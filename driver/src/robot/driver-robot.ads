@@ -54,8 +54,9 @@ package Driver.Robot is
    type Model is tagged limited private;
 
    procedure Observe (M : in out Model; O : Observation; Sent : Driver.Commands.Command);
-   --  One beat: the observation and the command the driver replied with.
-   --  Estimators only; never sends anything.
+   --  One beat: the observation, and Sent, the last command sent to the
+   --  robot before it arrived (the one in effect while it was captured;
+   --  holds included). Estimators only; never sends anything.
 
    function Booted (M : Model) return Boolean;
 

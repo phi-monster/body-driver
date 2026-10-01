@@ -2,10 +2,11 @@
 --
 --  Feeds a recording (harness/record/wire_proxy.py format, uncompressed)
 --  through every estimator exactly as the main loop does: each observation is
---  paired with the reply that followed it, read back as the command that was
---  sent, and given to the robot, hand and world estimators. At the end the
---  measured body is written to FILE, so it can be scored against simulator
---  truth. Nothing here decides anything; the recorded replies did.
+--  given to the robot, hand and world estimators together with the last
+--  command sent before it arrived (read back from the recorded replies), the
+--  command in effect while it was captured. At the end the measured body is
+--  written to FILE, so it can be scored against simulator truth. Nothing here
+--  decides anything; the recorded replies did.
 
 with Ada.Command_Line;
 with Ada.Strings.Unbounded;
@@ -43,8 +44,6 @@ procedure Replay is
 
    Layout   : Driver.Observations.Layout;
    Known    : Boolean := False;
-   Pending  : Driver.Observations.Observation;
-   Waiting  : Boolean := False;
    Beat     : Natural := 0;
    Episodes : Natural := 0;
    Commanded_Beats : Natural := 0;
@@ -52,22 +51,12 @@ procedure Replay is
    Robot : aliased Driver.Robot.Model;
    Hands : aliased Driver.Robot.Hand.Hands;
    Scene : aliased Driver.World.Scene;
-
-   procedure Observe (Sent : Driver.Commands.Command) is
-   begin
-      Driver.Robot.Observe (Robot, Pending, Sent);
-      Driver.Robot.Hand.Observe (Hands, Robot, Pending, Sent);
-      Driver.World.Observe (Scene, Robot, Hands, Pending, Sent);
-      Waiting := False;
-      Beat := Beat + 1;
-      if not Driver.Commands.Is_Hold (Sent) then
-         Commanded_Beats := Commanded_Beats + 1;
-      end if;
-   end Observe;
+   Sent  : Driver.Commands.Command := Driver.Commands.Hold;   --  the last command sent so far
 
    procedure Robot_Message (Data : Driver.Bytes.Byte_Array) is
       Req : Driver.Protocol.Request;
       Ok  : Boolean;
+      O   : Driver.Observations.Observation;
    begin
       Driver.Protocol.Decode (Data, Req, Ok);
       if not Ok then
@@ -79,9 +68,6 @@ procedure Replay is
          Driver.World.New_Episode (Scene);
       end if;
       if Driver.Protocol.Has_Observation (Req) then
-         if Waiting then
-            Observe (Driver.Commands.Hold);   --  no reply came for the previous one
-         end if;
          if not Known then
             Driver.Observations.Recognize (Req.Doc, Req.Observation, Layout, Known);
             if Known then
@@ -89,8 +75,11 @@ procedure Replay is
             end if;
          end if;
          if Known then
-            Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), Pending);
-            Waiting := True;
+            Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), O);
+            Driver.Robot.Observe (Robot, O, Sent);
+            Driver.Robot.Hand.Observe (Hands, Robot, O, Sent);
+            Driver.World.Observe (Scene, Robot, Hands, O, Sent);
+            Beat := Beat + 1;
          end if;
       end if;
    end Robot_Message;
@@ -101,16 +90,14 @@ procedure Replay is
       Ok  : Boolean;
       Action : Node;
    begin
-      if not Waiting then
-         return;
-      end if;
       Decode (Data, Doc, Ok);
-      Action := (if Ok then Element (Doc, Lookup (Doc, Lookup (Doc, Root (Doc), "payload"), "result"), 1)
+      Action := (if Ok and then Known
+                 then Element (Doc, Lookup (Doc, Lookup (Doc, Root (Doc), "payload"), "result"), 1)
                  else No_Node);
-      --  Acknowledgements (of update_obs, say) carry no action; the beat
-      --  ends with the reply that does, or with the next observation.
+      --  Acknowledgements (of update_obs, say) carry no action.
       if Action /= No_Node then
-         Observe (Driver.Replies.Read_Action (Layout, Doc, Action));
+         Sent := Driver.Replies.Read_Action (Layout, Doc, Action);
+         Commanded_Beats := Commanded_Beats + 1;
       end if;
    end Driver_Message;
 
@@ -143,11 +130,8 @@ begin
       end case;
    end loop;
    Driver.Recording.Close (R);
-   if Waiting then
-      Observe (Driver.Commands.Hold);
-   end if;
    Line (Core, "replayed" & Natural'Image (Beat) & " beats," & Natural'Image (Commanded_Beats)
-         & " with a command," & Natural'Image (Episodes) & " episode resets");
+         & " actions," & Natural'Image (Episodes) & " episode resets");
    if Length (Body_File) > 0 then
       Driver.Robot.Boot.Save (Robot, Hands, To_String (Body_File));
    end if;

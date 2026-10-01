@@ -34,7 +34,7 @@ package Driver.World is
       H    : Driver.Robot.Hand.Hands;
       O    : Observation;
       Sent : Driver.Commands.Command);
-   --  Estimators only, one beat.
+   --  Estimators only, one beat; Sent as in Driver.Robot.Observe.
 
    procedure New_Episode (S : in out Scene);
    --  Forgets the episode's things and places; surfaces measured before are

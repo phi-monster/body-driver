@@ -129,4 +129,58 @@ package body Driver.Recording is
 
    function Is_Open (W : Writer) return Boolean is (Is_Open (W.File));
 
+   --  File output is potentially blocking, so it happens outside the
+   --  protected action: the protected object is only the lock.
+   protected Lock is
+      entry Seize;
+      procedure Release;
+   private
+      Busy : Boolean := False;
+   end Lock;
+
+   protected body Lock is
+      entry Seize when not Busy is
+      begin
+         Busy := True;
+      end Seize;
+
+      procedure Release is
+      begin
+         Busy := False;
+      end Release;
+   end Lock;
+
+   Shared : Writer;
+
+   procedure Start_Shared (Path : String) is
+   begin
+      Lock.Seize;
+      Create (Shared, Path);
+      Lock.Release;
+   exception
+      when others =>
+         Lock.Release;
+         raise;
+   end Start_Shared;
+
+   procedure Write_Shared (Kind : Record_Kind; Payload : Byte_Array) is
+   begin
+      Lock.Seize;
+      if Is_Open (Shared) then
+         Write (Shared, Kind, Payload);
+      end if;
+      Lock.Release;
+   exception
+      when others =>
+         Lock.Release;
+         raise;
+   end Write_Shared;
+
+   procedure Stop_Shared is
+   begin
+      Lock.Seize;
+      Close (Shared);
+      Lock.Release;
+   end Stop_Shared;
+
 end Driver.Recording;

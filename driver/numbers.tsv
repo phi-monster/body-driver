@@ -1,8 +1,27 @@
 # file	line (comments and strings removed, blanks normalized)	literal (a " prefix: inside a string)	category	why
+body_driver.adb	Handed : Integer := -1;	1	structure	sentinel: no episode's sentence handed out yet
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
 driver-conventions.ads	Z : constant := 3.0;	3.0	statistics	the significance level of the one test (documented in Conventions)
+driver-http.adb	"" & Path & "" & CRLF	"1.1	format	HTTP/1.1 request line and chunked encoding (RFC 9112)
+driver-http.adb	(1 .. Stream_Element_Offset (Natural'Max (1, Get_Socket_Option (S, Socket_Level, Receive_Buffer).Size)));	1	numerics	a socket reporting a zero-byte buffer still moves one byte at a time
+driver-http.adb	Chunk_Left := Natural'Value ("" & Size & "");	"16	format	HTTP/1.1 request line and chunked encoding (RFC 9112)
+driver-http.adb	Connect_Socket (S, (Family => Family_Inet, Addr => Addresses (Get_Host_By_Name (Host), 1),	1	structure	the first address of the host
+driver-http.adb	Delete (Pending, 1, CRLF'Length);	1	structure	strings are indexed from 1
+driver-http.adb	Delete (Pending, 1, E + CRLF'Length - 1);	1	structure	strings are indexed from 1
+driver-http.adb	Delete (Pending, 1, P + Blank'Length - 1);	1	structure	strings are indexed from 1
+driver-http.adb	Delete (Pending, 1, Take);	1	structure	strings are indexed from 1
+driver-http.adb	Delete (Pending, 1, Take);	1	structure	strings are indexed from 1
+driver-http.adb	Deliver (Slice (Pending, 1, Take));	1	structure	strings are indexed from 1
+driver-http.adb	Deliver (Slice (Pending, 1, Take));	1	structure	strings are indexed from 1
+driver-http.adb	Head : constant String := Slice (Pending, 1, P - 1);	1	structure	strings are indexed from 1
+driver-http.adb	Line : constant String := Slice (Pending, 1, E - 1);	1	structure	strings are indexed from 1
+driver-http.adb	Piece : constant Natural := Natural'Max (1, Get_Socket_Option (S, Socket_Level, Send_Buffer).Size);	1	numerics	a socket reporting a zero-byte buffer still moves one byte at a time
+driver-http.adb	R.Status := Natural'Value (Status (Sp + 1 .. Natural'Min (Status'Last, Sp + 3)));	3	format	an HTTP status code has three digits
+driver-http.adb	Remaining : Integer := -1;	1	structure	sentinel: the body length is unknown until the server closes
+driver-http.adb	elsif R.Status not in 200 .. 299 then	200	format	HTTP 2xx means success
+driver-http.adb	elsif R.Status not in 200 .. 299 then	299	format	HTTP 2xx means success
 driver-images.adb	(0.299 * Real (Red (I, Column, Row)) + 0.587 * Real (Green (I, Column, Row))	0.299	format	ITU-R BT.601 luma weight of red
 driver-images.adb	(0.299 * Real (Red (I, Column, Row)) + 0.587 * Real (Green (I, Column, Row))	0.587	format	ITU-R BT.601 luma weight of green
 driver-images.adb	+ 0.114 * Real (Blue (I, Column, Row)));	0.114	format	ITU-R BT.601 luma weight of blue
@@ -10,6 +29,58 @@ driver-images.adb	function Blue (I : Image; Column, Row : Natural) return Natura
 driver-images.adb	function Green (I : Image; Column, Row : Natural) return Natural is (Channel (I, Column, Row, 1));	1	structure	green is the second byte of a pixel
 driver-images.adb	return Natural (Data (Data'First + Offset (3 * (Row * I.Width + Column) + Index)));	3	format	three bytes per RGB pixel
 driver-images.ads	with Pre => RGB'Length = 3 * Width * Height;	3	format	three bytes per RGB pixel
+driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#1_0000#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#400#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#D800#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#DC00#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	(if Kind_Of (Doc, N) = Object_Value then Child (Doc, N, 2 * Index) else No_Node);	2	structure	object members are stored as name and value pairs
+driver-json.adb	(if Kind_Of (Doc, N) = Object_Value then Text (Doc, Child (Doc, N, 2 * Index - 1)) else "");	2	structure	object members are stored as name and value pairs
+driver-json.adb	(if Point = 0 then Text (Start .. Mantissa_End) & "" & Text (Mantissa_End + 1 .. Pos - 1)	"0	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Ada.Long_Float_Text_IO.Put (Buffer, X, Aft => Digits_Shown - 1, Exp => 1);	1	numerics	15 to 17 significant digits make a double read back exactly
+driver-json.adb	Append (R, "" & Hex (Character'Pos (C) / 16 + 1) & Hex (Character'Pos (C) mod 16 + 1));	16	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (R, "" & Hex (Character'Pos (C) / 16 + 1) & Hex (Character'Pos (C) mod 16 + 1));	16	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + (C / 16#1000#) mod 16#40#));	16#1000#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + (C / 16#1000#) mod 16#40#));	16#40#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + (C / 16#1000#) mod 16#40#));	16#80#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + (C / 16#40#) mod 16#40#));	16#40#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + (C / 16#40#) mod 16#40#));	16#40#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + (C / 16#40#) mod 16#40#));	16#40#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + (C / 16#40#) mod 16#40#));	16#40#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + (C / 16#40#) mod 16#40#));	16#80#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + (C / 16#40#) mod 16#40#));	16#80#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + C mod 16#40#));	16#40#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + C mod 16#40#));	16#40#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + C mod 16#40#));	16#40#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + C mod 16#40#));	16#80#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + C mod 16#40#));	16#80#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#80# + C mod 16#40#));	16#80#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#C0# + C / 16#40#));	16#40#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#C0# + C / 16#40#));	16#C0#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#E0# + C / 16#1000#));	16#1000#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#E0# + C / 16#1000#));	16#E0#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#F0# + C / 16#4_0000#));	16#4_0000#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Append (S, Character'Val (16#F0# + C / 16#4_0000#));	16#F0#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Buffer : String (1 .. Real'Width + Real'Digits + 8);	8	format	room for sign, point and exponent
+driver-json.adb	Hex : constant String := "";	"0123456789	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	Not_A_Number : constant Real := To_Real (16#7FF8_0000_0000_0000#);	16#7FF8_0000_0000_0000#	format	IEEE 754 quiet NaN
+driver-json.adb	Pos := Pos + 2;	2	format	the length of a \u escape prefix
+driver-json.adb	Pos := Pos + 4;	4	format	four hex digits in a \u escape
+driver-json.adb	V := 16 * V + (case C is	16	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	elsif C < 16#1_0000# then	16#1_0000#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	elsif C < 16#800# then	16#800#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	elsif Doc.Nodes (Positive (N)).Of_Kind = Object_Value then Doc.Nodes (Positive (N)).Kids_Count / 2	2	structure	object members are stored as name and value pairs
+driver-json.adb	for Digits_Shown in Real'Digits .. Real'Digits + 2 loop	2	numerics	15 to 17 significant digits make a double read back exactly
+driver-json.adb	for K in 0 .. 3 loop	3	format	four hex digits in a \u escape
+driver-json.adb	if C < 16#80# then	16#80#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	if Character'Pos (C) < 16#20# then	16#20#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	if High in 16#D800# .. 16#DBFF# and then Pos + 1 <= Text'Last	16#D800#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	if High in 16#D800# .. 16#DBFF# and then Pos + 1 <= Text'Last	16#DBFF#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	if Pos + 3 > Text'Last then	3	format	four hex digits in a \u escape
+driver-json.adb	if Real'Value (Buffer) = X or else Digits_Shown = Real'Digits + 2 then	2	numerics	15 to 17 significant digits make a double read back exactly
+driver-json.adb	when '' .. '' => Character'Pos (C) - Character'Pos ('') + 10,	10	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	when '' .. '' => Character'Pos (C) - Character'Pos ('') + 10,	10	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
+driver-json.adb	when Boolean_Value => (if Doc.Nodes (Positive (N)).Flag then 1.0 else 0.0),	1.0	format	booleans read as 1 and 0
+driver-json.ads	No_Node : constant Node := 0;	0	structure	the absent node
 driver-log.adb	Buffer : String (1 .. 64);	64	format	room for any Real printed in fixed or exponent form
 driver-log.adb	IO.Put (Buffer, X, Aft => Digits_After_Point, Exp => 3);	3	format	exponent digits when a value is too large for fixed point
 driver-log.adb	function Image (X : Real; Digits_After_Point : Natural := 3) return String is	3	format	default digits printed after the point
@@ -286,3 +357,57 @@ driver-stats.ads	with Pre => Count (A) > 1;	1	statistics	a variance or a correla
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 2;	2	statistics	a line fit with a residual spread needs three points
 driver-uncertain.adb	for I in 1 .. 3 loop	3	structure	three dimensions
+driver-wire.adb	"" & ASCII.CR & ASCII.LF	"1.1	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	"" & ASCII.CR & ASCII.LF	"101	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	(R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	(R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	Accept_Suffix : constant String := "";	"258	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Accept_Suffix : constant String := "";	"47	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Accept_Suffix : constant String := "";	"95	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Ada.Strings.Unbounded.Append (R, (if I + 2 <= Data'Last then Alphabet (Group mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	Ada.Strings.Unbounded.Append (R, (if I + 2 <= Data'Last then Alphabet (Group mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet ((Group / 2 ** 12) mod 2 ** 6 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet ((Group / 2 ** 12) mod 2 ** 6 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet (Group / 2 ** 18 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	Ch := Character'Val (Character'Pos (Ch) + 32);	32	format	ASCII upper to lower case
+driver-wire.adb	Fin : constant Boolean := (Two (1) and 16#80#) /= 0;	16#80#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	Header.Append (16#80# or Opcode);	16#80#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Header.Append (Byte (L and 16#FF#));	16#FF#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8 * K) and 16#FF#));	16#FF#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8 * K) and 16#FF#));	8	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	16#FF#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	8	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Header.Append (Byte'(126));	126	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Header.Append (Byte'(127));	127	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	I := I + 3;	3	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	Kind := (if Message = 1 then Text else Binary);	1	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Length : Unsigned_64 := Unsigned_64 (Two (2) and 16#7F#);	16#7F#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Length := Shift_Left (Length, 8) or Unsigned_64 (B);	8	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Length := Unsigned_64 (X (1)) * 2 ** 8 + Unsigned_64 (X (2));	2	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Mask : Byte_Array (1 .. 4) := [others => 0];	4	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Masked : constant Boolean := (Two (2) and 16#80#) /= 0;	16#80#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	One : Byte_Array (1 .. 1);	1	structure	read the handshake one byte at a time
+driver-wire.adb	Opcode : constant Byte := Two (1) and 16#0F#;	16#0F#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Payload (I) := Payload (I) xor Mask ((I - 1) mod 4 + 1);	4	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .. Hex'First + 2 * Natural (I - 1) + 1) & "");	"16	format	SHA-1 digest as hexadecimal pairs
+driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .. Hex'First + 2 * Natural (I - 1) + 1) & "");	2	format	SHA-1 digest as hexadecimal pairs
+driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .. Hex'First + 2 * Natural (I - 1) + 1) & "");	2	format	SHA-1 digest as hexadecimal pairs
+driver-wire.adb	R : Byte_Array (1 .. Offset (Hex'Length / 2));	2	format	SHA-1 digest as hexadecimal pairs
+driver-wire.adb	Send_Frame (C, 10, Payload.all, Ok);	10	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Send_Frame (C, 2, Data, Ok);	2	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Two : Byte_Array (1 .. 2);	2	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	X : Byte_Array (1 .. 2);	2	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	X : Byte_Array (1 .. 8);	8	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	elsif L < 2 ** 16 then	2	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	elsif Length = 127 then	127	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	for K in reverse 0 .. 7 loop	7	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	if L < 126 then	126	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	if Length = 126 then	126	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	when 0 | 1 | 2 =>	1	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	when 0 | 1 | 2 =>	2	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	when 8 =>	8	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	when 9 =>	9	format	WebSocket framing and handshake (RFC 6455)

@@ -19,18 +19,34 @@
 
 with Driver.Clock;
 with Driver.Commands;
+with Driver.Observations;
 
 package Driver.Beats is
 
    procedure Next (Beat : out Driver.Clock.Beat);
    --  Decider side: wait for the next offered beat.
 
+   type Observation_View is access constant Driver.Observations.Observation;
+
+   function Latest return Observation_View;
+   --  Decider side: the observation of the beat Next returned. The view is
+   --  valid only until Send; keep a copy for anything needed longer.
+
+   function Last_Sent return Driver.Commands.Command;
+   --  Decider side: what was sent to the robot for the previous beat, holds
+   --  included (the command in effect while Latest was captured).
+
    procedure Send (C : Driver.Commands.Command);
    --  Decider side: the command for the beat Next returned.
 
-   procedure Offer (Beat : Driver.Clock.Beat; Decider_Took : out Boolean);
-   --  Main side: offer a beat; Decider_Took is False when no decider was
-   --  waiting in Next, and the beat then gets Hold.
+   procedure Offer
+     (Beat         : Driver.Clock.Beat;
+      O            : Driver.Observations.Observation;
+      Sent_Before  : Driver.Commands.Command;
+      Decider_Took : out Boolean);
+   --  Main side: offer a beat with its observation and the command sent for
+   --  the previous beat; Decider_Took is False when no decider was waiting
+   --  in Next, and the beat then gets Hold.
 
    procedure Await (C : out Driver.Commands.Command);
    --  Main side: after Offer took the beat, wait for the decider's Send.

@@ -38,6 +38,12 @@ package Driver.Recording is
    procedure Close (W : in out Writer);
    function Is_Open (W : Writer) return Boolean;
 
+   procedure Start_Shared (Path : String);
+   procedure Write_Shared (Kind : Record_Kind; Payload : Driver.Bytes.Byte_Array);
+   procedure Stop_Shared;
+   --  The process-wide recording the main loop and the service workers write
+   --  to, one record at a time; Write_Shared does nothing until it is started.
+
 private
 
    type Reader is limited record

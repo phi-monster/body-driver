@@ -16,7 +16,7 @@ package Driver.Robot.Hand is
    type Hands is tagged limited private;
 
    procedure Observe (H : in out Hands; M : Model; O : Observation; Sent : Driver.Commands.Command);
-   --  Estimators only, one beat.
+   --  Estimators only, one beat; Sent as in Driver.Robot.Observe.
 
    procedure Measure (H : in out Hands; M : in out Model);
    --  Decider: finds and measures every hand of the booted body.

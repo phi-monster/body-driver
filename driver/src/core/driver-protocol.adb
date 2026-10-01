@@ -55,7 +55,12 @@ package body Driver.Protocol is
          when Heartbeat    => "heartbeat_ack",
          when Unknown      => "error");
 
-   procedure Encode_Reply (R : Request; Action : Action_Writer; Reply : out Driver.Bytes.Buffer) is
+   procedure Encode_Reply
+     (R          : Request;
+      Has_Action : Boolean;
+      Action     : Driver.Bytes.Byte_Array;
+      Reply      : out Driver.Bytes.Buffer)
+   is
       Top    : constant Node := Root (R.Doc);
       Pairs  : Natural := 3;   --  message_type, step, payload
       Step   : constant Node := Lookup (R.Doc, Top, "step");
@@ -89,11 +94,11 @@ package body Driver.Protocol is
       if Wants_Action (R) then
          Put_Map_Header (Reply, 1);
          Put_String (Reply, "result");
-         if Action = null then
-            Put_Array_Header (Reply, 0);
-         else
+         if Has_Action then
             Put_Array_Header (Reply, 1);
-            Action (Reply);
+            Reply.Append (Action);
+         else
+            Put_Array_Header (Reply, 0);
          end if;
       elsif R.Kind = Hello then
          Put_Map_Header (Reply, 3);

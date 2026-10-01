@@ -27,11 +27,13 @@ package Driver.Protocol is
 
    procedure Decode (Data : Driver.Bytes.Byte_Array; R : out Request; Ok : out Boolean);
 
-   type Action_Writer is access procedure (B : in out Driver.Bytes.Buffer);
-   --  Writes one action map, the value carried in call_result's result list.
-
-   procedure Encode_Reply (R : Request; Action : Action_Writer; Reply : out Driver.Bytes.Buffer);
-   --  The reply for R. For get_action, Action writes the action; null gives
-   --  an empty result list (nothing can be sent yet).
+   procedure Encode_Reply
+     (R          : Request;
+      Has_Action : Boolean;
+      Action     : Driver.Bytes.Byte_Array;
+      Reply      : out Driver.Bytes.Buffer);
+   --  The reply for R. For get_action, Action is the encoded action map
+   --  (Driver.Replies); without one the result list is empty (nothing can be
+   --  sent yet). Action is ignored for every other request.
 
 end Driver.Protocol;

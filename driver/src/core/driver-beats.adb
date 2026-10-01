@@ -1,5 +1,8 @@
 package body Driver.Beats is
 
+   Current      : aliased Driver.Observations.Observation;
+   Current_Sent : Driver.Commands.Command := Driver.Commands.Hold;
+
    protected Episodes is
       procedure Advance;
       function Count return Natural;
@@ -71,10 +74,22 @@ package body Driver.Beats is
       Channel.Reply (C);
    end Send;
 
-   procedure Offer (Beat : Driver.Clock.Beat; Decider_Took : out Boolean) is
+   procedure Offer
+     (Beat         : Driver.Clock.Beat;
+      O            : Driver.Observations.Observation;
+      Sent_Before  : Driver.Commands.Command;
+      Decider_Took : out Boolean) is
    begin
+      --  Safe without a lock: the main loop only offers while no decider is
+      --  between Next and Send, the only window in which Latest may be read.
+      Current := O;
+      Current_Sent := Sent_Before;
       Channel.Put (Beat, Decider_Took);
    end Offer;
+
+   function Latest return Observation_View is (Current'Access);
+
+   function Last_Sent return Driver.Commands.Command is (Current_Sent);
 
    procedure Await (C : out Driver.Commands.Command) is
    begin

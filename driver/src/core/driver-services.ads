@@ -38,10 +38,15 @@ package Driver.Services is
 
    type Ticket is private;
 
+   --  Submit is for the estimators, which all run on the main loop; deciders
+   --  use the blocking calls.
    function Submit (S : Service; Path : String; Request : String; Beat : Driver.Clock.Beat) return Ticket;
    function Ready (T : Ticket) return Boolean;
    function Collect (T : Ticket) return Reply
      with Pre => Ready (T);
+
+   procedure Shut_Down;
+   --  Lets the workers behind Submit finish; the main program calls it before exiting.
 
 private
 

@@ -76,11 +76,12 @@ package Driver.Action is
       end case;
    end record;
 
-   type Context is limited record
-      Robot : not null access Driver.Robot.Model;
+   type Context
+     (Robot : not null access Driver.Robot.Model;
       Hands : not null access Driver.Robot.Hand.Hands;
-      Scene : not null access Driver.World.Scene;
-   end record;
+      Scene : not null access Driver.World.Scene) is limited null record;
+   --  What a decider acts on. Access discriminants let a Context refer to
+   --  models declared anywhere, for as long as the Context exists.
 
    package Name_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, String);
 

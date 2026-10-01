@@ -3,9 +3,11 @@ with Ada.Strings.Unbounded;
 with Driver.Bytes;
 with Driver.Commands;
 with Driver.Images;
+with Driver.Json;
 with Driver.Msgpack;
 with Driver.Observations;
 with Driver.Replies;
+with Driver.Services;
 with Driver.Numerics.Dense;
 with Driver.Stats;
 with Driver.Tests;
@@ -297,6 +299,40 @@ package body Driver.Core_Tests is
       Check (Driver.Commands.Target (Sent, 2) = [0.5], "with no reading the last value sent was not repeated");
    end Hold_Rules;
 
+   procedure Json_Round_Trip is
+      use Driver.Json;
+      use Ada.Strings.Unbounded;
+      Doc : Document;
+      Ok  : Boolean;
+      Why : Unbounded_String;
+      X   : constant Real := 0.1 + 0.2;
+   begin
+      Parse ("{""a"": [1, -2.5e3, 1e-2], ""s"": ""xé😀\n"", ""t"": true, ""n"": null, ""x"": "
+             & Number_Image (X) & "}", Doc, Ok, Why);
+      Check (Ok, "valid JSON rejected: " & To_String (Why));
+      Check (Number (Doc, Element (Doc, Lookup (Doc, Root (Doc), "a"), 2)) = -2500.0, "exponent without a point");
+      Check (Number (Doc, Element (Doc, Lookup (Doc, Root (Doc), "a"), 3)) = 0.01, "1e-2");
+      Check (Text (Doc, Lookup (Doc, Root (Doc), "s")) =
+               "x" & Character'Val (16#C3#) & Character'Val (16#A9#) & Character'Val (16#F0#) & Character'Val (16#9F#)
+               & Character'Val (16#98#) & Character'Val (16#80#) & ASCII.LF,
+             "\u escapes and a surrogate pair not decoded to UTF-8");
+      Check (Is_True (Doc, Lookup (Doc, Root (Doc), "t")), "true");
+      Check (Number (Doc, Lookup (Doc, Root (Doc), "x")) = X, "a number does not read back to the same bits");
+      Parse ("[1, 2] 3", Doc, Ok, Why);
+      Check (not Ok, "text after the value accepted");
+      Parse ("{""a"": nan}", Doc, Ok, Why);
+      Check (not Ok, "an unknown word accepted");
+      Check (Quote ("a""b" & ASCII.LF) = """a\""b\n""", "quoting");
+   end Json_Round_Trip;
+
+   procedure Unconfigured_Service is
+      use Driver.Services;
+      R : constant Reply := Call (Brain, "/v1/chat/completions", "{}");
+   begin
+      Check (not R.Ok and then Ada.Strings.Unbounded.Length (R.Why) > 0,
+             "a call without an address pretended to succeed or gave no reason");
+   end Unconfigured_Service;
+
    procedure Register is
    begin
       Driver.Tests.Register ("core.rotation", "Exp and Log disagree near 0 or pi", Rotation_Round_Trip'Access);
@@ -319,6 +355,10 @@ package body Driver.Core_Tests is
                              Layout_By_Shape'Access);
       Driver.Tests.Register ("core.replies", "a held group sends an invented value or forgets its target",
                              Hold_Rules'Access);
+      Driver.Tests.Register ("core.json", "JSON loses UTF-8, accepts junk, or a number changes its bits",
+                             Json_Round_Trip'Access);
+      Driver.Tests.Register ("core.services", "a call to an unconfigured service pretends to succeed",
+                             Unconfigured_Service'Access);
    end Register;
 
 end Driver.Core_Tests;
