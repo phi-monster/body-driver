@@ -123,9 +123,26 @@ def height(o):
     return float(o["hi"][2] - o["lo"][2])
 
 
+def overlap2d(P, Q):
+    """两个凸多边形(桌面上)叠不叠:分离轴,任何一条边的法向上两边的投影分得开就不叠"""
+    for poly in (P, Q):
+        for i in range(len(poly)):
+            e = poly[(i + 1) % len(poly)] - poly[i]
+            ax = np.array([-e[1], e[0]])
+            pa, qa = P @ ax, Q @ ax
+            if pa.max() < qa.min() or qa.max() < pa.min():
+                return False
+    return True
+
+
 def clear(body, pts):
+    # 歇着的手占的那几块:东西够高(顶高过那块的下沿)、桌面上的投影和那块叠着就不行。按整个投影判,不按角:
+    # 第一版只看包围盒的 8 个角在不在里面,电钻(18 cm 长)横跨人形右手那块(16 cm 宽),8 个角都在外面,开局就压着手,RoboDojo 判站不住(题 10)
+    foot = np.array([[p[0], p[1]] for p in pts[::2]])   # corners() 的 8 个角里 z 低 / 高成对,隔一个取就是 4 个桌面上的角
+    foot = foot[np.argsort(np.arctan2(foot[:, 1] - foot[:, 1].mean(), foot[:, 0] - foot[:, 0].mean()))]
+    top = max(p[2] for p in pts)
     for x0, x1, y0, y1, zmin in body["keepout"]:
-        if any(x0 <= p[0] <= x1 and y0 <= p[1] <= y1 and p[2] >= zmin for p in pts):
+        if top >= zmin and overlap2d(foot, np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])):
             return False
     # 每个角都在某一块出题区里(放宽 3 cm)
     return all(any(z[0][0] - 0.03 <= p[0] <= z[0][1] + 0.03 and z[1][0] - 0.03 <= p[1] <= z[1][1] + 0.03 for z in body["zones"]) for p in pts)
@@ -224,7 +241,9 @@ def make_one(rng, body_name, req):
     n_cl = int(rng.integers(body["clutter"][0], body["clutter"][1] + 1))
     clutter = [str(c) for c in rng.choice(rest, size=min(n_cl, len(rest)), replace=False)] if n_cl else []
     objs = [a] + other + clutter
-    pair = (0, 1, NEXT_GAP) if other else None
+    # 开局两件空着多远:"挨着"的题(next_to)要比 挨着的距离 + A 至少挪的距离 还远 —— 不然 A 挪不到 5 cm 就挨上了,判据却要它挪过 5 cm
+    # (题 12 人形:开局空 6 cm,挪到 2 cm 只挪了 4 cm,离线核判 0);"放上去"判据里没有"挪过多远",比挨着的距离远就行
+    pair = (0, 1, NEXT_GAP + NEXT_GAP if req == "next_to" else NEXT_GAP) if other else None
     spots = place(rng, body, [POOL[n] for n in objs], pair)
     if spots is None:
         return None

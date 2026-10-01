@@ -30,7 +30,8 @@ ap.add_argument("--summary", action="store_true")
 ap.add_argument("--lim", type=int, default=30, help="一集最多占排队位几分钟")
 ap.add_argument("--home", default="/root/p8/qexam", help="题单、结果、每集落盘放这儿")
 ap.add_argument("--body", action="append", default=[], help="身体=身体文件,比如 x5=/root/cal_v1b78.json")
-ap.add_argument("--keep_video", action="store_true", help="留 RoboDojo 这一集的录像(默认删)")
+ap.add_argument("--keep_video", action="store_true", help="留 RoboDojo 这一集的录像(挪进 runs/<炮名>/;默认删)")
+ap.add_argument("--shard", default="", help="k/n:这一份只跑第 k 份(从 0 数,共 n 份);有几个仿真位就起几个,各跑一份")
 ap.add_argument("--path", default="8", help="排队时报的路号")
 args = ap.parse_args()
 BODY_FILE = {"x5": "/root/cal_v1b78.json", "humanoid": "/root/cal_h4.json", "drone": "/root/cal_dr2.json"}
@@ -47,6 +48,9 @@ def load_batch(name):
     return json.load(open(f"{args.home}/batches/{name}.json"))
 
 
+BATCH_FLAGS = {}   # 题单上的:guard(做成了进不进守门的一套,默认进;RoboDojo 那一批不进)、keep_video(默认看 --keep_video)
+
+
 def questions():
     if args.guard:
         g = json.load(open(GUARD)) if os.path.exists(GUARD) else {}
@@ -56,8 +60,13 @@ def questions():
             out.append((ent["batch"], qs[ent["qid"]]))
         return out
     b = load_batch(args.batch)
+    BATCH_FLAGS.update({k: b[k] for k in ("guard", "keep_video") if k in b})
     want = {int(s) for s in args.qids.split(",") if s != ""}
-    return [(args.batch, q) for q in b["questions"] if not want or q["qid"] in want]
+    out = [(args.batch, q) for q in b["questions"] if not want or q["qid"] in want]
+    if args.shard:
+        k, n = (int(v) for v in args.shard.split("/"))
+        out = out[k::n]
+    return out
 
 
 def copy_body(src, dst):
@@ -103,8 +112,11 @@ def run_one(batch, q):
     os.makedirs(out)
     cal = f"{out}/cal_{shot.lower()}.json"
     copy_body(BODY_FILE[q["body"]], cal)
-    env = dict(os.environ, CAL=cal, BL_LIFE=f"{out}/经历_{shot.lower()}.txt", CFG=q["cfg"], SEED=str(q["seed"]),
-               BD_STEP_LIM=str(q["steps"]), DRVMODE="work", BL_VID="")
+    env = dict(os.environ, CAL=cal, BL_LIFE=f"{out}/经历_{shot.lower()}.txt", CFG=q["cfg"], SEED=str(q["seed"]), DRVMODE="work", BL_VID="")
+    if q.get("steps") is not None:   # RoboDojo 官方任务那一批不给:各任务用自己写死的步数(general_pickup 读 BD_STEP_LIM,run.sh 默认给 200 = 官方)
+        env["BD_STEP_LIM"] = str(q["steps"])
+    else:
+        env.pop("BD_STEP_LIM", None)
     t0 = time.time()
     print("== 题 %d(%s / %s,种子 %d,%d 步)%s · 炮 %s" % (q["qid"], q["body"], q["requirement"], q["seed"], q["steps"], q["sentence"], shot), flush=True)
     log = open(f"{out}/run.log", "w")
@@ -126,30 +138,36 @@ def run_one(batch, q):
     proc.wait()
     wall = time.time() - (started or t0)
     calog = f"/root/N{shot}/cal.log"
-    steps = rounds = None
+    steps = rounds = boot = None
     if os.path.exists(calog):
         txt = open(calog, errors="replace").read()
         m = re.findall(r"这一集已用 (\d+) 拍", txt)
         steps = int(m[-1]) if m else None
         rounds = len(re.findall(r"── 第 \d+ 轮", txt))
+        mb = re.findall(r"开机量身体一共用了 (\d+) 拍", txt)
+        boot = int(mb[-1]) if mb else None   # 身体文件装回来是几十拍;几百拍 = 从零量了(身体文件格式旧了 / 对不上),这一集的步数大半花在开机上
     success = None
     if result is not None:
         det = list((result.get("details") or {}).values())
         success = bool(det[0]["success"]) if det else bool(result.get("success_rate", 0) > 0.5)
     rec = {"batch": batch, "qid": q["qid"], "seed": q["seed"], "body": q["body"], "requirement": q["requirement"], "sentence": q["sentence"],
            "success": success, "outcome": ("success" if success else "fail") if result is not None else "no_result",
-           "steps_used": steps, "brain_rounds": rounds, "wall_s": round(wall), "shot": shot, "driver_log": calog,
+           "steps_used": steps, "boot_steps": boot, "brain_rounds": rounds, "wall_s": round(wall), "shot": shot, "driver_log": calog,
            "finished": time.strftime("%Y-%m-%d %H:%M:%S")}
     json.dump(rec, open(f"{out}/result.json", "w"), indent=1, ensure_ascii=False)
     with open(f"{args.home}/results/{batch if not args.guard else 'guard'}.jsonl", "a") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     tidy(shot, out)
     edir = os.path.dirname(res_glob.replace("_result.json", ""))
-    if not args.keep_video:
-        shutil.rmtree(edir, ignore_errors=True)
-        for r in glob.glob(f"{os.path.dirname(edir)}/_resume_{shot}.json"):
-            os.remove(r)
-    if success:
+    if args.keep_video or BATCH_FLAGS.get("keep_video"):   # 录像挪进这一集的落盘(RoboDojo 按做成 / 没做成给文件名:episode_*.mp4)
+        for v in glob.glob(f"{edir}/**/*.mp4", recursive=True):
+            shutil.move(v, os.path.join(out, os.path.basename(v)))
+        rec["videos"] = sorted(os.path.basename(v) for v in glob.glob(f"{out}/*.mp4"))
+        json.dump(rec, open(f"{out}/result.json", "w"), indent=1, ensure_ascii=False)
+    shutil.rmtree(edir, ignore_errors=True)
+    for r in glob.glob(f"{os.path.dirname(edir)}/_resume_{shot}.json"):
+        os.remove(r)
+    if success and BATCH_FLAGS.get("guard", True):
         g = json.load(open(GUARD)) if os.path.exists(GUARD) else {}
         g.setdefault("%s/%d" % (batch, q["qid"]), {"batch": batch, "qid": q["qid"], "first_success": rec["finished"], "shot": shot})
         json.dump(g, open(GUARD, "w"), indent=1, ensure_ascii=False)
