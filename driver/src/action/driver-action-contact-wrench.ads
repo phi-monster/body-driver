@@ -46,13 +46,21 @@ package Driver.Action.Contact.Wrench is
       Motion     : Twist;
       Centre     : Vec3;
       Up         : Vec3;
-      Resolution : Real) return Real
+      Resolution : Real;
+      Below      : Real := No_Way) return Real
      with Pre => abs Up > 0.0;
    --  The least friction coefficient for which Need finds a way; No_Way when
-   --  none does. Resolution is the friction angle, in radians, below which two
-   --  answers cannot be told apart (the angular uncertainty of the touches'
-   --  normals); without one the search stops when its interval is below
-   --  Unchanged_Fraction of the angle.
+   --  none below Below does. Resolution is the friction angle, in radians,
+   --  below which two answers cannot be told apart (the angular uncertainty of
+   --  the touches' normals); without one the search stops when its interval
+   --  is below Unchanged_Fraction of the angle. A friction too small to tell
+   --  from none is never assumed: the least answer is Least_Distinct.
+
+   function Least_Distinct (Resolution : Real) return Real;
+   --  The least friction coefficient the measurement can tell from none: the
+   --  tangent of Resolution, or of the round-off angle without one. Every
+   --  surface has some friction, and at none at all a slide costs nothing,
+   --  which would make every way of making it look equally good.
 
    type Rest_Answer is record
       Rests  : Boolean := False;

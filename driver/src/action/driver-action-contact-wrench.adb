@@ -247,32 +247,38 @@ package body Driver.Action.Contact.Wrench is
       end;
    end Need;
 
+   function Least_Distinct (Resolution : Real) return Real is (Tan (Real'Max (Resolution, Round_Off)));
+
    function Least_Friction
      (Touches    : Touch_Vectors.Vector;
       Base       : Footing;
       Motion     : Twist;
       Centre     : Vec3;
       Up         : Vec3;
-      Resolution : Real) return Real
+      Resolution : Real;
+      Below      : Real := No_Way) return Real
    is
       function Possible (Angle : Real) return Boolean is
         (Need (Touches, Base, Motion, Centre, Up, Tan (Angle)).Force < No_Way);
-      First : constant Answer := Need (Touches, Base, Motion, Centre, Up, 0.0);
-      Low   : Real := 0.0;
-      High  : Real := Pi / 2.0;
+      Floor : constant Real := Arctan (Least_Distinct (Resolution));
+      First : constant Answer := Need (Touches, Base, Motion, Centre, Up, Tan (Floor));
+      Low   : Real := Floor;
+      High  : Real := (if Below < No_Way then Arctan (Below) else Pi / 2.0);
       Found : Boolean := False;
    begin
       if First.Why = None then
-         return 0.0;
-      elsif First.Why = Footing_In_Way then
+         return Tan (Floor);
+      elsif First.Why = Footing_In_Way or else High <= Low then
          return No_Way;
+      elsif Below < No_Way then
+         if not Possible (High) then
+            return No_Way;
+         end if;
+         Found := True;
       end if;
-      --  Bisection on the friction angle, where possibility only grows. A
-      --  threshold at zero friction (an ideal squeeze) would halve High for
-      --  ever under a relative stop alone, hence the floor of round-off.
-      while High - Low > Real'Max (Resolution, Driver.Conventions.Unchanged_Fraction * High)
-        and then High > Round_Off
-      loop
+      --  Bisection on the friction angle, where possibility only grows once
+      --  the body's touches need friction at all.
+      while High - Low > Real'Max (Resolution, Driver.Conventions.Unchanged_Fraction * High) loop
          declare
             Mid : constant Real := (Low + High) / 2.0;
          begin
