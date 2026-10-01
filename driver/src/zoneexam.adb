@@ -108,6 +108,10 @@ begin
       New_Line;
       --  区心、主轴、张幅(和身体文件里这只眼握区的 cu / cv / au / av / span 比)
       Put_Line ("区心 " & Codec.Fmt (Z.Cu, 6) & " " & Codec.Fmt (Z.Cv, 6) & " · 主轴 " & Codec.Fmt (Z.Au, 6) & " " & Codec.Fmt (Z.Av, 6) & " · 张幅 " & Codec.Fmt (Z.Span, 6));
+      --  哪一类是张开时的手指定没定下来(只按两张图;开机时还按不动的部分、转一下眼的格点再定)、合空时手指到的那一截
+      Put_Line ("张开的那一类 " & (if Z.Open_Known then "定得下来" else "定不下来(两类一样开)") & (if Z.Lobes_Darker then " · 瓣 = 后一张里变暗的" else " · 瓣 = 后一张里变亮的")
+                & " · 合空那一截 " & (if Z.Shut.Ok then Codec.Fmt (Z.Shut.U, 1) & " " & Codec.Fmt (Z.Shut.V, 1) & " 宽 " & Codec.Fmt (Z.Shut.Wide, 0) & " 窄 " & Codec.Fmt (Z.Shut.Thin, 0)
+                                       & " 伸进来 " & Codec.Fmt (Z.Shut.Eu, 1) & " " & Codec.Fmt (Z.Shut.Ev, 1) else "无"));
       if Ada.Command_Line.Argument_Count >= 8 then
          declare
             use type Kinem.Ride;
@@ -195,6 +199,40 @@ begin
                            New_Line;
                         end;
                         Kinem.Classify_Rides (Eye, Rot, Sig, W, H, Pu, Pv, Bu, Bv, Rd);
+                        --  驱动同一段(Zone.Measure):哪一类是张开时的手指也按两头都长在眼上、又不在手指像素里的格点(手掌、不动的那根手指)重判
+                        declare
+                           St : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
+                           N_St : Natural := 0;
+                           Js : Natural := 0;
+                        begin
+                           for G in 0 .. Natural (Q.Length) - 1 loop
+                              if Mt (G).U >= 0.0 and then Mt (G).V >= 0.0 then
+                                 declare
+                                    Px : constant Natural := Natural (Long_Float'Floor (Q (G).V)) * W + Natural (Long_Float'Floor (Q (G).U));
+                                 begin
+                                    if Rd (Js) = Kinem.Rides and then not Z.Fingers.Element (Px) then
+                                       St.Replace_Element (Px, True);
+                                       N_St := N_St + 1;
+                                    end if;
+                                 end;
+                                 Js := Js + 1;
+                              end if;
+                           end loop;
+                           declare
+                              Zs : constant Zone.Hand_Zone := Zone.From_Frames (Open_G, Closed_G, W, H, St);
+                              U, V, Wd, Th : Long_Float;
+                              Ok : Boolean;
+                           begin
+                              Put ("不动的部分 " & Codec.Img (N_St) & " 个格点一起算 ⇒ 张开的那一类 " & (if Zs.Open_Known then "定得下来" else "定不下来")
+                                   & (if Zs.Lobes_Darker = Z.Lobes_Darker then "(和只看散得开一样)" else "(换成另一类)") & " · " & Codec.Img (Zs.N_Lobes) & " 瓣");
+                              for I in 0 .. Zs.N_Lobes - 1 loop
+                                 Zone.Tip_Section (Zs, Zone.Lobe_Of (Zs, I), W, H, U, V, Wd, Th, Ok);
+                                 Put (" | 瓣 " & Codec.Img (I) & " 尖 " & (if Ok then Codec.Fmt (U, 1) & " " & Codec.Fmt (V, 1) else "- -"));
+                              end loop;
+                              Put_Line (" · 合空那一截 " & (if Zs.Shut.Ok then Codec.Fmt (Zs.Shut.U, 1) & " " & Codec.Fmt (Zs.Shut.V, 1) & " 宽 " & Codec.Fmt (Zs.Shut.Wide, 0)
+                                                             else "无"));
+                           end;
+                        end;
                         --  驱动同一段:瓣按长在眼上补全(张开的就是第二张图那一头时),打出补之前 / 之后每一瓣的尖
                         declare
                            Gr : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Kinem.Gx * Kinem.Gy));

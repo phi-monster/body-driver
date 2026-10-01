@@ -6,6 +6,7 @@ with Msgpack;
 with Websocket;
 with Ada.Containers.Vectors;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
+with Ada.Calendar;
 package Plug is
    type Arm_Pose is array (0 .. 6) of Long_Float;
    package Pose_Vectors is new Ada.Containers.Vectors (Natural, Arm_Pose);
@@ -43,6 +44,8 @@ package Plug is
    --  各组读数这一拍变了多少(变得最多的那个关节)。Img_Ok:这台相机这一拍和上一拍都有画面、Img_Chg 真量了(没量的那一格不参与相关,不当"没变")
    type Beat is record
       Seq : Natural := 0;
+      --  (10-01 路 4,V5)这一拍收到的时刻:秒,从这条链上第一拍起算(墙上的钟)。命令发出到起效、会动的东西的位置随时间,都按它算
+      T : Long_Float := 0.0;
       Joints : Floats_Vectors.Vector;
       Reported_EE : Pose_Vectors.Vector;
       Img_Chg : Floats;
@@ -87,6 +90,8 @@ package Plug is
       Wait_Us, Parse_Us : Long_Float := 0.0;
       Frame_S : Long_Float := 0.0;      --  量出来的帧时(秒/帧)
       Beats : Beat_Vectors.Vector;      --  最近 Keep_Beats 拍(帧号连着)
+      T0 : Ada.Calendar.Time;           --  (V5)这条链上第一拍的时刻(Have_T0 之前不读)
+      Have_T0 : Boolean := False;
       Prev_Gray : Buf_Vectors.Vector;   --  上一拍各台相机的灰度图
       --  每个抓握读数组(按 Lay.Jaw 的下标)最后一次给过的目标;空 = 这一集还没给过。没给命令的通道照发它,不照发此刻的读数:
       --  读数会被外力推着走(V1B24 2026-09-27:碰桌面时手指被桌面顶着沿滑轨往里推,"保持此刻的读数"把推合了的读数锁住,爪子合上,

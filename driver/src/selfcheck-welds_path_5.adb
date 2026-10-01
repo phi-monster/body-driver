@@ -2,6 +2,8 @@ with Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions;
 with Contact.Search;
 with Contact.Wrench;
+with Contact.Qty;
+with Contact.Surface;
 separate (Selfcheck)
 procedure Welds_Path_5 is
    --  路 5 的焊点(大并行.md §5 路 5):每条写清"错了会是什么病",带一颗牙(去掉那一改就红;10-01 每颗都真拆掉跑过,红的是哪几条写在各条注释里)
@@ -402,7 +404,7 @@ begin
          declare
             A : constant Long_Float := 2.0 * Ada.Numerics.Pi * Long_Float (K) / 5.0;
          begin
-            Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045 * Cos (A), 0.045 * Sin (A), -0.09], Wide => 0.015, Thin => 0.01));
+            Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045 * Cos (A), 0.045 * Sin (A), -0.09], Wide => 0.015, Thin => 0.01, others => <>));
          end;
       end loop;
       Cx.Geo.Append (Geom.No_Geo); Cx.Geo.Append (Gx);
@@ -448,5 +450,215 @@ begin
              and then abs (Two.Reach_In - 0.09) < 1.0e-12,
              "接触集建手:一串瓣的写法在两瓣时和 09-29 的两瓣写法逐位相同(碰东西的面、合拢方向、行程 " & F4 (Two.Pads (0).Travel) & "、宽、厚、指尖到眼 "
              & F4 (Two.Reach_In) & ")");
+   end;
+   --  ── 量 → 要它怎么动(§2 第 16 条后半:量都变成旋量,10-01)──
+   --  ① height 和 10-01 以前逐位一样:以前 = 沿 Up_Dir(碰过的面按量到的法向,没碰过按协议的上)走,往下取反;现在 = Act.Want_Twist 的平移。
+   --     三种面:碰过的面(法向是量出来又归一过的,模长差一丝不到 1)、没碰过也没有板、只有标定板(Up_Dir 仍是协议的上),上下各一次,三个分量逐位比。
+   --     病:换成旋量以后 height 悄悄变了一丝(比如把量到的法向再归一一遍),x5 抬东西的每一步跟着变,和 09-23 以来的落盘对不上
+   declare
+      function Old_Height (Cx : Act.Context; Dir : Integer) return Contact.V3 is
+         Ax : constant Contact.V3 := (if Cx.Touch_Valid then Cx.Touch_N else [0.0, 0.0, 1.0]);
+      begin
+         return (if Dir < 0 then [-Ax (0), -Ax (1), -Ax (2)] else Ax);
+      end Old_Height;
+      --  一个"量出来又归一过"的法向,模长在浮点上不正好是 1(牙要咬得住:再归一一遍末位会变)
+      function Measured_N return Contact.V3 is
+         Ok : Boolean;
+         V : Contact.V3 := [0.0, 0.0, 1.0];
+      begin
+         for K in 1 .. 50 loop
+            V := Contact.Unit ([0.013 * Long_Float (K), -0.021, 0.9997], Ok);
+            exit when Contact.Norm (V) /= 1.0;
+         end loop;
+         return V;
+      end Measured_N;
+      Nm : constant Contact.V3 := Measured_N;
+      Same : Boolean := Contact.Norm (Nm) /= 1.0;
+      Fx : Plug.Frame;
+      Seen : Unbounded_String;
+   begin
+      for Case_K in 0 .. 2 loop
+         for Dk in 0 .. 1 loop
+            declare
+               Dir : constant Integer := (if Dk = 0 then 1 else -1);
+               Cx : Act.Context;
+               W : constant Act.Want := (Thing => 0, Rel => Sinew.Re_Qty, Qty => To_Unbounded_String ("height"), Dir => Dir, Ref => 0);
+               M : Contact.Twist;
+               Ok : Boolean;
+               Note : Unbounded_String;
+            begin
+               if Case_K = 0 then
+                  Cx.Touch_Valid := True; Cx.Touch_N := Nm; Cx.Touch_Pt := [0.0, 0.0, 0.0];
+               elsif Case_K = 2 then
+                  Cx.Board_Plane := True; Cx.Board_N := Nm; Cx.Board_Pt := [0.0, 0.0, 0.0];
+               end if;
+               Act.Want_Twist (Cx, Fx, W, -1, M, Ok, Note);
+               declare
+                  E : constant Contact.V3 := Old_Height (Cx, Dir);
+               begin
+                  Same := Same and then Ok and then M.Lin (0) = E (0) and then M.Lin (1) = E (1) and then M.Lin (2) = E (2) and then Contact.Angle (M) = 0.0;
+                  Append (Seen, " (" & F4 (M.Lin (0)) & "," & F4 (M.Lin (1)) & "," & F4 (M.Lin (2)) & ")");
+               end;
+            end;
+         end loop;
+      end loop;
+      Check (Same, "量变旋量·height 和以前逐位一样(碰过的面 / 没碰过 / 只有板,上下各一次;法向模长 " & Codec.Fmt (Contact.Norm (Nm) - 1.0, 17) & " 偏离 1):" & To_String (Seen));
+   end;
+   --  ② 每个量往哪变(Contact.Qty.Motion,量到的几何直接给):它在 (0.10, 0.20) 躺在面上(上 = +z),中心高 0.02;我那只眼在 (0.50, 0.20, 0.60);
+   --     脑看着的那只眼横轴朝 -y;参照那一件在 (-0.10, 0.20),顶面高 0.03。
+   --     · height 往上 = +z、往下 = -z;heading 往上 = 绕过它中心的 +z 转;tilt 往上 = 它的顶往远离我那边倒(绕 z × 水平离我的方向);away 往上 = 水平离我更远
+   --     · gap 往下(nearer)= 朝参照那一件;参照那一件比它低(中心更低)时往面里去的那一份去掉,只在面里走;rise ±z;across 往上 = 那只眼的右边(-y 放平)
+   --     · rest_on:底不比参照的顶高出不准那么多 ⇒ 先往上;够高、不在正上方 ⇒ 横着朝它;在正上方、比它的顶高 ⇒ 往下;贴着它的顶 ⇒ 不动
+   --     · aim:长轴沿 x,参照那一件在 +y 方向 ⇒ 绕 +z 转(逆时针)转过去;在 -y ⇒ 绕 -z;正对着长轴(两头都算)⇒ 不动
+   --     · 缺什么照实说:没有"我"那只眼 ⇒ tilt / away 说不出;没有参照那一件 ⇒ gap 说不出
+   --  病:量的方向写反 / 绕错点转 / 贴着面躺的东西被要求往面里走 / onto 横着直接往参照那一件身上撞 / 长轴只认一头,转大半圈
+   declare
+      package Q renames Contact.Qty;
+      S0 : Q.Scene;
+      function Mo (K : Q.Kind; Dir : Integer; S : Q.Scene; M : out Contact.Twist; Note : out Unbounded_String) return Boolean is
+         Ok : Boolean;
+      begin
+         Q.Motion (K, Dir, S, M, Ok, Note);
+         return Ok;
+      end Mo;
+      function Near (A, B : Contact.V3) return Boolean is (Contact.Norm ([A (0) - B (0), A (1) - B (1), A (2) - B (2)]) < 1.0e-9);
+      M_H, M_Hd, M_Hd2, M_T, M_A, M_G, M_G2, M_R, M_X, M_O1, M_O2, M_O3, M_O4, M_Am, M_Am2, M_Am3, M_Miss1, M_Miss2 : Contact.Twist;
+      N1, N2, N3, N4, N5, N6, N7, N8, N9, N10, N11, N12, N13, N14, N15, N16, N17, N18 : Unbounded_String;
+      Ok_All : Boolean := True;
+      Tilt_Away : Boolean := False;
+      Away_Up : Boolean := False;
+      Gap_Flat : Boolean := False;
+   begin
+      S0.Up := [0.0, 0.0, 1.0];
+      S0.Center := [0.10, 0.20, 0.02]; S0.Has_Center := True;
+      S0.Bottom := 0.0; S0.Has_Bottom := True;
+      S0.Axis := [1.0, 0.0, 0.0]; S0.Has_Axis := True; S0.Ang_Sd := 0.001;
+      S0.Me := [0.50, 0.20, 0.60]; S0.Has_Me := True;
+      S0.View_Right := [0.0, -1.0, 0.0]; S0.Has_View := True;
+      S0.Ref := [-0.10, 0.20, 0.015]; S0.Has_Ref := True; S0.Ref_Top := 0.03; S0.Has_Ref_Top := True;
+      S0.Sd := 0.001;
+      Ok_All := Mo (Q.Height, 1, S0, M_H, N1) and then Near (M_H.Lin, [0.0, 0.0, 1.0]);
+      Ok_All := Ok_All and then Mo (Q.Height, -1, S0, M_Hd, N2) and then Near (M_Hd.Lin, [0.0, 0.0, -1.0]);
+      Ok_All := Ok_All and then Mo (Q.Heading, 1, S0, M_Hd2, N3) and then Near (M_Hd2.Ang, [0.0, 0.0, 1.0]) and then Near (M_Hd2.Pivot, S0.Center);
+      --  tilt 往上:它顶上那一点(中心 + 0.05 z)绕那根轴转一丝 ⇒ 水平离我更远
+      if Mo (Q.Tilt, 1, S0, M_T, N4) then
+         declare
+            Top : constant Contact.V3 := [S0.Center (0), S0.Center (1), S0.Center (2) + 0.05];
+            Sm : constant Contact.Twist := (Lin => [0.0, 0.0, 0.0], Ang => [0.01 * M_T.Ang (0), 0.01 * M_T.Ang (1), 0.01 * M_T.Ang (2)], Pivot => M_T.Pivot);
+            T1 : constant Contact.V3 := Contact.Apply (Sm, Top);
+            function Hd (P : Contact.V3) return Long_Float is (Sqrt ((P (0) - S0.Me (0)) ** 2 + (P (1) - S0.Me (1)) ** 2));
+         begin
+            Tilt_Away := Hd (T1) > Hd (Top) and then Near (M_T.Pivot, S0.Center);
+         end;
+      end if;
+      if Mo (Q.Away, 1, S0, M_A, N5) then
+         Away_Up := Near (M_A.Lin, [-1.0, 0.0, 0.0]);   --  我在 +x 那边 ⇒ 远离我 = -x
+      end if;
+      Ok_All := Ok_All and then Mo (Q.Gap, -1, S0, M_G, N6) and then Near (M_G.Lin, [-1.0, 0.0, 0.0]);
+      --  参照那一件的中心比它低:往它那边走有往下的一份,它贴着面躺 ⇒ 去掉,只在面里走
+      Gap_Flat := Mo (Q.Gap, -1, S0, M_G2, N7) and then M_G2.Lin (2) >= 0.0;
+      Ok_All := Ok_All and then Mo (Q.Rise, 1, S0, M_R, N8) and then Near (M_R.Lin, [0.0, 0.0, 1.0]);
+      Ok_All := Ok_All and then Mo (Q.Across, 1, S0, M_X, N9) and then Near (M_X.Lin, [0.0, -1.0, 0.0]);
+      --  rest_on 四段
+      declare
+         S1 : Q.Scene := S0;
+      begin
+         Ok_All := Ok_All and then Mo (Q.Rest_On, 1, S1, M_O1, N10) and then Near (M_O1.Lin, [0.0, 0.0, 1.0]);   --  底 0 < 顶 0.03 ⇒ 先往上
+         S1.Bottom := 0.05; S1.Center (2) := 0.07;
+         Ok_All := Ok_All and then Mo (Q.Rest_On, 1, S1, M_O2, N11) and then Near (M_O2.Lin, [-1.0, 0.0, 0.0]);  --  够高、不在正上方 ⇒ 横着朝它
+         S1.Center (0) := S1.Ref (0); S1.Center (1) := S1.Ref (1);
+         Ok_All := Ok_All and then Mo (Q.Rest_On, 1, S1, M_O3, N12) and then Near (M_O3.Lin, [0.0, 0.0, -1.0]);  --  在正上方 ⇒ 往下
+         S1.Bottom := S1.Ref_Top;
+         Ok_All := Ok_All and then Mo (Q.Rest_On, 1, S1, M_O4, N13) and then not Contact.Moving (M_O4);           --  贴着它的顶 ⇒ 不动
+      end;
+      --  aim
+      declare
+         S2 : Q.Scene := S0;
+      begin
+         S2.Ref := [0.10, 0.50, 0.02];   --  在 +y
+         Ok_All := Ok_All and then Mo (Q.Aim, 1, S2, M_Am, N14) and then Near (M_Am.Ang, [0.0, 0.0, 1.0]);
+         S2.Ref := [0.10, -0.10, 0.02];  --  在 -y
+         Ok_All := Ok_All and then Mo (Q.Aim, 1, S2, M_Am2, N15) and then Near (M_Am2.Ang, [0.0, 0.0, -1.0]);
+         S2.Ref := [-0.20, 0.20, 0.02];  --  在长轴的另一头
+         Ok_All := Ok_All and then Mo (Q.Aim, 1, S2, M_Am3, N16) and then not Contact.Moving (M_Am3);
+      end;
+      --  缺的照实说
+      declare
+         S3 : Q.Scene := S0;
+      begin
+         S3.Has_Me := False;
+         Ok_All := Ok_All and then not Mo (Q.Tilt, 1, S3, M_Miss1, N17) and then Index (N17, "still") > 0;
+         S3.Has_Ref := False;
+         Ok_All := Ok_All and then not Mo (Q.Gap, -1, S3, M_Miss2, N18) and then Index (N18, "other thing") > 0;
+      end;
+      Check (Ok_All and then Tilt_Away and then Away_Up and then Gap_Flat,
+             "量变旋量·每个量往哪变:height ±z · heading 绕它中心的 +z · tilt 往上顶往远离我那边倒 " & (if Tilt_Away then "是" else "否")
+             & " · away 往上 (" & F4 (M_A.Lin (0)) & "," & F4 (M_A.Lin (1)) & ")· gap 往下朝参照那一件、它贴着面 ⇒ 不往面里去(z " & F4 (M_G2.Lin (2)) & ")"
+             & " · across 往右 = 那只眼的右边 · rest_on 先上 / 横着 / 往下 / 不动 · aim 逆时针 / 顺时针 / 两头都算不动 · 缺的照实说「" & To_String (N17) & "」「" & To_String (N18) & "」");
+   end;
+   --  ③ 它此刻在哪(Act.Want_Scene):没拿着 ⇒ 记下的轮廓补成实心(同接触集那一份)的形心、底贴着面、长条的长轴;
+   --     拿着 ⇒ 合上那一刻那份按手挪过的刚体运动搬过来(手平移 (0.10, 0, 0.05)、绕 z 转 90°:形心跟着走、长轴跟着转、底离面 0.05)。
+   --  病:拿起来以后还按桌上那份算(onto 永远在"先往上",heading 绕桌上的旧中心转);长轴不跟着手转
+   declare
+      Cx : Act.Context;
+      Fx : Plug.Frame;
+      W : constant Act.Want := (Thing => 1, Rel => Sinew.Re_Qty, Qty => To_Unbounded_String ("heading"), Dir => 1, Ref => 0);
+      Sc0, Sc1 : Contact.Qty.Scene;
+      It : Act.Item;
+      Moved_Ok, Axis_Ok, Lying_Ok : Boolean := False;
+   begin
+      Cx.Touch_Valid := True; Cx.Touch_Pt := [0.0, 0.0, 0.0]; Cx.Touch_N := [0.0, 0.0, 1.0];
+      for I in -20 .. 20 loop
+         for J in -3 .. 3 loop
+            Cx.Sil_Pts.Append (Geom.V3'[Pitch * Long_Float (I), Pitch * Long_Float (J), 0.02]);   --  8 cm × 1.2 cm 的条,顶面高 2 cm
+         end loop;
+      end loop;
+      Cx.Sil_Valid := True; Cx.Sil_Name := To_Unbounded_String ("bar"); Cx.Sil_Cam := 0; Cx.Sil_N := [0.0, 0.0, 1.0];
+      Cx.Sil_P0 := Cx.Sil_Pts.First_Element; Cx.Sil_Pitch := Pitch; Cx.Sil_Err := 0.0005;
+      It.Kind := Act.Thing;
+      Cx.Items.Append (It);
+      Cx.Boxed.Append (Act.Boxed_Thing'(Name => To_Unbounded_String ("bar"), others => <>));
+      Fx.EE.Append (Plug.Arm_Pose'[0.0, 0.0, 0.1, 1.0, 0.0, 0.0, 0.0]);
+      Act.Want_Scene (Cx, Fx, W, 0, Sc0);
+      Lying_Ok := Sc0.Has_Center and then Sc0.Has_Bottom and then abs Sc0.Bottom < 1.0e-12 and then Sc0.Has_Axis and then abs Sc0.Axis (0) > 0.999
+        and then abs Sc0.Center (0) < Pitch and then abs Sc0.Center (1) < Pitch;
+      --  拿住:合上那一刻手在 (0, 0, 0.1);现在手平移 (0.10, 0, 0.05)、绕 z 转 90°
+      Cx.Wld.Holding := True; Cx.Wld.Held_Arm := 0;
+      Contact.Surface.Walls_To_Support (Cx.Sil_Pts, Up, Zero3, Pitch, Cx.Held_Shape);   --  同 Solid_Of(这里没有视线可重投)
+      Cx.Held_Pose := Fx.EE (0);
+      Fx.EE.Replace_Element (0, Plug.Arm_Pose'[0.10, 0.0, 0.15, Cos (Ada.Numerics.Pi / 4.0), 0.0, 0.0, Sin (Ada.Numerics.Pi / 4.0)]);
+      Act.Want_Scene (Cx, Fx, W, 0, Sc1);
+      --  形心:相对合上那一刻的手 (0, 0, 0.1) 的那一段绕 z 转 90°((x, y, z) ⇒ (-y, x, z)),再接到现在的手 (0.10, 0, 0.15) 上
+      --  (实心模型的侧壁按格子补,左右差一格,形心不正好在 0;所以参照按桌上那份现算)
+      Moved_Ok := Sc1.Has_Center and then abs (Sc1.Center (0) - (0.10 - Sc0.Center (1))) < 1.0e-9 and then abs (Sc1.Center (1) - Sc0.Center (0)) < 1.0e-9
+        and then abs (Sc1.Center (2) - (Sc0.Center (2) + 0.05)) < 1.0e-9 and then abs (Sc1.Bottom - 0.05) < 1.0e-9;
+      Axis_Ok := Sc1.Has_Axis and then abs Sc1.Axis (1) > 0.999;   --  长轴跟着转 90°:x ⇒ y
+      Check (Lying_Ok and then Moved_Ok and then Axis_Ok,
+             "量变旋量·它此刻在哪:桌上那份形心 (" & F4 (Sc0.Center (0)) & "," & F4 (Sc0.Center (1)) & "," & F4 (Sc0.Center (2)) & ")、底 " & F4 (Sc0.Bottom)
+             & "、长轴 (" & F4 (Sc0.Axis (0)) & "," & F4 (Sc0.Axis (1)) & ") · 拿起来手挪 (0.10,0,0.05)、转 90° ⇒ 形心 (" & F4 (Sc1.Center (0)) & "," & F4 (Sc1.Center (1)) & ","
+             & F4 (Sc1.Center (2)) & ")、底 " & F4 (Sc1.Bottom) & "、长轴 (" & F4 (Sc1.Axis (0)) & "," & F4 (Sc1.Axis (1)) & ")");
+   end;
+   --  ④ 拿着它转(Act.Carry_Goal):手按它给的位姿走,它身上每一点正好绕那根轴(过它中心)转了要的角 —— 和 Want_Scene 搬它用的是同一个刚体变换
+   --  病:手原地转(位置不绕那一点转过去)⇒ 它绕手腕转,中心被甩出去;转的轴按手系而不是世界系
+   declare
+      Cur : constant Plug.Arm_Pose := [0.30, -0.10, 0.25, Cos (0.3), Sin (0.3) * 0.6, 0.0, Sin (0.3) * 0.8];
+      M : constant Contact.Twist := (Lin => [0.0, 0.0, 0.0], Ang => [0.0, 0.0, 1.0], Pivot => [0.32, -0.05, 0.02]);
+      Th : constant Long_Float := 0.4;
+      Gl : constant Plug.Arm_Pose := Act.Carry_Goal (Cur, M, Th);
+      Rd : constant Geom.M3 := Geom.Mul (Geom.Quat_To_R (Gl), Geom.Tr (Geom.Quat_To_R (Cur)));
+      Worst : Long_Float := 0.0;
+      type V3_Arr is array (0 .. 3) of Contact.V3;
+      Ps : constant V3_Arr := [[0.32, -0.05, 0.02], [0.36, -0.05, 0.02], [0.32, 0.0, 0.06], [0.25, -0.12, 0.01]];
+   begin
+      for P of Ps loop
+         declare
+            D : constant Geom.V3 := Geom.Ap (Rd, [P (0) - Cur (0), P (1) - Cur (1), P (2) - Cur (2)]);
+            Carried : constant Contact.V3 := [Gl (0) + D (0), Gl (1) + D (1), Gl (2) + D (2)];
+            Want_P : constant Contact.V3 := Contact.Apply ((Lin => [0.0, 0.0, 0.0], Ang => [0.0, 0.0, Th], Pivot => M.Pivot), P);
+         begin
+            Worst := Long_Float'Max (Worst, Contact.Norm ([Carried (0) - Want_P (0), Carried (1) - Want_P (1), Carried (2) - Want_P (2)]));
+         end;
+      end loop;
+      Check (Worst < 1.0e-9, "量变旋量·拿着它转:手按 Carry_Goal 走,它身上四个点和「绕过它中心的竖轴转 0.4 rad」最多差 " & Codec.Fmt (Worst, 12));
    end;
 end Welds_Path_5;

@@ -54,4 +54,10 @@ package Brain is
                  Cols, Rows, N_Items, N_Cams, N_Arms : Natural; RGB : Buf; W, H : Natural;
                  Program : out Unbounded_String; Err : out Unbounded_String;
                  Qtys_Usable : String := "") return Boolean;
+   --  叫了几次脑(大并行 §2 第 28 条:每个任务报叫了几次脑)。每问一次(Locate / Ask)日志里印一行
+   --  「[脑] 这一集第 N 次叫脑:…· 几秒 · 结果」;一集 = 对方两次复位之间。每轮开头报一次这一集的号(那一集开始时的帧号),
+   --  号变了 ⇒ 先印一行「[脑] 上一集一共叫了脑 N 次(写程序 a 次、问在哪 b 次)」,再从零数
+   procedure Episode (Id : Natural);
+   function Programs_Asked return Natural;   --  这一集问了几次"写一段程序"
+   function Locates_Asked return Natural;    --  这一集问了几次"它在哪一框"
 end Brain;

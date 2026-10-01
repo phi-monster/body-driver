@@ -2,7 +2,6 @@ with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Fu
 with Ada.Unchecked_Deallocation;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Codec;
-with Contact;
 with Plug;
 with Selfmap;
 with Stats;
@@ -1987,6 +1986,22 @@ package body Linkage is
       end;
    end Fit;
 
+   function Motion_Of (J : Joint; Pa : Pose; Q : Long_Float; Ok : out Boolean) return Contact.Twist is
+      W : constant V3 := Geom.Ap (Pa.R, J.Ax.W);
+   begin
+      Ok := J.Status = Found and then Pa.Ok;
+      if not Ok then
+         return Contact.Still ([others => 0.0]);
+      elsif J.Ax.Slide then
+         return Contact.Slide ([W (0) * Q, W (1) * Q, W (2) * Q]);
+      end if;
+      declare
+         P : constant V3 := Geom.Ap (Pa.R, J.Ax.P);
+      begin
+         return Contact.Rotation (W, Q, [P (0) + Pa.T (0), P (1) + Pa.T (1), P (2) + Pa.T (2)], Ok);
+      end;
+   end Motion_Of;
+
    function Say (Rep : Report) return String is
       use Codec;
       S : Unbounded_String;
@@ -2049,6 +2064,44 @@ package body Linkage is
    begin
       return Long_Float'Max (Floor, (Sqrt (Gate (Dim)) + Stats.Z) * Sqrt (Long_Float'Max (0.0, Max_Eig3 (Thing_Cov))));
    end Light_Len;
+
+   procedure Follow_Held (Want : V3; Unit, Floor, Noise : Long_Float; Budget : Natural;
+                          Move : access procedure (D : V3; Got_Hand, Got_Thing : out V3; Blocked, Ok : out Boolean);
+                          Rep : out Follow_Report) is
+      Ok : Boolean;
+      Wu : constant V3 := Contact.Unit (Want, Ok);
+      V2 : constant Long_Float := 2.0 * Noise ** 2;   --  两次读数之差:各向方差是一次的两倍
+      Cov : constant M3 := [[V2, 0.0, 0.0], [0.0, V2, 0.0], [0.0, 0.0, V2]];
+      Along : Long_Float := 0.0;
+      procedure Step (Dir : V3; Len : Long_Float; R : out Step_Report) is
+         Gh, Gt : V3;
+         Bl, Okm : Boolean;
+      begin
+         Move ([Dir (0) * Len, Dir (1) * Len, Dir (2) * Len], Gh, Gt, Bl, Okm);
+         R := (Ok => Okm, Hand => Gh, Hand_Cov => Cov, Thing => Gt, Thing_Cov => Cov, Blocked => Bl);
+         if Okm then
+            Along := Along + Contact.Dot (Gt, Wu);
+         end if;
+      end Step;
+      function Goal return Boolean is (Along >= Unit);
+   begin
+      Rep := (others => <>);
+      if not Ok or else Move = null or else not (Unit > 0.0) then
+         Rep.How := No_Direction;
+         return;
+      end if;
+      Follow (Want, Light_Len (Floor, Cov), Budget, Step'Access, Goal'Access, Rep);
+   end Follow_Held;
+
+   function Say (F : Follow_Report) return String is
+     ((case F.How is
+          when Arrived => "到了",
+          when Stuck => "哪边都不让(最后一轮试了 " & Codec.Img (Natural (F.Tried.Length)) & " 个方向,它往别处让过 " & Codec.Img (Natural (F.Yields.Length)) & " 次)",
+          when Left_Behind => "手走了它没跟上(从手里出去了)",
+          when Out_Of_Steps => "步数用完了",
+          when Body_Failed => "身体那一步没做成",
+          when No_Direction => "没有要它往哪挪的方向")
+      & "(走了 " & Codec.Img (F.Steps) & " 步,沿要的方向挪了 " & Codec.Fmt (F.Along, 4) & ")");
 
    procedure Follow (Want : V3; Len : Long_Float; Budget : Natural;
                      Step : access procedure (Dir : V3; Len : Long_Float; R : out Step_Report);

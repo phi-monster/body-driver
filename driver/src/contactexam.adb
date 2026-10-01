@@ -240,7 +240,8 @@ begin
                begin
                   G.Lobes.Clear;
                   for Lg of Gs2 (Cam).Lobes loop
-                     G.Lobes.Append (Geom.Lobe_Geo'(Tip => [S * Lg.Tip (0), S * Lg.Tip (1), S * Lg.Tip (2)], Wide => S * Lg.Wide, Thin => S * Lg.Thin));
+                     G.Lobes.Append (Geom.Lobe_Geo'(Tip => [S * Lg.Tip (0), S * Lg.Tip (1), S * Lg.Tip (2)], Wide => S * Lg.Wide, Thin => S * Lg.Thin,
+                                                  Shut => [S * Lg.Shut (0), S * Lg.Shut (1), S * Lg.Shut (2)], Shut_Ok => Lg.Shut_Ok));
                   end loop;
                   G.Tip_Sd := S * Gs2 (Cam).Tip_Sd;
                   C.Geo.Replace_Element (Cam, G);

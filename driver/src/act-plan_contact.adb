@@ -4,14 +4,13 @@ procedure Plan_Contact (C : in out Context; F : Plug.Frame; Arm, Cam : Natural; 
                         Pick : out Contact.Search.Candidate; Note : out Unbounded_String; Ok : out Boolean) is
    G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
    Have_Plane : constant Boolean := C.Touch_Valid or else C.Board_Plane;
-   Up : constant Geom.V3 := (if C.Touch_Valid then C.Touch_N elsif C.Board_Plane then C.Board_N else Protocol_Up);
-   Sp : constant Geom.V3 := (if C.Touch_Valid then C.Touch_Pt else C.Board_Pt);
+   Up : constant Geom.V3 := Lie_N (C);
+   Sp : constant Geom.V3 := Lie_P (C);
    Tol_P : constant Long_Float := Geo_Base (C, Arm);
    Tol_R : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);
    Mu_Lb : Long_Float := 0.0;
    Mu_Ub : Long_Float := Long_Float'Last;
    H : Contact.Search.Hand_Model;
-   Top : Contact.V3_Vectors.Vector := C.Sil_Pts;
    Surf, Around : Contact.V3_Vectors.Vector;
    Found : Contact.Search.Cand_Vectors.Vector;
    St : Contact.Search.Plan_Stats;
@@ -75,23 +74,8 @@ begin
          Mu_Lb := Gm.Lb; Mu_Ub := Gm.Ub;
       end if;
    end loop;
-   --  取轮廓时面的高度可能只是交点估的;碰过它躺的面 ⇒ 按真的面重投那些视线(一条都没落到面上 ⇒ 还用原来那份)
-   if C.Touch_Valid and then not C.Sil_Rays.Is_Empty then
-      declare
-         P0 : constant Geom.V3 := Plane_Point (C, C.Sil_P0, C.Sil_N, Say => False);
-         Dropped : Natural;
-         Again : Contact.V3_Vectors.Vector;
-      begin
-         if Geom.Norm ([P0 (0) - C.Sil_P0 (0), P0 (1) - C.Sil_P0 (1), P0 (2) - C.Sil_P0 (2)]) > C.Sil_Pitch then
-            Contact.Surface.On_Plane (C.Sil_Rays, P0, C.Sil_N, Again, Dropped);
-            if not Again.Is_Empty then
-               Top := Again;
-               Reprojected := True;
-            end if;
-         end if;
-      end;
-   end if;
-   Contact.Surface.Walls_To_Support (Top, Up, Sp, C.Sil_Pitch, Surf);
+   --  它的实心模型(取轮廓时面的高度可能只是交点估的;碰过它躺的面 ⇒ 按真的面重投,见 Solid_Of)
+   Solid_Of (C, Name, Surf, Reprojected);
    --  旁边的东西:被顶住过、比面高、又不在它自己身上的点。在它身上 = 离它最近的表面点不到一个采样间距(表面上任何一点离最近的采样点都在一个间距以内),
    --  再加上两边的不准(Z 倍的:顶住那一刻尖的误差、它顶面点的误差、位姿读数的噪声)
    declare

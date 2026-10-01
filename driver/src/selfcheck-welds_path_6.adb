@@ -1,5 +1,7 @@
 with Held;
+with Seek;
 with Linkage;
+with Strokes;
 with Stats;
 separate (Selfcheck)
 procedure Welds_Path_6 is
@@ -9,6 +11,8 @@ procedure Welds_Path_6 is
    use type Linkage.Axis_Status;
    use type Linkage.Follow_End;
    use type Held.Ride;
+   use type Seek.Seek_End;
+   use type Strokes.Strokes_End;
    subtype V3 is Geom.V3;
    subtype M3 is Geom.M3;
    package FR renames Ada.Numerics.Float_Random;
@@ -1211,5 +1215,324 @@ begin
                 "拿着的东西·手没动 ⇒ 判不了:跟着手走 " & Codec.Img (Rep.N_Rides) & " · 判不了 " & Codec.Img (Rep.N_Unknown) & " / "
                 & Codec.Img (No + Nt + Nj));
       end;
+   end;
+
+   --  🔴 对准、插进去(Seek.Run,§2 第 21 条):一个孔沿一根斜的轴往下,缝 0.0005(插进去的东西横着偏不到这么多就进得去)、深 0.01;
+   --  眼量的孔口位置横着不准 0.0015、沿轴 0.001 —— 眼的不准是缝的 3 倍;手靠得住的最小一步 0.0002(每一步走完量它在哪,读数的噪声是它的三分之一)。
+   --  真的孔口离估计横着沿垂直于轴的两根轴各偏半倍不准(正好在"一步一倍不准"那种粗格子的四个格点正中间)、沿轴深了半倍。
+   --  要:进去了;送的次数不超过"比找到的那一格更可能的格点"那么多;沿轴送进去的够深。
+   --  错了会是什么病:只在估计的那一处直着送 ⇒ 顶在孔边上进不去;横着找的步子按眼的不准定(一步 = 一倍不准)⇒ 格子比缝粗,
+   --  正好把孔跳过去,不准那一片都试完了也没找到;孔真在不准那一片外面 ⇒ 不在外面瞎找,照实说没找到。
+   --  牙:不准当 0(只在估计那一处送)⇒ 进不去;格子按一倍不准 ⇒ 不准那一片都试完了没找到;孔在 4 倍不准外 ⇒ 一片都试过、照实说没找到
+   declare
+      A : constant V3 := Unit ([0.3, -0.2, -0.93]);
+      E1, E2 : V3;
+      Sd_L : constant Long_Float := 0.0015;
+      Sd_A : constant Long_Float := 0.001;
+      Gap : constant Long_Float := 0.0005;
+      Depth : constant Long_Float := 0.01;
+      Depth_Sd : constant Long_Float := 0.0005;
+      Res : constant Long_Float := 0.0002;
+      Start : constant V3 := [0.1, 0.2, 0.3];
+      Est : constant V3 := Add (Start, Scl (A, 0.004));
+      Cov : M3;
+      Hole : V3;
+      Tip : V3;
+      --  孔口在 Hole、沿 A 往里;a = 沿轴进了多深(孔口那一面 = 0),l = 横着离孔的轴多远。
+      --  空着的地方:还没到那一面(a < 0),或者在孔里(0 ≤ a ≤ Depth、l ≤ Gap)
+      function Free (P : V3) return Boolean is
+         D : constant V3 := Sub (P, Hole);
+         Ax : constant Long_Float := Dot (D, A);
+         L : constant Long_Float := Geom.Norm (Sub (D, Scl (A, Ax)));
+      begin
+         return Ax < 0.0 or else (Ax <= Depth and then L <= Gap);
+      end Free;
+      --  身体走一步:沿 Dir 一小截一小截地走(最小一步的十分之一),碰到不空的地方就停;走完量它在哪(读数带噪声,最小一步的三分之一)
+      procedure Sim_Move (Dir : V3; Len : Long_Float; R : out Seek.Step_Report) is
+         Sub_L : constant Long_Float := Res / 10.0;
+         Done : Long_Float := 0.0;
+      begin
+         while Done < Len loop
+            declare
+               Nx : constant Long_Float := Long_Float'Min (Len, Done + Sub_L);
+            begin
+               exit when not Free (Add (Tip, Scl (Dir, Nx - Done)));
+               Tip := Add (Tip, Scl (Dir, Nx - Done));
+               Done := Nx;
+            end;
+         end loop;
+         R := (Ok => True, At_Now => Add (Tip, [Res / 3.0 * Gauss, Res / 3.0 * Gauss, Res / 3.0 * Gauss]), Blocked => Done < Len - Res);
+      end Sim_Move;
+      procedure Place (Lat1, Lat2, Ax_Off : Long_Float) is
+      begin
+         Hole := Add (Est, Add (Add (Scl (E1, Lat1 * Sd_L), Scl (E2, Lat2 * Sd_L)), Scl (A, Ax_Off * Sd_A)));
+         Tip := Start;
+      end Place;
+      Zero : constant M3 := [others => [others => 0.0]];
+      R_Ok, R_Naive, R_Coarse, R_Far : Seek.Report;
+      Bound : Natural := 0;
+   begin
+      --  垂直于轴的那一对轴(和 Seek 里同一个取法:辅助方向取 A 分量绝对值最小的那根坐标轴),好把真的孔口放在两种格子的格点之间
+      declare
+         Aux : V3 := [others => 0.0];
+         Low : Natural := 0;
+      begin
+         for C in 1 .. 2 loop
+            if abs A (C) < abs A (Low) then
+               Low := C;
+            end if;
+         end loop;
+         Aux (Low) := 1.0;
+         E1 := Unit (Contact.Cross (A, Aux));
+         E2 := Contact.Cross (A, E1);
+      end;
+      for I in 0 .. 2 loop
+         for J in 0 .. 2 loop
+            Cov (I, J) := Sd_L ** 2 * (E1 (I) * E1 (J) + E2 (I) * E2 (J)) + Sd_A ** 2 * A (I) * A (J);
+         end loop;
+      end loop;
+      FR.Reset (Gen, 181);
+      Place (0.5, 0.5, 0.5);
+      Seek.Run (Start, Est, Cov, A, Depth, Depth_Sd, Gap, Res, Sim_Move'Access, R_Ok);
+      Put_Line ("    插进去:" & Seek.Say (R_Ok));
+      --  比找到的那一格更可能的格点有几个(同一套格子、同一个排法)
+      declare
+         H : constant Long_Float := R_Ok.Spacing;
+         M_Hit : constant Long_Float := R_Ok.Mahal_Max;
+         N1 : constant Integer := Integer (Long_Float'Floor (4.0 * Sd_L / H));
+      begin
+         for I in -N1 .. N1 loop
+            for J in -N1 .. N1 loop
+               if Sqrt ((H * Long_Float (I)) ** 2 + (H * Long_Float (J)) ** 2) / Sd_L <= M_Hit then
+                  Bound := Bound + 1;
+               end if;
+            end loop;
+         end loop;
+      end;
+      Place (0.5, 0.5, 0.5);
+      Seek.Run (Start, Est, Zero, A, Depth, Depth_Sd, Gap, Res, Sim_Move'Access, R_Naive);
+      Place (0.5, 0.5, 0.5);
+      Seek.Run (Start, Est, Cov, A, Depth, Depth_Sd, Sd_L / Sqrt (2.0), Res, Sim_Move'Access, R_Coarse);
+      Place (4.0, 0.0, 0.5);
+      Seek.Run (Start, Est, Cov, A, Depth, Depth_Sd, Gap, Res, Sim_Move'Access, R_Far);
+      Put_Line ("    孔在 4 倍不准外:" & Seek.Say (R_Far));
+      Check (R_Ok.How = Seek.Reached and then R_Ok.Tries <= Bound and then R_Ok.Went_In >= Depth
+             and then R_Naive.How /= Seek.Reached and then R_Coarse.How = Seek.Not_Found
+             and then R_Far.How = Seek.Not_Found and then R_Far.Tries = R_Far.Candidates,
+             "对准插进去:" & R_Ok.How'Image & " · 送了 " & Codec.Img (R_Ok.Tries) & " 次(更可能的格点 " & Codec.Img (Bound) & " 个,一片 "
+             & Codec.Img (R_Ok.Candidates) & " 处,格子 " & Codec.Fmt (R_Ok.Spacing, 5) & ")· 送进去 " & Codec.Fmt (R_Ok.Went_In, 4)
+             & " · 牙:不准当 0 ⇒ " & R_Naive.How'Image & ";格子按一倍不准 ⇒ " & R_Coarse.How'Image & "(试了 " & Codec.Img (R_Coarse.Tries)
+             & " 处);孔在 4 倍外 ⇒ " & R_Far.How'Image & "(" & Codec.Img (R_Far.Tries) & " / " & Codec.Img (R_Far.Candidates) & ")");
+   end;
+
+   --  🔴 一次走不完的(Strokes.Run,§2 第 22 条):手腕量到的范围 −170° … +170°,最小一步 1°(读数的噪声 0.2°)。
+   --  ① 从 −100° 起拧一颗要转 900° 才拧紧的螺丝,脑说"到转不动为止";② 从 −100° 起转一把钥匙 450°(没有转不动的地方);
+   --  ③ 从 +100° 起往回转 500°(反着走);④ 倒手拉一根长东西 0.8(手够得着的那一截 0.1 … 0.4,最小一步 0.002 —— 同一段代码,不认单位);
+   --  ⑤ 同 ④ 但再握没握上。
+   --  要:① 转不动了、螺丝真转了 900°(差不过两个最小一步)、松开再握 2 回;② ③ ④ 走够了,真走的和要的差不过两个最小一步;
+   --  ⑤ 照实说再握没握上,走了第一下那么多。
+   --  错了会是什么病:手腕转到头就停 ⇒ 螺丝只拧了 270°、说不出"拧紧了";到头被挡住当成"拧紧了" ⇒ 同上;转回去只回一点 ⇒ 来回折腾很多回。
+   --  牙:不松开重握(一下走到范围的头)⇒ 螺丝只转了 270°
+   declare
+      Res : Long_Float := Deg;
+      Noise : Long_Float := 0.2 * Deg;
+      Wrist : Long_Float := 0.0;              --  手腕(或手)此刻真的在哪
+      Turned : Long_Float := 0.0;             --  那件东西真被转了(挪了)多少
+      Limit : Long_Float := Long_Float'Last;  --  转到这么多就转不动了(Long_Float'Last = 没有)
+      Lo : Long_Float := -170.0 * Deg;
+      Hi : Long_Float := 170.0 * Deg;
+      Grip_Ok : Boolean := True;
+      procedure Sim_Stroke (D : Long_Float; R : out Strokes.Step_Report) is
+         Can : constant Long_Float := (if D >= 0.0 then Long_Float'Min (D, Limit - Turned) else Long_Float'Max (D, -Limit - Turned));
+         Got : constant Long_Float := Long_Float'Max (Lo - Wrist, Long_Float'Min (Hi - Wrist, Can));
+      begin
+         Wrist := Wrist + Got;
+         Turned := Turned + Got;
+         R := (Ok => True, At_Now => Wrist + Noise * Gauss, Blocked => abs (D - Got) > Res);
+      end Sim_Stroke;
+      procedure Sim_Free (D : Long_Float; R : out Strokes.Step_Report) is
+         Got : constant Long_Float := Long_Float'Max (Lo - Wrist, Long_Float'Min (Hi - Wrist, D));
+      begin
+         Wrist := Wrist + Got;
+         R := (Ok => True, At_Now => Wrist + Noise * Gauss, Blocked => abs (D - Got) > Res);
+      end Sim_Free;
+      procedure Sim_Release (Ok : out Boolean) is
+      begin
+         Ok := True;
+      end Sim_Release;
+      procedure Sim_Regrasp (Ok : out Boolean) is
+      begin
+         Ok := Grip_Ok;
+      end Sim_Regrasp;
+      procedure Go (Want, Start, Lim : Long_Float; Grip : Boolean; Rep : out Strokes.Report; True_Done : out Long_Float) is
+      begin
+         Wrist := Start;
+         Turned := 0.0;
+         Limit := Lim;
+         Grip_Ok := Grip;
+         Strokes.Run (Want, Lo, Hi, Wrist + Noise * Gauss, Res, Natural'Last, Sim_Stroke'Access, Sim_Release'Access, Sim_Free'Access,
+                     Sim_Regrasp'Access, Rep);
+         True_Done := Turned;
+      end Go;
+      R1, R2, R3, R4, R5 : Strokes.Report;
+      D1, D2, D3, D4, D5, Naive : Long_Float;
+      Res_Rot : constant Long_Float := Deg;
+   begin
+      FR.Reset (Gen, 191);
+      Go (Long_Float'Last, -100.0 * Deg, 900.0 * Deg, True, R1, D1);
+      Put_Line ("    拧到转不动:" & Strokes.Say (R1) & " · 螺丝真转了 " & Codec.Fmt (D1 / Deg, 1) & "°");
+      --  牙:一下走到范围的头,不松开重握
+      Wrist := -100.0 * Deg;
+      Turned := 0.0;
+      Limit := 900.0 * Deg;
+      declare
+         R : Strokes.Step_Report;
+      begin
+         Sim_Stroke (Hi - Wrist, R);
+      end;
+      Naive := Turned;
+      Go (450.0 * Deg, -100.0 * Deg, Long_Float'Last, True, R2, D2);
+      Go (-500.0 * Deg, 100.0 * Deg, Long_Float'Last, True, R3, D3);
+      Put_Line ("    转 450° / 往回 500°:" & Strokes.Say (R2) & " / " & Strokes.Say (R3));
+      Res := 0.002;
+      Noise := 0.0004;
+      Lo := 0.1;
+      Hi := 0.4;
+      Go (0.8, 0.1, Long_Float'Last, True, R4, D4);
+      Go (0.8, 0.1, Long_Float'Last, False, R5, D5);
+      Put_Line ("    倒手拉 0.8:" & Strokes.Say (R4) & " / 再握不上:" & Strokes.Say (R5));
+      Check (R1.How = Strokes.Tight and then abs (D1 - 900.0 * Deg) <= 2.0 * Res_Rot and then R1.Regrasps = 2
+             and then R2.How = Strokes.Reached and then abs (D2 - 450.0 * Deg) <= 2.0 * Res_Rot
+             and then R3.How = Strokes.Reached and then abs (D3 + 500.0 * Deg) <= 2.0 * Res_Rot
+             and then R4.How = Strokes.Reached and then abs (D4 - 0.8) <= 2.0 * Res and then R4.Regrasps = 2
+             and then R5.How = Strokes.Regrasp_Failed and then abs (D5 - 0.3) <= 2.0 * Res
+             and then Naive < 900.0 * Deg - 2.0 * Res_Rot,
+             "一次走不完的:拧到转不动 " & R1.How'Image & " 真转了 " & Codec.Fmt (D1 / Deg, 1) & "°、再握 " & Codec.Img (R1.Regrasps) & " 回 · 转 450° ⇒ "
+             & Codec.Fmt (D2 / Deg, 1) & "° · 往回 500° ⇒ " & Codec.Fmt (D3 / Deg, 1) & "° · 倒手拉 0.8 ⇒ " & Codec.Fmt (D4, 4) & "、再握 "
+             & Codec.Img (R4.Regrasps) & " 回 · 再握不上 ⇒ " & R5.How'Image & " 走了 " & Codec.Fmt (D5, 4)
+             & " · 牙:不松开重握 ⇒ 螺丝只转了 " & Codec.Fmt (Naive / Deg, 1) & "°");
+   end;
+
+   --  🔴 接到执行上的那一层(Linkage.Follow_Held,Change_Held_Qty 那一下"手里的东西沿要的方向变一个单位"换成它):同一扇门(把手离轴 0.8,
+   --  握得住顶着的 0.9 步),脑要把手沿"和门开的方向差 50°"挪 0.15(门开到二十几度才挪得够)。调用方只给"走一下":手实到多少、
+   --  东西挪了多少(眼没另外跟着 ⇒ 就是手实到的)、挡没挡(Selfmap.Blocked);一步多长按这只手看得见的一档 0.03、读数抖 0.002 定。
+   --  要:到了、沿要的方向挪够 0.15、把手没滑出去。错了会是什么病:今天的 Change_Held_Qty 直着走一个单位(顶住了就沿着顶住的那一面再走一步)
+   --  ⇒ 门越开推得越顶着门,把手滑出去。牙:一直直着沿要的方向走 ⇒ 没挪够就滑出去了
+   declare
+      Rho : constant Long_Float := 0.8;
+      Phi : Long_Float := 0.0;
+      Phi_Max : constant Long_Float := 100.0 * Deg;
+      Slipped : Boolean := False;
+      Noise : constant Long_Float := 0.002;
+      Floor : constant Long_Float := 0.03;
+      Unit_L : constant Long_Float := 0.15;
+      Want : constant V3 := [Sin (50.0 * Deg), Cos (50.0 * Deg), 0.0];
+      Wu : constant V3 := Unit (Want);
+      V2 : constant Long_Float := 2.0 * Noise ** 2;
+      Grip : constant Long_Float := 0.9 * Linkage.Light_Len (Floor, [[V2, 0.0, 0.0], [0.0, V2, 0.0], [0.0, 0.0, V2]]);
+      Walked : Long_Float := 0.0;   --  把手真沿 Want 挪了多少
+      function Pos (A : Long_Float) return V3 is ([Rho * Cos (A), Rho * Sin (A), 0.0]);
+      procedure Door_Move (D : V3; Got_Hand, Got_Thing : out V3; Blocked, Ok : out Boolean) is
+         N : constant V3 := [Cos (Phi), Sin (Phi), 0.0];
+         T : constant V3 := [-Sin (Phi), Cos (Phi), 0.0];
+         Off : constant Long_Float := Sqrt (Dot (D, N) ** 2 + D (2) ** 2);   --  顶着门的那一截
+         Real : V3 := [others => 0.0];
+         L : constant Long_Float := Geom.Norm (D);
+      begin
+         Ok := True;
+         if Slipped or else Off > Grip then
+            Slipped := True;
+            Got_Hand := Add (D, [Noise * Gauss, Noise * Gauss, Noise * Gauss]);
+            Got_Thing := Got_Hand;   --  眼没另外跟着把手:只知道手到了哪
+            Blocked := False;
+            return;
+         end if;
+         declare
+            New_Phi : constant Long_Float := Long_Float'Max (0.0, Long_Float'Min (Phi_Max, Phi + Dot (D, T) / Rho));
+         begin
+            Real := Sub (Pos (New_Phi), Pos (Phi));
+            Phi := New_Phi;
+         end;
+         Walked := Walked + Dot (Real, Wu);
+         Got_Hand := Add (Real, [Noise * Gauss, Noise * Gauss, Noise * Gauss]);
+         Got_Thing := Got_Hand;
+         Blocked := L > 0.0 and then Selfmap.Blocked (L - Dot (Real, Scl (D, 1.0 / L)), 0.0, 0.0, Selfmap.Free_Base, L, Noise);
+      end Door_Move;
+      Fw : Linkage.Follow_Report;
+      Walked_F, Phi_F : Long_Float;
+      Slip_F : Boolean;
+      Naive_Walked : Long_Float;
+      Naive_Slip : Boolean;
+   begin
+      FR.Reset (Gen, 201);
+      Linkage.Follow_Held (Want, Unit_L, Floor, Noise, 400, Door_Move'Access, Fw);
+      Walked_F := Walked;
+      Phi_F := Phi;
+      Slip_F := Slipped;
+      --  牙:直着沿 Want 一下一下走(同 Light_Len 那一步),走够 Unit 或者滑出去为止
+      Phi := 0.0;
+      Slipped := False;
+      Walked := 0.0;
+      for I in 1 .. 400 loop
+         declare
+            Gh, Gt : V3;
+            Bl, Ok : Boolean;
+         begin
+            Door_Move (Scl (Wu, Grip / 0.9), Gh, Gt, Bl, Ok);
+         end;
+         exit when Slipped or else Walked >= Unit_L;
+      end loop;
+      Naive_Walked := Walked;
+      Naive_Slip := Slipped;
+      Check (Fw.How = Linkage.Arrived and then Walked_F >= Unit_L - Linkage.Light_Len (Floor, [[V2, 0.0, 0.0], [0.0, V2, 0.0], [0.0, 0.0, V2]])
+             and then not Slip_F and then Naive_Slip and then Naive_Walked < Unit_L,
+             "接到执行上·手里的东西沿要的方向变一个单位:" & Fw.How'Image & " · " & Codec.Img (Fw.Steps) & " 步 · 沿 Want 真挪了 " & Codec.Fmt (Walked_F, 4)
+             & "(要 " & Codec.Fmt (Unit_L, 2) & ")· 门开到 " & Codec.Fmt (Phi_F / Deg, 1) & "° · 滑出去 " & Slip_F'Image
+             & " · 牙:直着走 ⇒ 挪了 " & Codec.Fmt (Naive_Walked, 4) & " 就滑出去 " & Naive_Slip'Image);
+   end;
+
+   --  🔴 两块之间的轴 ⇒ 接触集的第③格(Linkage.Motion_Of,§2 第 19 条"同时两套接触"里动的那一块):一件东西被挪过(A 此刻的位姿转了 30°、平移了),
+   --  它上面一块绕 A 上的一根轴转(或沿 A 上的一根滑轴走)。要:按此刻的位姿把轴搬到世界里,B 上一点按这个旋量搬过去,和真的搬过去的一致
+   --  (差在数值分辨率以内);轴没定下来(Undecided)⇒ 不给旋量(Ok = False)。
+   --  错了会是什么病:轴照参照帧那一刻的世界系用 ⇒ 东西一被挪过,"扣扳机"那一段绕着空中一根不在枪上的轴转。
+   --  牙:不按 A 此刻的位姿搬轴 ⇒ 差出一大截
+   declare
+      Pa : constant Linkage.Pose := (Ok => True, R => Rot ([0.2, -0.4, 1.0], 30.0 * Deg), T => [0.3, -0.1, 0.05]);
+      Jt : Linkage.Joint;
+      Js : Linkage.Joint;
+      Ju : Linkage.Joint;
+      X_Ref : constant V3 := [0.12, 0.05, -0.02];   --  B 上一点,参照帧那一刻(A 的系 = 参照帧的世界)
+      Q : constant Long_Float := 25.0 * Deg;
+      Ok_T, Ok_S, Ok_U : Boolean;
+      Tw_T, Tw_S, Tw_U : Contact.Twist;
+      Err_T, Err_S, Naive_Err : Long_Float;
+   begin
+      Jt.Status := Linkage.Found;
+      Jt.Ax := (W => Unit ([0.3, 1.0, 0.1]), P => [0.05, 0.0, 0.01], Slide => False);
+      Js := Jt;
+      Js.Ax := (W => Unit ([1.0, 0.2, -0.3]), P => [0.0, 0.0, 0.0], Slide => True);
+      Ju := Jt;
+      Ju.Status := Linkage.Undecided;
+      Tw_T := Linkage.Motion_Of (Jt, Pa, Q, Ok_T);
+      Tw_S := Linkage.Motion_Of (Js, Pa, 0.04, Ok_S);
+      Tw_U := Linkage.Motion_Of (Ju, Pa, Q, Ok_U);
+      declare
+         X_Now : constant V3 := Add (Geom.Ap (Pa.R, X_Ref), Pa.T);
+         --  真的:在 A 的系里绕轴转 Q,再按 A 此刻的位姿搬到世界
+         Rq : constant M3 := Rot (Jt.Ax.W, Q);
+         True_T : constant V3 := Add (Geom.Ap (Pa.R, Add (Geom.Ap (Rq, Sub (X_Ref, Jt.Ax.P)), Jt.Ax.P)), Pa.T);
+         True_S : constant V3 := Add (Geom.Ap (Pa.R, Add (X_Ref, Scl (Js.Ax.W, 0.04))), Pa.T);
+         Naive : Contact.Twist;
+         Okn : Boolean;
+      begin
+         Err_T := Geom.Norm (Sub (Contact.Apply (Tw_T, X_Now), True_T));
+         Err_S := Geom.Norm (Sub (Contact.Apply (Tw_S, X_Now), True_S));
+         Naive := Contact.Rotation (Jt.Ax.W, Q, Jt.Ax.P, Okn);
+         Naive_Err := Geom.Norm (Sub (Contact.Apply (Naive, X_Now), True_T));
+      end;
+      Check (Ok_T and then Ok_S and then not Ok_U and then Err_T < Sqrt (Long_Float'Model_Epsilon) and then Err_S < Sqrt (Long_Float'Model_Epsilon)
+             and then Naive_Err > 0.01,
+             "两块之间的轴 ⇒ 接触集的旋量:转轴搬过去差 " & Codec.Fmt (Err_T, 12) & " · 滑轴 " & Codec.Fmt (Err_S, 12) & " · 定不下 ⇒ 不给 "
+             & Boolean'Image (not Ok_U) & " · 牙:轴不按 A 此刻的位姿搬 ⇒ 差 " & Codec.Fmt (Naive_Err, 4));
    end;
 end Welds_Path_6;
