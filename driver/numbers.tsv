@@ -17,6 +17,23 @@ driver-base64.adb	Sextet : constant := 2 ** 6;	2	format	each base64 character ca
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	2	format	a partial group of three bytes still takes four characters
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	3	format	base64 takes three bytes at a time
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	4	format	three bytes make four characters
+driver-brain-keyboard.adb	Rule ("");	"0	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"1	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Sentence_Rule : constant String := "";	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-live.adb	Half : constant := 0.5;	0.5	format	the centre of a pixel is half a pixel from its corner (Driver.Images coordinates)
+driver-brain-pictures.adb	Channels : constant := 3;	3	format	bytes per RGB pixel
+driver-brain-runaway.adb	for Length in 1 .. (N - S.First_Index) / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the words read
+driver-brain-runaway.adb	for Length in 1 .. L / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the lines read
+driver-brain-runaway.adb	for Length in 1 .. Natural (Slot.Length) / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the units read
+driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
+driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
+driver-brain-service.adb	& "";	"0	format	box edges are thousandths of the picture, from 0
+driver-brain-service.adb	& "";	"1000	format	box edges are thousandths of the picture, up to 1000
+driver-brain-service.adb	& Driver.Log.Image (Real (A.Seconds), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:197)
+driver-brain-service.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:284)
+driver-brain-service.adb	Thousandths : constant := 1000.0;	1000.0	format	boxes are given in thousandths of the picture (docs/brain-service.md)
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
 driver-clock.adb	function Nanoseconds_Of (S : Duration) return Long_Long_Integer is (Long_Long_Integer (Real (S) * 1.0e9));	1.0e9	format	nanoseconds per second (the recording format counts nanoseconds)
@@ -103,9 +120,11 @@ driver-http.adb	R.Status := Natural'Value (Status (Sp + 1 .. Natural'Min (Status
 driver-http.adb	Remaining : Integer := -1;	1	structure	sentinel: the body length is unknown until the server closes
 driver-http.adb	elsif R.Status not in 200 .. 299 then	200	format	HTTP 2xx means success
 driver-http.adb	elsif R.Status not in 200 .. 299 then	299	format	HTTP 2xx means success
-driver-images.adb	(0.299 * Real (Red (I, Column, Row)) + 0.587 * Real (Green (I, Column, Row))	0.299	format	ITU-R BT.601 luma weight of red
-driver-images.adb	(0.299 * Real (Red (I, Column, Row)) + 0.587 * Real (Green (I, Column, Row))	0.587	format	ITU-R BT.601 luma weight of green
-driver-images.adb	+ 0.114 * Real (Blue (I, Column, Row)));	0.114	format	ITU-R BT.601 luma weight of blue
+driver-images.adb	+ Blue_Weight * Real (RGB (B + 2));	2	format	ITU-R BT.601 luma weight
+driver-images.adb	B : constant Offset := RGB'First + Offset (3 * K);	3	format	RGB bytes: three per pixel
+driver-images.adb	Blue_Weight : constant := 0.114;	0.114	format	ITU-R BT.601 luma weight
+driver-images.adb	Green_Weight : constant := 0.587;	0.587	format	ITU-R BT.601 luma weight
+driver-images.adb	Red_Weight : constant := 0.299;	0.299	format	ITU-R BT.601 luma weight
 driver-images.adb	function Blue (I : Image; Column, Row : Natural) return Natural is (Channel (I, Column, Row, 2));	2	structure	blue is the third byte of a pixel
 driver-images.adb	function Green (I : Image; Column, Row : Natural) return Natural is (Channel (I, Column, Row, 1));	1	structure	green is the second byte of a pixel
 driver-images.adb	return Natural (Data (Data'First + Offset (3 * (Row * I.Width + Column) + Index)));	3	format	three bytes per RGB pixel
@@ -425,7 +444,7 @@ driver-observations.adb	if S'Length = 3 and then S (S'First + 2) = 3 and then S 
 driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
 driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
 driver-observations.ads	Key_Separator : constant Character := Character'Val (31);	31	format	ASCII unit separator
-driver-pixels.adb	(if V.Count > 1 then V.Sums.Constant_Reference.Element (K) / Real (V.Count - 1) else 0.0);	1	statistics	a sample variance needs two frames
+driver-pixels.adb	(if Frames > 1 then Sum / Real (Frames - 1) else 0.0);	1	statistics	a sample variance needs two frames
 driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	1.0	math	the variance of a uniform step of one level is 1/12
 driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	12.0	math	the variance of a uniform step of one level is 1/12
 driver-protocol.adb	Pairs : Natural := 3;	3	format	pair and element counts of the reply maps (docs/body-protocol.md 4)

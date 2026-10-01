@@ -38,6 +38,13 @@ package Driver.Pixels is
    --  The variance of one frame's luma at the pixel, never below the
    --  quantization floor; with one frame, the floor.
 
+   procedure Means (V : View; Into : out Real_Array)
+     with Pre => Frames (V) > 0 and then Into'Length = Width (V) * Height (V);
+   procedure Variances (V : View; Into : out Real_Array)
+     with Pre => Frames (V) > 0 and then Into'Length = Width (V) * Height (V);
+   --  Mean and Variance of every pixel at once, row after row as
+   --  Driver.Images.Luma lays them out: a frame's worth without a call per pixel.
+
    function Changed (A, B : View) return Driver.Images.Mask
      with Pre => Width (A) = Width (B) and then Height (A) = Height (B) and then Frames (A) > 0 and then Frames (B) > 0;
    --  The pixels whose mean luma differs significantly between the views.
