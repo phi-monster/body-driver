@@ -5,6 +5,7 @@ with Ada.Command_Line;
 with Driver.Action.Tests;
 with Driver.Brain.Tests;
 with Driver.Core_Tests;
+with Driver.Geometry.Tests;
 with Driver.Robot.Hand.Tests;
 with Driver.Robot.Tests;
 with Driver.Tests;
@@ -14,6 +15,7 @@ procedure Selftest is
    Failed : Natural;
 begin
    Driver.Core_Tests.Register;
+   Driver.Geometry.Tests.Register;
    Driver.Robot.Tests.Register;
    Driver.Robot.Hand.Tests.Register;
    Driver.World.Tests.Register;

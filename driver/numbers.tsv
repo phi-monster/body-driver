@@ -29,6 +29,22 @@ driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubl
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
 driver-conventions.ads	Z : constant := 3.0;	3.0	statistics	the significance level of the one test (documented in Conventions)
+driver-geometry.adb	Axis (Smallest) := 1.0;	1.0	math	component of a unit coordinate axis
+driver-geometry.adb	Dt : constant Vec3 := (-1.0 / Facing) * P.Normal;	1.0	math	derivative of a ray's distance to a plane with respect to the ray's origin
+driver-geometry.adb	Half : constant := 0.5;	0.5	math	one half: the symmetric part of a matrix is (A + A^T) / 2
+driver-geometry.adb	J : constant Mat3 := Identity3 - (1.0 / Facing) * Outer (U, P.Normal);	1.0	math	oblique projection along the ray onto the plane
+driver-geometry.adb	L : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
+driver-geometry.adb	L : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
+driver-geometry.adb	Unknowns : constant := 3;	3	structure	a plane has three degrees of freedom: an offset and two tilts
+driver-geometry.adb	Values : Real_Vector (1 .. 3);	3	structure	three dimensions
+driver-geometry.adb	Vectors : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
+driver-geometry.adb	Vectors : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
+driver-geometry.adb	Weight (I) := 1.0 / Real'Max (N * (Points (I).Covariance * N), Real'Model_Small);	1.0	math	a least-squares weight is the inverse of the variance
+driver-geometry.adb	Weight (I) := 1.0;	1.0	numerics	equal weights for the first pass, before any normal is known to weight along
+driver-geometry.adb	if Rays'Length < 2 then	2	structure	two lines are the fewest that can meet in a point
+driver-geometry.adb	return Sqrt (P.Offset_Sigma ** 2 + A * A * P.Tilt_11 + 2.0 * A * B * P.Tilt_12 + B * B * P.Tilt_22);	2.0	math	the cross term of a two-variable quadratic form appears twice
+driver-geometry.adb	subtype Mat2 is Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the two tilt directions of a plane
+driver-geometry.adb	subtype Mat2 is Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the two tilt directions of a plane
 driver-http.adb	"" & Path & "" & CRLF	"1.1	format	HTTP/1.1 request line and chunked encoding (RFC 9112)
 driver-http.adb	(1 .. Stream_Element_Offset (Natural'Max (1, Get_Socket_Option (S, Socket_Level, Receive_Buffer).Size)));	1	numerics	a socket reporting a zero-byte buffer still moves one byte at a time
 driver-http.adb	Chunk_Left := Natural'Value ("" & Size & "");	"16	format	HTTP/1.1 request line and chunked encoding (RFC 9112)
