@@ -5,6 +5,7 @@ driver-brain-keyboard.adb	Rule ("");	"1	format	GBNF character class of decimal d
 driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
 driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
 driver-brain-keyboard.adb	Sentence_Rule : constant String := "";	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-live.adb	Half : constant := 0.5;	0.5	format	the centre of a pixel is half a pixel from its corner (Driver.Images coordinates)
 driver-brain-pictures.adb	& Le (1, Two) & Le (Bits, Two) & Le (0, Four) & Le (Long_Long_Integer (Pixels), Four)	1	format	BMP information header: one colour plane
 driver-brain-pictures.adb	Bits : constant := 24;	24	format	bits per pixel of a 24-bit BMP
 driver-brain-pictures.adb	Byte_Base : constant := 256;	256	format	the values one byte holds

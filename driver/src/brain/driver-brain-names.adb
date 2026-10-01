@@ -87,12 +87,6 @@ package body Driver.Brain.Names is
       return False;
    end Same_Core;
 
-   procedure Clear (N : in out Table) is
-   begin
-      N.Things.Clear;
-      N.Places.Clear;
-   end Clear;
-
    procedure Name_Place (N : in out Table; Name : String; P : Place_Id) is
    begin
       for I in N.Places.First_Index .. N.Places.Last_Index loop

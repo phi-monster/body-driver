@@ -1,7 +1,9 @@
 with Driver.Brain.Execution.Tests;
 with Driver.Brain.Keyboard.Tests;
+with Driver.Brain.Live.Tests;
 with Driver.Brain.Names.Tests;
 with Driver.Brain.Parser.Tests;
+with Driver.Brain.Rounds.Tests;
 with Driver.Brain.Runaway.Tests;
 with Driver.Brain.Service.Tests;
 with Driver.Brain.Termination.Tests;
@@ -17,6 +19,8 @@ package body Driver.Brain.Tests is
       Driver.Brain.Service.Tests.Register;
       Driver.Brain.Termination.Tests.Register;
       Driver.Brain.Execution.Tests.Register;
+      Driver.Brain.Rounds.Tests.Register;
+      Driver.Brain.Live.Tests.Register;
    end Register;
 
 end Driver.Brain.Tests;

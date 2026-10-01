@@ -24,6 +24,9 @@ package Driver.Brain.Keyboard is
 
    type Layout is (Speech_Only, Quantity_Keys, Full_Keys);
 
+   function Image (L : Layout) return String is
+     (case L is when Speech_Only => "speech-only", when Quantity_Keys => "quantity", when Full_Keys => "full");
+
    type Keyboard is record
       Keys       : Layout := Speech_Only;
       Quantities : Word_Vectors.Vector;    --  the quantities' words

@@ -241,7 +241,7 @@ package body Driver.Brain.Names.Tests is
       B := (others => <>);
       Bind (N, F, 2, "upuntil the mintgreenscissors", Glue, B);
       Check (B.Kind = To_Thing and then B.Thing = 7, "glue alone in front: the letters find it");
-      N.Clear;
+      N := (others => <>);
       F := Three_Eyes;
       Bind (N, F, 2, "upthe mintgreenscissors", Glue, B);
       F.Replies.Append (R (1, "the mintgreenscissors", Boxed, A_Thing, 7));

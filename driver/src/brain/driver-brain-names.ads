@@ -94,9 +94,6 @@ package Driver.Brain.Names is
 
    type Table is tagged private;
 
-   procedure Clear (N : in out Table);
-   --  A new episode: every name and place is forgotten.
-
    procedure Name_Place (N : in out Table; Name : String; P : Place_Id);
    --  remember ... as Name: from now on Name is that place.
 
