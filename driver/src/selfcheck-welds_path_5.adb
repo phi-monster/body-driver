@@ -253,7 +253,7 @@ procedure Welds_Path_5 is
                 & Codec.Fmt (Jy (1), 2) & ")(要各自顺着走的方向)" else ""));
    end Searched;
 
-   --  两瓣(同自检里 Contact.Grasp 那几条的手):两个尖在眼前 9 cm、相距 9 cm,手指沿合拢方向厚 1 cm,指肚宽 1.5 cm,手落位的误差 2 mm
+   --  两瓣(同自检里 Contact.Search 那几条的手):两个尖在眼前 9 cm、相距 9 cm,手指沿合拢方向厚 1 cm,指肚宽 1.5 cm,手落位的误差 2 mm
    function Two_Hand return Se.Hand_Model is
       Ls : Se.Lobe_In_Vectors.Vector;
    begin
@@ -389,7 +389,7 @@ begin
       Cx : Act.Context;
       Fx : Plug.Frame;
       Gx : Geom.Cam_Geo;
-      Pick, Pick_D : Contact.Grasp.Candidate;
+      Pick, Pick_D : Contact.Search.Candidate;
       Nt, Nd : Unbounded_String;
       Okp, Okd : Boolean;
       procedure Any_Reach (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float) is

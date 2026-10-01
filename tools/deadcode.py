@@ -5,9 +5,30 @@
 # 只给自检当假身体用的钩子(驱动自己不调、专门让自检替身体喂一拍)照实列在 TEST_HOOKS 里,每一个写明替谁。
 TEST_HOOKS = {
     ("plug.adb", "Lock_Feed"): "自检在主线程里当假身体,替 Lock_Beat 从链路收的那一帧",
-    ("contact.adb", "Turn"): "脑要它'绕一根轴转'的那种运动(接触集执行层 Contact.Exec.Steps 吃的 Twist);自检拿它验转着走,驱动接上'脑要它怎么动'(PLAN ② 接下来第 1 条)就是活的",
+    ("contact.adb", "Rotation"): "脑要它'绕一根轴转'的那种运动(接触集执行层 Contact.Exec.Steps 吃的 Twist);自检拿它验转着走,驱动接上'脑要它怎么动'(PLAN ② 接下来第 1 条)就是活的",
     ("kinem.adb", "Refine_Tracks"): "把 Fit 的最后一步(④ 多视图,Refine_Until_Done)单独交给自检,从真模型起步验它",
-    ("contact-search.adb", "Two_Pads"): "两瓣手的旧写法(= From_Lobes 两个尖):驱动建手已按全部瓣走 From_Lobes(大并行路 5),只剩主代理 selfcheck.adb 里 Contact.Grasp 那几条旧焊点(1198、1199 行)在用;合并时那两行换成 From_Lobes,删掉 Two_Pads 和这一条",
+    # 路 6 部件和轴(大并行 §2 第 12 条)的新包,接口处在别路的文件里(Run_Segment 看东西动的那一处调 Fit、脑要挪一块时调 Follow),
+    # 等主代理合并时接上(路 6 的报告里写了接法);在那之前只有自检的焊点调它们。接上以后这 12 条全删
+    ("linkage.adb", "Fit"): "路 6:看东西动时按刚体运动归块、每两块拟合一根轴;驱动接上'东西被跟住的点每一帧的交点'(路 3 的东西)就是活的",
+    ("linkage.adb", "Say"): "路 6:Fit 的结果印一句日志;Fit 接上就是活的",
+    ("linkage.adb", "Follow"): "路 6:轴还不知道时顺着它让的方向走;驱动接上'脑要挪一块'(执行层按 Geo_Move 走一步)就是活的",
+    ("linkage.adb", "Light_Len"): "路 6:Follow 一步多长(看得出它挪了的最轻一步);Follow 接上就是活的",
+    ("linkage.adb", "Gate"): "路 6:同一个置信度的卡方门(Fit / Follow 用);它俩接上就是活的",
+    ("linkage.adb", "Mahal"): "路 6:马氏距离的平方(Follow 判挪没挪用);Follow 接上就是活的",
+    ("linkage.adb", "Inv3"): "路 6:3×3 求逆(Mahal、Fit 用);它们接上就是活的",
+    ("linkage.adb", "Eig_Sym"): "路 6:对称阵的特征分解(Fit 的 Horn 和铺没铺开、Max_Eig3 用);Fit 接上就是活的",
+    ("linkage.adb", "Max_Eig3"): "路 6:协方差最大的特征值(Fit、Light_Len 用);它们接上就是活的",
+    ("linkage.adb", "Perp"): "路 6:垂直于一个方向的一对轴(Fit 的轴参数化、Follow 试的方向用);它们接上就是活的",
+    ("linkage.adb", "Gate_F"): "路 6:噪声是量的时候的门(Paulson 的 F 分位;Fit 里每一道门都按它开);Fit 接上就是活的",
+    ("linkage.adb", "Z_Of"): "路 6:平方和换成一维正态的倍数(Fit 里判两块合不合、先合哪一对);Fit 接上就是活的",
+    # 路 6 拿着的东西(§2 第 20 条,I7 里路 6 那一份):抓住以后认跟着手走的点、它在手上的形状、每看一眼查滑没滑;
+    # 接口处在别路的文件里(接触集合拢以后调 Take、每看一眼调 Check_Slip、接触集搜索时问 In_World),接上以后这 6 条删
+    ("held.adb", "Take"): "路 6:抓住以后认哪些点跟着手走(和开机认长在眼上同一个判法)、它在手的系里的形状;接触集合拢以后调它就是活的",
+    ("held.adb", "In_World"): "路 6:拿着的东西此刻在世界里在哪、多不准(进'身体能碰东西的地方'那张单子);接触集搜索时问它就是活的",
+    ("held.adb", "Check_Slip"): "路 6:每看一眼查拿着的东西滑没滑(成团地比、算上手此刻的不准);看东西那一步调它就是活的",
+    ("held.adb", "Scl"): "路 6:3×3 乘一个数(Take / Check_Slip 用);它们接上就是活的",
+    ("held.adb", "Mapped"): "路 6:位姿的不准换一个系看(Take / In_World / Check_Slip 用);它们接上就是活的",
+    ("held.adb", "Add"): "路 6:两个 6×6 不准相加(Take / In_World / Check_Slip 用);它们接上就是活的",
 }
 import os, re, sys, glob, collections
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

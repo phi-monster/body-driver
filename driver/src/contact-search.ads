@@ -40,8 +40,6 @@ package Contact.Search is
    end record;
    package Lobe_In_Vectors is new Ada.Containers.Vectors (Natural, Lobe_In);
    function From_Lobes (Ls : Lobe_In_Vectors.Vector; Pos_Err : Long_Float) return Hand_Model;
-   --  两瓣的旧写法 = From_Lobes 两个尖、同一个宽和厚(只剩主代理 selfcheck.adb 里 Contact.Grasp 那几条旧焊点在用;合并时改成 From_Lobes、删掉它)
-   function Two_Pads (Tip_A, Tip_B : V3; Width, Thick, Pos_Err : Long_Float) return Hand_Model;
    --  这只手没量全 ⇒ 不成立,照实说
    function Not_Measured (Why : String) return Hand_Model;
 

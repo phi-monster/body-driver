@@ -1,0 +1,1652 @@
+{
+ "batch": "b1",
+ "seed": 1,
+ "bodies": [
+  "x5",
+  "humanoid",
+  "drone"
+ ],
+ "questions": [
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "on",
+   "sentence": "Put the tomato soup can on the gelatin box.",
+   "check": [
+    "bdq_on",
+    {
+     "a": "target",
+     "b": "other",
+     "mode": "on"
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_soup_can",
+     "desc": "tomato soup can",
+     "pos": [
+      0.0027062207303057972,
+      -0.05324684072030211,
+      0.8179280002654791
+     ],
+     "yaw": 126.81955518354403
+    },
+    {
+     "label": "other",
+     "cat": "bdq_gelatin_box",
+     "desc": "gelatin box",
+     "pos": [
+      -0.15983037591272653,
+      -0.15358088086251273,
+      0.7819918397890365
+     ],
+     "yaw": 251.72097871502012
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_banana",
+     "desc": "banana",
+     "pos": [
+      -0.2904518204911781,
+      0.025357500448316472,
+      0.7863241591902638
+     ],
+     "yaw": 271.45074055919497
+    },
+    {
+     "label": "clutter_1",
+     "cat": "bdq_clamp",
+     "desc": "clamp",
+     "pos": [
+      0.18362661802455665,
+      -0.00033993128846168674,
+      0.7852069094879871
+     ],
+     "yaw": 342.8479347009788
+    }
+   ],
+   "qid": 0,
+   "seed": 20000
+  },
+  {
+   "body": "drone",
+   "cfg": "drone_rgb",
+   "cfg_name": "drone",
+   "requirement": "above",
+   "sentence": "Fly right above the power drill.",
+   "check": [
+    "bdq_above",
+    {
+     "label": "target",
+     "xy_tol": 0.05,
+     "clear": 0.05
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_drill",
+     "desc": "power drill",
+     "pos": [
+      -0.13995752742375578,
+      0.15074732896295467,
+      0.8604184053521214
+     ],
+     "yaw": 169.12689835042227
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_pudding_box",
+     "desc": "pudding box",
+     "pos": [
+      -0.3162678170488306,
+      -0.1952224048396239,
+      0.7862352600566612
+     ],
+     "yaw": 271.3606875025556
+    },
+    {
+     "label": "clutter_1",
+     "cat": "bdq_gelatin_box",
+     "desc": "gelatin box",
+     "pos": [
+      -0.12204467185593951,
+      -0.11297261298562683,
+      0.7819918397890365
+     ],
+     "yaw": 106.29037225900902
+    },
+    {
+     "label": "clutter_2",
+     "cat": "bdq_foam_brick",
+     "desc": "foam brick",
+     "pos": [
+      0.33090461603852206,
+      -0.03139878160636536,
+      0.7932799996224046
+     ],
+     "yaw": 322.5165665704867
+    }
+   ],
+   "qid": 1,
+   "seed": 20001
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "turn",
+   "sentence": "Turn the mustard bottle around so it faces the other way.",
+   "check": [
+    "bdq_turned",
+    {
+     "label": "target",
+     "angle": 2.356194490192345
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_mustard",
+     "desc": "mustard bottle",
+     "pos": [
+      0.15350064747410813,
+      -0.06033644892309116,
+      0.8626509950238989
+     ],
+     "yaw": 234.93561830311836
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_gelatin_box",
+     "desc": "gelatin box",
+     "pos": [
+      -0.28240318335507736,
+      -0.15759497254056543,
+      0.7819918397890365
+     ],
+     "yaw": 102.41701282626059
+    },
+    {
+     "label": "clutter_1",
+     "cat": "bdq_scissors",
+     "desc": "scissors",
+     "pos": [
+      -0.10337065363362549,
+      -0.0322124975175245,
+      0.7762561701851449
+     ],
+     "yaw": 114.5291646493937
+    }
+   ],
+   "qid": 2,
+   "seed": 20002
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "push",
+   "sentence": "Push the potted meat can about 10 cm to your left, without lifting.",
+   "check": [
+    "bdq_pushed",
+    {
+     "label": "target",
+     "dir": [
+      -1.0,
+      0.0
+     ],
+     "dist": 0.08,
+     "max_lift": 0.02
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_meat_can",
+     "desc": "potted meat can",
+     "pos": [
+      -0.25599850510633737,
+      0.022077785052609822,
+      0.8087710008821413
+     ],
+     "yaw": 40.024455950352966
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_pudding_box",
+     "desc": "pudding box",
+     "pos": [
+      -0.11796801127337547,
+      -0.10142958664897968,
+      0.7862352600566612
+     ],
+     "yaw": 337.6272904642167
+    },
+    {
+     "label": "clutter_1",
+     "cat": "bdq_sugar_box",
+     "desc": "sugar box",
+     "pos": [
+      0.21997170553223827,
+      -0.10871390334662961,
+      0.8551266860337551
+     ],
+     "yaw": 134.9118108461473
+    }
+   ],
+   "qid": 3,
+   "seed": 20003
+  },
+  {
+   "body": "humanoid",
+   "cfg": "g1_rgb",
+   "cfg_name": "g1",
+   "requirement": "turn",
+   "sentence": "Turn the potted meat can around.",
+   "check": [
+    "bdq_turned",
+    {
+     "label": "target",
+     "angle": 2.356194490192345
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_meat_can",
+     "desc": "potted meat can",
+     "pos": [
+      0.20884022296883398,
+      -0.1648840671481705,
+      0.8087710008821413
+     ],
+     "yaw": 358.5894746677609
+    }
+   ],
+   "qid": 4,
+   "seed": 20004
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "lift",
+   "sentence": "Lift the gelatin box 15 cm off the table.",
+   "check": [
+    "is_lift",
+    {
+     "label": "target",
+     "z_threshold": 0.15
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_gelatin_box",
+     "desc": "gelatin box",
+     "pos": [
+      -0.10873519686593047,
+      0.07381816492490112,
+      0.7819918397890365
+     ],
+     "yaw": 186.4857727393523
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_marker",
+     "desc": "marker",
+     "pos": [
+      0.027020986791121082,
+      0.0018678078057901837,
+      0.7767375599353561
+     ],
+     "yaw": 251.80054722104575
+    }
+   ],
+   "qid": 5,
+   "seed": 20005
+  },
+  {
+   "body": "humanoid",
+   "cfg": "g1_rgb",
+   "cfg_name": "g1",
+   "requirement": "push",
+   "sentence": "Push the tomato soup can about 5 cm to your right, without lifting.",
+   "check": [
+    "bdq_pushed",
+    {
+     "label": "target",
+     "dir": [
+      1.0,
+      0.0
+     ],
+     "dist": 0.04,
+     "max_lift": 0.02
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_soup_can",
+     "desc": "tomato soup can",
+     "pos": [
+      0.18726432903874968,
+      -0.16323285741991383,
+      0.8179280002654791
+     ],
+     "yaw": 85.67422501000387
+    }
+   ],
+   "qid": 6,
+   "seed": 20006
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "next_to",
+   "sentence": "Move the gelatin box next to the sugar box.",
+   "check": [
+    "bdq_next_to",
+    {
+     "a": "target",
+     "b": "other",
+     "gap": 0.05,
+     "min_move": 0.05
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_gelatin_box",
+     "desc": "gelatin box",
+     "pos": [
+      -0.20368952838034302,
+      -0.07750980574677056,
+      0.7819918397890365
+     ],
+     "yaw": 215.44144447641403
+    },
+    {
+     "label": "other",
+     "cat": "bdq_sugar_box",
+     "desc": "sugar box",
+     "pos": [
+      0.17428259702674914,
+      -0.06312391239211047,
+      0.8551266860337551
+     ],
+     "yaw": 154.91866171848395
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_marker",
+     "desc": "marker",
+     "pos": [
+      0.062203952217827374,
+      0.03675858616184133,
+      0.7767375599353561
+     ],
+     "yaw": 291.1017144094427
+    }
+   ],
+   "qid": 7,
+   "seed": 20007
+  },
+  {
+   "body": "humanoid",
+   "cfg": "g1_rgb",
+   "cfg_name": "g1",
+   "requirement": "push",
+   "sentence": "Push the gelatin box about 5 cm away from you, without lifting.",
+   "check": [
+    "bdq_pushed",
+    {
+     "label": "target",
+     "dir": [
+      0.0,
+      1.0
+     ],
+     "dist": 0.04,
+     "max_lift": 0.02
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_gelatin_box",
+     "desc": "gelatin box",
+     "pos": [
+      0.1767930229556542,
+      -0.26749589127285145,
+      0.7819918397890365
+     ],
+     "yaw": 108.26301145637007
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_clamp",
+     "desc": "clamp",
+     "pos": [
+      -0.18498818885321883,
+      -0.24755635927282432,
+      0.7852069094879871
+     ],
+     "yaw": 4.566928262360714
+    }
+   ],
+   "qid": 8,
+   "seed": 20008
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "on",
+   "sentence": "Put the marker in the mug.",
+   "check": [
+    "bdq_on",
+    {
+     "a": "target",
+     "b": "other",
+     "mode": "in"
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_marker",
+     "desc": "marker",
+     "pos": [
+      0.26356435160105723,
+      -0.13878487488269114,
+      0.7767375599353561
+     ],
+     "yaw": 43.65436048475622
+    },
+    {
+     "label": "other",
+     "cat": "bdq_mug",
+     "desc": "mug",
+     "pos": [
+      0.04752422003848822,
+      0.016613819167002664,
+      0.8076510010216161
+     ],
+     "yaw": 206.5600901375601
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_cracker_box",
+     "desc": "cracker box",
+     "pos": [
+      -0.21523213796437202,
+      -0.06896967112546329,
+      0.8028999983392656
+     ],
+     "yaw": 200.1248694690782
+    }
+   ],
+   "qid": 9,
+   "seed": 20009
+  },
+  {
+   "body": "humanoid",
+   "cfg": "g1_rgb",
+   "cfg_name": "g1",
+   "requirement": "on",
+   "sentence": "Put the foam brick on the gelatin box.",
+   "check": [
+    "bdq_on",
+    {
+     "a": "target",
+     "b": "other",
+     "mode": "on"
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_foam_brick",
+     "desc": "foam brick",
+     "pos": [
+      0.244829009386794,
+      -0.27395289862551075,
+      0.7932799996224046
+     ],
+     "yaw": 262.7835534593543
+    },
+    {
+     "label": "other",
+     "cat": "bdq_gelatin_box",
+     "desc": "gelatin box",
+     "pos": [
+      0.12324097389176716,
+      -0.17471564632008577,
+      0.7819918397890365
+     ],
+     "yaw": 15.117767852501656
+    }
+   ],
+   "qid": 10,
+   "seed": 20010
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "lift",
+   "sentence": "Lift the mustard bottle 15 cm off the table.",
+   "check": [
+    "is_lift",
+    {
+     "label": "target",
+     "z_threshold": 0.15
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_mustard",
+     "desc": "mustard bottle",
+     "pos": [
+      0.18427242405228944,
+      0.02429811795123893,
+      0.8626509950238989
+     ],
+     "yaw": 247.20666829364453
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_meat_can",
+     "desc": "potted meat can",
+     "pos": [
+      -0.2721327432959271,
+      0.05485226979317098,
+      0.8087710008821413
+     ],
+     "yaw": 42.223838432871084
+    },
+    {
+     "label": "clutter_1",
+     "cat": "bdq_clamp",
+     "desc": "clamp",
+     "pos": [
+      -0.023827992022370348,
+      -0.061287547533879494,
+      0.7852069094879871
+     ],
+     "yaw": 290.78988032211834
+    }
+   ],
+   "qid": 11,
+   "seed": 20011
+  },
+  {
+   "body": "humanoid",
+   "cfg": "g1_rgb",
+   "cfg_name": "g1",
+   "requirement": "push",
+   "sentence": "Push the pudding box about 5 cm to your left, without lifting.",
+   "check": [
+    "bdq_pushed",
+    {
+     "label": "target",
+     "dir": [
+      -1.0,
+      0.0
+     ],
+     "dist": 0.04,
+     "max_lift": 0.02
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_pudding_box",
+     "desc": "pudding box",
+     "pos": [
+      0.20361886332585175,
+      -0.22595926742879568,
+      0.7862352600566612
+     ],
+     "yaw": 204.45768093865996
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_marker",
+     "desc": "marker",
+     "pos": [
+      -0.17214792037138454,
+      -0.19642727128022902,
+      0.7767375599353561
+     ],
+     "yaw": 158.15032009391004
+    }
+   ],
+   "qid": 12,
+   "seed": 20012
+  },
+  {
+   "body": "humanoid",
+   "cfg": "g1_rgb",
+   "cfg_name": "g1",
+   "requirement": "lift",
+   "sentence": "Lift the power drill 5 cm off the table.",
+   "check": [
+    "is_lift",
+    {
+     "label": "target",
+     "z_threshold": 0.05
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_drill",
+     "desc": "power drill",
+     "pos": [
+      0.18617115386021715,
+      -0.15896897983470196,
+      0.8604184053521214
+     ],
+     "yaw": 179.29003498227144
+    }
+   ],
+   "qid": 13,
+   "seed": 20013
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "next_to",
+   "sentence": "Move the banana next to the potted meat can.",
+   "check": [
+    "bdq_next_to",
+    {
+     "a": "target",
+     "b": "other",
+     "gap": 0.05,
+     "min_move": 0.05
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_banana",
+     "desc": "banana",
+     "pos": [
+      0.24415377583160064,
+      -0.08678579575671704,
+      0.7863241591902638
+     ],
+     "yaw": 86.32539674548165
+    },
+    {
+     "label": "other",
+     "cat": "bdq_meat_can",
+     "desc": "potted meat can",
+     "pos": [
+      0.018155450944643714,
+      0.06599884635617756,
+      0.8087710008821413
+     ],
+     "yaw": 209.15495064297514
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_bowl",
+     "desc": "bowl",
+     "pos": [
+      -0.150456208162189,
+      -0.04985144728241889,
+      0.7945049990228191
+     ],
+     "yaw": 176.74983374375273
+    }
+   ],
+   "qid": 14,
+   "seed": 20014
+  },
+  {
+   "body": "drone",
+   "cfg": "drone_rgb",
+   "cfg_name": "drone",
+   "requirement": "above",
+   "sentence": "Fly over to the wooden block and hover right above it.",
+   "check": [
+    "bdq_above",
+    {
+     "label": "target",
+     "xy_tol": 0.05,
+     "clear": 0.05
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_wood_block",
+     "desc": "wooden block",
+     "pos": [
+      0.07007233165084908,
+      -0.16166718062720975,
+      0.8123903903352382
+     ],
+     "yaw": 275.2632667830902
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_clamp",
+     "desc": "clamp",
+     "pos": [
+      -0.22840513573285476,
+      0.11470633708589423,
+      0.7852069094879871
+     ],
+     "yaw": 241.00108543327408
+    },
+    {
+     "label": "clutter_1",
+     "cat": "bdq_banana",
+     "desc": "banana",
+     "pos": [
+      -0.23654119071583585,
+      -0.13334572313932164,
+      0.7863241591902638
+     ],
+     "yaw": 208.31204945819883
+    }
+   ],
+   "qid": 15,
+   "seed": 20015
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "turn",
+   "sentence": "Turn the banana around so it faces the other way.",
+   "check": [
+    "bdq_turned",
+    {
+     "label": "target",
+     "angle": 2.356194490192345
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_banana",
+     "desc": "banana",
+     "pos": [
+      -0.06970048059083206,
+      0.007040629800174392,
+      0.7863241591902638
+     ],
+     "yaw": 39.386104437720306
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_bowl",
+     "desc": "bowl",
+     "pos": [
+      0.2094583363413945,
+      -0.017432610888181516,
+      0.7945049990228191
+     ],
+     "yaw": 41.90796678687476
+    }
+   ],
+   "qid": 16,
+   "seed": 20016
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "on",
+   "sentence": "Put the foam brick on the gelatin box.",
+   "check": [
+    "bdq_on",
+    {
+     "a": "target",
+     "b": "other",
+     "mode": "on"
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_foam_brick",
+     "desc": "foam brick",
+     "pos": [
+      0.18158035746909862,
+      -0.16557581644790118,
+      0.7932799996224046
+     ],
+     "yaw": 24.727631801029094
+    },
+    {
+     "label": "other",
+     "cat": "bdq_gelatin_box",
+     "desc": "gelatin box",
+     "pos": [
+      -0.06747682874794461,
+      -0.03827476223267148,
+      0.7819918397890365
+     ],
+     "yaw": 27.626521486319536
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_mug",
+     "desc": "mug",
+     "pos": [
+      0.1394755759875982,
+      0.03591590980164178,
+      0.8076510010216161
+     ],
+     "yaw": 46.434241005513066
+    }
+   ],
+   "qid": 17,
+   "seed": 20017
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "push",
+   "sentence": "Push the bowl about 10 cm to your left, without lifting.",
+   "check": [
+    "bdq_pushed",
+    {
+     "label": "target",
+     "dir": [
+      -1.0,
+      0.0
+     ],
+     "dist": 0.08,
+     "max_lift": 0.02
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_bowl",
+     "desc": "bowl",
+     "pos": [
+      -0.21601949918226782,
+      -0.01637724829558146,
+      0.7945049990228191
+     ],
+     "yaw": 248.1175316171349
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_wood_block",
+     "desc": "wooden block",
+     "pos": [
+      0.042053189888322295,
+      0.03711652611584779,
+      0.8123903903352382
+     ],
+     "yaw": 242.4222014582479
+    }
+   ],
+   "qid": 18,
+   "seed": 20018
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "turn",
+   "sentence": "Turn the marker around.",
+   "check": [
+    "bdq_turned",
+    {
+     "label": "target",
+     "angle": 2.356194490192345
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_marker",
+     "desc": "marker",
+     "pos": [
+      0.05064680035350144,
+      0.017765991216574156,
+      0.7767375599353561
+     ],
+     "yaw": 259.3798568508987
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_meat_can",
+     "desc": "potted meat can",
+     "pos": [
+      0.05785358836916832,
+      -0.14152589394003454,
+      0.8087710008821413
+     ],
+     "yaw": 5.002243260518604
+    }
+   ],
+   "qid": 19,
+   "seed": 20019
+  },
+  {
+   "body": "humanoid",
+   "cfg": "g1_rgb",
+   "cfg_name": "g1",
+   "requirement": "lift",
+   "sentence": "Lift the marker 5 cm off the table.",
+   "check": [
+    "is_lift",
+    {
+     "label": "target",
+     "z_threshold": 0.05
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_marker",
+     "desc": "marker",
+     "pos": [
+      0.16365624952839436,
+      -0.23722010296956858,
+      0.7767375599353561
+     ],
+     "yaw": 334.55582564643174
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_foam_brick",
+     "desc": "foam brick",
+     "pos": [
+      -0.1613989638320078,
+      -0.26353515196374644,
+      0.7932799996224046
+     ],
+     "yaw": 291.6410450254396
+    }
+   ],
+   "qid": 20,
+   "seed": 20020
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "on",
+   "sentence": "Put the gelatin box in the bowl.",
+   "check": [
+    "bdq_on",
+    {
+     "a": "target",
+     "b": "other",
+     "mode": "in"
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_gelatin_box",
+     "desc": "gelatin box",
+     "pos": [
+      0.23358274594319378,
+      -0.1339064013342203,
+      0.7819918397890365
+     ],
+     "yaw": 159.06771720939415
+    },
+    {
+     "label": "other",
+     "cat": "bdq_bowl",
+     "desc": "bowl",
+     "pos": [
+      -0.04310378563289946,
+      -0.07672255555272449,
+      0.7945049990228191
+     ],
+     "yaw": 106.74577810920454
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_mug",
+     "desc": "mug",
+     "pos": [
+      0.19256676424910646,
+      0.026715376181215778,
+      0.8076510010216161
+     ],
+     "yaw": 229.05352087839847
+    }
+   ],
+   "qid": 21,
+   "seed": 20021
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "push",
+   "sentence": "Push the clamp about 10 cm to your right, without lifting.",
+   "check": [
+    "bdq_pushed",
+    {
+     "label": "target",
+     "dir": [
+      1.0,
+      0.0
+     ],
+     "dist": 0.08,
+     "max_lift": 0.02
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_clamp",
+     "desc": "clamp",
+     "pos": [
+      0.1443147495582649,
+      -0.10302873572541417,
+      0.7852069094879871
+     ],
+     "yaw": 351.1190337973207
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_cracker_box",
+     "desc": "cracker box",
+     "pos": [
+      -0.18315183143276645,
+      -0.015663444211698685,
+      0.8028999983392656
+     ],
+     "yaw": 62.70271913864561
+    }
+   ],
+   "qid": 22,
+   "seed": 20022
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "lift",
+   "sentence": "Lift the sugar box 10 cm off the table.",
+   "check": [
+    "is_lift",
+    {
+     "label": "target",
+     "z_threshold": 0.1
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_sugar_box",
+     "desc": "sugar box",
+     "pos": [
+      0.18083619025856568,
+      0.06504538451071543,
+      0.8551266860337551
+     ],
+     "yaw": 168.47113273848117
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_wood_block",
+     "desc": "wooden block",
+     "pos": [
+      -0.20895422050645462,
+      -0.005739310514949192,
+      0.8123903903352382
+     ],
+     "yaw": 222.13764997738107
+    },
+    {
+     "label": "clutter_1",
+     "cat": "bdq_drill",
+     "desc": "power drill",
+     "pos": [
+      0.033434825933838286,
+      -0.03691000968538016,
+      0.8604184053521214
+     ],
+     "yaw": 10.887635207979836
+    }
+   ],
+   "qid": 23,
+   "seed": 20023
+  },
+  {
+   "body": "humanoid",
+   "cfg": "g1_rgb",
+   "cfg_name": "g1",
+   "requirement": "turn",
+   "sentence": "Turn the marker around.",
+   "check": [
+    "bdq_turned",
+    {
+     "label": "target",
+     "angle": 2.356194490192345
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_marker",
+     "desc": "marker",
+     "pos": [
+      -0.17255066998562618,
+      -0.2799313047408412,
+      0.7767375599353561
+     ],
+     "yaw": 277.41549659152514
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_mustard",
+     "desc": "mustard bottle",
+     "pos": [
+      0.21266857072174875,
+      -0.16692527833922383,
+      0.8626509950238989
+     ],
+     "yaw": 0.7960872106110717
+    }
+   ],
+   "qid": 24,
+   "seed": 20024
+  },
+  {
+   "body": "humanoid",
+   "cfg": "g1_rgb",
+   "cfg_name": "g1",
+   "requirement": "turn",
+   "sentence": "Turn the potted meat can around so it faces the other way.",
+   "check": [
+    "bdq_turned",
+    {
+     "label": "target",
+     "angle": 2.356194490192345
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_meat_can",
+     "desc": "potted meat can",
+     "pos": [
+      0.12270404923978544,
+      -0.16617073568190785,
+      0.8087710008821413
+     ],
+     "yaw": 356.4306237058268
+    }
+   ],
+   "qid": 25,
+   "seed": 20025
+  },
+  {
+   "body": "humanoid",
+   "cfg": "g1_rgb",
+   "cfg_name": "g1",
+   "requirement": "turn",
+   "sentence": "Turn the mustard bottle around.",
+   "check": [
+    "bdq_turned",
+    {
+     "label": "target",
+     "angle": 2.356194490192345
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_mustard",
+     "desc": "mustard bottle",
+     "pos": [
+      0.1634500725619742,
+      -0.16171585579238051,
+      0.8626509950238989
+     ],
+     "yaw": 185.4058563583888
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_marker",
+     "desc": "marker",
+     "pos": [
+      -0.15963590215214357,
+      -0.2715021913516046,
+      0.7767375599353561
+     ],
+     "yaw": 288.90910533359784
+    }
+   ],
+   "qid": 26,
+   "seed": 20026
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "on",
+   "sentence": "Put the tomato soup can on the gelatin box.",
+   "check": [
+    "bdq_on",
+    {
+     "a": "target",
+     "b": "other",
+     "mode": "on"
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_soup_can",
+     "desc": "tomato soup can",
+     "pos": [
+      -0.24837227391734543,
+      -0.06112623306371523,
+      0.8179280002654791
+     ],
+     "yaw": 72.00459019748025
+    },
+    {
+     "label": "other",
+     "cat": "bdq_gelatin_box",
+     "desc": "gelatin box",
+     "pos": [
+      0.22572923677887918,
+      0.0447075339032095,
+      0.7819918397890365
+     ],
+     "yaw": 350.9947559545873
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_foam_brick",
+     "desc": "foam brick",
+     "pos": [
+      0.03350448607736334,
+      -0.1494162550984465,
+      0.7932799996224046
+     ],
+     "yaw": 151.31050548952607
+    }
+   ],
+   "qid": 27,
+   "seed": 20027
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "push",
+   "sentence": "Push the mug about 10 cm to your left, without lifting.",
+   "check": [
+    "bdq_pushed",
+    {
+     "label": "target",
+     "dir": [
+      -1.0,
+      0.0
+     ],
+     "dist": 0.08,
+     "max_lift": 0.02
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_mug",
+     "desc": "mug",
+     "pos": [
+      0.13527154969976019,
+      -0.01903882603181334,
+      0.8076510010216161
+     ],
+     "yaw": 158.94856318913966
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_mustard",
+     "desc": "mustard bottle",
+     "pos": [
+      -0.2656904070893627,
+      -0.09561721130016661,
+      0.8626509950238989
+     ],
+     "yaw": 258.96850065239477
+    }
+   ],
+   "qid": 28,
+   "seed": 20028
+  },
+  {
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "lift",
+   "sentence": "Lift the potted meat can 5 cm off the table.",
+   "check": [
+    "is_lift",
+    {
+     "label": "target",
+     "z_threshold": 0.05
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "bdq_meat_can",
+     "desc": "potted meat can",
+     "pos": [
+      -0.070749707071116,
+      0.013808212739053721,
+      0.8087710008821413
+     ],
+     "yaw": 236.039160539768
+    },
+    {
+     "label": "clutter_0",
+     "cat": "bdq_mustard",
+     "desc": "mustard bottle",
+     "pos": [
+      0.044380371684168696,
+      -0.14163458917282573,
+      0.8626509950238989
+     ],
+     "yaw": 142.9442767347282
+    },
+    {
+     "label": "clutter_1",
+     "cat": "bdq_pudding_box",
+     "desc": "pudding box",
+     "pos": [
+      0.12761809611205,
+      0.030806079099535782,
+      0.7862352600566612
+     ],
+     "yaw": 329.8141441588184
+    }
+   ],
+   "qid": 29,
+   "seed": 20029
+  }
+ ],
+ "replaced": [
+  {
+   "qids": [
+    9,
+    17,
+    21
+   ],
+   "why": "离线核:放上去 / 放进去、物理走到停判 0 —— 马克笔躺着是圆柱:放到饼干盒顶上滚下去了(题 9、17);放进碗里来回滚,500 个子步没停(题 21)",
+   "old": [
+    {
+     "body": "x5",
+     "cfg": "arx_x5",
+     "cfg_name": "arx_x5",
+     "requirement": "on",
+     "sentence": "Put the marker on the cracker box.",
+     "check": [
+      "bdq_on",
+      {
+       "a": "target",
+       "b": "other",
+       "mode": "on"
+      }
+     ],
+     "steps": 300,
+     "objects": [
+      {
+       "label": "target",
+       "cat": "bdq_marker",
+       "desc": "marker",
+       "pos": [
+        -0.20698518092250992,
+        -0.04468648660848168,
+        0.7767375599353561
+       ],
+       "yaw": 237.49631836618755
+      },
+      {
+       "label": "other",
+       "cat": "bdq_cracker_box",
+       "desc": "cracker box",
+       "pos": [
+        0.17233719212288157,
+        -0.00884080886398178,
+        0.8028999983392656
+       ],
+       "yaw": 334.2198899100071
+      },
+      {
+       "label": "clutter_0",
+       "cat": "bdq_meat_can",
+       "desc": "potted meat can",
+       "pos": [
+        -0.06552005708492584,
+        -0.11060137427408333,
+        0.8087710008821413
+       ],
+       "yaw": 60.163407892505745
+      }
+     ],
+     "qid": 9,
+     "seed": 20009
+    },
+    {
+     "body": "x5",
+     "cfg": "arx_x5",
+     "cfg_name": "arx_x5",
+     "requirement": "on",
+     "sentence": "Put the marker on the cracker box.",
+     "check": [
+      "bdq_on",
+      {
+       "a": "target",
+       "b": "other",
+       "mode": "on"
+      }
+     ],
+     "steps": 300,
+     "objects": [
+      {
+       "label": "target",
+       "cat": "bdq_marker",
+       "desc": "marker",
+       "pos": [
+        0.27014461623798464,
+        0.05491030670294059,
+        0.7767375599353561
+       ],
+       "yaw": 295.2445476649957
+      },
+      {
+       "label": "other",
+       "cat": "bdq_cracker_box",
+       "desc": "cracker box",
+       "pos": [
+        -0.0004728684349997181,
+        -0.05180660484438107,
+        0.8028999983392656
+       ],
+       "yaw": 174.2242782710087
+      },
+      {
+       "label": "clutter_0",
+       "cat": "bdq_gelatin_box",
+       "desc": "gelatin box",
+       "pos": [
+        -0.2600744853038706,
+        -0.10287508999742401,
+        0.7819918397890365
+       ],
+       "yaw": 115.54915084741003
+      }
+     ],
+     "qid": 17,
+     "seed": 20017
+    },
+    {
+     "body": "x5",
+     "cfg": "arx_x5",
+     "cfg_name": "arx_x5",
+     "requirement": "on",
+     "sentence": "Put the marker in the bowl.",
+     "check": [
+      "bdq_on",
+      {
+       "a": "target",
+       "b": "other",
+       "mode": "in"
+      }
+     ],
+     "steps": 300,
+     "objects": [
+      {
+       "label": "target",
+       "cat": "bdq_marker",
+       "desc": "marker",
+       "pos": [
+        0.08210292598479796,
+        0.0413345441347939,
+        0.7767375599353561
+       ],
+       "yaw": 328.03873568664756
+      },
+      {
+       "label": "other",
+       "cat": "bdq_bowl",
+       "desc": "bowl",
+       "pos": [
+        -0.17618242604426212,
+        -0.12100884581398032,
+        0.7945049990228191
+       ],
+       "yaw": 175.91770148659523
+      },
+      {
+       "label": "clutter_0",
+       "cat": "bdq_meat_can",
+       "desc": "potted meat can",
+       "pos": [
+        0.25894191546652295,
+        0.062277857056567826,
+        0.8087710008821413
+       ],
+       "yaw": 332.2824025827278
+      },
+      {
+       "label": "clutter_1",
+       "cat": "bdq_banana",
+       "desc": "banana",
+       "pos": [
+        0.16213817273822945,
+        -0.15211458571375105,
+        0.7863241591902638
+       ],
+       "yaw": 186.77837158734826
+      }
+     ],
+     "qid": 21,
+     "seed": 20021
+    }
+   ]
+  },
+  {
+   "qids": [
+    26
+   ],
+   "why": "离线核:放上去、物理走到停判 0 —— 果冻盒在人形右手底下,泡沫砖摞上去顶到手指,被顶下桌了(出题时只查了每件开局碰不碰手,没查摞起来那一摞;出题已补上这一条,人形的放上去从此摆不下,换成同一具身体的别的要求)",
+   "old": [
+    {
+     "body": "humanoid",
+     "cfg": "g1_rgb",
+     "cfg_name": "g1",
+     "requirement": "on",
+     "sentence": "Put the foam brick on the gelatin box.",
+     "check": [
+      "bdq_on",
+      {
+       "a": "target",
+       "b": "other",
+       "mode": "on"
+      }
+     ],
+     "steps": 300,
+     "objects": [
+      {
+       "label": "target",
+       "cat": "bdq_foam_brick",
+       "desc": "foam brick",
+       "pos": [
+        -0.11523516262130098,
+        -0.16578860404467943,
+        0.7932799996224046
+       ],
+       "yaw": 183.74455085635373
+      },
+      {
+       "label": "other",
+       "cat": "bdq_gelatin_box",
+       "desc": "gelatin box",
+       "pos": [
+        -0.22772487693708215,
+        -0.27217921493754577,
+        0.7819918397890365
+       ],
+       "yaw": 51.116847141027904
+      }
+     ],
+     "qid": 26,
+     "seed": 20026
+    }
+   ]
+  }
+ ]
+}

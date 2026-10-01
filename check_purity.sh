@@ -35,7 +35,7 @@ if [ -n "$mmhit" ]; then echo "🔴 给脑的英文句子里用了 Mm(日志单�
 #    接触集只吃身体的路、东西的形状、要东西怎么动(一个旋量),做一个搜索 + 一个物理检查;加一件事 = 什么代码都不加。
 #    查的是接触集那几个包(contact*.ad?)和 Act 里把量交给它的那一段(act-plan_contact.adb):标识符(按 _ 切开的每一截)和字符串里的词,
 #    英文按整词、中文按词组;注释不查(注释里记的是历史,"八月那一版会抬"这种话照样能写)。
-#    例外只有下面这几个旧名:主代理 selfcheck.adb 的旧焊点还按它们在用(完整的具名聚合、Contact.Turn、Contact.Grasp / Contact.Hold),
+#    例外只有下面这几个旧名:主代理 selfcheck.adb 的旧焊点还按它们在用(完整的具名聚合、Contact.Turn),
 #    合并时主代理把那些用处改掉、从这里删掉对应的一条;分开编译的正文开头那段参数表(和 act.ads 里的声明一字不差)不查。
 ACT_WORDS='lift lifts lifted lifting push pushes pushed pushing pull pulls pulled pulling turn turns turned turning press presses pressed pressing
 grasp grasps grasped grasping grab grabs grabbed grabbing hold holds holding held pinch pinches pinched pinching pry pries pried prying
@@ -98,8 +98,7 @@ rm -rf "$tooth"
 if [ "$t_hit" != 3 ] || [ "$t_clean" != 0 ]; then echo "🔴 接触集动作词棘轮的牙松了:种了 3 处扫出 $t_hit 处、干净的扫出 $t_clean 处"; bad=1; fi
 act_files=""
 for f in "$ROOT"/driver/src/contact.ad? "$ROOT"/driver/src/contact-*.ad? "$ROOT"/driver/src/act-plan_contact.adb; do
-  b=$(basename "$f")
-  [ "$b" = contact-grasp.ads ] || [ "$b" = contact-hold.ads ] || act_files="$act_files $f"
+  act_files="$act_files $f"
 done
 acthit=$(act_scan $act_files)
 if [ -n "$acthit" ]; then echo "🔴 接触集里出现了动作词(它只认身体的路、东西的形状、要它怎么动;例外只许是 ACT_EXEMPT 里那几个旧名):"; echo "$acthit"; bad=1; fi

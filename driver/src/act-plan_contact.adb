@@ -1,7 +1,7 @@
 with Contact.Search;
 separate (Act)
 procedure Plan_Contact (C : in out Context; F : Plug.Frame; Arm, Cam : Natural; Name : Unbounded_String;
-                        Pick : out Contact.Grasp.Candidate; Note : out Unbounded_String; Ok : out Boolean) is
+                        Pick : out Contact.Search.Candidate; Note : out Unbounded_String; Ok : out Boolean) is
    G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
    Have_Plane : constant Boolean := C.Touch_Valid or else C.Board_Plane;
    Up : constant Geom.V3 := Lie_N (C);

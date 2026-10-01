@@ -22,7 +22,7 @@ with Sinew;
 with Runtime;
 with Monitor;
 with Contact;
-with Contact.Grasp;
+with Contact.Search;
 with Contact.Qty;
 package Act is
    --  🔴 脑写的结局词 → 身体的判法。**只有这一处**。
@@ -472,7 +472,7 @@ package Act is
    function Kin_Turn_Reach (Arm : Natural; P0 : Plug.Arm_Pose; Notch, Tol_P, Tol_R : Long_Float) return Long_Float;
    --  接触集(09-29 重写):量出来的手在记下的形状上挑一组下手处(导出只为自检)
    procedure Plan_Contact (C : in out Context; F : Plug.Frame; Arm, Cam : Natural; Name : Unbounded_String;
-                           Pick : out Contact.Grasp.Candidate; Note : out Unbounded_String; Ok : out Boolean);
+                           Pick : out Contact.Search.Candidate; Note : out Unbounded_String; Ok : out Boolean);
    --  手拿着它绕 M 的那根轴(过 M.Pivot)转 Th 弧度:手的位姿要到哪(位置绕那一点转过去、朝向转同一个角)
    function Carry_Goal (Cur : Plug.Arm_Pose; M : Contact.Twist; Th : Long_Float) return Plug.Arm_Pose;
    --  I5 ⇒ 要它怎么动(大并行路 5,10-01):量到的几何(Want_Scene:它的实心模型、它躺的面、不跟着这条臂走的那只眼、脑看着的那只眼、参照那一件的视线交点)

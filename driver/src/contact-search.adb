@@ -66,14 +66,6 @@ package body Contact.Search is
       return H;
    end From_Lobes;
 
-   function Two_Pads (Tip_A, Tip_B : V3; Width, Thick, Pos_Err : Long_Float) return Hand_Model is
-      Ls : Lobe_In_Vectors.Vector;
-   begin
-      Ls.Append (Lobe_In'(Tip => Tip_A, Width => Width, Thick => Thick));
-      Ls.Append (Lobe_In'(Tip => Tip_B, Width => Width, Thick => Thick));
-      return From_Lobes (Ls, Pos_Err);
-   end Two_Pads;
-
    --  绕单位轴 K 转 Th(罗德里格斯)
    function Rot (V, K : V3; Th : Long_Float) return V3 is
       C : constant Long_Float := Cos (Th);

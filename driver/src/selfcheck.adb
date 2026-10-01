@@ -28,8 +28,8 @@ with Selfmap;
 with Learned;
 with Exam;
 with Contact;
-with Contact.Grasp;
-with Contact.Hold;
+with Contact.Search;
+with Contact.Wrench;
 with Contact.Exec;
 with Contact.Surface;
 with Kinem;
@@ -1131,13 +1131,13 @@ begin
          Check (2 * F_Gate < N_F, "🦷 同一批配点按开机认手指的 1 px 门:手指格点只有 " & Codec.Img (F_Gate) & " / " & Codec.Img (N_F) & " 算没挪(旧量法漏掉大半)");
       end;
    end;
-   --  🔴 接触集重写(09-29):托住它要多大的摩擦、每单位重量最少要夹多紧(Contact.Hold)—— 能手算的几条:
+   --  🔴 接触集重写(09-29):托住它要多大的摩擦、每单位重量最少要夹多紧(Contact.Wrench)—— 能手算的几条:
    --  ① 两处正对的点接触夹在重心两侧,抬 = 托住单位重量:法向力之和 = 1/μ(每边 1/(2μ));不靠摩擦做不到、靠一点摩擦就做得到(要的摩擦 → 0);
    --  ② 重心偏出夹持线 0.05、指肚能拧(半径 0.01):竖着的摩擦 1/μ + 拧住 0.05/(μ·0.01) = 6/μ;点接触(不能拧)⇒ 托不住;
    --  ③ 两个面各歪 0.3 rad(同向):要的摩擦 = tan 0.3;④ 线性规划本身:min x1 + x2、x1 + 2 x2 = 4 ⇒ 2;x1 = -1 ⇒ 做不到
    declare
       use Ada.Numerics.Long_Elementary_Functions;
-      package Hd renames Contact.Hold;
+      package Hd renames Contact.Wrench;
       Ts : Hd.Touch_Vectors.Vector;
       L : constant Hd.Load := (F => [0.0, 0.0, 1.0], C => [0.0, 0.0, 0.0], M => [0.0, 0.0, 0.0]);
       L_Off : constant Hd.Load := (F => [0.0, 0.0, 1.0], C => [0.0, 0.05, 0.0], M => [0.0, 0.0, 0.0]);
@@ -1173,7 +1173,7 @@ begin
              & " · 两面各歪 0.3 rad ⇒ 要的摩擦 " & Codec.Fmt (M3, 4) & "(tan 0.3 = " & Codec.Fmt (Tan (Al), 4) & ")· 线性规划 " & Codec.Fmt (Obj1, 4)
              & " / 做不到的那一条 " & (if Ok2 then "说做得到(错)" else "说做不到"));
    end;
-   --  🔴 接触集重写(09-29):几何上让量出来的手真合一次挑下手处(Contact.Grasp)。手 = x5 这种两块相向合:两个尖在眼前 9 cm、相距 9 cm,
+   --  🔴 接触集重写(09-29):几何上让量出来的手真合一次挑下手处(Contact.Search)。手 = x5 这种两块相向合:两个尖在眼前 9 cm、相距 9 cm,
    --  手指沿合拢方向厚 1 cm(碰东西的两面相距 8 cm),指肚宽 1.5 cm,手落位的误差 2 mm;
    --  东西都平躺在桌上(z = 0,上 = +z),表面点 2 mm 一个(顶面 + 往下补到桌面)。
    --  ① 平条(沿 x 宽 2 cm、沿 y 长 20 cm、厚 1 cm):两个接触点落在条的两条长边上(x = ±1 cm)、法向 ±x、从上面进(竖着或斜着都行,由那个数定)、
@@ -1194,9 +1194,17 @@ begin
    --     第 1 名的两处接触都在方块的 y 范围外(再让半个指肚宽),账上有"旁边的东西挡着";反面对照:手指厚 4 mm 塞得进 ⇒ 第 1 名夹在条的正中(离重心 < 半个指肚宽)
    declare
       use Ada.Numerics.Long_Elementary_Functions;
-      package Cg2 renames Contact.Grasp;
-      Hm : constant Cg2.Hand_Model := Cg2.Two_Pads ([-0.045, 0.0, -0.09], [0.045, 0.0, -0.09], 0.015, 0.01, 0.002);
-      Hm_Thin : constant Cg2.Hand_Model := Cg2.Two_Pads ([-0.042, 0.0, -0.09], [0.042, 0.0, -0.09], 0.015, 0.004, 0.002);
+      package Cg2 renames Contact.Search;
+      --  两瓣、同一个宽和厚的手(= 09-29 的两块相向合;路 5 起手由 From_Lobes 按全部瓣建,两瓣时逐位相同)
+      function Two_Lobes (Tip_A, Tip_B : Contact.V3; Width, Thick, Pos_Err : Long_Float) return Cg2.Hand_Model is
+         Ls : Cg2.Lobe_In_Vectors.Vector;
+      begin
+         Ls.Append (Cg2.Lobe_In'(Tip => Tip_A, Width => Width, Thick => Thick));
+         Ls.Append (Cg2.Lobe_In'(Tip => Tip_B, Width => Width, Thick => Thick));
+         return Cg2.From_Lobes (Ls, Pos_Err);
+      end Two_Lobes;
+      Hm : constant Cg2.Hand_Model := Two_Lobes ([-0.045, 0.0, -0.09], [0.045, 0.0, -0.09], 0.015, 0.01, 0.002);
+      Hm_Thin : constant Cg2.Hand_Model := Two_Lobes ([-0.042, 0.0, -0.09], [0.042, 0.0, -0.09], 0.015, 0.004, 0.002);
       None : Contact.V3_Vectors.Vector;
       function Always (R : Geom.M3; T : Contact.V3) return Boolean is (True);
       function Never (R : Geom.M3; T : Contact.V3) return Boolean is (False);
@@ -1533,7 +1541,7 @@ begin
       Cx : Act.Context;
       Fx : Plug.Frame;
       Gx : Geom.Cam_Geo;
-      Pick : Contact.Grasp.Candidate;
+      Pick : Contact.Search.Candidate;
       Nt : Unbounded_String;
       Okp : Boolean;
       procedure Any_Reach (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float) is
@@ -1557,7 +1565,7 @@ begin
          Cx.Sil_Valid := True; Cx.Sil_Name := To_Unbounded_String ("bar"); Cx.Sil_Cam := 1; Cx.Sil_N := [0.0, 0.0, 1.0];
          Cx.Sil_P0 := Cx.Sil_Pts.First_Element; Cx.Sil_Pitch := 0.002; Cx.Sil_Err := 0.0005;
       end Bar;
-      function Jaw_World (P : Contact.Grasp.Candidate) return Geom.V3 is (Geom.Ap (P.R, [1.0, 0.0, 0.0]));
+      function Jaw_World (P : Contact.Search.Candidate) return Geom.V3 is (Geom.Ap (P.R, [1.0, 0.0, 0.0]));
       Jx1, Jx2 : Geom.V3;
       Sides_Ok : Boolean := False;
       Ok1, Ok2 : Boolean := False;
