@@ -7,6 +7,20 @@ TEST_HOOKS = {
     ("plug.adb", "Lock_Feed"): "自检在主线程里当假身体,替 Lock_Beat 从链路收的那一帧",
     ("contact.adb", "Turn"): "脑要它'绕一根轴转'的那种运动(接触集执行层 Contact.Exec.Steps 吃的 Twist);自检拿它验转着走,驱动接上'脑要它怎么动'(PLAN ② 接下来第 1 条)就是活的",
     ("kinem.adb", "Refine_Tracks"): "把 Fit 的最后一步(④ 多视图,Refine_Until_Done)单独交给自检,从真模型起步验它",
+    # 路 3 一件东西的估计(I4,大并行 §2 第 10 条):每一眼由 Remeasure_Boxed 交进来(活的),"给我它的形状"那一头是路 4 / 5 / 6 的
+    # (接触集按 Things.Solved 的表面点挑下手处、"走过去"按 Center、部件按 Surface),它们接上以后这 12 条删
+    ("things.adb", "Solve"): "路 3 I4:按全部的眼、面、碰到的点、量到的表面点雕外包;路 4 / 5 / 6 调 Solved 就是活的",
+    ("things.adb", "Solved"): "路 3 I4:解过的那一份(要多细由调用方说);路 4 / 5 / 6 调它就是活的",
+    ("things-solve_once.adb", "Solve_Once"): "路 3 I4:Solve 的八叉树那一遍(Solve 接上就是活的)",
+    ("things.adb", "Judge"): "路 3 I4:一格按一眼判空 / 实 / 压着轮廓 / 说不出(Solve 用);Solve 接上就是活的",
+    ("things.adb", "Build"): "路 3 I4:积分图(Solve / Point_In 用);Solve 接上就是活的",
+    ("things.adb", "Count_In"): "路 3 I4:积分图里数一块矩形(Judge 用);Solve 接上就是活的",
+    ("things.adb", "Free_Integral"): "路 3 I4:积分图用完放掉(Solve / Point_In 用);Solve 接上就是活的",
+    ("things.adb", "Point_In"): "路 3 I4:一点按一眼判(拿下手处问'那儿按这一眼是不是它'的人用;自检验判法);接触集接上就是活的",
+    ("things.adb", "Whole_In_Window"): "路 3 I4:这一眼看得见的它整个在掩膜里吗(要据此决定再不再看一眼的人用;自检验判法)",
+    ("things.adb", "Add_Touch"): "路 3 I4:碰到它的点进估计;接触集碰到东西那一处(路 2 / 5)调它就是活的",
+    ("things.adb", "Add_Point"): "路 3 I4:量到的它表面上的点进估计;两眼配点交出它表面的点那一步(路 3 下一段)接上就是活的",
+    ("things.adb", "Rename"): "路 3 I4:脑给它改名时估计跟着走;路 7 改名那一处(act-round)调它就是活的",
 }
 import os, re, sys, glob, collections
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

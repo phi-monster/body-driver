@@ -783,6 +783,8 @@ package body Jointboot is
            & "每个关节夹到到过的范围往外一步里发(到过的范围;问够不够得着只按尽头)");
    end Install;
 
+   function Arm_Sd (Arm : Natural) return Long_Float is (if Arm < Natural (St_Worlds.Length) then St_Worlds (Arm).Place_Sd else 0.0);
+
    --  上一条被截住了没有;截住了,从那一条以来到过的范围长了没有(不止一档)—— 手还没动(命令要隔一两拍才起效)⇒ Held,截住的状态留着;
    --  手一动、范围一长 ⇒ Held_Grown,重解重发。手停在真的尽头 / 碰上东西 ⇒ 范围不再长 ⇒ 一直 Held,照常停下、核尽头
    function Held_Back (Arm : Natural) return Plug.Limit_State is
