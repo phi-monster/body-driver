@@ -200,6 +200,23 @@ package body Driver.World.Estimates.Tests is
    --  When set, as a block in the image's lower left corner, where the table
    --  is and no thing: a segmentation of something else.
 
+   Speckled_Segments : Boolean := False;
+   --  When set, as the box's pixels in a checkerboard: every pixel of the
+   --  region is on its edge, so a pair from it asks every one.
+
+   function Speckled (M : Driver.Images.Mask) return Driver.Images.Mask is
+      Result : Driver.Images.Mask := M;
+   begin
+      for R in 0 .. Driver.Images.Height (M) - 1 loop
+         for C in 0 .. Driver.Images.Width (M) - 1 loop
+            if (C + R) mod 2 = 1 then
+               Driver.Images.Include (Result, C, R, False);
+            end if;
+         end loop;
+      end loop;
+      return Result;
+   end Speckled;
+
    function Corner_Runs (Width, Height : Positive) return String is
       --  The block's runs, alternating off and on and starting off.
       Side : constant Positive := Height / 4;
@@ -260,6 +277,7 @@ package body Driver.World.Estimates.Tests is
                                     & ",""h"":" & Driver.Json.Number_Image (Real (H)) & ",""score"":1,""runs"":["
                                     & (if Wrong_Segments then "0," & Driver.Json.Number_Image (Real (W * H))
                                        elsif Elsewhere_Segments then Corner_Runs (W, H)
+                                       elsif Speckled_Segments then Runs_Of (Speckled (Box_Region (St.Eye)))
                                        else Runs_Of (Box_Region (St.Eye)))
                                     & "]}"),
                       Why     => Null_Unbounded_String,
@@ -793,7 +811,10 @@ package body Driver.World.Estimates.Tests is
       --  on the table. The box and what is around it span most of each
       --  view, so every per-pixel quantity of its track (its depths, its
       --  pixels' statistics over the still frames, its cut frames) is
-      --  megabytes.
+      --  megabytes; and the second eye segments it as a checkerboard, every
+      --  pixel an edge pixel, so its pair asks some 55 000 of them, and every
+      --  per-point quantity of that pair (its answers, its candidates, the
+      --  mixture's errors) is too.
       Big_Columns : constant := 640;
       Big_Rows    : constant := 480;
       Near    : constant Eye_Pair :=
@@ -820,6 +841,7 @@ package body Driver.World.Estimates.Tests is
       Ada.Numerics.Float_Random.Reset (Gen, 11);
       Answered.Clear;
       View := Near;
+      Speckled_Segments := True;
       Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
       Pixels := Driver.Images.Count (Box_Region);
       Adopt (S, 1, Seen_Now, Box_Region, Box_T);
@@ -868,6 +890,7 @@ package body Driver.World.Estimates.Tests is
          end;
       end if;
       View := Eyes;
+      Speckled_Segments := False;
       Driver.Services.End_Replay;
    end Estimate_In_A_Task;
 
