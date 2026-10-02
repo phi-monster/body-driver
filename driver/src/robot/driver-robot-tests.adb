@@ -425,6 +425,30 @@ package body Driver.Robot.Tests is
       end if;
    end Estimate_In_A_Task;
 
+   --  A group that moves a patch in arm 1's eye while another eye is still
+   --  undecided about it (a live x5's right arm at its first read: a patch
+   --  in the left wrist's eye, the right wrist's eye undecided at 267 of 525
+   --  cells) may carry that eye: it is no closer until the eye decides, and
+   --  a closer once it decides that nothing moved.
+   procedure Undecided_Eye_Leaves_Group_Unclassified is
+      M : Model;
+      Undecided_Third : constant Eye_Effect :=
+        (Verdict => Undecided, Responding => 24, Textured => 48,
+         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0));
+      Nothing_Third : constant Eye_Effect :=
+        (Verdict => Nothing, Responding => 0, Textured => 48,
+         Fraction => (Value => 0.0, Sigma => 0.0, Degrees_Of_Freedom => 0));
+   begin
+      Exercise_Rig (M);
+      Check (Role (M, 3) = Closer, "the closer is a closer, got " & Role (M, 3)'Image);
+      M.Graph.Effects.Replace_Element ((3 - 1) * Eye_Count (M) + 3, Undecided_Third);
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, 3) = Unclassified, "a group an eye is undecided about is " & Role (M, 3)'Image);
+      M.Graph.Effects.Replace_Element ((3 - 1) * Eye_Count (M) + 3, Nothing_Third);
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, 3) = Closer, "once the eye decided nothing moved, the group is " & Role (M, 3)'Image);
+   end Undecided_Eye_Leaves_Group_Unclassified;
+
    --  A group only ever pushed together with another is not classified:
    --  what the eyes saw cannot be told from what its partner did.
    procedure Unprobed_Group_Stays_Unclassified is
@@ -1156,8 +1180,14 @@ package body Driver.Robot.Tests is
    --  by 30 % a beat to nothing from up to 40 luma levels (half that after a
    --  move of 0.01, a twentieth of a pixel, and the more the longer the move).
    procedure Boot_On_Rig
-     (M : in out Model; Settling : Boolean; Done, Ok : out Boolean; Beats : out Natural; Still_Poses : out Natural)
+     (M : in out Model; Settling : Boolean; Done, Ok : out Boolean; Beats : out Natural; Still_Poses : out Natural;
+      Arm_2_Poses : out Natural; Eye_2_Noise : Real := 0.0; Eye_2_Lag : Positive := 1)
    is
+      --  What each beat showed, for an eye that lags more than one beat.
+      History   : array (0 .. Eye_2_Lag - 1) of Rig_State;
+      Noise_Rng : Generator;
+      --  The same for the arm of group 2, whatever its number.
+      Poses_2   : array (1 .. 1_000) of Real_Array (1 .. 2) := [others => [0.0, 0.0]];
       --  The poses of arm 1 away from rest at which it could give a keyframe
       --  (Kinematics.Held_Still): the rig has no instrument, so the keyframes
       --  themselves stop after the first match is refused.
@@ -1190,6 +1220,7 @@ package body Driver.Robot.Tests is
    begin
       Beats := 0;
       Still_Poses := 0;
+      Arm_2_Poses := 0;
       begin
       for B in 0 .. Bound loop
          exit when Finished;
@@ -1208,7 +1239,8 @@ package body Driver.Robot.Tests is
                Drawn.Closer := 0.0;
                for E in 1 .. 3 loop
                   declare
-                     Picture : Driver.Images.Image := Render (E, Drawn);
+                     Picture : Driver.Images.Image :=
+                       Render (E, (if E = 2 and then Eye_2_Lag > 1 then History (B mod Eye_2_Lag) else Drawn));
                   begin
                      if Settling and then E = 1 and then Since < Natural'Last then
                         declare
@@ -1223,6 +1255,28 @@ package body Driver.Robot.Tests is
                                     L : constant Real := Real (Driver.Images.Red (Picture, X, Y))
                                       + (if (X * 7 + Y * 13) mod 10 /= 0 then 0.0
                                          elsif (B + X) mod 2 = 0 then Flicker else -Flicker);
+                                    V : constant Driver.Bytes.Byte :=
+                                      Driver.Bytes.Byte (Integer (Real'Max (0.0, Real'Min (255.0, L))));
+                                 begin
+                                    Data (K) := V;
+                                    Data (K + 1) := V;
+                                    Data (K + 2) := V;
+                                 end;
+                              end loop;
+                           end loop;
+                           Picture := Driver.Images.Create (Rig_Width, Rig_Height, Data);
+                        end;
+                     end if;
+                     if E = 2 and then Eye_2_Noise > 0.0 then
+                        declare
+                           use type Driver.Bytes.Offset;
+                           Data : Driver.Bytes.Byte_Array (1 .. 3 * Rig_Width * Rig_Height);
+                        begin
+                           for Y in 0 .. Rig_Height - 1 loop
+                              for X in 0 .. Rig_Width - 1 loop
+                                 declare
+                                    K : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Y * Rig_Width + X) + 1);
+                                    L : constant Real := Real (Driver.Images.Red (Picture, X, Y)) + Eye_2_Noise * Gaussian (Noise_Rng);
                                     V : constant Driver.Bytes.Byte :=
                                       Driver.Bytes.Byte (Integer (Real'Max (0.0, Real'Min (255.0, L))));
                                  begin
@@ -1267,6 +1321,16 @@ package body Driver.Robot.Tests is
                Still_Poses := Still_Poses + 1;
                Poses (Still_Poses) := Now.Arm_1;
             end if;
+            for A in 1 .. Arm_Count (M) loop
+               if Arm_Group (M, Arm_Id (A)) = 2 and then Now.Arm_2 /= [0.0, 0.0]
+                 and then Driver.Robot.Kinematics.Held_Still (M, Arm_Id (A), M.Beats - 1)
+                 and then (for all K in 1 .. Arm_2_Poses => Poses_2 (K) /= Now.Arm_2)
+                 and then Arm_2_Poses < Poses_2'Length
+               then
+                  Arm_2_Poses := Arm_2_Poses + 1;
+                  Poses_2 (Arm_2_Poses) := Now.Arm_2;
+               end if;
+            end loop;
             loop
                Driver.Beats.Offer (O.Beat, O, Sent, Took);
                exit when Took or else Finished;
@@ -1292,6 +1356,7 @@ package body Driver.Robot.Tests is
             elsif Since < Natural'Last then
                Since := Since + 1;
             end if;
+            History (B mod Eye_2_Lag) := Now;
             Shown := Now;
             Now.Arm_1 := Driver.Commands.Target (Sent, 1);
             Now.Arm_2 := Driver.Commands.Target (Sent, 2);
@@ -1320,8 +1385,9 @@ package body Driver.Robot.Tests is
       Ok    : Boolean;
       Beats : Natural;
       Poses : Natural;
+      Poses_2 : Natural;
    begin
-      Boot_On_Rig (M, False, Done, Ok, Beats, Poses);
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2);
       Check (Done, "the boot did not finish");
       --  The rig's idle group takes commands and moves nothing: the boot must
       --  name the clause it breaks and hold still.
@@ -1338,6 +1404,49 @@ package body Driver.Robot.Tests is
       Driver.Log.Line (Driver.Log.Robot, "boot from zero took" & Beats'Image & " beats");
    end Boot_From_Zero;
 
+   --  The rig's boot with arm 2's eye noisy (luma noise of 2 in its every
+   --  pixel): pushed by the amount another eye first sees it at, arm 2 leaves
+   --  its own eye undecided (31 of 48 cells), as a live x5's right arm left
+   --  its wrist's eye (267 of 525). Undecided is too little evidence: the
+   --  boot pushes the group again at twice its amounts until the eye decides,
+   --  and sweeps arm 2. (Without that, the eye stays undecided to the end, 32
+   --  of 48, and arm 2 is never swept.)
+   procedure Boot_With_An_Undecided_Eye is
+      M     : Model;
+      Done  : Boolean;
+      Ok    : Boolean;
+      Beats : Natural;
+      Poses, Poses_2 : Natural;
+   begin
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, Eye_2_Noise => 2.0);
+      Check (Done, "the boot did not finish");
+      Check (Role (M, 2) = Arm and then Eye_Mount (M, 2).Kind = Arm_Carried and then Eye_Mount (M, 2).Arm = 2,
+             "arm 2 carrying its noisy eye is not recognized: " & Role (M, 2)'Image & ", eye 2 "
+             & Eye_Mount (M, 2).Kind'Image);
+      Check (Poses_2 > 0, "arm 2 was never swept with its noisy eye");
+   end Boot_With_An_Undecided_Eye;
+
+   --  The rig's boot with arm 2's eye eight beats behind its readings, more
+   --  than the stretch between pushes at first: until the lag can be told,
+   --  that eye's motion is credited to arm 1, so at the first reading of the
+   --  body arm 1 carries both eyes and arm 2 none; the estimate after the
+   --  sweeps has eye 2 on arm 2. The boot follows the current estimate, not
+   --  the first reading: arm 2 is swept with its eye, and arm 1 again with
+   --  its own. (A boot that swept the arms read at first never sweeps arm 2.)
+   procedure Boot_With_A_Late_Mount is
+      M     : Model;
+      Done  : Boolean;
+      Ok    : Boolean;
+      Beats : Natural;
+      Poses, Poses_2 : Natural;
+   begin
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, Eye_2_Lag => 8);
+      Check (Done, "the boot did not finish");
+      Check (Eye_Mount (M, 2).Kind = Arm_Carried and then Eye_Mount (M, 2).Arm = 2,
+             "eye 2 does not end on arm 2: " & Eye_Mount (M, 2).Kind'Image);
+      Check (Poses_2 > 0, "arm 2 was never swept with its eye");
+   end Boot_With_A_Late_Mount;
+
    --  The rig's boot with eye 1's picture settling for beats after every move
    --  of arm 1: every sweep level and cell is held until the picture has
    --  stopped, so every level of every joint gives arm 1 a keyframe.
@@ -1348,8 +1457,9 @@ package body Driver.Robot.Tests is
       Beats : Natural;
       Levels : Natural := 0;   --  the sweep's single-joint levels of arm 1, both ways
       Poses  : Natural;
+      Poses_2 : Natural;
    begin
-      Boot_On_Rig (M, True, Done, Ok, Beats, Poses);
+      Boot_On_Rig (M, True, Done, Ok, Beats, Poses, Poses_2);
       Check (Done, "the boot did not finish");
       declare
          Half : constant Real := Real (Natural'Min (M.Eyes (1).Grid.Width, M.Eyes (1).Grid.Height)) / 2.0;
@@ -1499,6 +1609,181 @@ package body Driver.Robot.Tests is
       --  1e-3: the ninth level is the first that takes it no further.
       Check (Steps = 9, "the probe called the joint's end after" & Steps'Image & " levels, not 9");
    end Probe_A_Drooping_Joint;
+
+   --  ── Probing a channel both ways ──
+   --
+   --  The rig of the drooping-joint probe, its group 5 (which no eye sees)
+   --  resting at 0 and reading its target as Kind says, probed both ways
+   --  from 1e-5 against Bound (where every other channel of the body has
+   --  answered). The largest targets asked of it each way are kept.
+
+   type Idle_Kind is (At_Upper_Limit, Deadband, Disconnected);
+
+   --  At its upper limit, 0, and free down to -1e-3; a deadband of 5e-5 each
+   --  way, free beyond to 1e-3; disconnected, never moving.
+   function Idle_Reading (Kind : Idle_Kind; Target : Real) return Real is
+     (case Kind is
+         when At_Upper_Limit => Real'Max (-1.0e-3, Real'Min (Target, 0.0)),
+         when Deadband       => (if abs Target < 5.0e-5 then 0.0 else Real'Max (-1.0e-3, Real'Min (Target, 1.0e-3))),
+         when Disconnected   => 0.0);
+
+   procedure Probe_Idle_Both_Ways
+     (Kind     : Idle_Kind;
+      Bound    : Real;
+      Report   : out Driver.Robot.Motion.Two_Way_Report;
+      Up, Down : out Real;
+      Finished : out Boolean)
+   is
+      M     : Model;
+      Done  : Boolean := False with Atomic;
+      Got   : Driver.Robot.Motion.Two_Way_Report;
+
+      task Decider;
+      task body Decider is
+         W : Natural;
+         procedure Estimate is
+         begin
+            Estimate_Now (M);
+         end Estimate;
+      begin
+         Driver.Robot.Motion.Settle (M, W);
+         Driver.Robot.Motion.Hold (M, 100);
+         for K in 1 .. 16 loop
+            declare
+               C  : Driver.Commands.Command;
+               SR : Driver.Robot.Motion.Step_Report;
+            begin
+               --  Arm 1, which eye 1 sees, for the body's delay and the eyes' lag.
+               Driver.Commands.Set_Target (C, 1, [(if K mod 2 = 1 then 0.1 else 0.0), 0.0]);
+               Driver.Robot.Motion.Step (M, C, SR);
+               Driver.Robot.Motion.Hold (M, 2 + K mod 4);
+            end;
+         end loop;
+         Driver.Beats.Within_A_Beat (Estimate'Access);
+         Driver.Robot.Motion.Gather_Rest (M, 2);
+         Driver.Robot.Motion.Probe_Both_Ways (M, (Group => 5, Channel => 1), 1.0e-5, Bound, Got);
+         Done := True;
+      exception
+         when others =>
+            Driver.Beats.Release;
+            Done := True;
+      end Decider;
+
+      Now, Shown : Rig_State;
+      Sent  : Driver.Commands.Command;
+      Rng   : Generator;
+   begin
+      Up := 0.0;
+      Down := 0.0;
+      begin
+         for B in 0 .. 5_000 loop
+            exit when Done;
+            declare
+               O       : Observation;
+               Took    : Boolean := False;
+               Pending : Driver.Commands.Command;
+            begin
+               O.Beat := Driver.Clock.Beat (B);
+               for E in 1 .. 3 loop
+                  O.Images.Append (Render (E, Shown));
+                  O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+               end loop;
+               O.Readings.Append (Now.Arm_1);
+               O.Readings.Append (Now.Arm_2);
+               O.Readings.Append (Real_Array'(1 => Now.Closer));
+               O.Readings.Append (Real_Array'(1 => Now.Part));
+               O.Readings.Append (Real_Array'(1 => Now.Idle + 1.0e-13 * Gaussian (Rng)));
+               for G in 1 .. 5 loop
+                  O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+               end loop;
+               if B = 0 then
+                  Driver.Commands.Set_Target (Sent, 1, Now.Arm_1);
+                  Driver.Commands.Set_Target (Sent, 2, Now.Arm_2);
+                  Driver.Commands.Set_Target (Sent, 3, [Now.Closer]);
+                  Driver.Commands.Set_Target (Sent, 4, [Now.Part]);
+                  Driver.Commands.Set_Target (Sent, 5, [Now.Idle]);
+               end if;
+               Observe (M, O, Sent);
+               loop
+                  Driver.Beats.Offer (O.Beat, O, Sent, Took);
+                  exit when Took or else Done;
+                  delay 0.0;
+               end loop;
+               exit when not Took;
+               Driver.Beats.Await (Pending);
+               for G in Group_Id range 1 .. 5 loop
+                  if Driver.Commands.Has_Target (Pending, G) then
+                     Driver.Commands.Set_Target (Sent, G, Driver.Commands.Target (Pending, G));
+                  end if;
+               end loop;
+               Shown := Now;
+               Now.Arm_1 := Driver.Commands.Target (Sent, 1);
+               Now.Arm_2 := Driver.Commands.Target (Sent, 2);
+               Now.Closer := Driver.Commands.Target (Sent, 3) (1);
+               Now.Part := Driver.Commands.Target (Sent, 4) (1);
+               Up := Real'Max (Up, Driver.Commands.Target (Sent, 5) (1));
+               Down := Real'Max (Down, -Driver.Commands.Target (Sent, 5) (1));
+               Now.Idle := Idle_Reading (Kind, Driver.Commands.Target (Sent, 5) (1));
+            end;
+         end loop;
+      exception
+         when others =>
+            abort Decider;
+            raise;
+      end;
+      if not Done then
+         abort Decider;
+      end if;
+      Finished := Done;
+      Report := Got;
+   end Probe_Idle_Both_Ways;
+
+   --  A closer at its upper limit (a live x5's closer rests at 1.0 and was
+   --  asked 6.87e10 upwards): it answers downwards at the first level, so
+   --  the upward way stops there, never asked more than that first level.
+   --  A deadband is two-sided: small asks fail both ways, a larger one
+   --  succeeds, and the channel is found answering, not called dead or at
+   --  an end. A disconnected channel answers neither way: once both ways
+   --  have been asked as much as every other channel of the body needed, it
+   --  is called dead and asked no more.
+   procedure Probe_Limits_And_Deadbands is
+      use type Driver.Robot.Motion.Sense;
+      package Mo renames Driver.Robot.Motion;
+      R        : Mo.Two_Way_Report;
+      Up, Down : Real;
+      Finished : Boolean;
+   begin
+      Probe_Idle_Both_Ways (At_Upper_Limit, Real'Last, R, Up, Down, Finished);
+      Check (Finished, "the probe of a channel at its upper limit did not finish");
+      Check (R.At_End (Mo.Increasing) and then R.Levels (Mo.Increasing) = 1,
+             "the upward way of a channel at its upper limit was asked" & R.Levels (Mo.Increasing)'Image
+             & " levels, not stopped at the first, where the downward way answered");
+      Check (Up <= 1.0e-5, "the channel at its upper limit was asked" & Up'Image & " upwards");
+      Check (R.Answered = 1.0e-5 and then not R.Dead and then not R.At_End (Mo.Decreasing),
+             "the channel at its upper limit is not found answering downwards from the first level");
+      --  Down from 1e-5 it follows to 1e-3 (level 8, 1.28e-3, takes it there);
+      --  level 9 takes it no further: its own end.
+      Check (R.Levels (Mo.Decreasing) = 9, "the downward way ended after" & R.Levels (Mo.Decreasing)'Image & " levels, not 9");
+
+      --  Every other channel has answered by 1e-4; the deadband yields at
+      --  level 4, 8e-5.
+      Probe_Idle_Both_Ways (Deadband, 1.0e-4, R, Up, Down, Finished);
+      Check (Finished, "the probe of a channel with a deadband did not finish");
+      Check (not R.Dead and then R.Answered = 8.0e-5,
+             "a deadband of 5e-5 is not found answering at 8e-5: answered at" & R.Answered'Image
+             & (if R.Dead then ", called dead" else ""));
+      Check (not R.At_End (Mo.Increasing) and then not R.At_End (Mo.Decreasing),
+             "a channel with a deadband is called at an end");
+
+      --  Every other channel has answered by 4e-5 (level 3).
+      Probe_Idle_Both_Ways (Disconnected, 4.0e-5, R, Up, Down, Finished);
+      Check (Finished, "the probe of a disconnected channel did not finish");
+      Check (R.Dead and then R.Levels (Mo.Increasing) = 3 and then R.Levels (Mo.Decreasing) = 3,
+             "a channel that answers neither way is not called dead once both ways were asked 4e-5: levels"
+             & R.Levels (Mo.Increasing)'Image & R.Levels (Mo.Decreasing)'Image);
+      Check (Up <= 4.0e-5 and then Down <= 4.0e-5,
+             "the dead channel was asked" & Up'Image & " up and" & Down'Image & " down");
+   end Probe_Limits_And_Deadbands;
 
    --  ── The kinematics of a synthetic arm ──
    --
@@ -1689,6 +1974,10 @@ package body Driver.Robot.Tests is
       end loop;
       Arm.Result.Fitted := True;
       M.Kinematics.Append (Arm);
+      --  The graph lists group 1 as arm 1, carrying eye 1: the fit is the
+      --  arm's now.
+      M.Graph.Arms.Append (1);
+      M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => 1));
       Goal := Fit.Eye_At (Truth, Goal_Q);
       Driver.Robot.Kinematics.Solve_Pose (M, 1, Zero, Goal, False, [1 .. 6 => -1.0], [1 .. 6 => 1.0], Q, Position_Off, Turn_Off);
       Check (Position_Off < 1.0e-9 and then Turn_Off < 1.0e-9,
@@ -1703,6 +1992,33 @@ package body Driver.Robot.Tests is
       Check (Position_Off > 1.0e-3 or else Turn_Off > 1.0e-3, "a pose beyond the readings' range is reached");
       Check ((for all X of Q => abs X <= 0.1), "the readings found leave their range");
    end Reach_A_Pose;
+
+   --  A fit belongs to an arm only while the graph has its group as that arm,
+   --  carrying that eye: once the group stops being an arm, or the eye rides
+   --  on another, the fit is no arm's, and the refit clears it.
+   procedure Stale_Fit_Is_No_Arms is
+      M   : Model;
+      Arm : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
+   begin
+      for J in 1 .. 2 loop
+         Arm.Result.Joints.Append (Joint_Fit'(W => [0.0, 0.0, 1.0], P => [0.1, 0.0, 0.0], C => 1.0, Slide => False));
+         Arm.Result.Reference.Append (0.0);
+      end loop;
+      Arm.Result.Fitted := True;
+      M.Kinematics.Append (Arm);
+      M.Graph.Arms.Append (1);
+      M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => 1));
+      Check (Driver.Robot.Kinematics.Fitted (M, 1), "the arm's own fit is not found");
+      --  Eye 1 is found fixed in the world: group 1 carries no eye.
+      M.Graph.Mounts.Replace_Element (1, Mount'(Kind => World_Fixed));
+      Check (not Driver.Robot.Kinematics.Fitted (M, 1), "a fit of an eye the arm no longer carries is the arm's");
+      M.Graph.Mounts.Replace_Element (1, Mount'(Kind => Arm_Carried, Arm => 1));
+      --  Group 1 stops being an arm.
+      M.Graph.Arms.Clear;
+      Check (not Driver.Robot.Kinematics.Fitted (M, 1), "the fit of a group that stopped being an arm is an arm's");
+      Driver.Robot.Kinematics.Refit (M);
+      Check (not M.Kinematics (1).Result.Fitted, "the refit keeps the fit of a group that is no arm");
+   end Stale_Fit_Is_No_Arms;
 
    procedure Kinematics_Of_A_Synthetic_Arm is
    begin
@@ -1720,10 +2036,15 @@ package body Driver.Robot.Tests is
    begin
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
                              & "stack, as the decider's does", Estimate_In_A_Task'Access);
+      Driver.Tests.Register ("robot.probe.limits", "a channel at its limit one way is asked ever further that way though "
+                             & "it answered the other way, a deadband is not found, or a channel that answers neither way "
+                             & "is asked past where every other channel answered", Probe_Limits_And_Deadbands'Access);
       Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
       Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found, or are "
                              & "found beyond the range the arm moved through", Reach_A_Pose'Access);
+      Driver.Tests.Register ("robot.kinematics.stale", "the fit of a group that stopped being an arm, or of an eye it no "
+                             & "longer carries, is still taken for the arm's", Stale_Fit_Is_No_Arms'Access);
       Driver.Tests.Register ("robot.kinematics.small", "a sweep too small to determine the lens and the joints is "
                              & "reported fitted", Kinematics_Of_A_Small_Sweep'Access);
       Driver.Tests.Register ("robot.kinematics", "the arm's axes, the eye's lens or the eye's pose at a new pose come "
@@ -1731,6 +2052,10 @@ package body Driver.Robot.Tests is
                              Kinematics_Of_A_Synthetic_Arm'Access);
       Driver.Tests.Register ("robot.boot", "the boot does not finish, deadlocks with the main loop, or does not "
                              & "recognize the rig's groups when it pushes them itself", Boot_From_Zero'Access);
+      Driver.Tests.Register ("robot.boot.undecided", "an arm whose eye is undecided after the first pushes is left "
+                             & "unswept: the boot reads the body before the eye decides", Boot_With_An_Undecided_Eye'Access);
+      Driver.Tests.Register ("robot.boot.reread", "an arm the estimate finds carrying its eye only after the body "
+                             & "was first read is never swept with it", Boot_With_A_Late_Mount'Access);
       Driver.Tests.Register ("robot.boot.settling", "a sweep level whose eye's picture keeps changing for beats after "
                              & "the arm stopped gives no keyframe", Boot_With_Settling_Views'Access);
       Driver.Tests.Register ("robot.sweep.start", "a joint's sweep starts below where one cell of its eye tells the "
@@ -1761,6 +2086,8 @@ package body Driver.Robot.Tests is
                              Settle_After_A_Slow_Tail'Access);
       Driver.Tests.Register ("robot.keyframe.jitter", "an arm held away from rest whose reading jitters more than it did "
                              & "at rest gives no keyframe though its eye is still", Keyframe_Despite_Held_Jitter'Access);
+      Driver.Tests.Register ("robot.roles.undecided", "a group some eye is still undecided about is called a closer or a "
+                             & "part, though that eye may ride on it", Undecided_Eye_Leaves_Group_Unclassified'Access);
       Driver.Tests.Register ("robot.unprobed", "a group never pushed on its own is given a role from what moved "
                              & "with it", Unprobed_Group_Stays_Unclassified'Access);
       Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "
