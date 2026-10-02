@@ -159,11 +159,16 @@ private
 
    package Start_Vectors is new Ada.Containers.Vectors (Positive, Start);
 
-   --  What one pair of eyes last saw of a thing, and the observation it was
-   --  seen at (without its images): the eyes as they were then.
+   --  What one pair of eyes saw of a thing at one instant, the matcher's
+   --  error then (pixels, and the degrees of freedom it rests on), and the
+   --  observation it was seen at (without its images): the eyes as they were
+   --  then. A pair keeps its latest answer, and the last one before it that
+   --  saw the thing from another view.
    type Pair_Seen is record
       From, Into : Eye_Id;
       Kept       : Driver.World.Pairs.Match_Vectors.Vector;
+      Error      : Real := Real'Last;
+      Freedom    : Natural := 0;
       Then_Seen  : Observation_Holders.Holder;
    end record;
 
@@ -186,6 +191,15 @@ private
    end record;
 
    package Thing_Vectors is new Ada.Containers.Vectors (Thing_Id, Thing_Record);
+
+   procedure Keep_View
+     (R         : in out Thing_Record;
+      Answer    : Pair_Seen;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class);
+   --  A pair's answer that placed points of the thing, stored: it replaces
+   --  the pair's latest when it saw the thing from the same view, else the
+   --  latest becomes the earlier view, and an earlier one before it goes.
 
    package Place_Vectors is new Ada.Containers.Vectors (Place_Id, Point_Estimate);
 

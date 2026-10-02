@@ -702,9 +702,9 @@ package body Driver.World.Estimates.Tests is
          Q.Eyes.Append (Slot'(Has => True, Pointed => True, Track => Driver.World.Tracking.Start (Box_Region, Gray, 1),
                               others => <>));
          Q.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Strip,
-                                      Then_Seen => Observation_Holders.Empty_Holder));
+                                      Then_Seen => Observation_Holders.Empty_Holder, others => <>));
          Q.By_Pair.Append (Pair_Seen'(From => 2, Into => 1, Kept => Strip,
-                                      Then_Seen => Observation_Holders.Empty_Holder));
+                                      Then_Seen => Observation_Holders.Empty_Holder, others => <>));
          S.Things.Replace_Element (1, Q);
          Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
          O.Beat := 1;
@@ -930,7 +930,7 @@ package body Driver.World.Estimates.Tests is
       begin
          R.Eyes.Append (Slot'(Has => True, Pointed => True, Track => Driver.World.Tracking.Start (Box_Region, Gray, 1),
                               others => <>));
-         R.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Off, Then_Seen => Observation_Holders.Empty_Holder));
+         R.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Off, Then_Seen => Observation_Holders.Empty_Holder, others => <>));
          S.Things.Append (R);
       end;
       Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
@@ -942,6 +942,103 @@ package body Driver.World.Estimates.Tests is
              S.Things (1).Points.Length'Image & " points one pair alone placed were kept for the box");
       Driver.Services.End_Replay;
    end One_Pair;
+
+   procedure Views_Bear_Out is
+      --  One pair alone sees the box, its second eye on a wrist that is
+      --  elsewhere at every even beat. From two views the pair's points bear
+      --  each other out, as another pair's would; from one view twice they do
+      --  not, as the same wrong match comes back there. A view whose matches
+      --  met half a metre further along the first eye's sights (as One_Pair's
+      --  did) is borne out by no other view, and goes once two right views
+      --  have seen the box.
+      Moved : constant Driver.World.Tests.Pinhole :=
+        Driver.World.Tests.Looking_At ([0.35, -0.45, 0.6], [0.0, 0.0, 0.0], 150.0, Columns, Rows, 0.3);
+      Small : constant Mat3 := [[1.0E-6, 0.0, 0.0], [0.0, 1.0E-6, 0.0], [0.0, 0.0, 1.0E-6]];
+      Gray  : constant Driver.Images.Image := Plain (128);
+      Eye   : constant Vec3 := Eyes (1).Pose_In_World.Translation;
+
+      function Wrist (E : Eye_Id; Seen : not null access constant Observation)
+        return Driver.World.Cameras.Camera'Class is
+      begin
+         if E = 2 and then Seen.Beat mod 2 = 0 then
+            return Moved;
+         end if;
+         return View (E);
+      end Wrist;
+
+      function Answer (Beat : Driver.Clock.Beat; Wrong : Boolean) return Pair_Seen is
+         --  The pair's answer at that beat: the box top's grid points both
+         --  eyes see there, met where they are or half a metre further on.
+         O    : Observation;
+         Kept : Driver.World.Pairs.Match_Vectors.Vector;
+      begin
+         O.Beat := Beat;
+         for I in 0 .. 4 loop
+            for J in 0 .. 4 loop
+               declare
+                  X      : constant Vec3 := [Box_Half * Real (I - 2) / 2.5, Box_Half * Real (J - 2) / 2.5, Box_Top];
+                  P1, P2 : Driver.Images.Pixel;
+                  V1, V2 : Boolean;
+                  Held   : aliased constant Observation := O;
+               begin
+                  Eyes (1).Project (X, P1, V1);
+                  Wrist (2, Held'Access).Project (X, P2, V2);
+                  if V1 and then V2 then
+                     Kept.Append (Driver.World.Pairs.Match'
+                                    (In_First => P1, In_Second => P2, First => 1,
+                                     Point    => (Mean       => (if Wrong then Eye + (abs (X - Eye) + 0.5) * Unit (X - Eye)
+                                                                 else X),
+                                                  Covariance => Small)));
+                  end if;
+               end;
+            end loop;
+         end loop;
+         return (From => 1, Into => 2, Kept => Kept, Error => Match, Freedom => Natural (Kept.Length),
+                 Then_Seen => Observation_Holders.To_Holder (O));
+      end Answer;
+
+      type Answer_Plan is array (Positive range <>) of Pair_Seen;
+
+      function Points_After (Plan : Answer_Plan; Wrong_Kept : out Natural) return Natural is
+         --  The box's points once the pair answered so, in turn, and the scene
+         --  was observed: how many, and how many of them half a metre off.
+         S : State;
+         R : Thing_Record;
+         O : Observation;
+      begin
+         R.Eyes.Append (Slot'(Has => True, Pointed => True, Track => Driver.World.Tracking.Start (Box_Region, Gray, 1),
+                              others => <>));
+         for A of Plan loop
+            Keep_View (R, A, Wrist'Access);
+         end loop;
+         S.Things.Append (R);
+         O.Beat := 9;
+         O.Images.Append (Gray);
+         O.Images.Append (Gray);
+         Observe (S, 2, Wrist'Access, Up, True, O);
+         Wrong_Kept := 0;
+         for M of S.Things (1).Points loop
+            Wrong_Kept := Wrong_Kept + Boolean'Pos (abs (M.Point.Mean (3) - Box_Top) > 0.01);
+         end loop;
+         return Natural (S.Things (1).Points.Length);
+      end Points_After;
+
+      Wrong_Kept : Natural;
+   begin
+      View := Eyes;
+      Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
+      Check (Points_After ([Answer (1, False), Answer (2, False)], Wrong_Kept) > 0,
+             "the box's points from two views of one pair do not bear each other out");
+      Check (Points_After ([Answer (1, False), Answer (3, False)], Wrong_Kept) = 0,
+             "the box's points from one view of one pair, twice, bear each other out");
+      Check (Points_After ([Answer (1, True), Answer (2, False)], Wrong_Kept) = 0,
+             "a view that met the box half a metre off and one that met it where it is bear each other out");
+      Check (Points_After ([Answer (1, True), Answer (2, False), Answer (3, False)], Wrong_Kept) > 0
+             and then Wrong_Kept = 0,
+             "two right views after a wrong one do not give the box its right points alone:" & Wrong_Kept'Image
+             & " half a metre off");
+      Driver.Services.End_Replay;
+   end Views_Bear_Out;
 
    procedure Out_Of_View is
       --  The box pointed at in the first eye; two pairs, one each way between
@@ -988,12 +1085,12 @@ package body Driver.World.Estimates.Tests is
          R.Eyes.Append (Slot'(Has => True, Pointed => True, Track => Driver.World.Tracking.Start (Box, Gray, 1),
                               others => <>));
          R.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Top,
-                                      Then_Seen => Observation_Holders.To_Holder (Instant)));
+                                      Then_Seen => Observation_Holders.To_Holder (Instant), others => <>));
          R.By_Pair.Append (Pair_Seen'(From => 1, Into => 3, Kept => Off,
-                                      Then_Seen => Observation_Holders.To_Holder (Instant)));
+                                      Then_Seen => Observation_Holders.To_Holder (Instant), others => <>));
          --  And the second eye's pair, which saw the same top.
          R.By_Pair.Append (Pair_Seen'(From => 2, Into => 1, Kept => Top,
-                                      Then_Seen => Observation_Holders.To_Holder (Instant)));
+                                      Then_Seen => Observation_Holders.To_Holder (Instant), others => <>));
          S.Things.Append (R);
       end;
       Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
@@ -1082,10 +1179,10 @@ package body Driver.World.Estimates.Tests is
       begin
          R.Eyes.Append (Slot'(Has => True, Pointed => True, Track => Driver.World.Tracking.Start (Box, Gray, Beat),
                                others => <>));
-         R.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Top, Then_Seen => Observation_Holders.Empty_Holder));
+         R.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Top, Then_Seen => Observation_Holders.Empty_Holder, others => <>));
          --  And the second eye's pair, which saw the same top: each bears the
          --  other out.
-         R.By_Pair.Append (Pair_Seen'(From => 2, Into => 1, Kept => Top, Then_Seen => Observation_Holders.Empty_Holder));
+         R.By_Pair.Append (Pair_Seen'(From => 2, Into => 1, Kept => Top, Then_Seen => Observation_Holders.Empty_Holder, others => <>));
          S.Things.Append (R);
       end;
       Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
@@ -1148,6 +1245,8 @@ package body Driver.World.Estimates.Tests is
       Driver.Tests.Register ("world.estimate.task",
                              "the world's estimate fails in a task with the default stack, as the decider's does",
                              Estimate_In_A_Task'Access);
+      Driver.Tests.Register ("world.scene.views", "one pair's points from two views do not bear each other out, or from one "
+                             & "view twice do", Views_Bear_Out'Access);
       Driver.Tests.Register ("world.scene.one_pair",
                              "points one pair alone placed are kept for a thing, though no other pair bears them out",
                              One_Pair'Access);

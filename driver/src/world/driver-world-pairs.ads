@@ -60,7 +60,8 @@ package Driver.World.Pairs is
       Kept          : out Match_Vectors.Vector;
       Apart         : out Natural;
       Unplaced      : out Natural;
-      Error         : out Real)
+      Error         : out Real;
+      Error_Freedom : out Natural)
      with Pre => Answers'Length = Points'Length and then Own <= Points'Length;
    --  Points are pixels of First, the region's Own first, the pixels around
    --  it after; Answers are the matcher's, into Second's image of the same
@@ -68,7 +69,8 @@ package Driver.World.Pairs is
    --  error; when none were asked (Own is every point: the background, say,
    --  which is itself what is asked about), those of all the points do.
    --  Error is the matcher's error measured across the lines the first sights
-   --  draw in the second eye, in pixels (Real'Last when nothing measured it).
+   --  draw in the second eye, in pixels (Real'Last when nothing measured it),
+   --  and the degrees of freedom it rests on.
    --  Apart counts the matches that came back but whose lines of sight do not
    --  meet; Unplaced, those whose lines meet too far along them to tell how
    --  far. Nothing is kept when none of that sample came back to tell the

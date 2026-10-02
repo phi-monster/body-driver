@@ -332,7 +332,8 @@ package body Driver.World.Pairs is
       Kept          : out Match_Vectors.Vector;
       Apart         : out Natural;
       Unplaced      : out Natural;
-      Error         : out Real)
+      Error         : out Real;
+      Error_Freedom : out Natural)
    is
       --  The points whose round trips measure the matcher's error: those
       --  around the region, or all of them when nothing around was asked.
@@ -341,6 +342,7 @@ package body Driver.World.Pairs is
    begin
       Kept.Clear;
       Error := Real'Last;
+      Error_Freedom := 0;
       Apart := 0;
       Unplaced := 0;
       for I in First_Sample .. Points'Length loop
@@ -412,6 +414,7 @@ package body Driver.World.Pairs is
                   return;
                end if;
                Error := Line_Sigma;
+               Error_Freedom := Natural (Real'Floor (Line_Right));
                declare
                   --  How far along the first sight a point lies rests on the line
                   --  error's degrees of freedom.

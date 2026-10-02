@@ -108,10 +108,11 @@ package body Driver.World.Pairs.Tests is
                   Apart : Natural;
                   Far   : Natural;
                   Error : Real;
+                  Freedom : Natural;
                   Wrong_Kept, Right_Off : Natural := 0;
                   Wrong : constant Natural := Own / 8;
                begin
-                  Triangulate (A, B, Points, Own, Answers, Kept, Apart, Far, Error);
+                  Triangulate (A, B, Points, Own, Answers, Kept, Apart, Far, Error, Freedom);
                   Check (abs (Error - Matcher_Sigma) < 0.2 * Matcher_Sigma,
                          "the matcher's error measured is" & Error'Image & " px, not the" & Matcher_Sigma'Image & " it made");
                   for M of Kept loop
@@ -199,6 +200,7 @@ package body Driver.World.Pairs.Tests is
       Kept    : Match_Vectors.Vector;
       Apart, Far : Natural;
       Error   : Real;
+      Freedom : Natural;
       Near_Kept, Far_Kept, Near_Asked, Far_Asked : Natural := 0;
    begin
       Ada.Numerics.Float_Random.Reset (Gen, 73);
@@ -228,7 +230,7 @@ package body Driver.World.Pairs.Tests is
             end;
          end loop;
       end loop;
-      Triangulate (A, B, Points, Points'Length, Answers, Kept, Apart, Far, Error);
+      Triangulate (A, B, Points, Points'Length, Answers, Kept, Apart, Far, Error, Freedom);
       for M of Kept loop
          for K in Points'Range loop
             if Points (K) = M.In_First then
@@ -494,6 +496,7 @@ package body Driver.World.Pairs.Tests is
          Apart   : Natural;
          Far     : Natural;
          Error   : Real;
+         Freedom : Natural;
          Wrong_Kept, Right_Kept, Right_Asked : Natural := 0;
       begin
          for R in 0 .. 119 loop
@@ -537,7 +540,7 @@ package body Driver.World.Pairs.Tests is
             end;
          end loop;
          --  The region alone, so its own round trips must tell the error.
-         Triangulate (A, B, Points, Points'Length, Answers, Kept, Apart, Far, Error);
+         Triangulate (A, B, Points, Points'Length, Answers, Kept, Apart, Far, Error, Freedom);
          for M of Kept loop
             for I in Points'Range loop
                if Points (I) = M.In_First then

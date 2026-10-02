@@ -526,6 +526,77 @@ package body Driver.World.Estimates is
       Free (Own_Face);
    end Consistent;
 
+   procedure Keep_View
+     (R         : in out Thing_Record;
+      Answer    : Pair_Seen;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class)
+   is
+      --  Another view bears a pair's points out as another pair does: a wrong
+      --  match that met on the line its first sight drew in the second eye
+      --  does not come back to the same place once either eye looks from
+      --  elsewhere. From the same view it comes back: an answer from there
+      --  only replaces the pair's latest.
+      Latest, Earlier : Natural := 0;   --  the pair's entries, the earlier view first
+
+      function Elsewhere (Old : Pair_Seen) return Boolean is
+         --  The thing's middle, as the old answer placed it, lies in either eye
+         --  at pixels the two answers' matcher errors tell apart, by the one
+         --  significance rule.
+         type Two_Eyes is array (1 .. 2) of Eye_Id;
+      begin
+         if Old.Then_Seen.Is_Empty or else Answer.Then_Seen.Is_Empty or else Old.Kept.Is_Empty
+           or else not (Old.Error < Real'Last and then Answer.Error < Real'Last)
+         then
+            return False;
+         end if;
+         declare
+            Before : constant Observation_Holders.Constant_Reference_Type := Old.Then_Seen.Constant_Reference;
+            Now    : constant Observation_Holders.Constant_Reference_Type := Answer.Then_Seen.Constant_Reference;
+            Sigma  : constant Real := Sqrt (Old.Error ** 2 + Answer.Error ** 2);
+            Gate   : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural'Min (Old.Freedom, Answer.Freedom));
+            Middle : Vec3 := Zero3;
+         begin
+            for M of Old.Kept loop
+               Middle := Middle + M.Point.Mean;
+            end loop;
+            Middle := (1.0 / Real (Old.Kept.Length)) * Middle;
+            for E of Two_Eyes'[Answer.From, Answer.Into] loop
+               declare
+                  Then_Px, Now_Px           : Driver.Images.Pixel;
+                  Then_Visible, Now_Visible : Boolean;
+               begin
+                  Camera_Of (E, Before.Element).Project (Middle, Then_Px, Then_Visible);
+                  Camera_Of (E, Now.Element).Project (Middle, Now_Px, Now_Visible);
+                  if Then_Visible and then Now_Visible
+                    and then Significant (Gate, Sqrt ((Now_Px.U - Then_Px.U) ** 2 + (Now_Px.V - Then_Px.V) ** 2), Sigma)
+                  then
+                     return True;
+                  end if;
+               end;
+            end loop;
+            return False;
+         end;
+      end Elsewhere;
+   begin
+      for K in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
+         if R.By_Pair (K).From = Answer.From and then R.By_Pair (K).Into = Answer.Into then
+            Earlier := Latest;
+            Latest := K;
+         end if;
+      end loop;
+      if Latest = 0 then
+         R.By_Pair.Append (Answer);
+      elsif Elsewhere (R.By_Pair (Latest)) then
+         if Earlier /= 0 then
+            R.By_Pair.Delete (Earlier);
+         end if;
+         R.By_Pair.Append (Answer);
+      else
+         R.By_Pair.Replace_Element (Latest, Answer);
+      end if;
+   end Keep_View;
+
    procedure Read_Crosses
      (S         : State;
       Id        : Thing_Id;
@@ -550,13 +621,14 @@ package body Driver.World.Estimates is
                   Kept    : Driver.World.Pairs.Match_Vectors.Vector;
                   Apart   : Natural := 0;
                   Far     : Natural := 0;
-                  Error   : Real;
+                  Error   : Real := Real'Last;
+                  Freedom : Natural := 0;
                   Seen    : constant Observation_Holders.Constant_Reference_Type := X.Seen.Constant_Reference;
                begin
                   Driver.Instrument.Read_Match (Driver.Services.Collect (X.Ticket), True, Answers.all, Ok, Why);
                   if Ok then
                      Driver.World.Pairs.Triangulate (Camera_Of (X.From, Seen.Element), Camera_Of (X.Into, Seen.Element),
-                                                     Points, X.Own, Answers.all, Kept, Apart, Far, Error);
+                                                     Points, X.Own, Answers.all, Kept, Apart, Far, Error, Freedom);
                      if Kept.Is_Empty then
                         declare
                            Found : Natural := 0;
@@ -582,7 +654,6 @@ package body Driver.World.Estimates is
                   declare
                      Met_Before : constant Natural := Natural (Kept.Length);
                      Within     : Driver.World.Pairs.Match_Vectors.Vector;
-                     Placed     : Boolean := False;
                      Judged     : Natural := 0;   --  met points a pointed eye holding the thing sees
                   begin
                      --  The second eye does not see the thing now, as its other
@@ -638,19 +709,9 @@ package body Driver.World.Estimates is
                      --  What the pair saw before stands until it sees the thing
                      --  again: not seeing it now says nothing of where it is.
                      if not Kept.Is_Empty then
-                        for K in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
-                           if R.By_Pair (K).From = X.From and then R.By_Pair (K).Into = X.Into then
-                              R.By_Pair.Replace_Element
-                                (K, (From => X.From, Into => X.Into, Kept => Kept,
-                                     Then_Seen => Bare (Seen.Element.all)));
-                              Placed := True;
-                           end if;
-                        end loop;
-                        if not Placed then
-                           R.By_Pair.Append
-                             (Pair_Seen'(From => X.From, Into => X.Into, Kept => Kept,
-                                         Then_Seen => Bare (Seen.Element.all)));
-                        end if;
+                        Keep_View (R, (From => X.From, Into => X.Into, Kept => Kept, Error => Error,
+                                       Freedom => Freedom, Then_Seen => Bare (Seen.Element.all)),
+                                   Camera_Of);
                         R.Points_In := X.From;
                      end if;
                   end;
@@ -957,7 +1018,8 @@ package body Driver.World.Estimates is
                         Kept    : Driver.World.Pairs.Match_Vectors.Vector;
                         Apart   : Natural := 0;
                         Far     : Natural := 0;
-                        Error   : Real;
+                        Error   : Real := Real'Last;
+                        Freedom : Natural := 0;
                         Seen    : constant Observation_Holders.Constant_Reference_Type :=
                           S.Round_Seen.Constant_Reference;
                         First   : constant Driver.World.Cameras.Camera'Class := Camera_Of (X.From, Seen.Element);
@@ -969,7 +1031,7 @@ package body Driver.World.Estimates is
                         Driver.Instrument.Read_Match (Reply, True, Answers.all, Ok, Why);
                         if Ok then
                            Driver.World.Pairs.Triangulate
-                             (First, Second, Points, Points'Length, Answers.all, Kept, Apart, Far, Error);
+                             (First, Second, Points, Points'Length, Answers.all, Kept, Apart, Far, Error, Freedom);
                         else
                            Driver.Log.Line (Driver.Log.World, "the scene: the instrument did not match eye"
                                             & X.From'Image & " into eye" & X.Into'Image & ": " & To_String (Why));
