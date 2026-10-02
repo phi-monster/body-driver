@@ -127,6 +127,37 @@ package body Driver.Robot.Motion is
       end;
    end Step;
 
+   function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
+   begin
+      for E in 1 .. Eye_Count (M) loop
+         if Eye_Mount (M, Eye_Id (E)).Kind = Arm_Carried and then Eye_Mount (M, Eye_Id (E)).Arm = A then
+            declare
+               Per_Unit : constant Real := Lockin.Shift (M, Eye_Id (E), Arm_Group (M, A), Channel);
+               Noise    : constant Real := Lockin.Cell_Noise (M, Eye_Id (E));
+            begin
+               return (if Per_Unit > 0.0 and then Noise < Real'Last then Driver.Conventions.Z * Noise / Per_Unit else 0.0);
+            end;
+         end if;
+      end loop;
+      return 0.0;
+   end Sweep_Start;
+
+   procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id) is
+      B    : Driver.Clock.Beat;
+      Done : Boolean;
+
+      function Carries_An_Eye return Boolean is
+        (for some E in 1 .. Eye_Count (M) =>
+           Eye_Mount (M, Eye_Id (E)).Kind = Arm_Carried and then Eye_Mount (M, Eye_Id (E)).Arm = A);
+   begin
+      loop
+         Driver.Beats.Next (B);
+         Done := not Carries_An_Eye or else (M.Beats > 0 and then Kinematics.Held_Still (M, A, M.Beats - 1));
+         Driver.Beats.Send (Driver.Commands.Hold);
+         exit when Done;
+      end loop;
+   end Hold_For_Keyframe;
+
    procedure Hold_While_Matching (M : in out Model) is
       B    : Driver.Clock.Beat;
       Done : Boolean;

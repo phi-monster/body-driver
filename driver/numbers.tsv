@@ -648,8 +648,6 @@ driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * Half / (Real (N
 driver-robot-boot.adb	Col := Col / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
-driver-robot-boot.adb	Driver.Robot.Motion.Hold (M, 1);	1	structure	a view needs a second still frame to measure its noise
-driver-robot-boot.adb	Driver.Robot.Motion.Hold (M, 1);	1	structure	one more still beat for the eye at each pose
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	0.0	structure	from zero: the first step is the smallest every reading can tell
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	1.0	structure	the positive direction for every channel
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, [1 => (Group => G, Channel => C)], Sign, From, P);	1	structure	one channel at a time
@@ -1147,6 +1145,8 @@ driver-robot-steps.adb	if Ask /= 0.0 and then (Ask - Got) * (if Ask > 0.0 then 1
 driver-robot-steps.adb	if Ask /= 0.0 and then (Ask - Got) * (if Ask > 0.0 then 1.0 else -1.0) >= V.Value then	1.0	math	the sign of the ask, so that a shortfall counts toward the target
 driver-robot-steps.adb	if Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	two pairs of free shortfalls in a row are the fewest a scatter can be measured from
 driver-robot-steps.adb	with Pre => Natural (Shortfalls.Length) > 2	2	structure	two pairs of free shortfalls in a row are the fewest a scatter can be measured from
+driver-robot-stillness.adb	S.Change_1 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
+driver-robot-stillness.adb	S.Change_2 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
 driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then	2	statistics	a variance needs two frames
@@ -1163,6 +1163,7 @@ driver-robot.adb	Sigma => Sqrt (2.0) * Kinematics.Angle_Sigma (M, A)));	2.0	math
 driver-robot.adb	function In_World (M : Model; A : Arm_Id) return Boolean is (A = 1 and then Kinematics.Fitted (M, A));	1	structure	the world is the first arm's reference eye frame until the arms are measured into one
 driver-robot.adb	if M.Beats >= 2 * M.Graph_Evidence then	2	numerics	re-estimating when the evidence doubles keeps the number of re-estimates logarithmic in the stream
 driver-robot.ads	C : Real := 1.0;	1.0	structure	a joint turns one radian per reading unit until fitted
+driver-robot.ads	Change_1, Change_2 : Real := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot.ads	Frame : Positive := 1;	1	structure	keyframes are numbered from one
 driver-robot.ads	Frame : Positive := 1;	1	structure	keyframes are numbered from one
 driver-robot.ads	Rest_Factor : Real := 1.0;	1.0	math	before it is measured, a cell rests at its floor

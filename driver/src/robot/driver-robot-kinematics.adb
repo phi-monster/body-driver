@@ -5,6 +5,7 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Numerics.Dense;
 with Driver.Robot.Kinematics.Fit;
+with Driver.Robot.Stillness;
 with Driver.Stats;
 with Driver.Uncertain;
 with Driver.Instrument;
@@ -119,20 +120,22 @@ package body Driver.Robot.Kinematics is
       if E = 0 then
          return False;
       end if;
-      declare
-         S : Eye_Stream renames M.Eyes (E);
-      begin
-         return Beat > 0 and then Beat < Natural (S.Judged.Length)
-           and then S.Judged (Beat) and then S.Still_At (Beat)
-           and then S.Judged (Beat - 1) and then S.Still_At (Beat - 1)
-           and then Channels.Has_Reading (M, G, Beat) and then Channels.Has_Reading (M, G, Beat - 1)
-           and then not Channels.Moving (M, G, Beat);
-      end;
+      --  The eye's picture by the one stop rule (Stillness.Eye_Settled), which
+      --  holds for the latest beat.
+      return Beat > 0 and then Stillness.Eye_Settled (M, E)
+        and then Channels.Has_Reading (M, G, Beat) and then Channels.Has_Reading (M, G, Beat - 1)
+        and then not Channels.Moving (M, G, Beat);
    end Held_Still;
 
    procedure Observe (M : in out Model; O : Observation) is
       Beat : constant Natural := M.Beats;
    begin
+      --  Every arm's answers, whether or not the graph lists the arm now: a
+      --  request is pending until its answer is read (Hold_While_Matching
+      --  waits for all of them).
+      for R of M.Kinematics loop
+         Collect (R);
+      end loop;
       for A in 1 .. Arm_Count (M) loop
          declare
             Arm : constant Arm_Id := Arm_Id (A);
@@ -157,7 +160,6 @@ package body Driver.Robot.Kinematics is
                declare
                   R : Arm_Evidence renames M.Kinematics (Index);
                begin
-                  Collect (R);
                   if Held_Still (M, Arm, Beat)
                     and then E <= O.Images.Last_Index and then Driver.Observations.Has_Image (O, E)
                   then

@@ -40,6 +40,21 @@ package Driver.Robot.Motion is
    --  Holds the body until the instrument has answered every match the
    --  estimators asked of it (the kinematics' keyframes).
 
+   function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real;
+   --  The smallest turn of a joint of the arm that moves its eye's view by
+   --  what one cell of the view can tell: Z times the cells' displacement
+   --  noise (Lockin.Cell_Noise) over how far the view moves per reading unit
+   --  of the joint (Lockin.Shift); a keyframe that moves less tells the
+   --  kinematics nothing. Zero when the arm carries no eye or either is not
+   --  measured.
+
+   procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id);
+   --  Holds the body until the arm can give its kinematics a keyframe: its
+   --  readings do not move and its eye is still, at the latest beat and the
+   --  one before (Kinematics.Held_Still). A rendered view can keep changing
+   --  for beats after the camera stopped. Like Settle it waits as long as
+   --  that takes; an arm that carries no eye is not held.
+
    type Probe_Report is record
       Seen      : Boolean := False;   --  some eye saw the channel move
       Excursion : Real := 0.0;        --  how far it was taken, in reading units, when seen

@@ -5,11 +5,13 @@ with Driver.Commands;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Images;
+with Driver.Instrument;
 with Driver.Observations;
 with Driver.Beats;
 with Driver.Log;
 with Driver.Robot.Boot;
 with Driver.Robot.Kinematics;
+with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Kinematics.Fit;
 with Ada.Strings.Unbounded;
@@ -442,6 +444,133 @@ package body Driver.Robot.Tests is
              "the arm held still with an invisible jitter is not taken as still for a keyframe");
    end Keyframe_Despite_Held_Jitter;
 
+   --  A picture that keeps changing after the body stopped: the push moves
+   --  the view by 2 pixels, and from then on a flicker on a tenth of the
+   --  pixels, flipping sign every beat, decays from 40 luma levels by 30 % a
+   --  beat to a lasting 4, far above the still frames' noise before the push.
+   --  The picture has stopped once the flicker stops shrinking, though it
+   --  never comes back to the noise it had at rest.
+   procedure Settle_After_A_Slow_Tail is
+      M      : Model;
+      Width  : constant := 64;
+      Height : constant := 48;
+      Reading, Target : Real := 0.0;
+      Settled_At : Natural := 0;
+      Decaying_Until : Natural := 0;   --  the last beat the flicker shrank by more than a hundredth
+
+      function Frame (Beat : Natural; Shift, Flicker : Real) return Driver.Images.Image is
+         use type Driver.Bytes.Offset;
+         Data : Driver.Bytes.Byte_Array (1 .. 3 * Width * Height);
+      begin
+         for Y in 0 .. Height - 1 loop
+            for X in 0 .. Width - 1 loop
+               declare
+                  L : Real := Texture (Real (X) + Shift, Real (Y));
+                  K : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Y * Width + X) + 1);
+               begin
+                  if (X * 7 + Y * 13) mod 10 = 0 then
+                     L := L + (if (Beat + X) mod 2 = 0 then Flicker else -Flicker);
+                  end if;
+                  Data (K) := Driver.Bytes.Byte (Integer (Real'Max (0.0, Real'Min (255.0, L))));
+                  Data (K + 1) := Data (K);
+                  Data (K + 2) := Data (K);
+               end;
+            end loop;
+         end loop;
+         return Driver.Images.Create (Width, Height, Data);
+      end Frame;
+   begin
+      for B in 0 .. 199 loop
+         declare
+            O       : Observation;
+            Sent    : Driver.Commands.Command;
+            Flicker : Real := 0.0;
+         begin
+            if B = 100 then
+               Target := 1.0;
+            end if;
+            if B > 100 then
+               Reading := Target;
+               Flicker := 4.0 + 36.0 * 0.7 ** (B - 101);
+               if 36.0 * 0.7 ** (B - 101) * 0.3 > 0.01 * Flicker then
+                  Decaying_Until := B;
+               end if;
+            end if;
+            O.Beat := Driver.Clock.Beat (B);
+            O.Images.Append (Frame (B, (if B > 100 then 2.0 else 0.0), Flicker));
+            O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+            O.Readings.Append (Real_Array'(1 => Reading));
+            Driver.Commands.Set_Target (Sent, 1, [Target]);
+            Observe (M, O, Sent);
+            if B > 101 and then Settled_At = 0 and then Stillness.All_Still (M) then
+               Settled_At := B;
+            end if;
+         end;
+      end loop;
+      Check (not M.Eyes (1).Is_Still, "the lasting flicker is still to the rest-noise test: the test shows nothing");
+      Check (Settled_At > 0, "the body never settled while its eye's picture flickered at a lasting level");
+      Check (Settled_At = 0 or else Settled_At > Decaying_Until,
+             "the body settled at beat" & Settled_At'Image & " while the flicker still shrank, until" & Decaying_Until'Image);
+   end Settle_After_A_Slow_Tail;
+
+   --  The sweep starts each joint where its eye's view moves by what one cell
+   --  of it tells: Z times the cells' displacement noise. The visible step,
+   --  which a matched filter over every cell sees, moves the view by far less
+   --  than any one point of a match can be told.
+   procedure Sweep_Starts_Where_A_Cell_Tells is
+      M : Model;
+   begin
+      Exercise_Rig (M);
+      for C in 1 .. 2 loop
+         declare
+            Start : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
+            Shift : constant Real := Lockin.Shift (M, 1, 1, C);
+            Noise : constant Real := Lockin.Cell_Noise (M, 1);
+         begin
+            Check (Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last, "arm 1's sweep plan is not measured");
+            if Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last then
+               Check_Close (Start * Shift, Driver.Conventions.Z * Noise, 1.0e-9 * Noise,
+                            "the first level moves the view of joint" & C'Image);
+               Check (Known (Visible_Step (M, 1, C)) and then Start > Visible_Step (M, 1, C).Value,
+                      "joint" & C'Image & "'s sweep starts at its visible step or below");
+            end if;
+         end;
+      end loop;
+   end Sweep_Starts_Where_A_Cell_Tells;
+
+   --  An arm's match was asked, then the graph stopped listing the arm (an
+   --  estimate told its eye or group otherwise): its answer must still be
+   --  read, or the boot's wait for every answer never ends.
+   procedure Answers_Read_For_An_Unlisted_Arm is
+      M : Model;
+      R : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
+   begin
+      R.Pending.Append
+        (Pending_Match'(Frame  => 2,
+                        Ticket => Driver.Instrument.Submit_Match
+                          ((Stored => False, Image => Driver.Images.No_Image),
+                           (Stored => False, Image => Driver.Images.No_Image),
+                           [1 => (U => 1.0, V => 1.0)], True, 0)));
+      M.Kinematics.Append (R);
+      Check (Driver.Robot.Kinematics.Pending (M) = 1, "the match was not asked");
+      for B in 0 .. 3 loop
+         declare
+            O    : Observation;
+            Sent : Driver.Commands.Command;
+         begin
+            O.Beat := Driver.Clock.Beat (B);
+            O.Readings.Append (Real_Array'(1 => 0.0));
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+            Driver.Commands.Set_Target (Sent, 1, [0.0]);
+            Observe (M, O, Sent);
+         end;
+      end loop;
+      Check (Arm_Count (M) = 0, "the graph lists an arm");
+      Check (Driver.Robot.Kinematics.Pending (M) = 0,
+             "the answer to an arm the graph no longer lists is never read: the boot waits forever");
+   end Answers_Read_For_An_Unlisted_Arm;
+
    procedure Roles_Of_A_Synthetic_Body is
       M : Model;
    begin
@@ -819,35 +948,49 @@ package body Driver.Robot.Tests is
    --  target) is reached at once, the images show the beat before, and the
    --  test plays the main loop, offering every beat until the decider takes it.
 
-   procedure Boot_From_Zero is
-      M    : Model;
-      H    : Driver.Robot.Hand.Hands;
-      Done : Boolean := False with Atomic;
-      Ok   : Boolean := False with Atomic;
+   --  The rig booted from zero by Boot.Run. With Settling, eye 1's picture
+   --  keeps changing after every move of arm 1 the way a rendered view does:
+   --  a flicker on a tenth of its pixels, flipping sign every beat, decaying
+   --  by 30 % a beat to nothing from up to 40 luma levels (half that after a
+   --  move of 0.01, a twentieth of a pixel, and the more the longer the move).
+   procedure Boot_On_Rig
+     (M : in out Model; Settling : Boolean; Done, Ok : out Boolean; Beats : out Natural; Still_Poses : out Natural)
+   is
+      --  The poses of arm 1 away from rest at which it could give a keyframe
+      --  (Kinematics.Held_Still): the rig has no instrument, so the keyframes
+      --  themselves stop after the first match is refused.
+      Max_Poses : constant := 1_000;
+      Poses     : array (1 .. Max_Poses) of Real_Array (1 .. 2) := [others => [0.0, 0.0]];
+      H        : Driver.Robot.Hand.Hands;
+      Finished : Boolean := False with Atomic;
+      Fine_Run : Boolean := False with Atomic;
 
       task Decider;
       task body Decider is
          Fine : Boolean;
       begin
          Boot.Run (M, H, "", Fine);
-         Ok := Fine;
-         Done := True;
+         Fine_Run := Fine;
+         Finished := True;
       exception
          when others =>
             Driver.Beats.Release;
-            Done := True;
+            Finished := True;
       end Decider;
 
       Now, Shown : Rig_State;
       Sent  : Driver.Commands.Command;
-      Beats : Natural := 0;
+      Since : Natural := Natural'Last;   --  beats since arm 1 last moved in eye 1's picture
+      Trail : Real := 0.0;               --  how much the picture flickers after that move
       --  As many beats as the boot may take: every channel of the rig probed
       --  from the resolution of one reading unit, pushed both ways, and swept.
-      Bound : constant := 20_000;
+      Bound : constant := 40_000;
    begin
+      Beats := 0;
+      Still_Poses := 0;
       begin
       for B in 0 .. Bound loop
-         exit when Done;
+         exit when Finished;
          declare
             O       : Observation;
             Took    : Boolean := False;
@@ -862,7 +1005,36 @@ package body Driver.Robot.Tests is
             begin
                Drawn.Closer := 0.0;
                for E in 1 .. 3 loop
-                  O.Images.Append (Render (E, Drawn));
+                  declare
+                     Picture : Driver.Images.Image := Render (E, Drawn);
+                  begin
+                     if Settling and then E = 1 and then Since < Natural'Last then
+                        declare
+                           use type Driver.Bytes.Offset;
+                           Flicker : constant Real := Trail * 0.7 ** Since;
+                           Data    : Driver.Bytes.Byte_Array (1 .. 3 * Rig_Width * Rig_Height);
+                        begin
+                           for Y in 0 .. Rig_Height - 1 loop
+                              for X in 0 .. Rig_Width - 1 loop
+                                 declare
+                                    K : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Y * Rig_Width + X) + 1);
+                                    L : constant Real := Real (Driver.Images.Red (Picture, X, Y))
+                                      + (if (X * 7 + Y * 13) mod 10 /= 0 then 0.0
+                                         elsif (B + X) mod 2 = 0 then Flicker else -Flicker);
+                                    V : constant Driver.Bytes.Byte :=
+                                      Driver.Bytes.Byte (Integer (Real'Max (0.0, Real'Min (255.0, L))));
+                                 begin
+                                    Data (K) := V;
+                                    Data (K + 1) := V;
+                                    Data (K + 2) := V;
+                                 end;
+                              end loop;
+                           end loop;
+                           Picture := Driver.Images.Create (Rig_Width, Rig_Height, Data);
+                        end;
+                     end if;
+                     O.Images.Append (Picture);
+                  end;
                   O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
                end loop;
             end;
@@ -885,9 +1057,17 @@ package body Driver.Robot.Tests is
             end if;
             Observe (M, O, Sent);
             Driver.Robot.Hand.Observe (H, M, O, Sent);
+            if Arm_Count (M) >= 1 and then Now.Arm_1 /= [0.0, 0.0]
+              and then Driver.Robot.Kinematics.Held_Still (M, 1, M.Beats - 1)
+              and then (for all K in 1 .. Still_Poses => Poses (K) /= Now.Arm_1)
+              and then Still_Poses < Max_Poses
+            then
+               Still_Poses := Still_Poses + 1;
+               Poses (Still_Poses) := Now.Arm_1;
+            end if;
             loop
                Driver.Beats.Offer (O.Beat, O, Sent, Took);
-               exit when Took or else Done;
+               exit when Took or else Finished;
                delay 0.0;
             end loop;
             exit when not Took;
@@ -898,6 +1078,18 @@ package body Driver.Robot.Tests is
                   Driver.Commands.Set_Target (Sent, G, Driver.Commands.Target (Pending, G));
                end if;
             end loop;
+            --  Eye 1's next picture shows Now; it settles from a move of arm 1.
+            if Now.Arm_1 /= Shown.Arm_1 then
+               --  The longer the move, the more the picture flickers after it.
+               declare
+                  D : constant Real := Real'Max (abs (Now.Arm_1 (1) - Shown.Arm_1 (1)), abs (Now.Arm_1 (2) - Shown.Arm_1 (2)));
+               begin
+                  Trail := 40.0 * D / (D + 0.01);
+               end;
+               Since := 0;
+            elsif Since < Natural'Last then
+               Since := Since + 1;
+            end if;
             Shown := Now;
             Now.Arm_1 := Driver.Commands.Target (Sent, 1);
             Now.Arm_2 := Driver.Commands.Target (Sent, 2);
@@ -913,10 +1105,22 @@ package body Driver.Robot.Tests is
             abort Decider;
             raise;
       end;
-      if not Done then
+      if not Finished then
          abort Decider;
       end if;
-      Check (Done, "the boot did not finish within" & Bound'Image & " beats");
+      Done := Finished;
+      Ok := Fine_Run;
+   end Boot_On_Rig;
+
+   procedure Boot_From_Zero is
+      M     : Model;
+      Done  : Boolean;
+      Ok    : Boolean;
+      Beats : Natural;
+      Poses : Natural;
+   begin
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses);
+      Check (Done, "the boot did not finish");
       --  The rig's idle group takes commands and moves nothing: the boot must
       --  name the clause it breaks and hold still.
       Check (not Ok and then Contract_Breach (M, 5) = 2, "the boot did not report the idle group as breaking clause 2");
@@ -931,6 +1135,43 @@ package body Driver.Robot.Tests is
       Check (Known (Visible_Step (M, 1, 1)), "the boot measured how far arm 1 must move to be seen");
       Driver.Log.Line (Driver.Log.Robot, "boot from zero took" & Beats'Image & " beats");
    end Boot_From_Zero;
+
+   --  The rig's boot with eye 1's picture settling for beats after every move
+   --  of arm 1: every sweep level and cell is held until the picture has
+   --  stopped, so every level of every joint gives arm 1 a keyframe.
+   procedure Boot_With_Settling_Views is
+      M     : Model;
+      Done  : Boolean;
+      Ok    : Boolean;
+      Beats : Natural;
+      Levels : Natural := 0;   --  the sweep's single-joint levels of arm 1, both ways
+      Poses  : Natural;
+   begin
+      Boot_On_Rig (M, True, Done, Ok, Beats, Poses);
+      Check (Done, "the boot did not finish");
+      declare
+         Half : constant Real := Real (Natural'Min (M.Eyes (1).Grid.Width, M.Eyes (1).Grid.Height)) / 2.0;
+      begin
+         for C in 1 .. 2 loop
+            declare
+               First  : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
+               Shift  : constant Real := Lockin.Shift (M, 1, 1, C);
+               Offset : Real := First;
+            begin
+               if First > 0.0 and then Shift > 0.0 then
+                  while Offset * Shift <= Half loop
+                     Levels := Levels + 2;
+                     Offset := 2.0 * Offset;
+                  end loop;
+               end if;
+            end;
+         end loop;
+      end;
+      Driver.Log.Line (Driver.Log.Robot, "boot with settling views took" & Beats'Image & " beats; arm 1 could give"
+                       & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
+      Check (Levels > 0, "arm 1 was not swept");
+      Check (Poses >= Levels, "arm 1 could give" & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
+   end Boot_With_Settling_Views;
 
    --  A probe of a joint read exactly (noise 1e-13) whose reading settles a
    --  hair off its target, the more the further it goes (by the square of the
@@ -1286,6 +1527,12 @@ package body Driver.Robot.Tests is
                              Kinematics_Of_A_Synthetic_Arm'Access);
       Driver.Tests.Register ("robot.boot", "the boot does not finish, deadlocks with the main loop, or does not "
                              & "recognize the rig's groups when it pushes them itself", Boot_From_Zero'Access);
+      Driver.Tests.Register ("robot.boot.settling", "a sweep level whose eye's picture keeps changing for beats after "
+                             & "the arm stopped gives no keyframe", Boot_With_Settling_Views'Access);
+      Driver.Tests.Register ("robot.sweep.start", "a joint's sweep starts below where one cell of its eye tells the "
+                             & "view moved", Sweep_Starts_Where_A_Cell_Tells'Access);
+      Driver.Tests.Register ("robot.answers.unlisted", "the answers to an arm the graph no longer lists are never read, "
+                             & "so the wait for every answer never ends", Answers_Read_For_An_Unlisted_Arm'Access);
       Driver.Tests.Register ("robot.steps.jitter", "a push never ends when the held reading jitters more than it did at "
                              & "rest", Step_Ends_Despite_New_Jitter'Access);
       Driver.Tests.Register ("robot.steps.sight", "a push of a joint an eye watches is called blocked though it stopped "
@@ -1299,6 +1546,9 @@ package body Driver.Robot.Tests is
                              & "is credited with a lockstep partner's eye, a reaction to another push is taken for "
                              & "a push, the tail of a slow response is taken for rest, or the step an eye can see is "
                              & "misjudged", Roles_Of_A_Synthetic_Body'Access);
+      Driver.Tests.Register ("robot.settle.tail", "a body never settles while its eye's picture keeps changing at a "
+                             & "level above its noise at rest, or settles while that change still shrinks",
+                             Settle_After_A_Slow_Tail'Access);
       Driver.Tests.Register ("robot.keyframe.jitter", "an arm held away from rest whose reading jitters more than it did "
                              & "at rest gives no keyframe though its eye is still", Keyframe_Despite_Held_Jitter'Access);
       Driver.Tests.Register ("robot.unprobed", "a group never pushed on its own is given a role from what moved "
