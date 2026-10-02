@@ -1,4 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Numerics.Dense;
 
@@ -54,6 +55,20 @@ package body Driver.Robot.Hand.Touch is
    type Flags is array (Positive range <>) of Boolean;
    type Index_Array is array (Positive range <>) of Natural;
 
+   --  Everything sized by presses lives on the heap: the estimates also run
+   --  in the decider's task, whose stack is small. What is sized by the
+   --  tips' and surfaces' unknowns stays.
+   type Flags_Access is access Flags;
+   type Index_Access is access Index_Array;
+   type Vector_Access is access Real_Vector;
+   type Matrix_Access is access Real_Matrix;
+   type Result_Access is access Fit_Result;
+   procedure Free is new Ada.Unchecked_Deallocation (Flags, Flags_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Index_Array, Index_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Vector, Vector_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Matrix, Matrix_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Fit_Result, Result_Access);
+
    function Fit
      (Presses  : Press_Array;
       Sights   : Sight_Array;
@@ -65,7 +80,7 @@ package body Driver.Robot.Hand.Touch is
       W : constant Positive := (if As = On_Sight then 1 else Point_Unknowns);
       --  The unknowns of a tip: the distance along its line, or its point.
 
-      Result : Fit_Result (Presses => Presses'Length, Sights => J, Surfaces => K);
+      Result : Result_Access := new Fit_Result (Presses => Presses'Length, Sights => J, Surfaces => K);
 
       function Sight_Of (P : Press) return Positive is (P.Sight - Sights'First + 1);
       function Surface_Of (P : Press) return Positive is (P.Surface - Surfaces'First + 1);
@@ -82,9 +97,9 @@ package body Driver.Robot.Hand.Touch is
         (if As = On_Sight then Line (S).Origin.Mean + Tip_Q (S) * Line (S).Direction.Unit_Vector
          else Vec3 (Tip_Q (W * (S - 1) + 1 .. W * S)));
 
-      Chosen  : Flags (Presses'Range) := [others => True];
-      Deleted : Real_Vector (Presses'Range) := [others => 0.0];
-      Dof_Of  : Index_Array (Presses'Range) := [others => 0];
+      Chosen  : Flags_Access := new Flags'(Presses'Range => True);
+      Deleted : Vector_Access := new Real_Vector'(Presses'Range => 0.0);
+      Dof_Of  : Index_Access := new Index_Array'(Presses'Range => 0);
       Stopped : Index_Array (1 .. J) := [others => 0];
       Sunk    : Index_Array (1 .. J) := [others => 0];
 
@@ -150,146 +165,159 @@ package body Driver.Robot.Hand.Touch is
          end if;
          declare
             Dof   : constant Positive := Rows - Unknowns;
-            A     : Real_Matrix (1 .. Rows, 1 .. Unknowns);
-            B     : Real_Vector (1 .. Rows);
-            Base  : Real_Matrix (1 .. Rows, 1 .. Unknowns) := [others => [others => 0.0]];
-            Rhs   : Real_Vector (1 .. Rows) := [others => 0.0];
-            Sigma : Real_Vector (1 .. Rows) := [others => 1.0];
-            Press_Of_Row : Index_Array (1 .. Rows) := [others => 0];
+            A     : Matrix_Access := new Real_Matrix (1 .. Rows, 1 .. Unknowns);
+            B     : Vector_Access := new Real_Vector (1 .. Rows);
+            Base  : Matrix_Access := new Real_Matrix'(1 .. Rows => [1 .. Unknowns => 0.0]);
+            Rhs   : Vector_Access := new Real_Vector'(1 .. Rows => 0.0);
+            Sigma : Vector_Access := new Real_Vector'(1 .. Rows => 1.0);
+            Press_Of_Row : Index_Access := new Index_Array'(1 .. Rows => 0);
             Q     : Real_Vector (1 .. Unknowns);
             Full  : Boolean;
             Row   : Natural := 0;
             Scale : Real := 1.0;
             Previous : Real := Real'Last;
-         begin
-            for I in Presses'Range loop
-               if Chosen (I) then
-                  declare
-                     P    : Press renames Presses (I);
-                     S    : constant Positive := Sight_Of (P);
-                     F    : constant Positive := Surface_Of (P);
-                     X    : constant Vec3 := Tip_At (S);
-                     Y    : constant Vec3 := P.Tool.Pose * X;
-                     N    : constant Vec3 := Nominal (F).Normal;
-                     Lift : constant Vec3 := Transpose (P.Tool.Pose.Rotation) * N;
-                     H    : constant Real := N * (Y - Nominal (F).Centre);
-                     C0   : constant Positive := Column_Of_Sight (S);
-                     CF   : constant Positive := Column_Of_Surface (F);
-                  begin
-                     Row := Row + 1;
-                     Press_Of_Row (Row) := I;
-                     --  The height is linear in the tip's unknowns.
-                     if As = On_Sight then
-                        Base (Row, C0) := Lift * Line (S).Direction.Unit_Vector;
-                        Rhs (Row) := -(H - Base (Row, C0) * Tip_Q (S));
-                     else
-                        for C in 1 .. Point_Unknowns loop
-                           Base (Row, C0 + C - 1) := Lift (C);
-                        end loop;
-                        Rhs (Row) := -(H - Lift * X);
-                     end if;
-                     --  A higher surface lowers the tip's height above it.
-                     --  A measured surface's plane here is its prior, and its
-                     --  correction is solved whole; an unknown one's plane is the
-                     --  current estimate, corrected by a step.
-                     Base (Row, CF) := -1.0;
-                     Base (Row, CF + 1) := -(Nominal (F).Tangent_1 * (Y - Nominal (F).Centre));
-                     Base (Row, CF + 2) := -(Nominal (F).Tangent_2 * (Y - Nominal (F).Centre));
-                     Sigma (Row) := Pose_Sigma (P.Tool, X, N);
-                  end;
-               end if;
-            end loop;
-            --  Each measured surface's prior, whitened: the offset alone, the
-            --  two tilts through the inverse of their covariance's Cholesky factor.
-            for F in 1 .. K loop
-               if Column_Of_Surface (F) > 0 and then Prior (F).Measured then
-                  declare
-                     P   : constant Geometry.Plane_Estimate := Prior (F).Plane;
-                     CF  : constant Positive := Column_Of_Surface (F);
-                     L11 : constant Real := Sqrt (P.Tilt_11);
-                     L21 : constant Real := P.Tilt_12 / L11;
-                     L22 : constant Real := Sqrt (Real'Max (P.Tilt_22 - L21 * L21, Real'Model_Small));
-                  begin
-                     Base (Row + 1, CF) := 1.0 / P.Offset_Sigma;
-                     Base (Row + 2, CF + 1) := 1.0 / L11;
-                     Base (Row + 3, CF + 1) := -L21 / (L11 * L22);
-                     Base (Row + 3, CF + 2) := 1.0 / L22;
-                     Row := Row + Plane_Unknowns;
-                  end;
-               end if;
-            end loop;
-            --  The presses' variance in units of their predicted one: never
-            --  below it, raised to what they actually scatter when that is
-            --  more; it is the fixed point at which the chi square of all rows
-            --  matches its degrees of freedom. The priors keep their own.
-            loop
-               for R in 1 .. Rows loop
-                  declare
-                     S : constant Real := (if Press_Of_Row (R) > 0 then Sigma (R) * Sqrt (Scale) else 1.0);
-                  begin
-                     for C in 1 .. Unknowns loop
-                        A (R, C) := Base (R, C) / S;
-                     end loop;
-                     B (R) := Rhs (R) / S;
-                  end;
-               end loop;
-               Driver.Numerics.Dense.Least_Squares (A, B, Q, Full);
-               if not Full then
-                  return;
-               end if;
-               declare
-                  Res    : constant Real_Vector := A * Q - B;
-                  Next   : constant Real := Real'Max (1.0, Scale * (Res * Res) / Real (Dof));
-                  Change : constant Real := abs (Next - Scale);
-               begin
-                  exit when Change <= Driver.Conventions.Unchanged_Fraction * Scale or else Change >= Previous;
-                  Previous := Change;
-                  Scale := Next;
-               end;
-            end loop;
-            declare
-               Inv : constant Real_Matrix := Inverse (Transpose (A) * A);
-               Res : constant Real_Vector := A * Q - B;
-               Chi : constant Real := Res * Res;
+            procedure Solved;
+            --  The solve itself; it may end early, and its rows are
+            --  released after.
+            procedure Solved is
             begin
-               --  An unknown the presses fix only to round-off has no variance.
-               if (for some R in 1 .. Unknowns => not (Inv (R, R) > 0.0)) then
-                  return;
-               end if;
-               Noise := Scale;
-               Noise_Dof := (if Scale > 1.0 then Dof else 0);
-               Solution_Q := [others => 0.0];
-               Solution_Cov := [others => [others => 0.0]];
-               for R in 1 .. Unknowns loop
-                  Solution_Q (R) := Q (R);
-                  for C in 1 .. Unknowns loop
-                     Solution_Cov (R, C) := Inv (R, C);
-                  end loop;
-               end loop;
-               Deleted := [others => 0.0];
-               Dof_Of := [others => 0];
-               for R in 1 .. Rows loop
-                  if Press_Of_Row (R) > 0 then
+               for I in Presses'Range loop
+                  if Chosen (I) then
                      declare
-                        Row_R    : constant Real_Vector := [for C in 1 .. Unknowns => A (R, C)];
-                        Free     : constant Real := 1.0 - Row_R * (Inv * Row_R);
-                        --  The others' noise in the same units, at least the predicted one.
-                        Without  : Real := 1.0 / Scale;
+                        P    : Press renames Presses (I);
+                        S    : constant Positive := Sight_Of (P);
+                        F    : constant Positive := Surface_Of (P);
+                        X    : constant Vec3 := Tip_At (S);
+                        Y    : constant Vec3 := P.Tool.Pose * X;
+                        N    : constant Vec3 := Nominal (F).Normal;
+                        Lift : constant Vec3 := Transpose (P.Tool.Pose.Rotation) * N;
+                        H    : constant Real := N * (Y - Nominal (F).Centre);
+                        C0   : constant Positive := Column_Of_Sight (S);
+                        CF   : constant Positive := Column_Of_Surface (F);
                      begin
-                        if Free > Real'Model_Epsilon then
-                           --  Leaving this press out removes Res^2 / (1 - h) from the chi square.
-                           if Dof > 1 and then (Chi - Res (R) ** 2 / Free) / Real (Dof - 1) > Without then
-                              Without := (Chi - Res (R) ** 2 / Free) / Real (Dof - 1);
-                              Dof_Of (Press_Of_Row (R)) := Dof - 1;
-                           end if;
-                           --  The residual is the tip's height above the surface.
-                           Deleted (Press_Of_Row (R)) := Res (R) / Sqrt (Without * Free);
+                        Row := Row + 1;
+                        Press_Of_Row (Row) := I;
+                        --  The height is linear in the tip's unknowns.
+                        if As = On_Sight then
+                           Base (Row, C0) := Lift * Line (S).Direction.Unit_Vector;
+                           Rhs (Row) := -(H - Base (Row, C0) * Tip_Q (S));
+                        else
+                           for C in 1 .. Point_Unknowns loop
+                              Base (Row, C0 + C - 1) := Lift (C);
+                           end loop;
+                           Rhs (Row) := -(H - Lift * X);
                         end if;
+                        --  A higher surface lowers the tip's height above it.
+                        --  A measured surface's plane here is its prior, and its
+                        --  correction is solved whole; an unknown one's plane is the
+                        --  current estimate, corrected by a step.
+                        Base (Row, CF) := -1.0;
+                        Base (Row, CF + 1) := -(Nominal (F).Tangent_1 * (Y - Nominal (F).Centre));
+                        Base (Row, CF + 2) := -(Nominal (F).Tangent_2 * (Y - Nominal (F).Centre));
+                        Sigma (Row) := Pose_Sigma (P.Tool, X, N);
                      end;
                   end if;
                end loop;
-            end;
-            Ok := True;
+               --  Each measured surface's prior, whitened: the offset alone, the
+               --  two tilts through the inverse of their covariance's Cholesky factor.
+               for F in 1 .. K loop
+                  if Column_Of_Surface (F) > 0 and then Prior (F).Measured then
+                     declare
+                        P   : constant Geometry.Plane_Estimate := Prior (F).Plane;
+                        CF  : constant Positive := Column_Of_Surface (F);
+                        L11 : constant Real := Sqrt (P.Tilt_11);
+                        L21 : constant Real := P.Tilt_12 / L11;
+                        L22 : constant Real := Sqrt (Real'Max (P.Tilt_22 - L21 * L21, Real'Model_Small));
+                     begin
+                        Base (Row + 1, CF) := 1.0 / P.Offset_Sigma;
+                        Base (Row + 2, CF + 1) := 1.0 / L11;
+                        Base (Row + 3, CF + 1) := -L21 / (L11 * L22);
+                        Base (Row + 3, CF + 2) := 1.0 / L22;
+                        Row := Row + Plane_Unknowns;
+                     end;
+                  end if;
+               end loop;
+               --  The presses' variance in units of their predicted one: never
+               --  below it, raised to what they actually scatter when that is
+               --  more; it is the fixed point at which the chi square of all rows
+               --  matches its degrees of freedom. The priors keep their own.
+               loop
+                  for R in 1 .. Rows loop
+                     declare
+                        S : constant Real := (if Press_Of_Row (R) > 0 then Sigma (R) * Sqrt (Scale) else 1.0);
+                     begin
+                        for C in 1 .. Unknowns loop
+                           A (R, C) := Base (R, C) / S;
+                        end loop;
+                        B (R) := Rhs (R) / S;
+                     end;
+                  end loop;
+                  Driver.Numerics.Dense.Least_Squares (A.all, B.all, Q, Full);
+                  if not Full then
+                     return;
+                  end if;
+                  declare
+                     Res    : constant Real_Vector := A.all * Q - B.all;
+                     Next   : constant Real := Real'Max (1.0, Scale * (Res * Res) / Real (Dof));
+                     Change : constant Real := abs (Next - Scale);
+                  begin
+                     exit when Change <= Driver.Conventions.Unchanged_Fraction * Scale or else Change >= Previous;
+                     Previous := Change;
+                     Scale := Next;
+                  end;
+               end loop;
+               declare
+                  Inv : constant Real_Matrix := Inverse (Transpose (A.all) * A.all);
+                  Res : constant Real_Vector := A.all * Q - B.all;
+                  Chi : constant Real := Res * Res;
+               begin
+                  --  An unknown the presses fix only to round-off has no variance.
+                  if (for some R in 1 .. Unknowns => not (Inv (R, R) > 0.0)) then
+                     return;
+                  end if;
+                  Noise := Scale;
+                  Noise_Dof := (if Scale > 1.0 then Dof else 0);
+                  Solution_Q := [others => 0.0];
+                  Solution_Cov := [others => [others => 0.0]];
+                  for R in 1 .. Unknowns loop
+                     Solution_Q (R) := Q (R);
+                     for C in 1 .. Unknowns loop
+                        Solution_Cov (R, C) := Inv (R, C);
+                     end loop;
+                  end loop;
+                  Deleted.all := [others => 0.0];
+                  Dof_Of.all := [others => 0];
+                  for R in 1 .. Rows loop
+                     if Press_Of_Row (R) > 0 then
+                        declare
+                           Row_R    : constant Real_Vector := [for C in 1 .. Unknowns => A (R, C)];
+                           Free     : constant Real := 1.0 - Row_R * (Inv * Row_R);
+                           --  The others' noise in the same units, at least the predicted one.
+                           Without  : Real := 1.0 / Scale;
+                        begin
+                           if Free > Real'Model_Epsilon then
+                              --  Leaving this press out removes Res^2 / (1 - h) from the chi square.
+                              if Dof > 1 and then (Chi - Res (R) ** 2 / Free) / Real (Dof - 1) > Without then
+                                 Without := (Chi - Res (R) ** 2 / Free) / Real (Dof - 1);
+                                 Dof_Of (Press_Of_Row (R)) := Dof - 1;
+                              end if;
+                              --  The residual is the tip's height above the surface.
+                              Deleted (Press_Of_Row (R)) := Res (R) / Sqrt (Without * Free);
+                           end if;
+                        end;
+                     end if;
+                  end loop;
+               end;
+               Ok := True;
+            end Solved;
+         begin
+            Solved;
+            Free (A);
+            Free (B);
+            Free (Base);
+            Free (Rhs);
+            Free (Sigma);
+            Free (Press_Of_Row);
          end;
       end Solve;
 
@@ -353,8 +381,8 @@ package body Driver.Robot.Hand.Touch is
             return;
          end if;
          declare
-            A    : Real_Matrix (1 .. Rows, 1 .. Columns) := [others => [others => 0.0]];
-            B    : Real_Vector (1 .. Rows) := [others => 0.0];
+            A    : Matrix_Access := new Real_Matrix'(1 .. Rows => [1 .. Columns => 0.0]);
+            B    : Vector_Access := new Real_Vector'(1 .. Rows => 0.0);
             Q    : Real_Vector (1 .. Columns);
             Full : Boolean;
             R    : Natural := 0;
@@ -381,8 +409,8 @@ package body Driver.Robot.Hand.Touch is
             end loop;
             --  Columns nothing bears on are pinned, so the rest can be solved.
             declare
-               Pinned : Real_Matrix (1 .. Rows + Columns, 1 .. Columns) := [others => [others => 0.0]];
-               Rhs    : Real_Vector (1 .. Rows + Columns) := [others => 0.0];
+               Pinned : Matrix_Access := new Real_Matrix'(1 .. Rows + Columns => [1 .. Columns => 0.0]);
+               Rhs    : Vector_Access := new Real_Vector'(1 .. Rows + Columns => 0.0);
             begin
                for I in 1 .. Rows loop
                   for C in 1 .. Columns loop
@@ -395,8 +423,12 @@ package body Driver.Robot.Hand.Touch is
                      Pinned (Rows + C, C) := 1.0;
                   end if;
                end loop;
-               Driver.Numerics.Dense.Least_Squares (Pinned, Rhs, Q, Full);
+               Driver.Numerics.Dense.Least_Squares (Pinned.all, Rhs.all, Q, Full);
+               Free (Pinned);
+               Free (Rhs);
             end;
+            Free (A);
+            Free (B);
             if not Full then
                return;
             end if;
@@ -428,15 +460,28 @@ package body Driver.Robot.Hand.Touch is
          Ok := True;
       end Start;
 
+      function Done return Fit_Result;
+      --  The result, with what the fit kept per press released.
+
+      function Done return Fit_Result is
+      begin
+         return Copy : constant Fit_Result := Result.all do
+            Free (Result);
+            Free (Chosen);
+            Free (Deleted);
+            Free (Dof_Of);
+         end return;
+      end Done;
+
    begin
       for P of Presses loop
          if not Pose_Known (P.Tool) then
-            return Result;
+            return Done;
          end if;
       end loop;
       for S in 1 .. J loop
          if not Known (Line (S).Origin) or else Line (S).Direction.Sigma >= Real'Last then
-            return Result;
+            return Done;
          end if;
       end loop;
       declare
@@ -444,7 +489,7 @@ package body Driver.Robot.Hand.Touch is
       begin
          Start (Started);
          if not Started then
-            return Result;
+            return Done;
          end if;
       end;
       if As = Free then
@@ -453,7 +498,7 @@ package body Driver.Robot.Hand.Touch is
             Along : constant Fit_Result := Fit (Presses, Sights, Surfaces, On_Sight);
          begin
             if not Along.Ok then
-               return Result;
+               return Done;
             end if;
             for S in 1 .. J loop
                declare
@@ -482,7 +527,7 @@ package body Driver.Robot.Hand.Touch is
                Lay_Out;
                Solve (Solved);
                if not Solved then
-                  return Result;
+                  return Done;
                end if;
                declare
                   Size : constant Real := Take;
@@ -591,7 +636,7 @@ package body Driver.Robot.Hand.Touch is
             Result.Planes (F) := Prior (F).Plane;
          end if;
       end loop;
-      return Result;
+      return Done;
    end Fit;
 
 end Driver.Robot.Hand.Touch;

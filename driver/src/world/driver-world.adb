@@ -111,7 +111,6 @@ package body Driver.World is
       Points : constant Driver.World.Pairs.Match_Vectors.Vector :=
         (if Known_Thing (S, T) then Driver.World.Estimates.Points_Of (S.Data.State, T)
          else Driver.World.Pairs.Match_Vectors.Empty_Vector);
-      Result : Sample_Array (1 .. Natural (Points.Length));
       --  Each point by the pixel of the first eye it was seen at, so a
       --  point's neighbours on the surface are its neighbours in the image.
       type Key is record
@@ -138,29 +137,31 @@ package body Driver.World is
       for I in 1 .. Natural (Points.Length) loop
          Index.Include (Key_Of (Points (I)), I);
       end loop;
-      for I in Result'Range loop
-         declare
-            K : constant Key := Key_Of (Points (I));
-            Left, Right, Above, Below : Vec3;
-            Normal : Vec3 := Zero3;
-         begin
-            --  The surface's normal from the points beside it in the image;
-            --  none where a neighbour is missing.
-            if At_Key ((K.Eye, K.Column - 1, K.Row), Left) and then At_Key ((K.Eye, K.Column + 1, K.Row), Right)
-              and then At_Key ((K.Eye, K.Column, K.Row - 1), Above) and then At_Key ((K.Eye, K.Column, K.Row + 1), Below)
-            then
-               declare
-                  N : constant Vec3 := Cross (Right - Left, Below - Above);
-               begin
-                  if abs N > 0.0 then
-                     Normal := Unit (N);
-                  end if;
-               end;
-            end if;
-            Result (I) := (Point => Points (I).Point.Mean, Normal => Normal, Seen => True);
-         end;
-      end loop;
-      return Result;
+      return Result : Sample_Array (1 .. Natural (Points.Length)) do
+         for I in Result'Range loop
+            declare
+               K : constant Key := Key_Of (Points (I));
+               Left, Right, Above, Below : Vec3;
+               Normal : Vec3 := Zero3;
+            begin
+               --  The surface's normal from the points beside it in the image;
+               --  none where a neighbour is missing.
+               if At_Key ((K.Eye, K.Column - 1, K.Row), Left) and then At_Key ((K.Eye, K.Column + 1, K.Row), Right)
+                 and then At_Key ((K.Eye, K.Column, K.Row - 1), Above)
+                 and then At_Key ((K.Eye, K.Column, K.Row + 1), Below)
+               then
+                  declare
+                     N : constant Vec3 := Cross (Right - Left, Below - Above);
+                  begin
+                     if abs N > 0.0 then
+                        Normal := Unit (N);
+                     end if;
+                  end;
+               end if;
+               Result (I) := (Point => Points (I).Point.Mean, Normal => Normal, Seen => True);
+            end;
+         end loop;
+      end return;
    end Samples;
 
    function Sample_Sigma (S : Scene; T : Thing_Id) return Real is

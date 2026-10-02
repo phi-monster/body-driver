@@ -1,5 +1,6 @@
 with Ada.Containers.Ordered_Sets;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Stats;
 
 package body Driver.Robot.Hand.Lobes is
@@ -12,6 +13,17 @@ package body Driver.Robot.Hand.Lobes is
    --  data: its scale is worth that share of as many degrees of freedom.
 
    package Natural_Vectors is new Ada.Containers.Vectors (Natural, Natural);
+
+   --  Everything sized by pixels or components lives on the heap: the
+   --  estimates also run in the decider's task, whose stack is small.
+   type Real_Access is access Real_Array;
+   type Count_Array is array (Positive range <>) of Natural;
+   type Count_Access is access Count_Array;
+   type Flag_Array is array (Positive range <>) of Boolean;
+   type Flags_Access is access Flag_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Count_Array, Count_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flags_Access);
 
    --  Component labels of a mask, one per pixel (row-major), 0 off the mask.
    type Labels is record
@@ -52,7 +64,8 @@ package body Driver.Robot.Hand.Lobes is
                  Round_Trip_Gate   => Vector_Gate (2));
       end if;
       declare
-         Moves, Trips : Real_Array (1 .. 2 * Count);
+         Moves : Real_Access := new Real_Array (1 .. 2 * Count);
+         Trips : Real_Access := new Real_Array (1 .. 2 * Count);
          K : Natural := 0;
       begin
          for C of Still loop
@@ -67,10 +80,14 @@ package body Driver.Robot.Hand.Lobes is
          end loop;
          declare
             Dof : constant Natural := Natural (Real'Floor (Mad_Efficiency * Real (2 * Count)));
+            Moves_Sigma : constant Real := Driver.Stats.Robust_Sigma (Moves.all);
+            Trips_Sigma : constant Real := Driver.Stats.Robust_Sigma (Trips.all);
          begin
-            return (Displacement      => (Value => 0.0, Sigma => Driver.Stats.Robust_Sigma (Moves),
+            Free (Moves);
+            Free (Trips);
+            return (Displacement      => (Value => 0.0, Sigma => Moves_Sigma,
                                           Degrees_Of_Freedom => Dof),
-                    Round_Trip        => (Value => 0.0, Sigma => Driver.Stats.Robust_Sigma (Trips),
+                    Round_Trip        => (Value => 0.0, Sigma => Trips_Sigma,
                                           Degrees_Of_Freedom => Dof),
                     Displacement_Gate => Vector_Gate (2, Dof),
                     Round_Trip_Gate   => Vector_Gate (2, Dof));
@@ -293,8 +310,8 @@ package body Driver.Robot.Hand.Lobes is
       --  The components of M that hold a seed, numbered from one; the others
       --  are not moving parts and get label zero.
       All_Of : Labels := Components (M);
-      Seeded : array (1 .. All_Of.Count) of Boolean := [others => False];
-      Number : array (1 .. All_Of.Count) of Natural := [others => 0];
+      Seeded : Flags_Access := new Flag_Array'(1 .. All_Of.Count => False);
+      Number : Count_Access := new Count_Array'(1 .. All_Of.Count => 0);
       Kept   : Natural := 0;
    begin
       for R in 0 .. All_Of.Height - 1 loop
@@ -316,6 +333,8 @@ package body Driver.Robot.Hand.Lobes is
          end if;
       end loop;
       All_Of.Count := Kept;
+      Free (Seeded);
+      Free (Number);
       return All_Of;
    end Seeded_Components;
 
@@ -351,30 +370,51 @@ package body Driver.Robot.Hand.Lobes is
          package Link_Sets is new Ada.Containers.Ordered_Sets (Link);
          Links : Link_Sets.Set;
          function Linked (La, Lb : Positive) return Boolean is (Links.Contains ((A_Label => La, B_Label => Lb)));
-         Group_A : array (1 .. A.Count) of Natural := [others => 0];
-         Group_B : array (1 .. B.Count) of Natural := [others => 0];
+         Group_A : Count_Access := new Count_Array'(1 .. A.Count => 0);
+         Group_B : Count_Access := new Count_Array'(1 .. B.Count => 0);
          Groups  : Natural := 0;
 
          procedure Spread (From_A : Boolean; Index_Of : Positive; G : Positive);
-         --  Marks everything linked to a component as group G.
+         --  Marks everything linked to a component as group G: by a list of
+         --  the components still to visit, not by recursion, as the chain of
+         --  links can be as long as there are components.
 
          procedure Spread (From_A : Boolean; Index_Of : Positive; G : Positive) is
+            type Visit is record
+               In_A  : Boolean;
+               Label : Positive;
+            end record;
+            package Visit_Vectors is new Ada.Containers.Vectors (Positive, Visit);
+            To_Visit : Visit_Vectors.Vector;
          begin
             if From_A then
                Group_A (Index_Of) := G;
-               for Lb in 1 .. B.Count loop
-                  if Linked (Index_Of, Lb) and then Group_B (Lb) = 0 then
-                     Spread (False, Lb, G);
-                  end if;
-               end loop;
             else
                Group_B (Index_Of) := G;
-               for La in 1 .. A.Count loop
-                  if Linked (La, Index_Of) and then Group_A (La) = 0 then
-                     Spread (True, La, G);
-                  end if;
-               end loop;
             end if;
+            To_Visit.Append (Visit'(In_A => From_A, Label => Index_Of));
+            while not To_Visit.Is_Empty loop
+               declare
+                  V : constant Visit := To_Visit.Last_Element;
+               begin
+                  To_Visit.Delete_Last;
+                  if V.In_A then
+                     for Lb in 1 .. B.Count loop
+                        if Linked (V.Label, Lb) and then Group_B (Lb) = 0 then
+                           Group_B (Lb) := G;
+                           To_Visit.Append (Visit'(In_A => False, Label => Lb));
+                        end if;
+                     end loop;
+                  else
+                     for La in 1 .. A.Count loop
+                        if Linked (La, V.Label) and then Group_A (La) = 0 then
+                           Group_A (La) := G;
+                           To_Visit.Append (Visit'(In_A => True, Label => La));
+                        end if;
+                     end loop;
+                  end if;
+               end;
+            end loop;
          end Spread;
       begin
          for C of Forward loop
@@ -475,6 +515,8 @@ package body Driver.Robot.Hand.Lobes is
                end;
             end;
          end loop;
+         Free (Group_A);
+         Free (Group_B);
       end;
       return Result;
    end Find;

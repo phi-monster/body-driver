@@ -1,5 +1,6 @@
 with Ada.Containers.Ordered_Sets;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Ada.Strings.Unbounded;
 with Driver.Log;
 with Driver.World.Regions;
@@ -14,6 +15,20 @@ package body Driver.World.Estimates is
    use type Driver.World.Tracking.Phase;
 
    package Tracks renames Driver.World.Tracking;
+
+   --  Everything sized by pixels, points, surfaces or things lives on the
+   --  heap: the estimates also run in the decider's task, whose stack is small.
+   type Answers_Access is access Driver.Instrument.Answer_Array;
+   type Points_Access is access Driver.Geometry.Point_Array;
+   type Grid_Access is access Driver.World.Supports.Grid_Array;
+   type Flags_Access is access Driver.Geometry.Flag_Array;
+   type Thing_Flags is array (Thing_Id range <>) of Boolean;
+   type Thing_Flags_Access is access Thing_Flags;
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Instrument.Answer_Array, Answers_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Geometry.Point_Array, Points_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.World.Supports.Grid_Array, Grid_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Geometry.Flag_Array, Flags_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Thing_Flags, Thing_Flags_Access);
 
    Empty_Slot : Slot;
    --  No track; its ticket is never read while Out_Now is False.
@@ -57,14 +72,15 @@ package body Driver.World.Estimates is
             if Tracks.State (Here.Track) = Tracks.Matching then
                declare
                   Points  : constant Driver.Instrument.Point_Array := Here.Points.Element;
-                  Answers : Driver.Instrument.Answer_Array (Points'Range);
+                  Answers : Answers_Access := new Driver.Instrument.Answer_Array (Points'Range);
                begin
-                  Driver.Instrument.Read_Match (Reply, True, Answers, Ok, Why);
+                  Driver.Instrument.Read_Match (Reply, True, Answers.all, Ok, Why);
                   if Ok then
-                     Tracks.Matched (Here.Track, Points, Answers);
+                     Tracks.Matched (Here.Track, Points, Answers.all);
                   else
                      Tracks.Failed (Here.Track);
                   end if;
+                  Free (Answers);
                end;
             else
                declare
@@ -278,18 +294,117 @@ package body Driver.World.Estimates is
             end if;
          end;
       end loop;
-      for P of R.By_Pair loop
-         for M of P.Kept loop
-            if Inside_Pointed (R, M.Point.Mean, Camera_Of, Seen) then
-               Now.Append (M);
+      --  A pair's point is the thing's only once another pair bears it out:
+      --  it lies within the thing as the other pairs' points place it, their
+      --  spread about their middle and its own uncertainty taken together, by
+      --  the one significance rule. One pair alone is two eyes alone, and two
+      --  eyes cannot tell a wrong match that met on the line its first sight
+      --  draws from a right one; another pair, through other eyes or other
+      --  pixels, can.
+      for P in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
+         declare
+            Elsewhere : Natural := 0;   --  the other pairs' points
+            Middle : Vec3 := Zero3;
+            Spread : Mat3 := [others => [others => 0.0]];
+         begin
+            for Q in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
+               if Q /= P then
+                  for M of R.By_Pair (Q).Kept loop
+                     Elsewhere := Elsewhere + 1;
+                     Middle := Middle + M.Point.Mean;
+                  end loop;
+               end if;
+            end loop;
+            if Elsewhere >= 4 then
+               Middle := (1.0 / Real (Elsewhere)) * Middle;
+               for Q in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
+                  if Q /= P then
+                     for M of R.By_Pair (Q).Kept loop
+                        Spread := Spread + Driver.Numerics.Outer (M.Point.Mean - Middle, M.Point.Mean - Middle);
+                     end loop;
+                  end if;
+               end loop;
+               Spread := (1.0 / Real (Elsewhere - 1)) * Spread;
+               for M of R.By_Pair (P).Kept loop
+                  declare
+                     D : constant Vec3 := M.Point.Mean - Middle;
+                     C : constant Mat3 := Inverse (Spread + M.Point.Covariance);
+                  begin
+                     if Inside_Pointed (R, M.Point.Mean, Camera_Of, Seen)
+                       and then not Significant
+                         (Vector_Gate (3, Elsewhere - 1, Tests => Natural'Max (1, Natural (R.By_Pair (P).Kept.Length))),
+                          Sqrt (Real'Max (0.0, D * (C * D))), 1.0)
+                     then
+                        Now.Append (M);
+                     end if;
+                  end;
+               end loop;
             end if;
-         end loop;
+         end;
       end loop;
       if Driver.World.Pairs.Match_Vectors."/=" (Now, R.Points) then
          R.Points := Now;
          R.Points_At := Seen.Beat;
       end if;
       R.Has_Points := not R.Points.Is_Empty;
+      --  How far the thing reaches as the eyes it was pointed at in see it:
+      --  each region's pixels, on a grid as many pixels apart as the square
+      --  root of the region's shorter side, carried out along their sights
+      --  to the depth of the middle of what is seen of it. Its points may
+      --  cover only a part of what those regions show.
+      R.Outline.Clear;
+      if R.Has_Points then
+         declare
+            Middle : Vec3 := Zero3;
+         begin
+            for M of R.Points loop
+               Middle := Middle + M.Point.Mean;
+            end loop;
+            Middle := (1.0 / Real (R.Points.Length)) * Middle;
+            for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
+               if Holds (R, E) and then R.Eyes (E).Pointed
+                 and then Driver.Images.Count (Tracks.Region (R.Eyes (E).Track)) > 0
+               then
+                  declare
+                     Eye_Camera : constant Driver.World.Cameras.Camera'Class := Camera_Of (E, Seen);
+                     Region     : constant Driver.Images.Mask := Tracks.Region (R.Eyes (E).Track);
+                     B          : constant Driver.World.Regions.Box := Driver.World.Regions.Bounds (Region);
+                     Stride     : constant Positive :=
+                       Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (B.Column_1 - B.Column_0 + 1,
+                                                                                      B.Row_1 - B.Row_0 + 1))))));
+                     Axis       : constant Vec3 := Middle - Eye_Camera.Pose.Pose.Translation;
+                     Row        : Natural := B.Row_0;
+                  begin
+                     while Row <= B.Row_1 loop
+                        declare
+                           Column : Natural := B.Column_0;
+                        begin
+                           while Column <= B.Column_1 loop
+                              if Driver.Images.Contains (Region, Column, Row) then
+                                 declare
+                                    Sight : constant Ray_Estimate :=
+                                      Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));
+                                    Along : constant Real := Sight.Direction.Unit_Vector * Axis;
+                                 begin
+                                    if Along > 0.0 and then Sight.Direction.Sigma < Real'Last then
+                                       R.Outline.Append
+                                         (Point_Estimate'
+                                            (Mean       => Sight.Origin.Mean
+                                                           + (Real'(Axis * Axis) / Along) * Sight.Direction.Unit_Vector,
+                                             Covariance => [others => [others => 0.0]]));
+                                    end if;
+                                 end;
+                              end if;
+                              Column := Column + Stride;
+                           end loop;
+                        end;
+                        Row := Row + Stride;
+                     end loop;
+                  end;
+               end if;
+            end loop;
+         end;
+      end if;
    end Gather;
 
    function In_Reach (F : Driver.World.Supports.Surface; X : Vec3) return Boolean;
@@ -328,7 +443,8 @@ package body Driver.World.Estimates is
       --  has points enough to spread (four, for a spread in three dimensions),
       --  only the scene bears them out.
       Tests    : constant Positive := Natural'Max (1, Natural (Kept.Length));
-      Own_Face : array (S.Surfaces.First_Index .. S.Surfaces.Last_Index) of Boolean := [others => False];
+      Own_Face : Flags_Access :=
+        new Driver.Geometry.Flag_Array'(S.Surfaces.First_Index .. S.Surfaces.Last_Index => False);
       N        : constant Natural := Natural (R.Points.Length);
       Middle   : Vec3 := Zero3;
       Spread   : Mat3 := [others => [others => 0.0]];
@@ -387,6 +503,7 @@ package body Driver.World.Estimates is
          end;
       end loop;
       Kept := Kept_Now;
+      Free (Own_Face);
    end Consistent;
 
    procedure Read_Crosses
@@ -407,7 +524,7 @@ package body Driver.World.Estimates is
                R.Crosses.Delete (I);
                declare
                   Points  : constant Driver.Instrument.Point_Array := X.Points.Element;
-                  Answers : Driver.Instrument.Answer_Array (Points'Range);
+                  Answers : Answers_Access := new Driver.Instrument.Answer_Array (Points'Range);
                   Ok      : Boolean;
                   Why     : Unbounded_String;
                   Kept    : Driver.World.Pairs.Match_Vectors.Vector;
@@ -416,14 +533,15 @@ package body Driver.World.Estimates is
                   Error   : Real;
                   Seen    : constant Observation_Holders.Constant_Reference_Type := X.Seen.Constant_Reference;
                begin
-                  Driver.Instrument.Read_Match (Driver.Services.Collect (X.Ticket), True, Answers, Ok, Why);
+                  Driver.Instrument.Read_Match (Driver.Services.Collect (X.Ticket), True, Answers.all, Ok, Why);
                   if Ok then
                      Driver.World.Pairs.Triangulate (Camera_Of (X.From, Seen.Element), Camera_Of (X.Into, Seen.Element),
-                                                     Points, X.Own, Answers, Kept, Apart, Far, Error);
+                                                     Points, X.Own, Answers.all, Kept, Apart, Far, Error);
                   else
                      Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": the instrument did not match eye"
                                       & X.From'Image & " into eye" & X.Into'Image & ": " & To_String (Why));
                   end if;
+                  Free (Answers);
                   declare
                      Met_Before : constant Natural := Natural (Kept.Length);
                      Within     : Driver.World.Pairs.Match_Vectors.Vector;
@@ -588,26 +706,29 @@ package body Driver.World.Estimates is
      return Driver.Instrument.Point_Array
    is
       --  The centre of the middle pixel of each cell of the grid, but where
-      --  the eye sees the robot.
+      --  the eye sees the robot. Built where it is returned, off the stack.
       Columns : constant Natural := Driver.Images.Width (Image) / Stride;
       Rows    : constant Natural := Driver.Images.Height (Image) / Stride;
-      Points  : Driver.Instrument.Point_Array (1 .. Columns * Rows);
       Count   : Natural := 0;
+      function Cell (C, R : Natural) return Driver.Images.Pixel is
+        ((U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5));
    begin
       for R in 0 .. Rows - 1 loop
          for C in 0 .. Columns - 1 loop
-            declare
-               Px : constant Driver.Images.Pixel :=
-                 (U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);
-            begin
-               if not Inside (Robot, Px) then
-                  Count := Count + 1;
-                  Points (Count) := Px;
-               end if;
-            end;
+            Count := Count + Boolean'Pos (not Inside (Robot, Cell (C, R)));
          end loop;
       end loop;
-      return Points (1 .. Count);
+      return Points : Driver.Instrument.Point_Array (1 .. Count) do
+         Count := 0;
+         for R in 0 .. Rows - 1 loop
+            for C in 0 .. Columns - 1 loop
+               if not Inside (Robot, Cell (C, R)) then
+                  Count := Count + 1;
+                  Points (Count) := Cell (C, R);
+               end if;
+            end loop;
+         end loop;
+      end return;
    end Grid_Points;
 
    function Settled (S : State) return Boolean is
@@ -793,7 +914,7 @@ package body Driver.World.Estimates is
                   if X.Round = S.Round then
                      declare
                         Points  : constant Driver.Instrument.Point_Array := X.Points.Element;
-                        Answers : Driver.Instrument.Answer_Array (Points'Range);
+                        Answers : Answers_Access := new Driver.Instrument.Answer_Array (Points'Range);
                         Ok      : Boolean;
                         Why     : Unbounded_String;
                         Kept    : Driver.World.Pairs.Match_Vectors.Vector;
@@ -808,14 +929,15 @@ package body Driver.World.Estimates is
                         Columns : constant Natural := Driver.Images.Width (Seen.Element.Images (X.From)) / X.Stride;
                         Added   : Natural := 0;
                      begin
-                        Driver.Instrument.Read_Match (Reply, True, Answers, Ok, Why);
+                        Driver.Instrument.Read_Match (Reply, True, Answers.all, Ok, Why);
                         if Ok then
                            Driver.World.Pairs.Triangulate
-                             (First, Second, Points, Points'Length, Answers, Kept, Apart, Far, Error);
+                             (First, Second, Points, Points'Length, Answers.all, Kept, Apart, Far, Error);
                         else
                            Driver.Log.Line (Driver.Log.World, "the scene: the instrument did not match eye"
                                             & X.From'Image & " into eye" & X.Into'Image & ": " & To_String (Why));
                         end if;
+                        Free (Answers);
                         --  Each pair's grid apart from the others', so no two are
                         --  neighbours; a match landing on the robot in the second
                         --  eye is not the scene's.
@@ -854,8 +976,8 @@ package body Driver.World.Estimates is
             Driver.Log.Line (Driver.Log.World, "the scene: round" & S.Round'Image & " gave no points; the surfaces stay");
          else
             declare
-               All_Points : Driver.Geometry.Point_Array (1 .. Natural (S.Incoming.Length));
-               All_Grid   : Driver.World.Supports.Grid_Array (1 .. Natural (S.Incoming.Length));
+               All_Points : Points_Access := new Driver.Geometry.Point_Array (1 .. Natural (S.Incoming.Length));
+               All_Grid   : Grid_Access := new Driver.World.Supports.Grid_Array (1 .. Natural (S.Incoming.Length));
                Found      : Driver.World.Supports.Surface_Vectors.Vector;
                Scene      : Scene_Point_Vectors.Vector := S.Incoming;
                Carried    : Natural := 0;
@@ -864,7 +986,7 @@ package body Driver.World.Estimates is
                   All_Points (K) := S.Incoming (K).Point;
                   All_Grid (K) := S.Incoming (K).Grid;
                end loop;
-               Driver.World.Supports.Find (All_Points, All_Grid, S.Up, S.Seen_From, Found);
+               Driver.World.Supports.Find (All_Points.all, All_Grid.all, S.Up, S.Seen_From, Found);
                --  A surface of this episode stands where this measurement neither
                --  found it again nor saw through it: eyes that look elsewhere
                --  now say nothing of it. Its points come along, so its members
@@ -897,6 +1019,8 @@ package body Driver.World.Estimates is
                Driver.Log.Line (Driver.Log.World, "the scene:" & Found.Length'Image & " surfaces things can rest on, from"
                                 & All_Points'Length'Image & " points," & Carried'Image
                                 & " of them measured before and not seen since");
+               Free (All_Points);
+               Free (All_Grid);
             end;
          end if;
       end if;
@@ -973,14 +1097,15 @@ package body Driver.World.Estimates is
          if S.Things (Id).Under_Due then
             declare
                R      : Thing_Record := S.Things (Id);
-               Points : Driver.Geometry.Point_Array (1 .. Natural (R.Points.Length));
+               Points : Points_Access := new Driver.Geometry.Point_Array (1 .. Natural (R.Points.Length));
                function Own (Member : Positive) return Boolean is
                  (On_Thing (R, S.Scene (Member).Point.Mean, Camera_Of, Seen));
             begin
                for K in Points'Range loop
                   Points (K) := R.Points (K).Point;
                end loop;
-               R.Under := Driver.World.Supports.Under (S.Surfaces, Points, S.Up, Own'Access);
+               R.Under := Driver.World.Supports.Under (S.Surfaces, Points.all, S.Up, Own'Access);
+               Free (Points);
                R.Under_Due := False;
                S.Things.Replace_Element (Id, R);
             end;
@@ -997,7 +1122,7 @@ package body Driver.World.Estimates is
       Still     : Boolean;
       O         : Observation)
    is
-      Moved : array (S.Things.First_Index .. S.Things.Last_Index) of Boolean := [others => False];
+      Moved : Thing_Flags_Access := new Thing_Flags'(S.Things.First_Index .. S.Things.Last_Index => False);
       --  The eyes of this beat, for where points fall in them.
       Held  : constant Observation_Holders.Holder := Observation_Holders.To_Holder (O);
       Seen  : constant Observation_Holders.Constant_Reference_Type := Held.Constant_Reference;
@@ -1063,7 +1188,7 @@ package body Driver.World.Estimates is
             S.Things.Replace_Element (Id, R);
          end;
       end loop;
-      if (for some M of Moved => M) or else (for some R of S.Things => R.Under_Due) then
+      if (for some M of Moved.all => M) or else (for some R of S.Things => R.Under_Due) then
          for Id in Moved'Range loop
             if Moved (Id) then
                Changed (S, Id, Camera_Of, Seen.Element);
@@ -1072,6 +1197,7 @@ package body Driver.World.Estimates is
          end loop;
          Refresh_Supports (S, Camera_Of, Seen.Element);
       end if;
+      Free (Moved);
       Ask_Background (S, Eyes, Camera_Of, Still, O);
    end Observe;
 
@@ -1147,10 +1273,12 @@ package body Driver.World.Estimates is
          --  The middle of what the eyes saw of it. Its points share the eyes'
          --  pose errors, so their covariance is kept as one point's, not
          --  divided by their number. The thing's own middle is not there: a
-         --  solid seen from one side reaches behind and under what is seen,
-         --  as far as its support. So the covariance also holds how far the
-         --  seen points, and the space under them down to the support, lie
-         --  from that middle: the thing's middle is somewhere within that.
+         --  solid seen from one side reaches beside what its points cover (as
+         --  far as its regions show it), behind and under it, as far as its
+         --  support. So the covariance also holds how far the seen points, its
+         --  outline at their depth, and the space under all of them down to
+         --  the support lie from that middle: the thing's middle is somewhere
+         --  within that.
          N      : constant Real := Real (R.Points.Length);
          Middle : constant Vec3 := (1.0 / N) * Sum;
          Extent : Mat3 := [others => [others => 0.0]];
@@ -1160,9 +1288,9 @@ package body Driver.World.Estimates is
             Extent := Extent + Driver.Numerics.Outer (X - Middle, X - Middle);
             Count := Count + 1;
          end Add;
-      begin
-         for M of R.Points loop
-            Add (M.Point.Mean);
+         procedure With_Foot (X : Vec3) is
+         begin
+            Add (X);
             if R.Under.Index /= 0 then
                declare
                   P    : constant Driver.Geometry.Plane_Estimate := S.Surfaces (R.Under.Index).Plane;
@@ -1170,10 +1298,17 @@ package body Driver.World.Estimates is
                begin
                   if Lean /= 0.0 then
                      --  Its foot on the support, straight down along Up.
-                     Add (M.Point.Mean - (Driver.Geometry.Height (P, M.Point.Mean) / Lean) * S.Up.Unit_Vector);
+                     Add (X - (Driver.Geometry.Height (P, X) / Lean) * S.Up.Unit_Vector);
                   end if;
                end;
             end if;
+         end With_Foot;
+      begin
+         for M of R.Points loop
+            With_Foot (M.Point.Mean);
+         end loop;
+         for X of R.Outline loop
+            With_Foot (X.Mean);
          end loop;
          return (Mean       => Middle,
                  Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);

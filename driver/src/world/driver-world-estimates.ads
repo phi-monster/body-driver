@@ -179,6 +179,8 @@ private
       Has_Points : Boolean := False;
       Friction  : Friction_Bounds;
       Touches   : Point_Vectors.Vector;
+      Outline   : Point_Vectors.Vector;   --  its regions where it was pointed at, carried out to
+                                          --  the depth of what is seen of it
       Under     : Driver.World.Supports.Support;   --  its support, worked out again when its
       Under_Due : Boolean := True;                 --  points or the surfaces change
    end record;

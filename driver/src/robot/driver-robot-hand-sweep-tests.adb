@@ -1,4 +1,6 @@
+with Ada.Exceptions;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings.Unbounded;
 with Driver.Bytes;
 with Driver.Tests;
 
@@ -16,31 +18,35 @@ package body Driver.Robot.Hand.Sweep.Tests is
    --  The sweep reads only the beat; its readings and image are passed beside it.
 
    --  Two dark fingers enter from the bottom border; at closer reading R
-   --  (1 open, 0 closed) each has moved (1 - R) * 45 columns inwards.
-   function Left_Edge (Finger : Positive; R : Real) return Integer is
-     (if Finger = 1 then 10 + Integer (45.0 * (1.0 - R)) else 130 - Integer (45.0 * (1.0 - R)));
+   --  (1 open, 0 closed) each has moved (1 - R) * 45 columns inwards. A view
+   --  Scale times as wide and high shows the same, Scale times as large.
+   function Left_Edge (Finger : Positive; R : Real; Scale : Positive := 1) return Integer is
+     (Scale * (if Finger = 1 then 10 + Integer (45.0 * (1.0 - R)) else 130 - Integer (45.0 * (1.0 - R))));
 
-   function On_Finger (C, Row : Natural; R : Real) return Natural is
+   function On_Finger (C, Row : Natural; R : Real; Scale : Positive := 1) return Natural is
    begin
       for F in 1 .. 2 loop
-         if Row >= 40 and then Integer (C) in Left_Edge (F, R) .. Left_Edge (F, R) + 19 then
+         if Row >= Scale * 40
+           and then Integer (C) in Left_Edge (F, R, Scale) .. Left_Edge (F, R, Scale) + Scale * 20 - 1
+         then
             return F;
          end if;
       end loop;
       return 0;
    end On_Finger;
 
-   function Frame (R : Real) return Driver.Images.Image is
-      Data : Driver.Bytes.Byte_Array (1 .. 3 * W * H);
+   function Frame (R : Real; Scale : Positive := 1) return Driver.Images.Image is
+      Data : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset (3 * Scale * W * Scale * H));
    begin
-      for Row in 0 .. H - 1 loop
-         for C in 0 .. W - 1 loop
+      for Row in 0 .. Scale * H - 1 loop
+         for C in 0 .. Scale * W - 1 loop
             declare
                --  A textured table, so every background pixel has its own value.
                Table : constant Natural :=
                  Natural (128.0 + 60.0 * Sin (Real (C) * 0.37) * Cos (Real (Row) * 0.23) + Real ((C * 7 + Row * 13) mod 19));
-               L : constant Driver.Bytes.Byte := Driver.Bytes.Byte (if On_Finger (C, Row, R) > 0 then 20 else Table);
-               K : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Row * W + C));
+               L : constant Driver.Bytes.Byte :=
+                 Driver.Bytes.Byte (if On_Finger (C, Row, R, Scale) > 0 then 20 else Table);
+               K : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Row * Scale * W + C));
             begin
                Data (K + 1) := L;
                Data (K + 2) := L;
@@ -48,34 +54,36 @@ package body Driver.Robot.Hand.Sweep.Tests is
             end;
          end loop;
       end loop;
-      return Driver.Images.Create (W, H, Data);
+      return Driver.Images.Create (Scale * W, Scale * H, Data);
    end Frame;
 
    --  The matcher's answers for points of the view at reading From, looked
    --  for in the view at reading To.
-   function Answers (Points : Driver.Instrument.Point_Array; From, To : Real) return Driver.Instrument.Answer_Array is
-      Result : Driver.Instrument.Answer_Array (Points'Range);
+   function Answers (Points : Driver.Instrument.Point_Array; From, To : Real; Scale : Positive := 1)
+     return Driver.Instrument.Answer_Array is
    begin
-      for K in Points'Range loop
-         declare
-            P : constant Driver.Images.Pixel := Points (K);
-            C : constant Natural := Natural (Real'Floor (P.U));
-            R : constant Natural := Natural (Real'Floor (P.V));
-            F : constant Natural := On_Finger (C, R, From);
-         begin
-            if F > 0 then
-               Result (K) := (Found => True, Certainty => 1.0, Back => P,
-                              To => (U => P.U + Real (Left_Edge (F, To) - Left_Edge (F, From)), V => P.V));
-            elsif On_Finger (C, R, To) > 0 then
-               --  Covered in the other view: nowhere to go, no way back.
-               Result (K) := (Found => True, Certainty => 0.1, To => (U => P.U + 7.0, V => P.V),
-                              Back => (U => P.U + 11.0, V => P.V + 3.0));
-            else
-               Result (K) := (Found => True, Certainty => 1.0, To => P, Back => P);
-            end if;
-         end;
-      end loop;
-      return Result;
+      return Result : Driver.Instrument.Answer_Array (Points'Range) do
+         for K in Points'Range loop
+            declare
+               P : constant Driver.Images.Pixel := Points (K);
+               C : constant Natural := Natural (Real'Floor (P.U));
+               R : constant Natural := Natural (Real'Floor (P.V));
+               F : constant Natural := On_Finger (C, R, From, Scale);
+            begin
+               if F > 0 then
+                  Result (K) := (Found => True, Certainty => 1.0, Back => P,
+                                 To => (U => P.U + Real (Left_Edge (F, To, Scale) - Left_Edge (F, From, Scale)),
+                                        V => P.V));
+               elsif On_Finger (C, R, To, Scale) > 0 then
+                  --  Covered in the other view: nowhere to go, no way back.
+                  Result (K) := (Found => True, Certainty => 0.1, To => (U => P.U + 7.0, V => P.V),
+                                 Back => (U => P.U + 11.0, V => P.V + 3.0));
+               else
+                  Result (K) := (Found => True, Certainty => 1.0, To => P, Back => P);
+               end if;
+            end;
+         end loop;
+      end return;
    end Answers;
 
    procedure Two_Fingers_Swept is
@@ -127,6 +135,87 @@ package body Driver.Robot.Hand.Sweep.Tests is
          end if;
       end if;
    end Two_Fingers_Swept;
+
+   procedure Swept_In_A_Task is
+      --  The hand's estimate runs inside the decider's task, whose stack is
+      --  GNAT's default: the closer swept open to closed and back in a VGA
+      --  eye the fingers fill much of, the change between its ends asked of
+      --  the matcher pixel by pixel both ways round, and the lobes found from
+      --  the answers. Every per-pixel quantity of that is megabytes.
+      Scale    : constant := 4;
+      Readings : constant Real_Array := [1.0, 0.7, 0.5, 0.2, 0.0];
+      type Frame_Array is array (Readings'Range) of Driver.Images.Image;
+      Frames   : constant Frame_Array := [for I in Readings'Range => Frame (Readings (I), Scale)];
+      S        : State := Start (Scale * W, Scale * H, Channels => 1, Closer_Noise => [1 => 0.0],
+                                 Rest_Noise => [1 => 0.0]);
+      Done     : Boolean := False with Atomic;
+      Asked_At : Natural := 0;
+      Found    : Natural := 0;
+      Failure  : Ada.Strings.Unbounded.Unbounded_String;
+
+      function Frame_At (R : Real) return Driver.Images.Image is
+      begin
+         for I in Readings'Range loop
+            if Readings (I) = R then
+               return Frames (I);
+            end if;
+         end loop;
+         raise Program_Error with "no frame drawn at reading" & R'Image;
+      end Frame_At;
+   begin
+      declare
+         task Decider;
+         task body Decider is
+            B : Driver.Clock.Beat := 0;
+            procedure Hold (R : Real; Count : Positive) is
+            begin
+               for I in 1 .. Count loop
+                  Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame_At (R));
+                  B := B + 1;
+               end loop;
+            end Hold;
+            procedure Move (R : Real) is
+            begin
+               Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame_At (R));
+               B := B + 1;
+            end Move;
+         begin
+            Hold (1.0, 3);
+            Move (0.7);
+            Hold (0.5, 2);
+            Move (0.2);
+            Hold (0.0, 3);
+            Move (0.5);
+            Hold (1.0, 2);
+            Move (1.0);
+            if Wants_Correspondences (S, 1) then
+               declare
+                  Points : constant Driver.Instrument.Point_Array := Query_Points (S, 1);
+                  Low    : constant Real := Views.Reading (Low_End (S, 1), 1);
+                  High   : constant Real := Views.Reading (High_End (S, 1), 1);
+               begin
+                  Asked_At := Points'Length;
+                  Asked (S, 1);
+                  Answer (S, 1, Points, Answers (Points, Low, High, Scale), Answers (Points, High, Low, Scale),
+                          Driver.Images.Create (Scale * W, Scale * H));
+               end;
+               if Status (S, 1) = Measured then
+                  Found := Natural (Lobes_Of (S, 1).Length);
+               end if;
+            end if;
+            Done := True;
+         exception
+            when E : others =>
+               Failure := Ada.Strings.Unbounded.To_Unbounded_String (Ada.Exceptions.Exception_Information (E));
+         end Decider;
+      begin
+         null;
+      end;
+      Check (Done, "the sweep's estimate failed in a task with the default stack: "
+             & Ada.Strings.Unbounded.To_String (Failure));
+      Check (not Done or else Found = 2, "two fingers in a VGA view gave" & Found'Image & " lobes, from"
+             & Asked_At'Image & " pixels asked");
+   end Swept_In_A_Task;
 
    procedure Nothing_Seen is
       --  A channel whose push changes nothing this eye sees.
@@ -209,6 +298,8 @@ package body Driver.Robot.Hand.Sweep.Tests is
                              Refused_For_Now'Access);
       Driver.Tests.Register ("hand.sweep.two", "a closer swept open to closed does not yield its lobes and closed end",
                              Two_Fingers_Swept'Access);
+      Driver.Tests.Register ("hand.sweep.task", "the sweep's estimate fails in a task with the default stack, as the "
+                             & "decider's does", Swept_In_A_Task'Access);
       Driver.Tests.Register ("hand.sweep.nothing", "a push that changes nothing in the eye is sent to the matcher",
                              Nothing_Seen'Access);
    end Register;

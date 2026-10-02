@@ -12,41 +12,44 @@ package body Driver.World.Regions is
    function Depths (M : Mask) return Distances is
       --  Every pixel's distance from the region's outside along the region,
       --  in steps of 1 and the square root of 2 (two chamfer passes); the
-      --  image's border counts as outside.
+      --  image's border counts as outside. Built where it is returned, off
+      --  the stack: it is sized by pixels, and the estimates also run in the
+      --  decider's task, whose stack is small.
       W : constant Natural := Width (M);
       H : constant Natural := Height (M);
-      D : Distances (0 .. W * H - 1) := [others => Real'Last];
       Diagonal : constant Real := Sqrt (2.0);
       function Index (C, R : Natural) return Natural is (R * W + C);
-      function At_Pixel (C, R : Integer) return Real is
-        (if C < 0 or else R < 0 or else C >= W or else R >= H then 0.0 else D (Index (C, R)));
    begin
-      for R in 0 .. H - 1 loop
-         for C in 0 .. W - 1 loop
-            if not Contains (M, C, R) then
-               D (Index (C, R)) := 0.0;
-            end if;
-         end loop;
-      end loop;
-      for R in 0 .. H - 1 loop
-         for C in 0 .. W - 1 loop
-            if D (Index (C, R)) > 0.0 then
-               D (Index (C, R)) := Real'Min (D (Index (C, R)),
-                 Real'Min (Real'Min (At_Pixel (C - 1, R) + 1.0, At_Pixel (C, R - 1) + 1.0),
-                           Real'Min (At_Pixel (C - 1, R - 1) + Diagonal, At_Pixel (C + 1, R - 1) + Diagonal)));
-            end if;
-         end loop;
-      end loop;
-      for R in reverse 0 .. H - 1 loop
-         for C in reverse 0 .. W - 1 loop
-            if D (Index (C, R)) > 0.0 then
-               D (Index (C, R)) := Real'Min (D (Index (C, R)),
-                 Real'Min (Real'Min (At_Pixel (C + 1, R) + 1.0, At_Pixel (C, R + 1) + 1.0),
-                           Real'Min (At_Pixel (C + 1, R + 1) + Diagonal, At_Pixel (C - 1, R + 1) + Diagonal)));
-            end if;
-         end loop;
-      end loop;
-      return D;
+      return D : Distances (0 .. W * H - 1) do
+         declare
+            function At_Pixel (C, R : Integer) return Real is
+              (if C < 0 or else R < 0 or else C >= W or else R >= H then 0.0 else D (Index (C, R)));
+         begin
+            for R in 0 .. H - 1 loop
+               for C in 0 .. W - 1 loop
+                  D (Index (C, R)) := (if Contains (M, C, R) then Real'Last else 0.0);
+               end loop;
+            end loop;
+            for R in 0 .. H - 1 loop
+               for C in 0 .. W - 1 loop
+                  if D (Index (C, R)) > 0.0 then
+                     D (Index (C, R)) := Real'Min (D (Index (C, R)),
+                       Real'Min (Real'Min (At_Pixel (C - 1, R) + 1.0, At_Pixel (C, R - 1) + 1.0),
+                                 Real'Min (At_Pixel (C - 1, R - 1) + Diagonal, At_Pixel (C + 1, R - 1) + Diagonal)));
+                  end if;
+               end loop;
+            end loop;
+            for R in reverse 0 .. H - 1 loop
+               for C in reverse 0 .. W - 1 loop
+                  if D (Index (C, R)) > 0.0 then
+                     D (Index (C, R)) := Real'Min (D (Index (C, R)),
+                       Real'Min (Real'Min (At_Pixel (C + 1, R) + 1.0, At_Pixel (C, R + 1) + 1.0),
+                                 Real'Min (At_Pixel (C + 1, R + 1) + Diagonal, At_Pixel (C - 1, R + 1) + Diagonal)));
+                  end if;
+               end loop;
+            end loop;
+         end;
+      end return;
    end Depths;
 
    function Radius (M : Mask) return Real is

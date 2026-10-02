@@ -1,4 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Bytes;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -11,9 +12,16 @@ package body Driver.World.Tracking is
    use Driver.Images;
    use type Driver.Bytes.Offset;
 
+   --  Everything sized by pixels lives on the heap: the estimates also run in
+   --  the decider's task, whose stack is small.
+   type Bytes_Access is access Driver.Bytes.Byte_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Bytes.Byte_Array, Bytes_Access);
+   type Real_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
+
    function Cut (Frame : Image; Column_0, Row_0, Columns, Rows : Natural) return Image is
       --  The box of a frame as an image of its own.
-      Result : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset (3 * Columns * Rows));
+      Result : Bytes_Access := new Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset (3 * Columns * Rows));
       procedure Copy (RGB : Driver.Bytes.Byte_Array) is
          W : constant Natural := Width (Frame);
       begin
@@ -28,7 +36,9 @@ package body Driver.World.Tracking is
       end Copy;
    begin
       Query (Frame, Copy'Access);
-      return Create (Columns, Rows, Result);
+      return Box : constant Image := Create (Columns, Rows, Result.all) do
+         Free (Result);
+      end return;
    end Cut;
 
    function Start (Region : Mask; On : Image; Beat : Driver.Clock.Beat) return Track is
@@ -61,14 +71,16 @@ package body Driver.World.Tracking is
       Latest_Two : Driver.Pixels.View := Driver.Pixels.Empty (T.Columns, T.Rows);
       Count_Ref  : constant Positive := Driver.Pixels.Frames (T.Reference);
       Gate       : constant Driver.Uncertain.Gate := Scalar_Gate (Count_Ref - 1);
-      Ref_Mean, Ref_Variance, Now_Mean : Real_Array (1 .. T.Columns * T.Rows);
+      Ref_Mean     : Real_Access := new Real_Array (1 .. T.Columns * T.Rows);
+      Ref_Variance : Real_Access := new Real_Array (1 .. T.Columns * T.Rows);
+      Now_Mean     : Real_Access := new Real_Array (1 .. T.Columns * T.Rows);
       Flags      : Mask := Create (T.Columns, T.Rows);
    begin
       Driver.Pixels.Add (Latest_Two, T.Older.Element);
       Driver.Pixels.Add (Latest_Two, T.Newer.Element);
-      Driver.Pixels.Means (T.Reference, Ref_Mean);
-      Driver.Pixels.Variances (T.Reference, Ref_Variance);
-      Driver.Pixels.Means (Latest_Two, Now_Mean);
+      Driver.Pixels.Means (T.Reference, Ref_Mean.all);
+      Driver.Pixels.Variances (T.Reference, Ref_Variance.all);
+      Driver.Pixels.Means (Latest_Two, Now_Mean.all);
       for R in 0 .. T.Rows - 1 loop
          for C in 0 .. T.Columns - 1 loop
             declare
@@ -83,6 +95,9 @@ package body Driver.World.Tracking is
             end;
          end loop;
       end loop;
+      Free (Ref_Mean);
+      Free (Ref_Variance);
+      Free (Now_Mean);
       return Flags;
    end Changes;
 
@@ -196,25 +211,26 @@ package body Driver.World.Tracking is
             Total := Total + Boolean'Pos (Asked_Around (T, Region, C, R));
          end loop;
       end loop;
-      declare
-         Points : Driver.Instrument.Point_Array (1 .. Total);
-         Mine   : Natural := 0;
-         Beside : Natural := Own;
-      begin
-         for R in 0 .. T.Rows - 1 loop
-            for C in 0 .. T.Columns - 1 loop
-               --  The pixel's centre, in the whole image: the region's first.
-               if Asked_Own (T, Region, C, R) then
-                  Mine := Mine + 1;
-                  Points (Mine) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);
-               elsif Asked_Around (T, Region, C, R) then
-                  Beside := Beside + 1;
-                  Points (Beside) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);
-               end if;
+      --  Built where it is returned, not on the stack: it is sized by pixels.
+      return Points : Driver.Instrument.Point_Array (1 .. Total) do
+         declare
+            Mine   : Natural := 0;
+            Beside : Natural := Own;
+         begin
+            for R in 0 .. T.Rows - 1 loop
+               for C in 0 .. T.Columns - 1 loop
+                  --  The pixel's centre, in the whole image: the region's first.
+                  if Asked_Own (T, Region, C, R) then
+                     Mine := Mine + 1;
+                     Points (Mine) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);
+                  elsif Asked_Around (T, Region, C, R) then
+                     Beside := Beside + 1;
+                     Points (Beside) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);
+                  end if;
+               end loop;
             end loop;
-         end loop;
-         return Points;
-      end;
+         end;
+      end return;
    end Region_And_Around;
 
    function Match_Points (T : Track) return Driver.Instrument.Point_Array is (Region_And_Around (T));
@@ -256,7 +272,7 @@ package body Driver.World.Tracking is
       end if;
       declare
          --  The matcher's error, from the round trips of the pixels around it.
-         Trips : Real_Array (1 .. 2 * Still_Found);
+         Trips : Real_Access := new Real_Array (1 .. 2 * Still_Found);
          K     : Natural := 0;
       begin
          for I in T.Own_Points + 1 .. Answers'Length loop
@@ -277,7 +293,7 @@ package body Driver.World.Tracking is
             --  The matcher's error from the round trips that came back right
             --  (Driver.World.Pairs.Matcher_Error): when the eye moved, many
             --  of the pixels around may no longer be in view.
-            Error   : constant Error_Fit := Error_Of (Trips, W * H);
+            Error   : constant Error_Fit := Error_Of (Trips.all, W * H);
             Sigma   : constant Real := Error.Sigma;
             Gate    : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural (Real'Floor (2.0 * Error.Right)));
             Inner   : constant Driver.Instrument.Pixel := Driver.World.Regions.Inner_Point (T.Region.Element);
@@ -285,6 +301,7 @@ package body Driver.World.Tracking is
             Back    : Natural := 0;
             Nearest : Real := Real'Last;
          begin
+            Free (Trips);   --  its error is taken
             if Error.Right < 1.0 then
                --  None of the pixels around came back right.
                T.State := Gone;

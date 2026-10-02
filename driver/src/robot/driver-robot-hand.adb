@@ -86,6 +86,11 @@ package body Driver.Robot.Hand is
 
    procedure Free is new Ada.Unchecked_Deallocation (Hand_Data, Hand_Data_Access);
 
+   --  The matcher's answers are sized by pixels and live on the heap: the
+   --  estimates also run in the decider's task, whose stack is small.
+   type Answers_Access is access Driver.Instrument.Answer_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Instrument.Answer_Array, Answers_Access);
+
    overriding procedure Finalize (H : in out Hands) is
    begin
       Free (H.Data);
@@ -315,20 +320,20 @@ package body Driver.Robot.Hand is
             then
                declare
                   Points   : constant Driver.Instrument.Point_Array := Asked.Points.Element;
-                  Forward  : Driver.Instrument.Answer_Array (Points'Range);
-                  Backward : Driver.Instrument.Answer_Array (Points'Range);
+                  Forward  : Answers_Access := new Driver.Instrument.Answer_Array (Points'Range);
+                  Backward : Answers_Access := new Driver.Instrument.Answer_Array (Points'Range);
                   Ok_Forward, Ok_Backward : Boolean;
                   Why_Forward, Why_Backward : Unbounded_String;
                   Requests : Request_Array := P.Requests.Element;
                   Ahead    : constant Driver.Services.Reply := Driver.Services.Collect (Asked.Forward);
                   Behind   : constant Driver.Services.Reply := Driver.Services.Collect (Asked.Backward);
                begin
-                  Driver.Instrument.Read_Match (Ahead, True, Forward, Ok_Forward, Why_Forward);
-                  Driver.Instrument.Read_Match (Behind, True, Backward, Ok_Backward, Why_Backward);
+                  Driver.Instrument.Read_Match (Ahead, True, Forward.all, Ok_Forward, Why_Forward);
+                  Driver.Instrument.Read_Match (Behind, True, Backward.all, Ok_Backward, Why_Backward);
                   Requests (C).Out_Now := False;
                   P.Requests := Request_Holders.To_Holder (Requests);
                   if Ok_Forward and then Ok_Backward then
-                     Sweeps.Answer (P.Sweep, C, Points, Forward, Backward, Asked.Attached);
+                     Sweeps.Answer (P.Sweep, C, Points, Forward.all, Backward.all, Asked.Attached);
                      Driver.Log.Line
                        (Driver.Log.Robot, "hand: closer group" & P.Group'Image & " channel" & C'Image & " in eye"
                         & P.Eye'Image & ": "
@@ -350,6 +355,8 @@ package body Driver.Robot.Hand is
                                          & (if Lasting then "; it never can, so nothing more is asked" else ""));
                      end;
                   end if;
+                  Free (Forward);
+                  Free (Backward);
                end;
             end if;
          end;

@@ -1,5 +1,6 @@
 with Ada.Containers.Generic_Array_Sort;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Distributions;
 with Driver.Geometry;
 
@@ -8,6 +9,13 @@ package body Driver.World.Pairs is
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
 
+   --  Everything sized by matches lives on the heap: the estimates also run
+   --  in the decider's task, whose stack is small.
+   type Real_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
+   type Index_Array is array (Positive range <>) of Natural;
+   type Index_Access is access Index_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Index_Array, Index_Access);
 
    function Round_Trip (A : Driver.Instrument.Answer; From : Driver.Images.Pixel) return Real is
      (Sqrt ((A.Back.U - From.U) ** 2 + (A.Back.V - From.V) ** 2));
@@ -27,7 +35,6 @@ package body Driver.World.Pairs is
       --  Sigma of one coordinate of a right match's error, and how many of the
       --  errors are of right ones.
       N      : constant Natural := Squared'Length;
-      Sorted : Real_Array := Squared;
       Best   : Real := Real'First;   --  the best likelihood found so far
       Wrong  : constant Real := 1.0 / Measure;   --  a wrong match's density
       K      : constant Real := Real (Dimensions);
@@ -82,14 +89,19 @@ package body Driver.World.Pairs is
          Right := Real (N);
          return;
       end if;
-      Sort (Sorted);
-      loop
-         if Sorted (Sorted'First + Rank - 1) > 0.0 then
-            Fit (Sqrt (Sorted (Sorted'First + Rank - 1) / K));
-         end if;
-         exit when Rank = N;
-         Rank := Positive'Min (N, 2 * Rank);
-      end loop;
+      declare
+         Sorted : Real_Access := new Real_Array'(Squared);
+      begin
+         Sort (Sorted.all);
+         loop
+            if Sorted (Sorted'First + Rank - 1) > 0.0 then
+               Fit (Sqrt (Sorted (Sorted'First + Rank - 1) / K));
+            end if;
+            exit when Rank = N;
+            Rank := Positive'Min (N, 2 * Rank);
+         end loop;
+         Free (Sorted);
+      end;
    end Fit_Mixture;
 
    function Finite (X : Point_Estimate) return Boolean is
@@ -128,7 +140,7 @@ package body Driver.World.Pairs is
       --  it, and over the whole range those errors look like a wide Gaussian
       --  that swallows the right ones. Within the gate of that wide fit, they
       --  are what is spread evenly, and the right ones stand out again.
-      Errors : Real_Array := Squared;
+      Errors : Real_Access := new Real_Array'(Squared);
       Count  : Natural := Squared'Length;
       Window : Real := Measure;
    begin
@@ -153,15 +165,17 @@ package body Driver.World.Pairs is
             Window := Ball (Dimensions, Edge);
          end;
       end loop;
+      Free (Errors);
    end Mixture;
 
    procedure Matcher_Error (Trips : Real_Array; Area : Real; Sigma : out Real; Right : out Real) is
-      Squared : Real_Array (1 .. Trips'Length / 2);   --  each round trip's squared length
+      Squared : Real_Access := new Real_Array (1 .. Trips'Length / 2);   --  each round trip's squared length
    begin
       for I in Squared'Range loop
          Squared (I) := Trips (Trips'First + 2 * (I - 1)) ** 2 + Trips (Trips'First + 2 * I - 1) ** 2;
       end loop;
-      Mixture (Squared, 2, Area, Sigma, Right);
+      Mixture (Squared.all, 2, Area, Sigma, Right);
+      Free (Squared);
    end Matcher_Error;
 
    function Across_Basis (U : Vec3; Second : Boolean) return Vec3 is
@@ -226,7 +240,7 @@ package body Driver.World.Pairs is
          return;
       end if;
       declare
-         Trips      : Real_Array (1 .. 2 * Around);
+         Trips      : Real_Access := new Real_Array (1 .. 2 * Around);
          Trip_Sigma : Real;   --  one coordinate of a right match's round trip
          Right      : Real;   --  how many round trips are of right matches
          K          : Natural := 0;
@@ -243,7 +257,8 @@ package body Driver.World.Pairs is
                end if;
             end;
          end loop;
-         Matcher_Error (Trips, Real (First.Width) * Real (First.Height), Trip_Sigma, Right);
+         Matcher_Error (Trips.all, Real (First.Width) * Real (First.Height), Trip_Sigma, Right);
+         Free (Trips);
          if not (Trip_Sigma < Real'Last) or else Right < 1.0 then
             return;
          end if;
@@ -255,12 +270,81 @@ package body Driver.World.Pairs is
             Freedom   : constant Positive := 1;
             --  The matches that came back, and how far, in the second eye's
             --  pixels, each one's two lines of sight pass each other.
-            Candidate : array (1 .. Own) of Natural := [others => 0];
-            Off       : Real_Array (1 .. Own);
+            Candidate : Index_Access := new Index_Array (1 .. Own);
+            Off       : Real_Access := new Real_Array (1 .. Own);
             Count     : Natural := 0;
             Diagonal  : constant Real := Sqrt (Real (Second.Width) ** 2 + Real (Second.Height) ** 2);
             Line_Sigma : Real;
             Line_Right : Real;
+            procedure Place;
+            --  The candidates placed in the scene, by the line error the
+            --  ones that passed close tell.
+            procedure Place is
+            begin
+               if Count = 0 then
+                  return;
+               end if;
+               --  The matcher's error across the line the first sight draws in the
+               --  second eye, from the matches whose lines pass close, told from
+               --  the wrong ones, which pass anywhere within the image: a matcher
+               --  can be wrong yet come back, and only the geometry tells.
+               declare
+                  Squared : Real_Access := new Real_Array (1 .. Count);
+               begin
+                  for C in Squared'Range loop
+                     Squared (C) := Off (C) ** 2;
+                  end loop;
+                  Mixture (Squared.all, 1, 2.0 * Diagonal, Line_Sigma, Line_Right);
+                  Free (Squared);
+               end;
+               if not (Line_Sigma < Real'Last) or else Line_Right < 1.0 then
+                  return;
+               end if;
+               Error := Line_Sigma;
+               declare
+                  --  How far along the first sight a point lies rests on the line
+                  --  error's degrees of freedom.
+                  Depth_Gate : constant Driver.Uncertain.Gate := Scalar_Gate (Natural (Real'Floor (Line_Right)));
+               begin
+                  for C in 1 .. Count loop
+                     declare
+                        I           : constant Positive := Candidate (C);
+                        A           : Driver.Instrument.Answer renames Answers (Answers'First + I - 1);
+                        P           : constant Driver.Images.Pixel := Points (Points'First + I - 1);
+                        From_First  : constant Ray_Estimate := First.Ray (P);
+                        From_Second : Ray_Estimate := Second.Ray (A.To);
+                        Turn        : constant Real := Driver.World.Cameras.Radians_Per_Pixel (Second, A.To);
+                        U1          : constant Vec3 := From_First.Direction.Unit_Vector;
+                        X           : Point_Estimate;
+                        Met         : Boolean;
+                     begin
+                        From_Second.Direction.Sigma :=
+                          Sqrt (From_Second.Direction.Sigma ** 2 + (Line_Sigma * Turn) ** 2);
+                        Driver.Geometry.Meet ([From_First, From_Second], X, Met);
+                        if Met and then not Finite (X) then
+                           --  Met where no number can say: no place either.
+                           Unplaced := Unplaced + 1;
+                        elsif Met then
+                           if Significant
+                             (Driver.Distributions.Chi_Square_Deviate (Misfit ([From_First, From_Second], X.Mean),
+                                                                       Freedom),
+                              1.0)
+                           then
+                              Apart := Apart + 1;
+                           elsif not Significant (Depth_Gate, U1 * (X.Mean - From_First.Origin.Mean),
+                                                  Sqrt (Real'Max (0.0, U1 * (X.Covariance * U1))))
+                           then
+                              --  The two sights are too near parallel to tell how far
+                              --  along them the point is: it is no place in the scene.
+                              Unplaced := Unplaced + 1;
+                           else
+                              Kept.Append (Match'(In_First => P, In_Second => A.To, Point => X, First => <>));
+                           end if;
+                        end if;
+                     end;
+                  end loop;
+               end;
+            end Place;
          begin
             for I in 1 .. Own loop
                declare
@@ -299,66 +383,9 @@ package body Driver.World.Pairs is
                   end if;
                end;
             end loop;
-            if Count = 0 then
-               return;
-            end if;
-            --  The matcher's error across the line the first sight draws in the
-            --  second eye, from the matches whose lines pass close, told from
-            --  the wrong ones, which pass anywhere within the image: a matcher
-            --  can be wrong yet come back, and only the geometry tells.
-            declare
-               Squared : Real_Array (1 .. Count);
-            begin
-               for C in Squared'Range loop
-                  Squared (C) := Off (C) ** 2;
-               end loop;
-               Mixture (Squared, 1, 2.0 * Diagonal, Line_Sigma, Line_Right);
-            end;
-            if not (Line_Sigma < Real'Last) or else Line_Right < 1.0 then
-               return;
-            end if;
-            Error := Line_Sigma;
-            declare
-               --  How far along the first sight a point lies rests on the line
-               --  error's degrees of freedom.
-               Depth_Gate : constant Driver.Uncertain.Gate := Scalar_Gate (Natural (Real'Floor (Line_Right)));
-            begin
-            for C in 1 .. Count loop
-               declare
-                  I           : constant Positive := Candidate (C);
-                  A           : Driver.Instrument.Answer renames Answers (Answers'First + I - 1);
-                  P           : constant Driver.Images.Pixel := Points (Points'First + I - 1);
-                  From_First  : constant Ray_Estimate := First.Ray (P);
-                  From_Second : Ray_Estimate := Second.Ray (A.To);
-                  Turn        : constant Real := Driver.World.Cameras.Radians_Per_Pixel (Second, A.To);
-                  U1          : constant Vec3 := From_First.Direction.Unit_Vector;
-                  X           : Point_Estimate;
-                  Met         : Boolean;
-               begin
-                  From_Second.Direction.Sigma := Sqrt (From_Second.Direction.Sigma ** 2 + (Line_Sigma * Turn) ** 2);
-                  Driver.Geometry.Meet ([From_First, From_Second], X, Met);
-                  if Met and then not Finite (X) then
-                     --  Met where no number can say: no place either.
-                     Unplaced := Unplaced + 1;
-                  elsif Met then
-                     if Significant
-                       (Driver.Distributions.Chi_Square_Deviate (Misfit ([From_First, From_Second], X.Mean), Freedom),
-                        1.0)
-                     then
-                        Apart := Apart + 1;
-                     elsif not Significant (Depth_Gate, U1 * (X.Mean - From_First.Origin.Mean),
-                                            Sqrt (Real'Max (0.0, U1 * (X.Covariance * U1))))
-                     then
-                        --  The two sights are too near parallel to tell how far
-                        --  along them the point is: it is no place in the scene.
-                        Unplaced := Unplaced + 1;
-                     else
-                        Kept.Append (Match'(In_First => P, In_Second => A.To, Point => X, First => <>));
-                     end if;
-                  end if;
-               end;
-            end loop;
-            end;
+            Place;
+            Free (Candidate);
+            Free (Off);
          end;
       end;
    end Triangulate;
