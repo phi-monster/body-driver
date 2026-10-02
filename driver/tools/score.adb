@@ -33,6 +33,10 @@
 --  cameras, rays from the lenses, one hand on the first link, read by the
 --  CLOSER group) seen through a known similarity and offset, and scores them;
 --  a correct scorer reports the scale it was given and no error.
+--
+--  score --project RECORDING TRUTH BEAT EYE prints, for every link the truth
+--  puts inside that eye's image at that beat, its pixel: drawn on the frame
+--  (driver/tools/frame), it checks the truth's camera model against the images.
 
 with Ada.Command_Line;
 with Ada.Containers.Indefinite_Holders;
@@ -1227,9 +1231,94 @@ procedure Score is
    end Synthesize;
 
 
+   ---------------------------------------------------------------------------
+   --  Where the truth puts each link in an eye: checks the truth's camera
+   --  model against the images themselves (draw the pixels on the frame).
+
+   procedure True_Pixel (L : Lens; In_Eye : Vec3; U, V : out Real; Visible : out Boolean) is
+   begin
+      Visible := In_Eye (3) > 0.0;
+      U := 0.0;
+      V := 0.0;
+      if L.Has_K then
+         if Visible then
+            U := L.K (1, 1) * In_Eye (1) / In_Eye (3) + L.K (1, 3);
+            V := L.K (2, 2) * In_Eye (2) / In_Eye (3) + L.K (2, 3);
+         end if;
+         return;
+      end if;
+      declare
+         --  F-theta: invert angle (r) by bisection; it rises with r over the image.
+         C     : constant Real_Array := L.Coefficients.Element;
+         Rho   : constant Real := Sqrt (In_Eye (1) ** 2 + In_Eye (2) ** 2);
+         Theta : constant Real := Arctan (Rho, In_Eye (3));
+         Lo    : Real := 0.0;
+         Hi    : Real := Real (Natural'Max (L.Width, L.Height));
+         function Angle_At (R : Real) return Real is
+            A : Real := 0.0;
+         begin
+            for I in reverse C'Range loop
+               A := A * R + C (I);
+            end loop;
+            return A;
+         end Angle_At;
+      begin
+         Visible := Theta <= L.Max_Field / 2.0 / Degrees_Per_Radian and then Angle_At (Hi) >= Theta;
+         if not Visible or else Rho = 0.0 then
+            U := Real (L.Width) / 2.0;
+            V := Real (L.Height) / 2.0;
+            return;
+         end if;
+         for Step in 1 .. Real'Machine_Mantissa loop
+            if Angle_At ((Lo + Hi) / 2.0) < Theta then
+               Lo := (Lo + Hi) / 2.0;
+            else
+               Hi := (Lo + Hi) / 2.0;
+            end if;
+         end loop;
+         U := Real (L.Width) / 2.0 + Lo * In_Eye (1) / Rho;
+         V := Real (L.Height) / 2.0 + Lo * In_Eye (2) / Rho;
+      end;
+   end True_Pixel;
+
+   procedure Project (Beat : Natural; Eye : Positive) is
+      Name : constant String := Camera_Name (Eye);
+   begin
+      if Name = "" or else Beat > Recorded.Last_Index or else Recorded (Beat).Line = 0 then
+         Ada.Text_IO.Put_Line ("no truth for that eye at that beat");
+         return;
+      end if;
+      declare
+         L   : constant Truth_Line := Truth (Recorded (Beat).Line);
+         Cam : constant Rigid := L.Cameras (Name);
+      begin
+         for C in L.Links.Iterate loop
+            declare
+               P : constant Vec3 := Inverse (Cam) * Pose_Maps.Element (C).Translation;
+               U, V : Real;
+               Visible : Boolean;
+            begin
+               True_Pixel (Lenses (Name), P, U, V, Visible);
+               if Visible and then U in 0.0 .. Real (Lenses (Name).Width) and then V in 0.0 .. Real (Lenses (Name).Height)
+               then
+                  Ada.Text_IO.Put_Line (Pose_Maps.Key (C) & " " & Image (U, 1) & " " & Image (V, 1));
+               end if;
+            end;
+         end loop;
+      end;
+   end Project;
+
+
    use Ada.Command_Line;
 
 begin
+   if Argument_Count = 5 and then Argument (1) = "--project" then
+      Read_Truth (Argument (3));
+      Read_Recording (Argument (2));
+      Pair_Beats;
+      Project (Natural'Value (Argument (4)), Positive'Value (Argument (5)));
+      return;
+   end if;
    if Argument_Count >= 5 and then Argument (1) = "--check" then
       Read_Truth (Argument (3));
       Read_Recording (Argument (2));
