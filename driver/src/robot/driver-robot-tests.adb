@@ -329,27 +329,46 @@ package body Driver.Robot.Tests is
       Rng  : Generator;
       O    : Observation;
       Sent : Driver.Commands.Command;
-   begin
       --  Group 1 reads with noise of sigma 0.01 and is pushed by 1 at beat 20,
       --  answered from beat 21. Group 2 echoes its target exactly but no
       --  further than 1 (a clipped echo): its push to 0.5 at beat 10 is
-      --  answered at once, its push to 1.5 at beat 40 never. One camera.
+      --  answered at once, its push to 1.5 at beat 40 never. Group 3 is a
+      --  simulator's joint at rest: two beats in three it repeats exactly, the
+      --  third it moves by a jitter of sigma 1e-5; it is pushed by 0.1 at beat
+      --  30, answered from beat 31. One camera.
+      Jitter : constant Real := 1.0e-5;
+      Third  : Real := 0.0;
+   begin
       for B in 0 .. 59 loop
          O := (others => <>);
          O.Beat := Driver.Clock.Beat (B);
          O.Images.Append (Driver.Images.No_Image);
          O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
-         for G in 1 .. 2 loop
+         for G in 1 .. 3 loop
             O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
          end loop;
+         if B mod 3 = 0 then
+            Third := Third + Jitter * Gaussian (Rng);
+         end if;
          O.Readings.Append (Real_Array'(1 => (if B >= 21 then 1.0 else 0.0) + 0.01 * Gaussian (Rng)));
          O.Readings.Append (Real_Array'(1 => (if B >= 40 then 1.0 elsif B >= 10 then 0.5 else 0.0)));
+         O.Readings.Append (Real_Array'(1 => (if B >= 31 then 0.1 else 0.0) + Third));
          Sent := Driver.Commands.Hold;
          Driver.Commands.Set_Target (Sent, 1, [(if B >= 20 then 1.0 else 0.0)]);
          Driver.Commands.Set_Target (Sent, 2, [(if B >= 40 then 1.5 elsif B >= 10 then 0.5 else 0.0)]);
+         Driver.Commands.Set_Target (Sent, 3, [(if B >= 30 then 0.1 else 0.0)]);
          Observe (M, O, Sent);
       end loop;
       Estimate_Now (M);
+      --  The jitter, not zero: the exact repeats say nothing about how far a
+      --  resting reading moves when it does.
+      Check (Reading_Noise (M, 3, 1) > 0.0, "a jittering reading has noise, got zero");
+      Check_Close (Reading_Noise (M, 3, 1), Jitter / Sqrt (2.0), Jitter / Sqrt (2.0) / 2.0,
+                   "noise of a reading that mostly repeats exactly");
+      for B in 1 .. 29 loop
+         Check (not Channels.Moving (M, 3, B), "a jitter is not motion, at beat" & B'Image);
+      end loop;
+      Check (Channels.Moving (M, 3, 31), "a push of the jittering reading is motion");
       Check_Close (Reading_Noise (M, 1, 1), 0.01, 0.003, "noise of a reading");
       Check (Channels.Asked (M, 1, 20), "a target one unit away asks for motion");
       Check (not Channels.Asked (M, 1, 30), "a target held where the reading is asks for nothing");
@@ -433,8 +452,9 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.roles", "a group is given the wrong role, an eye the wrong mount or lag, an arm "
                              & "is credited with a lockstep partner's eye, or a reaction to another push is taken "
                              & "for a push", Roles_Of_A_Synthetic_Body'Access);
-      Driver.Tests.Register ("robot.channels", "reading noise is misjudged, a hold is taken for a push, or a push "
-                             & "never ends", Channel_Noise_And_Pushes'Access);
+      Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "
+                             & "given noise zero, so its jitter passes for motion), a hold is taken for a push, or a "
+                             & "push never ends", Channel_Noise_And_Pushes'Access);
       Driver.Tests.Register ("robot.flow", "a cell's displacement between two frames is misestimated or a flat cell "
                              & "reports one", Flow_Recovers_Shifts'Access);
       Driver.Tests.Register ("robot.regression", "wild observations or collinear regressors bend the robust fit, "

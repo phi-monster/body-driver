@@ -107,13 +107,12 @@ package body Driver.Robot is
    procedure Estimate_Now (M : in out Model) is
       Start : constant Duration := Driver.Clock.Seconds;
    begin
-      Channels.Measure_Noise (M);
+      Channels.Measure (M);
       for S of M.Eyes loop
          if S.Has_Settled then
             Stillness.Measure_Luma_Noise (S);
          end if;
       end loop;
-      Channels.Measure_Pushes (M);
       Lag.Measure (M);
       Lockin.Measure (M);
       Graph.Derive (M);

@@ -112,6 +112,39 @@ package body Driver.Robot.Channels is
       return Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)));
    end Mad_Degrees_Of_Freedom;
 
+   --  Whether the change into Beat is one of a resting reading: the beat and
+   --  the one before have readings, and for a commanded group the target did
+   --  not change and no push of it was under way.
+   function At_Rest (M : Model; G : Group_Id; Beat : Natural) return Boolean is
+     (Beat > 0 and then Has_Reading (M, G, Beat) and then Has_Reading (M, G, Beat - 1)
+      and then (not M.Groups (G).Commandable
+                or else (not Target_Changed (M, G, Beat) and then not Pushed (M, G, Beat))));
+
+   --  One channel's noise from its rest changes. A resting reading either
+   --  repeats exactly (a simulator between physics updates, a quantized or
+   --  echoed value) or changes by its jitter; the changes that are not exact
+   --  repeats measure the jitter. A channel that repeats exactly at every rest
+   --  beat has noise zero: any change of it is motion.
+   procedure Measure_Channel (M : in out Model; G : Group_Id; Channel : Positive; Rest : Natural) is
+      Moved : Real_Array (1 .. Rest);
+      K     : Natural := 0;
+      Index : constant Natural := First_Channel (M, G) + Channel - 1;
+   begin
+      for B in 1 .. Natural (M.Groups (G).Present.Length) - 1 loop
+         if At_Rest (M, G, B) and then Change (M, G, B, Channel) /= 0.0 then
+            K := K + 1;
+            Moved (K) := Change (M, G, B, Channel);
+         end if;
+      end loop;
+      if K = 0 then
+         M.Noise.Replace_Element (Index, 0.0);
+         M.Noise_Freedom.Replace_Element (Index, 0);
+      else
+         M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. K)) / Sqrt (2.0));
+         M.Noise_Freedom.Replace_Element (Index, Mad_Degrees_Of_Freedom (K));
+      end if;
+   end Measure_Channel;
+
    procedure Measure_Noise (M : in out Model) is
       Total : Natural := 0;
    begin
@@ -124,34 +157,16 @@ package body Driver.Robot.Channels is
       M.Noise_Freedom.Append (0, Ada.Containers.Count_Type (Total));
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          declare
-            S : Group_Stream renames M.Groups (G);
-            Beats : constant Natural := Natural (S.Present.Length);
-            Rest  : Natural := 0;
+            Rest : Natural := 0;
          begin
-            for B in 1 .. Beats - 1 loop
-               if S.Present (B) and then S.Present (B - 1)
-                 and then (not S.Commandable or else not Target_Changed (M, G, B))
-               then
+            for B in 1 .. Natural (M.Groups (G).Present.Length) - 1 loop
+               if At_Rest (M, G, B) then
                   Rest := Rest + 1;
                end if;
             end loop;
             if Rest > 0 then
-               for C in 1 .. S.Size loop
-                  declare
-                     D : Real_Array (1 .. Rest);
-                     K : Natural := 0;
-                  begin
-                     for B in 1 .. Beats - 1 loop
-                        if S.Present (B) and then S.Present (B - 1)
-                          and then (not S.Commandable or else not Target_Changed (M, G, B))
-                        then
-                           K := K + 1;
-                           D (K) := Change (M, G, B, C);
-                        end if;
-                     end loop;
-                     M.Noise.Replace_Element (First_Channel (M, G) + C - 1, Driver.Stats.Robust_Sigma (D) / Sqrt (2.0));
-                     M.Noise_Freedom.Replace_Element (First_Channel (M, G) + C - 1, Mad_Degrees_Of_Freedom (Rest));
-                  end;
+               for C in 1 .. M.Groups (G).Size loop
+                  Measure_Channel (M, G, C, Rest);
                end loop;
             end if;
          end;
@@ -314,6 +329,35 @@ package body Driver.Robot.Channels is
    function Pushed (M : Model; G : Group_Id; Beat : Natural) return Boolean is
      (G <= M.Groups.Last_Index and then Beat < Natural (M.Groups (G).Pushed.Length)
       and then M.Groups (G).Pushed (Beat));
+
+   procedure Measure (M : in out Model) is
+      Beats : Natural := 0;
+   begin
+      for S of M.Groups loop
+         S.Pushed.Clear;
+         Beats := Natural'Max (Beats, Natural (S.Present.Length));
+      end loop;
+      --  The noise is measured at rest, and rest is where no push is under
+      --  way, which takes the noise to find: the two are measured in turn
+      --  until the pushes found no longer change. Each round can only move
+      --  push marks, so as many rounds as beats bound it.
+      for Round in 0 .. Beats loop
+         Measure_Noise (M);
+         declare
+            Before : array (M.Groups.First_Index .. M.Groups.Last_Index) of Flag_Vectors.Vector;
+            Same   : Boolean := True;
+         begin
+            for G in Before'Range loop
+               Before (G) := M.Groups (G).Pushed;
+            end loop;
+            Measure_Pushes (M);
+            for G in Before'Range loop
+               Same := Same and then Flag_Vectors."=" (Before (G), M.Groups (G).Pushed);
+            end loop;
+            exit when Same and then Round > 0;
+         end;
+      end loop;
+   end Measure;
 
    function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean is
    begin

@@ -62,4 +62,8 @@ private package Driver.Robot.Channels is
    function Pushed (M : Model; G : Group_Id; Beat : Natural) return Boolean;
    --  False before Measure_Pushes covered Beat.
 
+   procedure Measure (M : in out Model);
+   --  The noise and the pushes together: each needs the other, so they are
+   --  measured in turn until the pushes found stop changing.
+
 end Driver.Robot.Channels;
