@@ -734,4 +734,12 @@ package body Driver.World.Estimates is
 
    function Support_Of (S : State; T : Thing_Id) return Driver.World.Supports.Support is (S.Things (T).Under);
 
+   function Resting_On (S : State; T : Thing_Id) return Surface_Id'Base is
+     (Surface_Id'Base (S.Things (T).Under.Index));
+
+   function Height_Above_Support (S : State; T : Thing_Id) return Estimate is
+     (if S.Things (T).Under.Index = 0 then Unknown else S.Things (T).Under.Height);
+
+   function Surface_Of (S : State; F : Surface_Id) return Driver.World.Supports.Surface is (S.Surfaces (Positive (F)));
+
 end Driver.World.Estimates;

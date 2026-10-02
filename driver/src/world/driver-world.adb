@@ -4,7 +4,6 @@ with Ada.Unchecked_Deallocation;
 with Driver.World.Cameras;
 with Driver.World.Estimates;
 with Driver.World.Pairs;
-with Driver.World.Supports;
 
 package body Driver.World is
 
@@ -85,19 +84,10 @@ package body Driver.World is
    end Centre;
 
    function Resting_On (S : Scene; T : Thing_Id) return Surface_Id'Base is
-     (if Known_Thing (S, T) then Surface_Id'Base (Driver.World.Estimates.Support_Of (S.Data.State, T).Index) else 0);
+     (if Known_Thing (S, T) then Driver.World.Estimates.Resting_On (S.Data.State, T) else 0);
 
    function Height_Above_Support (S : Scene; T : Thing_Id) return Estimate is
-   begin
-      if not Known_Thing (S, T) then
-         return Unknown;
-      end if;
-      declare
-         Under : constant Driver.World.Supports.Support := Driver.World.Estimates.Support_Of (S.Data.State, T);
-      begin
-         return (if Under.Index = 0 then Unknown else Under.Height);
-      end;
-   end Height_Above_Support;
+     (if Known_Thing (S, T) then Driver.World.Estimates.Height_Above_Support (S.Data.State, T) else Unknown);
 
    --  Not measured yet: what holds a thing, and its motion.
 

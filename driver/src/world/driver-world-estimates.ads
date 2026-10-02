@@ -54,6 +54,10 @@ private package Driver.World.Estimates is
    function Support_Of (S : State; T : Thing_Id) return Driver.World.Supports.Support;
    --  The support under the thing's points, and its height above it.
 
+   function Resting_On (S : State; T : Thing_Id) return Surface_Id'Base;
+   function Height_Above_Support (S : State; T : Thing_Id) return Estimate;
+   --  As Driver.World's: no support and Unknown before one is found.
+
    procedure Adopt (S : in out State; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id);
    procedure New_Episode (S : in out State);
 
@@ -81,6 +85,7 @@ private package Driver.World.Estimates is
    function Surface_Count (S : State) return Natural;
    function Plane_Of (S : State; F : Surface_Id) return Driver.Geometry.Plane_Estimate;
    function Earlier (S : State; F : Surface_Id) return Boolean;
+   function Surface_Of (S : State; F : Surface_Id) return Driver.World.Supports.Surface;
 
 private
 
