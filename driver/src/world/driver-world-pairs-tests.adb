@@ -104,10 +104,13 @@ package body Driver.World.Pairs.Tests is
                declare
                   Kept  : Match_Vectors.Vector;
                   Apart : Natural;
+                  Error : Real;
                   Wrong_Kept, Right_Off : Natural := 0;
                   Wrong : constant Natural := Own / 8;
                begin
-                  Triangulate (A, B, Points, Own, Answers, Kept, Apart);
+                  Triangulate (A, B, Points, Own, Answers, Kept, Apart, Error);
+                  Check (abs (Error - Matcher_Sigma) < 0.2 * Matcher_Sigma,
+                         "the matcher's error measured is" & Error'Image & " px, not the" & Matcher_Sigma'Image & " it made");
                   for M of Kept loop
                      declare
                         --  Find which pixel it was.

@@ -57,7 +57,8 @@ package body Driver.World.Pairs is
       Own           : Natural;
       Answers       : Driver.Instrument.Answer_Array;
       Kept          : out Match_Vectors.Vector;
-      Apart         : out Natural)
+      Apart         : out Natural;
+      Error         : out Real)
    is
       --  The points whose round trips measure the matcher's error: those
       --  around the region, or all of them when nothing around was asked.
@@ -65,6 +66,7 @@ package body Driver.World.Pairs is
       Around : Natural := 0;
    begin
       Kept.Clear;
+      Error := Real'Last;
       Apart := 0;
       for I in First_Sample .. Points'Length loop
          Around := Around + Boolean'Pos (Answers (Answers'First + I - 1).Found);
@@ -97,6 +99,7 @@ package body Driver.World.Pairs is
             --  Two lines of sight meeting in a point leave one degree of freedom.
             Freedom     : constant Positive := 1;
          begin
+            Error := Match_Sigma;
             for I in 1 .. Own loop
                declare
                   A : Driver.Instrument.Answer renames Answers (Answers'First + I - 1);
