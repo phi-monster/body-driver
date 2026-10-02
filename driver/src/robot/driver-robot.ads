@@ -353,6 +353,7 @@ private
       Query_U, Query_V : Real_Vectors.Vector;   --  the reference's query points
       Pending  : Pending_Vectors.Vector;
       Matches  : Match_Set_Vectors.Vector;
+      Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
    end record;
 
    package Arm_Evidence_Vectors is new Ada.Containers.Vectors (Positive, Arm_Evidence);

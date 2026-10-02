@@ -1,117 +1,265 @@
-# 脑服务:身体问什么、要什么回答
+# The brain service
 
-这份文档讲驱动(身体)和"脑"之间怎么说话。脑是你的模型,跑在你自己的推理服务上;驱动只是它的一个客户端。照这份文档,不用读驱动的源码,就能接上一个脑,或者自己写一个假脑来测接线。
+This is how the body driver talks to the brain: what it sends, what it reads
+back, and what a service has to do. The brain is your model, served by your
+own inference server; the driver is one of its clients. With this page alone
+you can connect a brain, or write a fake one to test the wiring
+(`driver/tools/fake_brain.adb` was written from this page and nothing else).
 
-语言本身(程序里每个词是什么意思、驱动认哪些写法)见 [`driver/LANGUAGE.md`](../driver/LANGUAGE.md),这里不重复。
+The language the brain writes is described in [`language.md`](language.md).
 
-## 1. 接在哪
-
-- 启动参数 `--eye host:port`,或者环境变量 `BL_EYE=host:port`(两个都给时用环境变量;都不给是 `127.0.0.1:8079`)。
-- 每一问都是一次 HTTP `POST http://host:port/v1/chat/completions`,请求体是 JSON(OpenAI 的 chat completions 形状)。一次请求从连接、发送到收完,一共最多等 1800 秒;到时限还没收完,就照实报"没问成",这一问作废。
-- 回包要是 JSON。驱动只读三样:`choices[0].message.content`(回答原文)、`choices[0].finish_reason`,以及出错时回包的原文(整段带进日志)。
-
-不走 HTTP 也行:设了 `BL_BRAIN=<目录>`,驱动就把问题写成文件、等回答文件,见第 5 节。
-
-## 2. 第一种问法:写一段程序
-
-每一轮问一次。这是脑真正"拿着循环"的那一问。
-
-### 请求
-
-```json
-{
-  "model": "eye",
-  "chat_template_kwargs": {"enable_thinking": false},
-  "structured_outputs": {"grammar": "<这一轮的键盘:GBNF 文法原文>"},
-  "messages": [{"role": "user", "content": [
-    {"type": "image_url", "image_url": {"url": "data:image/bmp;base64,<画面>"}},
-    {"type": "text", "text": "<问的话>"}
-  ]}]
-}
-```
-
-- `model` 一律是 `"eye"`。服务端要用这个名字把模型挂出来(vLLM:`--served-model-name eye`)。
-- 驱动自己不带 `temperature`、`max_tokens` 这一类数,不替脑定。采样设置由部署给:环境变量 `BL_BRAIN_SAMPLING` 是一段 JSON 对象,驱动把它的成员原样并进这一问的请求,放在 `"model"` 后面。用什么模型,就照它自己的推荐设(Qwen3.5 不思考模式的推荐是 `{"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0, "presence_penalty": 1.5, "repetition_penalty": 1.0}`)。没设就什么都不带,服务端按它自己的默认。读不成一个 JSON 对象,或者带了这一问自己的键(`model`、`messages`、`structured_outputs`、`chat_template_kwargs`),就不带,开机后第一问时在日志里照实说一次。
-- 认名字那一问(第 3 节)不并这一份:那一问要的是最可能的那个框,用 `temperature: 0`。
-- `structured_outputs.grammar` 是这一轮的键盘:一份 GBNF 文法,只放这具身体、这一轮真按得动的键。服务端要按它做受限解码,也就是文法外的字一个都打不出来(vLLM 0.29 的 `structured_outputs`;别的服务各有各的名字,适配的事你来做)。文法每一轮现场生成;同一轮写在问话里给脑看的那张"纸",和它是同一份,参数一样(见 `LANGUAGE.md` §17.1)。
-- 画面:主画面是脑这一轮选的那只眼(第一轮是不动的眼)。上面画着编号格子和清单上东西的编号框。别的眼并排缩在下面一条,每只框着白框、标着相机号。图是 24 位 BMP,base64 编码,放在 data URL 里。
-- 问的话依次是:
-  1. 一句"你就是这具身体";格子怎么编号。
-  2. `YOUR BODY`:身体自己量到的东西。量过什么、多可信、每只眼在哪、清单上点过名的东西。
-  3. `WHAT YOU JUST DID AND WHAT HAPPENED`:上一段程序每一节怎么收的尾,也就是执行器那句话的原文。
-  4. `WHAT YOU ARE TRYING TO DO`:任务句(观测里的 `instruction`,或者环境变量 `BL_ORDER`)。
-  5. 要是上一段被退回了,有一段 `I REFUSED YOUR LAST PROGRAM BEFORE ANYTHING MOVED`:哪一行、为什么、能照抄的替代。
-  6. `ANSWER WITH ONE PROGRAM`,后面是这一轮的那张语法纸,最后几句说明这门语言怎么被执行。
-
-### 回答
-
-- `choices[0].message.content` 就是程序原文,一行一句,外面不再包 JSON。
-- 驱动按 `LANGUAGE.md` 解析。解析不过、或者跟身体量到的不符,这一段一根手指都不动,原因和替代随下一轮一起给脑。退回不花任何代价。
-- `finish_reason = "length"`:写到服务端的上限被截断了。半截话不当回答,这一问作废,下一拍重问。
-- 回包里没有 `content`(空串)、不是 JSON、连不上:照实记下原因(日志 `[身] 🧠 问不通(…)`),这一拍不动,下一拍重问。
-- 服务端回的错里带着 `maximum context length`:问的话太长,放不进模型的上下文。驱动把清单上限砍一半再问(日志 `[身] 🧠 你读不下这么长`)。
-
-### 量过的一件事(10-01)
-
-09-30 以后,文法里名字那一格、`say` 那一句、行数都没有上限,驱动也不带 `max_tokens`。拿 S1A1–S1A5、H48/H49 落盘的画面,问 Qwen3.5-9B(vLLM 0.29,模型目录里没有 `generation_config.json`,于是用 vLLM 的默认采样:temperature 1.0、不截 top_p / top_k):单件 30 问里 20 问、两件 36 问里 26 问写到 1024 个 token 还没停,多半是在名字那一格里不停地写。照模型卡给不思考模式的那组采样参数(就是上面 `BL_BRAIN_SAMPLING` 那一段),跑飞降到 8/30、11/36(两件那一份是加了两件那一句的键盘)。不带 `presence_penalty`、只用另外五样,单件的跑飞几乎不降(22/30)。所以采样设置要按模型自己的推荐给全。
-
-## 3. 第二种问法:它在哪一框
-
-程序里每出现一个东西的名字,身体就问一次这只眼(这只眼指不出,就按相机的次序再问别的眼):这个名字指的是画面里哪一框。框里哪些像素是它,由身体自己量(见 `LANGUAGE.md` §17.7)。
-
-### 请求
-
-```json
-{
-  "model": "eye",
-  "temperature": 0,
-  "chat_template_kwargs": {"enable_thinking": false},
-  "response_format": {"type": "json_schema", "json_schema": {"name": "where_is_it", "strict": true, "schema": {
-    "type": "object", "additionalProperties": false, "required": ["found", "bbox_2d"],
-    "properties": {
-      "found": {"type": "boolean"},
-      "bbox_2d": {"type": "array", "minItems": 4, "maxItems": 4,
-                  "items": {"type": "integer", "minimum": 0, "maximum": 1000}}}}}},
-  "messages": [{"role": "user", "content": [
-    {"type": "image_url", "image_url": {"url": "data:image/bmp;base64,<这只眼的干净画面>"}},
-    {"type": "text", "text": "Locate what someone would call: <名字>\nIf you can see it in this picture, answer with the box around it. If you cannot see it here, say so - that is a normal answer and I will look with another eye rather than guess."}
-  ]}]
-}
-```
-
-- 这一问的 `temperature` 是 0,因为要稳:同一张图、同一个名字,应当回同一个框。
-- 画面是干净的,不画格子,也不画编号框。实测(09-21)画上去的标记会伤到这个模型的眼力。
-- `<名字>` 就是脑在程序里写的那串字,一个字不改。
-
-### 回答
-
-`content` 是一段 JSON:`{"found": true, "bbox_2d": [左, 上, 右, 下]}`,四个数是画幅的千分比(0..1000),和画面大小无关。看不见就回 `{"found": false, "bbox_2d": [0, 0, 0, 0]}`,这是正常的回答,不算错。
-
-- `found` 是 true 但框是空的(右 ≤ 左,或者下 ≤ 上):当它没指出来。
-- 连不上、超时、`content` 读不出 JSON:这一问"没问通",这个名字这一轮绑不上;别的眼也不再问,因为脑那头不通。
-
-## 4. 一集里叫了几次脑
-
-每问一次,日志里印一行,`N` 是这一集里第几次叫脑:
+## 1. Where the driver connects
 
 ```
-[脑] 这一集第 N 次叫脑:写一段程序 · 2.3 秒 · 交回 3 行
-[脑] 这一集第 N 次叫脑:问「scissors」在哪一框 · 1.5 秒 · 框 [297 283 345 413]
+body_driver --listen PORT --eye HOST:PORT ...
 ```
 
-每轮开头那一行(`[身] ── 第 k 轮 …`)后面带着这一集到这时叫过几次脑。对方复位、新的一集开始时,先印一行 `[脑] 上一集一共叫了脑 N 次(写程序 a 次、问在哪 b 次)`,再从零数。
+Every question is one HTTP/1.1 `POST` of a JSON body to
+`http://HOST:PORT/v1/chat/completions`, the OpenAI chat completions shape,
+one connection per question. The driver sets no time limit: the robot holds
+still while the driver waits, and the driver itself closes a streamed answer
+once it has read enough (section 3). Without `--eye`, every question fails
+with "no address was given for the brain service" and the body only holds.
 
-## 5. 人当脑(`BL_BRAIN=<目录>`)
+The driver asks two questions:
 
-不走 HTTP:驱动把问题写进那个目录,等一个回答文件出现。这条通道和产品是一个形状:一个只会说话的脑,靠同一套键盘开这具身体。
-
-| 问法 | 驱动写 | 你写 |
+| question | when | streamed |
 |---|---|---|
-| 写一段程序 | `prog.txt`(问的话,第一行是怎么写回答)、`prog.bmp`(画面) | `prog_answer.txt`:程序原文 |
-| 它在哪一框 | `where.txt`、`where.bmp`(干净的画面) | `where_answer.txt`:`{"found": true, "bbox_2d": [l, t, r, b]}` 或 `{"found": false, "bbox_2d": [0,0,0,0]}` |
+| write a program | once per round | yes |
+| where is it | for a name in a program, once per eye asked | no |
 
-回答一律先写临时文件,再 `mv` 成上面的名字。改名是原子的,驱动看见文件就读走,读完删掉。人当脑时,键盘上的约束没人替你挡,写错了驱动照样退回、说明为什么。
+Both name the model `"eye"`: serve it under that name (vLLM:
+`--served-model-name eye`).
 
-## 6. 写一个假脑测接线
+## 2. Sampling: `BL_BRAIN_SAMPLING`
 
-只要照第 2、3 节回话就能接上。[`tools/fake_brain.py`](../tools/fake_brain.py) 是照这份文档写的一个(没看驱动源码),只用来测接线:写程序那一问只回一句 `say …`,问在哪一律回 `found: false`。它从不让身体动,因为替脑写动作的"假脑"是不许的。
+The driver chooses no sampling setting. The deployment gives them as one
+JSON object in the environment variable `BL_BRAIN_SAMPLING`; its members are
+merged, exactly as written, into both questions, right after `"model"`. Use
+the settings the model's makers recommend. For Qwen3.5 without thinking, the
+box's `/root/q/run.sh` sets it to the model card's values:
+
+```
+BL_BRAIN_SAMPLING='{"temperature":0.7,"top_p":0.8,"top_k":20,"min_p":0,"presence_penalty":1.5,"repetition_penalty":1.0}'
+```
+
+Anything else the service needs per request belongs here too, for example
+`"chat_template_kwargs":{"enable_thinking":false}` or `"max_tokens"`.
+
+- Not set: nothing is merged and the service samples by its own defaults.
+- Not one JSON object, or setting a member the driver writes itself
+  (`model`, `messages`, `stream`, `structured_outputs`, `response_format`):
+  it is not used at all.
+
+Either way the first question logs once what happened:
+
+```
+[brain] BL_BRAIN_SAMPLING: both questions carry it as it is: {"temperature":0.7,...}
+[brain] BL_BRAIN_SAMPLING: it is not set, so the service samples by its own defaults
+[brain] BL_BRAIN_SAMPLING: it sets "model", which the driver writes itself, so it is not used: {...}
+```
+
+## 3. Question one: write a program
+
+### The request
+
+```json
+{"model": "eye",
+ "temperature": 0.7, "...": "the members of BL_BRAIN_SAMPLING",
+ "stream": true,
+ "structured_outputs": {"grammar": "<this round's keyboard, GBNF>"},
+ "messages": [{"role": "user", "content": [
+   {"type": "image_url", "image_url": {"url": "data:image/bmp;base64,<the picture>"}},
+   {"type": "text", "text": "<the prompt>"}]}]}
+```
+
+- `structured_outputs.grammar` is this round's keyboard as a GBNF grammar
+  (the `structured_outputs` member of vLLM 0.10 and later, with its xgrammar
+  backend). The service must decode under it: the brain can then type only
+  what this body can do now. The grammar is rebuilt every round from what the
+  body measured; the prompt prints the same keyboard for the brain to read
+  ([`language.md`](language.md), section 2). A service that ignores the
+  grammar still works, but its programs may contain lines the driver refuses.
+- The picture is one 24-bit BMP, base64 in a data URL. On top, at full size,
+  the eye the brain looks through this round (the first round: the first eye
+  fixed in the scene). Below it, one strip with every other eye that has a
+  picture this beat, left to right in camera order, each scaled to an equal
+  share of the width and keeping its own proportions. Nothing is drawn on
+  any picture: drawn marks were measured to hurt the model's sight.
+- The prompt has these sections, in this order:
+
+```
+You are the brain of a robot body, and I am that body. ...
+
+THE PICTURE
+The large picture is what my eye 1 sees now; it is fixed in the scene.
+Below it, from left to right: eye 2 (carried by arm 1), eye 3 (carried by arm 2).
+
+THINGS YOU HAVE NAMED
+- "scissors": eye 1 sees it now; 0.052 +- 0.004 above the surface it rests on, in my own length unit
+  (or: None yet. Name a thing in your own words; I ask my eyes where it is.)
+
+WHAT HAPPENED
+line 1: do the scissors height up until free -- ended free: ...
+  (or how the last answer was refused or cut; the first round says it is the first round)
+
+YOUR TASK
+Pick up the scissors by 10 cm.
+
+THE LANGUAGE THIS ROUND (the only text the decoder lets you type)
+<program>  ::= <line> (<line>)*
+... the keyboard, every key with its meaning ...
+
+Write the program now, one statement per line.
+```
+
+  The prompt describes the format and never how to act: the driver's gates
+  reject tutorial sentences in it.
+
+### The answer
+
+The answer streams as server-sent events, the OpenAI streaming shape: lines
+`data: <json>`, a blank line between events, and `data: [DONE]` at the end.
+From each event the driver reads `choices[0].delta.content`, appended to the
+answer, and `choices[0].finish_reason` when there is one. The answer is the
+program itself, one statement per line, with nothing around it.
+
+The driver reads as the answer arrives and closes the connection as soon as
+one of these holds:
+
+| stop | when |
+|---|---|
+| complete | a `done` outside every block was read: nothing after it can ever run |
+| ran away | the answer started a copy loop: inside one name or one `say` sentence a run of words comes again at once, or a run of whole lines does; inside a name, the language words the decoder glued into one word count as its parts (a name word that never ends is cut this way) |
+| a new episode | the robot started a new episode while the brain was writing; nothing of the answer runs |
+
+Only finished lines before the stop are kept; a line or word still being
+written is never judged. A service must stop generating when the connection
+closes (vLLM does; measured on the box, section 6).
+
+When the stream ends by itself:
+
+- `finish_reason: "stop"`: the answer is read whole.
+- `finish_reason: "length"`: the service stopped at its own token limit; the
+  finished lines are kept and the half-written last line is dropped.
+- no connection, or a status that is not 2xx: no program; the body does not
+  move, and the next round says the answer could not be read.
+
+The program is then read, checked against the body, and run; how each line
+ended is the next round's WHAT HAPPENED ([`language.md`](language.md),
+section 9).
+
+## 4. Question two: where is it
+
+When a program names a thing that no earlier name and no letters rule
+already settles, the body asks its eyes where the name is: first the eye the
+brain looks through, then the others in camera order, until one boxes it.
+Which pixels in the box are the thing is measured by the body itself (the
+instrument segments the box).
+
+### The request
+
+```json
+{"model": "eye",
+ "temperature": 0.7, "...": "the members of BL_BRAIN_SAMPLING",
+ "structured_outputs": {"grammar": "<the answer's grammar, below>"},
+ "messages": [{"role": "user", "content": [
+   {"type": "image_url", "image_url": {"url": "data:image/bmp;base64,<that eye's own picture>"}},
+   {"type": "text", "text": "Locate what someone would call: <name>\nIf you can see it in this picture, answer with the box around it. If you cannot see it here, say so - that is a normal answer and I will look with another eye rather than guess."}]}]}
+```
+
+- The picture is that one eye's picture as it is, at its own size.
+- `<name>` is the brain's words exactly as written in the program.
+- The grammar admits exactly the answers the driver reads, with no blank
+  anywhere and every edge a whole number from 0 to 1000:
+
+```
+root ::= "{\"found\":" ("true" | "false") ",\"bbox_2d\":[" e "," e "," e "," e "]}"
+e ::= "1000" | [1-9] [0-9] [0-9] | [1-9] [0-9] | [0-9]
+```
+
+  A JSON schema would let the decoder write blanks between the members, and
+  with greedy decoding Qwen3.5-9B wrote `{"found":` followed by tabs until the
+  token limit; under this grammar an answer is a few dozen characters.
+
+### The answer
+
+`choices[0].message.content` is the JSON object
+`{"found":true,"bbox_2d":[left,top,right,bottom]}`, the edges in
+thousandths of the picture's width and height (0 to 1000), whatever the
+picture's size. `{"found":false,"bbox_2d":[0,0,0,0]}` is a normal answer:
+the body asks the next eye. A service that cannot decode under a grammar may
+answer the same object with blanks; the driver reads it all the same.
+
+| answer | the body |
+|---|---|
+| found, with a box that has area | segments the box and binds the name to that patch |
+| found false, or a box with no area | asks the next eye |
+| found, but not four edges | no answer |
+| not JSON, no connection, a status that is not 2xx | no answer: no other eye is asked for this name, since the service is not answering |
+
+A name no eye points out may still bind by its letters to a thing named
+before ([`language.md`](language.md), section 7).
+
+## 5. What the log says
+
+Every call is one line, counted within the episode:
+
+```
+[brain] call 1 of this episode: write a program, 1.2 s, complete (line 3 is done outside every block), 3 lines kept
+[brain] call 2 of this episode: where is "the scissors", 0.9 s, box from (412, 230) to (468, 301)
+[brain] call 3 of this episode: where is "the cap", 0.8 s, not here (it says it cannot see it here)
+[brain] call 4 of this episode: where is "the cap", 0.0 s, no answer (...)
+```
+
+The reading end is one of `ended by itself`, `complete`, `ran away`,
+`stopped by the service`, `failed`. When the next episode begins:
+
+```
+[brain] the last episode called the brain 4 times (1 programs, 3 where-is-it questions)
+```
+
+Every line of the log is listed in [`log-lines.md`](log-lines.md).
+
+## 6. Measured with Qwen3.5-9B on vLLM
+
+On the box (vLLM serving Qwen3.5-9B as `eye` on 127.0.0.1:8078, sampling from
+`QWEN_CARD`), through the driver's own client (`driver/tools/brain_measure`):
+
+- **Reading stops in time.** 120 answers (20 tasks of five kinds, 2 each on
+  three keyboards) were read to their real end with the driver's verdict
+  taken on every event. The model does not stop after `done`: of the answers
+  cut at a top-level done (median 1.3 s, at most 4.0 s), nearly all would
+  have gone on repeating or talking to the token limit that the measurement
+  added (`max_tokens` 1024, about 41 s; the box's service allows 65536).
+  Answers cut as copy loops were cut at a median 2.3 s, and every one of
+  them ran on to the limit: no loop was cut that would have ended by itself.
+  No answer ran to the limit uncut. Reading saved 96 % of the time the
+  answers would have taken, even with the limit.
+- **The keyboard.** About 2000 answers on 20 tasks of five kinds: with the
+  quantity keyboard, one stretch per program, 59 of 60 lifts would run
+  right (heading keyboard: 56 of 60 lifts, 36 of 40 turns). Every form of
+  the sentence about two things tried made the tasks about one thing worse
+  on at least one keyboard, so none is offered
+  ([`design/brain.md`](design/brain.md)).
+- **Names.** The stretches of five recorded runs, 44 names in program order,
+  bound against three eyes asked live: every name that meant the scissors
+  was bound to the scissors (87 of 87 with the card's sampling, 29 of 29
+  greedy). Names made of words that name nothing were bound to a thing when
+  the eye boxed one for them (17 of 30), which is the eye's answer
+  ([`language.md`](language.md), section 7).
+- **The where-is-it answer.** Under a JSON schema, greedy decoding wrote
+  blanks without end; under the grammar of section 4 every answer ends.
+
+## 7. A fake brain for testing the wiring
+
+`driver/bin/fake_brain PORT` is a brain service written from this page
+alone. It answers question one with a stream of one `say` line, and question
+two with `found: false`, so a body wired to it runs its rounds and never
+moves: a brain that writes motion on its own would be a scripted program,
+which the driver does not allow.
+
+```
+driver/bin/fake_brain 8090 &
+driver/bin/body_driver --listen 9080 --eye 127.0.0.1:8090 --inst 127.0.0.1:8077
+```

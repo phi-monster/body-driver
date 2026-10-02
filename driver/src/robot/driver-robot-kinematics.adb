@@ -65,12 +65,13 @@ package body Driver.Robot.Kinematics is
          if Driver.Services.Ready (R.Pending (K).Ticket) then
             declare
                P      : constant Pending_Match := R.Pending (K);
+               Reply  : constant Driver.Services.Reply := Driver.Services.Collect (P.Ticket);
                Result : Driver.Instrument.Answer_Array (1 .. Natural (R.Query_U.Length));
                Ok     : Boolean;
                Why    : Ada.Strings.Unbounded.Unbounded_String;
                Set    : Match_Set;
             begin
-               Driver.Instrument.Read_Match (Driver.Services.Collect (P.Ticket), True, Result, Ok, Why);
+               Driver.Instrument.Read_Match (Reply, True, Result, Ok, Why);
                if Ok then
                   Set.Frame := P.Frame;
                   for A of Result loop
@@ -81,6 +82,12 @@ package body Driver.Robot.Kinematics is
                      Set.Found.Append (A.Found);
                   end loop;
                   R.Matches.Append (Set);
+               elsif Reply.Lasting then
+                  if not R.Unanswerable then
+                     Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image
+                                      & " gets no matches, and asks no more: " & Ada.Strings.Unbounded.To_String (Why));
+                  end if;
+                  R.Unanswerable := True;
                else
                   Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe" & P.Frame'Image
                                    & " has no matches: " & Ada.Strings.Unbounded.To_String (Why));
@@ -161,7 +168,7 @@ package body Driver.Robot.Kinematics is
                            end loop;
                            Fresh := Fresh and then Seeable;
                         end;
-                        if Fresh then
+                        if Fresh and then not R.Unanswerable then
                            declare
                               K : Keyframe;
                            begin
@@ -174,7 +181,7 @@ package body Driver.Robot.Kinematics is
                            end;
                            if Natural (R.Frames.Length) = 1 then
                               Query_Points (M, E, G, R.Query_U, R.Query_V);
-                           elsif not R.Query_U.Is_Empty then
+                           elsif not R.Query_U.Is_Empty and then not R.Unanswerable then
                               declare
                                  Points : Driver.Instrument.Point_Array (1 .. Natural (R.Query_U.Length));
                               begin

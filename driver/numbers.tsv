@@ -1,5 +1,130 @@
 # file	line (comments and strings removed, blanks normalized)	literal (a " prefix: inside a string)	category	why
 body_driver.adb	Handed : Integer := -1;	1	structure	sentinel: no episode's sentence handed out yet
+driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	1	math	odd steps turn one way, even steps the other
+driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	1.0	math	the negative sense of turning
+driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	1.0	math	the positive sense of turning
+driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	2	math	each sense advances one step every second step
+driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	2	math	the sense alternates with the parity of the step
+driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	2.0	math	a full circle is two pi
+driver-action-contact-search.adb	(Pad_Index => K, Sample => I, Psi => Psi, Any_Angle => Steps = 1);	1	math	a single turn: the contact set does not depend on the turn
+driver-action-contact-search.adb	(case V is when 1 => Theta * A1, when 2 => -Theta * A1, when 3 => Theta * A2, when 4 => -Theta * A2);	1	structure	first of the four tilted variants: about the first axis, positive
+driver-action-contact-search.adb	(case V is when 1 => Theta * A1, when 2 => -Theta * A1, when 3 => Theta * A2, when 4 => -Theta * A2);	2	structure	second tilted variant: about the first axis, negative
+driver-action-contact-search.adb	(case V is when 1 => Theta * A1, when 2 => -Theta * A1, when 3 => Theta * A2, when 4 => -Theta * A2);	3	structure	third tilted variant: about the second axis, positive
+driver-action-contact-search.adb	(case V is when 1 => Theta * A1, when 2 => -Theta * A1, when 3 => Theta * A2, when 4 => -Theta * A2);	4	structure	fourth tilted variant: about the second axis, negative
+driver-action-contact-search.adb	(if L <= Res then 1 else Positive (Real'Ceiling (2.0 * Pi * L / Res)));	1	math	one placement when no turn moves anything by a pitch
+driver-action-contact-search.adb	(if L <= Res then 1 else Positive (Real'Ceiling (2.0 * Pi * L / Res)));	2.0	math	a full circle is two pi
+driver-action-contact-search.adb	(if Natural (T.Length) >= 2 and then abs (T (2).Point - T (1).Point) > 0.0	2	math	a direction between touches needs two of them
+driver-action-contact-search.adb	(if Pin.Any_Angle then Steps_For (Lever (Pin.Pad_Index, E.Depth)) else 1);	1	math	a pin fixed at its own turn is one placement
+driver-action-contact-search.adb	Ahead : constant Vec3 := (L.Thickness / 2.0) * Facing;	2.0	math	the face is half a thickness ahead of the lobe's centre line
+driver-action-contact-search.adb	Apart : constant Gate := Vector_Gate (3);	3	structure	points of space have three coordinates
+driver-action-contact-search.adb	B : constant Box := Box_Of (P, R, X, Before (P.Closer), 0.0);	0.0	math	no extra length: the box as the lobe is
+driver-action-contact-search.adb	F : constant Vec3 := Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face - Mid;	0.0	math	no extra length: the box as the lobe is
+driver-action-contact-search.adb	Facing => Facing, Half_Width => L.Width / 2.0,	2.0	math	half of the measured width
+driver-action-contact-search.adb	Mid := Mid + Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face / Real (N_Pads);	0.0	math	no extra length: the box as the lobe is
+driver-action-contact-search.adb	Most : constant Real := Real'Min (Friction.High, 1.0 / Physics.Least_Distinct (Resolution));	1.0	math	the friction whose angle is as far from a right angle as the least distinct one is from none: tan (pi/2 - a) = 1 / tan a
+driver-action-contact-search.adb	Next : Positive := 1;	1	structure	the first position in the order
+driver-action-contact-search.adb	Next := 1;	1	structure	each friction level walks the order from its first position
+driver-action-contact-search.adb	Psi : constant Real := 2.0 * Pi * Real (Step) / Real (Steps);	2.0	math	equal steps of a full circle, two pi
+driver-action-contact-search.adb	Reference := Real'Min (Most, 2.0 * Reference);	2.0	numerics	doubling search: the friction needed is reached within a factor two in a number of levels logarithmic in it
+driver-action-contact-search.adb	Result := (if Count >= 2 then Touching else On_Air);	2	math	a closing set needs at least two touches; one touch alone is a single touch
+driver-action-contact-search.adb	Steps : constant Positive := Steps_For (Lever (K, 0.0));	0.0	math	no extra reach beyond the faces' centres
+driver-action-contact-search.adb	for C in 1 .. 3 loop	3	structure	the three coordinates of a point
+driver-action-contact-search.adb	for C in 1 .. 3 loop	3	structure	the three coordinates of a point
+driver-action-contact-search.adb	for C in 1 .. 3 loop	3	structure	the three coordinates of a point
+driver-action-contact-search.adb	for F in 0 .. 1 loop	1	structure	the two ends of a closing path: open and closed
+driver-action-contact-search.adb	for G in 0 .. 1 loop	1	structure	the two ends of a closing path: open and closed
+driver-action-contact-search.adb	for I in 0 .. 1 loop	1	structure	a box corner is on the face or a thickness behind it
+driver-action-contact-search.adb	for J in -1 .. 1 loop	1	structure	the two sides of a face (zero, the middle, is skipped)
+driver-action-contact-search.adb	for J in -1 .. 1 loop	1	structure	the two sides of a face (zero, the middle, is skipped)
+driver-action-contact-search.adb	for K in 0 .. 1 loop	1	structure	a box corner is at the lobe's end or its far end
+driver-action-contact-search.adb	if Natural (E.Pads.Length) < 2 then	2	math	closing on something needs at least two lobes
+driver-action-contact-search.adb	if Physics.Need (None, Thing.Base, Motion, Thing.Centre.Mean, U, 0.0).Why = Physics.Footing_In_Way then	0.0	math	whether a motion goes into the surface does not depend on friction
+driver-action-contact-search.adb	if Sq >= 0.0 and then Sq <= 1.0 and then Sq < S then	1.0	math	a closer's fraction runs from zero (open) to one (closed on nothing)
+driver-action-contact-search.adb	subtype Closer_Index is Positive range 1 .. Positive'Max (1, N_Closers);	1	structure	indexes start at one; an arm with no closer still gets one unused slot
+driver-action-contact-search.adb	type Touch_Set_Array is array (1 .. 4) of Touch_Vectors.Vector;	4	structure	two tilt axes, each turned both ways
+driver-action-contact-simplex.adb	Size := 1.0;	1.0	math	an all-zero row stays zero under any scale; one leaves it as it is
+driver-action-contact-simplex.adb	T (I, N + I) := 1.0;	1.0	structure	the artificial variable of row I enters with coefficient one (identity block of phase one)
+driver-action-contact-wrench.adb	A (R + 3, J) := G (R + 3) / Length;	3	structure	moment rows follow the three force rows of a wrench
+driver-action-contact-wrench.adb	A (R + 3, J) := G (R + 3) / Length;	3	structure	moment rows follow the three force rows of a wrench
+driver-action-contact-wrench.adb	A : Real_Matrix (1 .. 6, 1 .. Cols);	6	structure	a wrench has six components, three of force and three of moment
+driver-action-contact-wrench.adb	Column (G, 0.0);	0.0	math	the surface's forces cost the body nothing
+driver-action-contact-wrench.adb	Column (G, 1.0);	1.0	math	each body generator carries one unit of normal force, so its cost is one
+driver-action-contact-wrench.adb	H : Flat_Array (1 .. 2 * P'Length + 1) := [others => (X => 0.0, Y => 0.0, Index => 1)];	1	structure	placeholder index of unused hull slots, overwritten before use
+driver-action-contact-wrench.adb	H : Flat_Array (1 .. 2 * P'Length + 1) := [others => (X => 0.0, Y => 0.0, Index => 1)];	2	structure	the monotone chain holds at most both chains of every point plus the closing one
+driver-action-contact-wrench.adb	High : Real := (if Below < No_Way then Arctan (Below) else Pi / 2.0);	2.0	math	a friction angle lies below a right angle
+driver-action-contact-wrench.adb	Length := (if Count > 0 and then Length > 0.0 then Length / Real (Count) else 1.0);	1.0	math	any positive moment scale leaves the solution unchanged; one is the identity
+driver-action-contact-wrench.adb	Mid : constant Real := (Low + High) / 2.0;	2.0	math	bisection takes the midpoint
+driver-action-contact-wrench.adb	Theta : constant Real := 2.0 * Pi * Real (K) / Real (Edges);	2.0	math	a full turn is two pi
+driver-action-contact-wrench.adb	for R in 1 .. 3 loop	3	structure	the three force rows (the moment rows follow them)
+driver-action-contact-wrench.adb	if H'Length < 3 then	3	math	a hull of fewer than three vertices spans no area
+driver-action-contact-wrench.adb	if P'Length < 3 then	3	math	fewer than three points are their own hull
+driver-action-contact-wrench.adb	subtype Wrench6 is Real_Vector (1 .. 6);	6	structure	a wrench has six components, three of force and three of moment
+driver-action-contact-wrench.adb	while N >= 2 and then Side_Of (H (N - 1), H (N), S (I)) <= 0.0 loop	2	math	a turn is judged on the last two hull points and the next one
+driver-action-contact.adb	Cells.Insert (Key, (Total => Flat, Count => 1));	1	math	a new cell starts with the one point that opened it
+driver-action-contact.adb	Low : Positive := 1;	1	structure	the first coordinate axis is the first candidate seed
+driver-action-contact.adb	Seed (Low) := 1.0;	1.0	math	the seed is a unit coordinate axis
+driver-action-contact.adb	for K in 2 .. 3 loop	2	structure	the remaining coordinate axes, second and third
+driver-action-contact.adb	for K in 2 .. 3 loop	3	structure	the remaining coordinate axes, second and third
+driver-action-execution.adb	((Arms => Arm_Goal_Vectors.To_Vector ((Arm => A, Tool => Tool, Position_Only => False), 1),	1	structure	an order for one arm holds one goal
+driver-action-execution.adb	(Object_Pitch / 2.0 + Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
+driver-action-execution.adb	(Z * Sqrt (Sigma ** 2 + T.Sigma ** 2) + T.Pitch / 2.0);	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
+driver-action-execution.adb	Closers => Closer_Goal_Vectors.To_Vector ((Hand => H, Fraction => Fraction), 1),	1	structure	an order for one closer holds one goal
+driver-action-execution.adb	High := (Low + High) / 2.0;	2.0	numerics	bisection halves the interval
+driver-action-execution.adb	High := 2.0 * High;	2.0	numerics	doubling search: the bound is found within a factor two in a number of tries logarithmic in it
+driver-action-execution.adb	K : Positive := 1;	1	structure	a plan is followed from its first point
+driver-action-execution.adb	K := 1;	1	structure	a new plan is followed from its first point
+driver-action-execution.adb	Last : constant Vec3 := (if K > 1 then Route.Points (K) - Route.Points (K - 1) else D);	1	structure	the leg into point K starts at the point before it, when there is one
+driver-action-execution.adb	Lift := 2.0 * Lift;	2.0	numerics	doubling search: the height needed is found within a factor two in a number of tries logarithmic in it
+driver-action-execution.adb	Limit := Real'Min (Limit, Real'Max (Fine, Z * Sqrt (2.0) * Largest_Sigma (Start.Covariance)	2.0	statistics	a rise is the difference of two readings: its sigma is root two times theirs
+driver-action-execution.adb	Low := (Low + High) / 2.0;	2.0	numerics	bisection halves the interval
+driver-action-execution.adb	NL : constant Positive := Positive'Max (1, Natural (Real'Ceiling (E.Depth / Spacing)));	1	structure	at least one interval, so both ends are sampled
+driver-action-execution.adb	NW : constant Positive := Positive'Max (1, Natural (Real'Ceiling (2.0 * Pd.Half_Width / Spacing)));	1	structure	at least one interval, so both ends are sampled
+driver-action-execution.adb	NW : constant Positive := Positive'Max (1, Natural (Real'Ceiling (2.0 * Pd.Half_Width / Spacing)));	2.0	math	the full width is twice the half width
+driver-action-execution.adb	Pieces : constant Positive := Positive'Max (1, Natural (Real'Ceiling ((Shift + Turn * Lever) / Spacing)));	1	structure	at least one piece, so the end of the way is checked
+driver-action-execution.adb	Q : constant Vec3 := C + (2.0 * Real (I) / Real (NW) - 1.0) * Pd.Half_Width * Wd	1.0	math	from minus one to one half widths across the face
+driver-action-execution.adb	Q : constant Vec3 := C + (2.0 * Real (I) / Real (NW) - 1.0) * Pd.Half_Width * Wd	2.0	math	from minus one to one half widths across the face
+driver-action-execution.adb	Reach_Of : constant Real := O.Pitch / 2.0 + B;	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
+driver-action-execution.adb	Set_Closer (P, X, C.Hand, 0.0, Out_Come);	0.0	math	a closer's fraction: zero is open
+driver-action-execution.adb	Set_Closer (P, X, C.Hand, 0.0, Out_Come);	0.0	math	a closer's fraction: zero is open
+driver-action-execution.adb	Set_Closer (P, X, E.Closers (K).Hand, 1.0, Out_Come);	1.0	math	a closer's fraction: one is closed on nothing, so it closes until it stops on the thing
+driver-action-execution.adb	Set_Closer (P, X, H.Hand, 0.0, Out_Come);	0.0	math	a closer's fraction: zero is open
+driver-action-execution.adb	Set_Closer (P, X, H.Hand, 1.0, Out_Come);	1.0	math	a closer's fraction: one is closed on nothing, so it closes until it stops on something
+driver-action-execution.adb	Several : constant Boolean := Natural (Best.Touches.Length) > 1;	1	math	more than one touch is a set that closes on the thing; one touch alone presses
+driver-action-execution.adb	Sigma => Sqrt (2.0) * Largest_Sigma (Start.Covariance), Degrees_Of_Freedom => 0);	2.0	statistics	a rise is the difference of two readings: its sigma is root two times theirs
+driver-action-execution.adb	function Img (X : Real) return String is (Driver.Log.Image (X, 3));	3	format	digits printed in a log line or a message
+driver-action-execution.adb	if Fits ((Low + High) / 2.0) then	2.0	numerics	bisection tries the middle
+driver-action-execution.adb	or else not Significant (Vector_Gate (3), Turn, Largest_Sigma (A.Tool.Rotation_Covariance)));	3	structure	a turn is a rotation vector of three components
+driver-action-goals.adb	Grow : constant Vec3 := P.Rotation * [1.0, 0.0, -U_S];	1.0	math	the image column x / z grows as 1 / z along the eye's x and as -u / z along its z
+driver-action-goals.adb	Half_Gap : constant Real := Sqrt (((Sxx - Syy) / 2.0) ** 2 + Sxy ** 2);	2.0	math	eigenvalues of a symmetric two by two matrix: half their difference
+driver-action-goals.adb	Larger : constant Real := (Sxx + Syy) / 2.0 + Half_Gap;	2.0	math	eigenvalues of a symmetric two by two matrix: their mean
+driver-action-goals.adb	Level : constant Boolean := Significant (Vector_Gate (2), abs Flat, Sigma);	2	structure	a separation within a plane has two dimensions
+driver-action-goals.adb	Motion => Contact.Rotation ((if Phi > 0.0 then Axis else -Axis), 1.0, Subject.Centre.Mean),	1.0	math	a twist of unit size: one radian
+driver-action-goals.adb	P.Count := 2;	2	structure	over or under it: clear of it, then across
+driver-action-goals.adb	P.Count := 3;	3	structure	onto it: clear of it, across, then down
+driver-action-goals.adb	Sigma := X.Sigma * Sqrt (Larger / Real (Count)) / (2.0 * Half_Gap);	2.0	math	the gap between the two eigenvalues is twice the half gap
+driver-action-goals.adb	Sign : constant Real := (if Increase then 1.0 else -1.0);	1.0	math	down is the negative sense of a quantity
+driver-action-goals.adb	Sign : constant Real := (if Increase then 1.0 else -1.0);	1.0	math	up is the positive sense of a quantity
+driver-action-goals.adb	Theta : constant Real := Arctan (2.0 * Sxy, Sxx - Syy) / 2.0;	2.0	math	the principal axis of a two by two covariance lies at half the angle of (Sxx - Syy, 2 Sxy)
+driver-action-goals.adb	Theta : constant Real := Arctan (2.0 * Sxy, Sxx - Syy) / 2.0;	2.0	math	the principal axis of a two by two covariance lies at half the angle of (Sxx - Syy, 2 Sxy)
+driver-action-goals.adb	if not (abs F > 0.0) or else not Significant (Arccos (Real'Min (1.0, -Real'(D * U))), Angle_Sigma)	1.0	numerics	a cosine rounded above one is one, where Arccos is defined
+driver-action-goals.adb	if not Significant (Pi / 2.0, Sigma) then	2.0	math	an axis is itself after a half turn, so a quarter turn is as far off as it can be
+driver-action-goals.adb	if not Significant (Vector_Gate (2), abs Flat, Sigma) then	2	structure	a separation within a plane has two dimensions
+driver-action-goals.adb	if not Significant (Vector_Gate (2), abs H, X.Sigma) then	2	structure	a separation within a plane has two dimensions
+driver-action-goals.adb	return Along ((if R = Nearer then -1.0 else 1.0) * Unit (Subject.Centre.Mean - C), Sigma / D_S,	1.0	math	farther goes away from the eye
+driver-action-goals.adb	return Along ((if R = Nearer then -1.0 else 1.0) * Unit (Subject.Centre.Mean - C), Sigma / D_S,	1.0	math	nearer goes toward the eye
+driver-action-goals.adb	return Along ((if R = Right then 1.0 else -1.0) * Unit (Grow),	1.0	math	left goes the way the image column shrinks
+driver-action-goals.adb	return Along ((if R = Right then 1.0 else -1.0) * Unit (Grow),	1.0	math	right goes the way the image column grows
+driver-action-goals.adb	return Moving (Contact.Rotation (Sign * Cross (N, Unit (H)), 1.0, X.Centre.Mean), Unknown);	1.0	math	a twist of unit size: one radian
+driver-action-goals.adb	return Moving (Contact.Rotation (Sign * N, 1.0, X.Centre.Mean), Unknown);	1.0	math	a twist of unit size: one radian
+driver-action-goals.ads	type Point_Array is array (1 .. 3) of Vec3;	3	structure	the longest way over a thing has three legs: clear of it, across, down
+driver-action-grids.adb	G.Cubes.Insert (K, Entry_Vectors.To_Vector (Entry_Point'(Point => Point, Margin => Margin), 1));	1	structure	a new cube starts with the one point that falls in it
+driver-action-grids.adb	for DI in -1 .. 1 loop	1	structure	the cube itself and its neighbours on either side
+driver-action-grids.adb	for DI in -1 .. 1 loop	1	structure	the cube itself and its neighbours on either side
+driver-action-grids.adb	for DJ in -1 .. 1 loop	1	structure	the cube itself and its neighbours on either side
+driver-action-grids.adb	for DJ in -1 .. 1 loop	1	structure	the cube itself and its neighbours on either side
+driver-action-grids.adb	for DK in -1 .. 1 loop	1	structure	the cube itself and its neighbours on either side
+driver-action-grids.adb	for DK in -1 .. 1 loop	1	structure	the cube itself and its neighbours on either side
+driver-action-plants-live.adb	R.Beats := 1;	1	structure	an order that moves nothing lets exactly one beat pass
 driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
@@ -23,14 +148,24 @@ driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal d
 driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
 driver-brain-keyboard.adb	Sentence_Rule : constant String := "";	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
 driver-brain-live.adb	Half : constant := 0.5;	0.5	format	the centre of a pixel is half a pixel from its corner (Driver.Images coordinates)
+driver-brain-live.adb	elsif Driver.Robot.Hand.Hand_Count (B.C.Hands.all) /= 1 then	1	structure	exactly one hand: then it is the only hand the grasper can be; with more the body does not guess
 driver-brain-pictures.adb	Channels : constant := 3;	3	format	bytes per RGB pixel
 driver-brain-runaway.adb	for Length in 1 .. (N - S.First_Index) / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the words read
 driver-brain-runaway.adb	for Length in 1 .. L / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the lines read
 driver-brain-runaway.adb	for Length in 1 .. Natural (Slot.Length) / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the units read
-driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
-driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
-driver-brain-service.adb	& "";	"0	format	box edges are thousandths of the picture, from 0
-driver-brain-service.adb	& "";	"1000	format	box edges are thousandths of the picture, up to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"0	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"0	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"0	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"0	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"1	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"1	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"1000	format	a box edge is at most 1000 thousandths of the picture (the where-is-it answer's grammar)
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
 driver-brain-service.adb	& Driver.Log.Image (Real (A.Seconds), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:197)
 driver-brain-service.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:284)
 driver-brain-service.adb	Thousandths : constant := 1000.0;	1000.0	format	boxes are given in thousandths of the picture (docs/brain-service.md)
@@ -39,13 +174,19 @@ driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps app
 driver-clock.adb	function Nanoseconds_Of (S : Duration) return Long_Long_Integer is (Long_Long_Integer (Real (S) * 1.0e9));	1.0e9	format	nanoseconds per second (the recording format counts nanoseconds)
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
 driver-conventions.ads	Z : constant := 3.0;	3.0	statistics	the significance level of the one test (documented in Conventions)
+driver-distributions.adb	(Bernoulli (K) / (Real (2 * K * (2 * K - 1)) * Y ** (2 * K - 1)));	2	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	(Bernoulli (K) / (Real (2 * K * (2 * K - 1)) * Y ** (2 * K - 1)));	2	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	(Bernoulli (K) / (Real (2 * K * (2 * K - 1)) * Y ** (2 * K - 1)));	2	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
 driver-distributions.adb	(Sqrt (Chi_Square_Quantile (Two_Sided_Tail, 1)));	1	math	a squared standard Gaussian is a chi square of one degree of freedom
 driver-distributions.adb	(Upper_Incomplete_Gamma (1, Z * Z * Half, Log_Gamma_Halves (1)));	1	math	a = 1/2 counted in halves: erfc (x) = Q (1/2, x^2)
 driver-distributions.adb	(Upper_Incomplete_Gamma (1, Z * Z * Half, Log_Gamma_Halves (1)));	1	math	a = 1/2 counted in halves: erfc (x) = Q (1/2, x^2)
+driver-distributions.adb	43867.0 / 798.0];	43867.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	43867.0 / 798.0];	798.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
 driver-distributions.adb	A_Down : constant Real := A - 1.0;	1.0	math	the a - 1 of the incomplete beta continued fraction
 driver-distributions.adb	A_Up : constant Real := A + 1.0;	1.0	math	the a + 1 of the incomplete beta continued fraction
 driver-distributions.adb	Ap := Ap + 1.0;	1.0	math	successive terms of the incomplete gamma series
 driver-distributions.adb	B := B + 2.0;	2.0	math	the incomplete gamma continued fraction's denominators grow by two
+driver-distributions.adb	Bernoulli : constant array (1 .. 9) of Real :=	9	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
 driver-distributions.adb	C : Real := 1.0 / Tiny;	1.0	numerics	Lentz's method starts C at the reciprocal of its stand-in for zero
 driver-distributions.adb	C : Real := 1.0;	1.0	math	Lentz's method starts C at one
 driver-distributions.adb	C := Clamp_Away_From_Zero (1.0 + Even / C);	1.0	math	Lentz's recurrence C = 1 + a / C
@@ -57,22 +198,51 @@ driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Even * D);	1.0	m
 driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Odd * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
 driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Odd * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
 driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (An * D + B);	1.0	math	Lentz's recurrence D = 1 / (b + a D)
+driver-distributions.adb	First : constant Real := (Z ** 3 + Z) / 4.0;	4.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	1482.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	1920.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	776.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	79.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	92_160.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	945.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
 driver-distributions.adb	Half : constant := 0.5;	0.5	math	one half: arguments counted in halves, and the midpoint of a bisection
+driver-distributions.adb	Half_Log_Two_Pi : constant := 0.918_938_533_204_672_741_780_329_736_406;	0.918_938_533_204_672_741_780_329_736_406	math	ln (2 pi) / 2 of Stirling's formula
 driver-distributions.adb	Hi : Real := 1.0;	1.0	math	the incomplete beta's argument lies in [0, 1]
 driver-distributions.adb	Hi := 2.0 * Hi;	2.0	numerics	the bracket widens by doubling until it holds the quantile
-driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	1	math	the Gamma recurrence starts at Gamma (1/2) for an odd count of halves
-driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	1	math	the Gamma recurrence starts at Gamma (1/2) for an odd count of halves
-driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	2	math	the Gamma recurrence starts at Gamma (1) for an even count of halves
-driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	2	math	the Gamma recurrence starts at Gamma (1) for an even count of halves
-driver-distributions.adb	J := J + 2;	2	math	the Gamma recurrence steps by one, which is two halves
-driver-distributions.adb	Sum : Real := (if Halves mod 2 = 1 then Half * Log (Ada.Numerics.Pi) else 0.0);	1	math	an odd count of halves starts from ln Gamma (1/2) = ln sqrt pi
-driver-distributions.adb	Sum : Real := (if Halves mod 2 = 1 then Half * Log (Ada.Numerics.Pi) else 0.0);	2	math	parity of the count of halves
+driver-distributions.adb	Second : constant Real := (5.0 * Z ** 5 + 16.0 * Z ** 3 + 3.0 * Z) / 96.0;	16.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Second : constant Real := (5.0 * Z ** 5 + 16.0 * Z ** 3 + 3.0 * Z) / 96.0;	3.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Second : constant Real := (5.0 * Z ** 5 + 16.0 * Z ** 3 + 3.0 * Z) / 96.0;	5.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Second : constant Real := (5.0 * Z ** 5 + 16.0 * Z ** 3 + 3.0 * Z) / 96.0;	96.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
 driver-distributions.adb	Term : Real := 1.0 / A;	1.0	math	first term of the incomplete gamma series
+driver-distributions.adb	Third : constant Real := (3.0 * Z ** 7 + 19.0 * Z ** 5 + 17.0 * Z ** 3 - 15.0 * Z) / 384.0;	15.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Third : constant Real := (3.0 * Z ** 7 + 19.0 * Z ** 5 + 17.0 * Z ** 3 - 15.0 * Z) / 384.0;	17.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Third : constant Real := (3.0 * Z ** 7 + 19.0 * Z ** 5 + 17.0 * Z ** 3 - 15.0 * Z) / 384.0;	19.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Third : constant Real := (3.0 * Z ** 7 + 19.0 * Z ** 5 + 17.0 * Z ** 3 - 15.0 * Z) / 384.0;	3.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Third : constant Real := (3.0 * Z ** 7 + 19.0 * Z ** 5 + 17.0 * Z ** 3 - 15.0 * Z) / 384.0;	384.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
 driver-distributions.adb	Twice : constant Real := 2.0 * Mr;	2.0	math	the 2m terms of the incomplete beta continued fraction
+driver-distributions.adb	W : constant Real := 1.0 + U;	1.0	math	ln (1 + u) through w = 1 + u with its rounding divided out
 driver-distributions.adb	X : constant Real := Beta_Quantile (Two_Sided_Tail, Degrees_Of_Freedom, 1);	1	math	b = 1/2 counted in halves: the t tail is I_x (nu / 2, 1 / 2)
+driver-distributions.adb	Y := Y + 1.0;	1.0	math	the recurrence Gamma (y + 1) = y Gamma (y)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	1.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	1.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	1.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	1.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	2730.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	30.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	30.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	3617.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	42.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	5.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	510.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	6.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	6.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	66.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	691.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	7.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
 driver-distributions.adb	elsif X >= 1.0 then	1.0	math	the incomplete beta is 1 at x = 1
 driver-distributions.adb	exit when abs (Factor - 1.0) <= Precision;	1.0	numerics	converged when the next factor is one to working precision
 driver-distributions.adb	exit when abs (Factor - 1.0) <= Precision;	1.0	numerics	converged when the next factor is one to working precision
+driver-distributions.adb	if W = 1.0 then	1.0	math	ln (1 + u) through w = 1 + u with its rounding divided out
 driver-distributions.adb	if X < (A + 1.0) / (A + B + 2.0) then	1.0	math	the fraction converges quickly below (a + 1) / (a + b + 2)
 driver-distributions.adb	if X < (A + 1.0) / (A + B + 2.0) then	2.0	math	the fraction converges quickly below (a + 1) / (a + b + 2)
 driver-distributions.adb	if X < A + 1.0 then	1.0	math	the incomplete gamma series converges quickly below a + 1
@@ -81,6 +251,7 @@ driver-distributions.adb	return 1.0;	1.0	math	Q (a, 0) = 1 and I_1 (a, b) = 1
 driver-distributions.adb	return Gaussian_Two_Sided_Quantile (Real'Min (1.0, Tail));	1.0	math	a probability is at most one
 driver-distributions.adb	return Incomplete_Beta (Degrees_Of_Freedom, 1, Nu / (Nu + T * T), Log_Beta_Halves (Degrees_Of_Freedom, 1));	1	math	b = 1/2 counted in halves: the t tail is I_x (nu / 2, 1 / 2)
 driver-distributions.adb	return Incomplete_Beta (Degrees_Of_Freedom, 1, Nu / (Nu + T * T), Log_Beta_Halves (Degrees_Of_Freedom, 1));	1	math	b = 1/2 counted in halves: the t tail is I_x (nu / 2, 1 / 2)
+driver-distributions.adb	return Log (W) * U / (W - 1.0);	1.0	math	ln (1 + u) through w = 1 + u with its rounding divided out
 driver-distributions.ads	with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;	1.0	math	a probability is at most one
 driver-distributions.ads	with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;	1.0	math	a probability is at most one
 driver-distributions.ads	with Pre => Upper_Tail > 0.0 and then Upper_Tail <= 1.0;	1.0	math	a probability is at most one
@@ -98,7 +269,6 @@ driver-geometry.adb	Vectors : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three di
 driver-geometry.adb	Weight (I) := 1.0 / Real'Max (N * (Points (I).Covariance * N), Real'Model_Small);	1.0	math	a least-squares weight is the inverse of the variance
 driver-geometry.adb	Weight (I) := 1.0;	1.0	numerics	equal weights for the first pass, before any normal is known to weight along
 driver-geometry.adb	if Rays'Length < 2 then	2	structure	two lines are the fewest that can meet in a point
-driver-geometry.adb	return Natural'Max (1, Natural (Real'Floor	1	statistics	Welch's degrees of freedom are at least one
 driver-geometry.adb	return Sqrt (P.Offset_Sigma ** 2 + A * A * P.Tilt_11 + 2.0 * A * B * P.Tilt_12 + B * B * P.Tilt_22);	2.0	math	the cross term of a two-variable quadratic form appears twice
 driver-geometry.adb	subtype Mat2 is Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the two tilt directions of a plane
 driver-geometry.adb	subtype Mat2 is Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the two tilt directions of a plane
@@ -735,7 +905,7 @@ driver-stats.adb	return S (O + (N + 1) / 2);	2	math	heap sort and median index a
 driver-stats.ads	with Pre => Count (A) > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 2;	2	statistics	a line fit with a residual spread needs three points
-driver-uncertain.adb	Dof := Natural'Max (1, Natural (Real'Floor ((Va + Vb) * (Va + Vb) / Spread)));	1	statistics	Welch's degrees of freedom are at least one
+driver-uncertain.adb	(if Count >= Real (Natural'Last) then 0 else Natural'Max (1, Natural (Real'Floor (Count))));	1	statistics	a degrees-of-freedom count is at least one when the sigma is estimated
 driver-uncertain.adb	elsif Tests = 1 then Driver.Conventions.Z	1	statistics	a family of one test is a single test: the plain threshold
 driver-uncertain.adb	for I in 1 .. 3 loop	3	structure	three dimensions
 driver-uncertain.adb	function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate is	1	statistics	a family of one test is a single test: the plain threshold
@@ -794,3 +964,71 @@ driver-wire.adb	when 0 | 1 | 2 =>	1	format	WebSocket framing and handshake (RFC 
 driver-wire.adb	when 0 | 1 | 2 =>	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	when 8 =>	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	when 9 =>	9	format	WebSocket framing and handshake (RFC 6455)
+driver-world-cameras.adb	Beside : constant Ray_Estimate := C.Ray ((U => Px.U + 1.0, V => Px.V));	1.0	structure	the next pixel along the row
+driver-world-estimates.adb	& Driver.Log.Image (Error, 2) & "");	2	format	digits printed in a log line or a message
+driver-world-estimates.adb	& Driver.Log.Image (Error, 2) & "");	2	format	digits printed in a log line or a message
+driver-world-estimates.adb	(On, True, Box, [1 => (At_Pixel => Prompt, On => True)], Beat),	1	structure	one point prompts the segmentation
+driver-world-estimates.adb	(Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (Driver.Images.Width (Image),	1	structure	grid points are at least one pixel apart
+driver-world-estimates.adb	(Tracks.Segment_On (Here.Track), True, Around, [1 => (At_Pixel => At_Point, On => True)], Beat);	1	structure	one point prompts the segmentation
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2xStride	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2xStride	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	Covariance => (1.0 / Real (R.Points.Length)) * Spread);	1.0	math	the mean of the points' covariances is their sum over their count
+driver-world-estimates.adb	F : Positive := 1;	1	structure	vectors are indexed from one
+driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
+driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
+driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
+driver-world-estimates.adb	return (Mean => (1.0 / Real (R.Points.Length)) * Sum,	1.0	math	the centroid is the points' sum over their count
+driver-world-estimates.adb	return -1;	1	format	a beat before every beat: no measurement asked about yet
+driver-world-estimates.ads	Stride : Positive := 1;	1	structure	a grid at every pixel until it is set
+driver-world-pairs.adb	(Misfit ([From_First, From_Second], X.Mean), Freedom), 1.0)	1.0	statistics	the deviate is already in units of its sigma
+driver-world-pairs.adb	Chi := Chi + (C * P * P - 2.0 * B * P * Q + A * Q * Q) / Det;	2.0	math	the cross term of a two by two quadratic form
+driver-world-pairs.adb	First_Sample : constant Positive := (if Own < Points'Length then Own + 1 else 1);	1	structure	the points after the region's own, or all of them from the first
+driver-world-pairs.adb	Freedom : constant Positive := 1;	1	statistics	two lines of sight give four image coordinates for a point's three: one degree of freedom
+driver-world-pairs.adb	K := K + 2;	2	structure	two coordinates per round trip
+driver-world-pairs.adb	Mad_Efficiency : constant := 0.367_5;	0.367_5	statistics	asymptotic efficiency of the median absolute deviation for Gaussian data
+driver-world-pairs.adb	Match_Sigma : constant Real := Trip_Sigma / Sqrt (2.0);	2.0	statistics	a round trip is two matches, each carrying the noise of one
+driver-world-pairs.adb	Trips (K + 2) := A.Back.V - P.V;	2	structure	two coordinates per round trip
+driver-world-pairs.adb	Trips : Real_Array (1 .. 2 * Around);	2	structure	two coordinates per round trip
+driver-world-pairs.adb	Vector_Gate (2, Natural (Real'Floor (Mad_Efficiency * Real (2 * Around))));	2	structure	an image displacement has two components
+driver-world-pairs.adb	Vector_Gate (2, Natural (Real'Floor (Mad_Efficiency * Real (2 * Around))));	2	structure	an image displacement has two components
+driver-world-regions.adb	Diagonal : constant Real := Sqrt (2.0);	2.0	math	a diagonal step between pixels is the square root of two
+driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C + 1, R) + 1.0, At_Pixel (C, R + 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
+driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C + 1, R) + 1.0, At_Pixel (C, R + 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
+driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C - 1, R) + 1.0, At_Pixel (C, R - 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
+driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C - 1, R) + 1.0, At_Pixel (C, R - 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
+driver-world-regions.adb	return (U => Real (Best mod W) + 0.5, V => Real (Best / W) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-regions.adb	return (U => Real (Best mod W) + 0.5, V => Real (Best / W) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-supports.adb	Freedom : constant Natural := P.Points - 3;	3	statistics	a plane takes three of its points' degrees of freedom
+driver-world-supports.adb	Freedom > 0 and then P.Scatter > 1.0	1.0	statistics	a scatter per degree of freedom of one is what the points' own spreads say
+driver-world-supports.adb	Head : Positive := 1;	1	structure	vectors are indexed from one
+driver-world-supports.adb	Scale : Real := 1.0;	1.0	statistics	the points' own spreads, unscaled
+driver-world-supports.adb	Scale := (if Wider then Sqrt (P.Scatter) else 1.0);	1.0	statistics	the points' own spreads, unscaled
+driver-world-supports.adb	Sigma : constant Real := Sqrt ((P.Tilt_11 + P.Tilt_22) / 2.0 + Up.Sigma ** 2);	2.0	math	the mean of the tilt's two variances
+driver-world-supports.adb	Steps : constant array (1 .. 4) of Grid_Point :=	4	structure	a grid point has four neighbours across its sides
+driver-world-supports.adb	Steps : constant array (1 .. 4) of Grid_Point :=	4	structure	a grid point has four neighbours across its sides
+driver-world-supports.adb	and then Significant (Vector_Gate (Freedom), Sqrt (Real (Freedom) * P.Scatter), 1.0);	1.0	statistics	the chi square is already a length in units of sigma
+driver-world-supports.adb	return (if Grid'Length = 0 then 1 else Result);	1	structure	an empty grid spans no places: its lowest above its highest
+driver-world-supports.adb	return 2 * On > Natural (S.Members.Length);	2	math	most of them: more than half
+driver-world-tracking.adb	(Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (T.Columns, T.Rows)))))));	1	structure	grid points are at least one pixel apart
+driver-world-tracking.adb	+ 1.0 / Real (Count_Ref))))	1.0	math	the variance of a mean of n frames is the frame's variance over n
+driver-world-tracking.adb	K := K + 2;	2	structure	two coordinates per round trip
+driver-world-tracking.adb	Mad_Efficiency : constant := 0.367_5;	0.367_5	statistics	asymptotic efficiency of the median absolute deviation for Gaussian data
+driver-world-tracking.adb	Points (Beside) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-tracking.adb	Points (Beside) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-tracking.adb	Points (Mine) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-tracking.adb	Points (Mine) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-tracking.adb	RGB (RGB'First + Driver.Bytes.Offset (3 * ((Row_0 + R) * W + Column_0 + C) + K - 1));	3	format	three bytes per RGB pixel
+driver-world-tracking.adb	Result (Driver.Bytes.Offset (3 * (R * Columns + C) + K)) :=	3	format	three bytes per RGB pixel
+driver-world-tracking.adb	Result : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset (3 * Columns * Rows));	3	format	three bytes per RGB pixel
+driver-world-tracking.adb	Sqrt (Ref_Variance (I) * (1.0 / Real (Driver.Pixels.Frames (Latest_Two))	1.0	math	the variance of a mean of n frames is the frame's variance over n
+driver-world-tracking.adb	Trips (K + 2) := A.Back.V - P.V;	2	structure	two coordinates per round trip
+driver-world-tracking.adb	Trips : Real_Array (1 .. 2 * Still_Found);	2	structure	two coordinates per round trip
+driver-world-tracking.adb	Vector_Gate (2, Natural (Real'Floor (Mad_Efficiency * Real (2 * Still_Found))));	2	structure	an image displacement has two components
+driver-world-tracking.adb	Vector_Gate (2, Natural (Real'Floor (Mad_Efficiency * Real (2 * Still_Found))));	2	structure	an image displacement has two components
+driver-world-tracking.adb	for K in 1 .. 3 loop	3	format	three bytes per RGB pixel
+driver-world-tracking.adb	if Driver.Pixels.Frames (T.Reference) >= 2 and then not T.Older.Is_Empty and then Changed (T) then	2	statistics	a pixel's own variance needs two frames
+driver-world.adb	Sum := Sum + (M.Point.Covariance (1, 1) + M.Point.Covariance (2, 2) + M.Point.Covariance (3, 3)) / 3.0;	3.0	math	the mean of the three axes' variances

@@ -1,5 +1,6 @@
 with Driver.Beats;
 with Driver.Brain.Round;
+with Driver.Brain.Words;
 with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot;
@@ -11,20 +12,16 @@ package body Driver.Brain.Live is
    use type Driver.World.Surface_Id;
    use type Driver.Robot.Hand.Hand_Id;
    use type Driver.Action.Operand_Kind;
+   use type Driver.Action.Role;
 
    --  Inside a beat's window the decider may read the models and
-   --  Driver.Beats.Latest; the beat then gets Hold. Taking a beat and
-   --  replying Hold must go through Driver.Robot.Motion, the only sender, and
-   --  the primitive for it is not in Motion's specification yet.
-   procedure Within_A_Beat (During : not null access procedure) is
-   begin
-      raise Program_Error with "the brain reads the body inside a beat's window, which needs a Driver.Robot.Motion"
-        & " primitive that takes one beat and holds the body still";
-   end Within_A_Beat;
+   --  Driver.Beats.Latest; the beat is answered with a hold.
+   procedure Within_A_Beat (During : not null access procedure) renames Driver.Beats.Within_A_Beat;
 
    procedure Start (B : in out Body_Link) is
    begin
       B.Episode := Driver.Beats.Episode;
+      B.Heard := Driver.Beats.Words_Heard;
    end Start;
 
    overriding function Episode_Over (B : Body_Link) return Boolean is (Driver.Beats.Episode /= B.Episode);
@@ -49,8 +46,9 @@ package body Driver.Brain.Live is
          Q        : constant Driver.Brain.Keyboard.Word_Vectors.Vector := Words_Of (Driver.Action.Quantities (B.C.all));
       begin
          B.Now := O;
+         B.Heard := Driver.Beats.Words_Heard;
          Now.Images := O.Images;
-         Now.Instruction := O.Instruction;
+         Now.Instruction := To_Unbounded_String (Driver.Beats.Latest_Words);
          for E in O.Images.First_Index .. O.Images.Last_Index loop
             Now.Eyes.Append (Driver.Brain.Round.Eye_Facts'(Eye   => E,
                                                            Mount => Driver.Robot.Eye_Mount (B.C.Robot.all, E)));
@@ -73,13 +71,13 @@ package body Driver.Brain.Live is
             end;
          end loop;
          for W of Q loop
-            Meanings.Append ("");
+            Meanings.Append (Driver.Action.Meaning (W));
          end loop;
          Now.Keys := Driver.Brain.Keyboard.Choose
            (Quantities       => Q,
             Meanings         => Meanings,
             Roles            => [for R in Driver.Action.Role => Driver.Action.Can_Bind (B.C.all, R)],
-            Relations        => [others => True],
+            Relations        => [for R in Driver.Action.Relation => Driver.Action.Usable (B.C.all, R)],
             Surface_Measured => Surface,
             Two_Things       => [others => False],
             Eyes             => B.Eyes);
@@ -273,9 +271,32 @@ package body Driver.Brain.Live is
                P := Driver.World.Centre (S, Who.Thing);
             when Driver.Action.Place_Operand =>
                P := Driver.World.Where (S, Who.Place);
-            when Driver.Action.Role_Operand | Driver.Action.Nothing =>
+            when Driver.Action.Role_Operand =>
+               --  Which hand is the grasper is settled per stretch; with one hand
+               --  it can only be that one, and with more the body does not guess.
+               if Who.The_Role /= Driver.Action.Grasper then
+                  Ok := False;
+                  Why := To_Unbounded_String ("I cannot yet tell where " & Driver.Brain.Words.Word (Who.The_Role)
+                                              & " is as a place");
+                  return;
+               elsif Driver.Robot.Hand.Hand_Count (B.C.Hands.all) /= 1 then
+                  Ok := False;
+                  Why := To_Unbounded_String
+                    ("I have" & Natural'Image (Driver.Robot.Hand.Hand_Count (B.C.Hands.all))
+                     & " hands and which one is the grasper is settled stretch by stretch, so I do not guess which"
+                     & " one you mean; remember where the thing in it is instead");
+                  return;
+               end if;
+               P := Driver.Robot.Hand.Grip_Centre (B.C.Hands.all, B.C.Robot.all, Driver.Robot.Hand.Hand_Id'First,
+                                                   Driver.Beats.Latest.all);
+               if not Driver.Uncertain.Known (P) then
+                  Ok := False;
+                  Why := To_Unbounded_String ("I have not measured yet where my grasper closes");
+                  return;
+               end if;
+            when Driver.Action.Nothing =>
                Ok := False;
-               Why := To_Unbounded_String ("I cannot yet tell where a part of me is as a place");
+               Why := To_Unbounded_String ("there is nothing here to remember");
                return;
          end case;
          Driver.World.Remember (S, P, Place);
@@ -293,7 +314,8 @@ package body Driver.Brain.Live is
       Driver.Log.Line (Driver.Log.Brain, "the brain says: " & Sentence);
    end Say;
 
-   overriding function Interrupted (B : Body_Link) return Boolean is (B.Episode_Over);
+   overriding function Interrupted (B : Body_Link) return Boolean is
+     (B.Episode_Over or else Driver.Beats.Words_Heard /= B.Heard);
 
    overriding function Write_Program
      (T       : in out Brain_Link;

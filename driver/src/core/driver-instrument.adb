@@ -128,9 +128,14 @@ package body Driver.Instrument is
       Ok         : out Boolean;
       Why        : out Unbounded_String)
    is
-      Doc : Driver.Json.Document;
+      Doc     : Driver.Json.Document;
+      Nothing : constant Answer := (others => <>);
    begin
-      Result := [others => (others => <>)];
+      --  Element by element: an aggregate for the whole array would be built as
+      --  a temporary on the stack, and a reply can hold tens of thousands.
+      for A of Result loop
+         A := Nothing;
+      end loop;
       Ok := False;
       Why := Reply.Why;
       if not Reply.Ok then

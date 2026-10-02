@@ -144,8 +144,69 @@ package body Driver.Robot.Hand.Sweep.Tests is
              "a push that changes nothing asked the matcher");
    end Nothing_Seen;
 
+   procedure Refused (Lasting : Boolean) is
+      --  A sweep asked, refused, and swept again with new ends.
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
+      B : Driver.Clock.Beat := 0;
+      Rest_At : Real := 0.0;   --  the rest of the body, which the boot moves between sweeps
+      procedure Hold (R : Real; Frames : Positive) is
+      begin
+         for I in 1 .. Frames loop
+            Observe (S, At_Beat (B), True, [1 => R], [1 => Rest_At], Frame (R));
+            B := B + 1;
+         end loop;
+      end Hold;
+      procedure Move (R : Real) is
+      begin
+         Observe (S, At_Beat (B), False, [1 => R], [1 => Rest_At], Frame (R));
+         B := B + 1;
+      end Move;
+      procedure Sweep is
+      begin
+         Hold (1.0, 3);
+         Move (0.5);
+         Hold (0.0, 3);
+         Move (0.5);
+         Hold (1.0, 3);
+         Move (1.0);
+      end Sweep;
+   begin
+      Sweep;
+      Check (Wants_Correspondences (S, 1), "a full sweep did not ask for correspondences");
+      if Wants_Correspondences (S, 1) then
+         Asked (S, 1);
+         Refuse (S, 1, Lasting, "no address was given for the instrument service");
+         --  The arm moved, and the closer was swept again there: new ends.
+         Rest_At := 0.5;
+         Sweep;
+         if Lasting then
+            Check (Status (S, 1) = Unanswerable and then not Wants_Correspondences (S, 1)
+                   and then Refusal (S) = "no address was given for the instrument service",
+                   "an instrument that can never answer is asked again for new ends, or the reason is lost");
+         else
+            Check (Wants_Correspondences (S, 1) and then Refusal (S) = "",
+                   "new ends are not asked for after a refusal that may pass");
+         end if;
+      end if;
+   end Refused;
+
+   procedure Refused_For_Good is
+   begin
+      Refused (Lasting => True);
+   end Refused_For_Good;
+
+   procedure Refused_For_Now is
+   begin
+      Refused (Lasting => False);
+   end Refused_For_Now;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.sweep.lasting",
+                             "an instrument that can never answer is asked again whenever the closer's ends are new",
+                             Refused_For_Good'Access);
+      Driver.Tests.Register ("hand.sweep.transient", "new ends are not asked for after a refusal that may pass",
+                             Refused_For_Now'Access);
       Driver.Tests.Register ("hand.sweep.two", "a closer swept open to closed does not yield its lobes and closed end",
                              Two_Fingers_Swept'Access);
       Driver.Tests.Register ("hand.sweep.nothing", "a push that changes nothing in the eye is sent to the matcher",

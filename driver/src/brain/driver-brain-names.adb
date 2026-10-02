@@ -219,12 +219,13 @@ package body Driver.Brain.Names is
                Answer : Pointing;
                Where  : Box;
                Why    : Unbounded_String;
+               Stop   : Boolean := False;   --  this eye's answer settles that no eye shows it as a thing
             begin
                S.Ask_Where (E, Name, Answer, Where, Why);
                case Answer is
                   when No_Answer =>
                      Said ("I could not ask " & Eye (E) & " where it is (" & To_String (Why) & ")");
-                     exit;
+                     Stop := True;
                   when Not_Here =>
                      Said (Eye (E) & " cannot point it out");
                   when Boxed =>
@@ -249,13 +250,18 @@ package body Driver.Brain.Names is
                                  return;
                               end;
                            when Part_Of_Me =>
+                              --  The eye did point it out, at the body: asking the other
+                              --  eyes would only find whatever they guess instead.
                               Said (Eye (E) & " boxed a part of me" & (if Length (What) > 0 then " (" & To_String (What)
-                                                                         & ")" else ""));
+                                                                         & ")" else "")
+                                    & ", and parts of me go by their role, never by a name");
+                              Stop := True;
                            when No_Patch =>
                               Said ("in the box " & Eye (E) & " gave, nothing stands apart from its surroundings");
                         end case;
                      end;
                end case;
+               exit when Stop;
             end;
          end loop;
       end;

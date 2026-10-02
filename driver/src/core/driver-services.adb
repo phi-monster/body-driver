@@ -65,7 +65,7 @@ package body Driver.Services is
 
    function Not_Configured (S : Service) return Reply is
      (Ok => False, Text => Null_Unbounded_String,
-      Why => To_Unbounded_String ("no address was given for the " & Name (S) & " service"));
+      Why => To_Unbounded_String ("no address was given for the " & Name (S) & " service"), Lasting => True);
 
    function Recorded_Call (S : Service; Path, Request, Submitted_At : String) return Reply is
    begin
@@ -79,7 +79,7 @@ package body Driver.Services is
          declare
             H : constant Driver.Http.Response :=
               Driver.Http.Post (To_String (Endpoints (S).Host), Endpoints (S).Port, Path, Request);
-            R : constant Reply := (Ok => H.Ok, Text => H.Body_Text, Why => H.Why);
+            R : constant Reply := (Ok => H.Ok, Text => H.Body_Text, Why => H.Why, Lasting => False);
          begin
             Record_Reply (Call_Head, R);
             return R;
@@ -151,7 +151,8 @@ package body Driver.Services is
                                           On_Data'Access);
             --  An error reply is not a stream: its body (a JSON error, say) is
             --  the text, as for a blocking call.
-            R : constant Reply := (Ok => H.Ok, Text => (if H.Ok then Data else H.Body_Text), Why => H.Why);
+            R : constant Reply :=
+              (Ok => H.Ok, Text => (if H.Ok then Data else H.Body_Text), Why => H.Why, Lasting => False);
          begin
             Record_Reply (Call_Head, R);
             return R;

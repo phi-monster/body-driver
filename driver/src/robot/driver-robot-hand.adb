@@ -320,11 +320,11 @@ package body Driver.Robot.Hand is
                   Ok_Forward, Ok_Backward : Boolean;
                   Why_Forward, Why_Backward : Unbounded_String;
                   Requests : Request_Array := P.Requests.Element;
+                  Ahead    : constant Driver.Services.Reply := Driver.Services.Collect (Asked.Forward);
+                  Behind   : constant Driver.Services.Reply := Driver.Services.Collect (Asked.Backward);
                begin
-                  Driver.Instrument.Read_Match
-                    (Driver.Services.Collect (Asked.Forward), True, Forward, Ok_Forward, Why_Forward);
-                  Driver.Instrument.Read_Match
-                    (Driver.Services.Collect (Asked.Backward), True, Backward, Ok_Backward, Why_Backward);
+                  Driver.Instrument.Read_Match (Ahead, True, Forward, Ok_Forward, Why_Forward);
+                  Driver.Instrument.Read_Match (Behind, True, Backward, Ok_Backward, Why_Backward);
                   Requests (C).Out_Now := False;
                   P.Requests := Request_Holders.To_Holder (Requests);
                   if Ok_Forward and then Ok_Backward then
@@ -340,10 +340,15 @@ package body Driver.Robot.Hand is
                            else "nothing moves between its ends"));
                      Measured_Now := Measured_Now or else Sweeps.Status (P.Sweep, C) = Sweeps.Measured;
                   else
-                     Sweeps.Refuse (P.Sweep, C);
-                     Driver.Log.Line (Driver.Log.Robot, "hand: the instrument did not answer for closer group"
-                                      & P.Group'Image & " channel" & C'Image & ": "
-                                      & To_String (if Ok_Forward then Why_Backward else Why_Forward));
+                     declare
+                        Why     : constant String := To_String (if Ok_Forward then Why_Backward else Why_Forward);
+                        Lasting : constant Boolean := Ahead.Lasting or else Behind.Lasting;
+                     begin
+                        Sweeps.Refuse (P.Sweep, C, Lasting, Why);
+                        Driver.Log.Line (Driver.Log.Robot, "hand: the instrument did not answer for closer group"
+                                         & P.Group'Image & " channel" & C'Image & ": " & Why
+                                         & (if Lasting then "; it never can, so nothing more is asked" else ""));
+                     end;
                   end if;
                end;
             end if;
@@ -531,6 +536,15 @@ package body Driver.Robot.Hand is
    function Describe (H : Hands) return String is
       Text : Unbounded_String;
    begin
+      --  A closer the instrument can never answer for is not measured, and says why.
+      if H.Data /= null then
+         for P of H.Data.Pairs loop
+            if Sweeps.Refusal (P.Sweep) /= "" then
+               Append (Text, "closer group" & P.Group'Image & " in eye" & P.Eye'Image & ": not measured, the instrument"
+                       & " can never answer (" & Sweeps.Refusal (P.Sweep) & ")" & ASCII.LF);
+            end if;
+         end loop;
+      end if;
       for Id in 1 .. Hand_Id'Base (Hand_Count (H)) loop
          declare
             R : constant Hand_Record := Found (H, Id);

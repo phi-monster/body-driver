@@ -60,6 +60,17 @@ still pixels). A still pixel next to a finger that passed the single test by
 chance becomes the farthest pixel by one row; seeds pass the family test, so
 taking the farthest seed removes it.
 
+**Lesson: a refusal that can never pass ends the sweep.** A refused pair of
+ends is not asked again, but new ends are. While the boot moves the arm, the
+closer's views begin again at new beats, so the ends are new on nearly every
+still beat. Path A's rig, run without an instrument address, asked about 6000
+times. The service now says when its failure is lasting
+(`Driver.Services.Reply.Lasting`: no address was given). Then every channel
+of that sweep is `Unanswerable` with the reason, nothing is asked again,
+`Measure` does not sweep the channels left and says why, and `Describe`
+states it. A reply that does not fit, or a failed request, may pass, and new
+ends are asked again. There is no retry count.
+
 ## Closers whose reading echoes the command
 
 On the x5 the gripper's reading is the last command. Commanded past its travel

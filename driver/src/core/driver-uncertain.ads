@@ -46,6 +46,11 @@ package Driver.Uncertain with Pure is
    --  A - B for independent estimates: the sigmas add in quadrature and the
    --  degrees of freedom combine by Welch and Satterthwaite (rounded down).
 
+   function Satterthwaite_Count (Count : Real) return Natural;
+   --  A Welch-Satterthwaite degrees-of-freedom count as a whole number:
+   --  rounded down and at least one. A count beyond Natural'Last means the
+   --  sigma is known as well as it will ever be, and that is 0.
+
    function Significant (A, B : Estimate) return Boolean;
    --  Significant (Difference (A, B)) against zero.
 
