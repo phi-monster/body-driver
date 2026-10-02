@@ -63,6 +63,15 @@ package body Driver.Distributions.Tests is
                    "two-dof quantile");
       Check_Close (Student_T_Two_Sided_Tail (Student_T_Quantile (Alpha, 7), 7), Alpha, 1.0e-15, "tail of the quantile");
       Check_Close (Student_T_Quantile (Alpha, 1_000_000), Driver.Conventions.Z, 1.0e-5, "many dof is Gaussian");
+      --  At many dof the quantile comes from the Cornish-Fisher series: put
+      --  back into the exact tail it must give the tail asked for, also for a
+      --  family of a thousand tests and across the change of method.
+      for Dof of Natural_Array'[100, 5_000, 20_000, 100_000, 1_000_000, 20_000_000] loop
+         for Tail of Real_Array'[Alpha, Alpha / 1000.0] loop
+            Check_Close (Student_T_Two_Sided_Tail (Student_T_Quantile (Tail, Dof), Dof) / Tail, 1.0, 1.0e-9,
+                         "tail of the quantile at" & Dof'Image & " dof");
+         end loop;
+      end loop;
    end T_Quantile;
 
    procedure Known_Sigma_Is_Z is

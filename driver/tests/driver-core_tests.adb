@@ -126,6 +126,12 @@ package body Driver.Core_Tests is
       Check (not Significant (1.0e9, Real'Last), "unknown sigma made something significant");
       Check (not Significant (Estimate'(10.0, 2.0, 0), Estimate'(5.0, 2.0, 0)), "5 apart with combined sigma 2.83");
       Check (Significant (Estimate'(10.0, 1.0, 0), Estimate'(5.0, 1.0, 0)), "5 apart with combined sigma 1.41");
+      --  A well-measured sigma beside a known one: the Welch-Satterthwaite count
+      --  is far beyond any whole number, so the sum's sigma counts as known.
+      Check (Difference (Estimate'(1.0, 1.0e-12, 3), Estimate'(0.0, 1.0, 0)).Degrees_Of_Freedom = 0,
+             "an overwhelming Welch count was not taken as a known sigma");
+      Check (Satterthwaite_Count (7.9) = 7 and then Satterthwaite_Count (0.4) = 1,
+             "a Welch count is not rounded down to at least one");
    end Significance;
 
    procedure Point_Significance is

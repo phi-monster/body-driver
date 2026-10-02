@@ -552,7 +552,8 @@ procedure Numbers is
             exit;
          end if;
       end loop;
-      return (for all C of V (V'First .. Mantissa_End) => C in '0' | '_' | '.') and then V (V'First) = '0';
+      return V'Length > 0 and then (for all C of V (V'First .. Mantissa_End) => C in '0' | '_' | '.')
+        and then V (V'First) = '0';
    end Is_Zero;
 
    function Is_One_Real (V : String) return Boolean is
