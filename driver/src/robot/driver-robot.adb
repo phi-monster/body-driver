@@ -1,10 +1,13 @@
 with Ada.Containers;
+with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Clock;
+with Driver.Conventions;
 with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Graph;
+with Driver.Robot.Kinematics;
 with Driver.Robot.Lag;
 with Driver.Robot.Lockin;
 with Driver.Robot.Steps;
@@ -12,6 +15,7 @@ with Driver.Robot.Stillness;
 
 package body Driver.Robot is
 
+   use Ada.Numerics.Long_Elementary_Functions;
    use type Ada.Containers.Count_Type;
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
@@ -27,8 +31,9 @@ package body Driver.Robot is
       Du, Dv, Condition, Cell_Noise : Real_Array (1 .. N);
       Resolved : Flow.Flag_Array (1 .. N);
    begin
+      --  A cell at rest moves by its pixels' noise times the eye's rest factor.
       for C in 1 .. N loop
-         Cell_Noise (C) := S.Luma_Variance.Element (C - 1);
+         Cell_Noise (C) := S.Luma_Variance.Element (C - 1) * S.Rest_Factor ** 2;
       end loop;
       Flow.Displacements (S.Grid, S.Previous.all, S.Current.all, Cell_Noise, Du, Dv, Condition, Resolved);
       for C in 1 .. N loop
@@ -127,8 +132,10 @@ package body Driver.Robot is
          end if;
       end loop;
       Lag.Measure (M);
+      Lockin.Measure_Rest_Noise (M);
       Lockin.Measure (M);
       Graph.Derive (M);
+      Kinematics.Refit (M);
       M.Graph_Evidence := M.Beats;
       Driver.Log.Line (Driver.Log.Robot, "estimated from" & M.Beats'Image & " beats in"
                        & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
@@ -139,6 +146,7 @@ package body Driver.Robot is
       Channels.Append (M, O, Sent);
       Steps.Track (M, M.Beats);
       Observe_Eyes (M, O);
+      Kinematics.Observe (M, O);
       M.Beats := M.Beats + 1;
       --  The estimates are redone whenever the evidence behind them has
       --  doubled: a logarithmic number of times over any stream.
@@ -147,7 +155,22 @@ package body Driver.Robot is
       end if;
    end Observe;
 
-   function Booted (M : Model) return Boolean is (M.Is_Booted);
+   --  Booted once the kinematics of every arm that carries an eye are
+   --  fitted, and of one at least: a function of the evidence, so a replay
+   --  finds the boot where the run did.
+   function Booted (M : Model) return Boolean is
+      Any : Boolean := False;
+   begin
+      for E in M.Graph.Mounts.First_Index .. M.Graph.Mounts.Last_Index loop
+         if M.Graph.Mounts (E).Kind = Arm_Carried then
+            if not Kinematics.Fitted (M, M.Graph.Mounts (E).Arm) then
+               return False;
+            end if;
+            Any := True;
+         end if;
+      end loop;
+      return Any;
+   end Booted;
 
    function Role (M : Model; G : Group_Id) return Group_Role is
      (if G <= M.Graph.Roles.Last_Index then M.Graph.Roles (G) else Unclassified);
@@ -161,7 +184,51 @@ package body Driver.Robot is
    function Eye_Mount (M : Model; E : Eye_Id) return Mount is
      (if E <= M.Graph.Mounts.Last_Index then M.Graph.Mounts (E) else (Kind => Unmeasured));
 
-   function Eye_Pose (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is ((others => <>));
+   --  The arm whose eye this is, when its kinematics are fitted; 0 otherwise.
+   function Fitted_Arm (M : Model; E : Eye_Id) return Arm_Id'Base is
+     (if E <= M.Graph.Mounts.Last_Index and then M.Graph.Mounts (E).Kind = Arm_Carried
+        and then Kinematics.Fitted (M, M.Graph.Mounts (E).Arm)
+      then M.Graph.Mounts (E).Arm else 0);
+
+   --  The world: the frame of the first arm's eye at its reference keyframe,
+   --  until the arms are measured into one frame.
+   function In_World (M : Model; A : Arm_Id) return Boolean is (A = 1 and then Kinematics.Fitted (M, A));
+
+   --  The arm's eye at O in the world, known when the arm is in the world and
+   --  O carries its readings.
+   procedure Arm_Eye (M : Model; A : Arm_Id; O : Observation; T : out Rigid; Known_Pose : out Boolean) is
+      G : constant Group_Id := Arm_Group (M, A);
+   begin
+      T := Identity;
+      Known_Pose := In_World (M, A) and then G <= O.Readings.Last_Index
+                    and then O.Readings.Element (G)'Length = Group_Size (M, G);
+      if Known_Pose then
+         T := Kinematics.Eye_In_Reference (M, A, O.Readings.Element (G));
+      end if;
+   end Arm_Eye;
+
+   --  A pose with the uncertainty of the fit that gave it: its turn by the
+   --  angle the measured pixel noise subtends, its position by that angle
+   --  over the arm's reach (one model unit).
+   function With_Fit_Uncertainty (M : Model; A : Arm_Id; T : Rigid) return Pose_Estimate is
+      S : constant Real := Kinematics.Angle_Sigma (M, A);
+   begin
+      return (Pose                => T,
+              Position_Covariance => [[S * S, 0.0, 0.0], [0.0, S * S, 0.0], [0.0, 0.0, S * S]],
+              Rotation_Covariance => [[S * S, 0.0, 0.0], [0.0, S * S, 0.0], [0.0, 0.0, S * S]]);
+   end With_Fit_Uncertainty;
+
+   function Eye_Pose (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is
+      A : constant Arm_Id'Base := Fitted_Arm (M, E);
+      T : Rigid;
+      K : Boolean;
+   begin
+      if A = 0 then
+         return (others => <>);
+      end if;
+      Arm_Eye (M, A, O, T, K);
+      return (if K then With_Fit_Uncertainty (M, A, T) else (others => <>));
+   end Eye_Pose;
 
    procedure Project
      (M       : Model;
@@ -171,22 +238,77 @@ package body Driver.Robot is
       Px      : out Driver.Images.Pixel;
       Visible : out Boolean)
    is
-      pragma Unreferenced (M, E, O, Point);
+      A : constant Arm_Id'Base := Fitted_Arm (M, E);
+      T : Rigid;
+      K : Boolean;
    begin
       Px := (U => 0.0, V => 0.0);
       Visible := False;
+      if A > 0 then
+         Arm_Eye (M, A, O, T, K);
+         if K then
+            Kinematics.Project_In_Eye (M, A, Inverse (T) * Point, Px.U, Px.V, Visible);
+            Visible := Visible and then Px.U in 0.0 .. Real (M.Eyes (E).Grid.Width)
+                       and then Px.V in 0.0 .. Real (M.Eyes (E).Grid.Height);
+         end if;
+      end if;
    end Project;
 
+   function Eye_Ray (M : Model; E : Eye_Id; Px : Driver.Images.Pixel) return Ray_Estimate is
+      A : constant Arm_Id'Base := Fitted_Arm (M, E);
+   begin
+      if A = 0 then
+         return (others => <>);
+      end if;
+      return (Origin    => (Mean => [0.0, 0.0, 0.0], Covariance => [others => [others => 0.0]]),
+              Direction => (Unit_Vector => Kinematics.Ray_In_Eye (M, A, Px.U, Px.V),
+                            Sigma       => Kinematics.Angle_Sigma (M, A)));
+   end Eye_Ray;
+
    function Ray (M : Model; E : Eye_Id; O : Observation; Px : Driver.Images.Pixel) return Ray_Estimate is
-     ((others => <>));
+      A : constant Arm_Id'Base := Fitted_Arm (M, E);
+      T : Rigid;
+      K : Boolean;
+   begin
+      if A = 0 then
+         return (others => <>);
+      end if;
+      Arm_Eye (M, A, O, T, K);
+      if not K then
+         return (others => <>);
+      end if;
+      declare
+         P : constant Pose_Estimate := With_Fit_Uncertainty (M, A, T);
+      begin
+         return (Origin    => (Mean => T.Translation, Covariance => P.Position_Covariance),
+                 Direction => (Unit_Vector => Driver.Numerics.Arrays."*" (T.Rotation, Kinematics.Ray_In_Eye (M, A, Px.U, Px.V)),
+                               Sigma       => Sqrt (2.0) * Kinematics.Angle_Sigma (M, A)));
+      end;
+   end Ray;
 
-   function Eye_Ray (M : Model; E : Eye_Id; Px : Driver.Images.Pixel) return Ray_Estimate is ((others => <>));
+   function Up (M : Model) return Direction_Estimate is (M.Table_Up);
 
-   function Up (M : Model) return Direction_Estimate is ((others => <>));
+   --  The tool frame of an arm is the frame of the eye it carries: what the
+   --  driver measures of a hand it measures through that eye.
+   function Tool_Pose (M : Model; A : Arm_Id; O : Observation) return Pose_Estimate is
+   begin
+      for E in M.Graph.Mounts.First_Index .. M.Graph.Mounts.Last_Index loop
+         if M.Graph.Mounts (E).Kind = Arm_Carried and then M.Graph.Mounts (E).Arm = A then
+            return Eye_Pose (M, E, O);
+         end if;
+      end loop;
+      return (others => <>);
+   end Tool_Pose;
 
-   function Tool_Pose (M : Model; A : Arm_Id; O : Observation) return Pose_Estimate is ((others => <>));
-
-   function Eye_In_Tool (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is ((others => <>));
+   function Eye_In_Tool (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is
+      pragma Unreferenced (O);
+   begin
+      --  The eye is the tool frame of the arm that carries it: exactly.
+      return (if Fitted_Arm (M, E) > 0
+              then (Pose => Identity, Position_Covariance => [others => [others => 0.0]],
+                    Rotation_Covariance => [others => [others => 0.0]])
+              else (others => <>));
+   end Eye_In_Tool;
 
    function Blocked (M : Model; A : Arm_Id; O : Observation) return Boolean is
    begin
@@ -231,7 +353,47 @@ package body Driver.Robot is
    function Reading_Noise (M : Model; G : Group_Id; Channel : Positive) return Real is
      (Channels.Noise (M, G, Channel));
 
-   function Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate is (Unknown);
+   function Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate is
+      Best : Estimate := Unknown;
+   begin
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         declare
+            S    : Eye_Stream renames M.Eyes (E);
+            Kept : constant Natural := Natural (S.Kept_Groups.Length);
+            N    : constant Natural := (if Kept = 0 then 0 else Natural (S.Gains.Length) / Kept);
+            Column : Natural := 0;
+         begin
+            for K in 0 .. Kept - 1 loop
+               if S.Kept_Groups (K) = Natural (G) and then S.Kept_Channels (K) = Channel then
+                  Column := K + 1;
+               end if;
+            end loop;
+            if Column > 0 and then Response (M, G, E) in Patch | Undecided | Whole then
+               declare
+                  Gain, Spread : Real := 0.0;
+               begin
+                  for Cell in 0 .. N - 1 loop
+                     Gain := Gain + S.Gains (Cell * Kept + Column - 1);
+                     Spread := Spread + S.Gain_Variances (Cell * Kept + Column - 1);
+                  end loop;
+                  --  A step is seen when the displacement pattern it causes,
+                  --  matched against the eye's cells, stands out of their
+                  --  noise: a test of one degree, passed from Z / sqrt (Gain) on.
+                  if Gain > 0.0 then
+                     declare
+                        Step : constant Real := Driver.Conventions.Z / Sqrt (Gain);
+                     begin
+                        if not Known (Best) or else Step < Best.Value then
+                           Best := (Value => Step, Sigma => Step * Sqrt (Spread) / (2.0 * Gain), Degrees_Of_Freedom => 0);
+                        end if;
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      return Best;
+   end Visible_Step;
 
    function Response (M : Model; G : Group_Id; E : Eye_Id) return Eye_Response is
      (Graph.Effect (M, G, E).Verdict);
@@ -285,7 +447,12 @@ package body Driver.Robot is
                     & (if Lag_Known (M, E) then "image lag" & Integer'Image (Image_Lag (M, E)) & " beats, "
                         else "image lag unmeasured, ")
                     & Mount_Kind'Image (Mt.Kind)
-                    & (if Mt.Kind = Arm_Carried then " on arm" & Arm_Id'Image (Mt.Arm) else "") & ASCII.LF);
+                    & (if Mt.Kind = Arm_Carried then " on arm" & Arm_Id'Image (Mt.Arm) else "")
+                    & ", rest noise " & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & " times its floor"
+                    & (if M.Eyes (E).Rest_Counts_Known
+                        then ", at most" & M.Eyes (E).Rest_Count_Max'Image & " cells move at rest ("
+                             & Driver.Log.Image (M.Eyes (E).Rest_Count_Beats) & " beats)"
+                        else "") & ASCII.LF);
          end;
       end loop;
       return To_String (T);

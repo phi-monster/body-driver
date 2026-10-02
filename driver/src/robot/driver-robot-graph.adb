@@ -1,4 +1,5 @@
 with Driver.Robot.Channels;
+with Driver.Robot.Lag;
 
 package body Driver.Robot.Graph is
 
@@ -13,7 +14,42 @@ package body Driver.Robot.Graph is
    procedure Derive (M : in out Model) is
       Eyes : constant Natural := Natural (M.Eyes.Length);
       Gr   : Body_Graph renames M.Graph;
+
+      --  A group's own pushes: pushes it answered that no other commandable
+      --  group began within the longest lag the stream can tell of. Until it
+      --  has one, what the eyes saw while it moved cannot be told from what
+      --  the groups that moved with it did, and it is not classified.
+      function Pushed_Alone (G : Group_Id) return Boolean is
+         Window : constant Natural := Lag.Longest (M);
+      begin
+         for E of M.Groups (G).Episodes loop
+            if E.Moved then
+               declare
+                  Alone : Boolean := True;
+               begin
+                  for H in M.Groups.First_Index .. M.Groups.Last_Index loop
+                     if H /= G and then M.Groups (H).Commandable then
+                        for F of M.Groups (H).Episodes loop
+                           if abs (F.Start - E.Start) <= Window then
+                              Alone := False;
+                           end if;
+                        end loop;
+                     end if;
+                  end loop;
+                  if Alone then
+                     return True;
+                  end if;
+               end;
+            end if;
+         end loop;
+         return False;
+      end Pushed_Alone;
+
+      Own : array (M.Groups.First_Index .. M.Groups.Last_Index) of Boolean := [others => False];
    begin
+      for G in Own'Range loop
+         Own (G) := M.Groups (G).Commandable and then Pushed_Alone (G);
+      end loop;
       Gr.Roles.Clear;
       Gr.Arm_Of.Clear;
       Gr.Breach.Clear;
@@ -44,7 +80,7 @@ package body Driver.Robot.Graph is
 
       --  Carrier and arms.
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-         if M.Groups (G).Commandable then
+         if Own (G) then
             declare
                Whole_Eyes : Natural := 0;
             begin
@@ -108,7 +144,7 @@ package body Driver.Robot.Graph is
 
       --  Closers and parts.
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-         if M.Groups (G).Commandable and then Gr.Roles (G) = Unclassified then
+         if Own (G) and then Gr.Roles (G) = Unclassified then
             declare
                Best_Arm   : Arm_Id'Base := 0;
                Best_Count : Natural := 0;

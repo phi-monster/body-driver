@@ -38,6 +38,7 @@ with Driver.Images;
 with Driver.Numerics;
 with Driver.Observations;
 private with Driver.Pixels;
+private with Driver.Services;
 with Driver.Uncertain;
 
 package Driver.Robot is
@@ -85,6 +86,7 @@ package Driver.Robot is
    --  seconds, during which the robot holds.
 
    function Booted (M : Model) return Boolean;
+   --  The kinematics of every arm that carries an eye are measured.
 
    function Role (M : Model; G : Group_Id) return Group_Role;
 
@@ -262,6 +264,14 @@ private
       Measured      : Flag_Vectors.Vector;   --  per beat: both frames were there
       Noise         : Real_Vectors.Vector;   --  per cell: displacement noise at rest, once measured
       Textured      : Flag_Vectors.Vector;   --  per cell: can show a displacement, once measured
+      Kept_Groups   : Count_Vectors.Vector;  --  the lock-in's regressors: each one's group
+      Kept_Channels : Count_Vectors.Vector;  --  and channel
+      Gains         : Real_Vectors.Vector;   --  per cell and regressor: squared displacement per reading
+                                             --  unit over the cell's noise, less its estimation variance;
+                                             --  zero where the cell does not respond to that group
+      Gain_Variances : Real_Vectors.Vector;  --  their variances
+      Shifts        : Real_Vectors.Vector;   --  per cell and regressor: pixels moved per reading unit,
+                                             --  zero where the cell does not respond to that group
       Luma_Variance : Real_Vectors.Vector;   --  per cell: a resting pixel's luma variance (Stillness)
       Settled       : Driver.Pixels.View;    --  the frames since the eye last saw a change
       Noise_View    : Driver.Pixels.View;    --  the longest still run before the current one
@@ -270,6 +280,10 @@ private
       Is_Still      : Boolean := False;      --  at the latest beat, once judged (Driver.Robot.Stillness)
       Has_Judged    : Boolean := False;      --  the latest frame was judged, not only added to the first run
       Judged        : Flag_Vectors.Vector;   --  per beat: the eye had a frame and was judged
+      Rest_Factor   : Real := 1.0;           --  a resting cell's displacement noise over its floor (Lockin)
+      Rest_Counts_Known  : Boolean := False; --  how many cells move at a beat when nothing is pushed (Lockin):
+      Rest_Count_Max     : Natural := 0;     --  the most of them at any such beat,
+      Rest_Count_Beats   : Natural := 0;     --  over how many beats
       Still_At      : Flag_Vectors.Vector;   --  per beat: judged still
    end record;
 
@@ -306,6 +320,70 @@ private
       Carrier : Group_Id'Base := 0;
    end record;
 
+   --  The kinematics' evidence for one arm and its eye (Driver.Robot.Kinematics).
+   type Keyframe is record
+      Beat     : Natural := 0;
+      Readings : Real_Vectors.Vector;   --  the arm's readings, still
+      Image    : Driver.Images.Image;    --  what its eye saw, still
+   end record;
+
+   package Keyframe_Vectors is new Ada.Containers.Vectors (Positive, Keyframe);
+
+   --  Where the reference keyframe's query points went in one keyframe.
+   type Match_Set is record
+      Frame    : Positive := 1;          --  the keyframe
+      To_U, To_V     : Real_Vectors.Vector;   --  per query point, where it went
+      Back_U, Back_V : Real_Vectors.Vector;   --  and where that matched back to in the reference
+      Found    : Flag_Vectors.Vector;    --  the instrument gave an answer
+   end record;
+
+   package Match_Set_Vectors is new Ada.Containers.Vectors (Positive, Match_Set);
+
+   type Pending_Match is record
+      Frame  : Positive := 1;
+      Ticket : Driver.Services.Ticket;
+   end record;
+
+   package Pending_Vectors is new Ada.Containers.Vectors (Positive, Pending_Match);
+
+   --  An arm's kinematics and its eye's lens as last fitted (Driver.Robot.Kinematics.Fit).
+   type Joint_Fit is record
+      W, P  : Vec3 := [0.0, 0.0, 0.0];
+      C     : Real := 1.0;
+      Slide : Boolean := False;
+   end record;
+
+   package Joint_Fit_Vectors is new Ada.Containers.Vectors (Positive, Joint_Fit);
+
+   type Lens_Fit is record
+      Fx, Fy, Cx, Cy, K1, K2 : Real := 0.0;
+   end record;
+
+   type Arm_Fit is record
+      Fitted    : Boolean := False;
+      Reference : Real_Vectors.Vector;    --  the readings of the reference keyframe
+      Joints    : Joint_Fit_Vectors.Vector;
+      Lens      : Lens_Fit;
+      Used      : Natural := 0;           --  sightings in the last fit
+      Median_Px, Sigma_Px : Real := 0.0;
+      Matches   : Natural := 0;           --  keyframes with matches behind it
+      Why       : Ada.Strings.Unbounded.Unbounded_String;
+   end record;
+
+   type Arm_Evidence is record
+      Arm      : Arm_Id'Base := 0;
+      Group    : Group_Id'Base := 0;
+      Eye      : Eye_Id'Base := 0;
+      Frames   : Keyframe_Vectors.Vector;   --  the first is the reference
+      Query_U, Query_V : Real_Vectors.Vector;   --  the reference's query points
+      Pending  : Pending_Vectors.Vector;
+      Matches  : Match_Set_Vectors.Vector;
+      Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
+      Result   : Arm_Fit;
+   end record;
+
+   package Arm_Evidence_Vectors is new Ada.Containers.Vectors (Positive, Arm_Evidence);
+
    type Model is tagged limited record
       Beats          : Natural := 0;               --  observations seen
       Groups         : Group_Stream_Vectors.Vector;
@@ -316,6 +394,8 @@ private
       Lag_Known      : Eye_Flag_Vectors.Vector;    --  per eye: its lag stood out of every shift tried
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph
+      Kinematics     : Arm_Evidence_Vectors.Vector;   --  per arm with an eye
+      Table_Up       : Direction_Estimate;          --  the table's normal towards the eyes, in the world
       Is_Booted      : Boolean := False;
       Report         : Ada.Strings.Unbounded.Unbounded_String;   --  what the last estimate found, for Describe
    end record;

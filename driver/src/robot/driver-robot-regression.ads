@@ -32,12 +32,13 @@ private package Driver.Robot.Regression is
    --  quantity): exact data would otherwise give a zero scale, and every
    --  observation that is not fitted exactly would lose all its weight.
 
-   function Count_Significant (Count, Trials : Natural; Rate : Real) return Boolean
+   function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean
      with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;
    --  Count events in that many independent trials are more than chance at
    --  Rate per trial explains: the exact binomial probability of at least
    --  Count is below the tail Z has for a Gaussian (through its relation to
-   --  Fisher's F). Used for how many tests of a family alarmed.
+   --  Fisher's F), over Tests when this count is the best of that many
+   --  (Bonferroni). Used for how many tests of a family alarmed.
 
    function Explained_Nonnegative (X : Real_Matrix; Y : Real_Array; Used : out Natural) return Real
      with Pre => X'Length (1) = Y'Length;
@@ -46,6 +47,10 @@ private package Driver.Robot.Regression is
    --  active set, on X and Y centred so the intercept a is free), and how
    --  many of the b came out positive: R squared, for an F test of a fit in
    --  which every regressor can only add to Y.
+
+   function Coefficient_Variances (F : Fit) return Real_Array;
+   --  The variance of each coefficient: Scale ** 2 times the diagonal of the
+   --  pseudo-inverse of Normal.
 
    procedure Test_Block (F : Fit; First, Last : Positive; Statistic : out Real; Freedom : out Natural)
      with Pre => First <= Last and then Last <= F.Columns;

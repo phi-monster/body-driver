@@ -1,3 +1,4 @@
+with Driver.Conventions;
 with Ada.Containers;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Distributions;
@@ -123,7 +124,11 @@ package body Driver.Robot.Channels is
    --  repeats measure the jitter. A channel that repeats exactly at every rest
    --  beat has noise zero: any change of it is motion.
    procedure Measure_Channel (M : in out Model; G : Group_Id; Channel : Positive; Rest : Natural) is
-      Moved : Real_Array (1 .. Rest);
+      --  Every nonzero change at rest, and its negation: a change at rest has
+      --  no sign of its own, so its scale is measured about zero. About their
+      --  own median, two-valued changes (a reading whose last bit flips back
+      --  and forth, one way more often than the other) leave no spread at all.
+      Moved : Real_Array (1 .. 2 * Rest);
       K     : Natural := 0;
       Index : constant Natural := First_Channel (M, G) + Channel - 1;
    begin
@@ -131,13 +136,15 @@ package body Driver.Robot.Channels is
          if At_Rest (M, G, B) and then Change (M, G, B, Channel) /= 0.0 then
             K := K + 1;
             Moved (K) := Change (M, G, B, Channel);
+            Moved (Rest + K) := -Change (M, G, B, Channel);
          end if;
       end loop;
       if K = 0 then
          M.Noise.Replace_Element (Index, 0.0);
          M.Noise_Freedom.Replace_Element (Index, 0);
       else
-         M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. K)) / Sqrt (2.0));
+         Moved (K + 1 .. 2 * K) := Moved (Rest + 1 .. Rest + K);
+         M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. 2 * K)) / Sqrt (2.0));
          M.Noise_Freedom.Replace_Element (Index, Mad_Degrees_Of_Freedom (K));
       end if;
    end Measure_Channel;
@@ -254,6 +261,7 @@ package body Driver.Robot.Channels is
             Active : Boolean := False;
             Moved  : Boolean := False;
             Onset  : Natural := 0;
+            Length : Real := 0.0;
          begin
             if M.Groups (G).Commandable then
                --  The response delay: the longest wait from a push's start to
@@ -279,6 +287,14 @@ package body Driver.Robot.Channels is
                   Active := True;
                   Onset := B;
                   Moved := Moving (M, G, B);
+                  --  How far the push asks: its target from the reading before.
+                  Length := 0.0;
+                  if B > 0 and then Has_Reading (M, G, B - 1) and then Has_Target (M, G, B) then
+                     for C in 1 .. M.Groups (G).Size loop
+                        Length := Length + (Target (M, G, B, C) - Reading (M, G, B - 1, C)) ** 2;
+                     end loop;
+                  end if;
+                  Length := Sqrt (Length);
                elsif Active then
                   --  Until the reading first moves the push waits out the
                   --  delay; after that its response lasts, overshoot and all,
@@ -289,7 +305,7 @@ package body Driver.Robot.Channels is
                      if not Moved and then B - Onset >= Delay_Beats then
                         Active := False;
                      end if;
-                  elsif not Moving (M, G, B) then
+                  elsif not Moving (M, G, B) or else Converged (M, G, B, Length) then
                      Active := False;
                   end if;
                end if;
@@ -349,6 +365,18 @@ package body Driver.Robot.Channels is
          end;
       end loop;
    end Measure;
+
+   function Converged (M : Model; G : Group_Id; Beat : Natural; Length : Real) return Boolean is
+      Sum : Real := 0.0;
+   begin
+      if Beat = 0 or else not Has_Reading (M, G, Beat) or else not Has_Reading (M, G, Beat - 1) then
+         return False;
+      end if;
+      for C in 1 .. M.Groups (G).Size loop
+         Sum := Sum + Change (M, G, Beat, C) ** 2;
+      end loop;
+      return Sqrt (Sum) < Driver.Conventions.Unchanged_Fraction * Length;
+   end Converged;
 
    function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean is
    begin

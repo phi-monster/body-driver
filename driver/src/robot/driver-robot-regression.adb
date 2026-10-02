@@ -1,9 +1,11 @@
+with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Stats;
 
 package body Driver.Robot.Regression is
 
+   use Ada.Numerics.Long_Elementary_Functions;
 
    Huber_K : constant := Driver.Conventions.Z;
    --  A residual beyond Z sigma is significantly not noise: from there on
@@ -11,10 +13,15 @@ package body Driver.Robot.Regression is
 
    --  The pseudo-inverse of a symmetric positive semi-definite matrix, and
    --  its numerical rank: eigenvalues below the round-off of the largest
-   --  one, accumulated over the dimension, count as zero.
+   --  one, accumulated over the dimension, count as zero. The matrix is first
+   --  scaled to a unit diagonal (D^-1 A D^-1, inverted back with D^-1 on both
+   --  sides), so what counts as round-off does not depend on the units of the
+   --  regressors: a column a billion times larger than another must not make
+   --  the other one look like zero.
    procedure Pseudo_Inverse (A : Real_Matrix; Inverse : out Real_Matrix; Rank : out Natural) is
       N       : constant Natural := A'Length (1);
-      S       : constant Real_Matrix (1 .. N, 1 .. N) := A;
+      Scale   : Real_Vector (1 .. N);
+      S       : Real_Matrix (1 .. N, 1 .. N);
       Values  : Real_Vector (1 .. N);
       Vectors : Real_Matrix (1 .. N, 1 .. N);
       Largest : Real := 0.0;
@@ -24,6 +31,18 @@ package body Driver.Robot.Regression is
       if N = 0 then
          return;
       end if;
+      for J in 1 .. N loop
+         declare
+            D : constant Real := A (A'First (1) + J - 1, A'First (2) + J - 1);
+         begin
+            Scale (J) := (if D > 0.0 then Sqrt (D) else 1.0);
+         end;
+      end loop;
+      for I in 1 .. N loop
+         for J in 1 .. N loop
+            S (I, J) := A (A'First (1) + I - 1, A'First (2) + J - 1) / (Scale (I) * Scale (J));
+         end loop;
+      end loop;
       Eigensystem ((S + Transpose (S)) / 2.0, Values, Vectors);
       for V of Values loop
          Largest := Real'Max (Largest, abs V);
@@ -44,6 +63,11 @@ package body Driver.Robot.Regression is
                   end loop;
                end loop;
             end if;
+         end loop;
+         for I in 1 .. N loop
+            for J in 1 .. N loop
+               P (I, J) := P (I, J) / (Scale (I) * Scale (J));
+            end loop;
          end loop;
          Inverse := P;
       end;
@@ -151,7 +175,7 @@ package body Driver.Robot.Regression is
       return (Columns => P, Beta => B, Scale => S, Normal => A, Converged => Converged);
    end Solve;
 
-   function Count_Significant (Count, Trials : Natural; Rate : Real) return Boolean is
+   function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean is
    begin
       if Count = 0 then
          return False;
@@ -165,7 +189,7 @@ package body Driver.Robot.Regression is
            1.0 - Driver.Distributions.F_Upper_Tail
                    ((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));
       begin
-         return Tail < Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+         return Tail < Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / Real (Tests);
       end;
    end Count_Significant;
 
@@ -326,6 +350,18 @@ package body Driver.Robot.Regression is
       end loop;
       return Real'Max (0.0, 1.0 - Residual_Sum / Total);
    end Explained_Nonnegative;
+
+   function Coefficient_Variances (F : Fit) return Real_Array is
+      Inv    : Real_Matrix (1 .. F.Columns, 1 .. F.Columns);
+      Rank   : Natural;
+      Result : Real_Array (1 .. F.Columns);
+   begin
+      Pseudo_Inverse (F.Normal, Inv, Rank);
+      for J in Result'Range loop
+         Result (J) := F.Scale * F.Scale * Inv (J, J);
+      end loop;
+      return Result;
+   end Coefficient_Variances;
 
    procedure Test_Block (F : Fit; First, Last : Positive; Statistic : out Real; Freedom : out Natural) is
       K    : constant Natural := Last - First + 1;

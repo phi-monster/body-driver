@@ -1,13 +1,19 @@
 with Ada.Containers;
+with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
+with Driver.Robot.Lag;
 with Driver.Robot.Regression;
 with Driver.Stats;
 
 package body Driver.Robot.Lockin is
+
+   --  Samples too large for a stack live on the heap.
+   type Real_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
@@ -21,6 +27,19 @@ package body Driver.Robot.Lockin is
    end record;
 
    type Column_Array is array (Positive range <>) of Column;
+
+   function Median_Shift (S : Eye_Stream; Kept, Column, Count : Positive) return Real is
+      Values : Real_Array (1 .. Count);
+      K      : Natural := 0;
+   begin
+      for Cell in 0 .. Natural (S.Shifts.Length) / Kept - 1 loop
+         if S.Shifts (Cell * Kept + Column - 1) > 0.0 then
+            K := K + 1;
+            Values (K) := S.Shifts (Cell * Kept + Column - 1);
+         end if;
+      end loop;
+      return Driver.Stats.Median (Values);
+   end Median_Shift;
 
    procedure Measure (M : in out Model) is
       Groups : constant Natural := Natural (M.Groups.Length);
@@ -78,6 +97,11 @@ package body Driver.Robot.Lockin is
          begin
             S.Noise.Clear;
             S.Textured.Clear;
+            S.Kept_Groups.Clear;
+            S.Kept_Channels.Clear;
+            S.Gains.Clear;
+            S.Gain_Variances.Clear;
+            S.Shifts.Clear;
             if N > 0 then
                for B in 1 .. M.Beats - 1 loop
                   if Usable (B) then
@@ -122,6 +146,10 @@ package body Driver.Robot.Lockin is
                            end;
                         end loop;
                      end if;
+                  end loop;
+                  for K in 1 .. Kept loop
+                     S.Kept_Groups.Append (Natural (Cols (K).Group));
+                     S.Kept_Channels.Append (Cols (K).Channel);
                   end loop;
                   if Kept > 0 then
                      declare
@@ -184,6 +212,33 @@ package body Driver.Robot.Lockin is
                                     end if;
                                  end;
                               end loop;
+                              --  Each regressor's gain in this cell: its displacement per
+                              --  reading unit in units of the cell's noise, squared, less
+                              --  what estimating it adds on average (its own variance in
+                              --  those units), where the cell responds to its group.
+                              declare
+                                 Var_U : constant Real_Array := Regression.Coefficient_Variances (Fu);
+                                 Var_V : constant Real_Array := Regression.Coefficient_Variances (Fv);
+                              begin
+                                 for K in 1 .. Kept loop
+                                    if Responding (Cell, Cols (K).Group) and then Fu.Scale > 0.0 and then Fv.Scale > 0.0 then
+                                       declare
+                                          Bu : constant Real := Fu.Beta (K + 1) / Fu.Scale;
+                                          Bv : constant Real := Fv.Beta (K + 1) / Fv.Scale;
+                                          Gu : constant Real := Var_U (K + 1) / Fu.Scale ** 2;
+                                          Gv : constant Real := Var_V (K + 1) / Fv.Scale ** 2;
+                                       begin
+                                          S.Gains.Append (Bu ** 2 + Bv ** 2 - Gu - Gv);
+                                          S.Gain_Variances.Append (4.0 * (Gu * Bu ** 2 + Gv * Bv ** 2));
+                                          S.Shifts.Append (Sqrt (Fu.Beta (K + 1) ** 2 + Fv.Beta (K + 1) ** 2));
+                                       end;
+                                    else
+                                       S.Gains.Append (0.0);
+                                       S.Gain_Variances.Append (0.0);
+                                       S.Shifts.Append (0.0);
+                                    end if;
+                                 end loop;
+                              end;
                            end;
                         end Fit_Resolved;
 
@@ -203,6 +258,9 @@ package body Driver.Robot.Lockin is
                            Textured (Cell) := Driver.Stats.Median (Cond) > 0.0 and then Here > Kept + 1;
                            if not Textured (Cell) then
                               S.Noise.Append (Real'Last);
+                              S.Gains.Append (0.0, Ada.Containers.Count_Type (Kept));
+                              S.Gain_Variances.Append (0.0, Ada.Containers.Count_Type (Kept));
+                              S.Shifts.Append (0.0, Ada.Containers.Count_Type (Kept));
                               return;
                            end if;
                            Fit_Resolved (Cell, Here);
@@ -277,5 +335,181 @@ package body Driver.Robot.Lockin is
          end;
       end loop;
    end Measure;
+
+   procedure Measure_Rest_Noise (M : in out Model) is
+   begin
+      for S of M.Eyes loop
+         declare
+            N     : constant Natural := Cells (S.Grid);
+            Beats : constant Natural := Natural'Min (Natural (S.Judged.Length), Natural (S.Measured.Length));
+            Count : Natural := 0;
+         begin
+            if N > 0 and then Natural (S.Luma_Variance.Length) >= N then
+               for B in 1 .. Beats - 1 loop
+                  if S.Measured (B) and then S.Judged (B) and then S.Still_At (B) and then S.Judged (B - 1)
+                    and then S.Still_At (B - 1)
+                  then
+                     for C in 0 .. N - 1 loop
+                        if S.Condition (B * N + C) > 0.0 then
+                           Count := Count + 1;
+                        end if;
+                     end loop;
+                  end if;
+               end loop;
+               if Count > 0 then
+                  declare
+                     --  One ratio per still cell and beat: on the heap, a long
+                     --  stream has millions.
+                     Ratios : Real_Access := new Real_Array (1 .. Count);
+                     K      : Natural := 0;
+                  begin
+                     for B in 1 .. Beats - 1 loop
+                        if S.Measured (B) and then S.Judged (B) and then S.Still_At (B) and then S.Judged (B - 1)
+                          and then S.Still_At (B - 1)
+                        then
+                           for C in 0 .. N - 1 loop
+                              if S.Condition (B * N + C) > 0.0 then
+                                 K := K + 1;
+                                 Ratios (K) := (S.Du (B * N + C) ** 2 + S.Dv (B * N + C) ** 2)
+                                   / Flow.Noise_Floor (S.Condition (B * N + C), S.Luma_Variance (C)) ** 2;
+                              end if;
+                           end loop;
+                        end if;
+                     end loop;
+                     S.Rest_Factor := Real'Max
+                       (1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));
+                     Free (Ratios);
+                  end;
+               end if;
+            end if;
+         end;
+      end loop;
+      --  How many cells an eye counts as moved when no group is pushed: its own
+      --  fingers' jitter, the scene, the rest of the body's noise.
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         declare
+            S    : Eye_Stream renames M.Eyes (E);
+            --  An eye whose lag is not measured may show a push as late as
+            --  any lag the stream can tell.
+            Lag  : constant Natural :=
+              (if E <= M.Lag_Known.Last_Index and then M.Lag_Known (E)
+               then Natural (Integer'Max (0, M.Lags (E)))
+               else Driver.Robot.Lag.Longest (M));
+            Rest : Natural := 0;
+
+            function At_Rest (B : Natural) return Boolean is
+            begin
+               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                  for K in Integer'Max (0, B - Lag) .. B loop
+                     if M.Groups (G).Commandable and then Channels.Pushed (M, G, K) then
+                        return False;
+                     end if;
+                  end loop;
+               end loop;
+               return B < Natural (S.Measured.Length) and then S.Measured (B);
+            end At_Rest;
+         begin
+            for B in 1 .. M.Beats - 1 loop
+               if At_Rest (B) then
+                  Rest := Rest + 1;
+               end if;
+            end loop;
+            S.Rest_Counts_Known := Rest > 1;
+            if S.Rest_Counts_Known then
+               declare
+                  Counts : Real_Array (1 .. Rest);
+                  K      : Natural := 0;
+                  Count, Tested : Natural;
+               begin
+                  for B in 1 .. M.Beats - 1 loop
+                     if At_Rest (B) then
+                        K := K + 1;
+                        Count_Moved (S, B, Count, Tested);
+                        Counts (K) := Real (Count);
+                     end if;
+                  end loop;
+                  S.Rest_Count_Max := 0;
+                  for C of Counts loop
+                     S.Rest_Count_Max := Natural'Max (S.Rest_Count_Max, Natural (C));
+                  end loop;
+                  S.Rest_Count_Beats := Rest;
+               end;
+            end if;
+         end;
+      end loop;
+   end Measure_Rest_Noise;
+
+   --  How many textured cells moved beyond their noise at rest, or too far
+   --  to be resolved, at the beat; how many were tested.
+   procedure Count_Moved (S : Eye_Stream; Beat : Natural; Count, Tested : out Natural) is
+      N    : constant Natural := Cells (S.Grid);
+      Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
+   begin
+      Count := 0;
+      Tested := 0;
+      if N = 0 or else Beat >= Natural (S.Measured.Length) or else not S.Measured (Beat)
+        or else Natural (S.Luma_Variance.Length) < N
+      then
+         return;
+      end if;
+      for C in 0 .. N - 1 loop
+         declare
+            Cond : constant Real := S.Condition (Beat * N + C);
+         begin
+            if Cond > 0.0 then
+               Tested := Tested + 1;
+               if not S.Resolved (Beat * N + C)
+                 or else Driver.Uncertain.Significant
+                   (Gate, Sqrt (S.Du (Beat * N + C) ** 2 + S.Dv (Beat * N + C) ** 2),
+                    --  The cell's displacement noise at rest, as the eye's still
+                    --  frames measured it.
+                    S.Rest_Factor * Flow.Noise_Floor (Cond, S.Luma_Variance (C)))
+               then
+                  Count := Count + 1;
+               end if;
+            end if;
+         end;
+      end loop;
+   end Count_Moved;
+
+   function Moved (M : Model; E : Eye_Id; Beat : Natural) return Boolean is
+      S : Eye_Stream renames M.Eyes (E);
+      Count, Tested : Natural;
+   begin
+      Count_Moved (S, Beat, Count, Tested);
+      if Tested = 0 then
+         return False;
+      end if;
+      --  More than at any beat nobody pushed (its own fingers' jitter, the
+      --  scene): a count at rest beats all n of them with chance 1 / (n + 1),
+      --  whatever their distribution. Before that is measured, against the
+      --  false alarms of the per-cell test alone.
+      return (if S.Rest_Counts_Known
+              then Count > S.Rest_Count_Max
+              else Regression.Count_Significant
+                     (Count, Tested, Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z)));
+   end Moved;
+
+   function Shift (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Real is
+      S      : Eye_Stream renames M.Eyes (E);
+      Kept   : constant Natural := Natural (S.Kept_Groups.Length);
+      Column : Natural := 0;
+      Count  : Natural := 0;
+   begin
+      for K in 0 .. Kept - 1 loop
+         if S.Kept_Groups (K) = Natural (G) and then S.Kept_Channels (K) = Channel then
+            Column := K + 1;
+         end if;
+      end loop;
+      if Column = 0 then
+         return 0.0;
+      end if;
+      for Cell in 0 .. Natural (S.Shifts.Length) / Kept - 1 loop
+         if S.Shifts (Cell * Kept + Column - 1) > 0.0 then
+            Count := Count + 1;
+         end if;
+      end loop;
+      return (if Count = 0 then 0.0 else Median_Shift (S, Kept, Column, Count));
+   end Shift;
 
 end Driver.Robot.Lockin;

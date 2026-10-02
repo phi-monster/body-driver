@@ -24,4 +24,28 @@ private package Driver.Robot.Lockin is
    --  displacement noise at rest, from the whole stream. Uses the image
    --  lags (Driver.Robot.Lag) and the channel noise (Driver.Robot.Channels).
 
+   procedure Measure_Rest_Noise (M : in out Model);
+   --  For every eye, how much noisier its cells' displacements are at rest
+   --  than their quantization floor says: over the beats where the eye was
+   --  judged still in both frames (Driver.Robot.Stillness, which never looks
+   --  at displacements), each textured cell's displacement over its floor;
+   --  its squared length is a chi square of two degrees in those units, so
+   --  the factor is the square root of its median over the median of that
+   --  chi square. Never below one.
+
+   procedure Count_Moved (S : Eye_Stream; Beat : Natural; Count, Tested : out Natural);
+   function Moved (M : Model; E : Eye_Id; Beat : Natural) return Boolean;
+   --  The eye's image moved at that beat as the lock-in can tell: more of its
+   --  textured cells resolved a displacement beyond their noise at rest (their
+   --  floor times the eye's rest factor, Measure_Rest_Noise), or
+   --  moved too far to be resolved, than that per-cell test alarms on by
+   --  chance. The step that makes an eye move this way is one the lock-in
+   --  can measure; a change the stillness judgment sees (a pixel's rounding
+   --  flipping) can be far smaller.
+
+   function Shift (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Real;
+   --  How many pixels the eye's image moves per reading unit of the channel:
+   --  the median over the cells that respond to its group; zero when none
+   --  does or it was not measured.
+
 end Driver.Robot.Lockin;

@@ -83,6 +83,27 @@ driver must not use (a pose of the hand computed by the robot, true object
 poses) may be in the observation: the driver reads only joint readings,
 commands and images.
 
+### How the boot moves the robot
+
+This is how the driver moves a real robot when it boots:
+
+- First every commandable channel moves together by one amount, starting
+  from the smallest step every reading can tell from its noise and doubling.
+  It stops at the first level some eye sees the body move, confirmed by
+  moving back and forth by the same amount as many times in a row as rule out
+  chance. By then no channel has moved more than twice what an eye needs to
+  see it, whatever its units.
+- Then each channel moves on its own, doubling from that amount, and stops at
+  the first level an eye sees.
+- A channel also stops where it no longer follows its command: its reading
+  delivers a clearly smaller share of the step than a smaller step did, and
+  no longer moves. That is the joint's own end; there is no other limit.
+- If no eye sees the body move, every joint is pushed to its own end, and the
+  boot reports that clause 2 of the porting contract is broken and goes no
+  further.
+- A robot without a range around it where it may safely move this way should
+  not be booted unattended.
+
 ### The porting contract
 
 A body runs every program of the language when it does three things
