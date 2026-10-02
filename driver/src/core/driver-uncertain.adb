@@ -53,11 +53,14 @@ package body Driver.Uncertain is
          Dof : Natural := 0;
       begin
          if Spread > 0.0 then
-            Dof := Natural'Max (1, Natural (Real'Floor ((Va + Vb) * (Va + Vb) / Spread)));
+            Dof := Satterthwaite_Count ((Va + Vb) * (Va + Vb) / Spread);
          end if;
          return (Value => A.Value - B.Value, Sigma => Sqrt (Va + Vb), Degrees_Of_Freedom => Dof);
       end;
    end Difference;
+
+   function Satterthwaite_Count (Count : Real) return Natural is
+     (if Count >= Real (Natural'Last) then 0 else Natural'Max (1, Natural (Real'Floor (Count))));
 
    function Significant (A, B : Estimate) return Boolean is
       D : constant Estimate := Difference (A, B);

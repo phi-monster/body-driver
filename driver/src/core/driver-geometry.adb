@@ -159,8 +159,7 @@ package body Driver.Geometry is
       if Dof = 0 or else Plane_Variance <= 0.0 then
          return 0;
       end if;
-      return Natural'Max (1, Natural (Real'Floor
-        ((Plane_Variance + Known_Variance) ** 2 / (Plane_Variance ** 2 / Real (Dof)))));
+      return Satterthwaite_Count ((Plane_Variance + Known_Variance) ** 2 / (Plane_Variance ** 2 / Real (Dof)));
    end Welch_Plane;
 
    function Height_Sigma (P : Plane_Estimate; X : Vec3) return Real is
