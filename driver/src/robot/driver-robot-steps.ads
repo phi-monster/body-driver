@@ -3,7 +3,8 @@
 --  Every beat the push under way of every group is followed. A push starts
 --  where the target in effect asks for motion (Channels.Asked). It waits
 --  for the reading to move, at most the longest delay any earlier push of
---  the group took (or, before any push was answered, as many beats as the
+--  the body took, whichever group it moved: a command travels one path to
+--  every group (or, before any push was answered, as many beats as the
 --  stream had before it: no wait is longer than all the waiting so far). It
 --  then lasts until the reading is still, or until the next push cuts it
 --  short, or until it is plainly going nowhere: a joint chattering against

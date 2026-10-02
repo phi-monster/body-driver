@@ -181,8 +181,28 @@ package body Driver.Robot.Steps is
       end if;
    end Follow;
 
-   procedure Track (M : in out Model; Beat : Natural) is
+   --  The longest wait from a push to its reading's first motion over every
+   --  answered push of the body: a command travels one path to every group,
+   --  so a group that never answered yet (one held against its limit) is
+   --  waited for as long as any answer took. Known is False before any push
+   --  of the body was answered.
+   procedure Body_Delay (M : Model; Beats : out Natural; Known : out Boolean) is
    begin
+      Beats := 0;
+      Known := False;
+      for S of M.Groups loop
+         if S.Commandable and then S.Delay_Known then
+            Beats := Natural'Max (Beats, S.Delay_Beats);
+            Known := True;
+         end if;
+      end loop;
+   end Body_Delay;
+
+   procedure Track (M : in out Model; Beat : Natural) is
+      Delay_Beats : Natural;
+      Delay_Known : Boolean;
+   begin
+      Body_Delay (M, Delay_Beats, Delay_Known);
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          if M.Groups (G).Commandable then
             declare
@@ -198,7 +218,7 @@ package body Driver.Robot.Steps is
                   declare
                      E : Episode := S.Episodes.Last_Element;
                      --  How long a push may wait for its first motion.
-                     Wait : constant Natural := (if S.Delay_Known then S.Delay_Beats else E.Start);
+                     Wait : constant Natural := (if Delay_Known then Delay_Beats else E.Start);
                   begin
                      if not E.Moved then
                         if Channels.Moving (M, G, Beat) then

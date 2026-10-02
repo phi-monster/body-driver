@@ -835,6 +835,59 @@ package body Driver.Robot.Tests is
       end if;
    end Step_Ends_Despite_New_Jitter;
 
+   --  A group that never answered a push yet, asked beyond the limit it
+   --  rests at (a live x5's closer at 1.0, asked 1.000244 by Recognize):
+   --  nothing answers, and the push must be given up once the longest wait
+   --  any push of the body took for its answer is over, not after as many
+   --  beats as the stream had (A8 held that closer 3763 beats). Group 1
+   --  answers its pushes a beat after each; group 2 is pushed once, at 100.
+   procedure Unanswered_Push_Of_An_Unanswered_Group is
+      M      : Model;
+      Rng    : Generator;
+      O      : Observation;
+      Sent   : Driver.Commands.Command;
+      Limit  : constant Real := 1.0;
+      Arm, Arm_Target : Real := 0.0;
+      Closer_Target   : Real := Limit;
+   begin
+      for B in 0 .. 140 loop
+         if B in 40 | 52 then
+            Arm_Target := 0.01;
+         elsif B in 46 | 58 then
+            Arm_Target := 0.0;
+         elsif B in 41 | 47 | 53 | 59 then
+            Arm := Arm_Target;
+         elsif B = 100 then
+            Closer_Target := Limit + 2.44e-4;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Arm + 1.0e-12 * Gaussian (Rng)));
+         O.Readings.Append (Real_Array'(1 => Limit + 1.0e-12 * Gaussian (Rng)));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Arm_Target]);
+         Driver.Commands.Set_Target (Sent, 2, [Closer_Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (M.Groups (1).Delay_Known, "group 1's delay is not measured");
+      Check (Steps.Episodes (M, 2) = 1, "group 2 is pushed once, got" & Steps.Episodes (M, 2)'Image);
+      if M.Groups (1).Delay_Known and then Steps.Episodes (M, 2) = 1 then
+         declare
+            E : constant Episode := M.Groups (2).Episodes (1);
+         begin
+            Check (E.Ended and then E.End_At - E.Start <= M.Groups (1).Delay_Beats + 1,
+                   "the push nothing answers is still waited for"
+                   & Natural'Image ((if E.Ended then E.End_At else 140) - E.Start) & " beats after it began; the body"
+                   & " answered within" & M.Groups (1).Delay_Beats'Image);
+            Check (not E.Ended or else E.Blocked, "the push nothing answered is not called blocked");
+         end;
+      end if;
+   end Unanswered_Push_Of_An_Unanswered_Group;
+
    --  A joint stopped short of its target by something it keeps chattering
    --  against (a live x5's arm 2 in its first Hadamard cell: joint 3 moved by
    --  20 to 240 visible steps every beat for 800 beats and never came to
@@ -1686,6 +1739,9 @@ package body Driver.Robot.Tests is
                              & "so the wait for every answer never ends", Answers_Read_For_An_Unlisted_Arm'Access);
       Driver.Tests.Register ("robot.steps.jitter", "a push never ends when the held reading jitters more than it did at "
                              & "rest", Step_Ends_Despite_New_Jitter'Access);
+      Driver.Tests.Register ("robot.steps.unanswered", "a push of a group that never answered yet, which nothing "
+                             & "answers, is waited for longer than any push of the body took to answer",
+                             Unanswered_Push_Of_An_Unanswered_Group'Access);
       Driver.Tests.Register ("robot.steps.chatter", "a push against something its joint keeps chattering against never "
                              & "ends, or a free push that rings about its target is given up or called blocked",
                              Step_Ends_Against_Chatter'Access);
