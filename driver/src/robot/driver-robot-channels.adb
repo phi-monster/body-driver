@@ -1,4 +1,3 @@
-with Driver.Conventions;
 with Ada.Containers;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Distributions;
@@ -261,7 +260,6 @@ package body Driver.Robot.Channels is
             Active : Boolean := False;
             Moved  : Boolean := False;
             Onset  : Natural := 0;
-            Length : Real := 0.0;
          begin
             if M.Groups (G).Commandable then
                --  The response delay: the longest wait from a push's start to
@@ -287,14 +285,6 @@ package body Driver.Robot.Channels is
                   Active := True;
                   Onset := B;
                   Moved := Moving (M, G, B);
-                  --  How far the push asks: its target from the reading before.
-                  Length := 0.0;
-                  if B > 0 and then Has_Reading (M, G, B - 1) and then Has_Target (M, G, B) then
-                     for C in 1 .. M.Groups (G).Size loop
-                        Length := Length + (Target (M, G, B, C) - Reading (M, G, B - 1, C)) ** 2;
-                     end loop;
-                  end if;
-                  Length := Sqrt (Length);
                elsif Active then
                   --  Until the reading first moves the push waits out the
                   --  delay; after that its response lasts, overshoot and all,
@@ -305,7 +295,7 @@ package body Driver.Robot.Channels is
                      if not Moved and then B - Onset >= Delay_Beats then
                         Active := False;
                      end if;
-                  elsif not Moving (M, G, B) or else Converged (M, G, B, Length) then
+                  elsif not Moving (M, G, B) then
                      Active := False;
                   end if;
                end if;
@@ -366,31 +356,35 @@ package body Driver.Robot.Channels is
       end loop;
    end Measure;
 
-   function Converged (M : Model; G : Group_Id; Beat : Natural; Length : Real) return Boolean is
-      Sum : Real := 0.0;
-   begin
-      if Beat = 0 or else not Has_Reading (M, G, Beat) or else not Has_Reading (M, G, Beat - 1) then
-         return False;
-      end if;
-      for C in 1 .. M.Groups (G).Size loop
-         Sum := Sum + Change (M, G, Beat, C) ** 2;
-      end loop;
-      return Sqrt (Sum) < Driver.Conventions.Unchanged_Fraction * Length;
-   end Converged;
-
    function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean is
    begin
       if Beat = 0 or else not Has_Reading (M, G, Beat) or else not Has_Reading (M, G, Beat - 1) then
          return False;
       end if;
       declare
-         D : Real_Array (1 .. M.Groups (G).Size);
+         D     : Real_Array (1 .. M.Groups (G).Size);
+         Watched : Natural := 0;   --  channels an eye watches, their steps below what it sees
       begin
          for C in D'Range loop
             D (C) := Change (M, G, Beat, C);
+            declare
+               V : constant Estimate := Visible_Step (M, G, C);
+            begin
+               if Known (V) then
+                  --  A channel an eye watches moves when its change is a step the
+                  --  eye can see; below that no eye can tell, however the held
+                  --  reading jitters.
+                  if abs D (C) >= V.Value then
+                     return True;
+                  end if;
+                  D (C) := 0.0;
+                  Watched := Watched + 1;
+               end if;
+            end;
          end loop;
-         --  The change of two readings has twice the variance of one.
-         return Significant_Change (M, G, D, Sqrt (2.0));
+         --  The others against their noise: the change of two readings has
+         --  twice the variance of one.
+         return Watched < D'Length and then Significant_Change (M, G, D, Sqrt (2.0));
       end;
    end Moving;
 

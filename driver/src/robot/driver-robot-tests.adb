@@ -9,6 +9,7 @@ with Driver.Observations;
 with Driver.Beats;
 with Driver.Log;
 with Driver.Robot.Boot;
+with Driver.Robot.Kinematics;
 with Driver.Robot.Kinematics.Fit;
 with Ada.Strings.Unbounded;
 with Driver.Robot.Channels;
@@ -402,6 +403,44 @@ package body Driver.Robot.Tests is
       Check (Closer_Arm (M, 3) = 0, "the closer pushed only with arm 1 is given arm" & Closer_Arm (M, 3)'Image);
    end Unprobed_Group_Stays_Unclassified;
 
+   --  An arm held away from rest whose reading jitters far more than it did
+   --  at rest (here: exact at rest, flipping by a quarter of its visible step
+   --  when held) still gives
+   --  its kinematics a keyframe there once its eye is still.
+   procedure Keyframe_Despite_Held_Jitter is
+      M    : Model;
+      R    : Rig;
+      Rest : constant Rig_State := (others => <>);
+      Away : Rig_State := Rest;
+   begin
+      for B in 1 .. 5 loop
+         Step (M, R, Rest);
+      end loop;
+      Exercise (M, R, Arm_1, 0.1, 8);
+      Exercise (M, R, Arm_2, 0.1, 8);
+      Exercise (M, R, Closer, 0.1, 8);
+      Estimate_Now (M);
+      for B in 1 .. 4 loop
+         Step (M, R, Rest);
+      end loop;
+      Away.Arm_1 := [0.3, 0.15];
+      Check (Known (Visible_Step (M, 1, 1)), "the arm's visible step is measured");
+      for B in 1 .. 12 loop
+         declare
+            Held : Rig_State := Away;
+            --  A quarter of what the eye can see: invisible, yet far beyond the
+            --  exact readings' noise at rest.
+            Jitter : constant Real := (if Known (Visible_Step (M, 1, 1)) then Visible_Step (M, 1, 1).Value / 4.0 else 1.0e-4);
+         begin
+            Held.Arm_1 (1) := Away.Arm_1 (1) + (if B mod 2 = 0 then Jitter else -Jitter);
+            Step (M, R, Away, Held);
+         end;
+      end loop;
+      Check (Eye_Mount (M, 1) = (Kind => Arm_Carried, Arm => 1), "eye 1 rides on arm 1");
+      Check (Driver.Robot.Kinematics.Held_Still (M, 1, M.Beats - 1),
+             "the arm held still with an invisible jitter is not taken as still for a keyframe");
+   end Keyframe_Despite_Held_Jitter;
+
    procedure Roles_Of_A_Synthetic_Body is
       M : Model;
    begin
@@ -558,8 +597,9 @@ package body Driver.Robot.Tests is
    end Eye_Stillness;
 
    --  A joint held away from where it rested can jitter far more than it did
-   --  at rest (a live x5 arm: 7e-18 at rest, 8e-17 held 1.5e-5 away). Its push
-   --  must still end once the answer has converged.
+   --  at rest (a live x5 arm: 7e-18 at rest, 8e-17 held 1.5e-5 away, flipping
+   --  its last bits each beat). Its push must still end once what remains of
+   --  it is below what its eye can see.
    procedure Step_Ends_Despite_New_Jitter is
       M    : Model;
       Rng  : Generator;
@@ -567,9 +607,28 @@ package body Driver.Robot.Tests is
       Sent : Driver.Commands.Command;
       Target, Reading : Real := 0.0;
    begin
-      for B in 0 .. 99 loop
+      for B in 0 .. 199 loop
          if B = 40 then
             Target := 1.0;
+            --  What a lock-in measured of an eye watching the channel: ten
+            --  cells moving 100 pixels per reading unit (Visible_Step 0.009).
+            declare
+               S : Eye_Stream renames M.Eyes (1);
+            begin
+               S.Kept_Groups.Clear;
+               S.Kept_Channels.Clear;
+               S.Gains.Clear;
+               S.Gain_Variances.Clear;
+               S.Kept_Groups.Append (1);
+               S.Kept_Channels.Append (1);
+               for Cell in 1 .. 10 loop
+                  S.Gains.Append (1.0e4);
+                  S.Gain_Variances.Append (1.0);
+               end loop;
+               M.Graph.Effects.Replace_Element
+                 (1, (Verdict => Whole, Responding => 10, Textured => 10,
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+            end;
          end if;
          if B > 40 then
             --  Each beat closes seven eighths of the gap.
@@ -580,7 +639,10 @@ package body Driver.Robot.Tests is
          O.Images.Append (Driver.Images.No_Image);
          O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
          O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
-         O.Readings.Append (Real_Array'(1 => Reading + (if B > 40 then 1.0e-4 else 1.0e-6) * Gaussian (Rng)));
+         --  At rest a little noise; held, the last bits flip back and forth, so
+         --  every beat's change is a hundred times the noise measured at rest.
+         O.Readings.Append (Real_Array'(1 => Reading + (if B > 40 then (if B mod 2 = 0 then 1.0e-4 else -1.0e-4)
+                                                       else 1.0e-6 * Gaussian (Rng))));
          Sent := Driver.Commands.Hold;
          Driver.Commands.Set_Target (Sent, 1, [Target]);
          Observe (M, O, Sent);
@@ -947,6 +1009,49 @@ package body Driver.Robot.Tests is
       end;
    end Synthetic_Sweep;
 
+   --  The arm of the kinematics test, taken as measured: a pose it can reach
+   --  is reached, one beyond the readings it moved through is not.
+   procedure Reach_A_Pose is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      M      : Model;
+      Axes   : constant array (1 .. 6) of Vec3 :=
+        [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
+      Points : constant array (1 .. 6) of Vec3 :=
+        [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
+      Truth  : Fit.Joint_Array (1 .. 6);
+      Arm    : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
+      Goal_Q : constant Real_Array (1 .. 6) := [0.2, -0.15, 0.1, 0.25, -0.2, 0.3];
+      Zero   : constant Real_Array (1 .. 6) := [others => 0.0];
+      Goal   : Rigid;
+      Q      : Real_Array (1 .. 6);
+      Position_Off, Turn_Off : Real;
+   begin
+      for J in 1 .. 6 loop
+         declare
+            W : constant Vec3 := Unit (Axes (J));
+         begin
+            Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => 1.0, Slide => False);
+            Arm.Result.Joints.Append (Joint_Fit'(W => Truth (J).W, P => Truth (J).P, C => 1.0, Slide => False));
+            Arm.Result.Reference.Append (0.0);
+         end;
+      end loop;
+      Arm.Result.Fitted := True;
+      M.Kinematics.Append (Arm);
+      Goal := Fit.Eye_At (Truth, Goal_Q);
+      Driver.Robot.Kinematics.Solve_Pose (M, 1, Zero, Goal, False, [1 .. 6 => -1.0], [1 .. 6 => 1.0], Q, Position_Off, Turn_Off);
+      Check (Position_Off < 1.0e-9 and then Turn_Off < 1.0e-9,
+             "a reachable pose is missed by" & Position_Off'Image & " and" & Turn_Off'Image & " rad");
+      declare
+         Got : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q);
+      begin
+         Check (abs (Got.Translation - Goal.Translation) < 1.0e-9, "the readings found do not put the eye at the goal");
+      end;
+      --  The same goal with the readings held within a tenth of a radian.
+      Driver.Robot.Kinematics.Solve_Pose (M, 1, Zero, Goal, False, [1 .. 6 => -0.1], [1 .. 6 => 0.1], Q, Position_Off, Turn_Off);
+      Check (Position_Off > 1.0e-3 or else Turn_Off > 1.0e-3, "a pose beyond the readings' range is reached");
+      Check ((for all X of Q => abs X <= 0.1), "the readings found leave their range");
+   end Reach_A_Pose;
+
    procedure Kinematics_Of_A_Synthetic_Arm is
    begin
       Synthetic_Sweep (1.0, Expect_Fit => True);
@@ -961,6 +1066,8 @@ package body Driver.Robot.Tests is
 
    procedure Register is
    begin
+      Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found, or are "
+                             & "found beyond the range the arm moved through", Reach_A_Pose'Access);
       Driver.Tests.Register ("robot.kinematics.small", "a sweep too small to determine the lens and the joints is "
                              & "reported fitted", Kinematics_Of_A_Small_Sweep'Access);
       Driver.Tests.Register ("robot.kinematics", "the arm's axes, the eye's lens or the eye's pose at a new pose come "
@@ -979,6 +1086,8 @@ package body Driver.Robot.Tests is
                              & "is credited with a lockstep partner's eye, a reaction to another push is taken for "
                              & "a push, the tail of a slow response is taken for rest, or the step an eye can see is "
                              & "misjudged", Roles_Of_A_Synthetic_Body'Access);
+      Driver.Tests.Register ("robot.keyframe.jitter", "an arm held away from rest whose reading jitters more than it did "
+                             & "at rest gives no keyframe though its eye is still", Keyframe_Despite_Held_Jitter'Access);
       Driver.Tests.Register ("robot.unprobed", "a group never pushed on its own is given a role from what moved "
                              & "with it", Unprobed_Group_Stays_Unclassified'Access);
       Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "

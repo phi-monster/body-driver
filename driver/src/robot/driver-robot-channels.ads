@@ -51,16 +51,14 @@ private package Driver.Robot.Channels is
    --  The degrees of freedom the channel's noise rests on (0: known or exact).
    --  Every channel of the group has its noise measured.
 
-   function Converged (M : Model; G : Group_Id; Beat : Natural; Length : Real) return Boolean;
-   --  The reading changed at the beat by less than the unchanged fraction of
-   --  a push of that length: the push's answer has stopped changing, also
-   --  where the reading jitters more now than it was measured to at rest (a
-   --  joint held away from where it rested). A push is over when its reading
-   --  no longer moves or has converged.
-
    function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean;
-   --  Some channel's change at Beat is significant against its noise; False
-   --  without a reading at Beat or Beat - 1, or before noise is measured.
+   --  The group moved at Beat: a channel an eye watches changed by a step that
+   --  eye can see (Visible_Step: below it no eye can tell, however a held
+   --  reading jitters, and a joint held away from rest jitters far more than
+   --  it was measured to at rest), or the change of the channels no eye
+   --  watches is significant against their noise. False without a reading at
+   --  Beat or Beat - 1, or before noise is measured. The one test of motion:
+   --  push ends, the step tracker, stillness and keyframes all ask it.
 
    function Asked (M : Model; G : Group_Id; Beat : Natural) return Boolean;
    --  A push starts at Beat: the target in effect changed and asks for

@@ -18,6 +18,11 @@ private package Driver.Robot.Kinematics is
    procedure Observe (M : in out Model; O : Observation);
    --  One beat, after the readings and the eyes were taken in.
 
+   function Held_Still (M : Model; A : Arm_Id; Beat : Natural) return Boolean;
+   --  A keyframe can be taken of the arm at the beat: its eye was judged
+   --  still at it and the beat before, and its readings do not move
+   --  (Channels.Moving).
+
    function Matched (M : Model; A : Arm_Id) return Natural;
    --  How many keyframes of the arm have their matches back.
 
@@ -35,6 +40,23 @@ private package Driver.Robot.Kinematics is
    --  reference keyframe; the identity until the arm is fitted.
 
    function Fitted (M : Model; A : Arm_Id) return Boolean;
+
+   procedure Solve_Pose
+     (M             : Model;
+      A             : Arm_Id;
+      Start         : Real_Array;
+      Goal          : Rigid;
+      Position_Only : Boolean;
+      Low, High     : Real_Array;
+      Q             : out Real_Array;
+      Position_Off  : out Real;
+      Turn_Off      : out Real)
+     with Pre => Start'Length = Low'Length and then Low'Length = High'Length and then Q'Length = Start'Length;
+   --  The readings, within Low .. High, that bring the arm's eye (in its
+   --  reference frame) nearest Goal, by damped least squares from Start on
+   --  the position (model units) and the turn (radians) left, until a step
+   --  lowers what is left by less than the unchanged fraction of it; how far
+   --  the eye remains from Goal.
 
    function Angle_Sigma (M : Model; A : Arm_Id) return Real;
    --  The angle one pixel of the fit's measured noise subtends at the arm's

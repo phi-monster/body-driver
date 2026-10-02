@@ -1,7 +1,9 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
+with Driver.Conventions;
 with Driver.Distributions;
+with Driver.Numerics.Dense;
 with Driver.Robot.Kinematics.Fit;
 with Driver.Stats;
 with Driver.Uncertain;
@@ -110,6 +112,24 @@ package body Driver.Robot.Kinematics is
       end loop;
    end Collect;
 
+   function Held_Still (M : Model; A : Arm_Id; Beat : Natural) return Boolean is
+      E : constant Eye_Id'Base := Eye_Of (M, A);
+      G : constant Group_Id := Arm_Group (M, A);
+   begin
+      if E = 0 then
+         return False;
+      end if;
+      declare
+         S : Eye_Stream renames M.Eyes (E);
+      begin
+         return Beat > 0 and then Beat < Natural (S.Judged.Length)
+           and then S.Judged (Beat) and then S.Still_At (Beat)
+           and then S.Judged (Beat - 1) and then S.Still_At (Beat - 1)
+           and then Channels.Has_Reading (M, G, Beat) and then Channels.Has_Reading (M, G, Beat - 1)
+           and then not Channels.Moving (M, G, Beat);
+      end;
+   end Held_Still;
+
    procedure Observe (M : in out Model; O : Observation) is
       Beat : constant Natural := M.Beats;
    begin
@@ -136,14 +156,9 @@ package body Driver.Robot.Kinematics is
                end if;
                declare
                   R : Arm_Evidence renames M.Kinematics (Index);
-                  S : Eye_Stream renames M.Eyes (E);
                begin
                   Collect (R);
-                  if Beat > 0 and then Beat < Natural (S.Judged.Length)
-                    and then S.Judged (Beat) and then S.Still_At (Beat)
-                    and then S.Judged (Beat - 1) and then S.Still_At (Beat - 1)
-                    and then Channels.Has_Reading (M, G, Beat) and then Channels.Has_Reading (M, G, Beat - 1)
-                    and then not Channels.Moving (M, G, Beat)
+                  if Held_Still (M, Arm, Beat)
                     and then E <= O.Images.Last_Index and then Driver.Observations.Has_Image (O, E)
                   then
                      declare
@@ -440,6 +455,124 @@ package body Driver.Robot.Kinematics is
       end loop;
       return False;
    end Fitted;
+
+   procedure Solve_Pose
+     (M             : Model;
+      A             : Arm_Id;
+      Start         : Real_Array;
+      Goal          : Rigid;
+      Position_Only : Boolean;
+      Low, High     : Real_Array;
+      Q             : out Real_Array;
+      Position_Off  : out Real;
+      Turn_Off      : out Real)
+   is
+      use Driver.Numerics.Arrays;
+      use Ada.Numerics.Long_Elementary_Functions;
+      N    : constant Natural := Start'Length;
+      Rows : constant Positive := (if Position_Only then 3 else 6);
+      X    : Real_Array (1 .. N) := Start;
+      Lambda : Real := Real'Model_Epsilon;
+
+      function Clamp (V : Real_Array) return Real_Array is
+         R : Real_Array (1 .. N) := V;
+      begin
+         for J in 1 .. N loop
+            R (J) := Real'Max (Low (Low'First + J - 1), Real'Min (High (High'First + J - 1), V (V'First + J - 1)));
+         end loop;
+         return R;
+      end Clamp;
+
+      function Residual (V : Real_Array) return Real_Vector is
+         T : constant Rigid := Eye_In_Reference (M, A, V);
+         R : Real_Vector (1 .. Rows);
+         D : constant Vec3 := T.Translation - Goal.Translation;
+      begin
+         R (1 .. 3) := D;
+         if not Position_Only then
+            R (4 .. 6) := Driver.Numerics.Log (Transpose (T.Rotation) * Goal.Rotation);
+         end if;
+         return R;
+      end Residual;
+
+      function Cost (R : Real_Vector) return Real is (R * R);
+
+      R0 : Real_Vector (1 .. Rows);
+   begin
+      X := Clamp (X);
+      R0 := Residual (X);
+      loop
+         declare
+            J : Real_Matrix (1 .. Rows, 1 .. N);
+            Improved, Lowered : Boolean := False;
+         begin
+            for K in 1 .. N loop
+               declare
+                  Xp : Real_Array := X;
+                  H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (K));
+                  Rp : Real_Vector (1 .. Rows);
+               begin
+                  Xp (K) := Xp (K) + H;
+                  Rp := Residual (Xp);
+                  for I in 1 .. Rows loop
+                     J (I, K) := (Rp (I) - R0 (I)) / H;
+                  end loop;
+               end;
+            end loop;
+            declare
+               JtJ : constant Real_Matrix := Transpose (J) * J;
+               G   : constant Real_Vector := -(Transpose (J) * R0);
+            begin
+               loop
+                  declare
+                     D  : Real_Matrix := JtJ;
+                     Lf : Real_Matrix (1 .. N, 1 .. N);
+                     Pd : Boolean;
+                     Moves : Boolean := False;
+                  begin
+                     for P in 1 .. N loop
+                        D (P, P) := JtJ (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;
+                     end loop;
+                     Driver.Numerics.Dense.Cholesky (D, Lf, Pd);
+                     if Pd then
+                        declare
+                           Step : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, G);
+                           Xn   : Real_Array (1 .. N);
+                        begin
+                           for P in 1 .. N loop
+                              Xn (P) := X (P) + Step (P);
+                           end loop;
+                           Xn := Clamp (Xn);
+                           Moves := (for some P in 1 .. N => Xn (P) /= X (P));
+                           if Moves then
+                              declare
+                                 Rn : constant Real_Vector := Residual (Xn);
+                              begin
+                                 if Cost (Rn) < Cost (R0) then
+                                    Improved := Cost (R0) - Cost (Rn) > Driver.Conventions.Unchanged_Fraction * Cost (R0);
+                                    X := Xn;
+                                    R0 := Rn;
+                                    Lambda := Lambda / 2.0;
+                                    Lowered := True;
+                                 end if;
+                              end;
+                           end if;
+                        end;
+                     else
+                        Moves := True;
+                     end if;
+                     exit when Lowered or else not Moves;
+                     Lambda := 2.0 * Lambda;
+                  end;
+               end loop;
+            end;
+            exit when not Improved;
+         end;
+      end loop;
+      Q := X;
+      Position_Off := Sqrt (R0 (1) ** 2 + R0 (2) ** 2 + R0 (3) ** 2);
+      Turn_Off := (if Position_Only then 0.0 else Sqrt (R0 (4) ** 2 + R0 (5) ** 2 + R0 (6) ** 2));
+   end Solve_Pose;
 
    function Result_Of (M : Model; A : Arm_Id) return Arm_Fit is
    begin
