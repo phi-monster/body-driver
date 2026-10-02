@@ -1256,6 +1256,8 @@ driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real
 driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2	structure	the middle pixel of a grid cell is half the cell in
 driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2xStride	structure	the middle pixel of a grid cell is half the cell in
 driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2xStride	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(Vector_Gate (3, Elsewhere - 1, Tests => Natural'Max (1, Natural (R.By_Pair (P).Kept.Length))),	1	structure	a family holds at least one test
+driver-world-estimates.adb	(Vector_Gate (3, Elsewhere - 1, Tests => Natural'Max (1, Natural (R.By_Pair (P).Kept.Length))),	3	structure	a point has three coordinates
 driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);	1.0	math	a mean over the points
 driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);	1.0	math	a mean over the points and their feet
 driver-world-estimates.adb	F : Positive := 1;	1	structure	vectors are indexed from one
@@ -1264,13 +1266,17 @@ driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed fr
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	K : Positive := 1;	1	structure	the pairs are counted from one
 driver-world-estimates.adb	Middle : constant Vec3 := (1.0 / N) * Sum;	1.0	math	a mean over the points
+driver-world-estimates.adb	Middle := (1.0 / Real (Elsewhere)) * Middle;	1.0	math	a mean over the other pairs' points
 driver-world-estimates.adb	Middle := (1.0 / Real (N)) * Middle;	1.0	math	a mean over the points
 driver-world-estimates.adb	Off := Significant (Vector_Gate (3, N - 1, Tests => Tests), Sqrt (Real'Max (0.0, D * (C * D))), 1.0);	1.0	statistics	the distance is already in units of its sigma
 driver-world-estimates.adb	Off := Significant (Vector_Gate (3, N - 1, Tests => Tests), Sqrt (Real'Max (0.0, D * (C * D))), 1.0);	3	structure	a point has three coordinates
+driver-world-estimates.adb	Spread := (1.0 / Real (Elsewhere - 1)) * Spread;	1.0	statistics	the sample spread loses one degree of freedom to the mean
 driver-world-estimates.adb	Spread := (1.0 / Real (N - 1)) * Spread;	1.0	statistics	the sample spread loses one degree of freedom to the mean
+driver-world-estimates.adb	Sqrt (Real'Max (0.0, D * (C * D))), 1.0)	1.0	statistics	the distance is already in units of its sigma
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	1	structure	a family holds at least one test
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	2	structure	each point is tested from both eyes that saw it
 driver-world-estimates.adb	Tests : constant Positive := Natural'Max (1, Natural (Kept.Length));	1	structure	a family holds at least one test
+driver-world-estimates.adb	if Elsewhere >= 4 then	4	statistics	a spread in three dimensions needs one point more than it has dimensions
 driver-world-estimates.adb	if N >= 4 then	4	statistics	a spread in three dimensions needs one point more than it has dimensions
 driver-world-estimates.adb	if not Behind and then N >= 4 then	4	statistics	a spread in three dimensions needs one point more than it has dimensions
 driver-world-estimates.adb	return -1;	1	format	a beat before every beat: no measurement asked about yet

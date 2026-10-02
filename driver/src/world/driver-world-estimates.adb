@@ -278,12 +278,53 @@ package body Driver.World.Estimates is
             end if;
          end;
       end loop;
-      for P of R.By_Pair loop
-         for M of P.Kept loop
-            if Inside_Pointed (R, M.Point.Mean, Camera_Of, Seen) then
-               Now.Append (M);
+      --  A pair's point is the thing's only once another pair bears it out:
+      --  it lies within the thing as the other pairs' points place it, their
+      --  spread about their middle and its own uncertainty taken together, by
+      --  the one significance rule. One pair alone is two eyes alone, and two
+      --  eyes cannot tell a wrong match that met on the line its first sight
+      --  draws from a right one; another pair, through other eyes or other
+      --  pixels, can.
+      for P in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
+         declare
+            Elsewhere : Natural := 0;   --  the other pairs' points
+            Middle : Vec3 := Zero3;
+            Spread : Mat3 := [others => [others => 0.0]];
+         begin
+            for Q in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
+               if Q /= P then
+                  for M of R.By_Pair (Q).Kept loop
+                     Elsewhere := Elsewhere + 1;
+                     Middle := Middle + M.Point.Mean;
+                  end loop;
+               end if;
+            end loop;
+            if Elsewhere >= 4 then
+               Middle := (1.0 / Real (Elsewhere)) * Middle;
+               for Q in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
+                  if Q /= P then
+                     for M of R.By_Pair (Q).Kept loop
+                        Spread := Spread + Driver.Numerics.Outer (M.Point.Mean - Middle, M.Point.Mean - Middle);
+                     end loop;
+                  end if;
+               end loop;
+               Spread := (1.0 / Real (Elsewhere - 1)) * Spread;
+               for M of R.By_Pair (P).Kept loop
+                  declare
+                     D : constant Vec3 := M.Point.Mean - Middle;
+                     C : constant Mat3 := Inverse (Spread + M.Point.Covariance);
+                  begin
+                     if Inside_Pointed (R, M.Point.Mean, Camera_Of, Seen)
+                       and then not Significant
+                         (Vector_Gate (3, Elsewhere - 1, Tests => Natural'Max (1, Natural (R.By_Pair (P).Kept.Length))),
+                          Sqrt (Real'Max (0.0, D * (C * D))), 1.0)
+                     then
+                        Now.Append (M);
+                     end if;
+                  end;
+               end loop;
             end if;
-         end loop;
+         end;
       end loop;
       if Driver.World.Pairs.Match_Vectors."/=" (Now, R.Points) then
          R.Points := Now;

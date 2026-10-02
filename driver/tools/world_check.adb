@@ -1507,7 +1507,13 @@ procedure World_Check is
                      Height : constant Estimate := Driver.World.Offline.Height_Above_Support (Bench, T);
                      True_H : constant Real := Lowests (Own_K) (3) - Table_Top;
                   begin
-                     Append (Line, "; centre " & Mm (abs (Centre.Mean - Middles (Own_K))) & " mm from its mesh's middle");
+                     Append (Line, "; centre of what is seen " & Mm (abs (Centre.Mean - Middles (Own_K)))
+                             & " mm from its mesh's middle, which "
+                             & (if Significant (Centre, Point_Estimate'(Mean => Middles (Own_K),
+                                                                      Covariance => [others => [others => 0.0]]))
+                                 then "lies outside" else "lies within")
+                             & " its covariance (sigma " & Mm (Sqrt (Centre.Covariance (1, 1))) & ", "
+                             & Mm (Sqrt (Centre.Covariance (2, 2))) & ", " & Mm (Sqrt (Centre.Covariance (3, 3))) & " mm)");
                      if Under = 0 then
                         Append (Line, "; rests on nothing found");
                      else
