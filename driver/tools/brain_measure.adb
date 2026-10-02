@@ -128,7 +128,11 @@ procedure Brain_Measure is
       M.Append (Driver.Action.Meaning ("height"));
       if Ada.Strings.Fixed.Index (Name, "QH") = Name'First then
          Q.Append ("heading");
-         M.Append (Driver.Action.Meaning ("heading"));
+         --  A name with g in it keeps an earlier wording of heading, to
+         --  compare the action layer's with it.
+         M.Append (if Ada.Strings.Fixed.Index (Name, "g") > 0
+                   then "which way it points on the surface it rests on; up and down turn it one way or the other"
+                   else Driver.Action.Meaning ("heading"));
       end if;
       for E in 1 .. Eye_Count loop
          Eyes.Append (Driver.Observations.Camera_Id (E));

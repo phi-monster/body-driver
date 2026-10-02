@@ -44,8 +44,12 @@ say look = <eye number>
 done
 ```
 
-The quantity is one the body lists, with its meaning. `height` is how high a
-thing is above the surface it rests on, and `up` lifts it off that surface.
+The quantities are the ones the body can measure and change now, each listed
+with its meaning in the action layer's words: `height` is how high a thing is
+above the surface it rests on, and `up` takes it off that surface; `heading`
+is which way its long side points about its up, and `up` turns it
+counter-clockwise about its up; `tilt` is how far it leans as the eye that
+stays still sees it, and `up` leans its top away from that eye.
 Where to hold the thing, from which side to come, and when to close are the
 body's to work out: the brain says only which quantity of which thing should
 change, and which way.
