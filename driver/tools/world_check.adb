@@ -1453,44 +1453,71 @@ procedure World_Check is
                   Near_Count.Append (0);
                   return Near_Names.Last_Index;
                end Slot_Of;
+               Candidates : Name_Vectors.Vector;   --  the names of the meshes, placed in Placed_At
             begin
+               for K in Names.First_Index .. Names.Last_Index loop
+                  declare
+                     Unused : constant Placed := Grid_Of (K);
+                     pragma Unreferenced (Unused);
+                  begin
+                     Candidates.Append (Names (K));
+                  end;
+               end loop;
+               for C in L.Links.Iterate loop
+                  if Link_Keys.Contains (Pose_Maps.Key (C)) then
+                     declare
+                        Name : constant String := "robot " & Pose_Maps.Key (C);
+                     begin
+                        if not Placed_At.Contains (Name) then
+                           Placed_At.Include
+                             (Name, Place (Mesh_Of (Link_Keys (Pose_Maps.Key (C))), Pose_Maps.Element (C)));
+                        end if;
+                        Candidates.Append (Name);
+                     end;
+                  end if;
+               end loop;
                for I in Gaps'Range loop
                   declare
                      X     : constant Vec3 := Driver.World.Offline.Scene_At (Bench, S.Members (I)).Mean;
                      Best  : Real := Real'Last;
                      Which : Unbounded_String := To_Unbounded_String ("nothing");
+                     --  Each mesh's box first, nearest first: no triangle of a mesh
+                     --  is nearer than its box, so the search ends once a box is no
+                     --  nearer than the nearest triangle found.
+                     Boxes : Real_Array (1 .. Natural (Candidates.Length));
+                     Tried : array (Boxes'Range) of Boolean := [others => False];
                   begin
-                     for K in Names.First_Index .. Names.Last_Index loop
-                        if Box_Distance (K, X) < Best then
+                     for K in Boxes'Range loop
+                        declare
+                           M : constant Placed := Placed_At (Candidates (K));
+                           D : Vec3 := Zero3;
+                        begin
+                           for A in 1 .. 3 loop
+                              D (A) := Real'Max (0.0, Real'Max (M.Low (A) - X (A), X (A) - M.High (A)));
+                           end loop;
+                           Boxes (K) := (if M.Triangles.Is_Empty then Real'Last else abs D);
+                        end;
+                     end loop;
+                     loop
+                        declare
+                           Next : Natural := 0;
+                        begin
+                           for K in Boxes'Range loop
+                              if not Tried (K) and then (Next = 0 or else Boxes (K) < Boxes (Next)) then
+                                 Next := K;
+                              end if;
+                           end loop;
+                           exit when Next = 0 or else Boxes (Next) >= Best;
+                           Tried (Next) := True;
                            declare
-                              D : constant Real := Distance (Grid_Of (K), X);
+                              D : constant Real := Distance (Placed_At (Candidates (Next)), X);
                            begin
                               if D < Best then
                                  Best := D;
-                                 Which := To_Unbounded_String (Names (K));
+                                 Which := To_Unbounded_String (Candidates (Next));
                               end if;
                            end;
-                        end if;
-                     end loop;
-                     for C in L.Links.Iterate loop
-                        if Link_Keys.Contains (Pose_Maps.Key (C)) then
-                           declare
-                              Name : constant String := "robot " & Pose_Maps.Key (C);
-                           begin
-                              if not Placed_At.Contains (Name) then
-                                 Placed_At.Include
-                                   (Name, Place (Mesh_Of (Link_Keys (Pose_Maps.Key (C))), Pose_Maps.Element (C)));
-                              end if;
-                              declare
-                                 D : constant Real := Distance (Placed_At (Name), X);
-                              begin
-                                 if D < Best then
-                                    Best := D;
-                                    Which := To_Unbounded_String (Name);
-                                 end if;
-                              end;
-                           end;
-                        end if;
+                        end;
                      end loop;
                      Gaps (I) := Best;
                      declare
