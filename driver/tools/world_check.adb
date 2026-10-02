@@ -679,12 +679,21 @@ procedure World_Check is
       --  How far P is from the mesh's surface: the cells within a cube about P
       --  are searched, the cube doubling until the nearest triangle found lies
       --  within it (then no triangle outside can be nearer), or it holds them all.
-      Reach : Real := S.Size;
-      Best  : Real := Real'Last;
+      --  No triangle is nearer than the mesh's box, so the cube starts there,
+      --  and only the box's own cells are visited.
+      Outside : Vec3 := Zero3;
+      Reach   : Real;
+      Best    : Real := Real'Last;
+      First   : constant Cell := Cell_Of (S, S.Low);
+      Final   : constant Cell := Cell_Of (S, S.High);
    begin
       if S.Triangles.Is_Empty then
          return Real'Last;
       end if;
+      for A in 1 .. 3 loop
+         Outside (A) := Real'Max (0.0, Real'Max (S.Low (A) - P (A), P (A) - S.High (A)));
+      end loop;
+      Reach := Real'Max (S.Size, abs Outside);
       loop
          declare
             Lo : constant Cell := Cell_Of (S, P - [Reach, Reach, Reach]);
@@ -693,9 +702,9 @@ procedure World_Check is
               (for all A in 1 .. 3 => P (A) - Reach <= S.Low (A) and then P (A) + Reach >= S.High (A));
          begin
             Best := Real'Last;
-            for I in Lo.I .. Hi.I loop
-               for J in Lo.J .. Hi.J loop
-                  for K in Lo.K .. Hi.K loop
+            for I in Integer'Max (Lo.I, First.I) .. Integer'Min (Hi.I, Final.I) loop
+               for J in Integer'Max (Lo.J, First.J) .. Integer'Min (Hi.J, Final.J) loop
+                  for K in Integer'Max (Lo.K, First.K) .. Integer'Min (Hi.K, Final.K) loop
                      declare
                         Position : constant Cell_Maps.Cursor := S.Cells.Find ((I, J, K));
                      begin
