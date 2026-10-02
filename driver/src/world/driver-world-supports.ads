@@ -52,8 +52,9 @@ package Driver.World.Supports is
    --  eye that saw them stands.
 
    type Support is record
-      Index  : Natural := 0;      --  in the surfaces given; 0: none under it
-      Height : Estimate;          --  of the lowest point above it, along Up
+      Index    : Natural := 0;      --  in the surfaces given; 0: none under it
+      Height   : Estimate;          --  of the lowest point seen above it, along Up
+      Touching : Boolean := False;  --  that point on it, within their uncertainties
    end record;
 
    function Mostly (S : Surface; Of_It : not null access function (Member : Positive) return Boolean)
@@ -70,6 +71,11 @@ package Driver.World.Supports is
    --  the lowest of them all, so tested as one of a family of as many. Own
    --  says whether a surface's member is a point of the thing itself: a
    --  surface most of whose members are is the thing's own face, seen
-   --  before the thing was known, and holds nothing up.
+   --  before the thing was known, and holds nothing up. Touching says the
+   --  lowest point seen is on the support within their uncertainties: the
+   --  thing's bottom is seen there. When it is not, Height bounds how far
+   --  above the support the thing's bottom can be: the eyes see nothing of it
+   --  lower, and what they do not see (the side and the underside of a box
+   --  seen from above, the underside of a ball) may reach down to it.
 
 end Driver.World.Supports;

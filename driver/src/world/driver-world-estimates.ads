@@ -19,7 +19,13 @@
 --  points that gives (Driver.World.Supports), each pair's grid kept apart
 --  from the others'. The grid is as many pixels apart as the square root of
 --  the image's shorter side, so it has as many rows as each row has pixels
---  between points. A point of the scene that falls inside a thing's region
+--  between points. A surface measured before in the episode stands where a
+--  new measurement neither finds it again nor sees through it (a line of
+--  sight crossing it to a point beyond): eyes that look elsewhere now say
+--  nothing of it. A thing's points are each pair's latest, less those that
+--  fall outside it now in an eye that holds it where the brain pointed at
+--  it (a region found here may be part of it); an eye that lost it says
+--  nothing either. A point of the scene that falls inside a thing's region
 --  in an eye that holds it is the thing's own (on it, or hidden behind it),
 --  so a thing never rests on its own top face; a thing's support is worked
 --  out again only when its points or the surfaces change.
@@ -56,6 +62,7 @@ private package Driver.World.Estimates is
 
    function Resting_On (S : State; T : Thing_Id) return Surface_Id'Base;
    function Height_Above_Support (S : State; T : Thing_Id) return Estimate;
+   function Bottom_Seen (S : State; T : Thing_Id) return Boolean;
    --  As Driver.World's: no support and Unknown before one is found.
 
    procedure Adopt (S : in out State; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id);
@@ -87,15 +94,24 @@ private package Driver.World.Estimates is
    function Earlier (S : State; F : Surface_Id) return Boolean;
    function Surface_Of (S : State; F : Surface_Id) return Driver.World.Supports.Surface;
 
+   function Scene_Round (S : State) return Natural;
+   function Scene_Size (S : State) return Natural;
+   function Scene_At (S : State; K : Positive) return Point_Estimate;
+   function Scene_Grid_At (S : State; K : Positive) return Driver.World.Supports.Grid_Point;
+   --  The latest measurement of the scene: which it was, and its points with
+   --  their places in the grids they were asked on.
+
 private
 
    package Point_Holders is new Ada.Containers.Indefinite_Holders (Driver.Instrument.Point_Array, Driver.Instrument."=");
    package Image_Holders is new Ada.Containers.Indefinite_Holders (Driver.Images.Image, Driver.Images."=");
    package Observation_Holders is new Ada.Containers.Indefinite_Holders (Observation, Driver.Observations."=");
+   package Request_Holders is new Ada.Containers.Indefinite_Holders (String);
 
    --  A thing in one eye: its track, and the instrument's request out for it.
    type Slot is record
       Has     : Boolean := False;
+      Pointed : Boolean := False;   --  the region was given (the brain pointed at the thing here), not found
       Track   : Driver.World.Tracking.Track;
       Out_Now : Boolean := False;
       Ticket  : Driver.Services.Ticket;
@@ -131,17 +147,29 @@ private
       Ticket : Driver.Services.Ticket;
       On     : Image_Holders.Holder;
       Beat   : Driver.Clock.Beat := 0;
+      Asked  : Request_Holders.Holder;   --  the request sent, as the instrument got it
    end record;
 
    package Start_Vectors is new Ada.Containers.Vectors (Positive, Start);
    package Point_Vectors is new Ada.Containers.Vectors (Positive, Point_Estimate);
+
+   --  What one pair of eyes last saw of a thing, and the observation it was
+   --  seen at (without its images): the eyes as they were then.
+   type Pair_Seen is record
+      From, Into : Eye_Id;
+      Kept       : Driver.World.Pairs.Match_Vectors.Vector;
+      Then_Seen  : Observation_Holders.Holder;
+   end record;
+
+   package Pair_Seen_Vectors is new Ada.Containers.Vectors (Positive, Pair_Seen);
 
    type Thing_Record is record
       Eyes      : Slot_Vectors.Vector;
       Crosses   : Cross_Vectors.Vector;
       Asked     : Asked_Vectors.Vector;
       Starts    : Start_Vectors.Vector;
-      Points    : Driver.World.Pairs.Match_Vectors.Vector;
+      By_Pair   : Pair_Seen_Vectors.Vector;
+      Points    : Driver.World.Pairs.Match_Vectors.Vector;   --  every pair's, inside it in the eyes holding it
       Points_In : Eye_Id := Eye_Id'First;
       Points_At : Driver.Clock.Beat := 0;
       Has_Points : Boolean := False;
@@ -169,8 +197,9 @@ private
    --  A point of the scene: where both eyes saw it, and its place in the grid
    --  of the eye it was asked from.
    type Scene_Point is record
-      Point : Point_Estimate;
-      Grid  : Driver.World.Supports.Grid_Point;
+      Point      : Point_Estimate;
+      Grid       : Driver.World.Supports.Grid_Point;
+      From, Into : Eye_Id := Eye_Id'First;   --  the two eyes that saw it
    end record;
 
    package Scene_Point_Vectors is new Ada.Containers.Vectors (Positive, Scene_Point);
@@ -179,6 +208,7 @@ private
       Things      : Thing_Vectors.Vector;
       Surfaces    : Driver.World.Supports.Surface_Vectors.Vector;
       Scene       : Scene_Point_Vectors.Vector;   --  the points the surfaces were found among
+      Scene_Round : Natural := 0;                 --  the measurement of the scene they came from
       Earlier     : Boolean := False;             --  the surfaces are an earlier episode's
       Due         : Boolean := True;              --  the scene is to be measured at the next still beat
       Round       : Natural := 0;                 --  the latest measurement of the scene asked
