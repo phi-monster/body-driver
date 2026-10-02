@@ -22,6 +22,7 @@ package Driver.Stats with Pure is
 
    function Median (X : Real_Array) return Real
      with Pre => X'Length > 0;
+   --  Exact, and without copying X: a sample of any size.
 
    function Robust_Sigma (X : Real_Array) return Real
      with Pre => X'Length > 0;

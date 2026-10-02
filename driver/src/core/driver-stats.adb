@@ -1,4 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Conversion;
+with Interfaces;
 
 package body Driver.Stats is
 
@@ -31,64 +33,95 @@ package body Driver.Stats is
       return (Value => A.Mean, Sigma => Sqrt (Variance (A) / Real (A.N)), Degrees_Of_Freedom => A.N - 1);
    end Mean_Estimate;
 
-   procedure Sort (X : in out Real_Array) is
-   begin
-      --  Heap sort: O(n log n) in place, also for image-sized samples.
-      declare
-         N : constant Natural := X'Length;
-         O : constant Integer := X'First - 1;
-         procedure Sift (Start, Stop : Natural) is
-            Root : Natural := Start;
-            Child : Natural;
-            T : Real;
-         begin
-            loop
-               Child := 2 * Root;
-               exit when Child > Stop;
-               if Child < Stop and then X (O + Child) < X (O + Child + 1) then
-                  Child := Child + 1;
-               end if;
-               exit when not (X (O + Root) < X (O + Child));
-               T := X (O + Root);
-               X (O + Root) := X (O + Child);
-               X (O + Child) := T;
-               Root := Child;
-            end loop;
-         end Sift;
-         T : Real;
-      begin
-         for Start in reverse 1 .. N / 2 loop
-            Sift (Start, N);
-         end loop;
-         for Stop in reverse 2 .. N loop
-            T := X (O + 1);
-            X (O + 1) := X (O + Stop);
-            X (O + Stop) := T;
-            Sift (1, Stop - 1);
-         end loop;
-      end;
-   end Sort;
+   --  Order statistics by the values' bits. Setting the sign bit of a
+   --  non-negative IEEE double, and inverting every bit of a negative one,
+   --  gives keys that order as the values do. The K-th smallest value is found
+   --  one digit of its key at a time, most significant first, by counting the
+   --  values whose keys share the digits found so far: eight passes, nothing
+   --  copied, the sample untouched. Samples run to millions (a ratio for every
+   --  still cell of every beat), more than a stack holds.
 
-   function Median (X : Real_Array) return Real is
-      S : Real_Array := X;
-      N : constant Natural := S'Length;
-      O : constant Integer := S'First - 1;
+   subtype Key is Interfaces.Unsigned_64;
+   use type Key;
+
+   function Bits is new Ada.Unchecked_Conversion (Real, Key);
+   function Value_Of is new Ada.Unchecked_Conversion (Key, Real);
+
+   Sign : constant Key := 2 ** (Key'Size - 1);
+
+   Digit_Bits : constant := 8;   --  a byte of the key per pass; any width gives the same result
+   Radix      : constant := 2 ** Digit_Bits;
+
+   function Ordered (V : Real) return Key is
+     (if (Bits (V) and Sign) = 0 then Bits (V) or Sign else not Bits (V));
+
+   function Unordered (K : Key) return Real is
+     (Value_Of (if (K and Sign) /= 0 then K and not Sign else not K));
+
+   generic
+      with function Value (V : Real) return Real;
+   function Median_Of (X : Real_Array) return Real;
+   --  The median of Value (V) over X.
+
+   function Median_Of (X : Real_Array) return Real is
+      N       : constant Positive := X'Length;
+      Rank    : Positive := (N + 1) / 2;   --  the rank sought among the values that share Prefix
+      Prefix  : Key := 0;                  --  the key's digits found so far, in place
+      Found   : Key := 0;                  --  which bits of Prefix are found
+      Lower   : Real;
+      At_Most : Natural := 0;
+      Above   : Real := Real'Last;
    begin
-      Sort (S);
+      for Place in reverse 0 .. Key'Size / Digit_Bits - 1 loop
+         declare
+            Unit   : constant Key := Radix ** Place;
+            Counts : array (Key range 0 .. Radix - 1) of Natural := [others => 0];
+            Digit  : Key := 0;
+         begin
+            for V of X loop
+               declare
+                  K : constant Key := Ordered (Value (V));
+               begin
+                  if (K and Found) = Prefix then
+                     Counts (K / Unit mod Radix) := Counts (K / Unit mod Radix) + 1;
+                  end if;
+               end;
+            end loop;
+            while Counts (Digit) < Rank loop
+               Rank := Rank - Counts (Digit);
+               Digit := Digit + 1;
+            end loop;
+            Prefix := Prefix or Digit * Unit;
+            Found := Found or (Radix - 1) * Unit;
+         end;
+      end loop;
+      Lower := Unordered (Prefix);
       if N mod 2 = 1 then
-         return S (O + (N + 1) / 2);
+         return Lower;
       end if;
-      return (S (O + N / 2) + S (O + N / 2 + 1)) / 2.0;
-   end Median;
+      --  The next order statistic is Lower again when more than half the
+      --  values are at most Lower, else the least value above it.
+      for V of X loop
+         if Value (V) <= Lower then
+            At_Most := At_Most + 1;
+         else
+            Above := Real'Min (Above, Value (V));
+         end if;
+      end loop;
+      return (Lower + (if At_Most > N / 2 then Lower else Above)) / 2.0;
+   end Median_Of;
+
+   function Itself (V : Real) return Real is (V);
+   function Median_Of_Values is new Median_Of (Itself);
+
+   function Median (X : Real_Array) return Real is (Median_Of_Values (X));
 
    function Robust_Sigma (X : Real_Array) return Real is
-      M : constant Real := Median (X);
-      D : Real_Array (X'Range);
+      Center : constant Real := Median (X);
+      function Deviation (V : Real) return Real is (abs (V - Center));
+      function Median_Of_Deviations is new Median_Of (Deviation);
    begin
-      for I in X'Range loop
-         D (I) := abs (X (I) - M);
-      end loop;
-      return Gaussian_MAD_To_Sigma * Median (D);
+      return Gaussian_MAD_To_Sigma * Median_Of_Deviations (X);
    end Robust_Sigma;
 
    function Correlation (X, Y : Real_Array) return Real is

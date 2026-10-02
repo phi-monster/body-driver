@@ -1,10 +1,20 @@
+with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
+with Ada.Unchecked_Deallocation;
+with Driver.Distributions;
+with Driver.Robot.Kinematics.Fit;
+with Driver.Stats;
+with Driver.Uncertain;
 with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 
 package body Driver.Robot.Kinematics is
+
+   --  Samples too large for a stack live on the heap.
+   type Real_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
 
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
@@ -214,5 +224,255 @@ package body Driver.Robot.Kinematics is
       end loop;
       return 0;
    end Matched;
+
+   function Pending (M : Model) return Natural is
+      K : Natural := 0;
+   begin
+      for R of M.Kinematics loop
+         K := K + Natural (R.Pending.Length);
+      end loop;
+      return K;
+   end Pending;
+
+   procedure Refit (M : in out Model) is
+   begin
+      for Index in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+         declare
+            R : Arm_Evidence renames M.Kinematics (Index);
+         begin
+            if not R.Matches.Is_Empty and then Natural (R.Matches.Length) /= R.Result.Matches
+              and then R.Group <= M.Groups.Last_Index and then R.Eye <= M.Eyes.Last_Index
+            then
+               declare
+                  N       : constant Natural := M.Groups (R.Group).Size;
+                  Frames  : constant Natural := Natural (R.Frames.Length);
+                  Queries : constant Natural := Natural (R.Query_U.Length);
+                  Changes : Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. N);
+                  Visible : Real_Array (1 .. N);
+                  Count   : Natural := 0;
+                  Trips   : Real_Access;
+                  Sigma   : Real := 0.0;
+               begin
+                  for F in 1 .. Frames loop
+                     for C in 1 .. N loop
+                        Changes (F, C) := R.Frames (F).Readings (C - 1) - R.Frames (1).Readings (C - 1);
+                     end loop;
+                  end loop;
+                  for C in 1 .. N loop
+                     declare
+                        V : constant Estimate := Visible_Step (M, R.Group, C);
+                     begin
+                        Visible (C) := (if Known (V) then V.Value else 0.0);
+                     end;
+                  end loop;
+                  --  The noise of a round trip: the robust scale about zero of
+                  --  every answer's return to its query, both coordinates.
+                  for S of R.Matches loop
+                     for I in 0 .. Queries - 1 loop
+                        if S.Found (I) then
+                           Count := Count + 1;
+                        end if;
+                     end loop;
+                  end loop;
+                  if Count > 0 then
+                     Trips := new Real_Array (1 .. 2 * Count);
+                     declare
+                        K : Natural := 0;
+                     begin
+                        for S of R.Matches loop
+                           for I in 0 .. Queries - 1 loop
+                              if S.Found (I) then
+                                 Trips (K + 1) := abs (S.Back_U (I) - R.Query_U (I));
+                                 Trips (K + 2) := abs (S.Back_V (I) - R.Query_V (I));
+                                 K := K + 2;
+                              end if;
+                           end loop;
+                        end loop;
+                     end;
+                     Sigma := Driver.Stats.Median (Trips.all) / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5);
+                     Free (Trips);
+                  end if;
+                  declare
+                     function Round_Trip (S : Match_Set; I : Natural) return Boolean is
+                       (S.Found (I)
+                        and then (Sigma = 0.0
+                                  or else (not Driver.Uncertain.Significant (S.Back_U (I) - R.Query_U (I), Sigma)
+                                           and then not Driver.Uncertain.Significant (S.Back_V (I) - R.Query_V (I), Sigma))));
+
+                     --  A keyframe tells the fit something only when its points
+                     --  moved by more than the matcher errs: the median of their
+                     --  displacements significant against a round trip's noise.
+                     function Moved (S : Match_Set) return Boolean is
+                        D : Real_Array (1 .. Queries);
+                        K : Natural := 0;
+                     begin
+                        for I in 0 .. Queries - 1 loop
+                           if Round_Trip (S, I) then
+                              K := K + 1;
+                              D (K) := Ada.Numerics.Long_Elementary_Functions.Sqrt
+                                ((S.To_U (I) - R.Query_U (I)) ** 2 + (S.To_V (I) - R.Query_V (I)) ** 2);
+                           end if;
+                        end loop;
+                        return K > 0 and then Driver.Uncertain.Significant (Driver.Stats.Median (D (1 .. K)), Sigma);
+                     end Moved;
+
+                     Moving : array (R.Matches.First_Index .. R.Matches.Last_Index) of Boolean;
+
+                     function Returns (S : Match_Set; I : Natural) return Boolean is
+                       (Round_Trip (S, I) and then (for some K in Moving'Range => Moving (K) and then R.Matches (K).Frame = S.Frame));
+                     Kept : Natural := 0;
+                  begin
+                     for K in Moving'Range loop
+                        Moving (K) := Moved (R.Matches (K));
+                     end loop;
+                     for S of R.Matches loop
+                        for I in 0 .. Queries - 1 loop
+                           if Returns (S, I) then
+                              Kept := Kept + 1;
+                           end if;
+                        end loop;
+                     end loop;
+                     declare
+                        type Sighting_Access is access Fit.Sighting_Array;
+                        procedure Free is new Ada.Unchecked_Deallocation (Fit.Sighting_Array, Sighting_Access);
+                        Seen   : Sighting_Access := new Fit.Sighting_Array (1 .. Kept);
+                        K      : Natural := 0;
+                        Joints : Fit.Joint_Array (1 .. N);
+                        Lens   : Fit.Lens;
+                        Report : Fit.Fit_Report;
+                        Result : Arm_Fit;
+                     begin
+                        for S of R.Matches loop
+                           for I in 0 .. Queries - 1 loop
+                              if Returns (S, I) then
+                                 K := K + 1;
+                                 Seen (K) := (Frame => S.Frame, Track => I + 1,
+                                              U0 => R.Query_U (I), V0 => R.Query_V (I),
+                                              U => S.To_U (I), V => S.To_V (I));
+                              end if;
+                           end loop;
+                        end loop;
+                        Fit.Fit (Changes, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width, M.Eyes (R.Eye).Grid.Height,
+                                 Joints, Lens, Report);
+                        --  Up: the table the first arm's eye sees, away from it
+                        --  towards the eye (the world is that eye's reference
+                        --  frame).
+                        if Report.Fitted and then R.Arm = 1 then
+                           declare
+                              Normal : Vec3;
+                              Sigma  : Real;
+                              Found  : Boolean;
+                           begin
+                              Fit.Table (Changes, Seen.all, Joints, Lens, Normal, Sigma, Found);
+                              if Found then
+                                 M.Table_Up := (Unit_Vector => Normal, Sigma => Sigma);
+                              end if;
+                           end;
+                        end if;
+                        Free (Seen);
+                        Result.Fitted := Report.Fitted;
+                        Result.Matches := Natural (R.Matches.Length);
+                        Result.Used := Report.Used;
+                        Result.Median_Px := Report.Median_Px;
+                        Result.Sigma_Px := Report.Sigma_Px;
+                        Result.Why := Report.Why;
+                        Result.Reference := R.Frames (1).Readings;
+                        for J of Joints loop
+                           Result.Joints.Append (Joint_Fit'(W => J.W, P => J.P, C => J.C, Slide => J.Slide));
+                        end loop;
+                        Result.Lens := (Fx => Lens.Fx, Fy => Lens.Fy, Cx => Lens.Cx, Cy => Lens.Cy, K1 => Lens.K1, K2 => Lens.K2);
+                        --  A fit that failed keeps the last one that held.
+                        if Report.Fitted or else not R.Result.Fitted then
+                           R.Result := Result;
+                        else
+                           R.Result.Matches := Result.Matches;
+                           R.Result.Why := Result.Why;
+                        end if;
+                        Driver.Log.Line
+                          (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " "
+                           & (if Report.Fitted
+                              then "fitted from" & Kept'Image & " sightings of" & Frames'Image & " keyframes,"
+                                   & Report.Used'Image & " fit, median " & Driver.Log.Image (Report.Median_Px, 3)
+                                   & " px, noise " & Driver.Log.Image (Report.Sigma_Px, 3) & " px; focal "
+                                   & Driver.Log.Image (Lens.Fx, 2) & " x " & Driver.Log.Image (Lens.Fy, 2) & " px"
+                              else "not fitted (stage" & Report.Stage'Image & "): "
+                                   & Ada.Strings.Unbounded.To_String (Report.Why)));
+                     end;
+                  end;
+               end;
+            end if;
+         end;
+      end loop;
+   end Refit;
+
+   function Eye_In_Reference (M : Model; A : Arm_Id; Readings : Real_Array) return Rigid is
+   begin
+      for R of M.Kinematics loop
+         if R.Arm = A and then R.Result.Fitted
+           and then Natural (R.Result.Joints.Length) = Readings'Length
+           and then Natural (R.Result.Reference.Length) = Readings'Length
+         then
+            declare
+               Joints : Fit.Joint_Array (1 .. Readings'Length);
+               Change : Real_Array (1 .. Readings'Length);
+            begin
+               for J in Joints'Range loop
+                  declare
+                     F : constant Joint_Fit := R.Result.Joints (J);
+                  begin
+                     Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
+                     Change (J) := Readings (Readings'First + J - 1) - R.Result.Reference (J - 1);
+                  end;
+               end loop;
+               return Fit.Eye_At (Joints, Change);
+            end;
+         end if;
+      end loop;
+      return Identity;
+   end Eye_In_Reference;
+
+   function Fitted (M : Model; A : Arm_Id) return Boolean is
+   begin
+      for R of M.Kinematics loop
+         if R.Arm = A then
+            return R.Result.Fitted;
+         end if;
+      end loop;
+      return False;
+   end Fitted;
+
+   function Result_Of (M : Model; A : Arm_Id) return Arm_Fit is
+   begin
+      for R of M.Kinematics loop
+         if R.Arm = A then
+            return R.Result;
+         end if;
+      end loop;
+      return (others => <>);
+   end Result_Of;
+
+   function Lens_Of (M : Model; A : Arm_Id) return Fit.Lens is
+      L : constant Lens_Fit := Result_Of (M, A).Lens;
+   begin
+      return (Fx => L.Fx, Fy => L.Fy, Cx => L.Cx, Cy => L.Cy, K1 => L.K1, K2 => L.K2);
+   end Lens_Of;
+
+   function Angle_Sigma (M : Model; A : Arm_Id) return Real is
+      R : constant Arm_Fit := Result_Of (M, A);
+   begin
+      return (if R.Fitted and then R.Lens.Fx > 0.0 and then R.Lens.Fy > 0.0
+              then R.Sigma_Px / Real'Min (R.Lens.Fx, R.Lens.Fy) else Real'Last);
+   end Angle_Sigma;
+
+   function Ray_In_Eye (M : Model; A : Arm_Id; U, V : Real) return Vec3 is
+      H : constant Vec3 := Fit.Ray (Lens_Of (M, A), U, V);
+   begin
+      return Unit (H);
+   end Ray_In_Eye;
+
+   procedure Project_In_Eye (M : Model; A : Arm_Id; P : Vec3; U, V : out Real; In_Front : out Boolean) is
+   begin
+      Fit.Project (Lens_Of (M, A), P, U, V, In_Front);
+   end Project_In_Eye;
 
 end Driver.Robot.Kinematics;

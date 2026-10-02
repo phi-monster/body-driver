@@ -1,4 +1,5 @@
 with Ada.Containers;
+with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -9,6 +10,10 @@ with Driver.Robot.Regression;
 with Driver.Stats;
 
 package body Driver.Robot.Lockin is
+
+   --  Samples too large for a stack live on the heap.
+   type Real_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
@@ -353,7 +358,9 @@ package body Driver.Robot.Lockin is
                end loop;
                if Count > 0 then
                   declare
-                     Ratios : Real_Array (1 .. Count);
+                     --  One ratio per still cell and beat: on the heap, a long
+                     --  stream has millions.
+                     Ratios : Real_Access := new Real_Array (1 .. Count);
                      K      : Natural := 0;
                   begin
                      for B in 1 .. Beats - 1 loop
@@ -370,7 +377,8 @@ package body Driver.Robot.Lockin is
                         end if;
                      end loop;
                      S.Rest_Factor := Real'Max
-                       (1.0, Sqrt (Driver.Stats.Median (Ratios) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));
+                       (1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));
+                     Free (Ratios);
                   end;
                end if;
             end if;

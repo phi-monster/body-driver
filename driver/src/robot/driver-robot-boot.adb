@@ -364,6 +364,9 @@ package body Driver.Robot.Boot is
       for A in 1 .. Arms loop
          Sweep (Arm_Id (A));
       end loop;
+      --  The instrument answers the keyframes' matches a beat or more after
+      --  they were asked: the fit waits for every answer.
+      Driver.Robot.Motion.Hold_While_Matching (M);
       Driver.Beats.Within_A_Beat (Estimate'Access);
       Driver.Robot.Hand.Measure (H, M);
       declare

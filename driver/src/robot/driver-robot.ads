@@ -345,6 +345,30 @@ private
 
    package Pending_Vectors is new Ada.Containers.Vectors (Positive, Pending_Match);
 
+   --  An arm's kinematics and its eye's lens as last fitted (Driver.Robot.Kinematics.Fit).
+   type Joint_Fit is record
+      W, P  : Vec3 := [0.0, 0.0, 0.0];
+      C     : Real := 1.0;
+      Slide : Boolean := False;
+   end record;
+
+   package Joint_Fit_Vectors is new Ada.Containers.Vectors (Positive, Joint_Fit);
+
+   type Lens_Fit is record
+      Fx, Fy, Cx, Cy, K1, K2 : Real := 0.0;
+   end record;
+
+   type Arm_Fit is record
+      Fitted    : Boolean := False;
+      Reference : Real_Vectors.Vector;    --  the readings of the reference keyframe
+      Joints    : Joint_Fit_Vectors.Vector;
+      Lens      : Lens_Fit;
+      Used      : Natural := 0;           --  sightings in the last fit
+      Median_Px, Sigma_Px : Real := 0.0;
+      Matches   : Natural := 0;           --  keyframes with matches behind it
+      Why       : Ada.Strings.Unbounded.Unbounded_String;
+   end record;
+
    type Arm_Evidence is record
       Arm      : Arm_Id'Base := 0;
       Group    : Group_Id'Base := 0;
@@ -354,6 +378,7 @@ private
       Pending  : Pending_Vectors.Vector;
       Matches  : Match_Set_Vectors.Vector;
       Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
+      Result   : Arm_Fit;
    end record;
 
    package Arm_Evidence_Vectors is new Ada.Containers.Vectors (Positive, Arm_Evidence);
@@ -369,6 +394,7 @@ private
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph
       Kinematics     : Arm_Evidence_Vectors.Vector;   --  per arm with an eye
+      Table_Up       : Direction_Estimate;          --  the table's normal towards the eyes, in the world
       Is_Booted      : Boolean := False;
       Report         : Ada.Strings.Unbounded.Unbounded_String;   --  what the last estimate found, for Describe
    end record;

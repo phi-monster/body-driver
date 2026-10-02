@@ -35,6 +35,10 @@ package Driver.Robot.Motion is
    procedure Hold (M : in out Model; Beats : Positive);
    --  Holds the body for that many beats.
 
+   procedure Hold_While_Matching (M : in out Model);
+   --  Holds the body until the instrument has answered every match the
+   --  estimators asked of it (the kinematics' keyframes).
+
    type Probe_Report is record
       Seen      : Boolean := False;   --  some eye saw the channel move
       Excursion : Real := 0.0;        --  how far it was taken, in reading units, when seen

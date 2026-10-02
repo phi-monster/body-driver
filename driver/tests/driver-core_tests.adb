@@ -109,6 +109,64 @@ package body Driver.Core_Tests is
    begin
       Check_Close (Driver.Stats.Median (X), 3.0, 0.0, "median");
       Check (Driver.Stats.Robust_Sigma (X) < 2.0, "one outlier moves the robust sigma");
+      --  Exact against a sorted copy, for odd and even sizes, ties and both signs.
+      --  [1, 2, 3, 4] has a median absolute deviation of one, so it scales the rest.
+      declare
+         Unit_MAD : constant Real := Driver.Stats.Robust_Sigma ([1.0, 2.0, 3.0, 4.0]);
+         function Middle (S : Real_Array) return Real is
+           (if S'Length mod 2 = 1 then S (S'First + S'Length / 2)
+            else (S (S'First + S'Length / 2 - 1) + S (S'First + S'Length / 2)) / 2.0);
+         procedure Sorted (S : in out Real_Array) is
+            T : Real;
+            J : Integer;
+         begin
+            for I in S'First + 1 .. S'Last loop
+               T := S (I);
+               J := I - 1;
+               while J >= S'First and then S (J) > T loop
+                  S (J + 1) := S (J);
+                  J := J - 1;
+               end loop;
+               S (J + 1) := T;
+            end loop;
+         end Sorted;
+      begin
+         for N in 1 .. 40 loop
+            declare
+               V : Real_Array (1 .. N);
+               S : Real_Array (1 .. N);
+               D : Real_Array (1 .. N);
+               M : Real;
+            begin
+               for I in V'Range loop
+                  V (I) := Real ((I * 37) mod 23 - 11) / 4.0;
+               end loop;
+               S := V;
+               Sorted (S);
+               M := Middle (S);
+               Check_Close (Driver.Stats.Median (V), M, 0.0, "median of" & N'Image & " values");
+               for I in V'Range loop
+                  D (I) := abs (V (I) - M);
+               end loop;
+               Sorted (D);
+               Check_Close (Driver.Stats.Robust_Sigma (V), Middle (D) * Unit_MAD, 0.0,
+                            "robust sigma of" & N'Image & " values");
+            end;
+         end loop;
+      end;
+      --  A sample larger than any stack: 2**21 values, 16 MB, in shuffled order.
+      declare
+         type Sample is access Real_Array;
+         N   : constant := 2 ** 21;
+         Big : constant Sample := new Real_Array (1 .. N);
+      begin
+         for I in Big'Range loop
+            Big (I) := Real ((Long_Long_Integer (I) * 7919) mod N + 1);   --  a permutation of 1 .. N
+         end loop;
+         Check_Close (Driver.Stats.Median (Big.all), Real (N) / 2.0 + 0.5, 0.0, "median of a large sample");
+         Check_Close (Driver.Stats.Robust_Sigma (Big.all), Real (N) / 4.0 * Driver.Stats.Robust_Sigma ([1.0, 2.0, 3.0, 4.0]),
+                      0.0, "robust sigma of a large sample");
+      end;
       Check_Close (Driver.Stats.Correlation ([1.0, 2.0, 3.0], [2.0, 4.0, 6.0]), 1.0, 1.0e-12, "perfect correlation");
       declare
          L : constant Driver.Stats.Line := Driver.Stats.Fit_Line ([0.0, 1.0, 2.0, 3.0], [1.0, 3.0, 5.0, 7.0]);

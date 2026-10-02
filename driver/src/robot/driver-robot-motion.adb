@@ -7,6 +7,7 @@ with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Steps;
 with Driver.Robot.Lockin;
+with Driver.Robot.Kinematics;
 with Driver.Uncertain;
 
 package body Driver.Robot.Motion is
@@ -125,6 +126,18 @@ package body Driver.Robot.Motion is
          end loop;
       end;
    end Step;
+
+   procedure Hold_While_Matching (M : in out Model) is
+      B    : Driver.Clock.Beat;
+      Done : Boolean;
+   begin
+      loop
+         Driver.Beats.Next (B);
+         Done := Kinematics.Pending (M) = 0;
+         Driver.Beats.Send (Driver.Commands.Hold);
+         exit when Done;
+      end loop;
+   end Hold_While_Matching;
 
    procedure Hold (M : in out Model; Beats : Positive) is
       pragma Unreferenced (M);

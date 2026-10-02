@@ -135,6 +135,7 @@ package body Driver.Robot is
       Lockin.Measure_Rest_Noise (M);
       Lockin.Measure (M);
       Graph.Derive (M);
+      Kinematics.Refit (M);
       M.Graph_Evidence := M.Beats;
       Driver.Log.Line (Driver.Log.Robot, "estimated from" & M.Beats'Image & " beats in"
                        & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
@@ -168,7 +169,51 @@ package body Driver.Robot is
    function Eye_Mount (M : Model; E : Eye_Id) return Mount is
      (if E <= M.Graph.Mounts.Last_Index then M.Graph.Mounts (E) else (Kind => Unmeasured));
 
-   function Eye_Pose (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is ((others => <>));
+   --  The arm whose eye this is, when its kinematics are fitted; 0 otherwise.
+   function Fitted_Arm (M : Model; E : Eye_Id) return Arm_Id'Base is
+     (if E <= M.Graph.Mounts.Last_Index and then M.Graph.Mounts (E).Kind = Arm_Carried
+        and then Kinematics.Fitted (M, M.Graph.Mounts (E).Arm)
+      then M.Graph.Mounts (E).Arm else 0);
+
+   --  The world: the frame of the first arm's eye at its reference keyframe,
+   --  until the arms are measured into one frame.
+   function In_World (M : Model; A : Arm_Id) return Boolean is (A = 1 and then Kinematics.Fitted (M, A));
+
+   --  The arm's eye at O in the world, known when the arm is in the world and
+   --  O carries its readings.
+   procedure Arm_Eye (M : Model; A : Arm_Id; O : Observation; T : out Rigid; Known_Pose : out Boolean) is
+      G : constant Group_Id := Arm_Group (M, A);
+   begin
+      T := Identity;
+      Known_Pose := In_World (M, A) and then G <= O.Readings.Last_Index
+                    and then O.Readings.Element (G)'Length = Group_Size (M, G);
+      if Known_Pose then
+         T := Kinematics.Eye_In_Reference (M, A, O.Readings.Element (G));
+      end if;
+   end Arm_Eye;
+
+   --  A pose with the uncertainty of the fit that gave it: its turn by the
+   --  angle the measured pixel noise subtends, its position by that angle
+   --  over the arm's reach (one model unit).
+   function With_Fit_Uncertainty (M : Model; A : Arm_Id; T : Rigid) return Pose_Estimate is
+      S : constant Real := Kinematics.Angle_Sigma (M, A);
+   begin
+      return (Pose                => T,
+              Position_Covariance => [[S * S, 0.0, 0.0], [0.0, S * S, 0.0], [0.0, 0.0, S * S]],
+              Rotation_Covariance => [[S * S, 0.0, 0.0], [0.0, S * S, 0.0], [0.0, 0.0, S * S]]);
+   end With_Fit_Uncertainty;
+
+   function Eye_Pose (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is
+      A : constant Arm_Id'Base := Fitted_Arm (M, E);
+      T : Rigid;
+      K : Boolean;
+   begin
+      if A = 0 then
+         return (others => <>);
+      end if;
+      Arm_Eye (M, A, O, T, K);
+      return (if K then With_Fit_Uncertainty (M, A, T) else (others => <>));
+   end Eye_Pose;
 
    procedure Project
      (M       : Model;
@@ -178,22 +223,77 @@ package body Driver.Robot is
       Px      : out Driver.Images.Pixel;
       Visible : out Boolean)
    is
-      pragma Unreferenced (M, E, O, Point);
+      A : constant Arm_Id'Base := Fitted_Arm (M, E);
+      T : Rigid;
+      K : Boolean;
    begin
       Px := (U => 0.0, V => 0.0);
       Visible := False;
+      if A > 0 then
+         Arm_Eye (M, A, O, T, K);
+         if K then
+            Kinematics.Project_In_Eye (M, A, Inverse (T) * Point, Px.U, Px.V, Visible);
+            Visible := Visible and then Px.U in 0.0 .. Real (M.Eyes (E).Grid.Width)
+                       and then Px.V in 0.0 .. Real (M.Eyes (E).Grid.Height);
+         end if;
+      end if;
    end Project;
 
+   function Eye_Ray (M : Model; E : Eye_Id; Px : Driver.Images.Pixel) return Ray_Estimate is
+      A : constant Arm_Id'Base := Fitted_Arm (M, E);
+   begin
+      if A = 0 then
+         return (others => <>);
+      end if;
+      return (Origin    => (Mean => [0.0, 0.0, 0.0], Covariance => [others => [others => 0.0]]),
+              Direction => (Unit_Vector => Kinematics.Ray_In_Eye (M, A, Px.U, Px.V),
+                            Sigma       => Kinematics.Angle_Sigma (M, A)));
+   end Eye_Ray;
+
    function Ray (M : Model; E : Eye_Id; O : Observation; Px : Driver.Images.Pixel) return Ray_Estimate is
-     ((others => <>));
+      A : constant Arm_Id'Base := Fitted_Arm (M, E);
+      T : Rigid;
+      K : Boolean;
+   begin
+      if A = 0 then
+         return (others => <>);
+      end if;
+      Arm_Eye (M, A, O, T, K);
+      if not K then
+         return (others => <>);
+      end if;
+      declare
+         P : constant Pose_Estimate := With_Fit_Uncertainty (M, A, T);
+      begin
+         return (Origin    => (Mean => T.Translation, Covariance => P.Position_Covariance),
+                 Direction => (Unit_Vector => Driver.Numerics.Arrays."*" (T.Rotation, Kinematics.Ray_In_Eye (M, A, Px.U, Px.V)),
+                               Sigma       => Sqrt (2.0) * Kinematics.Angle_Sigma (M, A)));
+      end;
+   end Ray;
 
-   function Eye_Ray (M : Model; E : Eye_Id; Px : Driver.Images.Pixel) return Ray_Estimate is ((others => <>));
+   function Up (M : Model) return Direction_Estimate is (M.Table_Up);
 
-   function Up (M : Model) return Direction_Estimate is ((others => <>));
+   --  The tool frame of an arm is the frame of the eye it carries: what the
+   --  driver measures of a hand it measures through that eye.
+   function Tool_Pose (M : Model; A : Arm_Id; O : Observation) return Pose_Estimate is
+   begin
+      for E in M.Graph.Mounts.First_Index .. M.Graph.Mounts.Last_Index loop
+         if M.Graph.Mounts (E).Kind = Arm_Carried and then M.Graph.Mounts (E).Arm = A then
+            return Eye_Pose (M, E, O);
+         end if;
+      end loop;
+      return (others => <>);
+   end Tool_Pose;
 
-   function Tool_Pose (M : Model; A : Arm_Id; O : Observation) return Pose_Estimate is ((others => <>));
-
-   function Eye_In_Tool (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is ((others => <>));
+   function Eye_In_Tool (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is
+      pragma Unreferenced (O);
+   begin
+      --  The eye is the tool frame of the arm that carries it: exactly.
+      return (if Fitted_Arm (M, E) > 0
+              then (Pose => Identity, Position_Covariance => [others => [others => 0.0]],
+                    Rotation_Covariance => [others => [others => 0.0]])
+              else (others => <>));
+   end Eye_In_Tool;
 
    function Blocked (M : Model; A : Arm_Id; O : Observation) return Boolean is
    begin

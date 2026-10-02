@@ -9,7 +9,8 @@ with Driver.Observations;
 with Driver.Beats;
 with Driver.Log;
 with Driver.Robot.Boot;
-with Driver.Services;
+with Driver.Robot.Kinematics.Fit;
+with Ada.Strings.Unbounded;
 with Driver.Robot.Channels;
 with Driver.Robot.Hand;
 with Driver.Robot.Flow;
@@ -683,10 +684,6 @@ package body Driver.Robot.Tests is
       if not Done then
          abort Decider;
       end if;
-      --  The boot's estimators submitted to the instrument (which has no
-      --  address here), and the worker that answered keeps a program alive
-      --  until it is let go.
-      Driver.Services.Shut_Down;
       Check (Done, "the boot did not finish within" & Bound'Image & " beats");
       --  The rig's idle group takes commands and moves nothing: the boot must
       --  name the clause it breaks and hold still.
@@ -703,8 +700,167 @@ package body Driver.Robot.Tests is
       Driver.Log.Line (Driver.Log.Robot, "boot from zero took" & Beats'Image & " beats");
    end Boot_From_Zero;
 
+   --  ── The kinematics of a synthetic arm ──
+   --
+   --  Six turning joints carry an eye of 640 x 480 pixels with a focal length
+   --  of 400 pixels over a slanted table. The arm turns every joint alone both
+   --  ways by 0.05, 0.1 and 0.2 radians, then all of them in seven cells whose
+   --  signs are the rows of a Sylvester-Hadamard matrix; a 16 x 12 grid of the
+   --  reference view is followed into every keyframe with 0.2 pixels of noise.
+
+   procedure Kinematics_Of_A_Synthetic_Arm is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      N       : constant := 6;
+      Levels  : constant Real_Array := [0.05, -0.05, 0.1, -0.1, 0.2, -0.2];
+      Cells   : constant := 7;
+      Frames  : constant Positive := 1 + N * Levels'Length + Cells;
+      Columns : constant := 16;
+      Rows    : constant := 12;
+      Noise   : constant := 0.2;
+      Table   : constant Vec3 := [0.0, -0.6, -0.8];   --  its normal, towards the eye
+      Truth   : Fit.Joint_Array (1 .. N);
+      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Changes : Real_Matrix (1 .. Frames, 1 .. N) := [others => [others => 0.0]];
+      Rng     : Generator;
+      type Sighting_Access is access Fit.Sighting_Array;
+      All_Seen : constant Sighting_Access := new Fit.Sighting_Array (1 .. (Frames - 1) * Columns * Rows);
+      Seen     : Natural := 0;
+   begin
+      declare
+         Axes   : constant array (1 .. N) of Vec3 :=
+           [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
+         Points : constant array (1 .. N) of Vec3 :=
+           [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
+      begin
+         for J in 1 .. N loop
+            declare
+               W : constant Vec3 := Unit (Axes (J));
+            begin
+               Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => 1.0, Slide => False);
+            end;
+         end loop;
+      end;
+      for J in 1 .. N loop
+         for L in Levels'Range loop
+            Changes (1 + (J - 1) * Levels'Length + (L - Levels'First + 1), J) := Levels (L);
+         end loop;
+      end loop;
+      for Row in 1 .. Cells loop
+         for J in 1 .. N loop
+            declare
+               Bits : Natural := 0;
+               R    : Natural := Row;
+               C    : Natural := J;
+            begin
+               while R > 0 and then C > 0 loop
+                  if R mod 2 = 1 and then C mod 2 = 1 then
+                     Bits := Bits + 1;
+                  end if;
+                  R := R / 2;
+                  C := C / 2;
+               end loop;
+               Changes (1 + N * Levels'Length + Row, J) := (if Bits mod 2 = 0 then 0.05 else -0.05);
+            end;
+         end loop;
+      end loop;
+      for F in 2 .. Frames loop
+         declare
+            D : Real_Array (1 .. N);
+            T : Rigid;
+         begin
+            for J in 1 .. N loop
+               D (J) := Changes (F, J);
+            end loop;
+            T := Inverse (Fit.Eye_At (Truth, D));
+            for Gy in 1 .. Rows loop
+               for Gx in 1 .. Columns loop
+                  declare
+                     U0 : constant Real := (Real (Gx) - 0.5) * 640.0 / Real (Columns);
+                     V0 : constant Real := (Real (Gy) - 0.5) * 480.0 / Real (Rows);
+                     --  The table: the plane one unit from the eye along its normal.
+                     H     : constant Vec3 := Fit.Ray (Lens, U0, V0);
+                     Depth : constant Real := -1.0 / Real'(Unit (Table) * H);
+                     X  : constant Vec3 := Depth * H;
+                     U, V : Real;
+                     Ahead : Boolean;
+                  begin
+                     Fit.Project (Lens, T * X, U, V, Ahead);
+                     U := U + Noise * Gaussian (Rng);
+                     V := V + Noise * Gaussian (Rng);
+                     if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
+                        Seen := Seen + 1;
+                        All_Seen (Seen) := (Frame => F, Track => (Gy - 1) * Columns + Gx, U0 => U0, V0 => V0, U => U, V => V);
+                     end if;
+                  end;
+               end loop;
+            end loop;
+         end;
+      end loop;
+      declare
+         Joints : Fit.Joint_Array (1 .. N);
+         Found  : Fit.Lens;
+         Report : Fit.Fit_Report;
+      begin
+         Fit.Fit (Changes, [1 .. N => 0.01], All_Seen (1 .. Seen), 640, 480, Joints, Found, Report);
+         Check (Report.Fitted, "the fit did not succeed: stage" & Report.Stage'Image & ", "
+                & Ada.Strings.Unbounded.To_String (Report.Why));
+         if not Report.Fitted then
+            return;
+         end if;
+         Check_Close (Found.Fx, Lens.Fx, Lens.Fx * Noise / 40.0, "the focal length across");
+         Check_Close (Found.Fy, Lens.Fy, Lens.Fy * Noise / 40.0, "the focal length down");
+         for J in 1 .. N loop
+            Check (Arccos (Real'Min (1.0, Joints (J).W * Truth (J).W)) < Noise / 40.0,
+                   "joint" & J'Image & "'s axis is off by"
+                   & Real'Image (Arccos (Real'Min (1.0, Joints (J).W * Truth (J).W))) & " rad");
+         end loop;
+         --  The eye at a pose no keyframe had, lengths in the fit's units.
+         declare
+            Test  : constant Real_Array (1 .. N) := [0.15, -0.1, 0.08, -0.12, 0.1, -0.15];
+            Scale : Real := 0.0;
+            Want, Got : Rigid;
+         begin
+            for F in 1 .. Frames loop
+               declare
+                  D : Real_Array (1 .. N);
+               begin
+                  for J in 1 .. N loop
+                     D (J) := Changes (F, J);
+                  end loop;
+                  Scale := Scale + Fit.Eye_At (Truth, D).Translation * Fit.Eye_At (Truth, D).Translation;
+               end;
+            end loop;
+            Scale := Sqrt (Scale / Real (Frames));
+            Want := Fit.Eye_At (Truth, Test);
+            Got := Fit.Eye_At (Joints, Test);
+            Check (abs (Scale * Got.Translation - Want.Translation) < Scale * Noise / 40.0,
+                   "the eye at a new pose is off by" & Real'Image (abs (Scale * Got.Translation - Want.Translation) / Scale)
+                   & " of the arm's reach");
+            Check (Driver.Numerics.Angle (Transpose (Got.Rotation) * Want.Rotation) < Noise / 40.0,
+                   "the eye at a new pose is turned by"
+                   & Real'Image (Driver.Numerics.Angle (Transpose (Got.Rotation) * Want.Rotation)) & " rad");
+         end;
+         declare
+            Normal : Vec3;
+            Sigma  : Real;
+            Flat   : Boolean;
+         begin
+            Fit.Table (Changes, All_Seen (1 .. Seen), Joints, Found, Normal, Sigma, Flat);
+            Check (Flat, "no table found");
+            Check (Arccos (Real'Min (1.0, Normal * Unit (Table))) < Noise / 40.0,
+                   "the table's normal is off by" & Real'Image (Arccos (Real'Min (1.0, Normal * Unit (Table)))) & " rad");
+            Check (Sigma < Noise / 40.0, "the table's normal is uncertain by" & Sigma'Image & " rad");
+         end;
+         Driver.Log.Line (Driver.Log.Robot, "kinematics test: focal " & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy)
+                          & ", median " & Real'Image (Report.Median_Px) & " px over" & Report.Used'Image & " sightings");
+      end;
+   end Kinematics_Of_A_Synthetic_Arm;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("robot.kinematics", "the arm's axes, the eye's lens or the eye's pose at a new pose come "
+                             & "out wrong from noisy matches of single-joint and Hadamard keyframes",
+                             Kinematics_Of_A_Synthetic_Arm'Access);
       Driver.Tests.Register ("robot.boot", "the boot does not finish, deadlocks with the main loop, or does not "
                              & "recognize the rig's groups when it pushes them itself", Boot_From_Zero'Access);
       Driver.Tests.Register ("robot.steps", "a free push that falls as short as free pushes do is called blocked, a "

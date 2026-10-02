@@ -21,4 +21,29 @@ private package Driver.Robot.Kinematics is
    function Matched (M : Model; A : Arm_Id) return Natural;
    --  How many keyframes of the arm have their matches back.
 
+   function Pending (M : Model) return Natural;
+   --  Match requests of every arm not answered yet.
+
+   procedure Refit (M : in out Model);
+   --  Fits every arm whose matches changed since its last fit
+   --  (Driver.Robot.Kinematics.Fit). Its sightings are the matches whose
+   --  round trip comes back to where it started, within the noise of all the
+   --  round trips.
+
+   function Eye_In_Reference (M : Model; A : Arm_Id; Readings : Real_Array) return Rigid;
+   --  The arm's eye at those readings, in the frame of its eye at the
+   --  reference keyframe; the identity until the arm is fitted.
+
+   function Fitted (M : Model; A : Arm_Id) return Boolean;
+
+   function Angle_Sigma (M : Model; A : Arm_Id) return Real;
+   --  The angle one pixel of the fit's measured noise subtends at the arm's
+   --  eye: the uncertainty of a line of sight, and of the eye's turn.
+
+   function Ray_In_Eye (M : Model; A : Arm_Id; U, V : Real) return Vec3;
+   --  The unit line of sight through pixel (U, V) of the arm's eye.
+
+   procedure Project_In_Eye (M : Model; A : Arm_Id; P : Vec3; U, V : out Real; In_Front : out Boolean);
+   --  Where a point of the arm's eye frame lands in its image.
+
 end Driver.Robot.Kinematics;
