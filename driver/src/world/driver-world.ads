@@ -1,22 +1,42 @@
 --  Layer 3: the things around the robot, the surfaces they rest on, the
 --  places it remembers, and how all of that moves.
 --
---  Each thing has one estimate, shared by every eye and every beat: its
---  surface points and shape, the span two eyes agree on, its parts and their
---  axes, its motion, and what holds it. Names are not kept here: the brain
---  layer binds the brain's names to thing identities.
+--  Each thing has one estimate, shared by every eye and every beat: the
+--  region it covers in each eye that sees it, its surface points, measured
+--  where two eyes see the same point at the same instant, its centre, the
+--  surface it rests on and its height above it along the measured Up, its
+--  motion and where it will be, and what holds it. A thing is made from a
+--  region an eye points at (Adopt); a region of the same pixels as a thing
+--  already there is that thing. Names are not kept here: the brain layer
+--  binds the brain's names to thing identities.
+--
+--  Surfaces are the planes things rest on, fitted to scene points that two
+--  eyes see; places are points remembered by the brain's request. A new
+--  episode forgets the things and places; surfaces stay, marked as earlier,
+--  since a table does not move between episodes but must be seen again to
+--  be trusted.
+--
+--  Everything comes from the recorded stream: images, the body's measured
+--  geometry and the instrument's replies (Driver.Instrument, asked by the
+--  estimators and read on later beats). Until a quantity is measured it is
+--  reported unknown.
 --
 --  Ownership: path B.
 
 with Driver.Commands;
+with Driver.Geometry;
 with Driver.Images;
+with Driver.Numerics;
 with Driver.Observations;
 with Driver.Robot;
 with Driver.Robot.Hand;
 with Driver.Uncertain;
 
+private with Ada.Finalization;
+
 package Driver.World is
 
+   use Driver.Numerics;
    use Driver.Uncertain;
 
    subtype Eye_Id is Driver.Observations.Camera_Id;
@@ -75,10 +95,65 @@ package Driver.World is
    procedure Remember (S : in out Scene; Point : Point_Estimate; Place : out Place_Id);
    function Where (S : Scene; P : Place_Id) return Point_Estimate;
 
+   --  What the action layer reads of a thing's shape.
+
+   type Sample is record
+      Point  : Vec3 := Zero3;
+      Normal : Vec3 := Zero3;     --  unit and outward; zero where it was not measured
+      Seen   : Boolean := False;  --  an eye saw this face
+   end record;
+   --  One measured point of a thing's surface, world frame.
+
+   type Sample_Array is array (Positive range <>) of Sample;
+
+   function Samples (S : Scene; T : Thing_Id) return Sample_Array;
+   --  Empty until two eyes have seen the thing at the same instant.
+
+   function Sample_Sigma (S : Scene; T : Thing_Id) return Real;
+   --  The position uncertainty of a sample; Real'Last when none is measured.
+
+   procedure Touched (S : in out Scene; T : Thing_Id; Point : Point_Estimate);
+   --  A point of the thing's surface found by touching it: it is there.
+
+   type Friction_Bounds is record
+      Low  : Real := 0.0;
+      High : Real := Real'Last;
+   end record;
+   --  What has been learned of a thing's friction coefficient: it came along
+   --  when a contact needed Low, and failed one needing High.
+
+   procedure Learn_Friction (S : in out Scene; T : Thing_Id; Bounds : Friction_Bounds);
+   --  Narrows what is known by what an outcome showed.
+
+   function Friction (S : Scene; T : Thing_Id) return Friction_Bounds;
+
+   function Predicted (S : Scene; T : Thing_Id; Beats : Natural) return Point_Estimate;
+   --  Where its centre will be that many beats after the latest, from its
+   --  measured motion; a thing not moving stays where it is.
+
+   --  Surfaces and places.
+
+   function Surface_Count (S : Scene) return Natural;
+
+   function Plane_Of (S : Scene; F : Surface_Id) return Driver.Geometry.Plane_Estimate;
+   --  Its normal points away from the material, towards what rests on it.
+
+   function Earlier (S : Scene; F : Surface_Id) return Boolean;
+   --  Measured in an earlier episode and not seen again since.
+
+   function Place_Count (S : Scene) return Natural;
+
 private
 
-   type Scene is tagged limited record
-      Things : Natural := 0;
+   type Scene_Data;
+   --  Completed in the body, which uses the layer's own packages.
+
+   type Scene_Data_Access is access Scene_Data;
+
+   type Scene is new Ada.Finalization.Limited_Controlled with record
+      Data : Scene_Data_Access;
    end record;
+
+   overriding procedure Finalize (S : in out Scene);
 
 end Driver.World;
