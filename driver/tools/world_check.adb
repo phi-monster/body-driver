@@ -10,8 +10,9 @@
 --  the main loop runs it (Driver.Robot), and the instrument answers live.
 --
 --  Once the scene has been measured, every true object is adopted in the
---  first eye the middle of its mesh falls in, segmented by the instrument
---  there, as the brain points at a thing; from then on the world layer is on
+--  first eye the middle of its mesh falls in, segmented by the instrument in
+--  the box of its mesh there, as the brain's Identify asks for a box drawn
+--  round a thing; from then on the world layer is on
 --  its own. At the end each thing is scored against its object's true pose
 --  and visual mesh: how far its points lie from the object's surface (and in
 --  units of their own uncertainty), which object most of them lie on, and its
@@ -1036,15 +1037,36 @@ procedure World_Check is
                            Cam     : constant Truth_Camera := True_Camera (E, Beat);
                            Px      : Driver.Images.Pixel;
                            Visible : Boolean;
+                           Around  : Driver.Instrument.Box := (X0 => Real'Last, Y0 => Real'Last,
+                                                               X1 => Real'First, Y1 => Real'First);
+                           No_Points : constant Driver.Instrument.Prompt_Array := [];
                         begin
                            Cam.Project (Where, Px, Visible);
                            if Visible then
+                              --  The box a brain draws round the object, as the
+                              --  driver's Identify asks the instrument: here the
+                              --  box of its mesh's vertices that fall in the image.
+                              for V of Its.Vertices loop
+                                 declare
+                                    Q    : Driver.Images.Pixel;
+                                    Seen : Boolean;
+                                 begin
+                                    Cam.Project (Pose_Maps.Element (C) * V, Q, Seen);
+                                    if Seen then
+                                       Around := (X0 => Real'Min (Around.X0, Q.U), Y0 => Real'Min (Around.Y0, Q.V),
+                                                  X1 => Real'Max (Around.X1, Q.U), Y1 => Real'Max (Around.Y1, Q.V));
+                                    end if;
+                                 end;
+                              end loop;
+                              Ada.Text_IO.Put_Line ("beat" & Beat'Image & ": " & Name & " boxed in eye" & E'Image
+                                                    & " from (" & Image (Around.X0, 0) & "," & Image (Around.Y0, 0)
+                                                    & ") to (" & Image (Around.X1, 0) & "," & Image (Around.Y1, 0)
+                                                    & ")");
                               declare
                                  Reply  : constant Driver.Services.Reply :=
                                    Driver.Services.Call
                                      (Driver.Services.Instrument, "/segment",
-                                      Driver.Instrument.Segment_Request
-                                        (O.Images (E), False, (others => <>), [1 => (At_Pixel => Px, On => True)]));
+                                      Driver.Instrument.Segment_Request (O.Images (E), True, Around, No_Points));
                                  Region : Driver.Images.Mask;
                                  Score  : Real;
                                  Ok     : Boolean;
