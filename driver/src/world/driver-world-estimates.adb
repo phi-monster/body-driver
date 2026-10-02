@@ -147,7 +147,7 @@ package body Driver.World.Estimates is
       and then Px.U < Real (Driver.Images.Width (Region)) and then Px.V < Real (Driver.Images.Height (Region))
       and then Driver.Images.Contains (Region, Natural (Real'Floor (Px.U)), Natural (Real'Floor (Px.V))));
 
-   function Inside_Holding
+   function Inside_Pointed
      (R         : Thing_Record;
       X         : Vec3;
       Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
@@ -155,16 +155,19 @@ package body Driver.World.Estimates is
       Seen      : not null access constant Observation) return Boolean
    is
       --  A point of the thing falls inside its region in every eye that holds
-      --  it and sees where the point is. A pair can be wrong yet meet, when
-      --  the second eye's match slid along the line the first sight draws
-      --  there: the point is then on the first sight but at another depth,
-      --  and falls outside the thing elsewhere. A thing that moved leaves its
-      --  earlier points outside its regions. An eye that lost the thing, as
-      --  when something passes in front of it, says nothing either way: the
+      --  it where it was pointed at and sees where the point is. A pair can be
+      --  wrong yet meet, when the second eye's match slid along the line the
+      --  first sight draws there: the point is then on the first sight but at
+      --  another depth, and falls outside the thing elsewhere. A thing that
+      --  moved leaves its earlier points outside its regions. Only the regions
+      --  given judge: one this layer found itself (segmented around where a
+      --  pair's pixels went) can be part of the thing or something else, and
+      --  would throw out the thing's own points. An eye that lost the thing,
+      --  as when something passes in front of it, says nothing either way: the
       --  thing is where it was until an eye sees it elsewhere.
    begin
       for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
-         if Holds (R, E) then
+         if Holds (R, E) and then R.Eyes (E).Pointed then
             declare
                Px      : Driver.Images.Pixel;
                Visible : Boolean;
@@ -177,7 +180,7 @@ package body Driver.World.Estimates is
          end if;
       end loop;
       return True;
-   end Inside_Holding;
+   end Inside_Pointed;
 
    procedure Gather
      (R         : in out Thing_Record;
@@ -191,7 +194,7 @@ package body Driver.World.Estimates is
    begin
       for P of R.By_Pair loop
          for M of P.Kept loop
-            if Inside_Holding (R, M.Point.Mean, Camera_Of, Seen) then
+            if Inside_Pointed (R, M.Point.Mean, Camera_Of, Seen) then
                Now.Append (M);
             end if;
          end loop;
@@ -243,7 +246,7 @@ package body Driver.World.Estimates is
                      Placed     : Boolean := False;
                   begin
                      for M of Kept loop
-                        if Inside_Holding (R, M.Point.Mean, Camera_Of, Seen.Element) then
+                        if Inside_Pointed (R, M.Point.Mean, Camera_Of, Seen.Element) then
                            Within.Append (Driver.World.Pairs.Match'(M with delta First => X.From));
                         end if;
                      end loop;
@@ -832,7 +835,7 @@ package body Driver.World.Estimates is
             R : Thing_Record := S.Things (Id);
          begin
             if Has_Slot (R, E) and then Driver.World.Regions.Same_Pixels (Tracks.Region (R.Eyes (E).Track), Region) then
-               Put_Slot (R, E, Holding (Fresh));
+               Put_Slot (R, E, (Holding (Fresh) with delta Pointed => True));
                R.Under_Due := True;
                S.Things.Replace_Element (Id, R);
                Thing := Id;
@@ -843,7 +846,7 @@ package body Driver.World.Estimates is
       declare
          R : Thing_Record;
       begin
-         Put_Slot (R, E, Holding (Fresh));
+         Put_Slot (R, E, (Holding (Fresh) with delta Pointed => True));
          S.Things.Append (R);
          Thing := S.Things.Last_Index;
          Driver.Log.Line (Driver.Log.World, "thing" & Thing'Image & ": adopted in eye" & E'Image & ","

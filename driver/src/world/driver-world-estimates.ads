@@ -23,7 +23,8 @@
 --  new measurement neither finds it again nor sees through it (a line of
 --  sight crossing it to a point beyond): eyes that look elsewhere now say
 --  nothing of it. A thing's points are each pair's latest, less those that
---  fall outside it now in an eye that holds it; an eye that lost it says
+--  fall outside it now in an eye that holds it where the brain pointed at
+--  it (a region found here may be part of it); an eye that lost it says
 --  nothing either. A point of the scene that falls inside a thing's region
 --  in an eye that holds it is the thing's own (on it, or hidden behind it),
 --  so a thing never rests on its own top face; a thing's support is worked
@@ -109,6 +110,7 @@ private
    --  A thing in one eye: its track, and the instrument's request out for it.
    type Slot is record
       Has     : Boolean := False;
+      Pointed : Boolean := False;   --  the region was given (the brain pointed at the thing here), not found
       Track   : Driver.World.Tracking.Track;
       Out_Now : Boolean := False;
       Ticket  : Driver.Services.Ticket;

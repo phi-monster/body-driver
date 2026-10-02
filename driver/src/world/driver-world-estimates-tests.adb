@@ -421,7 +421,8 @@ package body Driver.World.Estimates.Tests is
       --  first eye. They stay while it holds the box where they fall, while it
       --  measures the box again in the same place (as when the eye moved and
       --  the box was segmented anew), and while it loses the box (as when
-      --  something passes in front); they go once it holds the box elsewhere.
+      --  something passes in front), and while a region found in the second
+      --  eye lies elsewhere; they go once the first eye holds the box elsewhere.
       S     : State;
       Gray  : constant Driver.Images.Image := Plain (128);
       Top   : Driver.World.Pairs.Match_Vectors.Vector;
@@ -447,7 +448,8 @@ package body Driver.World.Estimates.Tests is
       procedure Hold (Region : Driver.Images.Mask) is
          R : Thing_Record := S.Things (1);
       begin
-         R.Eyes.Replace_Element (1, Slot'(Has => True, Track => Driver.World.Tracking.Start (Region, Gray, Beat), others => <>));
+         R.Eyes.Replace_Element
+           (1, Slot'(Has => True, Pointed => True, Track => Driver.World.Tracking.Start (Region, Gray, Beat), others => <>));
          S.Things.Replace_Element (1, R);
       end Hold;
 
@@ -484,7 +486,8 @@ package body Driver.World.Estimates.Tests is
       declare
          R : Thing_Record;
       begin
-         R.Eyes.Append (Slot'(Has => True, Track => Driver.World.Tracking.Start (Box, Gray, Beat), others => <>));
+         R.Eyes.Append (Slot'(Has => True, Pointed => True, Track => Driver.World.Tracking.Start (Box, Gray, Beat),
+                               others => <>));
          R.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Top));
          S.Things.Append (R);
       end;
@@ -504,6 +507,24 @@ package body Driver.World.Estimates.Tests is
              "the first eye still holds the box after its pixels changed");
       Check (Kept = Natural (Top.Length), "the box lost from sight kept" & Kept'Image & " of" & Top.Length'Image
              & " points");
+      --  A region the layer found itself in the second eye, away from where
+      --  the box is there, judges nothing.
+      declare
+         R      : Thing_Record := S.Things (1);
+         Corner : Driver.Images.Mask := Driver.Images.Create (Columns, Rows);
+      begin
+         for Row in 0 .. Rows / 8 loop
+            for Column in 0 .. Columns / 8 loop
+               Driver.Images.Include (Corner, Column, Row);
+            end loop;
+         end loop;
+         R.Eyes.Append (Slot'(Has => True, Pointed => False, Track => Driver.World.Tracking.Start (Corner, Gray, Beat),
+                              others => <>));
+         S.Things.Replace_Element (1, R);
+      end;
+      Step (Gray);
+      Check (Kept = Natural (Top.Length), "a region found away from the box threw out" & Natural'Image
+               (Natural (Top.Length) - Kept) & " of its" & Top.Length'Image & " points");
       Hold (Shifted);
       Step (Gray);
       Check (Kept = 0, Kept'Image & " points stayed where the box no longer is");
@@ -516,7 +537,8 @@ package body Driver.World.Estimates.Tests is
                              "a surface no eye sees now is dropped when the scene is measured again, or one the eyes"
                              & " see through is kept", Surfaces_Stay'Access);
       Driver.Tests.Register ("world.scene.points_stay",
-                             "a thing's points go when an eye measures it again or loses it, or stay when an eye holds"
+                             "a thing's points go when an eye measures it again or loses it or a found region lies"
+                             & " elsewhere, or stay when the eye it was pointed at in holds"
                              & " it elsewhere", Points_Stay'Access);
       Driver.Tests.Register ("world.scene.flow",
                              "the scene is not measured, an adopted thing does not rest on the table it stands on, an"
