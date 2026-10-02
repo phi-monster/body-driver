@@ -104,11 +104,12 @@ package body Driver.World.Pairs.Tests is
                declare
                   Kept  : Match_Vectors.Vector;
                   Apart : Natural;
+                  Far   : Natural;
                   Error : Real;
                   Wrong_Kept, Right_Off : Natural := 0;
                   Wrong : constant Natural := Own / 8;
                begin
-                  Triangulate (A, B, Points, Own, Answers, Kept, Apart, Error);
+                  Triangulate (A, B, Points, Own, Answers, Kept, Apart, Far, Error);
                   Check (abs (Error - Matcher_Sigma) < 0.2 * Matcher_Sigma,
                          "the matcher's error measured is" & Error'Image & " px, not the" & Matcher_Sigma'Image & " it made");
                   for M of Kept loop
@@ -180,6 +181,100 @@ package body Driver.World.Pairs.Tests is
              & " right ones, not 0.5 px from 1000");
    end Mixed_Round_Trips;
 
+   procedure Too_Far is
+      --  Two eyes 0.1 apart, both looking down the x axis: what half the pixels
+      --  see is half a metre off, what the other half see is a kilometre off,
+      --  where the two sights part by a fiftieth of a pixel, under the
+      --  matcher's error. Those are no place in the scene, the near ones are.
+      A : constant Driver.World.Tests.Pinhole :=
+        Driver.World.Tests.Looking_At ([0.0, -0.05, 0.0], [10.0, -0.05, 0.0], 200.0, 160, 120, 0.1);
+      B : constant Driver.World.Tests.Pinhole :=
+        Driver.World.Tests.Looking_At ([0.0, 0.05, 0.0], [10.0, 0.05, 0.0], 200.0, 160, 120, 0.1);
+      Columns : constant := 16;
+      Rows    : constant := 12;
+      Points  : Driver.Instrument.Point_Array (1 .. Columns * Rows);
+      Answers : Driver.Instrument.Answer_Array (Points'Range);
+      Kept    : Match_Vectors.Vector;
+      Apart, Far : Natural;
+      Error   : Real;
+      Near_Kept, Far_Kept, Near_Asked, Far_Asked : Natural := 0;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 73);
+      for R in 0 .. Rows - 1 loop
+         for C in 0 .. Columns - 1 loop
+            declare
+               K : constant Positive := R * Columns + C + 1;
+               P : constant Driver.Images.Pixel := (U => Real (10 * C) + 5.5, V => Real (10 * R) + 5.5);
+               Sight : constant Ray_Estimate := A.Ray (P);
+               Depth : constant Real := (if K mod 2 = 0 then 0.5 else 1000.0);
+               Q     : Driver.Images.Pixel;
+               Seen  : Boolean;
+            begin
+               Points (K) := P;
+               B.Project (Sight.Origin.Mean + Depth * Sight.Direction.Unit_Vector, Q, Seen);
+               Answers (K) := (Found     => Seen,
+                               To        => (U => Q.U + Matcher_Sigma * Gaussian, V => Q.V + Matcher_Sigma * Gaussian),
+                               Back      => (U => P.U + Sqrt (2.0) * Matcher_Sigma * Gaussian,
+                                             V => P.V + Sqrt (2.0) * Matcher_Sigma * Gaussian),
+                               Certainty => 1.0);
+               if Seen and then K mod 2 = 1 then
+                  Far_Asked := Far_Asked + 1;
+               end if;
+               if Seen and then K mod 2 = 0 then
+                  Near_Asked := Near_Asked + 1;
+               end if;
+            end;
+         end loop;
+      end loop;
+      Triangulate (A, B, Points, Points'Length, Answers, Kept, Apart, Far, Error);
+      for M of Kept loop
+         for K in Points'Range loop
+            if Points (K) = M.In_First then
+               if K mod 2 = 0 then
+                  Near_Kept := Near_Kept + 1;
+               else
+                  Far_Kept := Far_Kept + 1;
+               end if;
+            end if;
+         end loop;
+      end loop;
+      --  A far point whose two sights cross by the matcher's error looks placed:
+      --  at the gate's tail, a few in a thousand. Without the test a third are.
+      Check (Far_Kept <= Far_Asked / 20,
+             Far_Kept'Image & " of" & Far_Asked'Image & " points a kilometre off were kept, with" & Far'Image
+             & " too far");
+      Check (Near_Asked > 50 and then Near_Kept >= Near_Asked - Near_Asked / 20,
+             "of" & Near_Asked'Image & " points half a metre off only" & Near_Kept'Image & " were kept");
+   end Too_Far;
+
+   procedure Near_Misses is
+      --  Round trips as an eye matched into one that sees a tenth of it: forty
+      --  right matches erring by 0.3 px per coordinate, sixty lost near what
+      --  they were asked and coming back within some 8 px, the rest anywhere
+      --  in an image of 640 by 480.
+      N     : constant := 660;
+      Trips : Real_Array (1 .. 2 * N);
+      Sigma, Right : Real;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 71);
+      for I in 1 .. N loop
+         if I <= 40 then
+            Trips (2 * I - 1) := Matcher_Sigma * Gaussian;
+            Trips (2 * I) := Matcher_Sigma * Gaussian;
+         elsif I <= 100 then
+            Trips (2 * I - 1) := 8.0 * Gaussian;
+            Trips (2 * I) := 8.0 * Gaussian;
+         else
+            Trips (2 * I - 1) := 640.0 * (Uniform - Uniform);
+            Trips (2 * I) := 480.0 * (Uniform - Uniform);
+         end if;
+      end loop;
+      Matcher_Error (Trips, 640.0 * 480.0, Sigma, Right);
+      Check (abs (Sigma - Matcher_Sigma) < 0.25 * Matcher_Sigma and then abs (Right - 40.0) < 10.0,
+             "with matches lost near what they were asked the matcher's error is" & Sigma'Image & " px from"
+             & Right'Image & " right ones, not" & Matcher_Sigma'Image & " px from 40");
+   end Near_Misses;
+
    Back_Near : Boolean := False;
    --  Whether the wrong matches come back near where they set out, as a
    --  matcher can when it is consistently wrong.
@@ -209,6 +304,7 @@ package body Driver.World.Pairs.Tests is
          K       : Natural := 0;
          Kept    : Match_Vectors.Vector;
          Apart   : Natural;
+         Far     : Natural;
          Error   : Real;
          Wrong_Kept, Right_Kept, Right_Asked : Natural := 0;
       begin
@@ -253,7 +349,7 @@ package body Driver.World.Pairs.Tests is
             end;
          end loop;
          --  The region alone, so its own round trips must tell the error.
-         Triangulate (A, B, Points, Points'Length, Answers, Kept, Apart, Error);
+         Triangulate (A, B, Points, Points'Length, Answers, Kept, Apart, Far, Error);
          for M of Kept loop
             for I in Points'Range loop
                if Points (I) = M.In_First then
@@ -293,6 +389,12 @@ package body Driver.World.Pairs.Tests is
       Driver.Tests.Register ("world.pairs.mixture",
                              "round trips of wrong matches, when most are wrong, are taken for the matcher's error",
                              Mixed_Round_Trips'Access);
+      Driver.Tests.Register ("world.pairs.near_misses",
+                             "matches lost near what they were asked are taken for the matcher's error",
+                             Near_Misses'Access);
+      Driver.Tests.Register ("world.pairs.too_far",
+                             "points whose two sights are too near parallel to place are kept",
+                             Too_Far'Access);
       Driver.Tests.Register ("world.pairs.unseen",
                              "matches into an eye that does not see most of what is asked are kept",
                              Mostly_Unseen'Access);

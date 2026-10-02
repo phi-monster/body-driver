@@ -12,7 +12,7 @@ package body Driver.World.Pairs is
    function Round_Trip (A : Driver.Instrument.Answer; From : Driver.Images.Pixel) return Real is
      (Sqrt ((A.Back.U - From.U) ** 2 + (A.Back.V - From.V) ** 2));
 
-   procedure Mixture
+   procedure Fit_Mixture
      (Squared    : Real_Array;
       Dimensions : Positive;
       Measure    : Real;
@@ -90,6 +90,62 @@ package body Driver.World.Pairs is
          exit when Rank = N;
          Rank := Positive'Min (N, 2 * Rank);
       end loop;
+   end Fit_Mixture;
+
+   function Ball (Dimensions : Positive; Radius : Real) return Real is
+      --  The measure of the errors no longer than Radius: a segment of both
+      --  signs, a disc, a ball (each two dimensions more multiply it by
+      --  2 pi Radius squared over the dimensions).
+      Measure : Real := (if Dimensions mod 2 = 0 then 1.0 else 2.0 * Radius);
+      D       : Natural := (if Dimensions mod 2 = 0 then 0 else 1);
+   begin
+      while D < Dimensions loop
+         D := D + 2;
+         Measure := Measure * 2.0 * Ada.Numerics.Pi * Radius ** 2 / Real (D);
+      end loop;
+      return Measure;
+   end Ball;
+
+   procedure Mixture
+     (Squared    : Real_Array;
+      Dimensions : Positive;
+      Measure    : Real;
+      Sigma      : out Real;
+      Right      : out Real)
+   is
+      --  The mixture fitted in a window that closes on the right matches: the
+      --  errors the fit's own gate holds, the wrong ones among them taken as
+      --  spread evenly over the window, until the window holds every error it
+      --  held before. Wrong matches are not spread evenly over the whole
+      --  range: a matcher that is lost near what it was asked comes back near
+      --  it, and over the whole range those errors look like a wide Gaussian
+      --  that swallows the right ones. Within the gate of that wide fit, they
+      --  are what is spread evenly, and the right ones stand out again.
+      Errors : Real_Array := Squared;
+      Count  : Natural := Squared'Length;
+      Window : Real := Measure;
+   begin
+      loop
+         Fit_Mixture (Errors (Errors'First .. Errors'First + Count - 1), Dimensions, Window, Sigma, Right);
+         exit when Right < 1.0 or else not (Sigma > 0.0 and then Sigma < Real'Last);
+         declare
+            Edge : constant Real :=
+              Driver.Uncertain.Threshold
+                (Driver.Uncertain.Vector_Gate (Dimensions, Natural (Real'Floor (Real (Dimensions) * Right))))
+              * Sigma;
+            Kept : Natural := 0;
+         begin
+            for I in Errors'First .. Errors'First + Count - 1 loop
+               if Errors (I) <= Edge ** 2 then
+                  Errors (Errors'First + Kept) := Errors (I);
+                  Kept := Kept + 1;
+               end if;
+            end loop;
+            exit when Kept = Count;
+            Count := Kept;
+            Window := Ball (Dimensions, Edge);
+         end;
+      end loop;
    end Mixture;
 
    procedure Matcher_Error (Trips : Real_Array; Area : Real; Sigma : out Real; Right : out Real) is
@@ -144,6 +200,7 @@ package body Driver.World.Pairs is
       Answers       : Driver.Instrument.Answer_Array;
       Kept          : out Match_Vectors.Vector;
       Apart         : out Natural;
+      Unplaced      : out Natural;
       Error         : out Real)
    is
       --  The points whose round trips measure the matcher's error: those
@@ -154,6 +211,7 @@ package body Driver.World.Pairs is
       Kept.Clear;
       Error := Real'Last;
       Apart := 0;
+      Unplaced := 0;
       for I in First_Sample .. Points'Length loop
          Around := Around + Boolean'Pos (Answers (Answers'First + I - 1).Found);
       end loop;
@@ -253,6 +311,11 @@ package body Driver.World.Pairs is
                return;
             end if;
             Error := Line_Sigma;
+            declare
+               --  How far along the first sight a point lies rests on the line
+               --  error's degrees of freedom.
+               Depth_Gate : constant Driver.Uncertain.Gate := Scalar_Gate (Natural (Real'Floor (Line_Right)));
+            begin
             for C in 1 .. Count loop
                declare
                   I           : constant Positive := Candidate (C);
@@ -261,6 +324,7 @@ package body Driver.World.Pairs is
                   From_First  : constant Ray_Estimate := First.Ray (P);
                   From_Second : Ray_Estimate := Second.Ray (A.To);
                   Turn        : constant Real := Driver.World.Cameras.Radians_Per_Pixel (Second, A.To);
+                  U1          : constant Vec3 := From_First.Direction.Unit_Vector;
                   X           : Point_Estimate;
                   Met         : Boolean;
                begin
@@ -272,12 +336,19 @@ package body Driver.World.Pairs is
                         1.0)
                      then
                         Apart := Apart + 1;
+                     elsif not Significant (Depth_Gate, U1 * (X.Mean - From_First.Origin.Mean),
+                                            Sqrt (Real'Max (0.0, U1 * (X.Covariance * U1))))
+                     then
+                        --  The two sights are too near parallel to tell how far
+                        --  along them the point is: it is no place in the scene.
+                        Unplaced := Unplaced + 1;
                      else
                         Kept.Append (Match'(In_First => P, In_Second => A.To, Point => X, First => <>));
                      end if;
                   end if;
                end;
             end loop;
+            end;
          end;
       end;
    end Triangulate;

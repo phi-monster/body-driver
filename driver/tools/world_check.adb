@@ -1,4 +1,4 @@
---  world_check RECORDING TRUTH --inst HOST:PORT
+--  world_check RECORDING TRUTH --inst HOST:PORT [--dump PREFIX] [--until BEAT] [--pairs BEAT PREFIX]
 --
 --  The world layer alone, on a recording with side-file truth
 --  (harness/robodojo_truth). The recorded frames go through the world's
@@ -72,6 +72,7 @@ procedure World_Check is
    use type Driver.Protocol.Message_Kind;
    use type Driver.Recording.Record_Kind;
    use type Driver.World.Surface_Id;
+   use type Driver.Observations.Camera_Id;
 
    subtype Real is Driver.Real;
    subtype Real_Array is Driver.Real_Array;
@@ -813,6 +814,128 @@ procedure World_Check is
                             & " points written to " & Name);
    end Dump_Scene;
 
+   function Lowest_Median (L : Truth_Line) return Real is
+      --  The median of the objects' lowest points: where the truth puts the
+      --  table they stand on.
+      Z : Real_Array (1 .. Natural (L.Objects.Length));
+      N : Natural := 0;
+   begin
+      for C in L.Objects.Iterate loop
+         if Object_Keys.Contains (Pose_Maps.Key (C)) then
+            declare
+               M   : constant Mesh := Mesh_Of (Object_Keys (Pose_Maps.Key (C)));
+               Low : Real := Real'Last;
+            begin
+               for V of M.Vertices loop
+                  declare
+                     P : constant Vec3 := Pose_Maps.Element (C) * V;
+                  begin
+                     Low := Real'Min (Low, P (3));
+                  end;
+               end loop;
+               if not M.Vertices.Is_Empty then
+                  N := N + 1;
+                  Z (N) := Low;
+               end if;
+            end;
+         end if;
+      end loop;
+      return (if N = 0 then 0.0 else Driver.Stats.Median (Z (1 .. N)));
+   end Lowest_Median;
+
+   Pairs_At     : Natural := Natural'Last;   --  the beat whose grids are matched pair by pair, when asked
+   Pairs_Prefix : Unbounded_String;
+
+   procedure Pair_Check (O : Observation) is
+      --  Every eye's grid, as the scene's measurement asks it, matched into
+      --  every other eye at this beat, beside where the table plane the truth
+      --  puts under the objects says each grid pixel's sight lands there. One
+      --  file a pair, a line a grid pixel: the pixel; whether the instrument
+      --  answered; its match and the match's way back; its certainty; the
+      --  table's pixel in the second eye and whether it is in view there.
+      Top : constant Real := Lowest_Median (Truth (Line_Of_Beat (Beat)));
+   begin
+      Ada.Text_IO.Put_Line ("beat" & Beat'Image & ": pairs checked against the table plane at z " & Mm (Top) & " mm");
+      for A in 1 .. Eye_Id'Base (Natural (O.Images.Length)) loop
+         for B in 1 .. Eye_Id'Base (Natural (O.Images.Length)) loop
+            if A /= B and then Driver.Observations.Has_Image (O, A) and then Driver.Observations.Has_Image (O, B) then
+               declare
+                  Picture : constant Driver.Images.Image := O.Images (A);
+                  Stride  : constant Positive :=
+                    Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (Driver.Images.Width (Picture),
+                                                                                   Driver.Images.Height (Picture)))))));
+                  Columns : constant Natural := Driver.Images.Width (Picture) / Stride;
+                  Rows    : constant Natural := Driver.Images.Height (Picture) / Stride;
+                  Points  : Driver.Instrument.Point_Array (1 .. Columns * Rows);
+                  Answers : Driver.Instrument.Answer_Array (Points'Range);
+                  Ok      : Boolean;
+                  Why     : Unbounded_String;
+                  First   : constant Truth_Camera := True_Camera (A, Beat);
+                  Second  : constant Truth_Camera := True_Camera (B, Beat);
+                  F       : Ada.Text_IO.File_Type;
+                  Near_3, Near_10, In_View, Answered : Natural := 0;
+               begin
+                  for R in 0 .. Rows - 1 loop
+                     for C in 0 .. Columns - 1 loop
+                        Points (R * Columns + C + 1) :=
+                          (U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);
+                     end loop;
+                  end loop;
+                  Driver.Instrument.Read_Match
+                    (Driver.Services.Call (Driver.Services.Instrument, "/match",
+                                           Driver.Instrument.Match_Request
+                                             ((Stored => False, Image => O.Images (A)),
+                                              (Stored => False, Image => O.Images (B)), Points, True)),
+                     True, Answers, Ok, Why);
+                  if not Ok then
+                     Ada.Text_IO.Put_Line ("pair" & A'Image & B'Image & ": no answer: " & To_String (Why));
+                  else
+                     Ada.Text_IO.Create (F, Ada.Text_IO.Out_File,
+                                         To_String (Pairs_Prefix) & "." & Image (Natural (A)) & "."
+                                         & Image (Natural (B)) & ".txt");
+                     for K in Points'Range loop
+                        declare
+                           Sight : constant Ray_Estimate := First.Ray (Points (K));
+                           D     : constant Vec3 := Sight.Direction.Unit_Vector;
+                           Q     : Driver.Images.Pixel := (U => 0.0, V => 0.0);
+                           Seen  : Boolean := False;
+                           W     : constant Driver.Instrument.Answer := Answers (K);
+                        begin
+                           if D (3) < 0.0 then
+                              Second.Project (Sight.Origin.Mean + ((Top - Sight.Origin.Mean (3)) / D (3)) * D, Q, Seen);
+                           end if;
+                           if W.Found then
+                              Answered := Answered + 1;
+                              if Seen then
+                                 In_View := In_View + 1;
+                                 if Sqrt ((W.To.U - Q.U) ** 2 + (W.To.V - Q.V) ** 2) < 3.0 then
+                                    Near_3 := Near_3 + 1;
+                                 end if;
+                                 if Sqrt ((W.To.U - Q.U) ** 2 + (W.To.V - Q.V) ** 2) < 10.0 then
+                                    Near_10 := Near_10 + 1;
+                                 end if;
+                              end if;
+                           end if;
+                           Ada.Text_IO.Put_Line
+                             (F, Image (Points (K).U, 1) & " " & Image (Points (K).V, 1) & " "
+                              & (if W.Found then "1" else "0") & " " & Image (W.To.U, 2) & " " & Image (W.To.V, 2)
+                              & " " & Image (W.Back.U, 2) & " " & Image (W.Back.V, 2) & " "
+                              & Image (W.Certainty, 3) & " " & Image (Q.U, 2) & " " & Image (Q.V, 2) & " "
+                              & (if Seen then "1" else "0"));
+                        end;
+                     end loop;
+                     Ada.Text_IO.Close (F);
+                     Ada.Text_IO.Put_Line
+                       ("pair" & A'Image & B'Image & ":" & Points'Length'Image & " asked," & Answered'Image
+                        & " answered," & In_View'Image & " of those with the table's point in view of the second,"
+                        & Near_3'Image & " within 3 px of it," & Near_10'Image & " within 10 px");
+                  end if;
+               end;
+            end if;
+         end loop;
+      end loop;
+   end Pair_Check;
+
    procedure Adopt_Objects (O : Observation) is
       --  Every true object, in the first eye the middle of its mesh falls in,
       --  segmented there by the instrument as a brain's pointing would be.
@@ -954,6 +1077,9 @@ procedure World_Check is
             Still : constant Boolean := Driver.Robot.Still (Robot);
          begin
             Driver.World.Offline.Observe (Bench, Natural (O.Images.Length), Camera_Of'Access, Up, Still, O);
+            if Beat = Pairs_At then
+               Pair_Check (O);
+            end if;
             if Length (Dump) > 0 and then Driver.World.Offline.Scene_Round (Bench) /= Dumped_Round then
                Dumped_Round := Driver.World.Offline.Scene_Round (Bench);
                Dump_Scene;
@@ -1191,7 +1317,8 @@ procedure World_Check is
 
 begin
    if Ada.Command_Line.Argument_Count < 4 or else Ada.Command_Line.Argument (3) /= "--inst" then
-      Line (Core, "usage: world_check RECORDING TRUTH --inst HOST:PORT [--dump PREFIX] [--until BEAT]");
+      Line (Core, "usage: world_check RECORDING TRUTH --inst HOST:PORT [--dump PREFIX] [--until BEAT]"
+                  & " [--pairs BEAT PREFIX]");
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
       return;
    end if;
@@ -1201,6 +1328,9 @@ begin
    for I in 5 .. Ada.Command_Line.Argument_Count - 1 loop
       if Ada.Command_Line.Argument (I) = "--dump" then
          Dump := To_Unbounded_String (Ada.Command_Line.Argument (I + 1));
+      elsif Ada.Command_Line.Argument (I) = "--pairs" and then I + 2 <= Ada.Command_Line.Argument_Count then
+         Pairs_At := Natural'Value (Ada.Command_Line.Argument (I + 1));
+         Pairs_Prefix := To_Unbounded_String (Ada.Command_Line.Argument (I + 2));
       elsif Ada.Command_Line.Argument (I) = "--until" then
          Until_Beat := Natural'Value (Ada.Command_Line.Argument (I + 1));
       end if;

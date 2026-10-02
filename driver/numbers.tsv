@@ -918,6 +918,9 @@ driver-world-estimates.adb	return -1;	1	format	a beat before every beat: no meas
 driver-world-estimates.ads	Stride : Positive := 1;	1	structure	a grid at every pixel until it is set
 driver-world-pairs.adb	1.0)	1.0	statistics	the deviate is already in units of its sigma
 driver-world-pairs.adb	Chi := Chi + (C * P * P - 2.0 * B * P * Q + A * Q * Q) / Det;	2.0	math	the cross term of a two by two quadratic form
+driver-world-pairs.adb	D : Natural := (if Dimensions mod 2 = 0 then 0 else 1);	1	math	an odd number of dimensions starts from the segment, of one dimension
+driver-world-pairs.adb	D : Natural := (if Dimensions mod 2 = 0 then 0 else 1);	2	math	the ball's measure goes up two dimensions at a time
+driver-world-pairs.adb	D := D + 2;	2	math	the ball's measure goes up two dimensions at a time
 driver-world-pairs.adb	First_Sample : constant Positive := (if Own < Points'Length then Own + 1 else 1);	1	structure	the points after the region's own, or all of them from the first
 driver-world-pairs.adb	Freedom : constant Positive := 1;	1	statistics	two lines of sight give four image coordinates for a point's three: one degree of freedom
 driver-world-pairs.adb	G : constant Real := Exp (-D / (2.0 * S2)) / (2.0 * Ada.Numerics.Pi * S2) ** (K / 2.0);	2.0	math	the Gaussian density in k dimensions
@@ -926,6 +929,10 @@ driver-world-pairs.adb	G : constant Real := Exp (-D / (2.0 * S2)) / (2.0 * Ada.N
 driver-world-pairs.adb	Gate : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural (Real'Floor (2.0 * Right)));	2	structure	a round trip has two coordinates
 driver-world-pairs.adb	Gate : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural (Real'Floor (2.0 * Right)));	2.0	statistics	each right round trip gives two degrees of freedom
 driver-world-pairs.adb	K := K + 2;	2	structure	two coordinates per round trip
+driver-world-pairs.adb	Measure : Real := (if Dimensions mod 2 = 0 then 1.0 else 2.0 * Radius);	1.0	math	the measure of no dimensions
+driver-world-pairs.adb	Measure : Real := (if Dimensions mod 2 = 0 then 1.0 else 2.0 * Radius);	2	math	the ball's measure goes up two dimensions at a time
+driver-world-pairs.adb	Measure : Real := (if Dimensions mod 2 = 0 then 1.0 else 2.0 * Radius);	2.0	math	a segment of both signs is twice its radius long
+driver-world-pairs.adb	Measure := Measure * 2.0 * Ada.Numerics.Pi * Radius ** 2 / Real (D);	2.0	math	a ball of two dimensions more: 2 pi r squared over the dimensions times the last
 driver-world-pairs.adb	Mixture (Squared, 1, 2.0 * Diagonal, Line_Sigma, Line_Right);	1	structure	the distance across a line is one coordinate
 driver-world-pairs.adb	Mixture (Squared, 1, 2.0 * Diagonal, Line_Sigma, Line_Right);	2.0	math	a signed distance spans the image's diagonal either way
 driver-world-pairs.adb	Mixture (Squared, 2, Area, Sigma, Right);	2	structure	a round trip has two coordinates
@@ -938,6 +945,7 @@ driver-world-pairs.adb	Squared : Real_Array (1 .. Trips'Length / 2);	2	structure
 driver-world-pairs.adb	Trips (K + 2) := A.Back.V - P.V;	2	structure	two coordinates per round trip
 driver-world-pairs.adb	Trips : Real_Array (1 .. 2 * Around);	2	structure	two coordinates per round trip
 driver-world-pairs.adb	Wrong : constant Real := 1.0 / Measure;	1.0	math	a uniform density over its range
+driver-world-pairs.adb	exit when Right < 1.0 or else not (Sigma > 0.0 and then Sigma < Real'Last);	1.0	statistics	not even one right match to set a window by
 driver-world-pairs.adb	if not (Line_Sigma < Real'Last) or else Line_Right < 1.0 then	1.0	statistics	not even one right match to tell the error by
 driver-world-pairs.adb	if not (Trip_Sigma < Real'Last) or else Right < 1.0 then	1.0	statistics	not even one right match to tell the error by
 driver-world-pairs.ads	with Pre => Trips'Length mod 2 = 0 and then Area > 0.0;	2	structure	two coordinates per round trip

@@ -214,13 +214,14 @@ package body Driver.World.Estimates is
                   Why     : Unbounded_String;
                   Kept    : Driver.World.Pairs.Match_Vectors.Vector;
                   Apart   : Natural := 0;
+                  Far     : Natural := 0;
                   Error   : Real;
                   Seen    : constant Observation_Holders.Constant_Reference_Type := X.Seen.Constant_Reference;
                begin
                   Driver.Instrument.Read_Match (Driver.Services.Collect (X.Ticket), True, Answers, Ok, Why);
                   if Ok then
                      Driver.World.Pairs.Triangulate (Camera_Of (X.From, Seen.Element), Camera_Of (X.Into, Seen.Element),
-                                                     Points, X.Own, Answers, Kept, Apart, Error);
+                                                     Points, X.Own, Answers, Kept, Apart, Far, Error);
                   else
                      Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": the instrument did not match eye"
                                       & X.From'Image & " into eye" & X.Into'Image & ": " & To_String (Why));
@@ -258,7 +259,8 @@ package body Driver.World.Estimates is
                   if not Kept.Is_Empty then
                      Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ":" & Kept.Length'Image
                                       & " points seen by eyes" & X.From'Image & " and" & X.Into'Image & ","
-                                      & Apart'Image & " matches whose lines did not meet, the matcher erring by "
+                                      & Apart'Image & " matches whose lines did not meet," & Far'Image
+                                      & " too far to place, the matcher erring by "
                                       & Driver.Log.Image (Error, 2) & " px");
                      --  The second eye had no track: segment the thing there around
                      --  where its pixels went, prompted where its inner point went.
@@ -463,6 +465,7 @@ package body Driver.World.Estimates is
                         Why     : Unbounded_String;
                         Kept    : Driver.World.Pairs.Match_Vectors.Vector;
                         Apart   : Natural := 0;
+                        Far     : Natural := 0;
                         Error   : Real;
                         Seen    : constant Observation_Holders.Constant_Reference_Type :=
                           S.Round_Seen.Constant_Reference;
@@ -474,7 +477,8 @@ package body Driver.World.Estimates is
                      begin
                         Driver.Instrument.Read_Match (Reply, True, Answers, Ok, Why);
                         if Ok then
-                           Driver.World.Pairs.Triangulate (First, Second, Points, Points'Length, Answers, Kept, Apart, Error);
+                           Driver.World.Pairs.Triangulate
+                             (First, Second, Points, Points'Length, Answers, Kept, Apart, Far, Error);
                         else
                            Driver.Log.Line (Driver.Log.World, "the scene: the instrument did not match eye"
                                             & X.From'Image & " into eye" & X.Into'Image & ": " & To_String (Why));
@@ -498,7 +502,8 @@ package body Driver.World.Estimates is
                         end if;
                         Driver.Log.Line (Driver.Log.World, "the scene:" & Added'Image & " points seen by eyes"
                                          & X.From'Image & " and" & X.Into'Image & "," & Apart'Image
-                                         & " matches whose lines did not meet, the matcher erring by "
+                                         & " matches whose lines did not meet," & Far'Image & " too far to place,"
+                                         & " the matcher erring by "
                                          & Driver.Log.Image (Error, 2) & " px");
                         Closed := not Round_Open (S);
                      end;
