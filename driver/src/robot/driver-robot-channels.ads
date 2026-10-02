@@ -32,6 +32,13 @@ private package Driver.Robot.Channels is
    --  The target in effect at Beat differs from the one at Beat - 1 (or
    --  appeared or disappeared); False at the first beat.
 
+   function Mad_Degrees_Of_Freedom (N : Natural) return Natural;
+   --  How many degrees of freedom a sigma from the median absolute deviation
+   --  of N Gaussian samples is worth: N times its asymptotic efficiency
+   --  against the standard deviation, 8 c^2 phi (c)^2 with c the median of
+   --  the absolute value of a unit Gaussian (about 0.37), and at least one
+   --  from two samples on (a sigma from two values rests on one); none below.
+
    procedure Measure_Noise (M : in out Model);
    --  Re-measures the noise of every channel from the whole stream.
 

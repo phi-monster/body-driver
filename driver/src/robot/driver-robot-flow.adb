@@ -93,6 +93,7 @@ package body Driver.Robot.Flow is
                         Trace : constant Real := Sxx + Syy;
                         U, V  : Real := 0.0;
                         Converged : Boolean := False;
+                        Last_Step : Real := Real'Last;
                      begin
                         if Det > 0.0 then
                            Condition (Condition'First + Cell - 1) :=
@@ -127,6 +128,12 @@ package body Driver.Robot.Flow is
                                                 Noise_Floor (Condition (Condition'First + Cell - 1),
                                                              Luma_Variance (Luma_Variance'First + Cell - 1)));
                                  exit when Converged;
+                                 --  A step no smaller than the last one is not closing in on
+                                 --  anything, and a translation past half the cell cannot be
+                                 --  resolved: either way the cell is given up.
+                                 exit when Sqrt (Su * Su + Sv * Sv) >= Last_Step
+                                   or else abs U > Real (Nx) / 2.0 or else abs V > Real (Ny) / 2.0;
+                                 Last_Step := Sqrt (Su * Su + Sv * Sv);
                               end;
                            end loop;
                            Du (K) := U;

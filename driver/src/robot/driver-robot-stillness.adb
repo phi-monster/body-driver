@@ -1,4 +1,4 @@
-with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Pixels;
@@ -9,32 +9,33 @@ with Driver.Stats;
 
 package body Driver.Robot.Stillness is
 
-   use Ada.Numerics.Long_Elementary_Functions;
+
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Luma_Access);
 
    --  How many pixels of the frame differ from the settled view's mean
-   --  significantly against the noise view's per-pixel noise.
-   function Changed_Pixels (View, Noise : Driver.Pixels.View; Luma : Real_Array) return Natural is
-      W       : constant Natural := Driver.Pixels.Width (View);
+   --  significantly against the noise view's per-pixel noise. Means and
+   --  Variances are the eye's buffers for the two views' pixels.
+   function Changed_Pixels
+     (View, Noise : Driver.Pixels.View; Luma : Real_Array; Means, Variances : in out Real_Array) return Natural
+   is
       Settled : constant Natural := Driver.Pixels.Frames (View);
       --  The noise of a variance measured over K frames rests on K - 1
       --  degrees of freedom; one frame has only the known floor.
       Freedom : constant Natural := Driver.Pixels.Frames (Noise) - 1;
-      Gate    : constant Driver.Uncertain.Gate := Driver.Uncertain.Scalar_Gate (Freedom);
+      --  The gate's own threshold, compared in squares: the same test without
+      --  a square root per pixel (every variance is positive and finite).
+      T       : constant Real := Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate (Freedom));
+      --  The frame and the settled mean share the pixel's noise; the mean's
+      --  is that over the settled frames.
+      Scale   : constant Real := T * T * (1.0 + 1.0 / Real (Settled));
       Count   : Natural := 0;
    begin
-      for Row in 0 .. Driver.Pixels.Height (View) - 1 loop
-         for Column in 0 .. W - 1 loop
-            declare
-               D : constant Real := Luma (Luma'First + Row * W + Column) - Driver.Pixels.Mean (View, Column, Row);
-               --  The frame and the settled mean share the pixel's noise; the
-               --  mean's is that over the settled frames.
-               V : constant Real := Driver.Pixels.Variance (Noise, Column, Row) * (1.0 + 1.0 / Real (Settled));
-            begin
-               if Driver.Uncertain.Significant (Gate, D, Sqrt (V)) then
-                  Count := Count + 1;
-               end if;
-            end;
-         end loop;
+      Driver.Pixels.Means (View, Means);
+      Driver.Pixels.Variances (Noise, Variances);
+      for K in 0 .. Luma'Length - 1 loop
+         if (Luma (Luma'First + K) - Means (Means'First + K)) ** 2 > Scale * Variances (Variances'First + K) then
+            Count := Count + 1;
+         end if;
       end loop;
       return Count;
    end Changed_Pixels;
@@ -62,12 +63,18 @@ package body Driver.Robot.Stillness is
          return;
       end if;
       S.Has_Judged := True;
+      if S.Means = null or else S.Means'Length /= W * H then
+         Free (S.Means);
+         Free (S.Variances);
+         S.Means := new Real_Array (1 .. W * H);
+         S.Variances := new Real_Array (1 .. W * H);
+      end if;
       declare
          --  Every pixel's test alarms by chance at this rate.
          P0      : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
          Changed : constant Natural :=
-           (if S.Noise_Is_Settled then Changed_Pixels (S.Settled, S.Settled, Luma)
-            else Changed_Pixels (S.Settled, S.Noise_View, Luma));
+           (if S.Noise_Is_Settled then Changed_Pixels (S.Settled, S.Settled, Luma, S.Means.all, S.Variances.all)
+            else Changed_Pixels (S.Settled, S.Noise_View, Luma, S.Means.all, S.Variances.all));
       begin
          S.Is_Still := not Regression.Count_Significant (Changed, W * H, P0);
       end;

@@ -503,32 +503,37 @@ package body Driver.Robot.Tests is
       Rng  : Generator;
       O    : Observation;
       Sent : Driver.Commands.Command;
-      --  The target in effect and where the reading has got to, beat by beat:
-      --  a delay of two beats, then an approach that settles 0.05 short, five
-      --  times the negligible fraction of the step (a joint held against
-      --  gravity). The third push meets an obstacle half
-      --  way; the fifth is never answered.
-      type Plan is record
-         At_Beat : Natural;
-         Target  : Real;
-         Path    : Real_Array (1 .. 3);   --  the reading two, three and four beats after the push
-      end record;
-      Pushes : constant array (1 .. 5) of Plan :=
-        [(10, 1.0, [0.5, 0.9, 0.95]),
-         (25, 2.0, [1.5, 1.9, 1.95]),
-         (40, 3.0, [2.3, 2.5, 2.5]),
-         (55, 2.0, [2.2, 2.08, 2.05]),
-         (70, 2.5, [2.05, 2.05, 2.05])];
-      Target, Reading : Real := 0.0;
+      --  Pushes every twelve beats. The reading answers two beats after a push
+      --  and settles three beats later, 0.05 short of the target with a
+      --  scatter of 0.001, as a joint held against gravity does, which is many
+      --  times the readings' noise. Pushes 1 to 5 and 7 move freely; push 6
+      --  meets an obstacle at 2.0; push 8 is never answered.
+      Targets : constant Real_Array (1 .. 8) := [1.0, 2.0, 1.0, 2.0, 1.0, 3.0, 1.0, 1.5];
+      Stop_At : constant Real := 2.0;
+      Target, Reading, From, To : Real := 0.0;
+      Blocked_From : Real := 0.0;   --  where push 6 started
    begin
-      for B in 0 .. 89 loop
-         for P of Pushes loop
-            if B = P.At_Beat then
-               Target := P.Target;
-            elsif B in P.At_Beat + 2 .. P.At_Beat + 4 then
-               Reading := P.Path (B - P.At_Beat - 1);
+      for B in 0 .. 109 loop
+         declare
+            K     : constant Natural := (if B >= 10 then (B - 10) / 12 + 1 else 0);
+            Phase : constant Natural := (if B >= 10 then (B - 10) mod 12 else 0);
+         begin
+            if K in Targets'Range then
+               if Phase = 0 then
+                  Target := Targets (K);
+                  From := Reading;
+                  To := Target - (if Target > From then 1.0 else -1.0) * (0.05 + 0.001 * Gaussian (Rng));
+                  if K = 6 then
+                     To := Stop_At;
+                     Blocked_From := From;
+                  elsif K = 8 then
+                     To := From;
+                  end if;
+               elsif Phase in 2 .. 4 then
+                  Reading := From + (To - From) * (case Phase is when 2 => 0.5, when 3 => 0.9, when others => 1.0);
+               end if;
             end if;
-         end loop;
+         end;
          O := (others => <>);
          O.Beat := Driver.Clock.Beat (B);
          O.Images.Append (Driver.Images.No_Image);
@@ -539,24 +544,26 @@ package body Driver.Robot.Tests is
          Driver.Commands.Set_Target (Sent, 1, [Target]);
          Observe (M, O, Sent);
       end loop;
-      Check (Steps.Episodes (M, 1) = 5, "five pushes, got" & Steps.Episodes (M, 1)'Image);
-      if Steps.Episodes (M, 1) = 5 then
+      Check (Steps.Episodes (M, 1) = 8, "eight pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 8 then
          declare
-            E : array (1 .. 5) of Episode;
+            E : array (1 .. 8) of Episode;
          begin
             for K in E'Range loop
                E (K) := M.Groups (1).Episodes (K);
                Check (E (K).Ended, "push" & K'Image & " is over");
             end loop;
             Check (E (1).Moved and then E (1).Moved_At - E (1).Start = 2, "the first push answers after two beats");
-            Check (not E (1).Blocked, "the first push counts as free");
-            Check (not E (2).Blocked, "a push that falls as short as the last free one is free");
-            Check (E (3).Blocked, "a push stopped half way is blocked");
-            Check_Close (E (3).Delivered.Value, (2.5 - 1.95) / (3.0 - 1.95), 0.01, "how much of the blocked push came through");
-            Check (not E (4).Blocked, "a free push after the obstacle is free again");
-            Check (E (5).Blocked and then not E (5).Moved, "a push nothing answers is blocked");
-            Check (E (5).End_At - E (5).Start = 3, "an unanswered push is given up after the longest delay, at"
-                   & Natural'Image (E (5).End_At - E (5).Start));
+            for K in 1 .. 5 loop
+               Check (not E (K).Blocked, "a push that falls short as free pushes do is free: push" & K'Image);
+            end loop;
+            Check (E (6).Blocked, "a push stopped by an obstacle is blocked");
+            Check_Close (E (6).Delivered.Value, (Stop_At - Blocked_From) / (3.0 - Blocked_From), 0.01,
+                         "how much of the blocked push came through");
+            Check (not E (7).Blocked, "a free push after the obstacle is free again");
+            Check (E (8).Blocked and then not E (8).Moved, "a push nothing answers is blocked");
+            Check (E (8).End_At - E (8).Start = 3, "an unanswered push is given up after the longest delay, at"
+                   & Natural'Image (E (8).End_At - E (8).Start));
          end;
       end if;
    end Step_Responses;

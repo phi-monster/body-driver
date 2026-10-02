@@ -1,11 +1,27 @@
 with Ada.Numerics.Long_Elementary_Functions;
-with Driver.Conventions;
+with Driver.Stats;
 with Driver.Robot.Channels;
 
 package body Driver.Robot.Steps is
 
    use Ada.Numerics.Long_Elementary_Functions;
    use type Driver.Observations.Group_Id;
+
+   --  How much two free pushes in a row differ in shortfall: the robust sigma
+   --  of every consecutive pair's difference, which is what a push's shortfall
+   --  minus the last free one's varies by when it too moves freely (the
+   --  readings' noise included), and the degrees of freedom it rests on.
+   procedure Pair_Scatter (Shortfalls : Real_Vectors.Vector; Sigma : out Real; Freedom : out Natural)
+     with Pre => Natural (Shortfalls.Length) > 2
+   is
+      Pairs : Real_Array (1 .. Natural (Shortfalls.Length) - 1);
+   begin
+      for K in Pairs'Range loop
+         Pairs (K) := Shortfalls (K) - Shortfalls (K - 1);
+      end loop;
+      Sigma := Driver.Stats.Robust_Sigma (Pairs);
+      Freedom := Channels.Mad_Degrees_Of_Freedom (Pairs'Length);
+   end Pair_Scatter;
 
    --  Closes the push under way at Beat and judges it. Answered is False for
    --  a push the reading never moved for; Settled is False for one the next
@@ -45,22 +61,18 @@ package body Driver.Robot.Steps is
                   E.Delivered := (Value => Along / E.Length, Sigma => Sigma / E.Length, Degrees_Of_Freedom => 0);
                   if not Answered then
                      E.Blocked := True;
-                  elsif S.Free_Count > 0 then
+                  elsif Natural (S.Free_Shortfalls.Length) > 2 then
                      declare
-                        Excess : constant Real := Short - S.Free_Last;
-                        --  Two free shortfalls in a row differ by this much
-                        --  more than their readings explain.
-                        Free_Spread : constant Real :=
-                          (if S.Free_Count > 1 then (S.Free_Last - S.Free_Before) ** 2 / 2.0 else 0.0);
+                        Excess  : constant Real := Short - S.Free_Shortfalls.Last_Element;
+                        Scatter : Real;
+                        Freedom : Natural;
                      begin
-                        E.Blocked := Excess > Driver.Conventions.Unchanged_Fraction * E.Length
-                          and then Driver.Uncertain.Significant (Excess, Sqrt (2.0 * Sigma ** 2 + Free_Spread));
+                        Pair_Scatter (S.Free_Shortfalls, Scatter, Freedom);
+                        E.Blocked := Excess > 0.0 and then Driver.Uncertain.Significant (Excess, Scatter, Freedom);
                      end;
                   end if;
                   if not E.Blocked then
-                     S.Free_Before := S.Free_Last;
-                     S.Free_Last := Short;
-                     S.Free_Count := S.Free_Count + 1;
+                     S.Free_Shortfalls.Append (Short);
                   end if;
                end;
             end if;

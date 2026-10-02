@@ -100,16 +100,13 @@ package body Driver.Robot.Channels is
       return N;
    end First_Channel;
 
-   --  How many degrees of freedom a sigma from the median absolute deviation
-   --  of N Gaussian samples is worth: N times its asymptotic efficiency
-   --  against the standard deviation, 8 c^2 phi (c)^2 with c the median of
-   --  the absolute value of a unit Gaussian (about 0.37).
    function Mad_Degrees_Of_Freedom (N : Natural) return Natural is
       Half : constant Real := 0.5;
       C    : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (Half);
       Phi  : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);
    begin
-      return Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)));
+      --  Rounding a handful of samples down to none would call the sigma known.
+      return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));
    end Mad_Degrees_Of_Freedom;
 
    --  Whether the change into Beat is one of a resting reading: the beat and

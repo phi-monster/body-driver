@@ -233,9 +233,7 @@ private
       Delay_Known : Boolean := False;      --  some push was answered
       Episodes    : Episode_Vectors.Vector;   --  every push and how it went (Driver.Robot.Steps)
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
-      Free_Last   : Real := 0.0;           --  the shortfalls of the last two free pushes
-      Free_Before : Real := 0.0;
-      Free_Count  : Natural := 0;
+      Free_Shortfalls : Real_Vectors.Vector;   --  of every push that moved freely, in order
    end record;
 
    package Group_Stream_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Stream);
@@ -256,6 +254,7 @@ private
       Grid          : Cell_Grid;
       Previous      : Luma_Access;           --  luma of the last frame
       Current       : Luma_Access;           --  luma of this beat's frame
+      Means, Variances : Luma_Access;        --  the stillness test's per-pixel reads of its views
       Has_Previous  : Boolean := False;      --  Previous is the frame of the beat before, of the grid's size
       Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat
       Condition     : Real_Vectors.Vector;   --  Cells values per beat
