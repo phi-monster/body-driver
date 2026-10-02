@@ -262,6 +262,14 @@ private
       Measured      : Flag_Vectors.Vector;   --  per beat: both frames were there
       Noise         : Real_Vectors.Vector;   --  per cell: displacement noise at rest, once measured
       Textured      : Flag_Vectors.Vector;   --  per cell: can show a displacement, once measured
+      Kept_Groups   : Count_Vectors.Vector;  --  the lock-in's regressors: each one's group
+      Kept_Channels : Count_Vectors.Vector;  --  and channel
+      Gains         : Real_Vectors.Vector;   --  per cell and regressor: squared displacement per reading
+                                             --  unit over the cell's noise, less its estimation variance;
+                                             --  zero where the cell does not respond to that group
+      Gain_Variances : Real_Vectors.Vector;  --  their variances
+      Shifts        : Real_Vectors.Vector;   --  per cell and regressor: pixels moved per reading unit,
+                                             --  zero where the cell does not respond to that group
       Luma_Variance : Real_Vectors.Vector;   --  per cell: a resting pixel's luma variance (Stillness)
       Settled       : Driver.Pixels.View;    --  the frames since the eye last saw a change
       Noise_View    : Driver.Pixels.View;    --  the longest still run before the current one

@@ -1,6 +1,8 @@
 with Ada.Containers;
+with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Clock;
+with Driver.Conventions;
 with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
@@ -12,6 +14,7 @@ with Driver.Robot.Stillness;
 
 package body Driver.Robot is
 
+   use Ada.Numerics.Long_Elementary_Functions;
    use type Ada.Containers.Count_Type;
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
@@ -231,7 +234,47 @@ package body Driver.Robot is
    function Reading_Noise (M : Model; G : Group_Id; Channel : Positive) return Real is
      (Channels.Noise (M, G, Channel));
 
-   function Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate is (Unknown);
+   function Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate is
+      Best : Estimate := Unknown;
+   begin
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         declare
+            S    : Eye_Stream renames M.Eyes (E);
+            Kept : constant Natural := Natural (S.Kept_Groups.Length);
+            N    : constant Natural := (if Kept = 0 then 0 else Natural (S.Gains.Length) / Kept);
+            Column : Natural := 0;
+         begin
+            for K in 0 .. Kept - 1 loop
+               if S.Kept_Groups (K) = Natural (G) and then S.Kept_Channels (K) = Channel then
+                  Column := K + 1;
+               end if;
+            end loop;
+            if Column > 0 and then Response (M, G, E) in Patch | Undecided | Whole then
+               declare
+                  Gain, Spread : Real := 0.0;
+               begin
+                  for Cell in 0 .. N - 1 loop
+                     Gain := Gain + S.Gains (Cell * Kept + Column - 1);
+                     Spread := Spread + S.Gain_Variances (Cell * Kept + Column - 1);
+                  end loop;
+                  --  A step is seen when the displacement pattern it causes,
+                  --  matched against the eye's cells, stands out of their
+                  --  noise: a test of one degree, passed from Z / sqrt (Gain) on.
+                  if Gain > 0.0 then
+                     declare
+                        Step : constant Real := Driver.Conventions.Z / Sqrt (Gain);
+                     begin
+                        if not Known (Best) or else Step < Best.Value then
+                           Best := (Value => Step, Sigma => Step * Sqrt (Spread) / (2.0 * Gain), Degrees_Of_Freedom => 0);
+                        end if;
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      return Best;
+   end Visible_Step;
 
    function Response (M : Model; G : Group_Id; E : Eye_Id) return Eye_Response is
      (Graph.Effect (M, G, E).Verdict);

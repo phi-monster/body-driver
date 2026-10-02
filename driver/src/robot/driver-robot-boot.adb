@@ -1,12 +1,271 @@
+with Driver.Beats;
+with Driver.Commands;
 with Driver.Log;
 with Driver.Robot.Body_File;
+with Driver.Robot.Lockin;
+with Driver.Robot.Motion;
 
 package body Driver.Robot.Boot is
 
+   use type Driver.Robot.Motion.Step_Outcome;
+
+   --  A repeatable uniform generator (Park and Miller's minimal standard),
+   --  for push orders that no other group's repeats.
+   type Generator is record
+      State : Long_Long_Integer := 1;
+   end record;
+
+   function Uniform (G : in out Generator) return Real is
+   begin
+      G.State := (G.State * 48_271) mod 2_147_483_647;
+      return Real (G.State) / 2_147_483_647.0;
+   end Uniform;
+
+   type Push is record
+      Channel : Positive;
+      Sign    : Real;
+   end record;
+
+   type Push_Array is array (Positive range <>) of Push;
+
+   procedure Shuffle (P : in out Push_Array; G : in out Generator) is
+   begin
+      for I in reverse P'First + 1 .. P'Last loop
+         declare
+            J : constant Positive := P'First + Natural (Real'Floor (Uniform (G) * Real (I - P'First + 1)));
+            T : constant Push := P (I);
+         begin
+            P (I) := P (Natural'Min (J, I));
+            P (Natural'Min (J, I)) := T;
+         end;
+      end loop;
+   end Shuffle;
+
    procedure Run (M : in out Model; H : in out Driver.Robot.Hand.Hands; Body_File : String; Ok : out Boolean) is
-      pragma Unreferenced (M, H, Body_File);
+      --  The decider reads the models only in held beats (Driver.Beats): every
+      --  read below is inside one, through Within_A_Beat or Motion.
+      Waited : Natural;
+      --  One generator for every order the boot draws, so no two repeat.
+      Rng    : Generator;
+
+      procedure Estimate is
+      begin
+         Estimate_Now (M);
+      end Estimate;
+
+      --  The group's readings now.
+      function Readings_Of (G : Group_Id; Size : Natural) return Real_Array is
+         Result : Real_Array (1 .. Size) := [others => 0.0];
+         procedure Read is
+            O : Observation renames Driver.Beats.Latest.all;
+         begin
+            if Natural (G) <= Natural (O.Readings.Length) and then O.Readings.Element (G)'Length = Size then
+               Result := O.Readings.Element (G);
+            end if;
+         end Read;
+      begin
+         Driver.Beats.Within_A_Beat (Read'Access);
+         return Result;
+      end Readings_Of;
+
+      procedure Go_To (G : Group_Id; Target : Real_Array; Report : out Driver.Robot.Motion.Step_Report) is
+         C : Driver.Commands.Command;
+      begin
+         Driver.Commands.Set_Target (C, G, Target);
+         Driver.Robot.Motion.Step (M, C, Report);
+      end Go_To;
+
+      --  Finds how far each channel of the group must move for an eye to see
+      --  it, then pushes every channel both ways by that much, in an order no
+      --  other group shares, for the lock-in to tell the groups apart.
+      procedure Recognize (G : Group_Id; Size : Positive) is
+         Start  : constant Real_Array := Readings_Of (G, Size);
+         Amount : Real_Array (1 .. Size) := [others => 0.0];
+         Report : Driver.Robot.Motion.Step_Report;
+         Order  : Push_Array (1 .. 2 * Size);
+         Count  : Natural := 0;
+      begin
+         for C in 1 .. Size loop
+            for Sign of Real_Array'[1.0, -1.0] loop
+               declare
+                  P : Driver.Robot.Motion.Probe_Report;
+               begin
+                  Driver.Robot.Motion.Probe (M, G, C, Sign, P);
+                  Go_To (G, Start, Report);
+                  if P.Seen then
+                     Amount (C) := P.Excursion;
+                     exit;
+                  end if;
+               end;
+            end loop;
+            Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & C'Image
+                             & (if Amount (C) > 0.0 then " is seen when moved by " & Driver.Log.Image (Amount (C), 6)
+                                else " moves nothing any eye sees"));
+         end loop;
+         for C in 1 .. Size loop
+            if Amount (C) > 0.0 then
+               Order (Count + 1) := (Channel => C, Sign => 1.0);
+               Order (Count + 2) := (Channel => C, Sign => -1.0);
+               Count := Count + 2;
+            end if;
+         end loop;
+         Shuffle (Order (1 .. Count), Rng);
+         for P of Order (1 .. Count) loop
+            declare
+               Away : Real_Array := Start;
+            begin
+               Away (P.Channel) := Start (P.Channel) + P.Sign * Amount (P.Channel);
+               Go_To (G, Away, Report);
+               Go_To (G, Start, Report);
+            end;
+         end loop;
+         Driver.Robot.Motion.Settle (M, Waited);
+      end Recognize;
+
+      --  Turns every joint of the arm both ways from where it rests, by steps
+      --  that double from the smallest one its eye can see, until a step is
+      --  blocked or short, or the eye would have turned by half its view:
+      --  beyond that a view shares less than half of itself with the one it
+      --  started from.
+      procedure Sweep (A : Arm_Id) is
+         G    : Group_Id := 1;
+         Size : Natural := 0;
+         procedure Read_Size is
+         begin
+            G := Arm_Group (M, A);
+            Size := Group_Size (M, G);
+         end Read_Size;
+      begin
+         Driver.Beats.Within_A_Beat (Read_Size'Access);
+         declare
+            First, Per_Unit : Real_Array (1 .. Size) := [others => 0.0];
+            Half   : Real := 0.0;
+            Eye    : Natural := 0;
+            procedure Read_Plan is
+            begin
+               for E in 1 .. Eye_Count (M) loop
+                  if Eye_Mount (M, Eye_Id (E)).Kind = Arm_Carried and then Eye_Mount (M, Eye_Id (E)).Arm = A then
+                     Eye := E;
+                  end if;
+               end loop;
+               if Eye > 0 then
+                  Half := Real (Natural'Min (M.Eyes (Eye_Id (Eye)).Grid.Width, M.Eyes (Eye_Id (Eye)).Grid.Height)) / 2.0;
+                  for C in 1 .. Size loop
+                     Per_Unit (C) := Lockin.Shift (M, Eye_Id (Eye), G, C);
+                     First (C) := (if Known (Visible_Step (M, G, C)) then Visible_Step (M, G, C).Value else 0.0);
+                  end loop;
+               end if;
+            end Read_Plan;
+            Start  : constant Real_Array := Readings_Of (G, Size);
+            Report : Driver.Robot.Motion.Step_Report;
+         begin
+            Driver.Beats.Within_A_Beat (Read_Plan'Access);
+            if Eye = 0 then
+               Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " carries no eye; its joints are not swept");
+               return;
+            end if;
+            declare
+               --  Joints and directions in an order no other arm shares, for
+               --  the estimates over the whole stream to tell them apart.
+               Order : Push_Array (1 .. 2 * Size);
+               Count : Natural := 0;
+            begin
+               for C in 1 .. Size loop
+                  if Per_Unit (C) > 0.0 and then First (C) > 0.0 then
+                     Order (Count + 1) := (Channel => C, Sign => 1.0);
+                     Order (Count + 2) := (Channel => C, Sign => -1.0);
+                     Count := Count + 2;
+                  else
+                     Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " channel" & C'Image
+                                      & " does not move its eye; not swept");
+                  end if;
+               end loop;
+               Shuffle (Order (1 .. Count), Rng);
+               for P of Order (1 .. Count) loop
+                  declare
+                     Offset : Real := First (P.Channel);
+                  begin
+                     while Offset * Per_Unit (P.Channel) <= Half loop
+                        declare
+                           Pose : Real_Array := Start;
+                        begin
+                           Pose (P.Channel) := Start (P.Channel) + P.Sign * Offset;
+                           Go_To (G, Pose, Report);
+                           --  A second still frame there, for the eye's view.
+                           Driver.Robot.Motion.Hold (M, 1);
+                           exit when Report.Outcome /= Driver.Robot.Motion.Reached;
+                        end;
+                        Offset := 2.0 * Offset;
+                     end loop;
+                  end;
+                  Go_To (G, Start, Report);
+               end loop;
+            end;
+            Driver.Robot.Motion.Settle (M, Waited);
+         end;
+      end Sweep;
+
+      Count  : Natural := 0;
+      Arms   : Natural := 0;
+      Breach : Boolean := False;
+
+      procedure Read_Count is
+      begin
+         Count := Group_Count (M);
+      end Read_Count;
+
+      procedure Read_Body is
+      begin
+         Driver.Log.Line (Driver.Log.Robot, "boot: the groups as recognized:" & ASCII.LF & Describe (M));
+         for G in 1 .. Group_Count (M) loop
+            if Is_Commandable (M, Group_Id (G)) and then Contract_Breach (M, Group_Id (G)) > 0 then
+               Breach := True;
+               Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " breaks clause"
+                                & Contract_Breach (M, Group_Id (G))'Image & " of the porting contract");
+            end if;
+         end loop;
+         Arms := Arm_Count (M);
+      end Read_Body;
    begin
       Ok := False;
+      Driver.Log.Line (Driver.Log.Robot, "boot: holding still to measure the body at rest");
+      Driver.Robot.Motion.Settle (M, Waited);
+      Driver.Beats.Within_A_Beat (Estimate'Access);
+      Driver.Beats.Within_A_Beat (Read_Count'Access);
+      declare
+         Commandable : array (1 .. Count) of Boolean := [others => False];
+         Sizes       : array (1 .. Count) of Natural := [others => 0];
+         procedure Read_Groups is
+         begin
+            for G in 1 .. Count loop
+               Commandable (G) := Is_Commandable (M, Group_Id (G));
+               Sizes (G) := Group_Size (M, Group_Id (G));
+            end loop;
+         end Read_Groups;
+      begin
+         Driver.Beats.Within_A_Beat (Read_Groups'Access);
+         for G in 1 .. Count loop
+            if Commandable (G) and then Sizes (G) > 0 then
+               Recognize (Group_Id (G), Sizes (G));
+            end if;
+         end loop;
+      end;
+      Driver.Beats.Within_A_Beat (Estimate'Access);
+      Driver.Beats.Within_A_Beat (Read_Body'Access);
+      for A in 1 .. Arms loop
+         Sweep (Arm_Id (A));
+      end loop;
+      Driver.Beats.Within_A_Beat (Estimate'Access);
+      Driver.Robot.Hand.Measure (H, M);
+      declare
+         procedure Store is
+         begin
+            Save (M, H, Body_File);
+         end Store;
+      begin
+         Driver.Beats.Within_A_Beat (Store'Access);
+      end;
+      Ok := not Breach;
    end Run;
 
    procedure Save (M : Model; H : Driver.Robot.Hand.Hands; Body_File : String) is

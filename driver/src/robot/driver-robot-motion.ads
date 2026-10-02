@@ -25,11 +25,37 @@ package Driver.Robot.Motion is
       Outcome   : Step_Outcome := Short;
       Beats     : Natural := 0;
       Delivered : Estimate;          --  delivered fraction of the commanded step
+      Started   : Natural := 0;      --  how many beats the body had seen when the step was sent
       Detail    : Unbounded_String;  --  which channels, and by how much, for the log
    end record;
 
    procedure Step (M : in out Model; Targets : Driver.Commands.Command; Report : out Step_Report);
    --  Sends the targets, waits until the body settles, and judges the step.
+
+   procedure Hold (M : in out Model; Beats : Positive);
+   --  Holds the body for that many beats.
+
+   type Probe_Report is record
+      Seen      : Boolean := False;   --  some eye saw the channel move
+      Excursion : Real := 0.0;        --  how far it was taken, in reading units, when seen
+      Steps     : Natural := 0;       --  how many doublings that took
+      Last      : Step_Report;        --  the last step's report
+   end record;
+
+   procedure Probe (M : in out Model; G : Group_Id; Channel : Positive; Direction : Real; Report : out Probe_Report)
+     with Pre => Direction /= 0.0;
+   --  Takes one channel away from where it reads, in the sign of Direction,
+   --  by steps that double, until some eye's image moves as the lock-in can
+   --  tell (Lockin.Moved): the smallest move worth pushing a channel by,
+   --  found without knowing its units. The
+   --  first step is the smallest change its reading can confirm (the
+   --  significance threshold of a change, from its measured noise); a
+   --  reading without jitter starts at the resolution of the group's largest
+   --  reading. It stops early when a step comes out blocked or short (the
+   --  reading no longer follows: a limit), and gives up after as many
+   --  doublings as a float has bits of precision. The channel stays where the
+   --  probe left it. A group that is not commandable, or a channel it does
+   --  not have, is not probed (Steps = 0).
 
    type Pose_Goal is record
       Pose          : Rigid;

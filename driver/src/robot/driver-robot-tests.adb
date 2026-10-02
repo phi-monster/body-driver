@@ -6,7 +6,11 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Images;
 with Driver.Observations;
+with Driver.Beats;
+with Driver.Log;
+with Driver.Robot.Boot;
 with Driver.Robot.Channels;
+with Driver.Robot.Hand;
 with Driver.Robot.Flow;
 with Driver.Robot.Regression;
 with Driver.Robot.Steps;
@@ -360,6 +364,13 @@ package body Driver.Robot.Tests is
       --  pushed together and one overshot while the other was still on its way.
       Check (Response (M, 1, 2) = Nothing, "arm 1 moves nothing in arm 2's eye, got " & Response (M, 1, 2)'Image);
       Check (Response (M, 2, 1) = Nothing, "arm 2 moves nothing in arm 1's eye, got " & Response (M, 2, 1)'Image);
+      --  An eye sees steps of an arm far smaller than the pushes it was shown,
+      --  and nothing of a group that moves nothing.
+      Check (Known (Visible_Step (M, 1, 1)) and then Visible_Step (M, 1, 1).Value < 0.1,
+             "arm 1 has a visible step below its pushes of 0.1");
+      Check (Known (Visible_Step (M, 3, 1)) and then Visible_Step (M, 3, 1).Value < 0.1,
+             "the closer has a visible step below its pushes of 0.1");
+      Check (not Known (Visible_Step (M, 5, 1)), "a group that moves nothing has no visible step");
       Check (Role (M, 3) = Closer, "the finger group is a closer, got " & Role (M, 3)'Image);
       Check (Closer_Arm (M, 3) = 1, "the closer belongs to arm 1, got" & Closer_Arm (M, 3)'Image);
       Check (Role (M, 4) = Part, "the part is a part, got " & Role (M, 4)'Image);
@@ -568,8 +579,129 @@ package body Driver.Robot.Tests is
       end if;
    end Step_Responses;
 
+   --  ── Boot ──
+   --
+   --  The rig as a robot: each beat the decider's command (holds keep the last
+   --  target) is reached at once, the images show the beat before, and the
+   --  test plays the main loop, offering every beat until the decider takes it.
+
+   procedure Boot_From_Zero is
+      M    : Model;
+      H    : Driver.Robot.Hand.Hands;
+      Done : Boolean := False with Atomic;
+      Ok   : Boolean := False with Atomic;
+
+      task Decider;
+      task body Decider is
+         Fine : Boolean;
+      begin
+         Boot.Run (M, H, "", Fine);
+         Ok := Fine;
+         Done := True;
+      exception
+         when others =>
+            Driver.Beats.Release;
+            Done := True;
+      end Decider;
+
+      Now, Shown : Rig_State;
+      Sent  : Driver.Commands.Command;
+      Beats : Natural := 0;
+      --  As many beats as the boot may take: every channel of the rig probed
+      --  from the resolution of one reading unit, pushed both ways, and swept.
+      Bound : constant := 20_000;
+   begin
+      begin
+      for B in 0 .. Bound loop
+         exit when Done;
+         declare
+            O       : Observation;
+            Took    : Boolean := False;
+            Pending : Driver.Commands.Command;
+         begin
+            O.Beat := Driver.Clock.Beat (B);
+            --  The finger patch is drawn where it started: the closer moves
+            --  nothing an eye sees, so no hand is measured (the hand's measure
+            --  has its own tests and needs the instrument).
+            declare
+               Drawn : Rig_State := Shown;
+            begin
+               Drawn.Closer := 0.0;
+               for E in 1 .. 3 loop
+                  O.Images.Append (Render (E, Drawn));
+                  O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+               end loop;
+            end;
+            O.Readings.Append (Now.Arm_1);
+            O.Readings.Append (Now.Arm_2);
+            O.Readings.Append (Real_Array'(1 => Now.Closer));
+            O.Readings.Append (Real_Array'(1 => Now.Part));
+            O.Readings.Append (Real_Array'(1 => Now.Idle));
+            O.Readings.Append (Real_Array'(1 => Now.Arm_1 (1) + Now.Arm_2 (1)));
+            O.Readings.Append (Real_Array'(1 => 7.0));
+            for G in 1 .. 7 loop
+               O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+            end loop;
+            if B = 0 then
+               Driver.Commands.Set_Target (Sent, 1, Now.Arm_1);
+               Driver.Commands.Set_Target (Sent, 2, Now.Arm_2);
+               Driver.Commands.Set_Target (Sent, 3, [Now.Closer]);
+               Driver.Commands.Set_Target (Sent, 4, [Now.Part]);
+               Driver.Commands.Set_Target (Sent, 5, [Now.Idle]);
+            end if;
+            Observe (M, O, Sent);
+            Driver.Robot.Hand.Observe (H, M, O, Sent);
+            loop
+               Driver.Beats.Offer (O.Beat, O, Sent, Took);
+               exit when Took or else Done;
+               delay 0.0;
+            end loop;
+            exit when not Took;
+            Driver.Beats.Await (Pending);
+            --  The robot reaches what it was sent; a group without a target holds.
+            for G in Group_Id range 1 .. 5 loop
+               if Driver.Commands.Has_Target (Pending, G) then
+                  Driver.Commands.Set_Target (Sent, G, Driver.Commands.Target (Pending, G));
+               end if;
+            end loop;
+            Shown := Now;
+            Now.Arm_1 := Driver.Commands.Target (Sent, 1);
+            Now.Arm_2 := Driver.Commands.Target (Sent, 2);
+            Now.Closer := Driver.Commands.Target (Sent, 3) (1);
+            Now.Part := Driver.Commands.Target (Sent, 4) (1);
+            Now.Idle := Driver.Commands.Target (Sent, 5) (1);
+            Beats := B + 1;
+         end;
+      end loop;
+      exception
+         when others =>
+            --  A failure on the main side must not leave the decider waiting.
+            abort Decider;
+            raise;
+      end;
+      if not Done then
+         abort Decider;
+      end if;
+      Check (Done, "the boot did not finish within" & Bound'Image & " beats");
+      --  The rig's idle group takes commands and moves nothing: the boot must
+      --  name the clause it breaks and hold still.
+      Check (not Ok and then Contract_Breach (M, 5) = 2, "the boot did not report the idle group as breaking clause 2");
+      Check (Role (M, 5) = Inert, "the idle group is inert, got " & Role (M, 5)'Image);
+      Check (Contract_Breach (M, 3) = 2, "the boot did not report the frozen closer as breaking clause 2");
+      Check (Eye_Mount (M, 1).Kind = Arm_Carried and then Eye_Mount (M, 1).Arm = 1, "eye 1 rides on arm 1");
+      Check (Eye_Mount (M, 2).Kind = Arm_Carried and then Eye_Mount (M, 2).Arm = 2, "eye 2 rides on arm 2");
+      Check (Eye_Mount (M, 3).Kind = World_Fixed, "eye 3 is fixed");
+      Check (Role (M, 1) = Arm and then Role (M, 2) = Arm, "the boot recognized both arms, got "
+             & Role (M, 1)'Image & " and " & Role (M, 2)'Image);
+      Check (Role (M, 4) = Part, "the boot recognized the part, got " & Role (M, 4)'Image);
+      Check (Known (Visible_Step (M, 1, 1)), "the boot measured how far arm 1 must move to be seen");
+      Driver.Log.Line (Driver.Log.Robot, "boot from zero took" & Beats'Image & " beats");
+   end Boot_From_Zero;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("robot.boot", "the boot does not finish, deadlocks with the main loop, or does not "
+                             & "recognize the rig's groups when it pushes them itself", Boot_From_Zero'Access);
       Driver.Tests.Register ("robot.steps", "a free push that falls as short as free pushes do is called blocked, a "
                              & "push stopped by an obstacle or never answered is called free, or the wait for an "
                              & "answer is not the measured delay", Step_Responses'Access);
@@ -577,7 +709,8 @@ package body Driver.Robot.Tests is
                              & "patch goes unnoticed", Eye_Stillness'Access);
       Driver.Tests.Register ("robot.roles", "a group is given the wrong role, an eye the wrong mount or lag, an arm "
                              & "is credited with a lockstep partner's eye, a reaction to another push is taken for "
-                             & "a push, or the tail of a slow response is taken for rest", Roles_Of_A_Synthetic_Body'Access);
+                             & "a push, the tail of a slow response is taken for rest, or the step an eye can see is "
+                             & "misjudged", Roles_Of_A_Synthetic_Body'Access);
       Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "
                              & "given noise zero, so its jitter passes for motion), a hold is taken for a push, or a "
                              & "push never ends", Channel_Noise_And_Pushes'Access);

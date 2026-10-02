@@ -471,6 +471,25 @@ driver-robot-body_file.ads	Graph_Method : constant := 1;	1	format	the first vers
 driver-robot-body_file.ads	Lag_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Lockin_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Noise_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
+driver-robot-boot.adb	& (if Amount (C) > 0.0 then "" & Driver.Log.Image (Amount (C), 6)	6	format	digits printed in a log line or a message
+driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
+driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
+driver-robot-boot.adb	Driver.Robot.Motion.Hold (M, 1);	1	structure	a view needs a second still frame to measure its noise
+driver-robot-boot.adb	G : Group_Id := 1;	1	structure	a group number before the arm's is read
+driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	2_147_483_647	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
+driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	48_271	math	Park and Miller's minimal standard generator: the multiplier
+driver-robot-boot.adb	Half := Real (Natural'Min (M.Eyes (Eye_Id (Eye)).Grid.Width, M.Eyes (Eye_Id (Eye)).Grid.Height)) / 2.0;	2.0	structure	a view keeps half of itself in sight while turning by half its width
+driver-robot-boot.adb	Offset := 2.0 * Offset;	2.0	math	the sweep doubles its step
+driver-robot-boot.adb	Order (Count + 1) := (Channel => C, Sign => 1.0);	1.0	math	the two directions of a push
+driver-robot-boot.adb	Order (Count + 1) := (Channel => C, Sign => 1.0);	1.0	math	the two directions of a push
+driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	1.0	math	the two directions of a push
+driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	1.0	math	the two directions of a push
+driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	2	structure	two pushes per channel, one each way
+driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	2	structure	two pushes per channel, one each way
+driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
+driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
+driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
+driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-channels.adb	(Driver.Uncertain.Vector_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	math	the squared deviations are already in units of each channel's sigma
 driver-robot-channels.adb	Half : constant Real := 0.5;	0.5	math	the median of the absolute value of a unit Gaussian is its two-sided quantile at one half
 driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	the first round takes every change for motion: noise zero
@@ -615,23 +634,39 @@ driver-robot-lag.adb	if Last < 1 then	1	structure	a differenced series needs two
 driver-robot-lag.adb	if Used = 0 or else R2 >= 1.0 then	1.0	math	a fraction of variance explained is at most one
 driver-robot-lag.adb	return (if Used = 0 then 1.0 else 0.0);	1.0	math	probabilities: no positive coefficient explains nothing, a perfect fit cannot be noise
 driver-robot-lag.adb	return 1.0;	1.0	math	a probability: too few rows to fit, so noise explains everything
+driver-robot-lockin.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	structure	a displacement has two components
 driver-robot-lockin.adb	Half : constant Real := 0.5;	0.5	math	a majority is more than half: a whole image moves when a significant majority of its cells do
+driver-robot-lockin.adb	S.Gain_Variances.Append (0.0);	0.0	math	a cell that does not respond adds no gain
+driver-robot-lockin.adb	S.Gain_Variances.Append (0.0, Ada.Containers.Count_Type (Kept));	0.0	math	a cell that cannot show a displacement adds no gain
+driver-robot-lockin.adb	S.Gain_Variances.Append (4.0 * (Gu * Bu ** 2 + Gv * Bv ** 2));	4.0	math	the variance of a squared estimate b^2 with variance g is 4 g b^2 to first order
+driver-robot-lockin.adb	S.Gains.Append (0.0);	0.0	math	a cell that does not respond adds no gain
+driver-robot-lockin.adb	S.Gains.Append (0.0, Ada.Containers.Count_Type (Kept));	0.0	math	a cell that cannot show a displacement adds no gain
 driver-robot-lockin.adb	S.Noise.Append (Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0));	2.0	math	the mean of the two components' variances
+driver-robot-lockin.adb	S.Shifts.Append (0.0);	0.0	math	a cell that does not respond moves no pixels
+driver-robot-lockin.adb	S.Shifts.Append (0.0, Ada.Containers.Count_Type (Kept));	0.0	math	a cell that cannot show a displacement moves no pixels
 driver-robot-lockin.adb	X (R, 1) := 1.0;	1.0	math	the intercept column of a regression
 driver-robot-lockin.adb	if All_Columns = 0 or else M.Beats < 2 then	2	structure	a displacement needs two frames
 driver-robot-lockin.adb	if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 then	1	structure	the beat before the one an image shows must exist
 driver-robot-lockin.adb	return Pushes <= 1;	1	structure	a row is a reference only while at most one group is pushed
 driver-robot-motion.adb	& Driver.Log.Image (E.Delivered.Value, 3) & "" & Driver.Log.Image (E.Length, 4)	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (E.Delivered.Value, 3) & "" & Driver.Log.Image (E.Length, 4)	4	format	digits printed in a log line or a message
+driver-robot-motion.adb	(Driver.Uncertain.Scalar_Gate (Channels.Noise_Freedom (M, G, Channel))) * Sigma * Sqrt (2.0);	2.0	math	a change is the difference of two readings
 driver-robot-motion.adb	Least : Estimate := (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0);	1.0	math	the whole step delivered, until a push says less
+driver-robot-motion.adb	Sign : constant Real := (if Direction > 0.0 then 1.0 else -1.0);	1.0	math	the two directions of a probe
+driver-robot-motion.adb	Sign : constant Real := (if Direction > 0.0 then 1.0 else -1.0);	1.0	math	the two directions of a probe
+driver-robot-motion.adb	Step_Size := 2.0 * Step_Size;	2.0	math	the probe doubles its step
+driver-robot-motion.adb	Step_Size := Real'Model_Epsilon * (if Scale > 0.0 then Scale else 1.0);	1.0	structure	the resolution of one reading unit when every reading is zero: no size to scale by
 driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	1.0	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
 driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
 driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
 driver-robot-regression.adb	Alpha : Real := 1.0;	1.0	math	the whole step to the restricted least-squares solution, cut back where a coefficient would turn negative
 driver-robot-regression.adb	Eigensystem ((S + Transpose (S)) / 2.0, Values, Vectors);	2.0	numerics	symmetrizing removes round-off asymmetry before the eigendecomposition
+driver-robot-regression.adb	Scale (J) := (if D > 0.0 then Sqrt (D) else 1.0);	1.0	math	a zero diagonal entry belongs to a zero row and column, which scaling leaves as it is
 driver-robot-regression.adb	W : Real_Array (1 .. N) := [others => 1.0];	1.0	math	the iteration starts from ordinary least squares, every weight one
+driver-robot-regression.adb	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean is	1	structure	a count that is no best of many is one test
 driver-robot-regression.adb	return (if R = 0.0 then 1.0 else 0.0);	1.0	math	with a zero scale only exact fits keep their weight
 driver-robot-regression.adb	return (if U <= Huber_K then 1.0 else Huber_K / U);	1.0	math	Huber's weight is one inside the cutoff
+driver-robot-regression.ads	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean	1	structure	a count that is no best of many is one test
 driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
 driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
 driver-robot-steps.adb	elsif Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	two pairs of free shortfalls in a row are the fewest a scatter can be measured from
@@ -640,6 +675,7 @@ driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (S
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
 driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then	2	statistics	a variance needs two frames
 driver-robot.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
+driver-robot.adb	Best := (Value => Step, Sigma => Step * Sqrt (Spread) / (2.0 * Gain), Degrees_Of_Freedom => 0);	2.0	math	the sigma of Z / sqrt (G) from that of G: half its relative error
 driver-robot.adb	S.Condition.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
 driver-robot.adb	S.Condition.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
 driver-robot.adb	S.Du.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent

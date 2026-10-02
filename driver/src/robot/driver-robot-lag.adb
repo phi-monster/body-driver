@@ -1,5 +1,7 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Containers.Vectors;
 with Driver.Robot.Channels;
+with Driver.Stats;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Robot.Flow;
@@ -116,8 +118,49 @@ package body Driver.Robot.Lag is
      (for some I in S.Value'Range => S.Have (I)
         and then (for some J in S.Value'Range => S.Have (J) and then S.Value (J) /= S.Value (I)));
 
+   --  How far a lag can be told at all: a push's response is told from the
+   --  next push's only when it shows before that one starts, so the lag is
+   --  identifiable up to the median stretch between one burst of pushes and
+   --  the next (pushes that each cut the last one short, a ramp, are one
+   --  burst; bursts of groups that start on the same beat are one start).
+   --  Without two bursts, every shift the stream allows.
+   function Identifiable (M : Model; Last : Natural) return Natural is
+      package Natural_Vectors is new Ada.Containers.Vectors (Positive, Natural);
+      package Sorting is new Natural_Vectors.Generic_Sorting;
+      Starts : Natural_Vectors.Vector;
+   begin
+      for S of M.Groups loop
+         if S.Commandable then
+            declare
+               Cut : Boolean := False;
+            begin
+               for E of S.Episodes loop
+                  if not Cut then
+                     Starts.Append (E.Start);
+                  end if;
+                  Cut := E.Ended and then not E.Settled;
+               end loop;
+            end;
+         end if;
+      end loop;
+      Sorting.Sort (Starts);
+      declare
+         Gaps : Real_Array (1 .. Natural (Starts.Length));
+         K    : Natural := 0;
+      begin
+         for I in Starts.First_Index + 1 .. Starts.Last_Index loop
+            if Starts (I) > Starts (I - 1) then
+               K := K + 1;
+               Gaps (K) := Real (Starts (I) - Starts (I - 1));
+            end if;
+         end loop;
+         return (if K = 0 then Last else Natural'Min (Last, Natural (Driver.Stats.Median (Gaps (1 .. K)))));
+      end;
+   end Identifiable;
+
    procedure Measure (M : in out Model) is
       Last : constant Integer := M.Beats - 1;
+      Bound : constant Natural := (if M.Beats > 0 then Identifiable (M, M.Beats - 1) else 0);
    begin
       M.Lags.Clear;
       M.Lag_Known.Clear;
@@ -242,7 +285,7 @@ package body Driver.Robot.Lag is
                   end loop;
                   Motion := Differenced (Motion);
                   Rank (Motion);
-                  for Shift in -Last .. Last loop
+                  for Shift in -Bound .. Bound loop
                      declare
                         Tail : constant Real := Fit_Tail (Motion, Shift);
                      begin
