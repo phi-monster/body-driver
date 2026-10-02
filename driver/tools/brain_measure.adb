@@ -19,6 +19,9 @@
 --       Asks where each NAME is in one picture, as the binder does.
 --    brain_measure where-request IMAGE.ppm NAME
 --       Prints the where-is-it request the driver would send.
+--    brain_measure bindings HOST:PORT SCENES.json QUESTIONS.json ANSWERS.jsonl REPEATS OUT.jsonl
+--       Binds every name the answers of a keyboard run wrote, as a first round
+--       does, and scores it against the thing its question meant.
 --    brain_measure names HOST:PORT REPLAY.json REPEATS OUT.jsonl
 --       Binds the names of recorded programs with the driver's binder, the
 --       eyes asked live, and scores each binding against what the name meant.
@@ -36,6 +39,7 @@
 --  Every quantity keyboard allows one stretch per program.
 
 with Ada.Command_Line;
+with Ada.Containers.Indefinite_Vectors;
 with Ada.Containers.Vectors;
 with Ada.Directories;
 with Ada.Streams.Stream_IO;
@@ -121,10 +125,10 @@ procedure Brain_Measure is
       Eyes : Driver.Brain.Keyboard.Eye_Vectors.Vector;
    begin
       Q.Append ("height");
-      M.Append ("how high it is above the surface it rests on; up lifts it off that surface");
+      M.Append (Driver.Action.Meaning ("height"));
       if Ada.Strings.Fixed.Index (Name, "QH") = Name'First then
          Q.Append ("heading");
-         M.Append ("which way it points on the surface it rests on; up and down turn it one way or the other");
+         M.Append (Driver.Action.Meaning ("heading"));
       end if;
       for E in 1 .. Eye_Count loop
          Eyes.Append (Driver.Observations.Camera_Id (E));
@@ -326,7 +330,10 @@ procedure Brain_Measure is
       end;
    end Setting_Of;
 
-   --  Every question of the file on every keyboard it names, Repeats times.
+   --  Interleaved: each repeat asks every question once on every keyboard it
+   --  names, the keyboards one after another in turn and in the other order
+   --  on the next repeat, so keyboards compared with each other share the
+   --  service's state and its drift over the hours a series takes.
    procedure Each_Answer
      (Path    : String;
       Repeats : Natural;
@@ -336,6 +343,16 @@ procedure Brain_Measure is
       Doc : Driver.Json.Document;
       Ok  : Boolean;
       Why : Unbounded_String;
+
+      type Asked is record
+         N     : Driver.Json.Node;
+         Board : Unbounded_String;
+         S     : Setting;
+      end record;
+
+      package Asked_Vectors is new Ada.Containers.Vectors (Positive, Asked);
+
+      All_Asked : Asked_Vectors.Vector;
    begin
       Driver.Json.Parse (Slurp (Path), Doc, Ok, Why);
       if not Ok then
@@ -355,9 +372,35 @@ procedure Brain_Measure is
                   if Repeats = 0 then
                      Ada.Text_IO.Put_Line (To_String (S.Prompt));
                   end if;
-                  for Rep in 1 .. Repeats loop
-                     Visit (Doc, N, Board, Rep, S);
+                  All_Asked.Append (Asked'(N => N, Board => To_Unbounded_String (Board), S => S));
+               end;
+            end loop;
+         end;
+      end loop;
+      for Rep in 1 .. Repeats loop
+         declare
+            Q_First : Positive := All_Asked.First_Index;
+         begin
+            --  The keyboards of one question are consecutive in All_Asked.
+            while Q_First <= All_Asked.Last_Index loop
+               declare
+                  Q_Last : Positive := Q_First;
+               begin
+                  while Q_Last < All_Asked.Last_Index
+                    and then Driver.Json."=" (All_Asked (Q_Last + 1).N, All_Asked (Q_First).N)
+                  loop
+                     Q_Last := Q_Last + 1;
                   end loop;
+                  if Rep mod 2 = 1 then
+                     for K in Q_First .. Q_Last loop
+                        Visit (Doc, All_Asked (K).N, To_String (All_Asked (K).Board), Rep, All_Asked (K).S);
+                     end loop;
+                  else
+                     for K in reverse Q_First .. Q_Last loop
+                        Visit (Doc, All_Asked (K).N, To_String (All_Asked (K).Board), Rep, All_Asked (K).S);
+                     end loop;
+                  end if;
+                  Q_First := Q_Last + 1;
                end;
             end loop;
          end;
@@ -732,6 +775,195 @@ procedure Brain_Measure is
       Ada.Text_IO.Put_Line ("right" & Right'Image & " of" & Asked'Image);
    end Names_Run;
 
+   --  Bindings of the names answers wrote: every distinct name of a scene
+   --  bound as a first round binds it (no name given before, the eye fixed in
+   --  the scene first), the eyes asked live, each binding scored against the
+   --  thing the question meant by it (the name holds the letters of the
+   --  question's thing or of its second thing; "?" when it holds neither).
+   procedure Bindings_Run is
+      Scene_Doc, Q_Doc, A_Doc : Driver.Json.Document;
+      Ok      : Boolean;
+      Why     : Unbounded_String;
+      Repeats : constant Positive := Positive'Value (Argument (6));
+
+      type Scene_Eyes_Access is access Replay_Eyes;
+      package Scene_Vectors is new Ada.Containers.Vectors (Positive, Scene_Eyes_Access);
+      package Text_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, String);
+
+      Scenes     : Scene_Vectors.Vector;
+      First_Eyes : Text_Vectors.Vector;   --  each scene's first picture, which questions name
+
+      type Name_Use is record
+         Scene : Positive;
+         Name  : Unbounded_String;
+         Meant : Unbounded_String;
+         Count : Natural := 0;
+      end record;
+
+      package Use_Vectors is new Ada.Containers.Vectors (Positive, Name_Use);
+      Uses : Use_Vectors.Vector;
+
+      function Real_Of (D : Driver.Json.Document; N : Driver.Json.Node; K : Positive) return Driver.Real is
+        (Driver.Json.Number (D, Driver.Json.Element (D, N, K)));
+
+      function Region_Of (D : Driver.Json.Document; N : Driver.Json.Node) return Region is
+        ((Eye => Driver.Observations.Camera_Id (Natural (Real_Of (D, N, 1))),
+          X0 => Real_Of (D, N, 2), Y0 => Real_Of (D, N, 3), X1 => Real_Of (D, N, 4), Y1 => Real_Of (D, N, 5)));
+
+      --  The scene's thing whose name holds the letters of Key, or "".
+      function Thing_Named (S : Positive; Key : String) return String is
+      begin
+         if Key'Length > 0 then
+            for T of Scenes (S).Things loop
+               if Has_Letters (To_String (T.Name), Key) then
+                  return To_String (T.Name);
+               end if;
+            end loop;
+         end if;
+         return "";
+      end Thing_Named;
+
+      Out_F : Ada.Text_IO.File_Type;
+      In_F  : Ada.Text_IO.File_Type;
+   begin
+      Configure (Argument (2));
+      Driver.Json.Parse (Slurp (Argument (3)), Scene_Doc, Ok, Why);
+      if Ok then
+         Driver.Json.Parse (Slurp (Argument (4)), Q_Doc, Ok, Why);
+      end if;
+      if not Ok then
+         Ada.Text_IO.Put_Line ("bindings: " & To_String (Why));
+         return;
+      end if;
+      for K in 1 .. Driver.Json.Count (Scene_Doc, Driver.Json.Root (Scene_Doc)) loop
+         declare
+            N      : constant Driver.Json.Node := Driver.Json.Element (Scene_Doc, Driver.Json.Root (Scene_Doc), K);
+            Eyes   : constant Driver.Json.Node := Driver.Json.Lookup (Scene_Doc, N, "eyes");
+            Things : constant Driver.Json.Node := Driver.Json.Lookup (Scene_Doc, N, "things");
+            Self   : constant Driver.Json.Node := Driver.Json.Lookup (Scene_Doc, N, "self");
+            S      : constant Scene_Eyes_Access := new Replay_Eyes;
+         begin
+            for E in 1 .. Driver.Json.Count (Scene_Doc, Eyes) loop
+               S.Images.Append (Read_Ppm (Driver.Json.Text (Scene_Doc, Driver.Json.Element (Scene_Doc, Eyes, E))));
+            end loop;
+            First_Eyes.Append (Driver.Json.Text (Scene_Doc, Driver.Json.Element (Scene_Doc, Eyes, 1)));
+            for T in 1 .. Driver.Json.Count (Scene_Doc, Things) loop
+               declare
+                  TN : constant Driver.Json.Node := Driver.Json.Element (Scene_Doc, Things, T);
+                  Rs : constant Driver.Json.Node := Driver.Json.Lookup (Scene_Doc, TN, "regions");
+                  M  : Marked := (Name    => To_Unbounded_String
+                                    (Driver.Json.Text (Scene_Doc, Driver.Json.Lookup (Scene_Doc, TN, "name"))),
+                                  Regions => <>);
+               begin
+                  for J in 1 .. Driver.Json.Count (Scene_Doc, Rs) loop
+                     M.Regions.Append (Region_Of (Scene_Doc, Driver.Json.Element (Scene_Doc, Rs, J)));
+                  end loop;
+                  S.Things.Append (M);
+               end;
+            end loop;
+            for J in 1 .. Driver.Json.Count (Scene_Doc, Self) loop
+               S.Self.Append (Region_Of (Scene_Doc, Driver.Json.Element (Scene_Doc, Self, J)));
+            end loop;
+            Scenes.Append (S);
+         end;
+      end loop;
+      --  Every name of every answer, with the scene of its question.
+      Ada.Text_IO.Open (In_F, Ada.Text_IO.In_File, Argument (5));
+      while not Ada.Text_IO.End_Of_File (In_F) loop
+         declare
+            Line : constant String := Ada.Text_IO.Get_Line (In_F);
+         begin
+            Driver.Json.Parse (Line, A_Doc, Ok, Why);
+            if Ok then
+               declare
+                  Id      : constant String := Driver.Json.Text (A_Doc, Driver.Json.Lookup (A_Doc, Driver.Json.Root (A_Doc), "id"));
+                  Program : constant String :=
+                    Driver.Json.Text (A_Doc, Driver.Json.Lookup (A_Doc, Driver.Json.Root (A_Doc), "program"));
+                  P       : Driver.Brain.Programs.Program;
+                  Bad     : Driver.Brain.Programs.Refusal;
+               begin
+                  Driver.Brain.Parser.Parse (Program, P, Ok, Bad);
+                  for Q in 1 .. Driver.Json.Count (Q_Doc, Driver.Json.Root (Q_Doc)) loop
+                     declare
+                        QN : constant Driver.Json.Node := Driver.Json.Element (Q_Doc, Driver.Json.Root (Q_Doc), Q);
+                        function Get (K : String) return String is (Driver.Json.Text (Q_Doc, Driver.Json.Lookup (Q_Doc, QN, K)));
+                        First : constant String :=
+                          Driver.Json.Text (Q_Doc, Driver.Json.Element (Q_Doc, Driver.Json.Lookup (Q_Doc, QN, "eyes"), 1));
+                     begin
+                        if Ok and then Get ("id") = Id then
+                           for S in First_Eyes.First_Index .. First_Eyes.Last_Index loop
+                              if First_Eyes (S) = First then
+                                 for N of Driver.Brain.Wants.Names_Of (P) loop
+                                    declare
+                                       Meant : constant String :=
+                                         (if Has_Letters (N, Get ("thing")) then Thing_Named (S, Get ("thing"))
+                                          elsif Has_Letters (N, Get ("other")) then Thing_Named (S, Get ("other"))
+                                          else "?");
+                                       Found : Boolean := False;
+                                    begin
+                                       for U of Uses loop
+                                          if U.Scene = S and then To_String (U.Name) = N then
+                                             U.Count := U.Count + 1;
+                                             Found := True;
+                                          end if;
+                                       end loop;
+                                       if not Found then
+                                          Uses.Append (Name_Use'(Scene => S, Name => To_Unbounded_String (N),
+                                                        Meant => To_Unbounded_String (Meant), Count => 1));
+                                       end if;
+                                    end;
+                                 end loop;
+                              end if;
+                           end loop;
+                        end if;
+                     end;
+                  end loop;
+               end;
+            end if;
+         end;
+      end loop;
+      Ada.Text_IO.Close (In_F);
+      Ada.Text_IO.Put_Line (Uses.Length'Image & " distinct names");
+      Ada.Text_IO.Create (Out_F, Ada.Text_IO.Append_File, Argument (7));
+      declare
+         Glue : constant Driver.Brain.Keyboard.Word_Vectors.Vector := Driver.Brain.Keyboard.Name_Words (Keys ("QH2o", 3));
+         Right, Weight : Natural := 0;
+      begin
+         for U of Uses loop
+            for Rep in 1 .. Repeats loop
+               declare
+                  Table : Driver.Brain.Names.Table;
+                  B     : Driver.Brain.Names.Binding;
+                  Got   : Unbounded_String;
+               begin
+                  Driver.Brain.Names.Bind (Table, Scenes (U.Scene).all, 1, To_String (U.Name), Glue, B);
+                  Driver.Brain.Names.Bind_Again (Table, Glue, To_String (U.Name), B);
+                  Got := To_Unbounded_String
+                    (case B.Kind is
+                        when Driver.Brain.Names.To_Thing =>
+                           To_String (Scenes (U.Scene).Things (Natural (B.Thing)).Name),
+                        when Driver.Brain.Names.To_Place => "a place",
+                        when Driver.Brain.Names.Unbound  => "none");
+                  Weight := Weight + U.Count;
+                  if Got = U.Meant then
+                     Right := Right + U.Count;
+                  end if;
+                  Ada.Text_IO.Put_Line
+                    (Out_F, "{""scene"":" & Driver.Log.Image (U.Scene) & ",""rep"":" & Driver.Log.Image (Rep)
+                     & ",""name"":" & Driver.Json.Quote (To_String (U.Name)) & ",""count"":" & Driver.Log.Image (U.Count)
+                     & ",""meant"":" & Driver.Json.Quote (To_String (U.Meant)) & ",""bound"":"
+                     & Driver.Json.Quote (To_String (Got)) & ",""right"":" & (if Got = U.Meant then "true" else "false")
+                     & ",""account"":" & Driver.Json.Quote (To_String (B.Account)) & "}");
+                  Ada.Text_IO.Flush (Out_F);
+               end;
+            end loop;
+         end loop;
+         Ada.Text_IO.Put_Line ("right, weighted by how often each name was written:" & Right'Image & " of"
+                               & Weight'Image);
+      end;
+      Ada.Text_IO.Close (Out_F);
+   end Bindings_Run;
+
    procedure Where_Run is
       Picture : constant Driver.Images.Image := Read_Ppm (Argument (3));
    begin
@@ -759,6 +991,8 @@ begin
       Over_Questions (Ask_Keyboard'Access);
    elsif Argument_Count >= 5 and then Argument (1) = "truncation" then
       Over_Questions (Ask_Truncation'Access);
+   elsif Argument_Count >= 7 and then Argument (1) = "bindings" then
+      Bindings_Run;
    elsif Argument_Count >= 5 and then Argument (1) = "names" then
       Names_Run;
    elsif Argument_Count >= 6 and then Argument (1) = "stream" then
