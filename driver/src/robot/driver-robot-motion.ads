@@ -41,13 +41,21 @@ package Driver.Robot.Motion is
    --  Holds the body until the instrument has answered every match the
    --  estimators asked of it (the kinematics' keyframes).
 
+   procedure Hold_For_Twin (M : in out Model; A : Arm_Id);
+   --  Holds the body still until the arm's still twin of its reference has
+   --  its match answered or refused (Kinematics.Twin_Answered), so the
+   --  matcher's noise is known before the arm is swept; an arm that carries
+   --  no eye is not held.
+
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real;
    --  The smallest turn of a joint of the arm that moves its eye's view by
-   --  what one cell of the view can tell: Z times the cells' displacement
-   --  noise (Lockin.Cell_Noise) over how far the view moves per reading unit
-   --  of the joint (Lockin.Shift); a keyframe that moves less tells the
-   --  kinematics nothing. Zero when the arm carries no eye or either is not
-   --  measured.
+   --  what both the view and the matcher can tell: Z times the larger of
+   --  the cells' displacement noise (Lockin.Cell_Noise) and the matcher's
+   --  (Kinematics.Match_Noise, from the still twin), over how far the view
+   --  moves per reading unit of the joint (Lockin.Shift); a keyframe that
+   --  moves less tells the kinematics nothing, and A9's showed it makes the
+   --  fit worse. Zero when the arm carries no eye or the shift or the cells'
+   --  noise is not measured.
 
    procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id);
    --  Holds the body until the arm can give its kinematics a keyframe: its

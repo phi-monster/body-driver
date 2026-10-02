@@ -28,6 +28,19 @@ private package Driver.Robot.Kinematics is
    function Matched (M : Model; A : Arm_Id) return Natural;
    --  How many keyframes of the arm have their matches back.
 
+   function Match_Noise (M : Model; A : Arm_Id) return Real;
+   --  How far the matcher errs on the arm's eye: the noise of a round trip,
+   --  the robust scale about zero of every answer's return to its query,
+   --  both coordinates, in pixels (Refit judges by it which keyframes moved
+   --  enough to tell the fit anything); 0 before any answer. The arm's
+   --  second keyframe is a still twin of its reference, taken at the same
+   --  pose, so the matcher's own error is known before any move.
+
+   function Twin_Answered (M : Model; A : Arm_Id) return Boolean;
+   --  The arm's still twin was taken and its match answered or refused, or
+   --  the instrument can never answer: Match_Noise will not change before
+   --  the arm moves.
+
    function Pending (M : Model) return Natural;
    --  Match requests of every arm not answered yet.
 

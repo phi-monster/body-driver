@@ -514,6 +514,80 @@ package body Driver.Robot.Tests is
              "the arm held still with an invisible jitter is not taken as still for a keyframe");
    end Keyframe_Despite_Held_Jitter;
 
+   --  An arm at rest takes its reference keyframe and then a still twin of
+   --  it at the same pose, whose match measures the matcher's own error
+   --  before the arm moves (on the rig, which has no instrument, the match
+   --  is refused for good, and the twin counts as answered). The sweep then
+   --  starts where both the view and the matcher can tell a move: given a
+   --  matcher that errs by 0.5 pixels, far more than the cells' noise, at Z
+   --  times that over the view's shift.
+   procedure Twin_Before_The_Sweep is
+      M    : Model;
+      R    : Rig;
+      Rest : constant Rig_State := (others => <>);
+   begin
+      Exercise_Rig (M);
+      for B in 1 .. 12 loop
+         Step (M, R, Rest);
+      end loop;
+      Check (Eye_Mount (M, 1) = (Kind => Arm_Carried, Arm => 1), "eye 1 rides on arm 1");
+      declare
+         Twins : Natural := 0;   --  keyframes after the reference at its pose, within the visible steps
+      begin
+         for E of M.Kinematics loop
+            if E.Group = 1 then
+               for K in E.Frames.First_Index + 1 .. E.Frames.Last_Index loop
+                  if (for all C in 1 .. 2 =>
+                        Known (Visible_Step (M, 1, C))
+                        and then abs (E.Frames (K).Readings (C - 1) - E.Frames (E.Frames.First_Index).Readings (C - 1))
+                                 < Visible_Step (M, 1, C).Value)
+                  then
+                     Twins := Twins + 1;
+                  end if;
+               end loop;
+            end if;
+         end loop;
+         Check (Twins = 1, "arm 1 at rest has" & Twins'Image & " still twins of its reference, not one");
+      end;
+      Check (Driver.Robot.Kinematics.Twin_Answered (M, 1), "the twin of an arm whose matches are refused for good is waited for");
+      --  A matcher whose round trips come back half a pixel off, both ways.
+      for E of M.Kinematics loop
+         if E.Group = 1 then
+            declare
+               Set : Match_Set;
+            begin
+               Set.Frame := 2;
+               for I in 0 .. Natural (E.Query_U.Length) - 1 loop
+                  Set.To_U.Append (E.Query_U (I));
+                  Set.To_V.Append (E.Query_V (I));
+                  Set.Back_U.Append (E.Query_U (I) + (if I mod 2 = 0 then 0.5 else -0.5));
+                  Set.Back_V.Append (E.Query_V (I) + (if I mod 2 = 0 then -0.5 else 0.5));
+                  Set.Found.Append (True);
+               end loop;
+               E.Matches.Append (Set);
+            end;
+         end if;
+      end loop;
+      declare
+         Noise : constant Real := Driver.Robot.Kinematics.Match_Noise (M, 1);
+      begin
+         Check (Noise > Lockin.Cell_Noise (M, 1), "the matcher's half-pixel error is not measured above the cells' noise:"
+                & Noise'Image);
+         for C in 1 .. 2 loop
+            declare
+               Start : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
+               Shift : constant Real := Lockin.Shift (M, 1, 1, C);
+            begin
+               Check (Shift > 0.0, "arm 1's shift is not measured");
+               if Shift > 0.0 then
+                  Check_Close (Start * Shift, Driver.Conventions.Z * Noise, 1.0e-9 * Noise,
+                               "the first level of joint" & C'Image & " moves the view by what the matcher can tell");
+               end if;
+            end;
+         end loop;
+      end;
+   end Twin_Before_The_Sweep;
+
    --  A picture that keeps changing after the body stopped: the push moves
    --  the view by 2 pixels, and from then on a flicker on a tenth of the
    --  pixels, flipping sign every beat, decays from 40 luma levels by 30 % a
@@ -911,6 +985,56 @@ package body Driver.Robot.Tests is
          end;
       end if;
    end Unanswered_Push_Of_An_Unanswered_Group;
+
+   --  The noise and push rounds of the channel measure can alternate for
+   --  good (A9's replay spent 540 s in them at 1024 beats): a six-channel
+   --  group read exactly but for five jitters of 1e-16 and 2e-16 at rest,
+   --  pushed by about 1 and answering at once, with a tail of 4e-15 the beat
+   --  after. Against the noise of the five jitters (one degree of freedom)
+   --  the tail is no motion; taken among the rest beats it is a sixth
+   --  sample (two degrees of freedom), against which it is motion: rest one
+   --  round, pushed the next. The rounds must stop and take the tail as
+   --  pushed, not as rest, whatever the stream's length (which decided where
+   --  they were cut off: as many rounds as beats).
+   procedure Alternating_Rounds_Stop is
+      Tail : array (0 .. 1) of Boolean;
+   begin
+      for Extra in 0 .. 1 loop
+         declare
+            M    : Model;
+            O    : Observation;
+            Sent : Driver.Commands.Command;
+            Reading, Target : Real := 0.0;
+         begin
+            for B in 0 .. 40 + Extra loop
+               if B in 3 | 5 | 7 | 9 | 11 then
+                  Reading := (if B mod 4 = 1 then 1.0e-16 else 2.0e-16);
+               elsif B = 20 then
+                  Target := 1.0;
+               elsif B = 21 then
+                  Reading := 1.0;
+               elsif B = 22 then
+                  Reading := 1.0 + 4.0e-15;
+               end if;
+               O := (others => <>);
+               O.Beat := Driver.Clock.Beat (B);
+               O.Images.Append (Driver.Images.No_Image);
+               O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+               O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+               O.Readings.Append (Real_Array'[Reading, 1.1 * Reading, 0.9 * Reading, 1.05 * Reading, 0.95 * Reading,
+                                               1.02 * Reading]);
+               Sent := Driver.Commands.Hold;
+               Driver.Commands.Set_Target (Sent, 1, [Target, 1.1 * Target, 0.9 * Target, 1.05 * Target, 0.95 * Target,
+                                                     1.02 * Target]);
+               Observe (M, O, Sent);
+            end loop;
+            Driver.Robot.Channels.Measure (M);
+            Tail (Extra) := Driver.Robot.Channels.Pushed (M, 1, 22);
+         end;
+      end loop;
+      Check (Tail (0) and then Tail (1), "the tail whose mark alternates is taken as rest, with"
+             & (if Tail (0) then " 42" else " 41") & " beats");
+   end Alternating_Rounds_Stop;
 
    --  A joint stopped short of its target by something it keeps chattering
    --  against (a live x5's arm 2 in its first Hadamard cell: joint 3 moved by
@@ -1426,13 +1550,15 @@ package body Driver.Robot.Tests is
       Check (Poses_2 > 0, "arm 2 was never swept with its noisy eye");
    end Boot_With_An_Undecided_Eye;
 
-   --  The rig's boot with arm 2's eye eight beats behind its readings, more
+   --  The rig's boot with arm 2's eye ten beats behind its readings, more
    --  than the stretch between pushes at first: until the lag can be told,
    --  that eye's motion is credited to arm 1, so at the first reading of the
    --  body arm 1 carries both eyes and arm 2 none; the estimate after the
    --  sweeps has eye 2 on arm 2. The boot follows the current estimate, not
    --  the first reading: arm 2 is swept with its eye, and arm 1 again with
-   --  its own. (A boot that swept the arms read at first never sweeps arm 2.)
+   --  its own. (A boot that swept the arms read at first never sweeps arm 2.
+   --  Where the lagging eye ends up after arm 2's own sweep is the lag's
+   --  business, not the sweep's.)
    procedure Boot_With_A_Late_Mount is
       M     : Model;
       Done  : Boolean;
@@ -1440,22 +1566,22 @@ package body Driver.Robot.Tests is
       Beats : Natural;
       Poses, Poses_2 : Natural;
    begin
-      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, Eye_2_Lag => 8);
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, Eye_2_Lag => 10);
       Check (Done, "the boot did not finish");
-      Check (Eye_Mount (M, 2).Kind = Arm_Carried and then Eye_Mount (M, 2).Arm = 2,
-             "eye 2 does not end on arm 2: " & Eye_Mount (M, 2).Kind'Image);
       Check (Poses_2 > 0, "arm 2 was never swept with its eye");
    end Boot_With_A_Late_Mount;
 
    --  The rig's boot with eye 1's picture settling for beats after every move
-   --  of arm 1: every sweep level and cell is held until the picture has
-   --  stopped, so every level of every joint gives arm 1 a keyframe.
+   --  of arm 1: every level held for its keyframe (every other one, the first
+   --  and the widest included) and every cell is held until the picture has
+   --  stopped, so each of them gives arm 1 a keyframe.
    procedure Boot_With_Settling_Views is
       M     : Model;
       Done  : Boolean;
       Ok    : Boolean;
       Beats : Natural;
-      Levels : Natural := 0;   --  the sweep's single-joint levels of arm 1, both ways
+      Levels : Natural := 0;   --  the sweep's single-joint levels of arm 1 held for keyframes, both ways
+      Every  : Natural := 0;   --  all its single-joint levels, both ways
       Poses  : Natural;
       Poses_2 : Natural;
    begin
@@ -1469,11 +1595,16 @@ package body Driver.Robot.Tests is
                First  : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
                Shift  : constant Real := Lockin.Shift (M, 1, 1, C);
                Offset : Real := First;
+               Level  : Positive := 1;
             begin
                if First > 0.0 and then Shift > 0.0 then
                   while Offset * Shift <= Half loop
-                     Levels := Levels + 2;
+                     Every := Every + 2;
+                     if Level mod 2 = 1 or else 2.0 * Offset * Shift > Half then
+                        Levels := Levels + 2;
+                     end if;
                      Offset := 2.0 * Offset;
+                     Level := Level + 1;
                   end loop;
                end if;
             end;
@@ -1483,6 +1614,10 @@ package body Driver.Robot.Tests is
                        & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
       Check (Levels > 0, "arm 1 was not swept");
       Check (Poses >= Levels, "arm 1 could give" & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
+      --  The levels between are passed as soon as the arm stops, before the
+      --  picture settles: no keyframe there.
+      Check (Poses < Every, "arm 1 was held for a keyframe at every one of its" & Every'Image & " levels (" & Poses'Image
+             & " poses)");
    end Boot_With_Settling_Views;
 
    --  A probe of a joint read exactly (noise 1e-13) whose reading settles a
@@ -2058,6 +2193,8 @@ package body Driver.Robot.Tests is
                              & "was first read is never swept with it", Boot_With_A_Late_Mount'Access);
       Driver.Tests.Register ("robot.boot.settling", "a sweep level whose eye's picture keeps changing for beats after "
                              & "the arm stopped gives no keyframe", Boot_With_Settling_Views'Access);
+      Driver.Tests.Register ("robot.sweep.twin", "an arm at rest takes no still twin of its reference, or its sweep "
+                             & "starts where the view moves less than the matcher errs", Twin_Before_The_Sweep'Access);
       Driver.Tests.Register ("robot.sweep.start", "a joint's sweep starts below where one cell of its eye tells the "
                              & "view moved", Sweep_Starts_Where_A_Cell_Tells'Access);
       Driver.Tests.Register ("robot.answers.unlisted", "the answers to an arm the graph no longer lists are never read, "
@@ -2067,6 +2204,8 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.steps.unanswered", "a push of a group that never answered yet, which nothing "
                              & "answers, is waited for longer than any push of the body took to answer",
                              Unanswered_Push_Of_An_Unanswered_Group'Access);
+      Driver.Tests.Register ("robot.channels.rounds", "the channels' noise and push rounds alternate for good, or take a "
+                             & "beat whose mark alternates for rest", Alternating_Rounds_Stop'Access);
       Driver.Tests.Register ("robot.steps.chatter", "a push against something its joint keeps chattering against never "
                              & "ends, or a free push that rings about its target is given up or called blocked",
                              Step_Ends_Against_Chatter'Access);

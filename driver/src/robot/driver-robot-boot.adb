@@ -238,6 +238,7 @@ package body Driver.Robot.Boot is
          end Read_Size;
       begin
          Driver.Beats.Within_A_Beat (Read_Size'Access);
+         Driver.Robot.Motion.Hold_For_Twin (M, A);
          declare
             First, Per_Unit : Real_Array (1 .. Size) := [others => 0.0];
             Half   : Real := 0.0;
@@ -285,6 +286,7 @@ package body Driver.Robot.Boot is
                for P of Order (1 .. Count) loop
                   declare
                      Offset : Real := First (P.Channel);
+                     Level  : Positive := 1;
                   begin
                      while Offset * Per_Unit (P.Channel) <= Half loop
                         declare
@@ -292,14 +294,25 @@ package body Driver.Robot.Boot is
                         begin
                            Pose (P.Channel) := Start (P.Channel) + P.Sign * Offset;
                            Go_To (G, Pose, Report);
-                           --  An arm given up while it kept moving (chattering
-                           --  against what stops it) gives no keyframe there.
-                           if Report.At_Rest then
+                           --  Every other level is held for its keyframe, the
+                           --  first and the widest included: keyframes over
+                           --  every scale from the matcher's limit to the widest
+                           --  turn, one per two doublings, fit as well as one per
+                           --  doubling (A9's arm: 59 keyframes against 97, the
+                           --  same against truth), and the holds are most of the
+                           --  sweep. An arm given up while it kept moving
+                           --  (chattering against what stops it) gives no
+                           --  keyframe there.
+                           if Report.At_Rest
+                             and then (Level mod 2 = 1 or else Report.Outcome /= Driver.Robot.Motion.Reached
+                                       or else 2.0 * Offset * Per_Unit (P.Channel) > Half)
+                           then
                               Driver.Robot.Motion.Hold_For_Keyframe (M, A);
                            end if;
                            exit when Report.Outcome /= Driver.Robot.Motion.Reached;
                         end;
                         Offset := 2.0 * Offset;
+                        Level := Level + 1;
                      end loop;
                   end;
                   Go_To (G, Start, Report);

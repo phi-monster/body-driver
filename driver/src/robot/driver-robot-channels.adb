@@ -331,7 +331,16 @@ package body Driver.Robot.Channels is
       --  reading changes at all and the tail of a slow response is never
       --  taken for rest; the noise measured outside those pushes is then the
       --  jitter alone, or zero where a reading has none. Each round can only
-      --  move push marks, so as many rounds as beats bound it.
+      --  move push marks, so as many rounds as beats bound it. The rounds can
+      --  also alternate: a beat right after a push whose change is
+      --  significant against the noise measured with it among the rest
+      --  beats, and not against the noise measured without it (with few
+      --  nonzero rest changes, their degrees of freedom move with it), is
+      --  rest one round and pushed the next, for good (A9's replay spent 540
+      --  s in such rounds at 1024 beats). When a round brings back the marks
+      --  of the round before the last, every beat either of the two marked
+      --  is taken as pushed, not as rest, and the noise is measured once more
+      --  outside them.
       declare
          Total : Natural := 0;
       begin
@@ -343,24 +352,42 @@ package body Driver.Robot.Channels is
          M.Noise_Freedom.Clear;
          M.Noise_Freedom.Append (0, Ada.Containers.Count_Type (Total));
       end;
-      for Round in 0 .. Beats loop
-         if Round > 0 then
-            Measure_Noise (M);
-         end if;
-         declare
-            Before : array (M.Groups.First_Index .. M.Groups.Last_Index) of Flag_Vectors.Vector;
-            Same   : Boolean := True;
-         begin
-            for G in Before'Range loop
-               Before (G) := M.Groups (G).Pushed;
-            end loop;
-            Measure_Pushes (M);
-            for G in Before'Range loop
-               Same := Same and then Flag_Vectors."=" (Before (G), M.Groups (G).Pushed);
-            end loop;
-            exit when Same and then Round > 0;
-         end;
-      end loop;
+      declare
+         --  The marks of the round before, and of the one before that.
+         type Marks is array (M.Groups.First_Index .. M.Groups.Last_Index) of Flag_Vectors.Vector;
+         Before, Older : Marks;
+      begin
+         for Round in 0 .. Beats loop
+            if Round > 0 then
+               Measure_Noise (M);
+            end if;
+            declare
+               Same, Back : Boolean := True;
+            begin
+               for G in Before'Range loop
+                  Older (G) := Before (G);
+                  Before (G) := M.Groups (G).Pushed;
+               end loop;
+               Measure_Pushes (M);
+               for G in Before'Range loop
+                  Same := Same and then Flag_Vectors."=" (Before (G), M.Groups (G).Pushed);
+                  Back := Back and then Flag_Vectors."=" (Older (G), M.Groups (G).Pushed);
+               end loop;
+               exit when Same and then Round > 0;
+               if Back and then Round > 1 then
+                  for G in Before'Range loop
+                     for B in 0 .. Natural (M.Groups (G).Pushed.Length) - 1 loop
+                        if B < Natural (Before (G).Length) and then Before (G) (B) then
+                           M.Groups (G).Pushed.Replace_Element (B, True);
+                        end if;
+                     end loop;
+                  end loop;
+                  Measure_Noise (M);
+                  exit;
+               end if;
+            end;
+         end loop;
+      end;
    end Measure;
 
    function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean is
