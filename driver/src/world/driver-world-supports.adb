@@ -431,9 +431,26 @@ package body Driver.World.Supports is
             S      : constant Surface := Surfaces (F);
             P      : constant Driver.Geometry.Plane_Estimate := S.Plane;
             Lowest : Positive := Points'First;
+            Reach  : Real := Real'Last;   --  how low the lowest so far says the thing surely reaches
+
+            function Surely_Down_To (I : Positive) return Real is
+               --  A point says the thing reaches down to its height or lower,
+               --  surely only to as high as its uncertainty takes it: one of
+               --  a family of as many points.
+               H : constant Estimate := Driver.Geometry.Height (P, Points (I));
+            begin
+               return (if H.Sigma < Real'Last
+                       then H.Value
+                            + Threshold (Scalar_Gate (H.Degrees_Of_Freedom, Tests => Points'Length)) * H.Sigma
+                       else Real'Last);
+            end Surely_Down_To;
          begin
+            --  The lowest point is the one that says the thing reaches lowest
+            --  at its own uncertainty: a point uncertain by a hand's breadth,
+            --  whatever its mean, says little of how low the thing is.
             for I in Points'Range loop
-               if Driver.Geometry.Height (P, Points (I).Mean) < Driver.Geometry.Height (P, Points (Lowest).Mean) then
+               if Surely_Down_To (I) < Reach then
+                  Reach := Surely_Down_To (I);
                   Lowest := I;
                end if;
             end loop;

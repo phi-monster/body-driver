@@ -199,6 +199,32 @@ package body Driver.World.Supports.Tests is
             end;
             Check (On_Table.Index = 1 and then Resting (On_Table) and then On_Table.Touching,
                    "a thing on the table does not rest on it");
+            declare
+               --  One wild point among them, its mean far under the table but
+               --  uncertain by a hand's breadth (as a wrong match leaves one):
+               --  it says nothing of how low the thing reaches. On the table,
+               --  the thing still touches it at its own points' height; held
+               --  above it, its bottom is still not seen.
+               function With_Wild (Thing : Driver.Geometry.Point_Array) return Driver.Geometry.Point_Array is
+                  Result : Driver.Geometry.Point_Array (1 .. Thing'Length + 1);
+               begin
+                  Result (1 .. Thing'Length) := Thing;
+                  Result (Result'Last) :=
+                    (Mean       => [0.3, 0.2, Table_Z (0.3) - 0.164],
+                     Covariance => [[0.099 ** 2, 0.0, 0.0], [0.0, 0.099 ** 2, 0.0], [0.0, 0.0, 0.099 ** 2]]);
+                  return Result;
+               end With_Wild;
+               Down   : constant Support := Under (Found, With_Wild (Table_Thing), Up, None'Access);
+               Raised : constant Support :=
+                 Under (Found, With_Wild (Thing (0.3, 0.2, Table_Z (0.3) + 0.05)), Up, None'Access);
+            begin
+               Check (Down.Index = 1 and then Down.Touching and then Down.Height.Sigma < 0.01
+                        and then Resting (Down),
+                      "a wild point under a thing on the table set its height:" & Down.Height.Value'Image & " +-"
+                      & Down.Height.Sigma'Image);
+               Check (Raised.Index = 1 and then not Raised.Touching and then abs (Raised.Height.Value - 0.05) < 0.01,
+                      "a wild point under a thing above the table made it touch, at" & Raised.Height.Value'Image);
+            end;
             Check (On_Box.Index = 2 and then Resting (On_Box) and then On_Box.Touching,
                    "a thing on the box does not rest on the box");
             Check (Lifted.Index = 1 and then abs (Lifted.Height.Value - 0.2) < 0.01 and then not Lifted.Touching,

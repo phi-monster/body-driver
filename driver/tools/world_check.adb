@@ -142,6 +142,7 @@ procedure World_Check is
    type Truth_Line is record
       Cameras : Pose_Maps.Map;    --  camera name -> optical frame
       Objects : Pose_Maps.Map;    --  object name -> pose of its root
+      Links   : Pose_Maps.Map;    --  robot link name -> pose of its root
       State   : Value_Maps.Map;   --  state key -> the observation's own values
    end record;
 
@@ -160,6 +161,7 @@ procedure World_Check is
    Lenses      : Lens_Maps.Map;
    Store       : Unbounded_String;
    Object_Keys : Key_Maps.Map;   --  object name -> geometry file in the store
+   Link_Keys   : Key_Maps.Map;   --  robot link name -> geometry file in the store
 
    procedure Read_Truth (Path : String) is
       use Driver.Json;
@@ -174,11 +176,17 @@ procedure World_Check is
          if Ok and then Text (Doc, Lookup (Doc, Root (Doc), "kind")) = "geometry" then
             declare
                Objects : constant Node := Lookup (Doc, Root (Doc), "objects");
+               Links   : constant Node := Lookup (Doc, Root (Doc), "links");
             begin
                Store := To_Unbounded_String (Text (Doc, Lookup (Doc, Root (Doc), "store")));
                for I in 1 .. Count (Doc, Objects) loop
                   if Kind_Of (Doc, Member_Value (Doc, Objects, I)) = String_Value then
                      Object_Keys.Include (Member_Name (Doc, Objects, I), Text (Doc, Member_Value (Doc, Objects, I)));
+                  end if;
+               end loop;
+               for I in 1 .. Count (Doc, Links) loop
+                  if Kind_Of (Doc, Member_Value (Doc, Links, I)) = String_Value then
+                     Link_Keys.Include (Member_Name (Doc, Links, I), Text (Doc, Member_Value (Doc, Links, I)));
                   end if;
                end loop;
             end;
@@ -188,6 +196,7 @@ procedure World_Check is
                Cameras : constant Node := Lookup (Doc, Root (Doc), "cameras");
                Objects : constant Node := Lookup (Doc, Root (Doc), "objects");
                State   : constant Node := Lookup (Doc, Root (Doc), "state");
+               Links   : constant Node := Lookup (Doc, Root (Doc), "links");
             begin
                for I in 1 .. Count (Doc, State) loop
                   L.State.Include (Member_Name (Doc, State, I), Numbers_Of (Doc, Member_Value (Doc, State, I)));
@@ -196,6 +205,9 @@ procedure World_Check is
                   L.Objects.Include (Member_Name (Doc, Objects, I),
                                      Quaternion_Pose (Numbers_Of (Doc, Lookup (Doc, Member_Value (Doc, Objects, I),
                                                                                "pose"))));
+               end loop;
+               for I in 1 .. Count (Doc, Links) loop
+                  L.Links.Include (Member_Name (Doc, Links, I), Quaternion_Pose (Numbers_Of (Doc, Member_Value (Doc, Links, I))));
                end loop;
                for I in 1 .. Count (Doc, Cameras) loop
                   declare
@@ -317,6 +329,8 @@ procedure World_Check is
       Optical : Rigid;
       Of_Lens : Lens;
       Known   : Boolean := False;
+      Line    : Natural := 0;           --  the truth line it was taken at
+      Name    : Unbounded_String;       --  the truth camera's name
    end record;
 
    overriding function Width (C : Truth_Camera) return Natural is (C.Of_Lens.Width);
@@ -361,9 +375,6 @@ procedure World_Check is
      ((Pose => C.Optical, Position_Covariance => [others => [others => 0.0]],
        Rotation_Covariance => [others => [others => 0.0]]));
 
-   function Self_Mask (C : Truth_Camera) return Driver.Images.Mask is
-     (Driver.Images.Create (C.Of_Lens.Width, C.Of_Lens.Height));
-
    Camera_Paths : Name_Vectors.Vector;   --  the layout's camera paths, in eye order
 
    function Camera_Name (Eye : Eye_Id) return String is
@@ -396,6 +407,8 @@ procedure World_Check is
          Result.Optical := Truth (Line_Of_Beat (Shot)).Cameras (Name);
          Result.Of_Lens := Lenses (Name);
          Result.Known := True;
+         Result.Line := Line_Of_Beat (Shot);
+         Result.Name := To_Unbounded_String (Name);
       end if;
       return Result;
    end True_Camera;
@@ -675,6 +688,86 @@ procedure World_Check is
       end loop;
       return S;
    end Place;
+
+   package Mask_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, Driver.Images.Mask, "<",
+                                                                    Driver.Images."=");
+   Self_Masks : Mask_Maps.Map;   --  by camera and truth line, each drawn once
+
+   function Self_Mask (C : Truth_Camera) return Driver.Images.Mask is
+      --  The pixels the robot's own links cover in this eye, drawn from their
+      --  true poses and meshes at the truth line the image was taken at: the
+      --  harness's stand-in for the self mask the body measures, as its eyes
+      --  stand in for the body's. Each triangle in front of the eye is filled
+      --  where its corners land, cut to the image.
+      Key    : constant String := To_String (C.Name) & Natural'Image (C.Line);
+      Result : Driver.Images.Mask := Driver.Images.Create (C.Of_Lens.Width, C.Of_Lens.Height);
+   begin
+      if not C.Known or else C.Line = 0 then
+         return Result;
+      end if;
+      if Self_Masks.Contains (Key) then
+         return Self_Masks (Key);
+      end if;
+      for L in Truth (C.Line).Links.Iterate loop
+         if Link_Keys.Contains (Pose_Maps.Key (L)) then
+            declare
+               M    : constant Mesh := Mesh_Of (Link_Keys (Pose_Maps.Key (L)));
+               Pose : constant Rigid := Pose_Maps.Element (L);
+            begin
+               for T of M.Triangles loop
+                  declare
+                     Corners : constant array (1 .. 3) of Vec3 := [T.A, T.B, T.C];
+                     U, V    : Real_Array (1 .. 3);
+                     Front   : Boolean := True;
+                  begin
+                     for K in Corners'Range loop
+                        declare
+                           In_Eye  : constant Vec3 :=
+                             Transpose (C.Optical.Rotation) * (Pose * Corners (K) - C.Optical.Translation);
+                           Visible : Boolean;
+                        begin
+                           True_Pixel (C.Of_Lens, In_Eye, U (K), V (K), Visible);
+                           --  A pinhole places a point in front anywhere, in the
+                           --  image or not; a fisheye only within its field.
+                           Front := Front and then In_Eye (3) > 0.0 and then (C.Of_Lens.Has_K or else Visible);
+                        end;
+                     end loop;
+                     if Front then
+                        declare
+                           Area : constant Real := (U (2) - U (1)) * (V (3) - V (1)) - (U (3) - U (1)) * (V (2) - V (1));
+                           C0   : constant Integer := Integer'Max (0, Integer (Real'Floor (Real'Min (U (1), Real'Min (U (2), U (3))))));
+                           C1   : constant Integer :=
+                             Integer'Min (C.Of_Lens.Width - 1, Integer (Real'Floor (Real'Max (U (1), Real'Max (U (2), U (3))))));
+                           R0   : constant Integer := Integer'Max (0, Integer (Real'Floor (Real'Min (V (1), Real'Min (V (2), V (3))))));
+                           R1   : constant Integer :=
+                             Integer'Min (C.Of_Lens.Height - 1, Integer (Real'Floor (Real'Max (V (1), Real'Max (V (2), V (3))))));
+                        begin
+                           if Area /= 0.0 then
+                              for Row in R0 .. R1 loop
+                                 for Column in C0 .. C1 loop
+                                    declare
+                                       X  : constant Real := Real (Column) + 0.5;
+                                       Y  : constant Real := Real (Row) + 0.5;
+                                       W1 : constant Real := ((U (2) - X) * (V (3) - Y) - (U (3) - X) * (V (2) - Y)) / Area;
+                                       W2 : constant Real := ((U (3) - X) * (V (1) - Y) - (U (1) - X) * (V (3) - Y)) / Area;
+                                    begin
+                                       if W1 >= 0.0 and then W2 >= 0.0 and then W1 + W2 <= 1.0 then
+                                          Driver.Images.Include (Result, Column, Row);
+                                       end if;
+                                    end;
+                                 end loop;
+                              end loop;
+                           end if;
+                        end;
+                     end if;
+                  end;
+               end loop;
+            end;
+         end if;
+      end loop;
+      Self_Masks.Include (Key, Result);
+      return Result;
+   end Self_Mask;
 
    function Middle_Of (M : Mesh; Pose : Rigid) return Vec3 is
       --  The mean of the mesh's vertices, placed.
@@ -972,57 +1065,58 @@ procedure World_Check is
    Regions_At     : Natural := Natural'Last;   --  the beat whose regions are written, when asked
    Regions_Prefix : Unbounded_String;
 
-   procedure Write_Regions (O : Observation) is
-      --  Every thing's region in every eye that holds it, as that eye's image
-      --  with the region's pixels lit red: PREFIX.THING.EYE.ppm.
+   procedure Write_Lit (Picture : Driver.Images.Image; Region : Driver.Images.Mask; Name : String) is
+      --  The image with the region's pixels lit red, as a PPM file.
+      use Ada.Streams.Stream_IO;
+      use type Ada.Streams.Stream_Element_Offset;
+      W     : constant Natural := Driver.Images.Width (Picture);
+      H     : constant Natural := Driver.Images.Height (Picture);
+      Bytes : Driver.Bytes.Byte_Array (1 .. Ada.Streams.Stream_Element_Offset (3 * W * H));
+      F     : File_Type;
+      K     : Ada.Streams.Stream_Element_Offset := 1;
+      Lit   : Boolean;
    begin
-      for C in Things.Iterate loop
-         for E in 1 .. Eye_Id'Base (Natural (O.Images.Length)) loop
-            declare
-               T : constant Driver.World.Thing_Id := Adopted_Maps.Key (C);
-            begin
-               if Driver.Observations.Has_Image (O, E)
-                 and then Driver.Images.Count (Driver.World.Offline.Region_In (Bench, T, E)) > 0
-               then
-                  declare
-                     use Ada.Streams.Stream_IO;
-                     use type Ada.Streams.Stream_Element_Offset;
-                     Picture : constant Driver.Images.Image := O.Images (E);
-                     Region  : constant Driver.Images.Mask := Driver.World.Offline.Region_In (Bench, T, E);
-                     W       : constant Natural := Driver.Images.Width (Picture);
-                     H       : constant Natural := Driver.Images.Height (Picture);
-                     Bytes   : Driver.Bytes.Byte_Array (1 .. Ada.Streams.Stream_Element_Offset (3 * W * H));
-                     F       : File_Type;
-                     K       : Ada.Streams.Stream_Element_Offset := 1;
-                     Lit     : Boolean;
-                  begin
-                     for Row in 0 .. H - 1 loop
-                        for Column in 0 .. W - 1 loop
-                           Lit := Column < Driver.Images.Width (Region) and then Row < Driver.Images.Height (Region)
-                             and then Driver.Images.Contains (Region, Column, Row);
-                           Bytes (K) := Ada.Streams.Stream_Element
-                             (if Lit then 255 else Driver.Images.Red (Picture, Column, Row));
-                           Bytes (K + 1) := Ada.Streams.Stream_Element
-                             (if Lit then Driver.Images.Green (Picture, Column, Row) / 2
-                              else Driver.Images.Green (Picture, Column, Row));
-                           Bytes (K + 2) := Ada.Streams.Stream_Element
-                             (if Lit then Driver.Images.Blue (Picture, Column, Row) / 2
-                              else Driver.Images.Blue (Picture, Column, Row));
-                           K := K + 3;
-                        end loop;
-                     end loop;
-                     Create (F, Out_File, To_String (Regions_Prefix) & "." & Image (Natural (T)) & "."
-                             & Image (Natural (E)) & ".ppm");
-                     Write (F, Driver.Bytes.To_Bytes ("P6" & ASCII.LF & Image (W) & " " & Image (H) & ASCII.LF
-                                                      & "255" & ASCII.LF));
-                     Write (F, Bytes);
-                     Close (F);
-                  end;
-               end if;
-            end;
+      for Row in 0 .. H - 1 loop
+         for Column in 0 .. W - 1 loop
+            Lit := Column < Driver.Images.Width (Region) and then Row < Driver.Images.Height (Region)
+              and then Driver.Images.Contains (Region, Column, Row);
+            Bytes (K) := Ada.Streams.Stream_Element (if Lit then 255 else Driver.Images.Red (Picture, Column, Row));
+            Bytes (K + 1) := Ada.Streams.Stream_Element
+              (if Lit then Driver.Images.Green (Picture, Column, Row) / 2 else Driver.Images.Green (Picture, Column, Row));
+            Bytes (K + 2) := Ada.Streams.Stream_Element
+              (if Lit then Driver.Images.Blue (Picture, Column, Row) / 2 else Driver.Images.Blue (Picture, Column, Row));
+            K := K + 3;
          end loop;
       end loop;
-      Ada.Text_IO.Put_Line ("beat" & Beat'Image & ": the things' regions written");
+      Create (F, Out_File, Name);
+      Write (F, Driver.Bytes.To_Bytes ("P6" & ASCII.LF & Image (W) & " " & Image (H) & ASCII.LF & "255" & ASCII.LF));
+      Write (F, Bytes);
+      Close (F);
+   end Write_Lit;
+
+   procedure Write_Regions (O : Observation) is
+      --  Every thing's region in every eye that holds it, and the robot's own
+      --  pixels in every eye, each lit red on that eye's image:
+      --  PREFIX.THING.EYE.ppm and PREFIX.self.EYE.ppm.
+   begin
+      for E in 1 .. Eye_Id'Base (Natural (O.Images.Length)) loop
+         if Driver.Observations.Has_Image (O, E) then
+            Write_Lit (O.Images (E), True_Camera (E, Beat).Self_Mask,
+                       To_String (Regions_Prefix) & ".self." & Image (Natural (E)) & ".ppm");
+            for C in Things.Iterate loop
+               declare
+                  T : constant Driver.World.Thing_Id := Adopted_Maps.Key (C);
+               begin
+                  if Driver.Images.Count (Driver.World.Offline.Region_In (Bench, T, E)) > 0 then
+                     Write_Lit (O.Images (E), Driver.World.Offline.Region_In (Bench, T, E),
+                                To_String (Regions_Prefix) & "." & Image (Natural (T)) & "." & Image (Natural (E))
+                                & ".ppm");
+                  end if;
+               end;
+            end loop;
+         end if;
+      end loop;
+      Ada.Text_IO.Put_Line ("beat" & Beat'Image & ": the things' regions and the robot's own pixels written");
    end Write_Regions;
 
    procedure Adopt_Objects (O : Observation) is
