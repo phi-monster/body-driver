@@ -1500,6 +1500,181 @@ package body Driver.Robot.Tests is
       Check (Steps = 9, "the probe called the joint's end after" & Steps'Image & " levels, not 9");
    end Probe_A_Drooping_Joint;
 
+   --  ── Probing a channel both ways ──
+   --
+   --  The rig of the drooping-joint probe, its group 5 (which no eye sees)
+   --  resting at 0 and reading its target as Kind says, probed both ways
+   --  from 1e-5 against Bound (where every other channel of the body has
+   --  answered). The largest targets asked of it each way are kept.
+
+   type Idle_Kind is (At_Upper_Limit, Deadband, Disconnected);
+
+   --  At its upper limit, 0, and free down to -1e-3; a deadband of 5e-5 each
+   --  way, free beyond to 1e-3; disconnected, never moving.
+   function Idle_Reading (Kind : Idle_Kind; Target : Real) return Real is
+     (case Kind is
+         when At_Upper_Limit => Real'Max (-1.0e-3, Real'Min (Target, 0.0)),
+         when Deadband       => (if abs Target < 5.0e-5 then 0.0 else Real'Max (-1.0e-3, Real'Min (Target, 1.0e-3))),
+         when Disconnected   => 0.0);
+
+   procedure Probe_Idle_Both_Ways
+     (Kind     : Idle_Kind;
+      Bound    : Real;
+      Report   : out Driver.Robot.Motion.Two_Way_Report;
+      Up, Down : out Real;
+      Finished : out Boolean)
+   is
+      M     : Model;
+      Done  : Boolean := False with Atomic;
+      Got   : Driver.Robot.Motion.Two_Way_Report;
+
+      task Decider;
+      task body Decider is
+         W : Natural;
+         procedure Estimate is
+         begin
+            Estimate_Now (M);
+         end Estimate;
+      begin
+         Driver.Robot.Motion.Settle (M, W);
+         Driver.Robot.Motion.Hold (M, 100);
+         for K in 1 .. 16 loop
+            declare
+               C  : Driver.Commands.Command;
+               SR : Driver.Robot.Motion.Step_Report;
+            begin
+               --  Arm 1, which eye 1 sees, for the body's delay and the eyes' lag.
+               Driver.Commands.Set_Target (C, 1, [(if K mod 2 = 1 then 0.1 else 0.0), 0.0]);
+               Driver.Robot.Motion.Step (M, C, SR);
+               Driver.Robot.Motion.Hold (M, 2 + K mod 4);
+            end;
+         end loop;
+         Driver.Beats.Within_A_Beat (Estimate'Access);
+         Driver.Robot.Motion.Gather_Rest (M, 2);
+         Driver.Robot.Motion.Probe_Both_Ways (M, (Group => 5, Channel => 1), 1.0e-5, Bound, Got);
+         Done := True;
+      exception
+         when others =>
+            Driver.Beats.Release;
+            Done := True;
+      end Decider;
+
+      Now, Shown : Rig_State;
+      Sent  : Driver.Commands.Command;
+      Rng   : Generator;
+   begin
+      Up := 0.0;
+      Down := 0.0;
+      begin
+         for B in 0 .. 5_000 loop
+            exit when Done;
+            declare
+               O       : Observation;
+               Took    : Boolean := False;
+               Pending : Driver.Commands.Command;
+            begin
+               O.Beat := Driver.Clock.Beat (B);
+               for E in 1 .. 3 loop
+                  O.Images.Append (Render (E, Shown));
+                  O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+               end loop;
+               O.Readings.Append (Now.Arm_1);
+               O.Readings.Append (Now.Arm_2);
+               O.Readings.Append (Real_Array'(1 => Now.Closer));
+               O.Readings.Append (Real_Array'(1 => Now.Part));
+               O.Readings.Append (Real_Array'(1 => Now.Idle + 1.0e-13 * Gaussian (Rng)));
+               for G in 1 .. 5 loop
+                  O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+               end loop;
+               if B = 0 then
+                  Driver.Commands.Set_Target (Sent, 1, Now.Arm_1);
+                  Driver.Commands.Set_Target (Sent, 2, Now.Arm_2);
+                  Driver.Commands.Set_Target (Sent, 3, [Now.Closer]);
+                  Driver.Commands.Set_Target (Sent, 4, [Now.Part]);
+                  Driver.Commands.Set_Target (Sent, 5, [Now.Idle]);
+               end if;
+               Observe (M, O, Sent);
+               loop
+                  Driver.Beats.Offer (O.Beat, O, Sent, Took);
+                  exit when Took or else Done;
+                  delay 0.0;
+               end loop;
+               exit when not Took;
+               Driver.Beats.Await (Pending);
+               for G in Group_Id range 1 .. 5 loop
+                  if Driver.Commands.Has_Target (Pending, G) then
+                     Driver.Commands.Set_Target (Sent, G, Driver.Commands.Target (Pending, G));
+                  end if;
+               end loop;
+               Shown := Now;
+               Now.Arm_1 := Driver.Commands.Target (Sent, 1);
+               Now.Arm_2 := Driver.Commands.Target (Sent, 2);
+               Now.Closer := Driver.Commands.Target (Sent, 3) (1);
+               Now.Part := Driver.Commands.Target (Sent, 4) (1);
+               Up := Real'Max (Up, Driver.Commands.Target (Sent, 5) (1));
+               Down := Real'Max (Down, -Driver.Commands.Target (Sent, 5) (1));
+               Now.Idle := Idle_Reading (Kind, Driver.Commands.Target (Sent, 5) (1));
+            end;
+         end loop;
+      exception
+         when others =>
+            abort Decider;
+            raise;
+      end;
+      if not Done then
+         abort Decider;
+      end if;
+      Finished := Done;
+      Report := Got;
+   end Probe_Idle_Both_Ways;
+
+   --  A closer at its upper limit (a live x5's closer rests at 1.0 and was
+   --  asked 6.87e10 upwards): it answers downwards at the first level, so
+   --  the upward way stops there, never asked more than that first level.
+   --  A deadband is two-sided: small asks fail both ways, a larger one
+   --  succeeds, and the channel is found answering, not called dead or at
+   --  an end. A disconnected channel answers neither way: once both ways
+   --  have been asked as much as every other channel of the body needed, it
+   --  is called dead and asked no more.
+   procedure Probe_Limits_And_Deadbands is
+      use type Driver.Robot.Motion.Sense;
+      package Mo renames Driver.Robot.Motion;
+      R        : Mo.Two_Way_Report;
+      Up, Down : Real;
+      Finished : Boolean;
+   begin
+      Probe_Idle_Both_Ways (At_Upper_Limit, Real'Last, R, Up, Down, Finished);
+      Check (Finished, "the probe of a channel at its upper limit did not finish");
+      Check (R.At_End (Mo.Increasing) and then R.Levels (Mo.Increasing) = 1,
+             "the upward way of a channel at its upper limit was asked" & R.Levels (Mo.Increasing)'Image
+             & " levels, not stopped at the first, where the downward way answered");
+      Check (Up <= 1.0e-5, "the channel at its upper limit was asked" & Up'Image & " upwards");
+      Check (R.Answered = 1.0e-5 and then not R.Dead and then not R.At_End (Mo.Decreasing),
+             "the channel at its upper limit is not found answering downwards from the first level");
+      --  Down from 1e-5 it follows to 1e-3 (level 8, 1.28e-3, takes it there);
+      --  level 9 takes it no further: its own end.
+      Check (R.Levels (Mo.Decreasing) = 9, "the downward way ended after" & R.Levels (Mo.Decreasing)'Image & " levels, not 9");
+
+      --  Every other channel has answered by 1e-4; the deadband yields at
+      --  level 4, 8e-5.
+      Probe_Idle_Both_Ways (Deadband, 1.0e-4, R, Up, Down, Finished);
+      Check (Finished, "the probe of a channel with a deadband did not finish");
+      Check (not R.Dead and then R.Answered = 8.0e-5,
+             "a deadband of 5e-5 is not found answering at 8e-5: answered at" & R.Answered'Image
+             & (if R.Dead then ", called dead" else ""));
+      Check (not R.At_End (Mo.Increasing) and then not R.At_End (Mo.Decreasing),
+             "a channel with a deadband is called at an end");
+
+      --  Every other channel has answered by 4e-5 (level 3).
+      Probe_Idle_Both_Ways (Disconnected, 4.0e-5, R, Up, Down, Finished);
+      Check (Finished, "the probe of a disconnected channel did not finish");
+      Check (R.Dead and then R.Levels (Mo.Increasing) = 3 and then R.Levels (Mo.Decreasing) = 3,
+             "a channel that answers neither way is not called dead once both ways were asked 4e-5: levels"
+             & R.Levels (Mo.Increasing)'Image & R.Levels (Mo.Decreasing)'Image);
+      Check (Up <= 4.0e-5 and then Down <= 4.0e-5,
+             "the dead channel was asked" & Up'Image & " up and" & Down'Image & " down");
+   end Probe_Limits_And_Deadbands;
+
    --  ── The kinematics of a synthetic arm ──
    --
    --  Six turning joints carry an eye of 640 x 480 pixels with a focal length
@@ -1720,6 +1895,9 @@ package body Driver.Robot.Tests is
    begin
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
                              & "stack, as the decider's does", Estimate_In_A_Task'Access);
+      Driver.Tests.Register ("robot.probe.limits", "a channel at its limit one way is asked ever further that way though "
+                             & "it answered the other way, a deadband is not found, or a channel that answers neither way "
+                             & "is asked past where every other channel answered", Probe_Limits_And_Deadbands'Access);
       Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
       Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found, or are "

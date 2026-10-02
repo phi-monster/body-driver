@@ -253,100 +253,160 @@ package body Driver.Robot.Motion is
       return Real'Model_Epsilon * (if Scale > 0.0 then Scale else 1.0);
    end Smallest_Step;
 
-   procedure Probe_Together
-     (M         : in out Model;
-      Channels  : Channel_Refs;
-      Direction : Real;
-      First     : Real;
-      Report    : out Probe_Report)
-   is
-      package Channel_Streams renames Driver.Robot.Channels;
-      type Flag_Array is array (Positive range <>) of Boolean;
-      B       : Driver.Clock.Beat;
-      Sign    : constant Real := (if Direction > 0.0 then 1.0 else -1.0);
-      N       : constant Natural := Channels'Length;
-      Listed  : constant Channel_Refs (1 .. N) := Channels;
-      Usable  : Flag_Array (1 .. N) := [others => False];
-      Base    : Driver.Commands.Command;            --  every listed group at its hold
-      Start   : Real_Array (1 .. N) := [others => 0.0];   --  each reading when the probe began
-      Noise   : Real_Array (1 .. N) := [others => 0.0];
-      Freedom : Count_Array (1 .. N) := [others => 0];
-      Following : Flag_Array (1 .. N) := [others => False];
-      Delivered : Flag_Array (1 .. N) := [others => False];   --  some level moved it along the ask
-      Farthest  : Real_Array (1 .. N) := [others => 0.0];   --  the farthest a level took it along the ask
-      Kept    : Real_Array (1 .. N) := [others => 0.0];   --  the offset where it last followed
-      Amount  : Real := First;
-      Unlooked : Natural := 0;   --  the first beat no look has judged: the looks tile the probe, so
-                                 --  a response that shows later than expected falls in the next one
+   type Flag_Array is array (Positive range <>) of Boolean;
 
-      --  Moves the listed channels to their holds plus the offsets and looks
-      --  for as long as a response takes to show in the readings and then in
-      --  the images: whether some eye saw motion, the chance that a look at
-      --  so many verdicts finds one by noise, and each reading at the end.
-      procedure Move_And_Look
-        (Offsets : Real_Array; Seen : out Boolean; Chance : out Real;
-         Now : out Real_Array; Moving : out Flag_Array)
-      is
-         C      : Driver.Commands.Command := Base;
-         From   : Natural;
-         Looked : Natural := 0;
-      begin
-         for I in 1 .. N loop
-            if Usable (I) then
-               declare
-                  G : constant Group_Id := Listed (I).Group;
-                  T : Real_Array := Driver.Commands.Target (C, G);
-                  K : constant Positive := T'First + Listed (I).Channel - 1;
-               begin
-                  T (K) := Driver.Commands.Target (Base, G) (K) + Offsets (I);
-                  Driver.Commands.Set_Target (C, G, T);
-               end;
-            end if;
-         end loop;
-         Driver.Beats.Next (B);
-         From := Unlooked;
-         Driver.Beats.Send (C);
-         loop
-            Driver.Beats.Next (B);
-            Looked := Looked + 1;
+   --  Moves the listed channels to Base plus the offsets and looks for as
+   --  long as a response takes to show in the readings and then in the
+   --  images: whether some eye saw motion, the chance that a look at so many
+   --  verdicts finds one by noise, and each reading at the end. Unlooked is
+   --  the first beat no look has judged: the looks tile the probe, so a
+   --  response that shows later than expected falls in the next one.
+   procedure Move_And_Look
+     (M        : in out Model;
+      Listed   : Channel_Refs;
+      Usable   : Flag_Array;
+      Base     : Driver.Commands.Command;
+      Offsets  : Real_Array;
+      Unlooked : in out Natural;
+      Seen     : out Boolean;
+      Chance   : out Real;
+      Now      : out Real_Array;
+      Moving   : out Flag_Array)
+   is
+      N      : constant Natural := Listed'Length;
+      B      : Driver.Clock.Beat;
+      C      : Driver.Commands.Command := Base;
+      From   : Natural;
+      Looked : Natural := 0;
+   begin
+      for I in 1 .. N loop
+         if Usable (I) then
             declare
-               Wait : Natural := 1;
-               Delay_Beats : Natural := 0;
-               Lag : Natural := 0;
-               Done : Boolean;
+               G : constant Group_Id := Listed (I).Group;
+               T : Real_Array := Driver.Commands.Target (C, G);
+               K : constant Positive := T'First + Listed (I).Channel - 1;
             begin
+               T (K) := Driver.Commands.Target (Base, G) (K) + Offsets (I);
+               Driver.Commands.Set_Target (C, G, T);
+            end;
+         end if;
+      end loop;
+      Driver.Beats.Next (B);
+      From := Unlooked;
+      Driver.Beats.Send (C);
+      loop
+         Driver.Beats.Next (B);
+         Looked := Looked + 1;
+         declare
+            Wait : Natural := 1;
+            Delay_Beats : Natural := 0;
+            Lag : Natural := 0;
+            Done : Boolean;
+         begin
+            for I in 1 .. N loop
+               if Usable (I) and then M.Groups (Listed (I).Group).Delay_Known then
+                  Delay_Beats := Natural'Max (Delay_Beats, M.Groups (Listed (I).Group).Delay_Beats);
+               end if;
+            end loop;
+            for E in 1 .. Eye_Count (M) loop
+               Lag := Natural'Max (Lag, Natural'Max (0, Image_Lag (M, Eye_Id (E))));
+            end loop;
+            Wait := Wait + Delay_Beats + Lag;
+            Done := Looked >= Wait;
+            if Done then
+               Look (M, From, Seen, Chance);
+               Unlooked := M.Beats;
                for I in 1 .. N loop
-                  if Usable (I) and then M.Groups (Listed (I).Group).Delay_Known then
-                     Delay_Beats := Natural'Max (Delay_Beats, M.Groups (Listed (I).Group).Delay_Beats);
+                  Now (I) := 0.0;
+                  Moving (I) := False;
+                  if Usable (I) and then Channels.Has_Reading (M, Listed (I).Group, M.Beats - 1) then
+                     Now (I) := Channels.Reading (M, Listed (I).Group, M.Beats - 1, Listed (I).Channel);
+                     Moving (I) := Channels.Moving (M, Listed (I).Group, M.Beats - 1);
                   end if;
                end loop;
-               for E in 1 .. Eye_Count (M) loop
-                  Lag := Natural'Max (Lag, Natural'Max (0, Image_Lag (M, Eye_Id (E))));
-               end loop;
-               Wait := Wait + Delay_Beats + Lag;
-               Done := Looked >= Wait;
-               if Done then
-                  Look (M, From, Seen, Chance);
-                  Unlooked := M.Beats;
-                  for I in 1 .. N loop
-                     Now (I) := 0.0;
-                     Moving (I) := False;
-                     if Usable (I) and then Channel_Streams.Has_Reading (M, Listed (I).Group, M.Beats - 1) then
-                        Now (I) := Channel_Streams.Reading (M, Listed (I).Group, M.Beats - 1, Listed (I).Channel);
-                        Moving (I) := Channel_Streams.Moving (M, Listed (I).Group, M.Beats - 1);
-                     end if;
-                  end loop;
-               end if;
-               Driver.Beats.Send (Driver.Commands.Hold);
-               exit when Done;
-            end;
-         end loop;
-      end Move_And_Look;
+            end if;
+            Driver.Beats.Send (Driver.Commands.Hold);
+            exit when Done;
+         end;
+      end loop;
+   end Move_And_Look;
 
+   --  A probe level took the channel further along its ask than any smaller
+   --  offset did, by Advance, as far as anything can tell: by a step an eye
+   --  watching it can see, or, for a channel no eye watches, significantly
+   --  against the readings' noise. (Not the fraction of the offset
+   --  delivered: a reading held a constant hair off its target delivers a
+   --  fraction that shrinks towards one as the offset grows, which exact
+   --  readings call significant.)
+   function Further
+     (M : Model; Ref : Channel_Ref; Advance, Noise : Real; Freedom : Natural) return Boolean
+   is
+      V : constant Estimate := Visible_Step (M, Ref.Group, Ref.Channel);
    begin
-      Report := (others => <>);
-      --  Where every listed channel is held and reads, and the first step,
-      --  read in a held beat.
+      return (if Known (V) then Advance >= V.Value
+              else Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom));
+   end Further;
+
+   --  A level some eye saw, confirmed by moves back and forth by the same
+   --  offsets, each of them seen, as many as the chance of one false alarm
+   --  asks.
+   procedure Confirm
+     (M         : in out Model;
+      Listed    : Channel_Refs;
+      Usable    : Flag_Array;
+      Base      : Driver.Commands.Command;
+      Offsets   : Real_Array;
+      Unlooked  : in out Natural;
+      Chance    : Real;
+      Confirmed : out Boolean)
+   is
+      Needed    : constant Natural := Run_Needed (Chance);
+      Run       : Natural := 1;
+      At_Amount : Boolean := True;
+      Seen      : Boolean;
+      Again     : Real;
+      Now       : Real_Array (1 .. Listed'Length);
+      Moving    : Flag_Array (1 .. Listed'Length);
+   begin
+      while Needed /= Natural'Last and then Run < Needed loop
+         At_Amount := not At_Amount;
+         declare
+            Back : Real_Array (1 .. Listed'Length);
+         begin
+            for I in Back'Range loop
+               Back (I) := (if At_Amount then Offsets (Offsets'First + I - 1) else 0.0);
+            end loop;
+            Move_And_Look (M, Listed, Usable, Base, Back, Unlooked, Seen, Again, Now, Moving);
+         end;
+         exit when not Seen;
+         Run := Run + 1;
+      end loop;
+      Confirmed := Needed /= Natural'Last and then Run >= Needed;
+   end Confirm;
+
+   --  Where every listed channel is held and reads, read in a held beat:
+   --  which channels can take part, their readings, their noise, the hold
+   --  every listed group is moved from, and the first step when First is 0.
+   procedure Begin_Probe
+     (M        : in out Model;
+      Listed   : Channel_Refs;
+      First    : Real;
+      Usable   : out Flag_Array;
+      Start    : out Real_Array;
+      Noise    : out Real_Array;
+      Freedom  : out Count_Array;
+      Base     : out Driver.Commands.Command;
+      Amount   : out Real;
+      Unlooked : out Natural)
+   is
+      B : Driver.Clock.Beat;
+   begin
+      Usable := [others => False];
+      Start := [others => 0.0];
+      Noise := [others => 0.0];
+      Freedom := [others => 0];
+      Base := Driver.Commands.Hold;
+      Amount := First;
       Driver.Beats.Next (B);
       Unlooked := M.Beats;
       if M.Beats > 0 then
@@ -356,13 +416,12 @@ package body Driver.Robot.Motion is
                C : constant Positive := Listed (I).Channel;
             begin
                if Natural (G) <= Group_Count (M) and then Is_Commandable (M, G) and then C <= Group_Size (M, G)
-                 and then Channel_Streams.Has_Reading (M, G, M.Beats - 1)
+                 and then Channels.Has_Reading (M, G, M.Beats - 1)
                then
                   Usable (I) := True;
-                  Following (I) := True;
-                  Start (I) := Channel_Streams.Reading (M, G, M.Beats - 1, C);
+                  Start (I) := Channels.Reading (M, G, M.Beats - 1, C);
                   Noise (I) := Reading_Noise (M, G, C);
-                  Freedom (I) := Channel_Streams.Noise_Freedom (M, G, C);
+                  Freedom (I) := Channels.Noise_Freedom (M, G, C);
                   if not Driver.Commands.Has_Target (Base, G) then
                      declare
                         H : Real_Array (1 .. Group_Size (M, G));
@@ -382,6 +441,35 @@ package body Driver.Robot.Motion is
          end loop;
       end if;
       Driver.Beats.Send (Driver.Commands.Hold);
+   end Begin_Probe;
+
+   procedure Probe_Together
+     (M         : in out Model;
+      Channels  : Channel_Refs;
+      Direction : Real;
+      First     : Real;
+      Report    : out Probe_Report;
+      Answers   : out Real_Array)
+   is
+      Sign      : constant Real := (if Direction > 0.0 then 1.0 else -1.0);
+      N         : constant Natural := Channels'Length;
+      Listed    : constant Channel_Refs (1 .. N) := Channels;
+      Usable    : Flag_Array (1 .. N);
+      Base      : Driver.Commands.Command;            --  every listed group at its hold
+      Start     : Real_Array (1 .. N);   --  each reading when the probe began
+      Noise     : Real_Array (1 .. N);
+      Freedom   : Count_Array (1 .. N);
+      Following : Flag_Array (1 .. N);
+      Delivered : Flag_Array (1 .. N) := [others => False];   --  some level moved it along the ask
+      Farthest  : Real_Array (1 .. N) := [others => 0.0];   --  the farthest a level took it along the ask
+      Kept      : Real_Array (1 .. N) := [others => 0.0];   --  the offset where it last followed
+      Amount    : Real;
+      Unlooked  : Natural;
+   begin
+      Report := (others => <>);
+      Answers := [others => 0.0];
+      Begin_Probe (M, Listed, First, Usable, Start, Noise, Freedom, Base, Amount, Unlooked);
+      Following := Usable;
       if Amount <= 0.0 or else (for all U of Usable => not U) then
          return;
       end if;
@@ -397,29 +485,25 @@ package body Driver.Robot.Motion is
             for I in 1 .. N loop
                Offsets (I) := (if Following (I) then Sign * Amount else Kept (I));
             end loop;
-            Move_And_Look (Offsets, Seen, Chance, Now, Moving);
+            Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving);
             --  Which channels still follow: whether asking further took each
-            --  further than any smaller offset did, as far as anything can
-            --  tell: by a step an eye watching it can see, or, for a channel no
-            --  eye watches, significantly against the readings' noise. (Not the
-            --  fraction of the offset delivered: a reading held a constant hair
-            --  off its target delivers a fraction that shrinks towards one as
-            --  the offset grows, which exact readings call significant.)
+            --  further than any smaller offset did.
             for I in 1 .. N loop
                if Usable (I) and then Following (I) then
                   declare
                      Excursion : constant Real := Sign * (Now (I) - Start (I));
-                     V         : constant Estimate := Visible_Step (M, Listed (I).Group, Listed (I).Channel);
-                     Further   : constant Boolean :=
-                       (if Known (V) then Excursion - Farthest (I) >= V.Value
-                        else Driver.Uncertain.Significant (Excursion - Farthest (I), Noise (I) * Sqrt (2.0), Freedom (I)));
+                     Went      : constant Boolean :=
+                       Further (M, Listed (I), Excursion - Farthest (I), Noise (I), Freedom (I));
                   begin
-                     if Delivered (I) and then not Further and then not Moving (I) then
+                     if Delivered (I) and then not Went and then not Moving (I) then
                         --  Its own end: held where it last followed.
                         Following (I) := False;
                      else
                         Kept (I) := Sign * Amount;
-                        if Further then
+                        if Went then
+                           if not Delivered (I) then
+                              Answers (Answers'First + I - 1) := Amount;
+                           end if;
                            Delivered (I) := True;
                            Farthest (I) := Excursion;
                         end if;
@@ -428,27 +512,11 @@ package body Driver.Robot.Motion is
                end if;
             end loop;
             if Seen then
-               --  Confirmed by moves back and forth by the same amount, each
-               --  of them seen, as many as the chance of one false alarm asks.
                declare
-                  Needed    : constant Natural := Run_Needed (Chance);
-                  Run       : Natural := 1;
-                  At_Amount : Boolean := True;
+                  Confirmed : Boolean;
                begin
-                  while Needed /= Natural'Last and then Run < Needed loop
-                     At_Amount := not At_Amount;
-                     declare
-                        Back : Real_Array (1 .. N);
-                     begin
-                        for I in 1 .. N loop
-                           Back (I) := (if At_Amount then Offsets (I) else 0.0);
-                        end loop;
-                        Move_And_Look (Back, Seen, Chance, Now, Moving);
-                     end;
-                     exit when not Seen;
-                     Run := Run + 1;
-                  end loop;
-                  if Needed /= Natural'Last and then Run >= Needed then
+                  Confirm (M, Listed, Usable, Base, Offsets, Unlooked, Chance, Confirmed);
+                  if Confirmed then
                      Report.Seen := True;
                      Report.Excursion := Amount;
                   end if;
@@ -461,6 +529,127 @@ package body Driver.Robot.Motion is
       --  Back to the hold.
       Step (M, Base, Report.Last);
    end Probe_Together;
+
+   procedure Probe_Together
+     (M         : in out Model;
+      Channels  : Channel_Refs;
+      Direction : Real;
+      First     : Real;
+      Report    : out Probe_Report)
+   is
+      Answers : Real_Array (1 .. Channels'Length);
+   begin
+      Probe_Together (M, Channels, Direction, First, Report, Answers);
+   end Probe_Together;
+
+   procedure Probe_Both_Ways
+     (M      : in out Model;
+      Ref    : Channel_Ref;
+      First  : Real;
+      Bound  : Real;
+      Report : out Two_Way_Report)
+   is
+      Listed    : constant Channel_Refs (1 .. 1) := [1 => Ref];
+      Usable    : Flag_Array (1 .. 1);
+      Base      : Driver.Commands.Command;
+      Start     : Real_Array (1 .. 1);
+      Noise     : Real_Array (1 .. 1);
+      Freedom   : Count_Array (1 .. 1);
+      Amount    : Real;
+      Unlooked  : Natural;
+      Signs     : constant array (Sense) of Real := [Increasing => 1.0, Decreasing => -1.0];
+      Other     : constant array (Sense) of Sense := [Increasing => Decreasing, Decreasing => Increasing];
+      Open      : Sense_Flags := [others => True];
+      Delivered : Sense_Flags := [others => False];
+      Answered  : Sense_Counts := [others => 0];   --  the level at which it first followed that way
+      Farthest  : array (Sense) of Real := [others => 0.0];
+   begin
+      Report := (others => <>);
+      Begin_Probe (M, Listed, First, Usable, Start, Noise, Freedom, Base, Amount, Unlooked);
+      if not Usable (1) then
+         return;
+      end if;
+      loop
+         declare
+            Way   : Sense := Increasing;
+            Found : Boolean := False;
+         begin
+            --  The next way: the one asked at the lower level, the increasing
+            --  one first; the decreasing one only while the increasing one has
+            --  delivered nothing, or once it has ended.
+            for S in Sense loop
+               if Open (S) and then Report.Levels (S) < Levels
+                 and then (S = Increasing or else not Open (Increasing) or else not Delivered (Increasing))
+                 and then (not Found or else Report.Levels (S) < Report.Levels (Way))
+               then
+                  Way := S;
+                  Found := True;
+               end if;
+            end loop;
+            exit when not Found;
+            Report.Levels (Way) := Report.Levels (Way) + 1;
+            declare
+               Offset  : constant Real := Amount * 2.0 ** (Report.Levels (Way) - 1);
+               Offsets : constant Real_Array (1 .. 1) := [1 => Signs (Way) * Offset];
+               Seen    : Boolean;
+               Chance  : Real;
+               Now     : Real_Array (1 .. 1);
+               Moving  : Flag_Array (1 .. 1);
+            begin
+               Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving);
+               declare
+                  Excursion : constant Real := Signs (Way) * (Now (1) - Start (1));
+                  Went      : constant Boolean := Further (M, Ref, Excursion - Farthest (Way), Noise (1), Freedom (1));
+               begin
+                  if Delivered (Way) and then not Went and then not Moving (1) then
+                     --  Its own end.
+                     Open (Way) := False;
+                  elsif Went then
+                     if not Delivered (Way) then
+                        Answered (Way) := Report.Levels (Way);
+                        Report.Answered := (if Report.Answered = 0.0 then Offset else Real'Min (Report.Answered, Offset));
+                     end if;
+                     Delivered (Way) := True;
+                     Farthest (Way) := Excursion;
+                  end if;
+               end;
+               if Seen then
+                  declare
+                     Confirmed : Boolean;
+                  begin
+                     Confirm (M, Listed, Usable, Base, Offsets, Unlooked, Chance, Confirmed);
+                     if Confirmed then
+                        Report.Seen := True;
+                        Report.Excursion := Offset;
+                        Report.Seen_Sense := Way;
+                     end if;
+                  end;
+               end if;
+               exit when Report.Seen;
+               --  A limit is one-sided: a way that delivered nothing up to the
+               --  level at which the other one answered is at its end.
+               for S in Sense loop
+                  if Open (S) and then not Delivered (S) and then Delivered (Other (S))
+                    and then Report.Levels (S) >= Answered (Other (S))
+                  then
+                     Open (S) := False;
+                     Report.At_End (S) := True;
+                  end if;
+               end loop;
+               --  Neither way answered when both were asked as much as every
+               --  other channel of the body needed: dead or disconnected.
+               if not Delivered (Increasing) and then not Delivered (Decreasing)
+                 and then Report.Levels (Increasing) = Report.Levels (Decreasing) and then Offset >= Bound
+               then
+                  Report.Dead := True;
+                  exit;
+               end if;
+            end;
+         end;
+      end loop;
+      --  Back to the hold.
+      Step (M, Base, Report.Last);
+   end Probe_Both_Ways;
 
    procedure Probe (M : in out Model; G : Group_Id; Channel : Positive; Direction : Real; Report : out Probe_Report) is
    begin

@@ -105,9 +105,60 @@ package Driver.Robot.Motion is
    --  channel of a group that is not commandable, or that the group does not
    --  have, takes no part; with none left, nothing is probed (Steps = 0).
 
+   procedure Probe_Together
+     (M         : in out Model;
+      Channels  : Channel_Refs;
+      Direction : Real;
+      First     : Real;
+      Report    : out Probe_Report;
+      Answers   : out Real_Array)
+     with Pre => Direction /= 0.0 and then First >= 0.0 and then Answers'Length = Channels'Length;
+   --  The same, and for every listed channel the amount of the level at
+   --  which its reading first followed (went further along the ask than any
+   --  smaller offset took it, by the test above); 0 for one that never did.
+
    procedure Probe (M : in out Model; G : Group_Id; Channel : Positive; Direction : Real; Report : out Probe_Report)
      with Pre => Direction /= 0.0;
    --  Probe_Together with that one channel, from its own noise.
+
+   type Sense is (Increasing, Decreasing);
+   type Sense_Counts is array (Sense) of Natural;
+   type Sense_Flags is array (Sense) of Boolean;
+
+   type Two_Way_Report is record
+      Seen       : Boolean := False;   --  some eye saw the channel move
+      Excursion  : Real := 0.0;        --  how far it was taken, in reading units, when seen
+      Seen_Sense : Sense := Increasing;   --  which way, when seen
+      Answered   : Real := 0.0;        --  the smallest amount at which its reading first followed, either way; 0 when never
+      Levels     : Sense_Counts := [others => 0];    --  how many levels each way was asked
+      At_End     : Sense_Flags := [others => False];  --  the way stopped because the other one answered while it delivered nothing
+      Dead       : Boolean := False;   --  it answered neither way up to where every other channel of the body did
+      Last       : Step_Report;        --  the last step's report
+   end record;
+
+   procedure Probe_Both_Ways
+     (M      : in out Model;
+      Ref    : Channel_Ref;
+      First  : Real;
+      Bound  : Real;
+      Report : out Two_Way_Report)
+     with Pre => First > 0.0;
+   --  Probes one channel both ways, each way by the levels Probe_Together
+   --  takes (doubling from First, looked at and confirmed alike, each way
+   --  ending at its own end), until an eye sees it. The increasing way goes
+   --  first at every level; the decreasing way is asked at a level only
+   --  while the increasing one has delivered nothing (a channel that
+   --  follows one way needs no other), or once it has ended. A limit is
+   --  one-sided: a way that has delivered nothing up to the level at which
+   --  the other one answered is at its end there, and its doubling stops (a
+   --  closer resting at its upper limit answers downwards at once). A
+   --  deadband is two-sided: small asks fail both ways and larger ones
+   --  succeed, so both ways go on doubling while neither answers. Bound is
+   --  where every other channel of the body has answered (the largest
+   --  amount at which another channel first followed; Real'Last when none
+   --  did): a channel that has answered neither way when both have been
+   --  asked at least that much is dead or disconnected, and the probe stops.
+   --  The body returns to the hold.
 
    procedure Gather_Rest (M : in out Model; Probes : Natural);
    --  Holds the body still for as long as one more still beat shortens the

@@ -1,3 +1,4 @@
+with Ada.Containers.Vectors;
 with Ada.Strings;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
@@ -11,6 +12,7 @@ with Driver.Robot.Motion;
 package body Driver.Robot.Boot is
 
    use type Driver.Robot.Motion.Step_Outcome;
+   use type Driver.Robot.Motion.Channel_Ref;
 
    package Real_IO is new Ada.Text_IO.Float_IO (Real);
 
@@ -89,39 +91,98 @@ package body Driver.Robot.Boot is
          Driver.Robot.Motion.Step (M, C, Report);
       end Go_To;
 
+      --  Where each channel's reading first followed a probe, from the probe of
+      --  every channel together on: the amount of that level.
+      type Answer is record
+         Ref    : Driver.Robot.Motion.Channel_Ref;
+         Amount : Real := 0.0;
+      end record;
+      package Answer_Vectors is new Ada.Containers.Vectors (Positive, Answer);
+      Answers : Answer_Vectors.Vector;
+
+      procedure Record_Answer (Ref : Driver.Robot.Motion.Channel_Ref; Amount : Real) is
+      begin
+         if Amount <= 0.0 then
+            return;
+         end if;
+         for A of Answers loop
+            if A.Ref = Ref then
+               A.Amount := Real'Min (A.Amount, Amount);
+               return;
+            end if;
+         end loop;
+         Answers.Append (Answer'(Ref => Ref, Amount => Amount));
+      end Record_Answer;
+
+      --  Where every other channel of the body has answered: the largest
+      --  amount at which a channel other than Ref first followed; Real'Last
+      --  when none has.
+      function Answered_Elsewhere (Ref : Driver.Robot.Motion.Channel_Ref) return Real is
+         Bound : Real := 0.0;
+      begin
+         for A of Answers loop
+            if A.Ref /= Ref then
+               Bound := Real'Max (Bound, A.Amount);
+            end if;
+         end loop;
+         return (if Bound > 0.0 then Bound else Real'Last);
+      end Answered_Elsewhere;
+
       --  Finds how far each channel of the group must move for an eye to see
-      --  it, from the amount at which the whole body was first seen, then
-      --  pushes every channel both ways by that much, in an order no other
-      --  group shares, for the lock-in to tell the groups apart.
+      --  it, both ways from the amount at which the whole body was first seen
+      --  (Motion.Probe_Both_Ways: a way at its end stops where the other one
+      --  answered; a channel that answers neither way where every other one
+      --  did is dead), then pushes every channel both ways by that much, in
+      --  an order no other group shares, for the lock-in to tell the groups
+      --  apart; never into a way found at its end.
       procedure Recognize (G : Group_Id; Size : Positive; From : Real) is
+         use type Driver.Robot.Motion.Sense;
          Start  : constant Real_Array := Holds_Of (G, Size);
          Amount : Real_Array (1 .. Size) := [others => 0.0];
+         Ended  : array (1 .. Size) of Driver.Robot.Motion.Sense_Flags := [others => [others => False]];
          Report : Driver.Robot.Motion.Step_Report;
          Order  : Push_Array (1 .. 2 * Size);
          Count  : Natural := 0;
+         function Way (S : Driver.Robot.Motion.Sense) return String is
+           (if S = Driver.Robot.Motion.Increasing then "upwards" else "downwards");
       begin
          for C in 1 .. Size loop
-            for Sign of Real_Array'[1.0, -1.0] loop
-               declare
-                  P : Driver.Robot.Motion.Probe_Report;
-               begin
-                  Driver.Robot.Motion.Probe_Together (M, [1 => (Group => G, Channel => C)], Sign, From, P);
-                  if P.Seen then
-                     Amount (C) := P.Excursion;
-                     exit;
+            declare
+               Ref : constant Driver.Robot.Motion.Channel_Ref := (Group => G, Channel => C);
+               P   : Driver.Robot.Motion.Two_Way_Report;
+            begin
+               Driver.Robot.Motion.Probe_Both_Ways (M, Ref, From, Answered_Elsewhere (Ref), P);
+               Record_Answer (Ref, P.Answered);
+               Ended (C) := P.At_End;
+               if P.Seen then
+                  Amount (C) := P.Excursion;
+               end if;
+               for S in Driver.Robot.Motion.Sense loop
+                  if P.At_End (S) then
+                     Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & C'Image & " is at its end "
+                                      & Way (S) & ": it delivered nothing that way up to "
+                                      & Scientific (From * 2.0 ** (P.Levels (S) - 1))
+                                      & " reading units, while it answered the other way");
                   end if;
-               end;
-            end loop;
-            Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & C'Image
-                             & (if Amount (C) > 0.0
-                                then " is seen when moved by " & Scientific (Amount (C)) & " reading units"
-                                else " moves nothing any eye sees, up to where it stops following"));
+               end loop;
+               Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & C'Image
+                                & (if Amount (C) > 0.0
+                                   then " is seen when moved by " & Scientific (Amount (C)) & " reading units"
+                                   elsif P.Dead
+                                   then " answers neither way up to " & Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))
+                                        & " reading units, where every other channel of the body had answered: dead or"
+                                        & " disconnected; it is not probed further"
+                                   else " moves nothing any eye sees, up to where it stops following"));
+            end;
          end loop;
          for C in 1 .. Size loop
             if Amount (C) > 0.0 then
-               Order (Count + 1) := (Channel => C, Sign => 1.0);
-               Order (Count + 2) := (Channel => C, Sign => -1.0);
-               Count := Count + 2;
+               for S in Driver.Robot.Motion.Sense loop
+                  if not Ended (C) (S) then
+                     Count := Count + 1;
+                     Order (Count) := (Channel => C, Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));
+                  end if;
+               end loop;
             end if;
          end loop;
          Shuffle (Order (1 .. Count), Rng);
@@ -347,7 +408,14 @@ package body Driver.Robot.Boot is
                --  more than twice what an eye needs to see it, whatever its
                --  units; each channel alone then starts from there.
                Driver.Robot.Motion.Gather_Rest (M, Total + 1);
-               Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);
+               declare
+                  First_Followed : Real_Array (1 .. Total);
+               begin
+                  Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P, First_Followed);
+                  for K in Refs'Range loop
+                     Record_Answer (Refs (K), First_Followed (K));
+                  end loop;
+               end;
                if not P.Seen then
                   Driver.Beats.Within_A_Beat (Estimate'Access);
                   Driver.Beats.Within_A_Beat (Read_Body'Access);
