@@ -114,6 +114,15 @@ procedure Deadcode is
    Subs : Subprogram_Maps.Map;
    Refs : Reference_Vectors.Vector;
 
+   --  A dispatching call reaches every override of the primitive it names: an
+   --  override's entity line carries "<file|line...>" for the subprogram it overrides.
+   type Override is record
+      Overridden, Overrider : Unbounded_String;
+   end record;
+
+   package Override_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, Override);
+   Overrides : Override_Vectors.Vector;
+
    --  One .ali file: its D lines number the files; X sections hold the
    --  entities of a file with their references.
    procedure Parse_Ali (Path : String) is
@@ -131,7 +140,7 @@ procedure Deadcode is
 
       procedure Finish_Entity is
       begin
-         if Have_Entity and then Entity_Kind in 'U' | 'V' | 'y' and then not Bodies.Is_Empty and then not Ends.Is_Empty
+         if Have_Entity and then Entity_Kind in 'U' | 'V' | 'x' | 'y' and then not Bodies.Is_Empty and then not Ends.Is_Empty
          then
             declare
                B : constant String := Bodies (1);
@@ -151,7 +160,7 @@ procedure Deadcode is
                   end;
                end if;
             end;
-         elsif Have_Entity and then Entity_Kind in 'U' | 'V' | 'y'
+         elsif Have_Entity and then Entity_Kind in 'U' | 'V' | 'x' | 'y'
            and then not Subs.Contains (To_String (Entity_Key))
          then
             Subs.Include (To_String (Entity_Key), (others => <>));
@@ -223,7 +232,7 @@ procedure Deadcode is
                            Bodies.Append (File_Name (Ref_File) & "|" & Image (A));
                         elsif Ref_Type = 't' then
                            Ends.Append (File_Name (Ref_File) & "|" & Image (A));
-                        elsif Ref_Type in 'r' | 's' | 'R' | 'm' | 'i' and then Entity_Kind in 'U' | 'V' | 'y' then
+                        elsif Ref_Type in 'r' | 's' | 'R' | 'm' | 'i' and then Entity_Kind in 'U' | 'V' | 'x' | 'y' then
                            Refs.Append (Reference'(File => To_Unbounded_String (File_Name (Ref_File)), Line => A,
                                          Target => Entity_Key));
                         end if;
@@ -295,6 +304,26 @@ procedure Deadcode is
                                                               & L (P .. Q - 1));
                            Have_Entity := True;
                            Ref_File := Section_File;
+                           declare
+                              Space : constant Natural := Ada.Strings.Fixed.Index (L (Q .. L'Last), " ");
+                              Head  : constant String := L (Q .. (if Space = 0 then L'Last else Space - 1));
+                              Open  : constant Natural := Ada.Strings.Fixed.Index (Head, "<");
+                              Bar   : constant Natural := (if Open = 0 then 0 else Ada.Strings.Fixed.Index (Head, "|", Open));
+                              Stop  : Natural := Bar + 1;
+                           begin
+                              if Entity_Kind in 'U' | 'V' | 'x' | 'y' and then Bar > Open + 1 then
+                                 while Stop <= Head'Last and then Head (Stop) in '0' .. '9' loop
+                                    Stop := Stop + 1;
+                                 end loop;
+                                 if Stop > Bar + 1 then
+                                    Overrides.Append
+                                      (Override'(Overridden => To_Unbounded_String
+                                          (File_Name (Natural'Value (Head (Open + 1 .. Bar - 1))) & ":"
+                                           & Head (Bar + 1 .. Stop - 1) & ":" & L (P .. Q - 1)),
+                                        Overrider  => Entity_Key));
+                                 end if;
+                              end if;
+                           end;
                            if Q <= L'Last then
                               Read_References (L (Q .. L'Last));
                            end if;
@@ -371,6 +400,17 @@ begin
          end;
       end if;
    end loop;
+   for O of Overrides loop
+      declare
+         S : String_Sets.Set;
+      begin
+         if Edges.Contains (To_String (O.Overridden)) then
+            S := Edges (To_String (O.Overridden));
+         end if;
+         S.Include (To_String (O.Overrider));
+         Edges.Include (To_String (O.Overridden), S);
+      end;
+   end loop;
    declare
       Stack : String_Vectors.Vector;
    begin
@@ -382,6 +422,17 @@ begin
               and then Ada.Strings.Fixed.Index (K, ":Body_Driver") > 0
             then
                Stack.Append (K);
+            end if;
+         end;
+      end loop;
+      --  An override of a primitive declared outside our sources (a controlled
+      --  type's Adjust and Finalize, say) is called by the language itself.
+      for O of Overrides loop
+         declare
+            Target : constant String := To_String (O.Overridden);
+         begin
+            if not Ours.Contains (Target (Target'First .. Ada.Strings.Fixed.Index (Target, ":") - 1)) then
+               Stack.Append (To_String (O.Overrider));
             end if;
          end;
       end loop;
