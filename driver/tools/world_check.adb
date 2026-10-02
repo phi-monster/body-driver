@@ -551,13 +551,14 @@ procedure World_Check is
       elsif D3 >= 0.0 and then D4 <= D3 then
          return T.B;
       elsif VC <= 0.0 and then D1 >= 0.0 and then D3 <= 0.0 then
-         return T.A + (D1 / (D1 - D3)) * AB;
+         return (if D1 - D3 > 0.0 then T.A + (D1 / (D1 - D3)) * AB else T.A);   --  over |AB| squared, nought when A = B
       elsif D6 >= 0.0 and then D5 <= D6 then
          return T.C;
       elsif VB <= 0.0 and then D2 >= 0.0 and then D6 <= 0.0 then
-         return T.A + (D2 / (D2 - D6)) * AC;
+         return (if D2 - D6 > 0.0 then T.A + (D2 / (D2 - D6)) * AC else T.A);   --  over |AC| squared
       elsif VA <= 0.0 and then D4 - D3 >= 0.0 and then D5 - D6 >= 0.0 then
-         return T.B + ((D4 - D3) / ((D4 - D3) + (D5 - D6))) * (T.C - T.B);
+         return (if (D4 - D3) + (D5 - D6) > 0.0                                 --  |BC| squared
+                 then T.B + ((D4 - D3) / ((D4 - D3) + (D5 - D6))) * (T.C - T.B) else T.B);
       elsif VA + VB + VC = 0.0 then
          return T.A;   --  a triangle with no area: its corner
       end if;
