@@ -75,7 +75,8 @@ by side, 10 repeats:
 | QH, touching and onto, one stretch | 54 / 60 | 38 / 40 |
 
 One stretch per program is no worse on either keyboard (59 against 58, and
-92 against 90 of 100), so the quantity keyboard has it. The sentence about
+92 against 90 of 100, with the earlier wording of heading), so the quantity
+keyboard has it. The sentence about
 two things with touching and onto, one stretch per program, is no worse on
 the heading keyboard (92 against 90) and does what it is for there (5
 repeats: on 18 of 20, next to 6 of 15, push 0 of 15, nothing ran away); on
@@ -86,6 +87,35 @@ on the keyboard: the rule is no worse, and on the height keyboard that is
 not shown. Push needs left and right, which every form that has them makes
 worse. Offering it would also need Driver.Action to say which of these
 relations it can carry out between two things.
+
+### Interleaved, sized for a 3-point drop at Z
+
+The verdict above rested on 60 lifts per keyboard. It was measured again
+with the action layer's glosses (Driver.Action.Meaning), on two scenes (RX5
+at beat 630 and at beat 100), each question asked on both keyboards in turn
+and in the other order on the next repeat, so both arms share the service's
+drift. The sample was sized from the observed rates so that Z se is 3 points
+if the arms are equal: n = Z^2 2p(1-p) / 0.03^2 per arm, with p = 0.95 for
+the height keyboard's lifts (950, run 960) and p = 0.92 for the heading
+keyboard's lifts and turns (1472, run 1500). Both keyboards allow one
+stretch; "with" adds `do <thing> touching|onto <thing> until <ending>`.
+
+| keyboard | without | with | drop, and its interval at Z = 3 |
+|---|---|---|---|
+| Q, lifts | 954 / 960 | 768 / 960 | +19.4 points [+15.4, +23.3]: worse |
+| QH, lifts | 860 / 900 | 725 / 900 | +15.0 [+10.5, +19.5]: worse |
+| QH, turns | 399 / 600 | 571 / 600 | -28.7 [-35.0, -22.3]: better |
+| QH, lifts and turns | 1259 / 1500 | 1296 / 1500 | -2.5 [-6.4, +1.4] |
+
+Answers cut as runaways or at the limit: Q 20 against 191, QH 75 against
+157. With the sentence the brain writes the change without its quantity
+(`do the paddle until free`), whose name slot loops. Lifts are worse on both
+keyboards, so the sentence stays off. Without the sentence, two turns in
+three are right on the heading keyboard: the brain lifts first (`do the pen
+height up until free`) with the action layer's wording of heading; the
+earlier wording was not yet compared side by side. The two-thing questions
+of this series had 50 answers when it was paused (on and next to: 8 of 12
+with the sentence, 0 of 14 without; push 0 of 24).
 
 ## The look key
 

@@ -71,13 +71,13 @@ package body Driver.Brain.Live is
             end;
          end loop;
          for W of Q loop
-            Meanings.Append ("");
+            Meanings.Append (Driver.Action.Meaning (W));
          end loop;
          Now.Keys := Driver.Brain.Keyboard.Choose
            (Quantities       => Q,
             Meanings         => Meanings,
             Roles            => [for R in Driver.Action.Role => Driver.Action.Can_Bind (B.C.all, R)],
-            Relations        => [others => True],
+            Relations        => [for R in Driver.Action.Relation => Driver.Action.Usable (B.C.all, R)],
             Surface_Measured => Surface,
             Two_Things       => [others => False],
             Eyes             => B.Eyes);
