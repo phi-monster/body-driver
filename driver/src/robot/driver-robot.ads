@@ -133,8 +133,9 @@ package Driver.Robot is
    --  Constant when the eye rides on the last link.
 
    function Blocked (M : Model; A : Arm_Id; O : Observation) return Boolean;
-   --  At the beat of O the arm was commanded further than it went, by more
-   --  than its free motion falls short: the estimators' view of the judgment
+   --  At the beat of O the arm was commanded further than it went, by a step
+   --  its eye can see (by more than its free motion falls short, for joints
+   --  no eye watches): the estimators' view of the judgment
    --  Driver.Robot.Motion.Step reports, so a replay sees the blocked beats of
    --  the run it replays.
 
@@ -216,7 +217,7 @@ private
       Length    : Real := 0.0;        --  how far it asked, in reading units
       Shortfall : Estimate;           --  how far short of the target it stopped, along the ask
       Delivered : Estimate;           --  the fraction of the ask it delivered, along the ask
-      Blocked   : Boolean := False;   --  it fell short by more than free pushes do
+      Blocked   : Boolean := False;   --  it fell short by a step an eye can see, or by more than free pushes do
    end record;
 
    package Episode_Vectors is new Ada.Containers.Vectors (Positive, Episode);
