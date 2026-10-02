@@ -654,6 +654,48 @@ package body Driver.World.Estimates.Tests is
                 "the box's own middle, " & Box_Top'Image & " / 2 up, is significantly off the centre given, whose"
                 & " height is uncertain by only" & Real'Image (Sqrt (C.Covariance (3, 3))));
       end;
+      --  Now its points cover only a strip of the top at one end, as two
+      --  pairs saw it, while the region it was pointed at in shows the whole
+      --  box: the box's middle is still within the centre's covariance.
+      declare
+         Strip : Driver.World.Pairs.Match_Vectors.Vector;
+         Gray  : constant Driver.Images.Image := Plain (128);
+         O     : Observation;
+         Q     : Thing_Record;
+      begin
+         for I in 0 .. 4 loop
+            for J in 0 .. 4 loop
+               Strip.Append
+                 (Driver.World.Pairs.Match'
+                    (In_First => (U => 0.0, V => 0.0), In_Second => (U => 0.0, V => 0.0), First => 1,
+                     Point    => (Mean       => [Box_Half * (0.6 + 0.1 * Real (I)), Box_Half * Real (J - 2) / 2.5, Box_Top],
+                                  Covariance => Small)));
+            end loop;
+         end loop;
+         View := Eyes;
+         Q.Eyes.Append (Slot'(Has => True, Pointed => True, Track => Driver.World.Tracking.Start (Box_Region, Gray, 1),
+                              others => <>));
+         Q.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Strip,
+                                      Then_Seen => Observation_Holders.Empty_Holder));
+         Q.By_Pair.Append (Pair_Seen'(From => 2, Into => 1, Kept => Strip,
+                                      Then_Seen => Observation_Holders.Empty_Holder));
+         S.Things.Replace_Element (1, Q);
+         Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
+         O.Beat := 1;
+         O.Images.Append (Gray);
+         O.Images.Append (Gray);
+         Observe (S, 2, Camera_Of'Access, Up, True, O);
+         declare
+            C : constant Point_Estimate := Centre (S, 1);
+         begin
+            Check (S.Things (1).Has_Points and then S.Things (1).Under.Index = 1,
+                   "the strip's points, or the table under them, were lost");
+            Check (not Significant (C, Point_Estimate'(Mean => Middle, Covariance => [others => [others => 0.0]])),
+                   "the box's own middle is significantly off the centre given by a strip of its top, whose"
+                   & " sideways sigma is only" & Real'Image (Sqrt (C.Covariance (1, 1))));
+         end;
+         Driver.Services.End_Replay;
+      end;
    end Centre_Honest;
 
    procedure Found_Elsewhere is

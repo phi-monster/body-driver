@@ -1260,6 +1260,8 @@ driver-world-estimates.adb	(Vector_Gate (3, Elsewhere - 1, Tests => Natural'Max 
 driver-world-estimates.adb	(Vector_Gate (3, Elsewhere - 1, Tests => Natural'Max (1, Natural (R.By_Pair (P).Kept.Length))),	3	structure	a point has three coordinates
 driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);	1.0	math	a mean over the points
 driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);	1.0	math	a mean over the points and their feet
+driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
+driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	F : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
@@ -1268,8 +1270,10 @@ driver-world-estimates.adb	K : Positive := 1;	1	structure	the pairs are counted 
 driver-world-estimates.adb	Middle : constant Vec3 := (1.0 / N) * Sum;	1.0	math	a mean over the points
 driver-world-estimates.adb	Middle := (1.0 / Real (Elsewhere)) * Middle;	1.0	math	a mean over the other pairs' points
 driver-world-estimates.adb	Middle := (1.0 / Real (N)) * Middle;	1.0	math	a mean over the points
+driver-world-estimates.adb	Middle := (1.0 / Real (R.Points.Length)) * Middle;	1.0	math	a mean over the points
 driver-world-estimates.adb	Off := Significant (Vector_Gate (3, N - 1, Tests => Tests), Sqrt (Real'Max (0.0, D * (C * D))), 1.0);	1.0	statistics	the distance is already in units of its sigma
 driver-world-estimates.adb	Off := Significant (Vector_Gate (3, N - 1, Tests => Tests), Sqrt (Real'Max (0.0, D * (C * D))), 1.0);	3	structure	a point has three coordinates
+driver-world-estimates.adb	Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (B.Column_1 - B.Column_0 + 1,	1	structure	a grid at least one pixel apart
 driver-world-estimates.adb	Spread := (1.0 / Real (Elsewhere - 1)) * Spread;	1.0	statistics	the sample spread loses one degree of freedom to the mean
 driver-world-estimates.adb	Spread := (1.0 / Real (N - 1)) * Spread;	1.0	statistics	the sample spread loses one degree of freedom to the mean
 driver-world-estimates.adb	Sqrt (Real'Max (0.0, D * (C * D))), 1.0)	1.0	statistics	the distance is already in units of its sigma

@@ -1516,6 +1516,33 @@ procedure World_Check is
                              & Mm (Sqrt (Centre.Covariance (2, 2))) & ", " & Mm (Sqrt (Centre.Covariance (3, 3))) & " mm)");
                      if Under = 0 then
                         Append (Line, "; rests on nothing found");
+                        declare
+                           --  Why not: its three lowest points against the true
+                           --  table top, each with its own vertical sigma.
+                           Z     : Real_Array (1 .. Natural (Points.Length));
+                           S     : Real_Array (1 .. Natural (Points.Length));
+                           Taken : array (Z'Range) of Boolean := [others => False];
+                        begin
+                           for I in Z'Range loop
+                              Z (I) := Points (I).Point.Mean (3) - Table_Top;
+                              S (I) := Sqrt (Points (I).Point.Covariance (3, 3));
+                           end loop;
+                           Append (Line, "; its lowest points above the true table top:");
+                           for K in 1 .. Natural'Min (3, Z'Length) loop
+                              declare
+                                 Best : Natural := 0;
+                              begin
+                                 for I in Z'Range loop
+                                    if not Taken (I) and then (Best = 0 or else Z (I) < Z (Best)) then
+                                       Best := I;
+                                    end if;
+                                 end loop;
+                                 Taken (Best) := True;
+                                 Append (Line, " " & Mm (Z (Best)) & " +- " & Mm (S (Best)));
+                              end;
+                           end loop;
+                           Append (Line, " mm");
+                        end;
                      else
                         declare
                            P : constant Driver.Geometry.Plane_Estimate :=

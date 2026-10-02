@@ -331,6 +331,64 @@ package body Driver.World.Estimates is
          R.Points_At := Seen.Beat;
       end if;
       R.Has_Points := not R.Points.Is_Empty;
+      --  How far the thing reaches as the eyes it was pointed at in see it:
+      --  each region's pixels, on a grid as many pixels apart as the square
+      --  root of the region's shorter side, carried out along their sights
+      --  to the depth of the middle of what is seen of it. Its points may
+      --  cover only a part of what those regions show.
+      R.Outline.Clear;
+      if R.Has_Points then
+         declare
+            Middle : Vec3 := Zero3;
+         begin
+            for M of R.Points loop
+               Middle := Middle + M.Point.Mean;
+            end loop;
+            Middle := (1.0 / Real (R.Points.Length)) * Middle;
+            for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
+               if Holds (R, E) and then R.Eyes (E).Pointed
+                 and then Driver.Images.Count (Tracks.Region (R.Eyes (E).Track)) > 0
+               then
+                  declare
+                     Eye_Camera : constant Driver.World.Cameras.Camera'Class := Camera_Of (E, Seen);
+                     Region     : constant Driver.Images.Mask := Tracks.Region (R.Eyes (E).Track);
+                     B          : constant Driver.World.Regions.Box := Driver.World.Regions.Bounds (Region);
+                     Stride     : constant Positive :=
+                       Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (B.Column_1 - B.Column_0 + 1,
+                                                                                      B.Row_1 - B.Row_0 + 1))))));
+                     Axis       : constant Vec3 := Middle - Eye_Camera.Pose.Pose.Translation;
+                     Row        : Natural := B.Row_0;
+                  begin
+                     while Row <= B.Row_1 loop
+                        declare
+                           Column : Natural := B.Column_0;
+                        begin
+                           while Column <= B.Column_1 loop
+                              if Driver.Images.Contains (Region, Column, Row) then
+                                 declare
+                                    Sight : constant Ray_Estimate :=
+                                      Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));
+                                    Along : constant Real := Sight.Direction.Unit_Vector * Axis;
+                                 begin
+                                    if Along > 0.0 and then Sight.Direction.Sigma < Real'Last then
+                                       R.Outline.Append
+                                         (Point_Estimate'
+                                            (Mean       => Sight.Origin.Mean
+                                                           + (Real'(Axis * Axis) / Along) * Sight.Direction.Unit_Vector,
+                                             Covariance => [others => [others => 0.0]]));
+                                    end if;
+                                 end;
+                              end if;
+                              Column := Column + Stride;
+                           end loop;
+                        end;
+                        Row := Row + Stride;
+                     end loop;
+                  end;
+               end if;
+            end loop;
+         end;
+      end if;
    end Gather;
 
    function In_Reach (F : Driver.World.Supports.Surface; X : Vec3) return Boolean;
@@ -1188,10 +1246,12 @@ package body Driver.World.Estimates is
          --  The middle of what the eyes saw of it. Its points share the eyes'
          --  pose errors, so their covariance is kept as one point's, not
          --  divided by their number. The thing's own middle is not there: a
-         --  solid seen from one side reaches behind and under what is seen,
-         --  as far as its support. So the covariance also holds how far the
-         --  seen points, and the space under them down to the support, lie
-         --  from that middle: the thing's middle is somewhere within that.
+         --  solid seen from one side reaches beside what its points cover (as
+         --  far as its regions show it), behind and under it, as far as its
+         --  support. So the covariance also holds how far the seen points, its
+         --  outline at their depth, and the space under all of them down to
+         --  the support lie from that middle: the thing's middle is somewhere
+         --  within that.
          N      : constant Real := Real (R.Points.Length);
          Middle : constant Vec3 := (1.0 / N) * Sum;
          Extent : Mat3 := [others => [others => 0.0]];
@@ -1201,9 +1261,9 @@ package body Driver.World.Estimates is
             Extent := Extent + Driver.Numerics.Outer (X - Middle, X - Middle);
             Count := Count + 1;
          end Add;
-      begin
-         for M of R.Points loop
-            Add (M.Point.Mean);
+         procedure With_Foot (X : Vec3) is
+         begin
+            Add (X);
             if R.Under.Index /= 0 then
                declare
                   P    : constant Driver.Geometry.Plane_Estimate := S.Surfaces (R.Under.Index).Plane;
@@ -1211,10 +1271,17 @@ package body Driver.World.Estimates is
                begin
                   if Lean /= 0.0 then
                      --  Its foot on the support, straight down along Up.
-                     Add (M.Point.Mean - (Driver.Geometry.Height (P, M.Point.Mean) / Lean) * S.Up.Unit_Vector);
+                     Add (X - (Driver.Geometry.Height (P, X) / Lean) * S.Up.Unit_Vector);
                   end if;
                end;
             end if;
+         end With_Foot;
+      begin
+         for M of R.Points loop
+            With_Foot (M.Point.Mean);
+         end loop;
+         for X of R.Outline loop
+            With_Foot (X.Mean);
          end loop;
          return (Mean       => Middle,
                  Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);
