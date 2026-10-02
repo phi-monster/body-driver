@@ -125,6 +125,25 @@ package body Driver.Robot.Kinematics is
       end loop;
    end Collect;
 
+   --  The evidence is an arm's now: the graph still lists its group as an
+   --  arm, under that number, carrying that eye. Evidence is kept by group,
+   --  so an arm renumbered by a new one keeps it; an arm that stopped being
+   --  one is not fitted.
+   function Current (M : Model; R : Arm_Evidence) return Boolean is
+     (R.Arm in 1 .. Arm_Id'Base (Arm_Count (M)) and then Arm_Group (M, R.Arm) = R.Group
+      and then Eye_Of (M, R.Arm) = R.Eye);
+
+   --  The evidence of arm A as the graph has it now; 0 when there is none.
+   function Index_Of (M : Model; A : Arm_Id) return Natural is
+   begin
+      for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+         if M.Kinematics (K).Arm = A and then Current (M, M.Kinematics (K)) then
+            return K;
+         end if;
+      end loop;
+      return 0;
+   end Index_Of;
+
    function Held_Still (M : Model; A : Arm_Id; Beat : Natural) return Boolean is
       E : constant Eye_Id'Base := Eye_Of (M, A);
       G : constant Group_Id := Arm_Group (M, A);
@@ -157,17 +176,20 @@ package body Driver.Robot.Kinematics is
          begin
             if E > 0 then
                for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
-                  if M.Kinematics (K).Arm = Arm then
+                  if M.Kinematics (K).Group = G then
                      Index := K;
                   end if;
                end loop;
-               --  An arm met for the first time, or one whose group or eye the
-               --  graph now tells differently, starts its evidence afresh.
+               --  A group met as an arm for the first time, or one whose eye the
+               --  graph now tells differently, starts its evidence afresh; one
+               --  renumbered by a new arm keeps it under its new number.
                if Index = 0 then
                   M.Kinematics.Append (Arm_Evidence'(Arm => Arm, Group => G, Eye => E, others => <>));
                   Index := M.Kinematics.Last_Index;
-               elsif M.Kinematics (Index).Group /= G or else M.Kinematics (Index).Eye /= E then
+               elsif M.Kinematics (Index).Eye /= E then
                   M.Kinematics.Replace_Element (Index, (Arm => Arm, Group => G, Eye => E, others => <>));
+               elsif M.Kinematics (Index).Arm /= Arm then
+                  M.Kinematics (Index).Arm := Arm;
                end if;
                declare
                   R : Arm_Evidence renames M.Kinematics (Index);
@@ -246,14 +268,7 @@ package body Driver.Robot.Kinematics is
    end Observe;
 
    function Matched (M : Model; A : Arm_Id) return Natural is
-   begin
-      for R of M.Kinematics loop
-         if R.Arm = A then
-            return Natural (R.Matches.Length);
-         end if;
-      end loop;
-      return 0;
-   end Matched;
+     (if Index_Of (M, A) > 0 then Natural (M.Kinematics (Index_Of (M, A)).Matches.Length) else 0);
 
    function Pending (M : Model) return Natural is
       K : Natural := 0;
@@ -270,7 +285,9 @@ package body Driver.Robot.Kinematics is
          declare
             R : Arm_Evidence renames M.Kinematics (Index);
          begin
-            if not R.Matches.Is_Empty and then Natural (R.Matches.Length) /= R.Result.Matches
+            if not Current (M, R) then
+               R.Result := (others => <>);
+            elsif not R.Matches.Is_Empty and then Natural (R.Matches.Length) /= R.Result.Matches
               and then R.Group <= M.Groups.Last_Index and then R.Eye <= M.Eyes.Last_Index
             then
                declare
@@ -444,7 +461,7 @@ package body Driver.Robot.Kinematics is
    function Eye_In_Reference (M : Model; A : Arm_Id; Readings : Real_Array) return Rigid is
    begin
       for R of M.Kinematics loop
-         if R.Arm = A and then R.Result.Fitted
+         if R.Arm = A and then Current (M, R) and then R.Result.Fitted
            and then Natural (R.Result.Joints.Length) = Readings'Length
            and then Natural (R.Result.Reference.Length) = Readings'Length
          then
@@ -468,14 +485,7 @@ package body Driver.Robot.Kinematics is
    end Eye_In_Reference;
 
    function Fitted (M : Model; A : Arm_Id) return Boolean is
-   begin
-      for R of M.Kinematics loop
-         if R.Arm = A then
-            return R.Result.Fitted;
-         end if;
-      end loop;
-      return False;
-   end Fitted;
+     (Index_Of (M, A) > 0 and then M.Kinematics (Index_Of (M, A)).Result.Fitted);
 
    procedure Solve_Pose
      (M             : Model;
@@ -596,14 +606,7 @@ package body Driver.Robot.Kinematics is
    end Solve_Pose;
 
    function Result_Of (M : Model; A : Arm_Id) return Arm_Fit is
-   begin
-      for R of M.Kinematics loop
-         if R.Arm = A then
-            return R.Result;
-         end if;
-      end loop;
-      return (others => <>);
-   end Result_Of;
+     (if Index_Of (M, A) > 0 then M.Kinematics (Index_Of (M, A)).Result else (others => <>));
 
    function Lens_Of (M : Model; A : Arm_Id) return Fit.Lens is
       L : constant Lens_Fit := Result_Of (M, A).Lens;

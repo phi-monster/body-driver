@@ -6,9 +6,11 @@
 --  is an arm carrying them. An eye whole for several arms rides on the one
 --  whose push moves the largest share of it. A group that only moves
 --  patches is a closer of the arm in whose eye its patch is strongest, or a
---  part when no arm's eye shows it. Groups the robot does not take commands
---  for are sensors when their readings change and inert when they never do.
---  Arms are numbered in the order of their groups.
+--  part when no arm's eye shows it; a group some eye is undecided about
+--  (that eye might ride on it) is neither until the eye decides. Groups the
+--  robot does not take commands for are sensors when their readings change
+--  and inert when they never do. Arms are numbered in the order of their
+--  groups.
 --
 --  The porting contract is checked on the way: a commandable group whose
 --  pushes never moved its reading breaks clause 1; one whose reading moved
