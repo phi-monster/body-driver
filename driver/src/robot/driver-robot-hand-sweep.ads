@@ -22,10 +22,11 @@ private with Ada.Containers.Indefinite_Holders;
 
 package Driver.Robot.Hand.Sweep is
 
-   type Progress is (Waiting, Requested, Unanswered, Nothing_Moves, Measured);
+   type Progress is (Waiting, Requested, Unanswered, Unanswerable, Nothing_Moves, Measured);
    --  Waiting        the channel's two ends have not both been seen still
    --  Requested      the correspondences between its ends are being asked for
    --  Unanswered     the instrument could not answer for these ends
+   --  Unanswerable   the instrument said it never can (no address): nothing is asked again
    --  Nothing_Moves  nothing in this eye moves between its ends
    --  Measured       its lobes are found
 
@@ -79,10 +80,16 @@ package Driver.Robot.Hand.Sweep is
                  and then Forward'Length = Points'Length and then Backward'Length = Points'Length;
    --  Finds the channel's lobes from the replies.
 
-   procedure Refuse (S : in out State; Channel : Positive)
+   procedure Refuse (S : in out State; Channel : Positive; Lasting : Boolean; Why : String)
      with Pre => Status (S, Channel) = Requested;
    --  The instrument could not answer: these ends are not asked for again,
-   --  so a missing or failing service is not asked every beat; new ends are.
+   --  so a failing service is not asked every beat; new ends are. When the
+   --  service said its failure is lasting (Driver.Services.Reply.Lasting:
+   --  it has no address), nothing is ever asked again: every channel is
+   --  Unanswerable, whatever ends come, and Refusal says why.
+
+   function Refusal (S : State) return String;
+   --  Why the instrument can never answer; empty while it may.
 
    function Lobes_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector
      with Pre => Status (S, Channel) = Measured;
@@ -111,10 +118,13 @@ private
    type Channel_Array is array (Positive range <>) of Channel_State;
    package Channel_Holders is new Ada.Containers.Indefinite_Holders (Channel_Array);
 
+   package Why_Holders is new Ada.Containers.Indefinite_Holders (String);
+
    type State is record
       Width, Height : Natural := 0;
       Views         : Driver.Robot.Hand.Views.Tracker;
       Per_Channel   : Channel_Holders.Holder;
+      Never         : Why_Holders.Holder;   --  why the instrument can never answer; empty while it may
    end record;
 
 end Driver.Robot.Hand.Sweep;

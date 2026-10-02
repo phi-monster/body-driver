@@ -149,27 +149,76 @@ package body Driver.World.Tracking is
    function Wants_Match (T : Track) return Boolean is
      (T.State = Lost and then T.Was_Still and then not T.Older.Is_Empty);
 
-   function Region_Points (T : Track) return Natural is (Count (T.Region.Element));
+   --  The pixels asked about: the region's edge pixel by pixel, the rest of
+   --  the region and the box around it on a grid as many pixels apart as the
+   --  square root of the box's shorter side. The edge, where a thing meets
+   --  what it rests on, is kept whole; inside and around, a sample says as
+   --  much (the matcher's error needs no more), and a region of thousands of
+   --  pixels costs the instrument hardly more than one of tens.
 
-   function Region_And_Around (T : Track) return Driver.Instrument.Point_Array is
+   function Stride_Of (T : Track) return Positive is
+     (Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (T.Columns, T.Rows)))))));
+
+   function In_Region (Region : Mask; C, R : Integer) return Boolean is
+     (C >= 0 and then R >= 0 and then C < Width (Region) and then R < Height (Region)
+      and then Contains (Region, C, R));
+
+   function Asked_Own (T : Track; Region : Mask; C, R : Natural) return Boolean is
+      --  A region pixel (box coordinates C, R) on its edge, or on the grid.
+      X : constant Natural := T.Column_0 + C;
+      Y : constant Natural := T.Row_0 + R;
+   begin
+      return In_Region (Region, X, Y)
+        and then ((C mod Stride_Of (T) = 0 and then R mod Stride_Of (T) = 0)
+                  or else not In_Region (Region, X + 1, Y) or else not In_Region (Region, X - 1, Y)
+                  or else not In_Region (Region, X, Y + 1) or else not In_Region (Region, X, Y - 1));
+   end Asked_Own;
+
+   function Asked_Around (T : Track; Region : Mask; C, R : Natural) return Boolean is
+     (not In_Region (Region, T.Column_0 + C, T.Row_0 + R)
+      and then C mod Stride_Of (T) = 0 and then R mod Stride_Of (T) = 0);
+
+   function Region_Points (T : Track) return Natural is
       Region : constant Mask := T.Region.Element;
-      Points : Driver.Instrument.Point_Array (1 .. T.Columns * T.Rows);
       Own    : Natural := 0;
-      Around : Natural := Count (Region);
    begin
       for R in 0 .. T.Rows - 1 loop
          for C in 0 .. T.Columns - 1 loop
-            --  The pixel's centre, in the whole image: the region's first.
-            if Contains (Region, T.Column_0 + C, T.Row_0 + R) then
-               Own := Own + 1;
-               Points (Own) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);
-            else
-               Around := Around + 1;
-               Points (Around) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);
-            end if;
+            Own := Own + Boolean'Pos (Asked_Own (T, Region, C, R));
          end loop;
       end loop;
-      return Points;
+      return Own;
+   end Region_Points;
+
+   function Region_And_Around (T : Track) return Driver.Instrument.Point_Array is
+      Region : constant Mask := T.Region.Element;
+      Own    : constant Natural := Region_Points (T);
+      Total  : Natural := Own;
+   begin
+      for R in 0 .. T.Rows - 1 loop
+         for C in 0 .. T.Columns - 1 loop
+            Total := Total + Boolean'Pos (Asked_Around (T, Region, C, R));
+         end loop;
+      end loop;
+      declare
+         Points : Driver.Instrument.Point_Array (1 .. Total);
+         Mine   : Natural := 0;
+         Beside : Natural := Own;
+      begin
+         for R in 0 .. T.Rows - 1 loop
+            for C in 0 .. T.Columns - 1 loop
+               --  The pixel's centre, in the whole image: the region's first.
+               if Asked_Own (T, Region, C, R) then
+                  Mine := Mine + 1;
+                  Points (Mine) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);
+               elsif Asked_Around (T, Region, C, R) then
+                  Beside := Beside + 1;
+                  Points (Beside) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);
+               end if;
+            end loop;
+         end loop;
+         return Points;
+      end;
    end Region_And_Around;
 
    function Match_Points (T : Track) return Driver.Instrument.Point_Array is (Region_And_Around (T));
@@ -179,7 +228,7 @@ package body Driver.World.Tracking is
       T.State := Matching;
       T.Asked_On := T.Latest_Image;
       T.Asked_At := T.Latest_At;
-      T.Own_Points := Count (T.Region.Element);
+      T.Own_Points := Region_Points (T);
    end Asked_Match;
 
    function Round_Trip (A : Driver.Instrument.Answer; From : Driver.Instrument.Pixel) return Real is

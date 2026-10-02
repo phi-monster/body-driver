@@ -78,14 +78,24 @@ procedure Measure (H : in out Hands; M : in out Model) is
    procedure Sweep_Channel (G : Group_Id; C : Positive) is
       Start : Real := 0.0;
       Step  : Estimate;
+      Never : Ada.Strings.Unbounded.Unbounded_String;
       procedure Read_Start (O : Observation) is
          R : constant Real_Array := O.Readings.Element (G);
+         P : constant Natural := Own_Pair (G);
       begin
          Start := R (R'First + C - 1);
          Step := Visible_Step (M, G, C);
+         Never := Ada.Strings.Unbounded.To_Unbounded_String
+           (if P > 0 then Sweeps.Refusal (H.Data.Pairs (P).Sweep) else "");
       end Read_Start;
    begin
       Hold_Beat (Read_Start'Access);
+      if Ada.Strings.Unbounded.Length (Never) > 0 then
+         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
+                          & " not swept: the instrument can never answer ("
+                          & Ada.Strings.Unbounded.To_String (Never) & ")");
+         return;
+      end if;
       if not Known (Step) then
          Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
                           & " has no visible step measured; not swept");

@@ -146,9 +146,20 @@ package body Driver.World.Supports.Tests is
             --  A thing seen from the side: a third of its points on the rim
             --  it stands on, the rest up its sides.
             function Thing (X, Y, Bottom : Real; Points : Positive := Thing_Points) return Driver.Geometry.Point_Array is
-              ([for I in 1 .. Points =>
-                  Seen_Truly ([X + 0.02 * Uniform, Y + 0.02 * Uniform,
-                               Bottom + (if 3 * I <= Points then 0.0 else 0.03 * Real (I) / Real (Points))])]);
+               --  Its base lies flat on what it stands on, leaning with the table.
+               Result : Driver.Geometry.Point_Array (1 .. Points);
+            begin
+               for I in Result'Range loop
+                  declare
+                     Dx : constant Real := 0.02 * Uniform;
+                     Dy : constant Real := 0.02 * Uniform;
+                  begin
+                     Result (I) := Seen_Truly ([X + Dx, Y + Dy, Bottom + Lean * Dx
+                                                + (if 3 * I <= Points then 0.0 else 0.03 * Real (I) / Real (Points))]);
+                  end;
+               end loop;
+               return Result;
+            end Thing;
             function Resting (S : Support) return Boolean is
               (not Significant (Scalar_Gate (S.Height.Degrees_Of_Freedom, Tests => Thing_Points), S.Height.Value,
                                 S.Height.Sigma));
@@ -160,7 +171,8 @@ package body Driver.World.Supports.Tests is
                return False;
             end None;
             function Box_Top_Part (Member : Positive) return Boolean is (Parts (Member) = Box_Top);
-            On_Table : constant Support := Under (Found, Thing (0.3, 0.2, Table_Z (0.3)), Up, None'Access);
+            Table_Thing : constant Driver.Geometry.Point_Array := Thing (0.3, 0.2, Table_Z (0.3));
+            On_Table : constant Support := Under (Found, Table_Thing, Up, None'Access);
             On_Box   : constant Support := Under (Found, Thing (0.49, 0.0, Table_Z (0.49) + 0.05), Up, None'Access);
             Lifted   : constant Support := Under (Found, Thing (0.3, 0.2, Table_Z (0.3) + 0.2), Up, None'Access);
             Over_Box : constant Support := Under (Found, Thing (0.49, 0.0, Table_Z (0.49) + 0.25), Up, None'Access);
@@ -236,8 +248,21 @@ package body Driver.World.Supports.Tests is
       Stated := Sigma;
    end Understated;
 
+   procedure Flipping is
+      --  A scene whose table, seen through spreads stated at half, makes the
+      --  refits flip points at the patch's edge back and forth for good: the
+      --  points held all through that are the table, not nothing.
+   begin
+      Stated := Sigma / 2.0;
+      Table_And_Boxes_Seen (1, With_Things => False);
+      Stated := Sigma;
+   end Flipping;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("world.supports.flipping",
+                             "a patch whose refits keep flipping points at its edge loses its surface",
+                             Flipping'Access);
       Driver.Tests.Register ("world.supports.table", "the planes things rest on, or what rests on which, are wrong",
                              Table_And_Boxes'Access);
       Driver.Tests.Register ("world.supports.understated",

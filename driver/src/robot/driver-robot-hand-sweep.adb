@@ -10,7 +10,8 @@ package body Driver.Robot.Hand.Sweep is
      ((Width       => Width,
        Height      => Height,
        Views       => Driver.Robot.Hand.Views.Start (Width, Height, Closer_Noise, Rest_Noise),
-       Per_Channel => Channel_Holders.To_Holder ([1 .. Channels => (others => <>)])));
+       Per_Channel => Channel_Holders.To_Holder ([1 .. Channels => (others => <>)]),
+       Never       => Why_Holders.Empty_Holder));
 
    function Channels (S : State) return Positive is (S.Per_Channel.Element'Length);
 
@@ -55,13 +56,16 @@ package body Driver.Robot.Hand.Sweep is
    is
    begin
       Driver.Robot.Hand.Views.Observe (S.Views, Seen, Still, Closer, Rest, Image);
-      for C in 1 .. Channels (S) loop
-         if Ends_Moved (S, C) then
-            Renew (S, C);
-         elsif Status (S, C) = Waiting and then Driver.Robot.Hand.Views.Unseen_Travel (S.Views, C) then
-            Set_Status (S, C, Nothing_Moves);
-         end if;
-      end loop;
+      --  With an instrument that can never answer, new ends change nothing.
+      if S.Never.Is_Empty then
+         for C in 1 .. Channels (S) loop
+            if Ends_Moved (S, C) then
+               Renew (S, C);
+            elsif Status (S, C) = Waiting and then Driver.Robot.Hand.Views.Unseen_Travel (S.Views, C) then
+               Set_Status (S, C, Nothing_Moves);
+            end if;
+         end loop;
+      end if;
    end Observe;
 
    function Status (S : State; Channel : Positive) return Progress is
@@ -125,10 +129,19 @@ package body Driver.Robot.Hand.Sweep is
       Set_Status (S, Channel, Requested);
    end Asked;
 
-   procedure Refuse (S : in out State; Channel : Positive) is
+   procedure Refuse (S : in out State; Channel : Positive; Lasting : Boolean; Why : String) is
    begin
-      Set_Status (S, Channel, Unanswered);
+      if Lasting then
+         S.Never := Why_Holders.To_Holder (Why);
+         for C in 1 .. Channels (S) loop
+            Set_Status (S, C, Unanswerable);
+         end loop;
+      else
+         Set_Status (S, Channel, Unanswered);
+      end if;
    end Refuse;
+
+   function Refusal (S : State) return String is (if S.Never.Is_Empty then "" else S.Never.Element);
 
    procedure Answer
      (S        : in out State;

@@ -5,6 +5,7 @@ with Driver.Robot.Hand;
 with Driver.Tests;
 with Driver.World.Pairs.Tests;
 with Driver.World.Regions.Tests;
+with Driver.World.Estimates.Tests;
 with Driver.World.Supports.Tests;
 with Driver.World.Tracking.Tests;
 
@@ -94,6 +95,7 @@ package body Driver.World.Tests is
       Driver.World.Regions.Tests.Register;
       Driver.World.Pairs.Tests.Register;
       Driver.World.Supports.Tests.Register;
+      Driver.World.Estimates.Tests.Register;
       Driver.World.Tracking.Tests.Register;
    end Register;
 

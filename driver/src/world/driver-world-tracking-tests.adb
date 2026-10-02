@@ -113,8 +113,10 @@ package body Driver.World.Tracking.Tests is
          Points  : constant Driver.Instrument.Point_Array := Match_Points (T);
          Answers : Driver.Instrument.Answer_Array (Points'Range);
       begin
-         Check (Region_Points (T) = 144 and then Points'Length > 144,
-                "not every pixel of the region, and some around it, are matched");
+         --  The square's edge of 44 pixels whole, a sample of its 100 inside
+         --  pixels, and a sample of the box around it.
+         Check (Region_Points (T) >= 44 and then Region_Points (T) < 144 and then Points'Length > Region_Points (T),
+                "the region's edge is not matched whole, its inside not by a sample, or nothing around it");
          for K in Points'Range loop
             if K <= Region_Points (T) then
                --  Its pixels went ten to the right and came back, give or
