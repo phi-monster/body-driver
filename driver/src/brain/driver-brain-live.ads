@@ -81,6 +81,7 @@ private
      Driver.Brain.Rounds.Surroundings and Driver.Brain.Names.Senses and Driver.Brain.Execution.Performer
    with record
       Episode : Natural := 0;                         --  the episode this link serves
+      Heard   : Natural := 0;                         --  the person's words as of the last look
       Now     : Driver.Observations.Observation;      --  the beat last looked at
    end record;
 

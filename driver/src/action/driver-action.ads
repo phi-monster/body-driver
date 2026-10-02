@@ -15,6 +15,7 @@ with Ada.Containers.Vectors;
 with Ada.Strings.Unbounded;
 with Driver.Robot;
 with Driver.Robot.Hand;
+with Driver.Uncertain;
 with Driver.World;
 
 package Driver.Action is
@@ -89,8 +90,32 @@ package Driver.Action is
    --  The quantities of things this body can measure and change now, by
    --  their keyboard word (for example "height").
 
+   function Meaning (Quantity : String) return String;
+   --  The sheet's gloss of a word Quantities gives, as the brain is shown it:
+   --  what is measured and which way up changes it. Format only, never how
+   --  to act; empty for a word that is not a quantity.
+
    function Can_Bind (C : Context; R : Role) return Boolean;
    --  The role is bound to a measured part of this body now.
+
+   function Role_Hand (C : Context; R : Role) return Driver.Robot.Hand.Hand_Id'Base;
+   --  The hand whose closer the role is bound to now; 0 when the role binds
+   --  no hand (a pusher, me) or nothing at all. With no thing to be near,
+   --  a role binds to the first measured arm that can play it.
+
+   function Role_Point (C : Context; R : Role) return Driver.Uncertain.Point_Estimate;
+   --  Where the part the role is bound to now is, in the world frame: the
+   --  middle of a grasper's lobe faces, of a pusher's own surface, of the
+   --  tool of the arm that is me; unknown when the role is not bound.
+
+   function Usable (C : Context; R : Relation) return Boolean;
+   --  The relation can be carried out with this body now: what it is judged
+   --  by is measured (an eye on no arm for left, right, nearer and farther;
+   --  gravity for above, below, onto, off and facing), and some part of the
+   --  body can bring it about (a grasper for close and open).
+   --
+   --  Quantities, Can_Bind, Usable and Check read the models as they are at
+   --  the latest beat, so they are called within a beat's window.
 
    type Verdict (Ok : Boolean := True) is record
       case Ok is

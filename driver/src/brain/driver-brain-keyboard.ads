@@ -8,7 +8,8 @@
 --
 --  With a grasper bound and a quantity to change, the keyboard is the
 --  quantity sentence (do <thing> <quantity> up|down until <ending>), say and
---  done. Without a grasper but with some role, it is the full keyboard of
+--  done, with one stretch in a program at most: the keyboard has no control
+--  flow, so a second stretch could not depend on how the first ended. Without a grasper but with some role, it is the full keyboard of
 --  constraints and control. With no role at all, only say and done. On
 --  every keyboard of a body with more than one eye, "say look = <eye
 --  number>" (LANGUAGE.md 17.5) is a key of its own that types only the

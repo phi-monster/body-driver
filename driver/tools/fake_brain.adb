@@ -1,7 +1,7 @@
 --  fake_brain PORT: a brain service written from docs/brain-service.md
 --  alone, to test the wiring between the driver and a brain.
 --
---  Question one (a streamed request) is answered with server-sent events
+--  Question one (the streamed request) is answered with server-sent events
 --  carrying one say line; question two (a request with a response format)
 --  with found false. The body wired to it runs its rounds and never moves:
 --  a brain that wrote motion on its own would be a scripted program.
@@ -25,7 +25,20 @@ procedure Fake_Brain is
 
    Sentence : constant String := "say I am a fake brain: I only speak";
 
-   function Contains (Text, Part : String) return Boolean is (Ada.Strings.Fixed.Index (Text, Part) > 0);
+   --  Question one is the streamed one: its request sets "stream" to true.
+   function Streamed (Request : String) return Boolean is
+      Key : constant String := """stream""";
+      At_Key : constant Natural := Ada.Strings.Fixed.Index (Request, Key);
+      I      : Natural := At_Key + Key'Length;
+   begin
+      if At_Key = 0 then
+         return False;
+      end if;
+      while I <= Request'Last and then Request (I) in ' ' | ':' | ASCII.HT | ASCII.LF | ASCII.CR loop
+         I := I + 1;
+      end loop;
+      return I + 3 <= Request'Last and then Request (I .. I + 3) = "true";
+   end Streamed;
 
    procedure Send (Client : Socket_Type; Text : String) is
       Data : Ada.Streams.Stream_Element_Array (1 .. Ada.Streams.Stream_Element_Offset (Text'Length));
@@ -96,7 +109,7 @@ procedure Fake_Brain is
    procedure Answer_Where (Client : Socket_Type) is
       Reply : constant String :=
         "{""choices"":[{""index"":0,""message"":{""role"":""assistant"",""content"":"
-        & """{\""found\"": false, \""bbox_2d\"": [0, 0, 0, 0]}""},""finish_reason"":""stop""}]}";
+        & """{\""found\"":false,\""bbox_2d\"":[0,0,0,0]}""},""finish_reason"":""stop""}]}";
    begin
       Send (Client, "HTTP/1.1 200 OK" & CRLF & "Content-Type: application/json" & CRLF & "Content-Length:"
             & Natural'Image (Reply'Length) & CRLF & "Connection: close" & CRLF & CRLF & Reply);
@@ -121,12 +134,12 @@ begin
       declare
          Request : constant String := Read_Request (Client);
       begin
-         if Contains (Request, """response_format""") then
-            Answer_Where (Client);
-            Ada.Text_IO.Put_Line ("where is it: found false");
-         else
+         if Streamed (Request) then
             Answer_Program (Client);
             Ada.Text_IO.Put_Line ("write a program: " & Sentence);
+         else
+            Answer_Where (Client);
+            Ada.Text_IO.Put_Line ("where is it: found false");
          end if;
       exception
          when Socket_Error =>

@@ -11,9 +11,11 @@
 --  Arms: an estimated tool pose T_est relates to the true pose T_true of some
 --  link by an unknown similarity S (world frames and units differ) and a
 --  constant offset X (the frame the driver chose on its last link):
---  T_true = S T_est X. Every true link is tried; S and X are fitted on every
---  other distinct pose and the errors reported on the rest, for the link that
---  fits best (links rigid with one another fit alike).
+--  T_true = S T_est X. Every true link that turns like the tool between its
+--  successive poses is tried (the angle of R_i^T R_j does not depend on S or
+--  X); S and X are fitted on every other distinct pose and the errors reported
+--  on the rest, for the link that fits best (links rigid with one another fit
+--  alike).
 --
 --  Eyes: an eye frame is defined (z along the optical axis, x and y along +U
 --  and +V), so an estimated eye pose is compared with the true optical frame
@@ -671,6 +673,56 @@ procedure Score is
       end loop;
    end Split_Pairs;
 
+   type Turn_Mismatch is record
+      Median, Spread : Real := Real'Last;
+   end record;
+
+   function Rotation_Mismatch (Tool : Positive; Link : String) return Turn_Mismatch is
+      --  How much the tool turns between successive distinct poses is the
+      --  same angle whatever the world frame and the offset on the link (S
+      --  and X cancel in R_i^T R_j), so the tool's true link turns as much as
+      --  the estimate does: a cheap ranking of the links before any fit.
+      package Real_Vectors is new Ada.Containers.Vectors (Positive, Real);
+      Differences   : Real_Vectors.Vector;
+      Last_Position : Vec3 := [Real'Last, 0.0, 0.0];
+      Previous_Est, Previous_True : Rigid;
+      Have : Boolean := False;
+   begin
+      for B in Recorded.First_Index .. Recorded.Last_Index loop
+         if Recorded (B).Line > 0 and then Estimated.Contains (B)
+           and then Natural (Estimated (B).Tools.Length) >= Tool
+           and then Truth (Recorded (B).Line).Links.Contains (Link)
+         then
+            declare
+               T : constant Rigid := Truth (Recorded (B).Line).Links (Link);
+               E : constant Rigid := Estimated (B).Tools (Tool);
+            begin
+               if abs (T.Translation - Last_Position) > 0.0 then
+                  Last_Position := T.Translation;
+                  if Have then
+                     Differences.Append (abs (Angle (Transpose (Previous_Est.Rotation) * E.Rotation)
+                                              - Angle (Transpose (Previous_True.Rotation) * T.Rotation)));
+                  end if;
+                  Previous_Est := E;
+                  Previous_True := T;
+                  Have := True;
+               end if;
+            end;
+         end if;
+      end loop;
+      if Natural (Differences.Length) < 2 then
+         return (others => <>);
+      end if;
+      declare
+         D : Real_Array (1 .. Natural (Differences.Length));
+      begin
+         for I in D'Range loop
+            D (I) := Differences (I);
+         end loop;
+         return (Median => Driver.Stats.Median (D), Spread => Driver.Stats.Robust_Sigma (D));
+      end;
+   end Rotation_Mismatch;
+
    procedure Score_Arms is
       Tools : Natural := 0;
       Links : Name_Vectors.Vector;
@@ -689,12 +741,25 @@ procedure Score is
          declare
             Best : Arm_Fit;
             Best_Test : Pair_Vectors.Vector;
+            Least : Turn_Mismatch;
+            Turns : array (1 .. Natural (Links.Length)) of Turn_Mismatch;
          begin
-            for Link of Links loop
+            --  Only links that turn like the tool, within Z of the best one's
+            --  own scatter, are worth a fit.
+            for I in Turns'Range loop
+               Turns (I) := Rotation_Mismatch (Tool, Links (I));
+               if Turns (I).Median < Least.Median then
+                  Least := Turns (I);
+               end if;
+            end loop;
+            for I in Turns'Range loop
                declare
+                  Link        : constant String := Links (I);
                   Train, Test : Pair_Vectors.Vector;
                begin
-                  Split_Pairs (Tool, Link, Train, Test);
+                  if Turns (I).Median <= Least.Median + Driver.Conventions.Z * Least.Spread then
+                     Split_Pairs (Tool, Link, Train, Test);
+                  end if;
                   if Natural (Train.Length) >= 5 and then not Test.Is_Empty then
                      declare
                         X : constant Parameters := Best_Fit (Train);
@@ -885,6 +950,9 @@ procedure Score is
       Close (F);
    end Append_Vertices;
 
+   package Mesh_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, Vertex_Vectors.Vector, "<", Vertex_Vectors."=");
+   Meshes_Read : Mesh_Maps.Map;   --  every stored geometry is read once
+
    function Collision_Points (Key : String) return Vertex_Vectors.Vector is
       --  Every collision vertex of a stored geometry, in its link's frame.
       use Driver.Json;
@@ -894,6 +962,9 @@ procedure Score is
       Why    : Unbounded_String;
       Points : Vertex_Vectors.Vector;
    begin
+      if Meshes_Read.Contains (Key) then
+         return Meshes_Read (Key);
+      end if;
       Ada.Text_IO.Open (F, Ada.Text_IO.In_File, To_String (Store) & "/" & Key & ".json");
       Parse (Ada.Text_IO.Get_Line (F), Doc, Ok, Why);
       Ada.Text_IO.Close (F);
@@ -909,6 +980,7 @@ procedure Score is
             end loop;
          end;
       end if;
+      Meshes_Read.Include (Key, Points);
       return Points;
    end Collision_Points;
 

@@ -1,0 +1,48 @@
+--  A want carried out on a plant, one step at a time, to one ending.
+--
+--  The thing a want is about is first brought under control: if no hand
+--  holds it, the contact search (Driver.Action.Contact.Search) picks where
+--  the body meets it for the wanted motion, and the body goes there by the
+--  lowest way around what is in between, opens its closers as far as the
+--  way in needs, comes in along the last straight stretch and closes until
+--  the closers stop on it. Then every step moves it a part of the way, as
+--  far as three measured bounds allow: the arm reaches there, an eye that
+--  stays still keeps seeing it, and nothing it could meet is nearer than its
+--  own uncertainty (from there on it creeps by the arm's smallest step);
+--  a wanted ending that the motion is about to bring about bounds the step
+--  too, so the step does not overshoot it. After every step the monitor
+--  (Driver.Action.Monitor) reads the measured facts; the interval ends with
+--  the ending it names. A thing brought down onto a surface is let go only
+--  when it rests there. What failed is handed back to the plant (a friction
+--  that let the thing slip), so the next choice differs. Nothing here knows
+--  which body or which task it serves.
+
+with Driver.Action.Plants;
+with Driver.Action.Snapshots;
+with Driver.Uncertain;
+
+package Driver.Action.Execution is
+
+   procedure Execute (P : in out Driver.Action.Plants.Plant'Class; W : Want; R : out Result);
+
+   function Bindable (S : Driver.Action.Snapshots.Snapshot; R : Role) return Boolean;
+   --  Some arm can play the role now: a grasper closes lobes on things, a
+   --  pusher touches without closing, me carries the whole body and every
+   --  eye.
+
+   function Usable (S : Driver.Action.Snapshots.Snapshot; R : Relation) return Boolean;
+   --  What the relation is judged by is measured and some part can bring it
+   --  about (Driver.Action.Usable); into is not built yet.
+
+   function Bound_Arm (S : Driver.Action.Snapshots.Snapshot; R : Role; A : out Driver.Action.Snapshots.Arm_Id)
+     return Boolean;
+   --  The arm the role binds to with no thing to be near: the first measured
+   --  one that can play it.
+
+   function Part_Point (S : Driver.Action.Snapshots.Snapshot; A : Driver.Action.Snapshots.Arm_Id)
+     return Driver.Uncertain.Point_Estimate
+     with Pre => Driver.Action.Snapshots.Has_Arm (S, A);
+   --  The middle of the arm's touching parts in the world: its lobes' faces,
+   --  else its own surface, else its tool.
+
+end Driver.Action.Execution;

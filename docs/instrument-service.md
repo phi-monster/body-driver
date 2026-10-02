@@ -1,73 +1,110 @@
-# 仪器服务:配点和分割
+# The instrument service
 
-驱动旁边跑着一个小 HTTP 进程,叫"仪器"。它用任务无关的学习型模型,从画面里量出几样东西还回来:两帧里哪两个像素是同一个点(配点)、两帧有多像(整体特征)、框里那件东西是哪些像素(分割)。驱动只认它回的数字,不认是哪个模型,换模型只改仪器那一边。仪器量的每一样,驱动都拿几何再核一遍(三角重投、两停交叉);模型自报的可信度只记下来,不拿来当门。
+Beside the driver runs a small HTTP service, the instrument. With learned,
+task-free models it measures a few things in pictures and hands back numbers:
+where a pixel of one picture is in another (matching), and which pixels of a
+picture are the thing a box or a few points pick out (segmentation). The
+driver trusts only the numbers, never the model: every answer is checked by
+geometry where it is used, and the model's own confidence is recorded but
+never used as a gate. Changing the model changes only the service.
 
-参考实现:[`harness/instruments/serve.py`](../harness/instruments/serve.py)。模型是 RoMa(配点)、DINOv2(整体特征)、SAM 2.1(分割),权重按 sha256 钉死,对不上就不起来。
+The reference service is [`harness/instruments/serve.py`](../harness/instruments/serve.py)
+(RoMa for matching, SAM 2.1 for segmentation, weights pinned by sha256). It
+is one of the two programs outside the driver that may be Python, because its
+models only run in PyTorch; the driver itself talks to it like to any other
+service.
 
-## 1. 接在哪
+## 1. Where the driver connects
 
-- 环境变量 `BL_INST=host:port`,或启动参数 `--inst host:port`(两个都给时用启动参数)。都没给就不用仪器;要用到它的那几步照实说"没配仪器"。
-- 每一样都是一次 HTTP `POST http://host:port/<路径>`,请求和回包都是 JSON。一次请求从连接、发送到收完,一共最多等 1800 秒。
-- 图一律是 24 位 BMP 的 base64(不带 `data:` 前缀),按画面原样大小传。像素坐标:原点在左上角,u 向右,v 向下,单位是像素,可以带小数。
-- 回包里 `"ok": false` 表示仪器说不行。`"err"` 是原因,驱动照抄进日志。
-- `GET /health`:参考实现回 `{"instruments": [...], "device": ...}`。驱动不调它,只给人查。
+```
+body_driver --listen PORT --inst HOST:PORT ...
+```
 
-## 2. `POST /frame`:存一帧
+Every question is one HTTP/1.1 `POST http://HOST:PORT/<path>` with a JSON
+body, answered with JSON. Without `--inst`, every question fails with "no
+address was given for the instrument service", and what needs the instrument
+is reported as not measured.
+
+- Pictures travel as a 24-bit BMP file encoded in base64 (no `data:` prefix),
+  at the picture's own size.
+- Pixel coordinates: the origin is the top left corner of the top left
+  pixel, u grows to the right and v downwards, in pixels, with fractions.
+  The centre of the top left pixel is (0.5, 0.5).
+- `"ok": false` with `"err"` means the service could not answer; the reason
+  goes into the log.
+
+The driver never waits on the instrument in its main loop: the parts of the
+driver that estimate submit a question and read the reply on a later beat;
+only the parts that decide (booting, binding a name) ask and wait.
+
+## 2. `POST /frame`: keep a picture
 
 ```json
 {"image": "<BMP base64>"}
 ```
-→ `{"ok": true, "id": 17}`
 
-把一帧存在仪器那边,之后配点只报编号。开机扫描时同一帧要和几十帧配,每次都传整张图,比配点本身还慢(09-26 实测一对 1.9 秒,配点只占 0.8 秒)。参考实现只留最近 1200 帧;驱动拿到编号就用,不长期依赖它。
-
-## 3. `POST /match`:配点
+answered with
 
 ```json
-{"a": "<BMP base64>", "b": "<BMP base64>", "num": 0, "points": [[u, v], ...]}
+{"ok": true, "id": 17}
 ```
-也可以用 `"a_id"` / `"b_id"`(`/frame` 回的编号)代替 `"a"` / `"b"`。可选项:`"coarse": true` 只在粗分辨率上配;`"back": true` 要往返。
 
-→
+The service keeps the picture, and later questions name it by its number
+instead of sending it again (`a_id`, `b_id` below). A reply without a
+non-negative number is refused.
+
+## 3. `POST /match`: where points of one picture are in another
+
+```json
+{"a": "<BMP base64>", "b": "<BMP base64>", "num": 0, "points": [[u, v], ...], "back": true}
+```
+
+`"a_id"` and `"b_id"` (numbers from `/frame`) may stand for `"a"` and `"b"`.
+The driver always sends `"num": 0`: it asks only about the points it names.
+
 ```json
 {"ok": true,
- "points": [[ub, vb, cert], ...],
- "back":   [[ua2, va2], ...],
- "samples": [[ua, va, ub, vb, cert], ...]}
+ "points": [[ub, vb, certainty], ...],
+ "back":   [[ua, va], ...]}
 ```
 
-- `points` 和请求里的 `points` 一一对应,顺序不变:A 里的那个像素在 B 里落在哪,`cert` 是模型自报的可信度(0..1)。条数对不上,驱动就当这一对没问到。
-- `back`(要了才有):每个点配到 B 以后,再配回 A 落在哪。往返差就是配点自己对不对得上;驱动按这个差筛点(开机扫描时往返 1 px 以内才收)。
-- `num > 0`:让仪器自己抽 `num` 对对应点,放在 `samples` 里。驱动现在只发 `num: 0`,只问它点的那些点。
+- `points` answers the request's points one for one, in order: where each
+  point of picture a is in picture b, and the model's certainty from 0 to 1.
+  A point the service cannot answer is written with a negative coordinate.
+- `back`, when asked for: where each answer in b matches back to in a. The
+  distance between a point and its round trip is how well the match agrees
+  with itself, and that, not the certainty, is what the driver judges.
+- A reply with another number of answers than points asked, or without a
+  round trip for every point when one was asked, is refused whole: nothing
+  of it is used.
 
-## 4. `POST /describe`:整体特征
+## 4. `POST /segment`: the pixels of a thing
 
 ```json
-{"ids": [3, 4, 17]}
+{"image": "<BMP base64>", "box": [x0, y0, x1, y1], "points": [[u, v, 1], [u, v, 0], ...]}
 ```
-→ `{"ok": true, "vectors": [[...], [...], [...]]}`
 
-每一帧(按 `/frame` 的编号)一个向量,归一过:两帧看起来多像,就是两个向量的点积。参考实现用的是 DINOv2 图块特征的平均,1024 个数。驱动只拿它挑先配哪几对,配上配不上照样按几何核。
-
-## 5. `POST /segment`:框里那件东西的像素
+`box` is in pixels; each point is on the thing (1) or off it (0). At least
+one of the two is given. The name binder sends the box the brain's eye gave
+for a name ([`language.md`](language.md), section 7) and no points.
 
 ```json
-{"image": "<BMP base64>", "box": [x0, y0, x1, y1], "points": [[u, v, 1], [u, v, 0]]}
+{"ok": true, "w": 640, "h": 480, "score": 0.93, "runs": [r0, r1, r2, ...]}
 ```
-`box`(像素)和 `points`(1 = 在它身上,0 = 不在)至少给一样。
 
-→ `{"ok": true, "w": 640, "h": 480, "area": 1687, "box": [...], "score": 0.93, "runs": [r0, r1, r2, ...]}`
+- `runs` are run lengths over the picture read row by row from the top: a
+  run of pixels off the thing, then a run on it, alternately, starting off
+  it. They must add up to `w x h`.
+- `w` and `h` must be the picture's size.
+- `score` is the model's own estimate of its quality; it is recorded only.
+- A reply for another picture size, or whose runs run past the picture or
+  do not cover it, is refused.
 
-- `runs`:整幅画面按行展开后的游程。先是"不是它"一段,再是"是它"一段,交替下去;加起来必须等于 `w × h`,否则驱动不收。
-- `score`:模型自报的 IoU。驱动只记下来,不拿它当门。
-- 驱动用它的地方:脑说"它在这一框里"以后,身体先让仪器出整片像素,再自己量形心、长轴、是不是单独的一块(`LANGUAGE.md` §17.7 第 2 步)。
+## 5. Where the driver uses it
 
-## 6. 什么时候用到
-
-| 用在哪 | 问法 |
+| step | questions |
 |---|---|
-| 开机扫描:每一节的形状、不动的眼对齐 | `/frame` 存各格,`/match` 按编号、带往返,`/describe` 挑先配哪几对 |
-| 开机碰指尖、找手指 | `/match` |
-| 认名字:脑给框 ⇒ 框里是哪些像素 | `/segment` |
+| booting: matching what an eye saw before and after a push, mounting the eyes | `/frame`, `/match` with round trips |
+| binding a name: which pixels the brain's eye boxed | `/segment` |
 
-没配仪器时,开机里要配点的那几步照实报"没配仪器",量不出的就说量不出。
+Without the instrument, a step that needs it says so and measures nothing.
