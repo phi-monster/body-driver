@@ -46,4 +46,10 @@ package body Driver.World.Offline is
    function Plane_Of (B : Bench; F : Surface_Id) return Driver.Geometry.Plane_Estimate is
      (Estimates.Plane_Of (B.State, F));
 
+   function Scene_Round (B : Bench) return Natural is (Estimates.Scene_Round (B.State));
+   function Scene_Size (B : Bench) return Natural is (Estimates.Scene_Size (B.State));
+   function Scene_At (B : Bench; K : Positive) return Point_Estimate is (Estimates.Scene_At (B.State, K));
+   function Scene_Grid_At (B : Bench; K : Positive) return Driver.World.Supports.Grid_Point is
+     (Estimates.Scene_Grid_At (B.State, K));
+
 end Driver.World.Offline;

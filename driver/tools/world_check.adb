@@ -754,6 +754,9 @@ procedure World_Check is
    Things      : Adopted_Maps.Map;
    Adopted_Yet : Boolean := False;
    Last_Surfaces : Natural := 0;
+   Dump          : Unbounded_String;   --  where each measurement of the scene is written, when asked
+   Dumped_Round  : Natural := 0;
+   Until_Beat    : Natural := Natural'Last;   --  the replay stops after this beat, when asked
 
    function Same_State (O : Observation; L : Truth_Line) return Boolean is
       Common : Natural := 0;
@@ -774,6 +777,32 @@ procedure World_Check is
       end loop;
       return Common > 0;
    end Same_State;
+
+   procedure Dump_Scene is
+      --  The scene's latest measurement, one point a line: its position and
+      --  covariance (metres), and its place in the grid it was asked on.
+      F    : Ada.Text_IO.File_Type;
+      Name : constant String := To_String (Dump) & "." & Image (Dumped_Round) & ".txt";
+   begin
+      Ada.Text_IO.Create (F, Ada.Text_IO.Out_File, Name);
+      for K in 1 .. Driver.World.Offline.Scene_Size (Bench) loop
+         declare
+            P : constant Point_Estimate := Driver.World.Offline.Scene_At (Bench, K);
+            G : constant Driver.World.Supports.Grid_Point := Driver.World.Offline.Scene_Grid_At (Bench, K);
+         begin
+            Ada.Text_IO.Put_Line
+              (F, Driver.Json.Number_Image (P.Mean (1)) & " " & Driver.Json.Number_Image (P.Mean (2)) & " "
+               & Driver.Json.Number_Image (P.Mean (3)) & " " & Driver.Json.Number_Image (P.Covariance (1, 1)) & " "
+               & Driver.Json.Number_Image (P.Covariance (2, 2)) & " " & Driver.Json.Number_Image (P.Covariance (3, 3))
+               & " " & Driver.Json.Number_Image (P.Covariance (1, 2)) & " "
+               & Driver.Json.Number_Image (P.Covariance (1, 3)) & " " & Driver.Json.Number_Image (P.Covariance (2, 3))
+               & " " & Image (G.Column) & " " & Image (G.Row));
+         end;
+      end loop;
+      Ada.Text_IO.Close (F);
+      Ada.Text_IO.Put_Line ("beat" & Beat'Image & ": the scene's" & Driver.World.Offline.Scene_Size (Bench)'Image
+                            & " points written to " & Name);
+   end Dump_Scene;
 
    procedure Adopt_Objects (O : Observation) is
       --  Every true object, in the first eye the middle of its mesh falls in,
@@ -856,6 +885,9 @@ procedure World_Check is
       end loop;
    end Adopt_Objects;
 
+   procedure Report;
+   --  Scores the things of the episode so far against the truth of the latest paired beat.
+
    procedure Robot_Message (Data : Driver.Bytes.Byte_Array) is
       Req : Driver.Protocol.Request;
       Ok  : Boolean;
@@ -866,6 +898,11 @@ procedure World_Check is
          return;
       end if;
       if Req.Kind = Driver.Protocol.Reset then
+         --  The episode that ends is scored before the world forgets its things.
+         Ada.Text_IO.Put_Line ("beat" & Beat'Image & ": a new episode");
+         if Last > 0 and then not Things.Is_Empty then
+            Report;
+         end if;
          Episodes := Episodes + 1;
          Driver.World.Offline.New_Episode (Bench);
          Things.Clear;
@@ -902,6 +939,10 @@ procedure World_Check is
             Still : constant Boolean := Driver.Robot.Still (Robot);
          begin
             Driver.World.Offline.Observe (Bench, Natural (O.Images.Length), Camera_Of'Access, Up, Still, O);
+            if Length (Dump) > 0 and then Driver.World.Offline.Scene_Round (Bench) /= Dumped_Round then
+               Dumped_Round := Driver.World.Offline.Scene_Round (Bench);
+               Dump_Scene;
+            end if;
             Last := Beat;
             if Driver.World.Offline.Surface_Count (Bench) /= Last_Surfaces then
                Last_Surfaces := Driver.World.Offline.Surface_Count (Bench);
@@ -935,35 +976,83 @@ procedure World_Check is
    --  The score
 
    procedure Report is
+      --  Every object's box and lowest point from its placed vertices; the
+      --  triangle grid of an object only once some point could be nearest it.
       L         : constant Truth_Line := Truth (Line_Of_Beat (Last));
       Placed_At : Placed_Maps.Map;
-      Lowest    : Real_Array (1 .. Natural (L.Objects.Length));
-      N         : Natural := 0;
+      Names     : Name_Vectors.Vector;
+      Lows      : Vertex_Vectors.Vector;   --  each object's box, its lowest corner
+      Highs     : Vertex_Vectors.Vector;   --  and its highest
+      Lowests   : Vertex_Vectors.Vector;   --  each object's lowest vertex
+      Middles   : Vertex_Vectors.Vector;
       Table_Top : Real := 0.0;
 
       function Plane_Z (P : Driver.Geometry.Plane_Estimate; X, Y : Real) return Real is
         ((P.Normal * P.Centre - P.Normal (1) * X - P.Normal (2) * Y) / P.Normal (3));
+
+      function Grid_Of (K : Positive) return Placed is
+      begin
+         if not Placed_At.Contains (Names (K)) then
+            Placed_At.Include (Names (K), Place (Mesh_Of (Object_Keys (Names (K))), L.Objects (Names (K))));
+         end if;
+         return Placed_At (Names (K));
+      end Grid_Of;
+
+      function Box_Distance (K : Positive; P : Vec3) return Real is
+         --  How far P is from the object's box: no nearer can it be to the object.
+         D : Vec3 := Zero3;
+      begin
+         for A in 1 .. 3 loop
+            D (A) := Real'Max (0.0, Real'Max (Lows (K) (A) - P (A), P (A) - Highs (K) (A)));
+         end loop;
+         return abs D;
+      end Box_Distance;
    begin
       for C in L.Objects.Iterate loop
          if Object_Keys.Contains (Pose_Maps.Key (C)) then
             declare
-               S : constant Placed := Place (Mesh_Of (Object_Keys (Pose_Maps.Key (C))), Pose_Maps.Element (C));
+               M      : constant Mesh := Mesh_Of (Object_Keys (Pose_Maps.Key (C)));
+               Low    : Vec3 := [others => Real'Last];
+               High   : Vec3 := [others => Real'First];
+               Lowest : Vec3 := Zero3;
             begin
-               if not S.Triangles.Is_Empty then
-                  Placed_At.Include (Pose_Maps.Key (C), S);
-                  N := N + 1;
-                  Lowest (N) := S.Lowest (3);
-                  Ada.Text_IO.Put_Line ("object " & Pose_Maps.Key (C) & ": lowest point at z " & Mm (S.Lowest (3))
-                                        & " mm," & S.Triangles.Length'Image & " triangles");
+               if not M.Vertices.Is_Empty then
+                  for V of M.Vertices loop
+                     declare
+                        P : constant Vec3 := Pose_Maps.Element (C) * V;
+                     begin
+                        if P (3) < Low (3) then
+                           Lowest := P;
+                        end if;
+                        for A in 1 .. 3 loop
+                           Low (A) := Real'Min (Low (A), P (A));
+                           High (A) := Real'Max (High (A), P (A));
+                        end loop;
+                     end;
+                  end loop;
+                  Names.Append (Pose_Maps.Key (C));
+                  Lows.Append (Low);
+                  Highs.Append (High);
+                  Lowests.Append (Lowest);
+                  Middles.Append (Middle_Of (M, Pose_Maps.Element (C)));
+                  Ada.Text_IO.Put_Line ("object " & Pose_Maps.Key (C) & ": lowest point at z " & Mm (Lowest (3))
+                                        & " mm," & M.Triangles.Length'Image & " triangles");
                end if;
             end;
          end if;
       end loop;
-      if N = 0 then
+      if Names.Is_Empty then
          Ada.Text_IO.Put_Line ("no object has a mesh");
          return;
       end if;
-      Table_Top := Driver.Stats.Median (Lowest (1 .. N));
+      declare
+         Z : Real_Array (1 .. Natural (Names.Length));
+      begin
+         for K in Z'Range loop
+            Z (K) := Lowests (K) (3);
+         end loop;
+         Table_Top := Driver.Stats.Median (Z);
+      end;
       Ada.Text_IO.Put_Line ("table top (median of the objects' lowest points): z " & Mm (Table_Top) & " mm");
 
       for F in 1 .. Driver.World.Offline.Surface_Count (Bench) loop
@@ -988,44 +1077,48 @@ procedure World_Check is
             A      : constant Adopted := Adopted_Maps.Element (C);
             Name   : constant String := To_String (A.Object);
             Points : constant Driver.World.Pairs.Match_Vectors.Vector := Driver.World.Offline.Points_Of (Bench, T);
+            Own_K  : Natural := 0;
             Line   : Unbounded_String := To_Unbounded_String
               ("thing" & T'Image & " (" & Name & ", eye" & A.Eye'Image & "):" & Points.Length'Image & " points");
          begin
-            if not Points.Is_Empty and then Placed_At.Contains (Name) then
+            for K in Names.First_Index .. Names.Last_Index loop
+               if Names (K) = Name then
+                  Own_K := K;
+               end if;
+            end loop;
+            if not Points.Is_Empty and then Own_K > 0 then
                declare
-                  Own    : constant Placed := Placed_At (Name);
-                  Off    : Real_Array (1 .. Natural (Points.Length));
-                  Sigmas : Real_Array (1 .. Natural (Points.Length));
-                  Count_Of : array (1 .. Natural (Placed_At.Length)) of Natural := [others => 0];
-                  Names  : Name_Vectors.Vector;
+                  Own      : constant Placed := Grid_Of (Own_K);
+                  Off      : Real_Array (1 .. Natural (Points.Length));
+                  Sigmas   : Real_Array (1 .. Natural (Points.Length));
+                  Count_Of : array (Names.First_Index .. Names.Last_Index) of Natural := [others => 0];
                begin
-                  for P in Placed_At.Iterate loop
-                     Names.Append (Placed_Maps.Key (P));
-                  end loop;
                   for I in Off'Range loop
                      declare
                         M     : constant Driver.World.Pairs.Match := Points (I);
                         Sigma : constant Real :=
                           Sqrt ((M.Point.Covariance (1, 1) + M.Point.Covariance (2, 2) + M.Point.Covariance (3, 3))
                                 / 3.0);
-                        Best  : Real := Real'Last;
-                        Which : Natural := 0;
+                        Best  : Real;
+                        Which : Positive := Own_K;
                      begin
                         Off (I) := Distance (Own, M.Point.Mean);
                         Sigmas (I) := (if Sigma > 0.0 then Off (I) / Sigma else Real'Last);
+                        Best := Off (I);
+                        --  Another object nearer: only one whose box comes nearer.
                         for K in Names.First_Index .. Names.Last_Index loop
-                           declare
-                              D : constant Real := Distance (Placed_At (Names (K)), M.Point.Mean);
-                           begin
-                              if D < Best then
-                                 Best := D;
-                                 Which := K;
-                              end if;
-                           end;
+                           if K /= Own_K and then Box_Distance (K, M.Point.Mean) < Best then
+                              declare
+                                 D : constant Real := Distance (Grid_Of (K), M.Point.Mean);
+                              begin
+                                 if D < Best then
+                                    Best := D;
+                                    Which := K;
+                                 end if;
+                              end;
+                           end if;
                         end loop;
-                        if Which > 0 then
-                           Count_Of (Which) := Count_Of (Which) + 1;
-                        end if;
+                        Count_Of (Which) := Count_Of (Which) + 1;
                      end;
                   end loop;
                   declare
@@ -1045,9 +1138,9 @@ procedure World_Check is
                      Centre : constant Point_Estimate := Driver.World.Offline.Centre (Bench, T);
                      Under  : constant Driver.World.Surface_Id'Base := Driver.World.Offline.Resting_On (Bench, T);
                      Height : constant Estimate := Driver.World.Offline.Height_Above_Support (Bench, T);
-                     True_H : constant Real := Own.Lowest (3) - Table_Top;
+                     True_H : constant Real := Lowests (Own_K) (3) - Table_Top;
                   begin
-                     Append (Line, "; centre " & Mm (abs (Centre.Mean - Own.Middle)) & " mm from its mesh's middle");
+                     Append (Line, "; centre " & Mm (abs (Centre.Mean - Middles (Own_K))) & " mm from its mesh's middle");
                      if Under = 0 then
                         Append (Line, "; rests on nothing found");
                      else
@@ -1058,7 +1151,7 @@ procedure World_Check is
                            Append (Line, "; rests on surface" & Under'Image & " at " & Mm (Height.Value) & " +- "
                                    & Mm (Height.Sigma) & " mm (truth " & Mm (True_H) & " mm, off by "
                                    & Mm (Height.Value - True_H) & " mm); that surface is "
-                                   & Mm (Plane_Z (P, Own.Lowest (1), Own.Lowest (2)) - Table_Top)
+                                   & Mm (Plane_Z (P, Lowests (Own_K) (1), Lowests (Own_K) (2)) - Table_Top)
                                    & " mm off the table top under it");
                         end;
                      end if;
@@ -1083,13 +1176,20 @@ procedure World_Check is
 
 begin
    if Ada.Command_Line.Argument_Count < 4 or else Ada.Command_Line.Argument (3) /= "--inst" then
-      Line (Core, "usage: world_check RECORDING TRUTH --inst HOST:PORT");
+      Line (Core, "usage: world_check RECORDING TRUTH --inst HOST:PORT [--dump PREFIX] [--until BEAT]");
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
       return;
    end if;
    Path := To_Unbounded_String (Ada.Command_Line.Argument (1));
    Truth_Path := To_Unbounded_String (Ada.Command_Line.Argument (2));
    Configure_Instrument (Ada.Command_Line.Argument (4));
+   for I in 5 .. Ada.Command_Line.Argument_Count - 1 loop
+      if Ada.Command_Line.Argument (I) = "--dump" then
+         Dump := To_Unbounded_String (Ada.Command_Line.Argument (I + 1));
+      elsif Ada.Command_Line.Argument (I) = "--until" then
+         Until_Beat := Natural'Value (Ada.Command_Line.Argument (I + 1));
+      end if;
+   end loop;
    Read_Truth (To_String (Truth_Path));
    Ada.Text_IO.Put_Line ("truth:" & Truth.Length'Image & " observation lines," & Lenses.Length'Image & " cameras,"
                          & Object_Keys.Length'Image & " objects");
@@ -1104,7 +1204,7 @@ begin
    end if;
    while More loop
       Driver.Recording.Next (R, Kind, Ns, Payload, More);
-      exit when not More;
+      exit when not More or else Beat > Until_Beat;
       if Kind = Driver.Recording.Robot_Message then
          Payload.Query (Robot_Message'Access);
       elsif Kind = Driver.Recording.Driver_Message then

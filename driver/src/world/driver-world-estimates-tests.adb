@@ -159,8 +159,13 @@ package body Driver.World.Estimates.Tests is
       end if;
    end Answer;
 
+   Wrong_Segments : Boolean := False;
+   --  When set, the instrument segments a thing in a second eye as the whole
+   --  image: a segmentation that went wrong.
+
    procedure Answer_All (S : State) is
-      --  Every match the estimator has asked for: the scene's and the things'.
+      --  Every match the estimator has asked for, the scene's and the things',
+      --  and, when wrong ones are wanted, every segmentation.
    begin
       for X of S.Asking loop
          Answer (X.Ticket, X.From, X.Into, S.Round_Seen.Element, X.Points.Element);
@@ -169,6 +174,22 @@ package body Driver.World.Estimates.Tests is
          for X of R.Crosses loop
             Answer (X.Ticket, X.From, X.Into, X.Seen.Element, X.Points.Element);
          end loop;
+         if Wrong_Segments then
+            for St of R.Starts loop
+               if not Answered.Contains (St.Ticket) then
+                  Driver.Services.Replay_Reply
+                    (Driver.Services.Instrument, "/segment", St.Asked.Element,
+                     (Ok      => True,
+                      Text    => To_Unbounded_String
+                                   ("{""ok"":true,""w"":" & Driver.Json.Number_Image (Real (Columns))
+                                    & ",""h"":" & Driver.Json.Number_Image (Real (Rows)) & ",""score"":1,""runs"":[0,"
+                                    & Driver.Json.Number_Image (Real (Columns * Rows)) & "]}"),
+                      Why     => Null_Unbounded_String,
+                      Lasting => False));
+                  Answered.Append (St.Ticket);
+               end if;
+            end loop;
+         end if;
       end loop;
    end Answer_All;
 
@@ -301,15 +322,23 @@ package body Driver.World.Estimates.Tests is
              "the surfaces were not measured again in the new episode:" & Surface_Count (S)'Image & " surfaces, earlier "
              & Boolean'Image (Earlier (S, 1)) & ", table" & Table_F'Image & ", top" & Top_F'Image);
 
-      --  The box changes where it is: its own top goes with it, the table stays.
+      --  The box, segmented wrongly in the second eye as the whole image, still
+      --  rests on the table; then it changes where it is: its own top goes
+      --  with it, the table stays.
+      Wrong_Segments := True;
       Adopt (S, 1, Seen_Now (Gray), Box_Region, Box_T);
       Step;
       Step;
+      Step;
+      Check (Seen_In (S, Box_T, 2), "the box was not segmented in the second eye");
+      Check (Support_Of (S, Box_T).Index = Table_F,
+             "a wrong region in one eye made the table the box's own face");
       Step (Over_Box (Gray, Driver.Bytes.Byte'Last));
       Step (Over_Box (Gray, Driver.Bytes.Byte'Last));
       Find_Surfaces;
       Check (Surface_Count (S) = 1 and then Table_F > 0,
              "after the box changed the scene held" & Surface_Count (S)'Image & " surfaces, not the table alone");
+      Wrong_Segments := False;
       Driver.Services.End_Replay;
    end Scene_Flow;
 

@@ -87,11 +87,19 @@ private package Driver.World.Estimates is
    function Earlier (S : State; F : Surface_Id) return Boolean;
    function Surface_Of (S : State; F : Surface_Id) return Driver.World.Supports.Surface;
 
+   function Scene_Round (S : State) return Natural;
+   function Scene_Size (S : State) return Natural;
+   function Scene_At (S : State; K : Positive) return Point_Estimate;
+   function Scene_Grid_At (S : State; K : Positive) return Driver.World.Supports.Grid_Point;
+   --  The latest measurement of the scene: which it was, and its points with
+   --  their places in the grids they were asked on.
+
 private
 
    package Point_Holders is new Ada.Containers.Indefinite_Holders (Driver.Instrument.Point_Array, Driver.Instrument."=");
    package Image_Holders is new Ada.Containers.Indefinite_Holders (Driver.Images.Image, Driver.Images."=");
    package Observation_Holders is new Ada.Containers.Indefinite_Holders (Observation, Driver.Observations."=");
+   package Request_Holders is new Ada.Containers.Indefinite_Holders (String);
 
    --  A thing in one eye: its track, and the instrument's request out for it.
    type Slot is record
@@ -131,6 +139,7 @@ private
       Ticket : Driver.Services.Ticket;
       On     : Image_Holders.Holder;
       Beat   : Driver.Clock.Beat := 0;
+      Asked  : Request_Holders.Holder;   --  the request sent, as the instrument got it
    end record;
 
    package Start_Vectors is new Ada.Containers.Vectors (Positive, Start);
@@ -179,6 +188,7 @@ private
       Things      : Thing_Vectors.Vector;
       Surfaces    : Driver.World.Supports.Surface_Vectors.Vector;
       Scene       : Scene_Point_Vectors.Vector;   --  the points the surfaces were found among
+      Scene_Round : Natural := 0;                 --  the measurement of the scene they came from
       Earlier     : Boolean := False;             --  the surfaces are an earlier episode's
       Due         : Boolean := True;              --  the scene is to be measured at the next still beat
       Round       : Natural := 0;                 --  the latest measurement of the scene asked

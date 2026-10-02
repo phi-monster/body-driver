@@ -202,12 +202,19 @@ package body Driver.World.Estimates is
                                  Prompt := M.In_Second;
                               end if;
                            end loop;
-                           R.Starts.Append (Start'
-                             ((Eye    => X.Into,
-                               Ticket => Driver.Instrument.Submit_Segment
-                                           (On, True, Box, [1 => (At_Pixel => Prompt, On => True)], Beat),
-                               On     => Image_Holders.To_Holder (On),
-                               Beat   => Seen.Element.Beat)));
+                           declare
+                              Request : constant String :=
+                                Driver.Instrument.Segment_Request
+                                  (On, True, Box, [1 => (At_Pixel => Prompt, On => True)]);
+                           begin
+                              R.Starts.Append (Start'
+                                ((Eye    => X.Into,
+                                  Ticket => Driver.Services.Submit
+                                              (Driver.Services.Instrument, "/segment", Request, Beat),
+                                  On     => Image_Holders.To_Holder (On),
+                                  Beat   => Seen.Element.Beat,
+                                  Asked  => Request_Holders.To_Holder (Request))));
+                           end;
                         end;
                      end if;
                   end if;
@@ -244,6 +251,8 @@ package body Driver.World.Estimates is
                                                   Driver.Images.Height (On), Found, Score, Ok, Why);
                   if Ok and then Driver.Images.Count (Found) > 0 then
                      Put_Slot (R, St.Eye, Holding (Tracks.Start (Found, On, St.Beat)));
+                     --  What the thing covers changed: so may what is its own.
+                     R.Under_Due := True;
                      Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": found in eye" & St.Eye'Image & ","
                                       & Driver.Images.Count (Found)'Image & " pixels");
                   end if;
@@ -445,6 +454,7 @@ package body Driver.World.Estimates is
                Driver.World.Supports.Find (All_Points, All_Grid, S.Up, S.Seen_From, Found);
                S.Surfaces := Found;
                S.Scene := S.Incoming;
+               S.Scene_Round := S.Round;
                S.Incoming.Clear;
                S.Earlier := False;
                Surfaces_Changed (S);
@@ -462,8 +472,11 @@ package body Driver.World.Estimates is
                                              return Driver.World.Cameras.Camera'Class;
       Seen      : not null access constant Observation) return Boolean
    is
-      --  A point of the scene falls inside the thing's region in an eye that
-      --  has one: it is on the thing, or hidden behind it.
+      --  A point of the scene inside the thing's region in every eye that has
+      --  one and sees where the point is: inside what all those eyes see of
+      --  the thing (on it, or hidden behind it in some eye), so a region one
+      --  eye got wrong claims nothing the others keep apart.
+      In_Some : Boolean := False;
    begin
       for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
          if R.Eyes (E).Has then
@@ -472,13 +485,16 @@ package body Driver.World.Estimates is
                Visible : Boolean;
             begin
                Camera_Of (E, Seen).Project (X, Px, Visible);
-               if Visible and then Inside (Tracks.Region (R.Eyes (E).Track), Px) then
-                  return True;
+               if Visible then
+                  if not Inside (Tracks.Region (R.Eyes (E).Track), Px) then
+                     return False;
+                  end if;
+                  In_Some := True;
                end if;
             end;
          end if;
       end loop;
-      return False;
+      return In_Some;
    end On_Thing;
 
    --  A thing's region changed: the surfaces made of its own points may have
@@ -738,5 +754,10 @@ package body Driver.World.Estimates is
      (if S.Things (T).Under.Index = 0 then Unknown else S.Things (T).Under.Height);
 
    function Surface_Of (S : State; F : Surface_Id) return Driver.World.Supports.Surface is (S.Surfaces (Positive (F)));
+
+   function Scene_Round (S : State) return Natural is (S.Scene_Round);
+   function Scene_Size (S : State) return Natural is (Natural (S.Scene.Length));
+   function Scene_At (S : State; K : Positive) return Point_Estimate is (S.Scene (K).Point);
+   function Scene_Grid_At (S : State; K : Positive) return Driver.World.Supports.Grid_Point is (S.Scene (K).Grid);
 
 end Driver.World.Estimates;
