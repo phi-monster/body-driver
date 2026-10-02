@@ -39,6 +39,12 @@ package Driver.Beats is
    procedure Send (C : Driver.Commands.Command);
    --  Decider side: the command for the beat Next returned.
 
+   procedure Within_A_Beat (During : not null access procedure);
+   --  Decider side: takes the next beat, runs During in its window (the
+   --  models hold still until it returns) and answers the beat with a hold,
+   --  so a decider that only looks never moves the robot. A failure in
+   --  During still answers the beat before it propagates.
+
    procedure Offer
      (Beat         : Driver.Clock.Beat;
       O            : Driver.Observations.Observation;
@@ -57,5 +63,16 @@ package Driver.Beats is
    function Episode return Natural;
    --  How many new episodes have been announced; a decider compares it
    --  across beats to notice that the episode it was working on has ended.
+
+   procedure Hear (Words : String);
+   --  Main side: what the person said, as the latest observation carries it
+   --  (an observation without words leaves the last ones standing).
+
+   function Latest_Words return String;
+   --  Decider side, at any time: the person's latest words.
+
+   function Words_Heard return Natural;
+   --  How many times the person's words have changed: a decider compares it
+   --  over time to notice that something new was said.
 
 end Driver.Beats;
