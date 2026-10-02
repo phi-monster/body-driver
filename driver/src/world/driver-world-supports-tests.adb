@@ -191,14 +191,17 @@ package body Driver.World.Supports.Tests is
             declare
                Itself : constant Support := Under (Found, Top (1 .. Tops), Up, Box_Top_Part'Access);
             begin
-               Check (Itself.Index = 1 and then abs (Itself.Height.Value - 0.05) < 0.005,
-                      "the box rests on its own top face, or not on the table at its top's height");
+               --  Seen only from above: its bottom unseen, its height above the
+               --  table a bound, never a height it is seen to float at.
+               Check (Itself.Index = 1 and then abs (Itself.Height.Value - 0.05) < 0.005 and then not Itself.Touching,
+                      "the box seen from above rests on its own top face, not on the table at its top's height, or"
+                      & " is said to touch the table");
             end;
-            Check (On_Table.Index = 1 and then Resting (On_Table),
+            Check (On_Table.Index = 1 and then Resting (On_Table) and then On_Table.Touching,
                    "a thing on the table does not rest on it");
-            Check (On_Box.Index = 2 and then Resting (On_Box),
+            Check (On_Box.Index = 2 and then Resting (On_Box) and then On_Box.Touching,
                    "a thing on the box does not rest on the box");
-            Check (Lifted.Index = 1 and then abs (Lifted.Height.Value - 0.2) < 0.01,
+            Check (Lifted.Index = 1 and then abs (Lifted.Height.Value - 0.2) < 0.01 and then not Lifted.Touching,
                    "a thing held over the table is not over it at its height");
             Check (Over_Box.Index = 2 and then abs (Over_Box.Height.Value - 0.2) < 0.01,
                    "a thing held over the box is not over the box at its height");

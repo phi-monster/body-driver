@@ -2,7 +2,7 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Bytes;
 with Driver.Conventions;
 with Driver.Distributions;
-with Driver.Stats;
+with Driver.World.Pairs;
 with Driver.World.Regions;
 
 package body Driver.World.Tracking is
@@ -10,10 +10,6 @@ package body Driver.World.Tracking is
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Images;
    use type Driver.Bytes.Offset;
-
-   Mad_Efficiency : constant := 0.367_5;
-   --  The asymptotic efficiency of the median absolute deviation for Gaussian
-   --  data: its scale is worth that share of as many degrees of freedom.
 
    function Cut (Frame : Image; Column_0, Row_0, Columns, Rows : Natural) return Image is
       --  The box of a frame as an image of its own.
@@ -234,6 +230,18 @@ package body Driver.World.Tracking is
    function Round_Trip (A : Driver.Instrument.Answer; From : Driver.Instrument.Pixel) return Real is
      (Sqrt ((A.Back.U - From.U) ** 2 + (A.Back.V - From.V) ** 2));
 
+   type Error_Fit is record
+      Sigma : Real := Real'Last;   --  one coordinate of a right match's round trip
+      Right : Real := 0.0;         --  how many round trips are of right matches
+   end record;
+
+   function Error_Of (Trips : Real_Array; Area : Real) return Error_Fit is
+      Result : Error_Fit;
+   begin
+      Driver.World.Pairs.Matcher_Error (Trips, Area, Result.Sigma, Result.Right);
+      return Result;
+   end Error_Of;
+
    procedure Matched (T : in out Track; Points : Driver.Instrument.Point_Array; Answers : Driver.Instrument.Answer_Array)
    is
       Still_Found : Natural := 0;
@@ -264,16 +272,24 @@ package body Driver.World.Tracking is
             end;
          end loop;
          declare
-            Sigma   : constant Real := Driver.Stats.Robust_Sigma (Trips);
-            Gate    : constant Driver.Uncertain.Gate :=
-              Vector_Gate (2, Natural (Real'Floor (Mad_Efficiency * Real (2 * Still_Found))));
+            W       : constant Real := Real (Width (T.Asked_On.Element));
+            H       : constant Real := Real (Height (T.Asked_On.Element));
+            --  The matcher's error from the round trips that came back right
+            --  (Driver.World.Pairs.Matcher_Error): when the eye moved, many
+            --  of the pixels around may no longer be in view.
+            Error   : constant Error_Fit := Error_Of (Trips, W * H);
+            Sigma   : constant Real := Error.Sigma;
+            Gate    : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural (Real'Floor (2.0 * Error.Right)));
             Inner   : constant Driver.Instrument.Pixel := Driver.World.Regions.Inner_Point (T.Region.Element);
             Box     : Driver.Instrument.Box := (X0 => Real'Last, Y0 => Real'Last, X1 => Real'First, Y1 => Real'First);
             Back    : Natural := 0;
             Nearest : Real := Real'Last;
-            W       : constant Real := Real (Width (T.Asked_On.Element));
-            H       : constant Real := Real (Height (T.Asked_On.Element));
          begin
+            if Error.Right < 1.0 then
+               --  None of the pixels around came back right.
+               T.State := Gone;
+               return;
+            end if;
             for I in 1 .. T.Own_Points loop
                declare
                   A : Driver.Instrument.Answer renames Answers (Answers'First + I - 1);

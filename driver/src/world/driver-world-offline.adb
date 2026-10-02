@@ -27,6 +27,8 @@ package body Driver.World.Offline is
    function Thing_Count (B : Bench) return Natural is (Estimates.Thing_Count (B.State));
 
    function Seen_In (B : Bench; T : Thing_Id; E : Eye_Id) return Boolean is (Estimates.Seen_In (B.State, T, E));
+   function Region_In (B : Bench; T : Thing_Id; E : Eye_Id) return Driver.Images.Mask is
+     (Estimates.Region_In (B.State, T, E));
 
    function Points_Of (B : Bench; T : Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector is
      (Estimates.Points_Of (B.State, T));
@@ -38,6 +40,8 @@ package body Driver.World.Offline is
    function Height_Above_Support (B : Bench; T : Thing_Id) return Estimate is
      (Estimates.Height_Above_Support (B.State, T));
 
+   function Bottom_Seen (B : Bench; T : Thing_Id) return Boolean is (Estimates.Bottom_Seen (B.State, T));
+
    function Surface_Count (B : Bench) return Natural is (Estimates.Surface_Count (B.State));
 
    function Surface_Of (B : Bench; F : Surface_Id) return Driver.World.Supports.Surface is
@@ -45,5 +49,11 @@ package body Driver.World.Offline is
 
    function Plane_Of (B : Bench; F : Surface_Id) return Driver.Geometry.Plane_Estimate is
      (Estimates.Plane_Of (B.State, F));
+
+   function Scene_Round (B : Bench) return Natural is (Estimates.Scene_Round (B.State));
+   function Scene_Size (B : Bench) return Natural is (Estimates.Scene_Size (B.State));
+   function Scene_At (B : Bench; K : Positive) return Point_Estimate is (Estimates.Scene_At (B.State, K));
+   function Scene_Grid_At (B : Bench; K : Positive) return Driver.World.Supports.Grid_Point is
+     (Estimates.Scene_Grid_At (B.State, K));
 
 end Driver.World.Offline;
