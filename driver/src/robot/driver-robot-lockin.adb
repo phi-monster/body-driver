@@ -9,6 +9,8 @@ with Driver.Stats;
 
 package body Driver.Robot.Lockin is
 
+   procedure Count_Moved (S : Eye_Stream; Beat : Natural; Count, Tested : out Natural);
+
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
    use type Driver.Observations.Group_Id;
@@ -330,17 +332,111 @@ package body Driver.Robot.Lockin is
       end loop;
    end Measure;
 
-   function Moved (M : Model; E : Eye_Id; Beat : Natural) return Boolean is
-      S       : Eye_Stream renames M.Eyes (E);
-      N       : constant Natural := Cells (S.Grid);
-      Gate    : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
-      Count   : Natural := 0;
-      Tested  : Natural := 0;
+   procedure Measure_Rest_Noise (M : in out Model) is
    begin
+      for S of M.Eyes loop
+         declare
+            N     : constant Natural := Cells (S.Grid);
+            Beats : constant Natural := Natural'Min (Natural (S.Judged.Length), Natural (S.Measured.Length));
+            Count : Natural := 0;
+         begin
+            if N > 0 and then Natural (S.Luma_Variance.Length) >= N then
+               for B in 1 .. Beats - 1 loop
+                  if S.Measured (B) and then S.Judged (B) and then S.Still_At (B) and then S.Judged (B - 1)
+                    and then S.Still_At (B - 1)
+                  then
+                     for C in 0 .. N - 1 loop
+                        if S.Condition (B * N + C) > 0.0 then
+                           Count := Count + 1;
+                        end if;
+                     end loop;
+                  end if;
+               end loop;
+               if Count > 0 then
+                  declare
+                     Ratios : Real_Array (1 .. Count);
+                     K      : Natural := 0;
+                  begin
+                     for B in 1 .. Beats - 1 loop
+                        if S.Measured (B) and then S.Judged (B) and then S.Still_At (B) and then S.Judged (B - 1)
+                          and then S.Still_At (B - 1)
+                        then
+                           for C in 0 .. N - 1 loop
+                              if S.Condition (B * N + C) > 0.0 then
+                                 K := K + 1;
+                                 Ratios (K) := (S.Du (B * N + C) ** 2 + S.Dv (B * N + C) ** 2)
+                                   / Flow.Noise_Floor (S.Condition (B * N + C), S.Luma_Variance (C)) ** 2;
+                              end if;
+                           end loop;
+                        end if;
+                     end loop;
+                     S.Rest_Factor := Real'Max
+                       (1.0, Sqrt (Driver.Stats.Median (Ratios) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));
+                  end;
+               end if;
+            end if;
+         end;
+      end loop;
+      --  How many cells an eye counts as moved when no group is pushed: its own
+      --  fingers' jitter, the scene, the rest of the body's noise.
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         declare
+            S    : Eye_Stream renames M.Eyes (E);
+            Lag  : constant Natural := Natural (Integer'Max (0, (if E <= M.Lags.Last_Index then M.Lags (E) else 0)));
+            Rest : Natural := 0;
+
+            function At_Rest (B : Natural) return Boolean is
+            begin
+               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                  for K in Integer'Max (0, B - Lag) .. B loop
+                     if M.Groups (G).Commandable and then Channels.Pushed (M, G, K) then
+                        return False;
+                     end if;
+                  end loop;
+               end loop;
+               return B < Natural (S.Measured.Length) and then S.Measured (B);
+            end At_Rest;
+         begin
+            for B in 1 .. M.Beats - 1 loop
+               if At_Rest (B) then
+                  Rest := Rest + 1;
+               end if;
+            end loop;
+            S.Rest_Counts_Known := Rest > 1;
+            if S.Rest_Counts_Known then
+               declare
+                  Counts : Real_Array (1 .. Rest);
+                  K      : Natural := 0;
+                  Count, Tested : Natural;
+               begin
+                  for B in 1 .. M.Beats - 1 loop
+                     if At_Rest (B) then
+                        K := K + 1;
+                        Count_Moved (S, B, Count, Tested);
+                        Counts (K) := Real (Count);
+                     end if;
+                  end loop;
+                  S.Rest_Count_Median := Driver.Stats.Median (Counts);
+                  S.Rest_Count_Sigma := Driver.Stats.Robust_Sigma (Counts);
+                  S.Rest_Count_Freedom := Channels.Mad_Degrees_Of_Freedom (Rest);
+               end;
+            end if;
+         end;
+      end loop;
+   end Measure_Rest_Noise;
+
+   --  How many textured cells moved beyond their noise at rest, or too far
+   --  to be resolved, at the beat; how many were tested.
+   procedure Count_Moved (S : Eye_Stream; Beat : Natural; Count, Tested : out Natural) is
+      N    : constant Natural := Cells (S.Grid);
+      Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
+   begin
+      Count := 0;
+      Tested := 0;
       if N = 0 or else Beat >= Natural (S.Measured.Length) or else not S.Measured (Beat)
         or else Natural (S.Luma_Variance.Length) < N
       then
-         return False;
+         return;
       end if;
       for C in 0 .. N - 1 loop
          declare
@@ -351,20 +447,34 @@ package body Driver.Robot.Lockin is
                if not S.Resolved (Beat * N + C)
                  or else Driver.Uncertain.Significant
                    (Gate, Sqrt (S.Du (Beat * N + C) ** 2 + S.Dv (Beat * N + C) ** 2),
-                    --  The cell's displacement noise as the last lock-in measured
-                    --  it, never below what its pixels' noise allows.
-                    Real'Max (Flow.Noise_Floor (Cond, S.Luma_Variance (C)),
-                              (if C < Natural (S.Noise.Length) and then S.Noise.Element (C) < Real'Last
-                               then S.Noise.Element (C) else 0.0)))
+                    --  The cell's displacement noise at rest, as the eye's still
+                    --  frames measured it.
+                    S.Rest_Factor * Flow.Noise_Floor (Cond, S.Luma_Variance (C)))
                then
                   Count := Count + 1;
                end if;
             end if;
          end;
       end loop;
-      return Tested > 0
-        and then Regression.Count_Significant
-          (Count, Tested, Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z));
+   end Count_Moved;
+
+   function Moved (M : Model; E : Eye_Id; Beat : Natural) return Boolean is
+      S : Eye_Stream renames M.Eyes (E);
+      Count, Tested : Natural;
+   begin
+      Count_Moved (S, Beat, Count, Tested);
+      if Tested = 0 then
+         return False;
+      end if;
+      --  Against the eye's own counts at rest when they are measured (what its
+      --  own fingers' jitter and the scene do when nobody pushes), else against
+      --  the false alarms of the per-cell test alone.
+      return (if S.Rest_Counts_Known
+              then Driver.Uncertain.Significant (Real (Count) - S.Rest_Count_Median, S.Rest_Count_Sigma,
+                                                 S.Rest_Count_Freedom)
+                   and then Real (Count) > S.Rest_Count_Median
+              else Regression.Count_Significant
+                     (Count, Tested, Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z)));
    end Moved;
 
    function Shift (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Real is

@@ -30,8 +30,9 @@ package body Driver.Robot is
       Du, Dv, Condition, Cell_Noise : Real_Array (1 .. N);
       Resolved : Flow.Flag_Array (1 .. N);
    begin
+      --  A cell at rest moves by its pixels' noise times the eye's rest factor.
       for C in 1 .. N loop
-         Cell_Noise (C) := S.Luma_Variance.Element (C - 1);
+         Cell_Noise (C) := S.Luma_Variance.Element (C - 1) * S.Rest_Factor ** 2;
       end loop;
       Flow.Displacements (S.Grid, S.Previous.all, S.Current.all, Cell_Noise, Du, Dv, Condition, Resolved);
       for C in 1 .. N loop
@@ -129,6 +130,7 @@ package body Driver.Robot is
             Stillness.Measure_Luma_Noise (S);
          end if;
       end loop;
+      Lockin.Measure_Rest_Noise (M);
       Lag.Measure (M);
       Lockin.Measure (M);
       Graph.Derive (M);
@@ -328,7 +330,12 @@ package body Driver.Robot is
                     & (if Lag_Known (M, E) then "image lag" & Integer'Image (Image_Lag (M, E)) & " beats, "
                         else "image lag unmeasured, ")
                     & Mount_Kind'Image (Mt.Kind)
-                    & (if Mt.Kind = Arm_Carried then " on arm" & Arm_Id'Image (Mt.Arm) else "") & ASCII.LF);
+                    & (if Mt.Kind = Arm_Carried then " on arm" & Arm_Id'Image (Mt.Arm) else "")
+                    & ", rest noise " & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & " times its floor"
+                    & (if M.Eyes (E).Rest_Counts_Known
+                        then ", " & Driver.Log.Image (M.Eyes (E).Rest_Count_Median, 1) & " +- "
+                             & Driver.Log.Image (M.Eyes (E).Rest_Count_Sigma, 1) & " cells move at rest"
+                        else "") & ASCII.LF);
          end;
       end loop;
       return To_String (T);

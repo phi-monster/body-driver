@@ -93,7 +93,8 @@ package body Driver.Robot.Flow is
                         Trace : constant Real := Sxx + Syy;
                         U, V  : Real := 0.0;
                         Converged : Boolean := False;
-                        Last_Step : Real := Real'Last;
+                        Last_Step : Real := Real'Last;   --  the step before this one
+                        Final     : Real := Real'Last;   --  the last step taken
                      begin
                         if Det > 0.0 then
                            Condition (Condition'First + Cell - 1) :=
@@ -121,6 +122,7 @@ package body Driver.Robot.Flow is
                                  Sv := -(Sxx * By - Sxy * Bx) / Det;
                                  U := U + Su;
                                  V := V + Sv;
+                                 Final := Sqrt (Su * Su + Sv * Sv);
                                  --  Done when a step no longer changes the estimate,
                                  --  or is below what the cell can resolve at all.
                                  Converged := Sqrt (Su * Su + Sv * Sv)
@@ -139,11 +141,18 @@ package body Driver.Robot.Flow is
                            Du (K) := U;
                            Dv (K) := V;
                            --  A translation is resolved when the iteration settled on
-                           --  it and the content moved less than half the cell: beyond
-                           --  that most of the template has left the window it is
+                           --  it, or its last step was no larger than its noise lets a
+                           --  step be (a cell at rest steps by noise and stops shrinking
+                           --  there), and the content moved less than half the cell:
+                           --  beyond that most of the template has left the window it is
                            --  matched in, and the answer is whatever fits best.
                            Resolved (Resolved'First + Cell - 1) :=
-                             Converged and then abs U <= Real (Nx) / 2.0 and then abs V <= Real (Ny) / 2.0;
+                             (Converged
+                              or else Driver.Uncertain.Significant
+                                        (Driver.Uncertain.Vector_Gate (2), Final,
+                                         Noise_Floor (Condition (Condition'First + Cell - 1),
+                                                      Luma_Variance (Luma_Variance'First + Cell - 1))) = False)
+                             and then abs U <= Real (Nx) / 2.0 and then abs V <= Real (Ny) / 2.0;
                         end if;
                      end;
                   end;

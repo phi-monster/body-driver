@@ -278,6 +278,11 @@ private
       Is_Still      : Boolean := False;      --  at the latest beat, once judged (Driver.Robot.Stillness)
       Has_Judged    : Boolean := False;      --  the latest frame was judged, not only added to the first run
       Judged        : Flag_Vectors.Vector;   --  per beat: the eye had a frame and was judged
+      Rest_Factor   : Real := 1.0;           --  a resting cell's displacement noise over its floor (Lockin)
+      Rest_Counts_Known  : Boolean := False; --  how many cells move at a beat when nothing is pushed (Lockin):
+      Rest_Count_Median  : Real := 0.0;      --  its median,
+      Rest_Count_Sigma   : Real := 0.0;      --  its robust sigma
+      Rest_Count_Freedom : Natural := 0;     --  and the degrees of freedom that rests on
       Still_At      : Flag_Vectors.Vector;   --  per beat: judged still
    end record;
 
