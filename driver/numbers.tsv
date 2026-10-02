@@ -1143,7 +1143,9 @@ driver-robot-regression.adb	return (if U <= Huber_K then 1.0 else Huber_K / U);	
 driver-robot-regression.ads	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean	1	structure	a count that is no best of many is one test
 driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
 driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
-driver-robot-steps.adb	elsif Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	two pairs of free shortfalls in a row are the fewest a scatter can be measured from
+driver-robot-steps.adb	if Ask /= 0.0 and then (Ask - Got) * (if Ask > 0.0 then 1.0 else -1.0) >= V.Value then	1.0	math	the sign of the ask, so that a shortfall counts toward the target
+driver-robot-steps.adb	if Ask /= 0.0 and then (Ask - Got) * (if Ask > 0.0 then 1.0 else -1.0) >= V.Value then	1.0	math	the sign of the ask, so that a shortfall counts toward the target
+driver-robot-steps.adb	if Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	two pairs of free shortfalls in a row are the fewest a scatter can be measured from
 driver-robot-steps.adb	with Pre => Natural (Shortfalls.Length) > 2	2	structure	two pairs of free shortfalls in a row are the fewest a scatter can be measured from
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K

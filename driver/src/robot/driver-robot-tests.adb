@@ -659,6 +659,89 @@ package body Driver.Robot.Tests is
       end if;
    end Step_Ends_Despite_New_Jitter;
 
+   --  A joint an eye watches, read exactly as a simulator reads it: every push
+   --  closes all but 1.45 % of its ask in one beat and stops there, which is
+   --  far beyond the readings' noise and, for a long push, far beyond what
+   --  short free pushes fell short by, yet below the step the eye can see.
+   --  Pushes 1 to 6 go back and forth by 0.01, push 7 goes 0.5 out and push
+   --  8 back, both freely; pushes 9 and 10 ask less than the eye can see, so
+   --  their motion, all but 1.45 % of it, is never seen; push 11 asks 0.5 and
+   --  is stopped half way; push 12 asks 0.35 and nothing answers it.
+   procedure Step_Short_Of_Sight is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Asks : constant Real_Array (1 .. 12) := [0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.5, 0.0, -0.001, 0.0, 0.5, 0.6];
+      Target, Reading, From : Real := 0.0;
+   begin
+      for B in 0 .. 160 loop
+         --  Every estimate measures the lock-in afresh; the eye is put back.
+         if B = 64 or else B = 128 then
+            --  What a lock-in measured of an eye watching the channel: ten
+            --  cells moving 100 pixels per reading unit (Visible_Step 0.009).
+            declare
+               S : Eye_Stream renames M.Eyes (1);
+            begin
+               S.Kept_Groups.Clear;
+               S.Kept_Channels.Clear;
+               S.Gains.Clear;
+               S.Gain_Variances.Clear;
+               S.Kept_Groups.Append (1);
+               S.Kept_Channels.Append (1);
+               for Cell in 1 .. 10 loop
+                  S.Gains.Append (1.0e4);
+                  S.Gain_Variances.Append (1.0);
+               end loop;
+               M.Graph.Effects.Replace_Element
+                 (1, (Verdict => Whole, Responding => 10, Textured => 10,
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+            end;
+         end if;
+         --  Pushes 1 to 8, then (once an estimate has measured how long the
+         --  joint takes to answer) pushes 9 to 12.
+         if B in 66 .. 105 | 130 .. 149 then
+            declare
+               K     : constant Natural := (if B < 128 then (B - 66) / 5 + 1 else (B - 130) / 5 + 9);
+               Phase : constant Natural := (if B < 128 then (B - 66) mod 5 else (B - 130) mod 5);
+            begin
+               if K in Asks'Range then
+                  if Phase = 0 then
+                     Target := Asks (K);
+                     From := Reading;
+                  elsif Phase = 1 then
+                     Reading := From + (case K is when 11 => 0.5, when 12 => 0.0, when others => 0.9855) * (Target - From);
+                  end if;
+               end if;
+            end;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Reading + 1.0e-12 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Known (Visible_Step (M, 1, 1)), "the eye's visible step is known");
+      Check (Steps.Episodes (M, 1) = 12, "twelve pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 12 then
+         for K in 1 .. 10 loop
+            declare
+               E : constant Episode := M.Groups (1).Episodes (K);
+            begin
+               Check (E.Ended and then not E.Blocked,
+                      "push" & K'Image & " stopped short by" & Real'Image (E.Shortfall.Value)
+                      & ", less than the eye can see, and is called blocked");
+            end;
+         end loop;
+         Check (M.Groups (1).Episodes (11).Blocked, "a push stopped half way is not called blocked");
+         Check (M.Groups (1).Episodes (12).Blocked, "a push the eye could see and nothing answered is not called blocked");
+      end if;
+   end Step_Short_Of_Sight;
+
    procedure Step_Responses is
       M    : Model;
       Rng  : Generator;
@@ -1077,6 +1160,8 @@ package body Driver.Robot.Tests is
                              & "recognize the rig's groups when it pushes them itself", Boot_From_Zero'Access);
       Driver.Tests.Register ("robot.steps.jitter", "a push never ends when the held reading jitters more than it did at "
                              & "rest", Step_Ends_Despite_New_Jitter'Access);
+      Driver.Tests.Register ("robot.steps.sight", "a push of a joint an eye watches is called blocked though it stopped "
+                             & "short by less than the eye can see, or asked less than the eye can see", Step_Short_Of_Sight'Access);
       Driver.Tests.Register ("robot.steps", "a free push that falls as short as free pushes do is called blocked, a "
                              & "push stopped by an obstacle or never answered is called free, or the wait for an "
                              & "answer is not the measured delay", Step_Responses'Access);

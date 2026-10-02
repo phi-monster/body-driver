@@ -9,15 +9,22 @@
 --  short.
 --
 --  A push that came to rest is judged by its shortfall: how far short of
---  its target it stopped, along the direction it was asked to move. Free
---  motion falls short too (a joint held against gravity settles short of
---  its target), so the shortfall is compared with that of the last push
---  that moved freely. A push is blocked when it falls short by
---  significantly more, against the readings' noise and the spread of the
---  free pushes' shortfalls, and by more than a negligible fraction of the
---  step (Driver.Conventions.Unchanged_Fraction): pushing further did not
---  get it there. A push the reading never answered is blocked. The first
---  push of a group has nothing to be compared with and counts as free.
+--  its target it stopped. A channel an eye watches (one with a Visible_Step)
+--  is short when it stopped short of its ask by at least that step: less
+--  than that no eye can tell from where it was asked to be, however exactly
+--  the readings tell it (a simulator's joint closes all but a percent of a
+--  push and stops, which is far beyond its readings' noise). The channels no
+--  eye watches are judged together, along the direction they were asked to
+--  move: free motion falls short too (a joint held against gravity settles
+--  short of its target), so their shortfall is compared with that of the
+--  last push that moved them freely, and they are short when they fall
+--  short by significantly more, against the spread of the free pushes'
+--  shortfalls (the first pushes have nothing to be compared with and count
+--  as free). A push is blocked when a channel is short, or when nothing
+--  answered the channels no eye watches. A push answers when its reading
+--  moves (Channels.Moving); one that asks a watched channel for less than
+--  its visible step moves nothing any eye can see, so that it did not seem
+--  to answer says nothing, and it is judged by its shortfall alone.
 --
 --  The judgment is made from the stream alone, as the pushes happen, so the
 --  same verdicts follow from a recording (Driver.Robot.Blocked) as from the

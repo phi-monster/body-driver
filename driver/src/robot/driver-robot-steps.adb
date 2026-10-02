@@ -36,21 +36,38 @@ package body Driver.Robot.Steps is
       if Settled and then E.Length > 0.0 and then Channels.Has_Reading (M, G, Beat) then
          declare
             Along, Spread : Real := 0.0;
-            Known : Boolean := True;
+            Noise_Known   : Boolean := True;
+            --  A channel an eye watches stopped short of its ask by a step
+            --  that eye can see.
+            Seen_Short : Boolean := False;
+            --  The ask and what came of it along the channels no eye watches,
+            --  which are judged against the free pushes.
+            Unwatched_Length, Unwatched_Along : Real := 0.0;
          begin
             for C in 1 .. S.Size loop
                declare
-                  Unit  : constant Real := S.Ask (C - 1) / E.Length;
+                  Ask   : constant Real := S.Ask (C - 1);
+                  Unit  : constant Real := Ask / E.Length;
                   Sigma : constant Real := Channels.Noise (M, G, C);
+                  Got   : constant Real := Channels.Reading (M, G, Beat, C) - S.From (C - 1);
+                  V     : constant Estimate := Visible_Step (M, G, C);
                begin
-                  Along := Along + Unit * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));
-                  Known := Known and then Sigma < Real'Last;
-                  if Known then
+                  Along := Along + Unit * Got;
+                  Noise_Known := Noise_Known and then Sigma < Real'Last;
+                  if Noise_Known then
                      Spread := Spread + (Unit * Sigma) ** 2;
+                  end if;
+                  if Known (V) then
+                     if Ask /= 0.0 and then (Ask - Got) * (if Ask > 0.0 then 1.0 else -1.0) >= V.Value then
+                        Seen_Short := True;
+                     end if;
+                  else
+                     Unwatched_Length := Unwatched_Length + Unit * Ask;
+                     Unwatched_Along := Unwatched_Along + Unit * Got;
                   end if;
                end;
             end loop;
-            if Known then
+            if Noise_Known then
                declare
                   --  A shortfall is the difference of two readings, the one
                   --  before the push and the one where it stopped.
@@ -59,22 +76,36 @@ package body Driver.Robot.Steps is
                begin
                   E.Shortfall := (Value => Short, Sigma => Sigma, Degrees_Of_Freedom => 0);
                   E.Delivered := (Value => Along / E.Length, Sigma => Sigma / E.Length, Degrees_Of_Freedom => 0);
-                  if not Answered then
-                     E.Blocked := True;
-                  elsif Natural (S.Free_Shortfalls.Length) > 2 then
-                     declare
-                        Excess  : constant Real := Short - S.Free_Shortfalls.Last_Element;
-                        Scatter : Real;
-                        Freedom : Natural;
-                     begin
-                        Pair_Scatter (S.Free_Shortfalls, Scatter, Freedom);
-                        E.Blocked := Excess > 0.0 and then Driver.Uncertain.Significant (Excess, Scatter, Freedom);
-                     end;
-                  end if;
-                  if not E.Blocked then
-                     S.Free_Shortfalls.Append (Short);
-                  end if;
                end;
+               --  The channels an eye watches are judged by what the eye could
+               --  tell, answered or not: a push smaller than their visible step
+               --  moves nothing any eye can see, so that it did not seem to
+               --  answer says nothing. The others are blocked when nothing
+               --  answered them, or when they fell short by more than free
+               --  pushes do.
+               if Seen_Short then
+                  E.Blocked := True;
+               elsif Unwatched_Length > 0.0 and then not Answered then
+                  E.Blocked := True;
+               elsif Unwatched_Length > 0.0 then
+                  declare
+                     Short : constant Real := Unwatched_Length - Unwatched_Along;
+                  begin
+                     if Natural (S.Free_Shortfalls.Length) > 2 then
+                        declare
+                           Excess  : constant Real := Short - S.Free_Shortfalls.Last_Element;
+                           Scatter : Real;
+                           Freedom : Natural;
+                        begin
+                           Pair_Scatter (S.Free_Shortfalls, Scatter, Freedom);
+                           E.Blocked := Excess > 0.0 and then Driver.Uncertain.Significant (Excess, Scatter, Freedom);
+                        end;
+                     end if;
+                     if not E.Blocked then
+                        S.Free_Shortfalls.Append (Short);
+                     end if;
+                  end;
+               end if;
             end if;
          end;
       end if;
