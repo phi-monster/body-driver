@@ -1,3 +1,5 @@
+with Ada.Unchecked_Deallocation;
+
 package body Driver.Images is
 
    use Driver.Bytes;
@@ -55,9 +57,21 @@ package body Driver.Images is
       end if;
    end Query;
 
+   type Bit_Array_Access is access Bit_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Bit_Array, Bit_Array_Access);
+
    function Create (Width, Height : Natural) return Mask is
-     (Width => Width, Height => Height,
-      Bits  => Bit_Holders.To_Holder (Bit_Array'(0 .. Width * Height - 1 => False)));
+      --  Cleared on the heap, as Pixels.Empty is: an aggregate of a frame's
+      --  bits is a stack temporary, a megabyte for a 4K frame.
+      Bits : Bit_Array_Access := new Bit_Array (0 .. Width * Height - 1);
+   begin
+      for B of Bits.all loop
+         B := False;
+      end loop;
+      return Result : constant Mask := (Width => Width, Height => Height, Bits => Bit_Holders.To_Holder (Bits.all)) do
+         Free (Bits);
+      end return;
+   end Create;
 
    function Width (M : Mask) return Natural is (M.Width);
    function Height (M : Mask) return Natural is (M.Height);
