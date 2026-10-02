@@ -8,7 +8,6 @@ with Driver.Action.Monitor;
 with Driver.Conventions;
 with Driver.Log;
 with Driver.Numerics;
-with Driver.Uncertain;
 
 package body Driver.Action.Execution is
 
@@ -413,11 +412,13 @@ package body Driver.Action.Execution is
    function Grip_Of_Arm (S : Snapshot; A : Arm_Id; Closing : Boolean) return Grip is
      ((Arm => A, Hands => Search.Effector_Of (S, A).Closers, Closing => Closing, Searched => False, Chosen => <>));
 
-   --  The arm a role binds to now, the nearest to Near of those that can
-   --  play it: a grasper closes lobes on things, a pusher touches without
-   --  closing, me carries the whole body and every eye.
-   function Bound (S : Snapshot; R : Role; Near : Vec3; A : out Arm_Id) return Boolean is
-      Best : Real := Real'Last;
+   --  The arm a role binds to now: of those that can play it (a grasper
+   --  closes lobes on things, a pusher touches without closing, me carries
+   --  the whole body and every eye), the nearest to Near when there is
+   --  something to be near, else the first measured.
+   function Bound (S : Snapshot; R : Role; Near : Vec3; Has_Near : Boolean; A : out Arm_Id) return Boolean is
+      Best  : Real := Real'Last;
+      Found : Boolean := False;
    begin
       A := Arm_Id'First;
       for Arm_S of S.Arms loop
@@ -429,20 +430,23 @@ package body Driver.Action.Execution is
                   when Pusher  => not E.Closes and then not (E.Surface.Is_Empty and then E.Ends.Is_Empty),
                   when Me      => Arm_S.Carries_All);
          begin
-            if Fits and then abs (E.Tool.Translation - Near) < Best then
+            if Fits and then (if Has_Near then abs (E.Tool.Translation - Near) < Best else not Found) then
                Best := abs (E.Tool.Translation - Near);
                A := Arm_S.Id;
+               Found := True;
             end if;
          end;
       end loop;
-      return Best < Real'Last;
+      return Found;
    end Bound;
 
    function Bindable (S : Snapshot; R : Role) return Boolean is
       A : Arm_Id;
    begin
-      return Bound (S, R, Zero3, A);
+      return Bound (S, R, Zero3, False, A);
    end Bindable;
+
+   function Bound_Arm (S : Snapshot; R : Role; A : out Arm_Id) return Boolean is (Bound (S, R, Zero3, False, A));
 
    function Usable (S : Snapshot; R : Relation) return Boolean is
       Arms      : constant Boolean := not S.Arms.Is_Empty;
@@ -632,6 +636,8 @@ package body Driver.Action.Execution is
       end loop;
       return It;
    end Effector_Item;
+
+   function Part_Point (S : Snapshot; A : Arm_Id) return Point_Estimate is (Effector_Item (S, A).Centre);
 
    --  How far along the unit twist the moving points can go before one of
    --  them meets a surface or a thing other than Except, and the band of
@@ -1193,7 +1199,7 @@ package body Driver.Action.Execution is
          end if;
          case C.Subject.Kind is
             when Role_Operand =>
-               if not Bound (X.S, C.Subject.The_Role, Near, A) then
+               if not Bound (X.S, C.Subject.The_Role, Near, Has_Object, A) then
                   Note_Tried (X, "I have no part that can be " & Role_Word (C.Subject.The_Role) & " now");
                   return;
                end if;

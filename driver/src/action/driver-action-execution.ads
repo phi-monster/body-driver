@@ -19,6 +19,7 @@
 
 with Driver.Action.Plants;
 with Driver.Action.Snapshots;
+with Driver.Uncertain;
 
 package Driver.Action.Execution is
 
@@ -32,5 +33,16 @@ package Driver.Action.Execution is
    function Usable (S : Driver.Action.Snapshots.Snapshot; R : Relation) return Boolean;
    --  What the relation is judged by is measured and some part can bring it
    --  about (Driver.Action.Usable); into is not built yet.
+
+   function Bound_Arm (S : Driver.Action.Snapshots.Snapshot; R : Role; A : out Driver.Action.Snapshots.Arm_Id)
+     return Boolean;
+   --  The arm the role binds to with no thing to be near: the first measured
+   --  one that can play it.
+
+   function Part_Point (S : Driver.Action.Snapshots.Snapshot; A : Driver.Action.Snapshots.Arm_Id)
+     return Driver.Uncertain.Point_Estimate
+     with Pre => Driver.Action.Snapshots.Has_Arm (S, A);
+   --  The middle of the arm's touching parts in the world: its lobes' faces,
+   --  else its own surface, else its tool.
 
 end Driver.Action.Execution;

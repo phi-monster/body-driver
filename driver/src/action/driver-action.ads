@@ -15,6 +15,7 @@ with Ada.Containers.Vectors;
 with Ada.Strings.Unbounded;
 with Driver.Robot;
 with Driver.Robot.Hand;
+with Driver.Uncertain;
 with Driver.World;
 
 package Driver.Action is
@@ -96,6 +97,16 @@ package Driver.Action is
 
    function Can_Bind (C : Context; R : Role) return Boolean;
    --  The role is bound to a measured part of this body now.
+
+   function Role_Hand (C : Context; R : Role) return Driver.Robot.Hand.Hand_Id'Base;
+   --  The hand whose closer the role is bound to now; 0 when the role binds
+   --  no hand (a pusher, me) or nothing at all. With no thing to be near,
+   --  a role binds to the first measured arm that can play it.
+
+   function Role_Point (C : Context; R : Role) return Driver.Uncertain.Point_Estimate;
+   --  Where the part the role is bound to now is, in the world frame: the
+   --  middle of a grasper's lobe faces, of a pusher's own surface, of the
+   --  tool of the arm that is me; unknown when the role is not bound.
 
    function Usable (C : Context; R : Relation) return Boolean;
    --  The relation can be carried out with this body now: what it is judged
