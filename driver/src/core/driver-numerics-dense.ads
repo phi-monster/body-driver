@@ -5,7 +5,7 @@
 --  code needs: Cholesky for normal equations, and Householder QR for least
 --  squares that stays accurate when the normal equations would not.
 
-package Driver.Numerics.Dense with Pure is
+package Driver.Numerics.Dense with Preelaborate is
 
    procedure Cholesky (A : Real_Matrix; L : out Real_Matrix; Positive_Definite : out Boolean)
      with Pre => A'Length (1) = A'Length (2)
