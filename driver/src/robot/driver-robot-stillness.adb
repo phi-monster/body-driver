@@ -50,6 +50,7 @@ package body Driver.Robot.Stillness is
          S.Noise_Is_Settled := True;
          S.Has_Settled := True;
          S.Is_Still := False;
+         S.Has_Judged := False;
          return;
       end if;
       --  The noise of a pixel needs two frames to be measured at all; until
@@ -57,8 +58,10 @@ package body Driver.Robot.Stillness is
       if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then
          Driver.Pixels.Add (S.Settled, Frame);
          S.Is_Still := False;
+         S.Has_Judged := False;
          return;
       end if;
+      S.Has_Judged := True;
       declare
          --  Every pixel's test alarms by chance at this rate.
          P0      : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);

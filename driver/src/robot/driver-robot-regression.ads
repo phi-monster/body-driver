@@ -39,6 +39,14 @@ private package Driver.Robot.Regression is
    --  Count is below the tail Z has for a Gaussian (through its relation to
    --  Fisher's F). Used for how many tests of a family alarmed.
 
+   function Explained_Nonnegative (X : Real_Matrix; Y : Real_Array; Used : out Natural) return Real
+     with Pre => X'Length (1) = Y'Length;
+   --  The fraction of the variance of Y about its mean explained by the
+   --  least-squares fit Y = a + X b with every b >= 0 (Lawson and Hanson's
+   --  active set, on X and Y centred so the intercept a is free), and how
+   --  many of the b came out positive: R squared, for an F test of a fit in
+   --  which every regressor can only add to Y.
+
    procedure Test_Block (F : Fit; First, Last : Positive; Statistic : out Real; Freedom : out Natural)
      with Pre => First <= Last and then Last <= F.Columns;
    --  The Wald statistic of coefficients First .. Last against zero, with

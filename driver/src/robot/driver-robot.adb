@@ -7,6 +7,7 @@ with Driver.Robot.Flow;
 with Driver.Robot.Graph;
 with Driver.Robot.Lag;
 with Driver.Robot.Lockin;
+with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
 
 package body Driver.Robot is
@@ -24,15 +25,17 @@ package body Driver.Robot is
    is
       N : constant Positive := Cells (S.Grid);
       Du, Dv, Condition, Cell_Noise : Real_Array (1 .. N);
+      Resolved : Flow.Flag_Array (1 .. N);
    begin
       for C in 1 .. N loop
          Cell_Noise (C) := S.Luma_Variance.Element (C - 1);
       end loop;
-      Flow.Displacements (S.Grid, S.Previous.all, S.Current.all, Cell_Noise, Du, Dv, Condition);
+      Flow.Displacements (S.Grid, S.Previous.all, S.Current.all, Cell_Noise, Du, Dv, Condition, Resolved);
       for C in 1 .. N loop
          S.Du.Append (Du (C));
          S.Dv.Append (Dv (C));
          S.Condition.Append (Condition (C));
+         S.Resolved.Append (Resolved (C));
       end loop;
       S.Measured.Append (True);
    end Measure_Displacement;
@@ -64,8 +67,14 @@ package body Driver.Robot is
                   S.Du.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));
                   S.Dv.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));
                   S.Condition.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));
+                  S.Resolved.Append (False, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));
                   S.Measured.Append (False, Ada.Containers.Count_Type (M.Beats));
                end if;
+            end if;
+            --  An eye that appears late was not judged before.
+            if S.Judged.Is_Empty and then M.Beats > 0 then
+               S.Judged.Append (False, Ada.Containers.Count_Type (M.Beats));
+               S.Still_At.Append (False, Ada.Containers.Count_Type (M.Beats));
             end if;
             declare
                N    : constant Natural := Cells (S.Grid);
@@ -79,6 +88,7 @@ package body Driver.Robot is
                   S.Du.Append (0.0, Ada.Containers.Count_Type (N));
                   S.Dv.Append (0.0, Ada.Containers.Count_Type (N));
                   S.Condition.Append (0.0, Ada.Containers.Count_Type (N));
+                  S.Resolved.Append (False, Ada.Containers.Count_Type (N));
                   S.Measured.Append (False);
                end if;
                if Have then
@@ -87,6 +97,9 @@ package body Driver.Robot is
                      Stillness.Measure_Luma_Noise (S);
                   end if;
                end if;
+               --  An eye's first two frames start its noise and are not judged.
+               S.Judged.Append (Have and then S.Has_Judged);
+               S.Still_At.Append (Have and then S.Is_Still);
                --  This frame is the next one's previous; a missing frame, or
                --  one of another size, breaks the chain: the next displacement
                --  would span two beats.
@@ -124,6 +137,7 @@ package body Driver.Robot is
    procedure Observe (M : in out Model; O : Observation; Sent : Driver.Commands.Command) is
    begin
       Channels.Append (M, O, Sent);
+      Steps.Track (M, M.Beats);
       Observe_Eyes (M, O);
       M.Beats := M.Beats + 1;
       --  The estimates are redone whenever the evidence behind them has
@@ -174,7 +188,28 @@ package body Driver.Robot is
 
    function Eye_In_Tool (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is ((others => <>));
 
-   function Blocked (M : Model; A : Arm_Id; O : Observation) return Boolean is (False);
+   function Blocked (M : Model; A : Arm_Id; O : Observation) return Boolean is
+   begin
+      if Natural (A) > Arm_Count (M) then
+         return False;
+      end if;
+      declare
+         G  : constant Group_Id := Arm_Group (M, A);
+         At_Beat : constant Natural := Natural (O.Beat);
+      begin
+         --  The push in effect at that beat: the latest one begun by then.
+         for K in reverse 1 .. Steps.Episodes (M, G) loop
+            declare
+               E : Episode renames M.Groups (G).Episodes (K);
+            begin
+               if E.Start <= At_Beat then
+                  return E.Ended and then E.End_At <= At_Beat and then E.Blocked;
+               end if;
+            end;
+         end loop;
+         return False;
+      end;
+   end Blocked;
 
    function Self_Mask (M : Model; E : Eye_Id; O : Observation) return Driver.Images.Mask is
      (if E <= O.Images.Last_Index then Driver.Images.Create (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)))
@@ -216,6 +251,7 @@ package body Driver.Robot is
      (if G <= M.Graph.Breach.Last_Index then M.Graph.Breach (G) else 0);
 
    function Describe (M : Model) return String is
+      use Ada.Strings.Unbounded;
       use Driver.Log;
       T : Unbounded_String;
    begin

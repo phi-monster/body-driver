@@ -1,5 +1,9 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Robot.Channels;
+with Driver.Conventions;
+with Driver.Distributions;
+with Driver.Robot.Flow;
+with Driver.Robot.Regression;
 
 package body Driver.Robot.Lag is
 
@@ -107,41 +111,10 @@ package body Driver.Robot.Lag is
       return D;
    end Differenced;
 
-   --  The z-score of the correlation of A (beat B) with R (beat B - Shift)
-   --  over the beats both have; zero when fewer than three pairs or no spread.
-   function Shifted_Z (A, R : Series; Shift : Integer) return Real is
-      N : Natural := 0;
-      Sa, Sr, Saa, Srr, Sar : Real := 0.0;
-   begin
-      for I in A.Value'Range loop
-         declare
-            J : constant Integer := I - Shift;
-         begin
-            if J in R.Value'Range and then A.Have (I) and then R.Have (J) then
-               N := N + 1;
-               Sa := Sa + A.Value (I);
-               Sr := Sr + R.Value (J);
-               Saa := Saa + A.Value (I) ** 2;
-               Srr := Srr + R.Value (J) ** 2;
-               Sar := Sar + A.Value (I) * R.Value (J);
-            end if;
-         end;
-      end loop;
-      --  A correlation needs three pairs to have a spread left over.
-      if N < 3 then
-         return 0.0;
-      end if;
-      declare
-         Cov : constant Real := Sar - Sa * Sr / Real (N);
-         Va  : constant Real := Saa - Sa * Sa / Real (N);
-         Vr  : constant Real := Srr - Sr * Sr / Real (N);
-      begin
-         if Va <= 0.0 or else Vr <= 0.0 then
-            return 0.0;
-         end if;
-         return Cov / Sqrt (Va * Vr) * Sqrt (Real (N - 1));
-      end;
-   end Shifted_Z;
+   --  The series takes more than one value.
+   function Varies (S : Series) return Boolean is
+     (for some I in S.Value'Range => S.Have (I)
+        and then (for some J in S.Value'Range => S.Have (J) and then S.Value (J) /= S.Value (I)));
 
    procedure Measure (M : in out Model) is
       Last : constant Integer := M.Beats - 1;
@@ -177,12 +150,67 @@ package body Driver.Robot.Lag is
                Rank (Speeds (G));
             end if;
          end loop;
+         declare
+         --  The chance that noise fits the eye's motion at this shift as well as
+         --  the pushes do: the eye's differenced motion ranks regressed on every
+         --  varying group's differenced speed ranks at once, each of which can
+         --  only add motion, against the F distribution of that fit.
+         function Fit_Tail (Motion : Series; Shift : Integer) return Real is
+            Varying : array (1 .. Natural (M.Groups.Length)) of Group_Id;
+            K       : Natural := 0;
+            Rows    : Natural := 0;
+         begin
+            for G in Speeds'Range loop
+               if M.Groups (G).Commandable and then Varies (Speeds (G)) then
+                  K := K + 1;
+                  Varying (K) := G;
+               end if;
+            end loop;
+            for I in Motion.Value'Range loop
+               if Motion.Have (I) and then I - Shift in Motion.Value'Range
+                 and then (for all J in 1 .. K => Speeds (Varying (J)).Have (I - Shift))
+               then
+                  Rows := Rows + 1;
+               end if;
+            end loop;
+            if K = 0 or else Rows <= K + 1 then
+               return 1.0;
+            end if;
+            declare
+               X    : Driver.Numerics.Arrays.Real_Matrix (1 .. Rows, 1 .. K);
+               Y    : Real_Array (1 .. Rows);
+               R    : Natural := 0;
+               Used : Natural;
+            begin
+               for I in Motion.Value'Range loop
+                  if Motion.Have (I) and then I - Shift in Motion.Value'Range
+                    and then (for all J in 1 .. K => Speeds (Varying (J)).Have (I - Shift))
+                  then
+                     R := R + 1;
+                     Y (R) := Motion.Value (I);
+                     for J in 1 .. K loop
+                        X (R, J) := Speeds (Varying (J)).Value (I - Shift);
+                     end loop;
+                  end if;
+               end loop;
+               declare
+                  R2 : constant Real := Regression.Explained_Nonnegative (X, Y, Used);
+               begin
+                  if Used = 0 or else R2 >= 1.0 then
+                     return (if Used = 0 then 1.0 else 0.0);
+                  end if;
+                  return Driver.Distributions.F_Upper_Tail
+                    ((R2 / Real (Used)) / ((1.0 - R2) / Real (Rows - Used - 1)), Used, Rows - Used - 1);
+               end;
+            end;
+         end Fit_Tail;
+      begin
          for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
             declare
                S      : Eye_Stream renames M.Eyes (E);
                N      : constant Natural := Cells (S.Grid);
                Motion : Series (M.Beats);
-               Best   : Real := 0.0;
+               Best   : Real := 1.0;     --  the smallest chance of a fit this good by noise
                Lag    : Integer := 0;
                Tests  : Natural := 0;
             begin
@@ -192,8 +220,20 @@ package body Driver.Robot.Lag is
                         declare
                            Sum : Real := 0.0;
                         begin
+                           --  A cell whose content moved too far to be resolved moved at
+                           --  least as far as a resolved displacement can go: half its
+                           --  width and half its height.
                            for C in 0 .. N - 1 loop
-                              Sum := Sum + Sqrt (S.Du (B * N + C) ** 2 + S.Dv (B * N + C) ** 2);
+                              if S.Resolved (B * N + C) then
+                                 Sum := Sum + Sqrt (S.Du (B * N + C) ** 2 + S.Dv (B * N + C) ** 2);
+                              elsif S.Condition (B * N + C) > 0.0 then
+                                 declare
+                                    X0, X1, Y0, Y1 : Natural;
+                                 begin
+                                    Flow.Bounds (S.Grid, C + 1, X0, X1, Y0, Y1);
+                                    Sum := Sum + Sqrt ((Real (X1 - X0) / 2.0) ** 2 + (Real (Y1 - Y0) / 2.0) ** 2);
+                                 end;
+                              end if;
                            end loop;
                            Motion.Value (B + 1) := Sum / Real (N);
                            Motion.Have (B + 1) := True;
@@ -202,25 +242,21 @@ package body Driver.Robot.Lag is
                   end loop;
                   Motion := Differenced (Motion);
                   Rank (Motion);
-                  for G in Speeds'Range loop
-                     if M.Groups (G).Commandable then
-                        for Shift in -Last .. Last loop
-                           declare
-                              Z : constant Real := Shifted_Z (Motion, Speeds (G), Shift);
-                           begin
-                              Tests := Tests + 1;
-                              if Z > Best then
-                                 Best := Z;
-                                 Lag := Shift;
-                              end if;
-                           end;
-                        end loop;
-                     end if;
+                  for Shift in -Last .. Last loop
+                     declare
+                        Tail : constant Real := Fit_Tail (Motion, Shift);
+                     begin
+                        Tests := Tests + 1;
+                        if Tail < Best then
+                           Best := Tail;
+                           Lag := Shift;
+                        end if;
+                     end;
                   end loop;
                   --  The best of many shifts is one of a family: the lag is
                   --  measured only when it stands out of all of them.
                   if Tests > 0
-                    and then Driver.Uncertain.Significant (Driver.Uncertain.Scalar_Gate (Tests => Tests), Best, 1.0)
+                    and then Best < Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / Real (Tests)
                   then
                      M.Lags.Replace_Element (E, Lag);
                      M.Lag_Known.Replace_Element (E, True);
@@ -228,6 +264,7 @@ package body Driver.Robot.Lag is
                end if;
             end;
          end loop;
+         end;
       end;
    end Measure;
 

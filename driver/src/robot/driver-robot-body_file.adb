@@ -1,4 +1,5 @@
 with Ada.Characters.Handling;
+with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Driver.Json;
 with Driver.Log;
@@ -7,6 +8,7 @@ with Driver.Robot.Graph;
 
 package body Driver.Robot.Body_File is
 
+   use Ada.Strings.Unbounded;
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
 

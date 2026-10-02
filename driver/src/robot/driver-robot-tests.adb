@@ -9,6 +9,7 @@ with Driver.Observations;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Regression;
+with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
 with Driver.Tests;
 
@@ -54,6 +55,7 @@ package body Driver.Robot.Tests is
       G : constant Cell_Grid := Flow.Grid_Of (W, H);
       A, B : Real_Array (1 .. W * H);
       Du, Dv, Cond : Real_Array (1 .. Cells (G));
+      Resolved : Flow.Flag_Array (1 .. Cells (G));
       --  Noiseless frames: a pixel varies by its 8-bit rounding alone, the
       --  floor Driver.Pixels applies.
       Quantization : constant Real_Array (1 .. Cells (G)) := [others => 1.0 / 12.0];
@@ -67,7 +69,7 @@ package body Driver.Robot.Tests is
                B (Y * W + X + 1) := Smooth (Real (X) - Su, Real (Y) - Sv);
             end loop;
          end loop;
-         Flow.Displacements (G, A, B, Quantization, Du, Dv, Cond);
+         Flow.Displacements (G, A, B, Quantization, Du, Dv, Cond, Resolved);
       end Shift;
    begin
       Check (G.Columns = 8 and then G.Rows = 6, "grid of a 64 x 48 image is 8 x 6");
@@ -82,6 +84,7 @@ package body Driver.Robot.Tests is
             --  Iteration stops once a step changes it by under 1 % of itself.
             Check_Close (Du (C), 1.0, 0.015, "horizontal whole-pixel shift of cell" & C'Image);
             Check_Close (Dv (C), -1.0, 0.015, "vertical whole-pixel shift of cell" & C'Image);
+            Check (Resolved (C), "a one-pixel shift is resolved in cell" & C'Image);
          end if;
          Check (Cond (C) > 0.0, "a textured cell is conditioned");
       end loop;
@@ -95,9 +98,15 @@ package body Driver.Robot.Tests is
          Check_Close (Du (C), 0.3, 0.1, "horizontal sub-pixel shift of cell" & C'Image);
          Check_Close (Dv (C), -0.2, 0.07, "vertical sub-pixel shift of cell" & C'Image);
       end loop;
+      --  Six pixels in eight-pixel cells: the template leaves its window.
+      Shift (6.0, 0.0);
+      for C in Du'Range loop
+         Check (not Resolved (C), "a shift of most of a cell is not resolved in cell" & C'Image);
+      end loop;
       A := [others => 100.0];
-      Flow.Displacements (G, A, A, Quantization, Du, Dv, Cond);
-      Check (Cond (1) = 0.0 and then Du (1) = 0.0, "a flat cell has no displacement and no condition");
+      Flow.Displacements (G, A, A, Quantization, Du, Dv, Cond, Resolved);
+      Check (Cond (1) = 0.0 and then Du (1) = 0.0 and then not Resolved (1),
+             "a flat cell has no displacement, no condition and resolves nothing");
    end Flow_Recovers_Shifts;
 
    --  ── Regression ──
@@ -218,16 +227,22 @@ package body Driver.Robot.Tests is
       Now      : Rig_State;   --  the readings this beat
       Previous : Rig_State;
       Beat     : Natural := 0;
+      Timing   : Generator;   --  how long each push is held: a lock-in needs pushes that no
+                              --  other group's train lines up with at any shift
    end record;
 
-   --  One beat: the robot reaches the targets of Sent, reports, and the model observes.
-   procedure Step (M : in out Model; R : in out Rig; Target : Rig_State) is
+   --  Two to four beats.
+   function Hold_Beats (R : in out Rig) return Positive is (2 + Natural (Real'Floor (3.0 * Uniform (R.Timing))));
+
+   --  One beat: the robot is commanded to Target and reads Reading (where its
+   --  response has got to), reports, and the model observes.
+   procedure Step (M : in out Model; R : in out Rig; Target, Reading : Rig_State) is
       O    : Observation;
       Sent : Driver.Commands.Command;
    begin
       R.Previous := R.Now;
       R.Shown := R.Now;
-      R.Now := Target;
+      R.Now := Reading;
       --  The reaction: arm 1 shakes when the closer moves.
       R.Now.Arm_1 (1) := R.Now.Arm_1 (1) + 1.0e-7 * (Target.Closer - R.Previous.Closer);
       Driver.Commands.Set_Target (Sent, 1, Target.Arm_1);
@@ -254,6 +269,12 @@ package body Driver.Robot.Tests is
       R.Beat := R.Beat + 1;
    end Step;
 
+   --  The robot reaches the targets at once.
+   procedure Step (M : in out Model; R : in out Rig; Target : Rig_State) is
+   begin
+      Step (M, R, Target, Target);
+   end Step;
+
    type Push_Kind is (Arm_1, Arm_2, Closer, Part, Idle, Lockstep);
 
    --  Pushes one group away by Amount and back, Times times, holding two
@@ -273,12 +294,40 @@ package body Driver.Robot.Tests is
             Away.Arm_2 := [Amount, 0.0];
       end case;
       for T in 1 .. Times loop
-         Step (M, R, Away);
-         Step (M, R, Away);
-         Step (M, R, Away);
-         Step (M, R, Rest);
-         Step (M, R, Rest);
-         Step (M, R, Rest);
+         if Kind = Lockstep then
+            --  Arm 1 overshoots and comes back while arm 2 is still on its way:
+            --  arm 1 moves away from its target while its own push is still
+            --  being answered.
+            for K in 1 .. 2 loop
+               declare
+                  Goal : constant Rig_State := (if K = 1 then Away else Rest);
+                  From : constant Real := (if K = 1 then 0.0 else Amount);
+                  To   : constant Real := (if K = 1 then Amount else 0.0);
+                  Arm_1_Path : constant Real_Array (1 .. 3) := [0.97, 1.07, 1.0];
+                  Arm_2_Path : constant Real_Array (1 .. 3) := [0.5, 0.9, 1.0];
+               begin
+                  for B in 1 .. 3 loop
+                     declare
+                        Now : Rig_State := Goal;
+                     begin
+                        Now.Arm_1 (1) := From + (To - From) * Arm_1_Path (B);
+                        Now.Arm_2 (1) := From + (To - From) * Arm_2_Path (B);
+                        Step (M, R, Goal, Now);
+                     end;
+                  end loop;
+                  for B in 1 .. Hold_Beats (R) loop
+                     Step (M, R, Goal);
+                  end loop;
+               end;
+            end loop;
+         else
+            for B in 1 .. Hold_Beats (R) loop
+               Step (M, R, Away);
+            end loop;
+            for B in 1 .. Hold_Beats (R) loop
+               Step (M, R, Rest);
+            end loop;
+         end if;
       end loop;
    end Exercise;
 
@@ -307,6 +356,10 @@ package body Driver.Robot.Tests is
       Exercise_Rig (M);
       Check (Role (M, 1) = Arm, "arm 1 is an arm, got " & Role (M, 1)'Image);
       Check (Role (M, 2) = Arm, "arm 2 is an arm, got " & Role (M, 2)'Image);
+      --  Each arm moves nothing in the other's eye, though they were also
+      --  pushed together and one overshot while the other was still on its way.
+      Check (Response (M, 1, 2) = Nothing, "arm 1 moves nothing in arm 2's eye, got " & Response (M, 1, 2)'Image);
+      Check (Response (M, 2, 1) = Nothing, "arm 2 moves nothing in arm 1's eye, got " & Response (M, 2, 1)'Image);
       Check (Role (M, 3) = Closer, "the finger group is a closer, got " & Role (M, 3)'Image);
       Check (Closer_Arm (M, 3) = 1, "the closer belongs to arm 1, got" & Closer_Arm (M, 3)'Image);
       Check (Role (M, 4) = Part, "the part is a part, got " & Role (M, 4)'Image);
@@ -445,13 +498,79 @@ package body Driver.Robot.Tests is
       end loop;
    end Eye_Stillness;
 
+   procedure Step_Responses is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      --  The target in effect and where the reading has got to, beat by beat:
+      --  a delay of two beats, then an approach that settles 0.05 short, five
+      --  times the negligible fraction of the step (a joint held against
+      --  gravity). The third push meets an obstacle half
+      --  way; the fifth is never answered.
+      type Plan is record
+         At_Beat : Natural;
+         Target  : Real;
+         Path    : Real_Array (1 .. 3);   --  the reading two, three and four beats after the push
+      end record;
+      Pushes : constant array (1 .. 5) of Plan :=
+        [(10, 1.0, [0.5, 0.9, 0.95]),
+         (25, 2.0, [1.5, 1.9, 1.95]),
+         (40, 3.0, [2.3, 2.5, 2.5]),
+         (55, 2.0, [2.2, 2.08, 2.05]),
+         (70, 2.5, [2.05, 2.05, 2.05])];
+      Target, Reading : Real := 0.0;
+   begin
+      for B in 0 .. 89 loop
+         for P of Pushes loop
+            if B = P.At_Beat then
+               Target := P.Target;
+            elsif B in P.At_Beat + 2 .. P.At_Beat + 4 then
+               Reading := P.Path (B - P.At_Beat - 1);
+            end if;
+         end loop;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Reading + 1.0e-4 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Steps.Episodes (M, 1) = 5, "five pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 5 then
+         declare
+            E : array (1 .. 5) of Episode;
+         begin
+            for K in E'Range loop
+               E (K) := M.Groups (1).Episodes (K);
+               Check (E (K).Ended, "push" & K'Image & " is over");
+            end loop;
+            Check (E (1).Moved and then E (1).Moved_At - E (1).Start = 2, "the first push answers after two beats");
+            Check (not E (1).Blocked, "the first push counts as free");
+            Check (not E (2).Blocked, "a push that falls as short as the last free one is free");
+            Check (E (3).Blocked, "a push stopped half way is blocked");
+            Check_Close (E (3).Delivered.Value, (2.5 - 1.95) / (3.0 - 1.95), 0.01, "how much of the blocked push came through");
+            Check (not E (4).Blocked, "a free push after the obstacle is free again");
+            Check (E (5).Blocked and then not E (5).Moved, "a push nothing answers is blocked");
+            Check (E (5).End_At - E (5).Start = 3, "an unanswered push is given up after the longest delay, at"
+                   & Natural'Image (E (5).End_At - E (5).Start));
+         end;
+      end if;
+   end Step_Responses;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("robot.steps", "a free push that falls as short as free pushes do is called blocked, a "
+                             & "push stopped by an obstacle or never answered is called free, or the wait for an "
+                             & "answer is not the measured delay", Step_Responses'Access);
       Driver.Tests.Register ("robot.stillness", "an eye with ordinary camera noise never comes to rest, or a moving "
                              & "patch goes unnoticed", Eye_Stillness'Access);
       Driver.Tests.Register ("robot.roles", "a group is given the wrong role, an eye the wrong mount or lag, an arm "
-                             & "is credited with a lockstep partner's eye, or a reaction to another push is taken "
-                             & "for a push", Roles_Of_A_Synthetic_Body'Access);
+                             & "is credited with a lockstep partner's eye, a reaction to another push is taken for "
+                             & "a push, or the tail of a slow response is taken for rest", Roles_Of_A_Synthetic_Body'Access);
       Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "
                              & "given noise zero, so its jitter passes for motion), a hold is taken for a push, or a "
                              & "push never ends", Channel_Noise_And_Pushes'Access);

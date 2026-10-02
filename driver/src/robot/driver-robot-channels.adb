@@ -246,40 +246,13 @@ package body Driver.Robot.Channels is
       end;
    end Asked;
 
-   --  The push is still closing in at Beat: the reading moved, and no
-   --  channel moved significantly away from its target. Whether any channel
-   --  of the group did is one question asked of all of them, so each test is
-   --  one of a family of as many.
-   function Closing_In (M : Model; G : Group_Id; Beat : Natural) return Boolean is
-      Size : constant Natural := M.Groups (G).Size;
-   begin
-      if Size = 0 or else not Has_Reading (M, G, Beat) or else not Has_Reading (M, G, Beat - 1)
-        or else not Has_Target (M, G, Beat) or else not Moving (M, G, Beat)
-      then
-         return False;
-      end if;
-      for C in 1 .. Size loop
-         declare
-            Sigma : constant Real := Noise (M, G, C);
-            Loss  : constant Real := abs (Target (M, G, Beat, C) - Reading (M, G, Beat, C))
-                                     - abs (Target (M, G, Beat, C) - Reading (M, G, Beat - 1, C));
-            Gate  : constant Driver.Uncertain.Gate :=
-              Driver.Uncertain.Scalar_Gate (Noise_Freedom (M, G, C), Tests => Size);
-         begin
-            if Loss > 0.0 and then Driver.Uncertain.Significant (Gate, Loss, Sigma * Sqrt (2.0)) then
-               return False;
-            end if;
-         end;
-      end loop;
-      return True;
-   end Closing_In;
-
    procedure Measure_Pushes (M : in out Model) is
    begin
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          declare
             Beats  : constant Natural := Natural (M.Groups (G).Present.Length);
             Delay_Beats : Natural := 0;
+            Answered    : Boolean := False;
             Marks  : Flag_Vectors.Vector;
             Active : Boolean := False;
             Moved  : Boolean := False;
@@ -295,11 +268,14 @@ package body Driver.Robot.Channels is
                         exit when D > B and then Asked (M, G, D);
                         if Moving (M, G, D) then
                            Delay_Beats := Natural'Max (Delay_Beats, D - B);
+                           Answered := True;
                            exit;
                         end if;
                      end loop;
                   end if;
                end loop;
+               M.Groups (G).Delay_Beats := Delay_Beats;
+               M.Groups (G).Delay_Known := Answered;
             end if;
             for B in 0 .. Beats - 1 loop
                if M.Groups (G).Commandable and then Asked (M, G, B) then
@@ -308,14 +284,15 @@ package body Driver.Robot.Channels is
                   Moved := Moving (M, G, B);
                elsif Active then
                   --  Until the reading first moves the push waits out the
-                  --  delay; after that it lasts while it closes in. A push
-                  --  that is not answered within the delay is over.
+                  --  delay; after that its response lasts, overshoot and all,
+                  --  until the reading is still. A push that is not answered
+                  --  within the delay is over.
                   if not Moved then
                      Moved := Moving (M, G, B);
                      if not Moved and then B - Onset >= Delay_Beats then
                         Active := False;
                      end if;
-                  elsif not Closing_In (M, G, B) then
+                  elsif not Moving (M, G, B) then
                      Active := False;
                   end if;
                end if;
@@ -339,10 +316,27 @@ package body Driver.Robot.Channels is
       end loop;
       --  The noise is measured at rest, and rest is where no push is under
       --  way, which takes the noise to find: the two are measured in turn
-      --  until the pushes found no longer change. Each round can only move
-      --  push marks, so as many rounds as beats bound it.
+      --  until the pushes found no longer change. The first round takes every
+      --  change for motion (noise zero), so a push lasts as long as its
+      --  reading changes at all and the tail of a slow response is never
+      --  taken for rest; the noise measured outside those pushes is then the
+      --  jitter alone, or zero where a reading has none. Each round can only
+      --  move push marks, so as many rounds as beats bound it.
+      declare
+         Total : Natural := 0;
+      begin
+         for S of M.Groups loop
+            Total := Total + S.Size;
+         end loop;
+         M.Noise.Clear;
+         M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));
+         M.Noise_Freedom.Clear;
+         M.Noise_Freedom.Append (0, Ada.Containers.Count_Type (Total));
+      end;
       for Round in 0 .. Beats loop
-         Measure_Noise (M);
+         if Round > 0 then
+            Measure_Noise (M);
+         end if;
          declare
             Before : array (M.Groups.First_Index .. M.Groups.Last_Index) of Flag_Vectors.Vector;
             Same   : Boolean := True;

@@ -129,31 +129,31 @@ package body Driver.Robot.Lockin is
                         Responding : array (1 .. N, M.Groups.First_Index .. M.Groups.Last_Index) of Boolean :=
                           [others => [others => False]];
                         Textured : array (1 .. N) of Boolean := [others => False];
-                        --  One cell: its displacements regressed on the pushes,
-                        --  and for every group whether its block responds.
-                        procedure Fit_Cell (Cell : Positive) is
-                           U, V, Cond : Real_Array (1 .. Rows);
-                           Floors : Real_Array (1 .. Rows);
-                           Fl : Natural := 0;
+                        --  One cell: its displacements regressed on the pushes, over
+                        --  the beats where the cell resolved one, and for every
+                        --  group whether its block responds.
+                        procedure Fit_Resolved (Cell : Positive; Here : Positive) is
+                           Xc     : Real_Matrix (1 .. Here, 1 .. Kept + 1);
+                           U, V   : Real_Array (1 .. Here);
+                           Floors : Real_Array (1 .. Here);
+                           K      : Natural := 0;
                         begin
                            for R in 1 .. Rows loop
-                              U (R) := S.Du (Beat_Of (R) * N + Cell - 1);
-                              V (R) := S.Dv (Beat_Of (R) * N + Cell - 1);
-                              Cond (R) := S.Condition (Beat_Of (R) * N + Cell - 1);
-                              if Cond (R) > 0.0 then
-                                 Fl := Fl + 1;
-                                 Floors (Fl) := Flow.Noise_Floor (Cond (R), S.Luma_Variance (Cell - 1));
+                              if S.Resolved (Beat_Of (R) * N + Cell - 1) then
+                                 K := K + 1;
+                                 for J in 1 .. Kept + 1 loop
+                                    Xc (K, J) := X (R, J);
+                                 end loop;
+                                 U (K) := S.Du (Beat_Of (R) * N + Cell - 1);
+                                 V (K) := S.Dv (Beat_Of (R) * N + Cell - 1);
+                                 Floors (K) := Flow.Noise_Floor (S.Condition (Beat_Of (R) * N + Cell - 1),
+                                                                 S.Luma_Variance (Cell - 1));
                               end if;
                            end loop;
-                           Textured (Cell) := Driver.Stats.Median (Cond) > 0.0;
-                           if not Textured (Cell) then
-                              S.Noise.Append (Real'Last);
-                              return;
-                           end if;
                            declare
-                              Floor : constant Real := Driver.Stats.Median (Floors (1 .. Fl));
-                              Fu    : constant Regression.Fit := Regression.Solve (X, U, Floor);
-                              Fv    : constant Regression.Fit := Regression.Solve (X, V, Floor);
+                              Floor : constant Real := Driver.Stats.Median (Floors);
+                              Fu    : constant Regression.Fit := Regression.Solve (Xc, U, Floor);
+                              Fv    : constant Regression.Fit := Regression.Solve (Xc, V, Floor);
                            begin
                               S.Noise.Append (Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0));
                               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -185,6 +185,27 @@ package body Driver.Robot.Lockin is
                                  end;
                               end loop;
                            end;
+                        end Fit_Resolved;
+
+                        procedure Fit_Cell (Cell : Positive) is
+                           Cond : Real_Array (1 .. Rows);
+                           Here : Natural := 0;
+                        begin
+                           for R in 1 .. Rows loop
+                              Cond (R) := S.Condition (Beat_Of (R) * N + Cell - 1);
+                              if S.Resolved (Beat_Of (R) * N + Cell - 1) then
+                                 Here := Here + 1;
+                              end if;
+                           end loop;
+                           --  A cell can show a displacement when it has texture in two
+                           --  directions, and it is tested when it resolved more
+                           --  displacements than the fit has coefficients.
+                           Textured (Cell) := Driver.Stats.Median (Cond) > 0.0 and then Here > Kept + 1;
+                           if not Textured (Cell) then
+                              S.Noise.Append (Real'Last);
+                              return;
+                           end if;
+                           Fit_Resolved (Cell, Here);
                         end Fit_Cell;
                      begin
                         for R in 1 .. Rows loop

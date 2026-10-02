@@ -53,9 +53,10 @@ private package Driver.Robot.Channels is
 
    procedure Measure_Pushes (M : in out Model);
    --  Marks, for every commandable group, the beats at which it is being
-   --  pushed: from a push's start while its reading has not moved yet, and
-   --  then as long as it keeps moving; the push ends at the first still
-   --  beat after the reading moved, or where the next push starts. A group
+   --  pushed: from a push's start while its reading has not moved yet (at
+   --  most the longest response delay measured), and then as long as it keeps
+   --  moving, overshoot included; the push ends at the first still beat after
+   --  the reading moved, or where the next push starts. A group
    --  that moves without being pushed (a reaction to another group, sway)
    --  is not being pushed. Uses the noise, so Measure_Noise comes first.
 

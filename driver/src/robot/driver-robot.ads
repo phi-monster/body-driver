@@ -194,7 +194,7 @@ package Driver.Robot is
 
 private
 
-   use Ada.Strings.Unbounded;
+
 
    package Real_Vectors is new Ada.Containers.Vectors (Natural, Real);
    package Flag_Vectors is new Ada.Containers.Vectors (Natural, Boolean);
@@ -202,6 +202,22 @@ private
    --  A frame's luma (Driver.Images.Luma), on the heap: two per eye, swapped
    --  every beat, never on a stack.
    package Count_Vectors is new Ada.Containers.Vectors (Natural, Natural);
+
+   --  One push of a group and how it went (Driver.Robot.Steps).
+   type Episode is record
+      Start     : Natural := 0;       --  the beat its target changed
+      Moved     : Boolean := False;
+      Moved_At  : Natural := 0;       --  the first beat its reading moved
+      Ended     : Boolean := False;
+      End_At    : Natural := 0;       --  the first still beat, or where it was given up or cut short
+      Settled   : Boolean := False;   --  ended by coming to rest
+      Length    : Real := 0.0;        --  how far it asked, in reading units
+      Shortfall : Estimate;           --  how far short of the target it stopped, along the ask
+      Delivered : Estimate;           --  the fraction of the ask it delivered, along the ask
+      Blocked   : Boolean := False;   --  it fell short by more than free pushes do
+   end record;
+
+   package Episode_Vectors is new Ada.Containers.Vectors (Positive, Episode);
 
    --  A group's readings and the target in effect, beat after beat; beat K
    --  of the stream is the K-th observation (counted from zero).
@@ -213,6 +229,13 @@ private
       Targets     : Real_Vectors.Vector;   --  Size targets per beat
       Targeted    : Flag_Vectors.Vector;   --  the command in effect carried a target
       Pushed      : Flag_Vectors.Vector;   --  per beat, once measured: moving because it was pushed
+      Delay_Beats : Natural := 0;          --  the longest wait from a push to its first motion
+      Delay_Known : Boolean := False;      --  some push was answered
+      Episodes    : Episode_Vectors.Vector;   --  every push and how it went (Driver.Robot.Steps)
+      From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
+      Free_Last   : Real := 0.0;           --  the shortfalls of the last two free pushes
+      Free_Before : Real := 0.0;
+      Free_Count  : Natural := 0;
    end record;
 
    package Group_Stream_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Stream);
@@ -236,6 +259,7 @@ private
       Has_Previous  : Boolean := False;      --  Previous is the frame of the beat before, of the grid's size
       Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat
       Condition     : Real_Vectors.Vector;   --  Cells values per beat
+      Resolved      : Flag_Vectors.Vector;   --  Cells values per beat: the displacement was measured (Flow)
       Measured      : Flag_Vectors.Vector;   --  per beat: both frames were there
       Noise         : Real_Vectors.Vector;   --  per cell: displacement noise at rest, once measured
       Textured      : Flag_Vectors.Vector;   --  per cell: can show a displacement, once measured
@@ -245,6 +269,9 @@ private
       Noise_Is_Settled : Boolean := True;    --  the settled view is the longest run so far
       Has_Settled   : Boolean := False;
       Is_Still      : Boolean := False;      --  at the latest beat, once judged (Driver.Robot.Stillness)
+      Has_Judged    : Boolean := False;      --  the latest frame was judged, not only added to the first run
+      Judged        : Flag_Vectors.Vector;   --  per beat: the eye had a frame and was judged
+      Still_At      : Flag_Vectors.Vector;   --  per beat: judged still
    end record;
 
    package Eye_Stream_Vectors is new Ada.Containers.Vectors (Eye_Id, Eye_Stream);
@@ -291,7 +318,7 @@ private
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph
       Is_Booted      : Boolean := False;
-      Report         : Unbounded_String;           --  what the last estimate found, for Describe
+      Report         : Ada.Strings.Unbounded.Unbounded_String;   --  what the last estimate found, for Describe
    end record;
 
 end Driver.Robot;

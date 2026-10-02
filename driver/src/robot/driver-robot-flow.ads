@@ -17,6 +17,8 @@
 
 private package Driver.Robot.Flow is
 
+   type Flag_Array is array (Positive range <>) of Boolean;
+
    function Grid_Of (Width, Height : Natural) return Cell_Grid;
    --  As many cells across as the square root of the width, as many down as
    --  the square root of the height: a cell is about as many pixels wide as
@@ -33,15 +35,19 @@ private package Driver.Robot.Flow is
       Before, After : Real_Array;
       Luma_Variance : Real_Array;
       Du, Dv        : out Real_Array;
-      Condition     : out Real_Array)
+      Condition     : out Real_Array;
+      Resolved      : out Flag_Array)
      with Pre => Before'Length = G.Width * G.Height and then After'Length = Before'Length
                  and then Luma_Variance'Length = Cells (G)
                  and then Du'Length = Cells (G) and then Dv'Length = Cells (G)
-                 and then Condition'Length = Cells (G);
+                 and then Condition'Length = Cells (G) and then Resolved'Length = Cells (G);
    --  Per cell, the translation (pixels, +U right and +V down) that moves the
    --  content of Before to After, and the smaller eigenvalue of the cell's
    --  gradient tensor. A cell without texture in two directions gets zero
-   --  displacement and zero condition. Luma_Variance is, per cell, the
+   --  displacement and zero condition. Resolved says, per cell, whether the
+   --  translation was measured at all: the iteration settled and the content
+   --  moved less than half the cell; otherwise the displacement is only
+   --  the best fit of a template that left its window. Luma_Variance is, per cell, the
    --  variance of a resting pixel's luma (Noise_Floor); the iteration stops
    --  once a step is below what that noise lets the cell resolve.
 

@@ -473,6 +473,7 @@ driver-robot-body_file.ads	Lockin_Method : constant := 2;	2	format	the second ve
 driver-robot-body_file.ads	Noise_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-channels.adb	(Driver.Uncertain.Vector_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	math	the squared deviations are already in units of each channel's sigma
 driver-robot-channels.adb	Half : constant Real := 0.5;	0.5	math	the median of the absolute value of a unit Gaussian is its two-sided quantile at one half
+driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	the first round takes every change for motion: noise zero
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, 0.0);	0.0	math	a reading that repeats exactly at every rest beat has no jitter: any change of it is motion
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. K)) / Sqrt (2.0));	2.0	math	the change of two readings has twice the variance of one
 driver-robot-channels.adb	Phi : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
@@ -481,13 +482,14 @@ driver-robot-channels.adb	S.Targets.Append (0.0, Ada.Containers.Count_Type (S.Si
 driver-robot-channels.adb	S.Targets.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Values.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
-driver-robot-channels.adb	if Loss > 0.0 and then Driver.Uncertain.Significant (Gate, Loss, Sigma * Sqrt (2.0)) then	2.0	math	the change of two readings has twice the variance of one
 driver-robot-channels.adb	return Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)));	8.0	math	the median absolute deviation's asymptotic efficiency at the Gaussian is 8 c^2 phi (c)^2
 driver-robot-channels.adb	return Significant_Change (M, G, Ask, 1.0);	1.0	math	a target against one reading carries that reading's noise once
 driver-robot-channels.adb	return Significant_Change (M, G, D, Sqrt (2.0));	2.0	math	the change of two readings has twice the variance of one
 driver-robot-flow.adb	(Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;	2.0	math	the smaller eigenvalue of a symmetric 2 x 2 matrix, (trace - sqrt (trace^2 - 4 det)) / 2
 driver-robot-flow.adb	(Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;	4.0	math	the smaller eigenvalue of a symmetric 2 x 2 matrix, (trace - sqrt (trace^2 - 4 det)) / 2
 driver-robot-flow.adb	(if Condition > 0.0 then Sqrt (2.0 * Luma_Variance / Condition) else Real'Last);	2.0	math	a displacement between two frames carries both frames' pixel noise
+driver-robot-flow.adb	Converged and then abs U <= Real (Nx) / 2.0 and then abs V <= Real (Ny) / 2.0;	2.0	structure	a translation beyond half the cell has moved most of the template out of the window it is matched in
+driver-robot-flow.adb	Converged and then abs U <= Real (Nx) / 2.0 and then abs V <= Real (Ny) / 2.0;	2.0	structure	a translation beyond half the cell has moved most of the template out of the window it is matched in
 driver-robot-flow.adb	Gx (I) := (At_Before (X + 1, Y) - At_Before (X - 1, Y)) / 2.0;	2.0	math	a central difference spans two pixels
 driver-robot-flow.adb	Gy (I) := (At_Before (X, Y + 1) - At_Before (X, Y - 1)) / 2.0;	2.0	math	a central difference spans two pixels
 driver-robot-flow.adb	X0 := Natural'Max (X0, 1);	1	structure	the central difference needs the pixel before
@@ -497,20 +499,6 @@ driver-robot-flow.adb	Y1 : constant Natural := Natural'Min (Natural (Real'Floor 
 driver-robot-graph.adb	Gr.Breach.Replace_Element (G, 1);	1	structure	clause 1 of the porting contract (docs/body-protocol.md, 3): the reading does not follow the command
 driver-robot-graph.adb	Gr.Breach.Replace_Element (G, 2);	2	structure	clause 2 of the porting contract (docs/body-protocol.md, 3): nothing any eye sees changes when it moves
 driver-robot-graph.adb	if Whole_Eyes = Eyes and then Eyes >= 2 then	2	structure	with a single eye, carrying the whole body and carrying that eye cannot be told apart
-driver-robot-hand-touch.adb	A (Row + 1, Base + 1) := 1.0 / P.Offset_Sigma;	1.0	math	a prior row is whitened by the inverse of its sigma
-driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	1.0	math	whitening by the inverse of the tilt covariance's Cholesky factor
-driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	2	structure	the second of a surface's three error components, the first tilt
-driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	2	structure	the second of a surface's three error components, the first tilt
-driver-robot-hand-touch.adb	A (Row + 3, Base + 2) := -L21 / (L11 * L22);	2	structure	the second of a surface's three error components, the first tilt
-driver-robot-hand-touch.adb	A (Row + 3, Base + 2) := -L21 / (L11 * L22);	3	structure	the third of a surface's three error components, the second tilt
-driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	1.0	math	whitening by the inverse of the tilt covariance's Cholesky factor
-driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	3	structure	the third of a surface's three error components, the second tilt
-driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	3	structure	the third of a surface's three error components, the second tilt
-driver-robot-hand-touch.adb	E : Equations (Presses => Presses'Length, K => 1);	1	structure	a tip on a known line of sight has one unknown, its distance
-driver-robot-hand-touch.adb	E : Equations (Presses => Presses'Length, K => 3);	3	structure	a free tip has three unknowns, its coordinates
-driver-robot-hand-touch.adb	E.Plane (I, 1) := -1.0;	1.0	math	a surface raised by its offset error lowers the tip's height by the same amount
-driver-robot-hand-touch.adb	Found : Surface_Index (Presses'Range) := [others => 1];	1	structure	surfaces are numbered from one
-driver-robot-hand-touch.adb	Next : constant Real := Real'Max (1.0, Noise * (Res * Res) / Real (Dof));	1.0	statistics	the presses' noise is never below what the arm's pose predicts
 driver-robot-hand-aims.adb	(if Size > Real'Model_Epsilon then Exp (Arctan (Size, Now * Goal) * ((1.0 / Size) * Axis))	1.0	math	a vector over its length is its unit vector
 driver-robot-hand-frames.adb	Across : constant Real := (Turn (1, 1) + Turn (2, 2) + Turn (3, 3) - U * (Turn * U)) / 2.0;	2.0	math	the mean of the turn's variance about the two axes across the line
 driver-robot-hand-lobes.adb	+ 1.0 / Real (Li.Count_There) + 1.0 / Real (Lj.Count_There));	1.0	math	the variance of a mean of n pixels is the pixel variance over n
@@ -593,42 +581,6 @@ driver-robot-hand-touch.adb	T22 : constant Real := Solution_Cov (CF + 2, CF + 2)
 driver-robot-hand-touch.adb	W : constant Positive := (if As = On_Sight then 1 else Point_Unknowns);	1	structure	a tip on its line has one unknown, the distance along it
 driver-robot-hand-touch.adb	Without : Real := 1.0 / Scale;	1.0	statistics	the others' noise in units of the predicted one
 driver-robot-hand-touch.adb	if Chosen (I) and then Significant (Deleted (I), 1.0, Dof_Of (I))	1.0	math	a residual already in units of its own sigma
-driver-robot-hand-touch.adb	if Dof > 1 and then (Chi - Res (J) ** 2 / Free) / Real (Dof - 1) > Scale then	1	statistics	the others need a degree of freedom left to measure their scatter
-driver-robot-hand-touch.adb	if Presses'Length < 2 or else not Known (Origin) or else Direction.Sigma >= Real'Last then	2	structure	one press to fix the distance and one to check it
-driver-robot-lag.adb	Child := 2 * Root;	2	structure	in a binary heap the children of node k are 2 k and 2 k + 1
-driver-robot-lag.adb	I : Positive := 1;	1	structure	arrays are indexed from one
-driver-robot-lag.adb	Ranks (L) := Real (I + J) / 2.0;	2.0	math	tied values share the mean of the ranks they span
-driver-robot-lag.adb	Sift (1, Stop - 1);	1	structure	the heap's root is node one, and the heap shrinks by one per extraction
-driver-robot-lag.adb	and then Driver.Uncertain.Significant (Driver.Uncertain.Scalar_Gate (Tests => Tests), Best, 1.0)	1.0	math	a rank correlation's z is already in units of its own sigma
-driver-robot-lag.adb	for Start in reverse 1 .. N / 2 loop	2	structure	the last node of a binary heap that has a child is N / 2
-driver-robot-lag.adb	for Stop in reverse 2 .. N loop	2	structure	extraction stops when one node is left, which is then in place
-driver-robot-lag.adb	if Last < 1 then	1	structure	a differenced series needs two beats
-driver-robot-lag.adb	if N < 3 then	3	statistics	two pairs always correlate perfectly; a correlation says something from three pairs on
-driver-robot-lockin.adb	Half : constant Real := 0.5;	0.5	math	a majority is more than half: a whole image moves when a significant majority of its cells do
-driver-robot-lockin.adb	S.Noise.Append (Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0));	2.0	math	the mean of the two components' variances
-driver-robot-lockin.adb	X (R, 1) := 1.0;	1.0	math	the intercept column of a regression
-driver-robot-lockin.adb	if All_Columns = 0 or else M.Beats < 2 then	2	structure	a displacement needs two frames
-driver-robot-lockin.adb	if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 then	1	structure	the beat before the one an image shows must exist
-driver-robot-lockin.adb	return Pushes <= 1;	1	structure	a row is a reference only while at most one group is pushed
-driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	1.0	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
-driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
-driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
-driver-robot-regression.adb	Eigensystem ((S + Transpose (S)) / 2.0, Values, Vectors);	2.0	numerics	symmetrizing removes round-off asymmetry before the eigendecomposition
-driver-robot-regression.adb	W : Real_Array (1 .. N) := [others => 1.0];	1.0	math	the iteration starts from ordinary least squares, every weight one
-driver-robot-regression.adb	return (if R = 0.0 then 1.0 else 0.0);	1.0	math	with a zero scale only exact fits keep their weight
-driver-robot-regression.adb	return (if U <= Huber_K then 1.0 else Huber_K / U);	1.0	math	Huber's weight is one inside the cutoff
-driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
-driver-robot-stillness.adb	V : constant Real := Driver.Pixels.Variance (Noise, Column, Row) * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
-driver-robot-stillness.adb	V : constant Real := Driver.Pixels.Variance (Noise, Column, Row) * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
-driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then	2	statistics	a variance needs two frames
-driver-robot.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
-driver-robot.adb	S.Condition.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
-driver-robot.adb	S.Condition.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
-driver-robot.adb	S.Du.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
-driver-robot.adb	S.Du.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
-driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
-driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
-driver-robot.adb	if M.Beats >= 2 * M.Graph_Evidence then	2	numerics	re-estimating when the evidence doubles keeps the number of re-estimates logarithmic in the stream
 driver-robot-hand-touch.adb	if Dof > 1 and then (Chi - Res (R) ** 2 / Free) / Real (Dof - 1) > Without then	1	statistics	leaving a press out leaves one degree of freedom less
 driver-robot-hand-touch.adb	then Moved (Prior (F).Plane, Correction (Plane_Unknowns * F - 2), Correction (Plane_Unknowns * F - 1),	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-views.adb	(Driver.Pixels.Frames (V.Frames) >= 2 and then Driver.Pixels.Frames (Before.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
@@ -646,6 +598,49 @@ driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P
 driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	Sqrt (2.0) * Reading_Noise (M, R.Group, C)));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-lag.adb	Best : Real := 1.0;	1.0	math	a probability: no fit yet, so noise explains everything
+driver-robot-lag.adb	Child := 2 * Root;	2	structure	in a binary heap the children of node k are 2 k and 2 k + 1
+driver-robot-lag.adb	I : Positive := 1;	1	structure	arrays are indexed from one
+driver-robot-lag.adb	Ranks (L) := Real (I + J) / 2.0;	2.0	math	tied values share the mean of the ranks they span
+driver-robot-lag.adb	Sift (1, Stop - 1);	1	structure	the heap's root is node one, and the heap shrinks by one per extraction
+driver-robot-lag.adb	Sum := Sum + Sqrt ((Real (X1 - X0) / 2.0) ** 2 + (Real (Y1 - Y0) / 2.0) ** 2);	2.0	structure	an unresolved cell moved at least as far as a resolved one can: half its width and height
+driver-robot-lag.adb	Sum := Sum + Sqrt ((Real (X1 - X0) / 2.0) ** 2 + (Real (Y1 - Y0) / 2.0) ** 2);	2.0	structure	an unresolved cell moved at least as far as a resolved one can: half its width and height
+driver-robot-lag.adb	for Start in reverse 1 .. N / 2 loop	2	structure	the last node of a binary heap that has a child is N / 2
+driver-robot-lag.adb	for Stop in reverse 2 .. N loop	2	structure	extraction stops when one node is left, which is then in place
+driver-robot-lag.adb	if Last < 1 then	1	structure	a differenced series needs two beats
+driver-robot-lag.adb	if Used = 0 or else R2 >= 1.0 then	1.0	math	a fraction of variance explained is at most one
+driver-robot-lag.adb	return (if Used = 0 then 1.0 else 0.0);	1.0	math	probabilities: no positive coefficient explains nothing, a perfect fit cannot be noise
+driver-robot-lag.adb	return 1.0;	1.0	math	a probability: too few rows to fit, so noise explains everything
+driver-robot-lockin.adb	Half : constant Real := 0.5;	0.5	math	a majority is more than half: a whole image moves when a significant majority of its cells do
+driver-robot-lockin.adb	S.Noise.Append (Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0));	2.0	math	the mean of the two components' variances
+driver-robot-lockin.adb	X (R, 1) := 1.0;	1.0	math	the intercept column of a regression
+driver-robot-lockin.adb	if All_Columns = 0 or else M.Beats < 2 then	2	structure	a displacement needs two frames
+driver-robot-lockin.adb	if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 then	1	structure	the beat before the one an image shows must exist
+driver-robot-lockin.adb	return Pushes <= 1;	1	structure	a row is a reference only while at most one group is pushed
+driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	1.0	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
+driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
+driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
+driver-robot-regression.adb	Alpha : Real := 1.0;	1.0	math	the whole step to the restricted least-squares solution, cut back where a coefficient would turn negative
+driver-robot-regression.adb	Eigensystem ((S + Transpose (S)) / 2.0, Values, Vectors);	2.0	numerics	symmetrizing removes round-off asymmetry before the eigendecomposition
+driver-robot-regression.adb	W : Real_Array (1 .. N) := [others => 1.0];	1.0	math	the iteration starts from ordinary least squares, every weight one
+driver-robot-regression.adb	return (if R = 0.0 then 1.0 else 0.0);	1.0	math	with a zero scale only exact fits keep their weight
+driver-robot-regression.adb	return (if U <= Huber_K then 1.0 else Huber_K / U);	1.0	math	Huber's weight is one inside the cutoff
+driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
+driver-robot-steps.adb	(if S.Free_Count > 1 then (S.Free_Last - S.Free_Before) ** 2 / 2.0 else 0.0);	1	structure	a spread needs two free shortfalls
+driver-robot-steps.adb	(if S.Free_Count > 1 then (S.Free_Last - S.Free_Before) ** 2 / 2.0 else 0.0);	2.0	statistics	the variance of one of two values from their difference: half its square
+driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
+driver-robot-steps.adb	and then Driver.Uncertain.Significant (Excess, Sqrt (2.0 * Sigma ** 2 + Free_Spread));	2.0	math	the difference of two shortfalls carries the variance of both
+driver-robot-stillness.adb	V : constant Real := Driver.Pixels.Variance (Noise, Column, Row) * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
+driver-robot-stillness.adb	V : constant Real := Driver.Pixels.Variance (Noise, Column, Row) * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
+driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then	2	statistics	a variance needs two frames
+driver-robot.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
+driver-robot.adb	S.Condition.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
+driver-robot.adb	S.Condition.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
+driver-robot.adb	S.Du.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
+driver-robot.adb	S.Du.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
+driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
+driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
+driver-robot.adb	if M.Beats >= 2 * M.Graph_Evidence then	2	numerics	re-estimating when the evidence doubles keeps the number of re-estimates logarithmic in the stream
 driver-stats.adb	Child := 2 * Root;	2	math	heap sort and median index arithmetic
 driver-stats.adb	Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
 driver-stats.adb	Gaussian_MAD_To_Sigma : constant := 1.482_602_218_505_602;	1.482_602_218_505_602	statistics	1 / Phi^-1 (3/4): MAD to sigma for Gaussian data

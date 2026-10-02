@@ -169,6 +169,164 @@ package body Driver.Robot.Regression is
       end;
    end Count_Significant;
 
+   function Explained_Nonnegative (X : Real_Matrix; Y : Real_Array; Used : out Natural) return Real is
+      N  : constant Natural := X'Length (1);
+      P  : constant Natural := X'Length (2);
+      R0 : constant Integer := X'First (1) - 1;
+      C0 : constant Integer := X'First (2) - 1;
+      Y0 : constant Integer := Y'First - 1;
+      Xc : Real_Matrix (1 .. N, 1 .. P);
+      Yc : Real_Vector (1 .. N);
+      B  : Real_Vector (1 .. P) := [others => 0.0];
+      Positive_Set : array (1 .. P) of Boolean := [others => False];
+      Total : Real := 0.0;
+
+      --  The least-squares coefficients on the columns in the positive set,
+      --  zero elsewhere.
+      function Restricted return Real_Vector is
+         A    : Real_Matrix (1 .. P, 1 .. P) := [others => [others => 0.0]];
+         R    : Real_Vector (1 .. P) := [others => 0.0];
+         Inv  : Real_Matrix (1 .. P, 1 .. P);
+         Rank : Natural;
+      begin
+         for J in 1 .. P loop
+            if Positive_Set (J) then
+               for I in 1 .. N loop
+                  R (J) := R (J) + Xc (I, J) * Yc (I);
+               end loop;
+               for K in 1 .. P loop
+                  if Positive_Set (K) then
+                     for I in 1 .. N loop
+                        A (J, K) := A (J, K) + Xc (I, J) * Xc (I, K);
+                     end loop;
+                  end if;
+               end loop;
+            end if;
+         end loop;
+         Pseudo_Inverse (A, Inv, Rank);
+         return Inv * R;
+      end Restricted;
+
+      function Residual_Sum return Real is
+         S : Real := 0.0;
+      begin
+         for I in 1 .. N loop
+            declare
+               F : Real := 0.0;
+            begin
+               for J in 1 .. P loop
+                  F := F + Xc (I, J) * B (J);
+               end loop;
+               S := S + (Yc (I) - F) ** 2;
+            end;
+         end loop;
+         return S;
+      end Residual_Sum;
+   begin
+      Used := 0;
+      if N = 0 then
+         return 0.0;
+      end if;
+      declare
+         Mean : Real := 0.0;
+      begin
+         for I in 1 .. N loop
+            Mean := Mean + Y (Y0 + I);
+         end loop;
+         Mean := Mean / Real (N);
+         for I in 1 .. N loop
+            Yc (I) := Y (Y0 + I) - Mean;
+            Total := Total + Yc (I) ** 2;
+         end loop;
+      end;
+      for J in 1 .. P loop
+         declare
+            Mean : Real := 0.0;
+         begin
+            for I in 1 .. N loop
+               Mean := Mean + X (R0 + I, C0 + J);
+            end loop;
+            Mean := Mean / Real (N);
+            for I in 1 .. N loop
+               Xc (I, J) := X (R0 + I, C0 + J) - Mean;
+            end loop;
+         end;
+      end loop;
+      if Total = 0.0 then
+         return 0.0;
+      end if;
+      --  Each round admits the column that most lowers the residual; a
+      --  column leaves when keeping it would need a negative coefficient.
+      --  Every column enters and leaves at most once per round, so as many
+      --  rounds as there are columns, squared, bound it.
+      for Round in 1 .. P * P loop
+         declare
+            Best  : Natural := 0;
+            Slope : Real := 0.0;
+         begin
+            for J in 1 .. P loop
+               if not Positive_Set (J) then
+                  declare
+                     W : Real := 0.0;
+                  begin
+                     for I in 1 .. N loop
+                        declare
+                           F : Real := 0.0;
+                        begin
+                           for K in 1 .. P loop
+                              F := F + Xc (I, K) * B (K);
+                           end loop;
+                           W := W + Xc (I, J) * (Yc (I) - F);
+                        end;
+                     end loop;
+                     if W > Slope then
+                        Slope := W;
+                        Best := J;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            exit when Best = 0;
+            Positive_Set (Best) := True;
+            for Inner in 1 .. P loop
+               declare
+                  S : constant Real_Vector := Restricted;
+                  Alpha : Real := 1.0;
+                  Feasible : Boolean := True;
+               begin
+                  for J in 1 .. P loop
+                     if Positive_Set (J) and then S (J) <= 0.0 then
+                        Feasible := False;
+                        if B (J) - S (J) > 0.0 then
+                           Alpha := Real'Min (Alpha, B (J) / (B (J) - S (J)));
+                        end if;
+                     end if;
+                  end loop;
+                  if Feasible then
+                     B := S;
+                     exit;
+                  end if;
+                  for J in 1 .. P loop
+                     if Positive_Set (J) then
+                        B (J) := B (J) + Alpha * (S (J) - B (J));
+                        if B (J) <= 0.0 then
+                           B (J) := 0.0;
+                           Positive_Set (J) := False;
+                        end if;
+                     end if;
+                  end loop;
+               end;
+            end loop;
+         end;
+      end loop;
+      for J in 1 .. P loop
+         if Positive_Set (J) and then B (J) > 0.0 then
+            Used := Used + 1;
+         end if;
+      end loop;
+      return Real'Max (0.0, 1.0 - Residual_Sum / Total);
+   end Explained_Nonnegative;
+
    procedure Test_Block (F : Fit; First, Last : Positive; Statistic : out Real; Freedom : out Natural) is
       K    : constant Natural := Last - First + 1;
       Inv  : Real_Matrix (1 .. F.Columns, 1 .. F.Columns);

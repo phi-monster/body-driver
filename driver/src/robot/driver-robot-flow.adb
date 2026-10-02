@@ -26,7 +26,8 @@ package body Driver.Robot.Flow is
       Before, After : Real_Array;
       Luma_Variance : Real_Array;
       Du, Dv        : out Real_Array;
-      Condition     : out Real_Array)
+      Condition     : out Real_Array;
+      Resolved      : out Flag_Array)
    is
       W  : constant Natural := G.Width;
       H  : constant Natural := G.Height;
@@ -69,6 +70,7 @@ package body Driver.Robot.Flow is
                Du (K) := 0.0;
                Dv (K) := 0.0;
                Condition (Condition'First + Cell - 1) := 0.0;
+               Resolved (Resolved'First + Cell - 1) := False;
                if Nx > 0 and then Ny > 0 then
                   declare
                      Gx, Gy : Real_Array (1 .. Nx * Ny);
@@ -90,6 +92,7 @@ package body Driver.Robot.Flow is
                         Det   : constant Real := Sxx * Syy - Sxy * Sxy;
                         Trace : constant Real := Sxx + Syy;
                         U, V  : Real := 0.0;
+                        Converged : Boolean := False;
                      begin
                         if Det > 0.0 then
                            Condition (Condition'First + Cell - 1) :=
@@ -119,14 +122,21 @@ package body Driver.Robot.Flow is
                                  V := V + Sv;
                                  --  Done when a step no longer changes the estimate,
                                  --  or is below what the cell can resolve at all.
-                                 exit when Sqrt (Su * Su + Sv * Sv)
-                                           <= Real'Max (Driver.Conventions.Unchanged_Fraction * Sqrt (U * U + V * V),
-                                                        Noise_Floor (Condition (Condition'First + Cell - 1),
-                                                                     Luma_Variance (Luma_Variance'First + Cell - 1)));
+                                 Converged := Sqrt (Su * Su + Sv * Sv)
+                                   <= Real'Max (Driver.Conventions.Unchanged_Fraction * Sqrt (U * U + V * V),
+                                                Noise_Floor (Condition (Condition'First + Cell - 1),
+                                                             Luma_Variance (Luma_Variance'First + Cell - 1)));
+                                 exit when Converged;
                               end;
                            end loop;
                            Du (K) := U;
                            Dv (K) := V;
+                           --  A translation is resolved when the iteration settled on
+                           --  it and the content moved less than half the cell: beyond
+                           --  that most of the template has left the window it is
+                           --  matched in, and the answer is whatever fits best.
+                           Resolved (Resolved'First + Cell - 1) :=
+                             Converged and then abs U <= Real (Nx) / 2.0 and then abs V <= Real (Ny) / 2.0;
                         end if;
                      end;
                   end;

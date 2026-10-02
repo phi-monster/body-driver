@@ -56,6 +56,17 @@ mounted on the wrong arm, and the left gripper became the right arm's closer.
 - Rest beats are beats where the target did not change and no push of the
   group is under way. Finding pushes takes the noise, so the two are
   measured in turn until the pushes found stop changing.
+- The first round takes every change for motion (noise zero). The other
+  starting point, noise from every beat whose target did not change, fails
+  for a reading without jitter. There the only nonzero "rest" changes are
+  the tails of its own slow responses: the beats after a push where the
+  target is held and the reading is still on its way. In the self test's
+  rig, an arm that takes three beats to arrive moved 1.2 per beat with
+  noise measured from those tails, so its push ended after one beat. The
+  wrong noise then never changed, because the push marks it produced kept
+  the tails in the rest beats. Starting from zero, a push lasts as long as
+  its reading changes at all. The tails are never rest, and the noise
+  measured outside the pushes is the jitter alone, or zero.
 
 The test `robot.channels` holds a joint that repeats exactly two beats in
 three and jitters by 1e-5 on the third. Its noise must come out at the
