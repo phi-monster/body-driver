@@ -32,6 +32,7 @@ package Driver.World.Offline is
 
    function Thing_Count (B : Bench) return Natural;
    function Seen_In (B : Bench; T : Thing_Id; E : Eye_Id) return Boolean;
+   function Region_In (B : Bench; T : Thing_Id; E : Eye_Id) return Driver.Images.Mask;
    function Points_Of (B : Bench; T : Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector;
    function Centre (B : Bench; T : Thing_Id) return Point_Estimate;
    function Resting_On (B : Bench; T : Thing_Id) return Surface_Id'Base;

@@ -92,6 +92,13 @@ package body Driver.World.Pairs is
       end loop;
    end Fit_Mixture;
 
+   function Finite (X : Point_Estimate) return Boolean is
+     (for all A in 1 .. 3 =>
+        X.Mean (A) = X.Mean (A) and then abs X.Mean (A) <= Real'Last
+        and then (for all B in 1 .. 3 => X.Covariance (A, B) = X.Covariance (A, B)
+                                         and then abs X.Covariance (A, B) <= Real'Last));
+   --  Every coordinate and covariance a number (a NaN is not equal to itself).
+
    function Ball (Dimensions : Positive; Radius : Real) return Real is
       --  The measure of the errors no longer than Radius: a segment of both
       --  signs, a disc, a ball (each two dimensions more multiply it by
@@ -330,7 +337,10 @@ package body Driver.World.Pairs is
                begin
                   From_Second.Direction.Sigma := Sqrt (From_Second.Direction.Sigma ** 2 + (Line_Sigma * Turn) ** 2);
                   Driver.Geometry.Meet ([From_First, From_Second], X, Met);
-                  if Met then
+                  if Met and then not Finite (X) then
+                     --  Met where no number can say: no place either.
+                     Unplaced := Unplaced + 1;
+                  elsif Met then
                      if Significant
                        (Driver.Distributions.Chi_Square_Deviate (Misfit ([From_First, From_Second], X.Mean), Freedom),
                         1.0)

@@ -6,7 +6,9 @@ with Ada.Strings.Unbounded;
 with Driver.Bytes;
 with Driver.Json;
 with Driver.Tests;
+with Driver.World.Regions;
 with Driver.World.Tests;
+with Driver.World.Tracking;
 
 package body Driver.World.Estimates.Tests is
 
@@ -342,8 +344,105 @@ package body Driver.World.Estimates.Tests is
       Driver.Services.End_Replay;
    end Scene_Flow;
 
+   procedure Points_Stay is
+      --  The box top's points, as two eyes saw them, with the box held in the
+      --  first eye. They stay while it holds the box where they fall, while it
+      --  measures the box again in the same place (as when the eye moved and
+      --  the box was segmented anew), and while it loses the box (as when
+      --  something passes in front); they go once it holds the box elsewhere.
+      S     : State;
+      Gray  : constant Driver.Images.Image := Plain (128);
+      Top   : Driver.World.Pairs.Match_Vectors.Vector;
+      Beat  : Driver.Clock.Beat := 1;
+      Box   : constant Driver.Images.Mask := Box_Region;
+
+      function Shifted return Driver.Images.Mask is
+         --  The box's pixels in the first eye, a box's width further right.
+         M : Driver.Images.Mask := Driver.Images.Create (Columns, Rows);
+         B : constant Driver.World.Regions.Box := Driver.World.Regions.Bounds (Box);
+         W : constant Natural := B.Column_1 - B.Column_0 + 1;
+      begin
+         for R in 0 .. Rows - 1 loop
+            for C in 0 .. Columns - 1 - W loop
+               if Driver.Images.Contains (Box, C, R) then
+                  Driver.Images.Include (M, C + W, R);
+               end if;
+            end loop;
+         end loop;
+         return M;
+      end Shifted;
+
+      procedure Hold (Region : Driver.Images.Mask) is
+         R : Thing_Record := S.Things (1);
+      begin
+         R.Eyes.Replace_Element (1, Slot'(Has => True, Track => Driver.World.Tracking.Start (Region, Gray, Beat), others => <>));
+         S.Things.Replace_Element (1, R);
+      end Hold;
+
+      procedure Step (First : Driver.Images.Image) is
+         O : Observation;
+      begin
+         O.Beat := Beat;
+         O.Images.Append (First);
+         O.Images.Append (Gray);
+         Observe (S, 2, Camera_Of'Access, Up, True, O);
+         Beat := Beat + 1;
+      end Step;
+
+      function Kept return Natural is (Natural (S.Things (1).Points.Length));
+      --  The instrument answers nothing here: the thing's points are given.
+   begin
+      for I in 0 .. 4 loop
+         for J in 0 .. 4 loop
+            declare
+               X      : constant Vec3 := [Box_Half * Real (I - 2) / 2.5, Box_Half * Real (J - 2) / 2.5, Box_Top];
+               P1, P2 : Driver.Images.Pixel;
+               V1, V2 : Boolean;
+            begin
+               Eyes (1).Project (X, P1, V1);
+               Eyes (2).Project (X, P2, V2);
+               if V1 and then V2 then
+                  Top.Append (Driver.World.Pairs.Match'(In_First => P1, In_Second => P2, First => 1,
+                               Point    => (Mean => X, Covariance => [[1.0E-6, 0.0, 0.0], [0.0, 1.0E-6, 0.0],
+                                                                      [0.0, 0.0, 1.0E-6]])));
+               end if;
+            end;
+         end loop;
+      end loop;
+      declare
+         R : Thing_Record;
+      begin
+         R.Eyes.Append (Slot'(Has => True, Track => Driver.World.Tracking.Start (Box, Gray, Beat), others => <>));
+         R.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Top));
+         S.Things.Append (R);
+      end;
+      Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
+      Step (Gray);
+      Check (Kept = Natural (Top.Length), "of" & Top.Length'Image & " points inside the box only" & Kept'Image
+             & " were kept");
+      Hold (Box);
+      Step (Gray);
+      Check (Kept = Natural (Top.Length), "the box measured again in the same place kept" & Kept'Image & " of"
+             & Top.Length'Image & " points");
+      Step (Gray);
+      Step (Over_Box (Gray, Driver.Bytes.Byte'Last));
+      Step (Over_Box (Gray, Driver.Bytes.Byte'Last));
+      Check (Driver.World.Tracking."/="
+               (Driver.World.Tracking.State (S.Things (1).Eyes (1).Track), Driver.World.Tracking.Holding),
+             "the first eye still holds the box after its pixels changed");
+      Check (Kept = Natural (Top.Length), "the box lost from sight kept" & Kept'Image & " of" & Top.Length'Image
+             & " points");
+      Hold (Shifted);
+      Step (Gray);
+      Check (Kept = 0, Kept'Image & " points stayed where the box no longer is");
+      Driver.Services.End_Replay;
+   end Points_Stay;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("world.scene.points_stay",
+                             "a thing's points go when an eye measures it again or loses it, or stay when an eye holds"
+                             & " it elsewhere", Points_Stay'Access);
       Driver.Tests.Register ("world.scene.flow",
                              "the scene is not measured, an adopted thing does not rest on the table it stands on, an"
                              & " episode loses or keeps its surfaces wrongly, or a moved thing leaves its top behind",

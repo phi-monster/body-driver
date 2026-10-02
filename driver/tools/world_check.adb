@@ -1,4 +1,5 @@
 --  world_check RECORDING TRUTH --inst HOST:PORT [--dump PREFIX] [--until BEAT] [--pairs BEAT PREFIX]
+--              [--regions BEAT PREFIX]
 --
 --  The world layer alone, on a recording with side-file truth
 --  (harness/robodojo_truth). The recorded frames go through the world's
@@ -936,6 +937,62 @@ procedure World_Check is
       end loop;
    end Pair_Check;
 
+   Regions_At     : Natural := Natural'Last;   --  the beat whose regions are written, when asked
+   Regions_Prefix : Unbounded_String;
+
+   procedure Write_Regions (O : Observation) is
+      --  Every thing's region in every eye that holds it, as that eye's image
+      --  with the region's pixels lit red: PREFIX.THING.EYE.ppm.
+   begin
+      for C in Things.Iterate loop
+         for E in 1 .. Eye_Id'Base (Natural (O.Images.Length)) loop
+            declare
+               T : constant Driver.World.Thing_Id := Adopted_Maps.Key (C);
+            begin
+               if Driver.Observations.Has_Image (O, E)
+                 and then Driver.Images.Count (Driver.World.Offline.Region_In (Bench, T, E)) > 0
+               then
+                  declare
+                     use Ada.Streams.Stream_IO;
+                     use type Ada.Streams.Stream_Element_Offset;
+                     Picture : constant Driver.Images.Image := O.Images (E);
+                     Region  : constant Driver.Images.Mask := Driver.World.Offline.Region_In (Bench, T, E);
+                     W       : constant Natural := Driver.Images.Width (Picture);
+                     H       : constant Natural := Driver.Images.Height (Picture);
+                     Bytes   : Driver.Bytes.Byte_Array (1 .. Ada.Streams.Stream_Element_Offset (3 * W * H));
+                     F       : File_Type;
+                     K       : Ada.Streams.Stream_Element_Offset := 1;
+                     Lit     : Boolean;
+                  begin
+                     for Row in 0 .. H - 1 loop
+                        for Column in 0 .. W - 1 loop
+                           Lit := Column < Driver.Images.Width (Region) and then Row < Driver.Images.Height (Region)
+                             and then Driver.Images.Contains (Region, Column, Row);
+                           Bytes (K) := Ada.Streams.Stream_Element
+                             (if Lit then 255 else Driver.Images.Red (Picture, Column, Row));
+                           Bytes (K + 1) := Ada.Streams.Stream_Element
+                             (if Lit then Driver.Images.Green (Picture, Column, Row) / 2
+                              else Driver.Images.Green (Picture, Column, Row));
+                           Bytes (K + 2) := Ada.Streams.Stream_Element
+                             (if Lit then Driver.Images.Blue (Picture, Column, Row) / 2
+                              else Driver.Images.Blue (Picture, Column, Row));
+                           K := K + 3;
+                        end loop;
+                     end loop;
+                     Create (F, Out_File, To_String (Regions_Prefix) & "." & Image (Natural (T)) & "."
+                             & Image (Natural (E)) & ".ppm");
+                     Write (F, Driver.Bytes.To_Bytes ("P6" & ASCII.LF & Image (W) & " " & Image (H) & ASCII.LF
+                                                      & "255" & ASCII.LF));
+                     Write (F, Bytes);
+                     Close (F);
+                  end;
+               end if;
+            end;
+         end loop;
+      end loop;
+      Ada.Text_IO.Put_Line ("beat" & Beat'Image & ": the things' regions written");
+   end Write_Regions;
+
    procedure Adopt_Objects (O : Observation) is
       --  Every true object, in the first eye the middle of its mesh falls in,
       --  segmented there by the instrument as a brain's pointing would be.
@@ -1077,6 +1134,9 @@ procedure World_Check is
             Still : constant Boolean := Driver.Robot.Still (Robot);
          begin
             Driver.World.Offline.Observe (Bench, Natural (O.Images.Length), Camera_Of'Access, Up, Still, O);
+            if Beat = Regions_At then
+               Write_Regions (O);
+            end if;
             if Beat = Pairs_At then
                Pair_Check (O);
             end if;
@@ -1115,6 +1175,25 @@ procedure World_Check is
 
    ---------------------------------------------------------------------------
    --  The score
+
+   function Finite_Points (T : Driver.World.Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector is
+      --  The thing's points that are numbers: a NaN is not equal to itself.
+      Result : Driver.World.Pairs.Match_Vectors.Vector;
+      Not_Numbers : Natural := 0;
+   begin
+      for M of Driver.World.Offline.Points_Of (Bench, T) loop
+         if (for all A in 1 .. 3 => M.Point.Mean (A) = M.Point.Mean (A) and then abs M.Point.Mean (A) <= Real'Last)
+         then
+            Result.Append (M);
+         else
+            Not_Numbers := Not_Numbers + 1;
+         end if;
+      end loop;
+      if Not_Numbers > 0 then
+         Ada.Text_IO.Put_Line ("thing" & Image (Natural (T)) & ":" & Not_Numbers'Image & " points are not numbers");
+      end if;
+      return Result;
+   end Finite_Points;
 
    procedure Report is
       --  Every object's box and lowest point from its placed vertices; the
@@ -1217,7 +1296,7 @@ procedure World_Check is
             T      : constant Driver.World.Thing_Id := Adopted_Maps.Key (C);
             A      : constant Adopted := Adopted_Maps.Element (C);
             Name   : constant String := To_String (A.Object);
-            Points : constant Driver.World.Pairs.Match_Vectors.Vector := Driver.World.Offline.Points_Of (Bench, T);
+            Points : constant Driver.World.Pairs.Match_Vectors.Vector := Finite_Points (T);
             Own_K  : Natural := 0;
             Line   : Unbounded_String := To_Unbounded_String
               ("thing" & T'Image & " (" & Name & ", eye" & A.Eye'Image & "):" & Points.Length'Image & " points");
@@ -1318,7 +1397,7 @@ procedure World_Check is
 begin
    if Ada.Command_Line.Argument_Count < 4 or else Ada.Command_Line.Argument (3) /= "--inst" then
       Line (Core, "usage: world_check RECORDING TRUTH --inst HOST:PORT [--dump PREFIX] [--until BEAT]"
-                  & " [--pairs BEAT PREFIX]");
+                  & " [--pairs BEAT PREFIX] [--regions BEAT PREFIX]");
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
       return;
    end if;
@@ -1331,6 +1410,9 @@ begin
       elsif Ada.Command_Line.Argument (I) = "--pairs" and then I + 2 <= Ada.Command_Line.Argument_Count then
          Pairs_At := Natural'Value (Ada.Command_Line.Argument (I + 1));
          Pairs_Prefix := To_Unbounded_String (Ada.Command_Line.Argument (I + 2));
+      elsif Ada.Command_Line.Argument (I) = "--regions" and then I + 2 <= Ada.Command_Line.Argument_Count then
+         Regions_At := Natural'Value (Ada.Command_Line.Argument (I + 1));
+         Regions_Prefix := To_Unbounded_String (Ada.Command_Line.Argument (I + 2));
       elsif Ada.Command_Line.Argument (I) = "--until" then
          Until_Beat := Natural'Value (Ada.Command_Line.Argument (I + 1));
       end if;

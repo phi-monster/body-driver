@@ -27,6 +27,8 @@ package body Driver.World.Offline is
    function Thing_Count (B : Bench) return Natural is (Estimates.Thing_Count (B.State));
 
    function Seen_In (B : Bench; T : Thing_Id; E : Eye_Id) return Boolean is (Estimates.Seen_In (B.State, T, E));
+   function Region_In (B : Bench; T : Thing_Id; E : Eye_Id) return Driver.Images.Mask is
+     (Estimates.Region_In (B.State, T, E));
 
    function Points_Of (B : Bench; T : Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector is
      (Estimates.Points_Of (B.State, T));
