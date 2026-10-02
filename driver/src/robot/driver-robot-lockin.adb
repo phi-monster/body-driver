@@ -490,6 +490,32 @@ package body Driver.Robot.Lockin is
                      (Count, Tested, Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z)));
    end Moved;
 
+   function Cell_Noise (M : Model; E : Eye_Id) return Real is
+      S     : Eye_Stream renames M.Eyes (E);
+      Count : Natural := 0;
+   begin
+      for X of S.Noise loop
+         if X < Real'Last then
+            Count := Count + 1;
+         end if;
+      end loop;
+      if Count = 0 then
+         return Real'Last;
+      end if;
+      declare
+         Values : Real_Array (1 .. Count);
+         K      : Natural := 0;
+      begin
+         for X of S.Noise loop
+            if X < Real'Last then
+               K := K + 1;
+               Values (K) := X;
+            end if;
+         end loop;
+         return Driver.Stats.Median (Values);
+      end;
+   end Cell_Noise;
+
    function Shift (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Real is
       S      : Eye_Stream renames M.Eyes (E);
       Kept   : constant Natural := Natural (S.Kept_Groups.Length);

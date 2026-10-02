@@ -46,7 +46,19 @@ package body Driver.Robot is
    end Measure_Displacement;
 
    procedure Observe_Eyes (M : in out Model; O : Observation) is
+      --  Some commandable group began to move at this beat: each picture's
+      --  settle watch starts afresh when its frames show that beat, its lag
+      --  later, so the first change it weighs is the move's own.
+      Began_Moving : Boolean := False;
    begin
+      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+         if M.Groups (G).Commandable and then Channels.Moving (M, G, M.Beats)
+           and then not (M.Beats > 0 and then Channels.Moving (M, G, M.Beats - 1))
+         then
+            Began_Moving := True;
+         end if;
+      end loop;
+      M.Began_Moving.Append (Began_Moving);
       if M.Eyes.Is_Empty then
          for E in O.Images.First_Index .. O.Images.Last_Index loop
             M.Eyes.Append (Eye_Stream'(others => <>));
@@ -105,17 +117,31 @@ package body Driver.Robot is
                --  An eye's first two frames start its noise and are not judged.
                S.Judged.Append (Have and then S.Has_Judged);
                S.Still_At.Append (Have and then S.Is_Still);
-               --  This frame is the next one's previous; a missing frame, or
-               --  one of another size, breaks the chain: the next displacement
-               --  would span two beats.
+               --  Whether its picture has stopped changing (the one stop rule).
+               declare
+                  Shown : constant Integer := M.Beats - Natural'Max (0, Image_Lag (M, E));
+                  Reset : constant Boolean := Shown >= 0 and then M.Began_Moving (Shown);
+               begin
+                  if not Same then
+                     S.Has_Previous := False;
+                     S.Has_Before := False;
+                  end if;
+                  Stillness.Watch (S, Reset);
+               end;
+               --  This frame is the next one's previous, and the previous one
+               --  the next one's before; a missing frame, or one of another
+               --  size, breaks the chain: the next displacement would span two
+               --  beats.
                if Same then
                   declare
-                     Spare : constant Luma_Access := S.Previous;
+                     Spare : constant Luma_Access := S.Before;
                   begin
+                     S.Before := S.Previous;
                      S.Previous := S.Current;
                      S.Current := Spare;
                   end;
                end if;
+               S.Has_Before := Same and then S.Has_Previous;
                S.Has_Previous := Same;
             end;
          end;

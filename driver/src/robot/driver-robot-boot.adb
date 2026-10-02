@@ -138,10 +138,13 @@ package body Driver.Robot.Boot is
       end Recognize;
 
       --  Turns every joint of the arm both ways from where it rests, by steps
-      --  that double from the smallest one its eye can see, until a step is
-      --  blocked or short, or the eye would have turned by half its view:
-      --  beyond that a view shares less than half of itself with the one it
-      --  started from.
+      --  that double from the smallest one that moves its eye's view by what
+      --  one cell of it can tell (Z times the cells' displacement noise, over
+      --  how far the view moves per reading unit: a keyframe that moves less
+      --  tells the fit nothing), until a step is blocked or short, or the eye
+      --  would have turned by half its view: beyond that a view shares less
+      --  than half of itself with the one it started from. Every step is held
+      --  until the eye gives the keyframe (Motion.Hold_For_Keyframe).
       procedure Sweep (A : Arm_Id) is
          G    : Group_Id := 1;
          Size : Natural := 0;
@@ -167,7 +170,7 @@ package body Driver.Robot.Boot is
                   Half := Real (Natural'Min (M.Eyes (Eye_Id (Eye)).Grid.Width, M.Eyes (Eye_Id (Eye)).Grid.Height)) / 2.0;
                   for C in 1 .. Size loop
                      Per_Unit (C) := Lockin.Shift (M, Eye_Id (Eye), G, C);
-                     First (C) := (if Known (Visible_Step (M, G, C)) then Visible_Step (M, G, C).Value else 0.0);
+                     First (C) := Driver.Robot.Motion.Sweep_Start (M, A, C);
                   end loop;
                end if;
             end Read_Plan;
@@ -206,8 +209,7 @@ package body Driver.Robot.Boot is
                         begin
                            Pose (P.Channel) := Start (P.Channel) + P.Sign * Offset;
                            Go_To (G, Pose, Report);
-                           --  A second still frame there, for the eye's view.
-                           Driver.Robot.Motion.Hold (M, 1);
+                           Driver.Robot.Motion.Hold_For_Keyframe (M, A);
                            exit when Report.Outcome /= Driver.Robot.Motion.Reached;
                         end;
                         Offset := 2.0 * Offset;
@@ -259,7 +261,7 @@ package body Driver.Robot.Boot is
                               end;
                            end loop;
                            Go_To (G, Pose, Report);
-                           Driver.Robot.Motion.Hold (M, 1);
+                           Driver.Robot.Motion.Hold_For_Keyframe (M, A);
                         end;
                      end loop;
                      Go_To (G, Start, Report);

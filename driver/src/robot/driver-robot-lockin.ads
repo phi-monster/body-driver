@@ -43,6 +43,11 @@ private package Driver.Robot.Lockin is
    --  can measure; a change the stillness judgment sees (a pixel's rounding
    --  flipping) can be far smaller.
 
+   function Cell_Noise (M : Model; E : Eye_Id) return Real;
+   --  How finely one cell of the eye tells a displacement: the median over its
+   --  textured cells of the noise of their displacements about the
+   --  regression on the pushes, in pixels; Real'Last before it is measured.
+
    function Shift (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Real;
    --  How many pixels the eye's image moves per reading unit of the channel:
    --  the median over the cells that respond to its group; zero when none

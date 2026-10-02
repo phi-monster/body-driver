@@ -19,9 +19,11 @@ private package Driver.Robot.Kinematics is
    --  One beat, after the readings and the eyes were taken in.
 
    function Held_Still (M : Model; A : Arm_Id; Beat : Natural) return Boolean;
-   --  A keyframe can be taken of the arm at the beat: its eye was judged
-   --  still at it and the beat before, and its readings do not move
-   --  (Channels.Moving).
+   --  A keyframe can be taken of the arm at the latest beat: its readings do
+   --  not move (Channels.Moving) and its eye's picture has stopped changing
+   --  since the body last began to move (Stillness.Eye_Settled, the one stop
+   --  rule; a rendered view keeps changing for beats after the camera stops,
+   --  and a real camera's exposure does too).
 
    function Matched (M : Model; A : Arm_Id) return Natural;
    --  How many keyframes of the arm have their matches back.
