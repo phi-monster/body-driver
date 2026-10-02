@@ -14,6 +14,7 @@
 --  measured is lost.
 
 with Ada.Command_Line;
+with Ada.Exceptions;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Driver.Action;
@@ -100,6 +101,9 @@ procedure Body_Driver is
       entry Start;
    end Decider;
 
+   --  A task that ends on an exception ends silently, and the robot would hold
+   --  for good with nothing in the log: every failure is written out whole. A
+   --  failed episode does not take the later ones with it.
    task body Decider is
       Ok          : Boolean;
       Instruction : Unbounded_String;
@@ -110,11 +114,21 @@ procedure Body_Driver is
       if Ok then
          loop
             Tasks.Wait (Instruction);
-            Driver.Brain.Run_Episode (Context, To_String (Instruction));
+            begin
+               Driver.Brain.Run_Episode (Context, To_String (Instruction));
+            exception
+               when E : others =>
+                  Driver.Beats.Release;
+                  Line (Core, "the episode failed; waiting for the next one: " & Ada.Exceptions.Exception_Information (E));
+            end;
          end loop;
       else
          Line (Core, "the body could not be measured; holding still");
       end if;
+   exception
+      when E : others =>
+         Driver.Beats.Release;
+         Line (Core, "the boot failed; holding still: " & Ada.Exceptions.Exception_Information (E));
    end Decider;
 
    Connection : Driver.Wire.Connection;

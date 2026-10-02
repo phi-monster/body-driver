@@ -39,6 +39,11 @@ package Driver.Beats is
    procedure Send (C : Driver.Commands.Command);
    --  Decider side: the command for the beat Next returned.
 
+   procedure Release;
+   --  Decider side, after a failure: if the decider holds a beat (Next
+   --  returned, Send not yet called), it is answered with hold, so the main
+   --  loop never waits on a decider that has stopped.
+
    procedure Within_A_Beat (During : not null access procedure);
    --  Decider side: takes the next beat, runs During in its window (the
    --  models hold still until it returns) and answers the beat with a hold,
