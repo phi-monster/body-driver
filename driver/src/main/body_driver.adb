@@ -109,7 +109,13 @@ procedure Body_Driver is
       Instruction : Unbounded_String;
       Context     : Driver.Action.Context (Robot'Access, Hands'Access, Scene'Access);
    begin
-      accept Start;
+      --  When the program ends before it starts (a port that cannot be bound), the
+      --  decider ends with it rather than keeping the program alive.
+      select
+         accept Start;
+      or
+         terminate;
+      end select;
       Driver.Robot.Boot.Run (Robot, Hands, To_String (Body_File), Ok);
       if Ok then
          loop

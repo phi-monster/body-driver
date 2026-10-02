@@ -425,6 +425,12 @@ package body Driver.Core_Tests is
       Check (not R.Ok and then Ada.Strings.Unbounded.Length (R.Why) > 0,
              "a call without an address pretended to succeed or gave no reason");
       Check (R.Lasting, "a call without an address was not marked as failing for good");
+      declare
+         T : constant Ticket := Submit (Instrument, "/match", "{}", 0);
+      begin
+         --  Answered at once, with no worker left behind to keep the program alive.
+         Check (Ready (T) and then Collect (T).Lasting, "a submission without an address was not answered at once");
+      end;
    end Unconfigured_Service;
 
    procedure Streaming_Error_Body is

@@ -356,6 +356,12 @@ package body Driver.Services is
          Submit_Replayed (S, Path, Request, T);
          return T;
       end if;
+      if Unconfigured (S) then
+         --  Answered at once, and no worker is started for a service that
+         --  cannot be reached: a worker would outlive the program.
+         Results.Put (T, Not_Configured (S));
+         return T;
+      end if;
       if Workers (S) = null then
          Workers (S) := new Worker (S);
       end if;
