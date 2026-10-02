@@ -41,11 +41,14 @@ package Driver.Action.Goals is
       Ok     : Boolean := False;
       Motion : Driver.Action.Contact.Twist;
       Gap    : Estimate;              --  how far the relation still is from holding; Unknown when it has no end
+      Leg    : Real := Real'Last;     --  how far Motion goes before another way is needed
       Done   : Boolean := False;      --  it holds already, as far as can be measured
       Why    : Unbounded_String;      --  what is missing when not Ok; what is done first, when that differs
    end record;
    --  Motion is of unit size: one unit of length along it, or one radian
-   --  about it, closes one unit of Gap.
+   --  about it, closes one unit of Gap. A relation reached by a path of
+   --  several legs (up, across, down) has Gap the length of the whole path
+   --  left, so it shrinks as steadily from one leg to the next as within one.
 
    function Up_Of (S : Snapshot; T : Thing_Id) return Vec3
      with Pre => Has_Thing (S, T);
@@ -95,5 +98,24 @@ package Driver.Action.Goals is
    --  The motion of the subject that brings the relation about. A subject
    --  that rests on a surface moves along it, never into it. Long is the
    --  subject's long axis, for Facing.
+
+   type Point_Array is array (1 .. 3) of Vec3;
+
+   type Plan is record
+      Ok       : Boolean := False;
+      Why      : Unbounded_String;
+      Points   : Point_Array := [others => Zero3];   --  where the subject's centre passes, in order
+      Count    : Natural := 0;
+      By_Touch : Boolean := False;   --  after the last point it goes on the same way until it touches
+   end record;
+
+   function Over_Plan (S : Snapshot; Subject, Object : Item; R : Pair_Relation; Margin : Real) return Plan
+     with Pre => R in Above | Below | Onto;
+   --  The way over the object, once, from where both are now: along the
+   --  object's up until the subject is clear of its top by Margin, across
+   --  until straight over its centre, and for Onto down onto its top and on
+   --  until the touch; Below the same way under it. Each point is decided
+   --  once, so noise near a threshold cannot send the subject back and forth;
+   --  Margin is what the mover needs to pass without meeting it.
 
 end Driver.Action.Goals;

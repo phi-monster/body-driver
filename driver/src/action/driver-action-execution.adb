@@ -3,6 +3,7 @@ with Driver.Action.Contact;
 with Driver.Action.Contact.Search;
 with Driver.Action.Contact.Wrench;
 with Driver.Action.Goals;
+with Driver.Action.Grids;
 with Driver.Action.Monitor;
 with Driver.Action.Snapshots;
 with Driver.Conventions;
@@ -23,6 +24,7 @@ package body Driver.Action.Execution is
    use type Thing_Id;
    use type Surface_Id;
    use type Driver.Action.Goals.Quantity;
+   use type Driver.Action.Goals.Pair_Relation;
 
    package Contact renames Driver.Action.Contact;
    package Search renames Driver.Action.Contact.Search;
@@ -172,7 +174,7 @@ package body Driver.Action.Execution is
       for Pd of E.Pads loop
          declare
             F  : constant Real := E.Closers (Pd.Closer).Now;
-            C  : constant Vec3 := Pd.Open + F * (Pd.Closed - Pd.Open);
+            C  : constant Vec3 := Pd.Open + F * (Pd.Closed - Pd.Open) + E.Band * E.Along;   --  the lobe's end
             Across : constant Vec3 := Cross (Pd.Facing, E.Along);
             Wd : constant Vec3 := (if abs Across > 0.0 then Unit (Across) else Zero3);
             NW : constant Positive := Positive'Max (1, Natural (Real'Ceiling (2.0 * Pd.Half_Width / Spacing)));
@@ -200,10 +202,36 @@ package body Driver.Action.Execution is
       return Pts;
    end Body_Points;
 
-   --  The least distance from any of the points to the surfaces and the
-   --  things' samples (Except and Held left out), less the margin each needs:
+   --  The margin a body part known to Sigma keeps from a thing's samples:
    --  Z of the two sigmas together, and half a pitch between samples.
-   function Least_Gap (S : Snapshot; Points : Contact.Point_Vectors.Vector; Sigma : Real; Except, Held : Thing_Id'Base)
+   function Margin_From (T : Thing_State; Sigma : Real) return Real is
+     (Z * Sqrt (Sigma ** 2 + T.Sigma ** 2) + T.Pitch / 2.0);
+
+   --  The samples of every thing but Except and Held, filed for nearness.
+   function Obstacles (S : Snapshot; Sigma : Real; Except, Held : Thing_Id'Base) return Grids.Grid is
+      G    : Grids.Grid;
+      Cube : Real := 0.0;
+   begin
+      for T of S.Things loop
+         if T.Id /= Except and then T.Id /= Held and then T.Sigma < Real'Last then
+            Cube := Real'Max (Cube, Margin_From (T, Sigma));
+         end if;
+      end loop;
+      Grids.Start (G, (if Cube > 0.0 then Cube else Real'Last));
+      for T of S.Things loop
+         if T.Id /= Except and then T.Id /= Held and then T.Sigma < Real'Last then
+            for Smp of T.Samples loop
+               Grids.Add (G, Smp.Point, Margin_From (T, Sigma));
+            end loop;
+         end if;
+      end loop;
+      return G;
+   end Obstacles;
+
+   --  The least distance from any of the points to the surfaces and the
+   --  filed samples, less the margin each needs: exact when below zero, and
+   --  never below zero when the true one is not (Driver.Action.Grids).
+   function Least_Gap (S : Snapshot; Near : Grids.Grid; Points : Contact.Point_Vectors.Vector; Sigma : Real)
      return Real
    is
       Least : Real := Real'Last;
@@ -220,18 +248,8 @@ package body Driver.Action.Execution is
             end;
          end if;
       end loop;
-      for T of S.Things loop
-         if T.Id /= Except and then T.Id /= Held then
-            declare
-               Margin : constant Real := Z * Sqrt (Sigma ** 2 + T.Sigma ** 2) + T.Pitch / 2.0;
-            begin
-               for Q of Points loop
-                  for Smp of T.Samples loop
-                     Least := Real'Min (Least, abs (Q - Smp.Point) - Margin);
-                  end loop;
-               end loop;
-            end;
-         end if;
+      for Q of Points loop
+         Least := Real'Min (Least, Grids.Least_Gap (Near, Q));
       end loop;
       return Least;
    end Least_Gap;
@@ -239,7 +257,7 @@ package body Driver.Action.Execution is
    --  Whether the arm's measured parts, and what it holds, moving straight
    --  from one tool pose to another, keep clear of the surfaces and of every
    --  other thing; coming no nearer than it was at the start always is.
-   function Clear_Way (S : Snapshot; E : Search.Effector; From, To : Rigid; Except, Held : Thing_Id'Base)
+   function Clear_Way (S : Snapshot; E : Search.Effector; From, To : Rigid; Held : Thing_Id'Base; Near : Grids.Grid)
      return Boolean
    is
       Spacing : Real := Real'Last;
@@ -269,7 +287,7 @@ package body Driver.Action.Execution is
             end loop;
             return Pts;
          end At_Pose;
-         Start_Gap : constant Real := Least_Gap (S, At_Pose (From), E.Sigma, Except, Held);
+         Start_Gap : constant Real := Least_Gap (S, Near, At_Pose (From), E.Sigma);
       begin
          for P of At_Pose (From) loop
             Lever := Real'Max (Lever, abs (P - From.Translation));
@@ -286,7 +304,7 @@ package body Driver.Action.Execution is
                     (Rotation    => From.Rotation
                                       * Exp (Share * Driver.Numerics.Log (Transpose (From.Rotation) * To.Rotation)),
                      Translation => From.Translation + Share * (To.Translation - From.Translation));
-                  Gap   : constant Real := Least_Gap (S, At_Pose (Pose), E.Sigma, Except, Held);
+                  Gap   : constant Real := Least_Gap (S, Near, At_Pose (Pose), E.Sigma);
                begin
                   if Gap < 0.0 and then Gap < Start_Gap then
                      return False;
@@ -312,12 +330,13 @@ package body Driver.Action.Execution is
             From : constant Rigid := E.Tool;
             Now  : constant Arm_State := Arm (X.S, A);
             Up   : constant Vec3 := Gravity (X.S);
+            Near : constant Grids.Grid := Obstacles (X.S, E.Sigma, Except, Held);
          begin
             if At_Goal (Now, Goal) then
                Outcome := Reached;
                return;
             end if;
-            if not (abs Up > 0.0) or else Clear_Way (X.S, E, From, Goal, Except, Held) then
+            if not (abs Up > 0.0) or else Clear_Way (X.S, E, From, Goal, Held, Near) then
                Go (P, X, A, Goal, Outcome, Why);
                return;
             end if;
@@ -331,9 +350,9 @@ package body Driver.Action.Execution is
                   Via_2 := (Rotation => Goal.Rotation, Translation => Goal.Translation + Lift * Up);
                   exit when P.Reach ((Arm => A, Tool => Via_1, Position_Only => False)).Status /= Reachable
                     or else P.Reach ((Arm => A, Tool => Via_2, Position_Only => False)).Status /= Reachable;
-                  if Clear_Way (X.S, E, From, Via_1, Except, Held)
-                    and then Clear_Way (X.S, E, Via_1, Via_2, Except, Held)
-                    and then Clear_Way (X.S, E, Via_2, Goal, Except, Held)
+                  if Clear_Way (X.S, E, From, Via_1, Held, Near)
+                    and then Clear_Way (X.S, E, Via_1, Via_2, Held, Near)
+                    and then Clear_Way (X.S, E, Via_2, Goal, Held, Near)
                   then
                      Found := True;
                      exit;
@@ -378,25 +397,59 @@ package body Driver.Action.Execution is
       return B;
    end Beside_Of;
 
-   function Busy (S : Snapshot; A : Arm_Id; T : Thing_Id) return Boolean is
+
+   function Busy (S : Snapshot; A : Arm_Id; T : Thing_Id'Base) return Boolean is
      (for some O of S.Things => O.Id /= T and then O.Held_By /= 0 and then Has_Hand (S, O.Held_By)
                                 and then Hand (S, O.Held_By).Arm = A);
    --  The arm holds something else.
 
    type Grip is record
-      Arm     : Arm_Id := Arm_Id'First;
-      Hands   : Search.Closer_Vectors.Vector;   --  the closers that close on it
-      Closing : Boolean := False;               --  it is held between lobes, not touched by one part
-      Searched : Boolean := False;              --  Chosen is the contact set this run picked
-      Chosen  : Search.Candidate;
+      Arm      : Arm_Id := Arm_Id'First;
+      Hands    : Search.Closer_Vectors.Vector;   --  the closers that close on it
+      Closing  : Boolean := False;               --  it is held between lobes, not touched by one part
+      Searched : Boolean := False;               --  Chosen is the contact set this run picked
+      Chosen   : Search.Candidate;
    end record;
 
+   function Grip_Of_Arm (S : Snapshot; A : Arm_Id; Closing : Boolean) return Grip is
+     ((Arm => A, Hands => Search.Effector_Of (S, A).Closers, Closing => Closing, Searched => False, Chosen => <>));
+
+   --  The arm a role binds to now, the nearest to Near of those that can
+   --  play it: a grasper closes lobes on things, a pusher touches without
+   --  closing, me carries the whole body and every eye.
+   function Bound (S : Snapshot; R : Role; Near : Vec3; A : out Arm_Id) return Boolean is
+      Best : Real := Real'Last;
+   begin
+      A := Arm_Id'First;
+      for Arm_S of S.Arms loop
+         declare
+            E    : constant Search.Effector := Search.Effector_Of (S, Arm_S.Id);
+            Fits : constant Boolean :=
+              (case R is
+                  when Grasper => E.Closes,
+                  when Pusher  => not E.Closes and then not (E.Surface.Is_Empty and then E.Ends.Is_Empty),
+                  when Me      => Arm_S.Carries_All);
+         begin
+            if Fits and then abs (E.Tool.Translation - Near) < Best then
+               Best := abs (E.Tool.Translation - Near);
+               A := Arm_S.Id;
+            end if;
+         end;
+      end loop;
+      return Best < Real'Last;
+   end Bound;
+
+   function Role_Word (R : Role) return String is
+     (case R is when Me => "me", when Grasper => "grasper", when Pusher => "pusher");
+
    --  Brings a part of the body into the contact set the search picks for
-   --  Motion, over every arm free to do it; on a closing set, closes on the
-   --  thing. A closing that finds nothing between the lobes is tried again
-   --  from a new look only if it changed something.
+   --  Motion, over every arm free to do it (or only Only_Arm); on a closing
+   --  set, closes on the thing. A closing that finds nothing between the
+   --  lobes is tried again from a new look only if it changed something.
+   --  Touch_Only takes a single touch and stops where the last straight
+   --  stretch begins, for the caller to come in until it meets the thing.
    procedure Acquire (P : in out Plant'Class; X : in out State; T : Thing_Id; Motion : Contact.Twist; G : out Grip;
-                      Ok : out Boolean)
+                      Ok : out Boolean; Only_Arm : Arm_Id'Base := 0; Touch_Only : Boolean := False)
    is
    begin
       Ok := False;
@@ -408,7 +461,11 @@ package body Driver.Action.Execution is
             Before_Centre : constant Point_Estimate := Thing (X.S, T).Centre;
          begin
             for A of X.S.Arms loop
-               if not Busy (X.S, A.Id, T) then
+               if Only_Arm /= 0 and then A.Id /= Only_Arm then
+                  null;
+               elsif Busy (X.S, A.Id, T) then
+                  Note_Tried (X, "arm " & Img (Integer (A.Id)) & " holds something else");
+               else
                   declare
                      E     : constant Search.Effector := Search.Effector_Of (X.S, A.Id);
                      Arm_Id_Now : constant Arm_Id := A.Id;
@@ -419,7 +476,7 @@ package body Driver.Action.Execution is
                      Acc   : Search.Account;
                   begin
                      Search.Find (Search.Shape_Of (X.S, T), Beside_Of (X.S, T), E, Motion, Gravity (X.S),
-                                  Thing (X.S, T).Friction, Can_Reach'Access, C, Found, Acc);
+                                  Thing (X.S, T).Friction, Can_Reach'Access, C, Found, Acc, Touch_Only);
                      if Found and then C.Force < Force then
                         Best := C;
                         Force := C.Force;
@@ -428,8 +485,6 @@ package body Driver.Action.Execution is
                         Note_Tried (X, "arm " & Img (Integer (A.Id)) & ": " & Search.Say (Acc));
                      end if;
                   end;
-               else
-                  Note_Tried (X, "arm " & Img (Integer (A.Id)) & " holds something else");
                end if;
             end loop;
             if Force = Real'Last then
@@ -439,11 +494,11 @@ package body Driver.Action.Execution is
                E   : constant Search.Effector := Search.Effector_Of (X.S, Arm_Of_Best);
                Out_Come : Step_Outcome;
                Why : Unbounded_String;
+               Several : constant Boolean := Natural (Best.Touches.Length) > 1;
             begin
-               G := (Arm => Arm_Of_Best, Hands => E.Closers, Closing => Natural (Best.Touches.Length) > 1, Searched => True,
-                     Chosen => Best);
+               G := (Arm => Arm_Of_Best, Hands => E.Closers, Closing => Several, Searched => True, Chosen => Best);
                Say (X, "I meet it with arm " & Img (Integer (Arm_Of_Best)) & " at "
-                    & Img (Natural (Best.Touches.Length)) & " touch" & (if Natural (Best.Touches.Length) > 1 then "es" else "")
+                    & Img (Natural (Best.Touches.Length)) & " touch" & (if Several then "es" else "")
                     & ", needing friction " & Img (Best.Mu_Worst) & " at most");
                if G.Closing then
                   for K in 1 .. Natural (E.Closers.Length) loop
@@ -456,10 +511,18 @@ package body Driver.Action.Execution is
                               & (if Out_Come = Refused then To_String (Why) else "something stopped the arm"));
                   return;
                end if;
+               if Touch_Only then
+                  Ok := True;
+                  return;
+               end if;
                Go (P, X, Arm_Of_Best, Best.Tool, Out_Come, Why);
                if Out_Come = Refused then
                   Note_Tried (X, "coming in to touch it: " & To_String (Why));
                   return;
+               elsif Out_Come = Blocked then
+                  Say (X, "something stopped my hand " & Img (abs (Arm (X.S, Arm_Of_Best).Tool.Pose.Translation
+                                                                  - Best.Tool.Translation))
+                       & " short of where it was to touch");
                end if;
                if not G.Closing then
                   Ok := True;
@@ -501,28 +564,81 @@ package body Driver.Action.Execution is
       end loop;
    end Acquire;
 
-   --  How far along the unit twist the thing can go before it meets a
-   --  surface or another thing, and the uncertainty of that distance.
-   procedure Contact_Ahead (S : Snapshot; T : Thing_Id; G : Contact.Twist; Ahead, Band : out Real) is
-      X : constant Thing_State := Thing (S, T);
+   --  The points that move in a step: the thing's surface, or when no thing
+   --  is moved, the arm's own parts that can meet something.
+   function Moving_Points (S : Snapshot; T : Thing_Id'Base; A : Arm_Id) return Contact.Point_Vectors.Vector is
+      Pts : Contact.Point_Vectors.Vector;
+   begin
+      if T /= 0 then
+         for Smp of Thing (S, T).Samples loop
+            Pts.Append (Smp.Point);
+         end loop;
+         return Pts;
+      end if;
+      declare
+         E       : constant Search.Effector := Search.Effector_Of (S, A);
+         Spacing : Real := Real'Last;
+      begin
+         for O of S.Things loop
+            if O.Pitch > 0.0 then
+               Spacing := Real'Min (Spacing, O.Pitch);
+            end if;
+         end loop;
+         return Body_Points (E, E.Tool, (if Spacing = Real'Last then Arm (S, A).Step.Value else Spacing));
+      end;
+   end Moving_Points;
+
+   --  The arm's touching parts as one side of a relation: their middle (the
+   --  lobes' faces, else its own surface, else its tool), and their points.
+   function Effector_Item (S : Snapshot; A : Arm_Id) return Goals.Item is
+      E   : constant Search.Effector := Search.Effector_Of (S, A);
+      Sum : Vec3 := Zero3;
+      N   : Natural := 0;
+      It  : Goals.Item;
+   begin
+      for Pd of E.Pads loop
+         Sum := Sum + E.Tool * (Pd.Open + E.Closers (Pd.Closer).Now * (Pd.Closed - Pd.Open));
+         N := N + 1;
+      end loop;
+      if N = 0 then
+         for Sf of E.Surface loop
+            Sum := Sum + E.Tool * Sf.Point;
+            N := N + 1;
+         end loop;
+      end if;
+      It.Centre := (Mean => (if N > 0 then Sum / Real (N) else E.Tool.Translation),
+                    Covariance => Arm (S, A).Tool.Position_Covariance);
+      It.Sigma := E.Sigma;
+      for Q of Moving_Points (S, 0, A) loop
+         It.Samples.Append (Sample'(Point => Q, Normal => Zero3));
+      end loop;
+      return It;
+   end Effector_Item;
+
+   --  How far along the unit twist the moving points can go before one of
+   --  them meets a surface or a thing other than Except, and the band of
+   --  that distance's uncertainty.
+   procedure Contact_Ahead (S : Snapshot; Moving : Contact.Point_Vectors.Vector; Sigma : Real; Except : Thing_Id'Base;
+                            G : Contact.Twist; Ahead, Band : out Real)
+   is
    begin
       Ahead := Real'Last;
       Band := 0.0;
-      for Smp of X.Samples loop
+      for Q0 of Moving loop
          declare
-            V  : constant Vec3 := Contact.Velocity (G, Smp.Point);
+            V  : constant Vec3 := Contact.Velocity (G, Q0);
             VV : constant Real := V * V;
          begin
             if VV > 0.0 then
                for F of S.Surfaces loop
                   if F.Of_Thing = 0 and then abs F.Normal.Unit_Vector > 0.0 then
                      declare
-                        N  : constant Vec3 := Unit (F.Normal.Unit_Vector);
+                        N       : constant Vec3 := Unit (F.Normal.Unit_Vector);
                         In_Rate : constant Real := -Real'(V * N);
-                        H  : constant Real := (Smp.Point - F.Point.Mean) * N;
-                        B  : constant Real := Z * Sqrt (X.Sigma ** 2 + Largest_Sigma (F.Point.Covariance) ** 2);
+                        H       : constant Real := (Q0 - F.Point.Mean) * N;
+                        B       : constant Real := Z * Sqrt (Sigma ** 2 + Largest_Sigma (F.Point.Covariance) ** 2);
                      begin
-                        if In_Rate > 0.0 and then H > -B and then H / In_Rate < Ahead then
+                        if In_Rate > 0.0 and then H > -B and then Real'Max (0.0, H) / In_Rate < Ahead then
                            Ahead := Real'Max (0.0, H) / In_Rate;
                            Band := B / In_Rate;
                         end if;
@@ -530,19 +646,17 @@ package body Driver.Action.Execution is
                   end if;
                end loop;
                for O of S.Things loop
-                  if O.Id /= T then
+                  if O.Id /= Except then
                      declare
-                        B : constant Real := Z * Sqrt (X.Sigma ** 2 + O.Sigma ** 2);
+                        B        : constant Real := Z * Sqrt (Sigma ** 2 + O.Sigma ** 2);
                         Reach_Of : constant Real := O.Pitch / 2.0 + B;
                      begin
                         for Q of O.Samples loop
                            declare
-                              D : constant Vec3 := Q.Point - Smp.Point;
+                              D     : constant Vec3 := Q.Point - Q0;
                               Along : constant Real := Real'(D * V) / VV;
                            begin
-                              if Along > 0.0 and then Along < Ahead
-                                and then abs (D - Along * V) <= Reach_Of
-                              then
+                              if Along > 0.0 and then Along < Ahead and then abs (D - Along * V) <= Reach_Of then
                                  Ahead := Along;
                                  Band := B / Sqrt (VV);
                               end if;
@@ -603,48 +717,59 @@ package body Driver.Action.Execution is
       return Contact.Footing_Of (Pts, Low * N, N, X.Pitch);
    end Base_Over_Support;
 
-   --  Moves the thing, held or touched as G says, step by step along what
-   --  Next_Goal wants of it, until the monitor names an ending.
-   procedure Carry (P : in out Plant'Class; X : in out State; T : Thing_Id; G : Grip;
+   --  Moves the subject step by step along what Next_Goal wants, until the
+   --  monitor names an ending. The subject is the thing T, held or touched
+   --  as G says, or when T is 0 the arm's own touching parts. A relation
+   --  that ends in contact (Arrive_By_Touch) goes on past where the geometry
+   --  says it holds, by the arm's smallest step, until the touch is felt.
+   procedure Carry (P : in out Plant'Class; X : in out State; T : Thing_Id'Base; G : Grip;
                     Next_Goal : not null access function (S : Snapshot) return Goals.Answer;
-                    Wanted : Ending_Set; Max_Steps : Natural; Final : out Ending)
+                    Wanted : Ending_Set; Max_Steps : Natural; Final : out Ending;
+                    Arrive_By_Touch : Boolean := False)
    is
-      Watch  : Monitor.Watch := Monitor.Start;
-      Start  : constant Point_Estimate := Thing (X.S, T).Centre;
-      Up0    : constant Vec3 := Goals.Up_Of (X.S, T);
-      Supported : constant Boolean := Thing (X.S, T).Support /= 0;
-      Travelled : Real := 0.0;
+      Watch     : Monitor.Watch := Monitor.Start;
+      Start     : constant Point_Estimate :=
+        (if T /= 0 then Thing (X.S, T).Centre else Effector_Item (X.S, G.Arm).Centre);
+      Up0       : constant Vec3 := (if T /= 0 then Goals.Up_Of (X.S, T) else Gravity (X.S));
+      Supported : constant Boolean := T /= 0 and then Thing (X.S, T).Support /= 0;
    begin
       loop
          declare
             Goal    : constant Goals.Answer := Next_Goal (X.S);
             Now     : constant Arm_State := Arm (X.S, G.Arm);
-            Before  : constant Thing_State := Thing (X.S, T);
+            Centre  : constant Point_Estimate :=
+              (if T /= 0 then Thing (X.S, T).Centre else Effector_Item (X.S, G.Arm).Centre);
+            Sigma   : constant Real := (if T /= 0 then Thing (X.S, T).Sigma else Search.Effector_Of (X.S, G.Arm).Sigma);
+            Pushing : constant Boolean := Goal.Ok and then Goal.Done and then Arrive_By_Touch;
             F       : Monitor.Facts;
             Step    : Real := 0.0;
             Ahead, Band : Real := Real'Last;
             Res     : Arm_Result;
          begin
-            if Goal.Ok and then not Goal.Done then
-               Contact_Ahead (X.S, T, Goal.Motion, Ahead, Band);
+            if Goal.Ok and then (not Goal.Done or else Pushing) then
+               Contact_Ahead (X.S, Moving_Points (X.S, T, G.Arm), Sigma, T, Goal.Motion, Ahead, Band);
                declare
                   Fine  : constant Real := Resolution (Now, Goal.Motion);
                   Limit : Real := Real'Last;
                   function Fits (S : Real) return Boolean is
                     (P.Reach ((Arm => G.Arm, Tool => Moved (Goal.Motion, S, Now.Tool.Pose), Position_Only => False))
                        .Status = Reachable
-                     and then P.In_View (Contact.Apply (Contact.Scaled (Goal.Motion, S), Before.Centre.Mean)));
+                     and then P.In_View (Contact.Apply (Contact.Scaled (Goal.Motion, S), Centre.Mean)));
                begin
                   if Ahead < Real'Last then
                      Limit := Real'Max (Fine, Ahead - Band);
                   end if;
-                  if Known (Goal.Gap) then
-                     Limit := Real'Min (Limit, Real'Max (Fine, Goal.Gap.Value));
+                  if Pushing then
+                     Limit := Fine;
+                  elsif Known (Goal.Gap) then
+                     Limit := Real'Min (Limit, Real'Max (Fine, Real'Min (Goal.Gap.Value, Goal.Leg)));
+                  elsif Goal.Leg < Real'Last then
+                     Limit := Real'Min (Limit, Real'Max (Fine, Goal.Leg));
                   end if;
                   if Wanted (Free) and then Supported then
                      --  The rise is judged against its own noise: go just far enough for that.
                      Limit := Real'Min (Limit, Real'Max (Fine, Z * Sqrt (2.0) * Largest_Sigma (Start.Covariance)
-                                                          - Real'((Before.Centre.Mean - Start.Mean) * Up0)));
+                                                          - Real'((Centre.Mean - Start.Mean) * Up0)));
                   end if;
                   if Limit < Real'Last and then Fits (Limit) then
                      Step := Limit;
@@ -675,13 +800,21 @@ package body Driver.Action.Execution is
                end;
             end if;
             F.Commanded := Step > 0.0;
-            F.Exhausted := Goal.Ok and then not Goal.Done and then Step = 0.0;
+            F.Exhausted := Goal.Ok and then (not Goal.Done or else Pushing) and then Step = 0.0;
             if F.Commanded then
                declare
                   R : Report;
                begin
                   P.Move (One_Arm (G.Arm, Moved (Goal.Motion, Step, Now.Tool.Pose)), R);
                   Res := R.Arms.First_Element;
+               end;
+            else
+               --  Nothing to move: one beat passes while the scene is watched.
+               declare
+                  R : Report;
+               begin
+                  P.Move ((Arms => Arm_Goal_Vectors.Empty_Vector, Closers => Closer_Goal_Vectors.Empty_Vector,
+                           Settle => False), R);
                end;
             end if;
             Look (P, X);
@@ -691,16 +824,16 @@ package body Driver.Action.Execution is
                Delivered  : constant Real := (if F.Commanded and then Known (Res.Delivered)
                                               then Real'Max (0.0, Res.Delivered.Value) * Step else 0.0);
             begin
-               if F.Commanded then
-                  Travelled := Travelled + Delivered;
-               end if;
                F.Blocked := F.Commanded and then Res.Outcome = Blocked and then Delivered < Ahead - Band;
                F.Touch := F.Commanded and then Res.Outcome = Blocked and then not F.Blocked;
-               if Res.Outcome = Refused and then F.Commanded then
+               if F.Commanded and then Res.Outcome = Refused then
                   F.Blocked := True;
                   Say (X, "the arm refused the step: " & To_String (Res.Why));
                end if;
-               if Has_Thing (X.S, T) then
+               if T = 0 then
+                  F.Seen := True;
+                  F.Followable := True;
+               elsif Has_Thing (X.S, T) then
                   declare
                      Now_T : constant Thing_State := Thing (X.S, T);
                   begin
@@ -708,17 +841,17 @@ package body Driver.Action.Execution is
                      F.Followable := Known (Now_T.Centre);
                      F.Height_Gain := (Value => Real'((Now_T.Centre.Mean - Start.Mean) * Up0),
                                        Sigma => Sqrt (2.0) * Largest_Sigma (Start.Covariance), Degrees_Of_Freedom => 0);
-                     if F.Commanded then
+                     if F.Commanded and then G.Closing then
                         --  Where it was, carried by the hand's measured motion:
                         --  the two hand readings and the lever of their turn add
                         --  their uncertainty to that of where it was.
                         declare
-                           Lever : constant Real := abs (Before.Centre.Mean - Now.Tool.Pose.Translation);
+                           Lever : constant Real := abs (Centre.Mean - Now.Tool.Pose.Translation);
                            Turns : constant Real := Largest_Sigma (Now.Tool.Rotation_Covariance) ** 2
                              + Largest_Sigma (Arm (X.S, G.Arm).Tool.Rotation_Covariance) ** 2;
                         begin
-                           F.Carried_To := (Mean       => Carried * Before.Centre.Mean,
-                                            Covariance => Before.Centre.Covariance + Now.Tool.Position_Covariance
+                           F.Carried_To := (Mean       => Carried * Centre.Mean,
+                                            Covariance => Centre.Covariance + Now.Tool.Position_Covariance
                                               + Arm (X.S, G.Arm).Tool.Position_Covariance
                                               + (Lever ** 2 * Turns) * Identity3);
                         end;
@@ -729,7 +862,7 @@ package body Driver.Action.Execution is
                   F.Seen := False;
                   F.Followable := False;
                end if;
-               if G.Closing then
+               if G.Closing and then not G.Hands.Is_Empty then
                   declare
                      Fr : constant Estimate := Hand (X.S, G.Hands.First_Element.Hand).Fraction;
                   begin
@@ -738,23 +871,29 @@ package body Driver.Action.Execution is
                   end;
                end if;
                F.Still := X.S.Still;
-               F.Gap := (if Goal.Ok then Goal.Gap else Unknown);
+               --  The gap as it is after the step, against what the step owed.
+               declare
+                  After : constant Goals.Answer := Next_Goal (X.S);
+               begin
+                  F.Gap := (if After.Ok and then not Pushing then After.Gap else Unknown);
+               end;
                F.Owed := Delivered;
                F.Out_Of_Beats := P.Episode_Over;
             end;
             Monitor.Step (Watch, F);
             if Monitor.Fired (Watch, F, Wanted, Max_Steps) then
                Final := Monitor.Ending_Of (Watch, F, Wanted, Max_Steps);
-               if Has_Thing (X.S, T) then
-                  declare
-                     Moved_By : constant Vec3 := Thing (X.S, T).Centre.Mean - Start.Mean;
-                  begin
-                     Say (X, "it moved by " & Img (abs Moved_By) & ", " & Img (Real'(Moved_By * Up0))
-                          & " of it up, in " & Img (Monitor.Steps (Watch)) & " steps");
-                  end;
-               end if;
+               declare
+                  Now_Centre : constant Vec3 :=
+                    (if T = 0 then Effector_Item (X.S, G.Arm).Centre.Mean
+                     elsif Has_Thing (X.S, T) then Thing (X.S, T).Centre.Mean else Start.Mean);
+                  Moved_By   : constant Vec3 := Now_Centre - Start.Mean;
+               begin
+                  Say (X, (if T = 0 then "my hand" else "it") & " moved by " & Img (abs Moved_By) & ", "
+                       & Img (Real'(Moved_By * Up0)) & " of it up, in " & Img (Monitor.Steps (Watch)) & " steps");
+               end;
                if F.Exhausted and then Final in Stuck | Settled then
-                  Say (X, "I could take it no further: a step of the smallest size would leave my reach or my view");
+                  Say (X, "I could go no further: a step of the smallest size would leave my reach or my view");
                end if;
                if not Goal.Ok then
                   Say (X, To_String (Goal.Why));
@@ -806,6 +945,7 @@ package body Driver.Action.Execution is
       Can  : constant Goals.Quantity_Set := Goals.Changeable (S);
       Seen : Natural := 0;
    begin
+      Q := Goals.Quantity'First;
       for K in Goals.Quantity loop
          if Can (K) then
             Seen := Seen + 1;
@@ -817,6 +957,35 @@ package body Driver.Action.Execution is
       end loop;
       return False;
    end Quantity_Of;
+
+   --  Takes hold of the thing for Motion unless a hand holds it already.
+   procedure Hold_It (P : in out Plant'Class; X : in out State; T : Thing_Id; Motion : Contact.Twist; G : out Grip;
+                      Ok : out Boolean)
+   is
+   begin
+      if Thing (X.S, T).Held_By /= 0 and then Has_Hand (X.S, Thing (X.S, T).Held_By) then
+         G := Grip_Of_Arm (X.S, Hand (X.S, Thing (X.S, T).Held_By).Arm, Closing => True);
+         Say (X, "I hold it already");
+         Ok := True;
+      else
+         Acquire (P, X, T, Motion, G, Ok);
+         if not Ok then
+            Note_Tried (X, "no part of me could take it that way");
+         end if;
+      end if;
+   end Hold_It;
+
+   --  A grip that let the thing slip needed more friction than it has.
+   procedure Learn_From_Slip (P : in out Plant'Class; X : in out State; T : Thing_Id; G : Grip) is
+      B : Friction_Bounds := Thing (X.S, T).Friction;
+   begin
+      if G.Closing and then G.Searched then
+         B.High := Real'Min (B.High, G.Chosen.Mu_Nominal);
+         P.Learn ((Kind => Friction_Learned, Thing => T, Bounds => B));
+         Say (X, "it slipped out of a grip that needed friction " & Img (G.Chosen.Mu_Nominal)
+              & ", so I take its friction to be less than that from now on");
+      end if;
+   end Learn_From_Slip;
 
    procedure Run_Change (P : in out Plant'Class; X : in out State; W : Want; Final : out Ending) is
       T : constant Thing_Id := W.Thing;
@@ -843,38 +1012,337 @@ package body Driver.Action.Execution is
             Note_Tried (X, To_String (First.Why));
             return;
          end if;
-         if Thing (X.S, T).Held_By /= 0 and then Has_Hand (X.S, Thing (X.S, T).Held_By) then
-            declare
-               H : constant Hand_State := Hand (X.S, Thing (X.S, T).Held_By);
-            begin
-               Hold := (Arm => H.Arm, Hands => Search.Effector_Of (X.S, H.Arm).Closers, Closing => True, Searched => False,
-                        Chosen => <>);
-               Say (X, "I hold it already");
-            end;
-         else
-            Acquire (P, X, T, First.Motion, Hold, Ok);
-            if not Ok then
-               Note_Tried (X, "no part of me could take it that way");
-               return;
-            end if;
+         Hold_It (P, X, T, First.Motion, Hold, Ok);
+         if not Ok then
+            return;
          end if;
          Carry (P, X, T, Hold, Next_Goal'Access, W.Until_Endings, W.Max_Steps, Final);
          if Final = Touched and then Q = Goals.Height and then not W.Increase then
             Put_Down (P, X, T, Hold);
-         elsif Final = Slipped and then Hold.Closing and then Hold.Searched then
-            --  The grip needed Mu_Nominal as measured and did not hold:
-            --  the thing's friction is below it.
-            declare
-               B : Friction_Bounds := Thing (X.S, T).Friction;
-            begin
-               B.High := Real'Min (B.High, Hold.Chosen.Mu_Nominal);
-               P.Learn ((Kind => Friction_Learned, Thing => T, Bounds => B));
-               Say (X, "it slipped out of a grip that needed friction " & Img (Hold.Chosen.Mu_Nominal)
-                    & ", so I take its friction to be less than that from now on");
-            end;
+         elsif Final = Slipped then
+            Learn_From_Slip (P, X, T, Hold);
          end if;
       end;
    end Run_Change;
+
+   function Pair_Of (R : Relation; Pair : out Goals.Pair_Relation) return Boolean is
+   begin
+      case R is
+         when Above   => Pair := Goals.Above;
+         when Below   => Pair := Goals.Below;
+         when Left    => Pair := Goals.Left;
+         when Right   => Pair := Goals.Right;
+         when Nearer  => Pair := Goals.Nearer;
+         when Farther => Pair := Goals.Farther;
+         when Onto    => Pair := Goals.Onto;
+         when Off     => Pair := Goals.Off;
+         when Facing  => Pair := Goals.Facing;
+         when others  =>
+            Pair := Goals.Above;
+            return False;
+      end case;
+      return True;
+   end Pair_Of;
+
+   --  Moves the subject (thing T, or arm G.Arm's own parts when T is 0)
+   --  through the points of the plan over the object, planned once and again
+   --  only when the object is measured to have moved; the last point of a
+   --  plan that ends by touch is passed until the touch is felt.
+   procedure Follow_Over (P : in out Plant'Class; X : in out State; T : Thing_Id'Base; G : Grip;
+                          Subject_Of, Object_Of : not null access function (S : Snapshot) return Goals.Item;
+                          Object_Pitch : Real; R : Goals.Pair_Relation; W : Want; Final : out Ending)
+   is
+      --  What the mover needs to pass over without meeting it: the reach of
+      --  the contact test ahead, and the arm's own resolution on top.
+      function Margin (S : Snapshot) return Real is
+        (Object_Pitch / 2.0 + Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)
+         + Arm (S, G.Arm).Step.Value);
+      Route   : Goals.Plan := Goals.Over_Plan (X.S, Subject_Of (X.S), Object_Of (X.S), R, Margin (X.S));
+      Planned : Point_Estimate := Object_Of (X.S).Centre;
+      K       : Positive := 1;
+
+      function Next (S : Snapshot) return Goals.Answer is
+         Fine : constant Real := Arm (S, G.Arm).Step.Value;
+      begin
+         if Significant (Planned, Object_Of (S).Centre) then
+            Route := Goals.Over_Plan (S, Subject_Of (S), Object_Of (S), R, Margin (S));
+            Planned := Object_Of (S).Centre;
+            K := 1;
+         end if;
+         if not Route.Ok then
+            return (Ok => False, Why => Route.Why, others => <>);
+         end if;
+         declare
+            C : constant Vec3 := Subject_Of (S).Centre.Mean;
+         begin
+            while K < Route.Count and then abs (Route.Points (K) - C) <= Fine loop
+               K := K + 1;
+            end loop;
+            declare
+               D    : constant Vec3 := Route.Points (K) - C;
+               Last : constant Vec3 := (if K > 1 then Route.Points (K) - Route.Points (K - 1) else D);
+               Rest : Real := abs D;
+            begin
+               for J in K + 1 .. Route.Count loop
+                  Rest := Rest + abs (Route.Points (J) - Route.Points (J - 1));
+               end loop;
+               if K = Route.Count and then abs D <= Fine then
+                  return (Ok => True, Done => True, Leg => Real'Last, Why => Null_Unbounded_String,
+                          Gap => (Value => 0.0, Sigma => Subject_Of (S).Sigma, Degrees_Of_Freedom => 0),
+                          Motion => (if abs Last > 0.0 then Contact.Slide (Unit (Last)) else Contact.Still (C)));
+               end if;
+               return (Ok => True, Done => False, Leg => abs D, Why => Null_Unbounded_String,
+                       Gap => (Value => Rest, Sigma => Subject_Of (S).Sigma, Degrees_Of_Freedom => 0),
+                       Motion => Contact.Slide (Unit (D)));
+            end;
+         end;
+      end Next;
+   begin
+      if not Route.Ok then
+         Final := Refused;
+         Note_Tried (X, To_String (Route.Why));
+         return;
+      end if;
+      Carry (P, X, T, G, Next'Access, W.Until_Endings, W.Max_Steps, Final, Arrive_By_Touch => Route.By_Touch);
+   end Follow_Over;
+
+   --  Watches the scene beat by beat, moving nothing, until an ending.
+   procedure Wait (P : in out Plant'Class; X : in out State; W : Want; Final : out Ending) is
+      Watch : Monitor.Watch := Monitor.Start;
+      R     : Report;
+   begin
+      loop
+         P.Move ((Arms => Arm_Goal_Vectors.Empty_Vector, Closers => Closer_Goal_Vectors.Empty_Vector,
+                  Settle => False), R);
+         Look (P, X);
+         declare
+            F : constant Monitor.Facts := (Still => X.S.Still, Out_Of_Beats => P.Episode_Over, others => <>);
+         begin
+            Monitor.Step (Watch, F);
+            if Monitor.Fired (Watch, F, W.Until_Endings, W.Max_Steps) then
+               Final := Monitor.Ending_Of (Watch, F, W.Until_Endings, W.Max_Steps);
+               Say (X, "I kept still for " & Img (Monitor.Steps (Watch)) & " beats");
+               return;
+            end if;
+         end;
+      end loop;
+   end Wait;
+
+   procedure Run_Interval (P : in out Plant'Class; X : in out State; W : Want; Final : out Ending) is
+      C : Constraint;
+   begin
+      Final := Refused;
+      if W.Constraints.Is_Empty then
+         Note_Tried (X, "the interval asks for nothing");
+         return;
+      end if;
+      C := W.Constraints.First_Element;
+      for K of W.Constraints loop
+         if K.Must then
+            C := K;
+            exit;
+         end if;
+      end loop;
+      if C.Subject.Kind = Role_Operand and then C.Relation in Still | Clear then
+         Wait (P, X, W, Final);
+         return;
+      end if;
+      declare
+         Has_Object : constant Boolean :=
+           (case C.Object.Kind is
+               when Thing_Operand => Has_Thing (X.S, C.Object.Thing),
+               when Place_Operand => Has_Place (X.S, C.Object.Place),
+               when others        => False);
+         Near : constant Vec3 :=
+           (case C.Object.Kind is
+               when Thing_Operand => (if Has_Object then Thing (X.S, C.Object.Thing).Centre.Mean else Zero3),
+               when Place_Operand => (if Has_Object then Place (X.S, C.Object.Place).Point.Mean else Zero3),
+               when others        => Zero3);
+         A    : Arm_Id;
+         Pair : Goals.Pair_Relation;
+         function Object_Item (S : Snapshot) return Goals.Item is
+           (case C.Object.Kind is
+               when Thing_Operand => Goals.Item_Of (S, C.Object.Thing),
+               when Place_Operand => Goals.Point_Item (Place (S, C.Object.Place).Point),
+               when others        => Goals.Point_Item ((others => <>)));
+         function Object_Pitch (S : Snapshot) return Real is
+           (if C.Object.Kind = Thing_Operand and then Has_Thing (S, C.Object.Thing)
+            then Thing (S, C.Object.Thing).Pitch else 0.0);
+      begin
+         if C.Object.Kind in Thing_Operand | Place_Operand and then not Has_Object then
+            Note_Tried (X, "I do not measure what it is to be " & Relation'Image (C.Relation) & " now");
+            return;
+         end if;
+         case C.Subject.Kind is
+            when Role_Operand =>
+               if not Bound (X.S, C.Subject.The_Role, Near, A) then
+                  Note_Tried (X, "I have no part that can be " & Role_Word (C.Subject.The_Role) & " now");
+                  return;
+               end if;
+               case C.Relation is
+                  when Close =>
+                     if C.Object.Kind = Thing_Operand then
+                        declare
+                           Up : constant Goals.Answer := Goals.Twist_Of (X.S, C.Object.Thing, Goals.Height, True);
+                           G  : Grip;
+                           Ok : Boolean;
+                        begin
+                           Acquire (P, X, C.Object.Thing, Up.Motion, G, Ok, Only_Arm => A);
+                           if not Ok then
+                              Note_Tried (X, "no way to close on it");
+                              return;
+                           end if;
+                           Final := (if W.Until_Endings (Stuck) then Stuck
+                                     elsif W.Until_Endings (Touched) then Touched else Settled);
+                        end;
+                     else
+                        declare
+                           Out_Come : Step_Outcome;
+                        begin
+                           for H of Search.Effector_Of (X.S, A).Closers loop
+                              Set_Closer (P, X, H.Hand, 1.0, Out_Come);
+                           end loop;
+                           Final := (if Out_Come = Blocked then Stuck else Settled);
+                        end;
+                     end if;
+                     return;
+                  when Open =>
+                     declare
+                        Out_Come : Step_Outcome;
+                     begin
+                        for H of Search.Effector_Of (X.S, A).Closers loop
+                           Set_Closer (P, X, H.Hand, 0.0, Out_Come);
+                        end loop;
+                        Say (X, "I opened arm " & Img (Integer (A)) & "'s lobes");
+                     end;
+                     Wait (P, X, W, Final);
+                     return;
+                  when Touching | Press =>
+                     if C.Object.Kind = Thing_Operand then
+                        declare
+                           G  : Grip;
+                           Ok : Boolean;
+                        begin
+                           Acquire (P, X, C.Object.Thing, Contact.Still (Near), G, Ok, Only_Arm => A,
+                                    Touch_Only => True);
+                           if not Ok then
+                              Note_Tried (X, "no part of arm " & Img (Integer (A)) & " can touch it");
+                              return;
+                           end if;
+                           declare
+                              --  In along the last straight stretch, past where the
+                              --  touch should be if need be, until it is felt.
+                              In_Way : constant Vec3 := G.Chosen.Tool.Translation - G.Chosen.Hover.Translation;
+                              function Toward_Touch (Unused : Snapshot) return Goals.Answer is
+                                (Ok => True, Done => False, Why => Null_Unbounded_String, Leg => Real'Last,
+                                 Motion => Contact.Slide (Unit (In_Way)), Gap => Unknown);
+                           begin
+                              Carry (P, X, 0, Grip_Of_Arm (X.S, A, Closing => False), Toward_Touch'Access,
+                                     W.Until_Endings, W.Max_Steps, Final, Arrive_By_Touch => True);
+                           end;
+                        end;
+                     else
+                        declare
+                           function Toward_Place (S : Snapshot) return Goals.Answer is
+                              Here : constant Goals.Item := Effector_Item (S, A);
+                              D    : constant Vec3 := Object_Item (S).Centre.Mean - Here.Centre.Mean;
+                              Done : constant Boolean := not Significant (Here.Centre, Object_Item (S).Centre);
+                           begin
+                              return (Ok => True, Done => Done, Why => Null_Unbounded_String, Leg => Real'Last,
+                                      Motion => Contact.Slide (if abs D > 0.0 then Unit (D) else Gravity (S)),
+                                      Gap => (Value => abs D, Sigma => Here.Sigma, Degrees_Of_Freedom => 0));
+                           end Toward_Place;
+                        begin
+                           Carry (P, X, 0, Grip_Of_Arm (X.S, A, Closing => False), Toward_Place'Access,
+                                  W.Until_Endings, W.Max_Steps, Final);
+                        end;
+                     end if;
+                     return;
+                  when others =>
+                     if not Pair_Of (C.Relation, Pair) then
+                        Note_Tried (X, "I cannot do " & Relation'Image (C.Relation) & " with a part of me yet");
+                        return;
+                     elsif C.Object.Kind not in Thing_Operand | Place_Operand then
+                        Note_Tried (X, "it needs something to be " & Relation'Image (C.Relation) & " of");
+                        return;
+                     end if;
+                     declare
+                        function Steer (S : Snapshot) return Goals.Answer is
+                          (Goals.Toward (S, Effector_Item (S, A), Object_Item (S), Pair,
+                                         Rotate (Arm (S, A).Tool.Pose, Search.Effector_Of (S, A).Along),
+                                         Largest_Sigma (Arm (S, A).Tool.Rotation_Covariance)));
+                        function Mine (S : Snapshot) return Goals.Item is (Effector_Item (S, A));
+                     begin
+                        if Pair in Goals.Above | Goals.Below | Goals.Onto then
+                           Follow_Over (P, X, 0, Grip_Of_Arm (X.S, A, Closing => False), Mine'Access,
+                                        Object_Item'Access, Object_Pitch (X.S), Pair, W, Final);
+                        else
+                           Carry (P, X, 0, Grip_Of_Arm (X.S, A, Closing => False), Steer'Access, W.Until_Endings,
+                                  W.Max_Steps, Final);
+                        end if;
+                     end;
+                     return;
+               end case;
+            when Thing_Operand =>
+               declare
+                  T : constant Thing_Id := C.Subject.Thing;
+               begin
+                  if not Has_Thing (X.S, T) then
+                     Note_Tried (X, "I do not see the thing that is to move");
+                     return;
+                  elsif not Pair_Of (C.Relation, Pair) or else C.Object.Kind not in Thing_Operand | Place_Operand then
+                     Note_Tried (X, "a thing can be moved " & Relation'Image (C.Relation)
+                                 & " only of another thing or a place");
+                     return;
+                  end if;
+                  declare
+                     function Steer (S : Snapshot) return Goals.Answer is
+                        Axis_Sigma : Real;
+                        L : constant Vec3 :=
+                          (if Has_Thing (S, T) then Goals.Long_Axis (S, T, Axis_Sigma) else Zero3);
+                     begin
+                        if not Has_Thing (S, T) then
+                           return (Ok => False, Why => To_Unbounded_String ("I no longer see it"), others => <>);
+                        end if;
+                        return Goals.Toward (S, Goals.Item_Of (S, T), Object_Item (S), Pair, L,
+                                             (if abs L > 0.0 then Axis_Sigma else Real'Last));
+                     end Steer;
+                     First : constant Goals.Answer := Steer (X.S);
+                     G     : Grip;
+                     Ok    : Boolean;
+                  begin
+                     if not First.Ok then
+                        Note_Tried (X, To_String (First.Why));
+                        return;
+                     elsif First.Done and then not (Pair = Goals.Onto and then W.Until_Endings (Touched)) then
+                        Say (X, To_String (First.Why));
+                     end if;
+                     Hold_It (P, X, T, First.Motion, G, Ok);
+                     if not Ok then
+                        return;
+                     end if;
+                     if Pair in Goals.Above | Goals.Below | Goals.Onto then
+                        declare
+                           function Held_Thing (S : Snapshot) return Goals.Item is (Goals.Item_Of (S, T));
+                        begin
+                           Follow_Over (P, X, T, G, Held_Thing'Access, Object_Item'Access, Object_Pitch (X.S), Pair,
+                                        W, Final);
+                        end;
+                     else
+                        Carry (P, X, T, G, Steer'Access, W.Until_Endings, W.Max_Steps, Final);
+                     end if;
+                     if Final = Touched and then Pair = Goals.Onto then
+                        Put_Down (P, X, T, G);
+                     elsif Final = Slipped then
+                        Learn_From_Slip (P, X, T, G);
+                     end if;
+                  end;
+               end;
+            when others =>
+               Note_Tried (X, "only a part of me or a thing can be made to move");
+         end case;
+      end;
+   end Run_Interval;
 
    procedure Execute (P : in out Driver.Action.Plants.Plant'Class; W : Want; R : out Result) is
       X : State;
@@ -885,7 +1353,7 @@ package body Driver.Action.Execution is
          when Change =>
             Run_Change (P, X, W, R.Final);
          when Interval =>
-            Note_Tried (X, "intervals of constraints are not built yet");
+            Run_Interval (P, X, W, R.Final);
       end case;
       R.Account := X.Account;
       R.Tried := X.Tried;

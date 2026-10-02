@@ -64,9 +64,13 @@ package Driver.Action.Contact.Search is
       Along   : Vec3 := Zero3;           --  unit, tool frame: from the hand toward the lobes' ends
       Depth   : Real := 0.0;             --  how far a thing may go in between the ends
       Sigma   : Real := Real'Last;       --  placement uncertainty of its touching parts
+      Band    : Real := 0.0;             --  how far behind the lobes' ends a face's touch is set
       Closes  : Boolean := False;        --  some closer brings faces together
       Why_Not : Unbounded_String;        --  why it cannot close, when it cannot
    end record;
+   --  A pad's points are where its face touches: Band behind the end of the
+   --  lobe, the arm's resolution and Z of its placement sigma, so that the
+   --  touch stays on the face wherever within its uncertainty the arm stops.
 
    function Effector_Of (S : Snapshot; A : Arm_Id) return Effector
      with Pre => Has_Arm (S, A);
@@ -126,9 +130,11 @@ package Driver.Action.Contact.Search is
       Reachable : not null access function (Tool : Rigid) return Boolean;
       Best      : out Candidate;
       Found     : out Boolean;
-      Tried     : out Account)
+      Tried     : out Account;
+      Touch_Only : Boolean := False)
      with Pre => abs Up > 0.0;
    --  The best contact set of E on the thing for Motion. Beside are the
-   --  measured surfaces of everything else near it.
+   --  measured surfaces of everything else near it. Touch_Only leaves out
+   --  the sets that close on the thing, for a want to touch it, not hold it.
 
 end Driver.Action.Contact.Search;

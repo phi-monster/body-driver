@@ -11,6 +11,7 @@ with Driver.Tests;
 package body Driver.Action.Execution.Tests is
 
    use Driver.Numerics;
+   use Driver.Numerics.Arrays;
    use Driver.Tests;
    use Driver.Action.Snapshots;
    use Driver.Action.Snapshots.Tests;
@@ -88,10 +89,111 @@ package body Driver.Action.Execution.Tests is
       end loop;
    end Bar_Up_And_Down;
 
+   function Thing_Of (T : Thing_Id) return Operand is ((Kind => Thing_Operand, Thing => T));
+   function Role_Of (R : Role) return Operand is ((Kind => Role_Operand, The_Role => R));
+
+   function Interval_Want (Subject : Operand; R : Relation; Object : Operand; Until_Ending : Ending;
+                           Steps : Natural := 0) return Want
+   is
+      W : Want (Interval);
+   begin
+      W.Until_Endings := Endings (Until_Ending);
+      W.Max_Steps := Steps;
+      W.Constraints.Append (Constraint'(Subject => Subject, Relation => R, Object => Object, Step => Unspecified,
+                             Strength => Unspecified, Must => False));
+      return W;
+   end Interval_Want;
+
+   type Model_Array is array (Positive range <>) of Model;
+
+   --  The five shapes of the weld matrix, each with where it lies.
+   Shapes : constant Model_Array :=
+     [Bar (0.2, 0.02, 0.02), Block (0.04, 0.04, 0.04), Upright_Cylinder (0.025, 0.08), Scissors (0.18, 0.016, 0.006),
+      Cup (0.03, 0.004, 0.08)];
+
+   Names : constant array (Shapes'Range) of access constant String :=
+     [new String'("bar"), new String'("block"), new String'("cylinder"), new String'("scissors"), new String'("cup")];
+
+   procedure Each_Shape_Up is
+   begin
+      for K in Shapes'Range loop
+         declare
+            W : Sim.World;
+            R : Result;
+         begin
+            One_Gripper (W, Turned, 11 + K);
+            Sim.Add_Thing (W, Shapes (K), On_Table (0.1, 0.05, 0.4), Mu => 0.6);
+            Ada.Text_IO.Put_Line ("      " & Names (K).all & ":");
+            Run (W, Height_Want (1, True, Free), R);
+            Check (R.Final = Free, "the " & Names (K).all & " lifted until free does not end free");
+            Check (Sim.Lowest (W, 1) > 0.0 and then Sim.Truth (W, 1).Held_By = 1,
+                   "the " & Names (K).all & " said to be free is not up in the hand");
+            Run (W, Height_Want (1, True, Settled), R);
+            Check (R.Final = Settled and then Sim.Lowest (W, 1) > 0.05,
+                   "the " & Names (K).all & " lifted until settled does not go well up");
+         end;
+      end loop;
+   end Each_Shape_Up;
+
+   procedure Each_Shape_Onto_A_Block is
+   begin
+      for K in Shapes'Range loop
+         declare
+            W : Sim.World;
+            R : Result;
+         begin
+            One_Gripper (W, Turned, 23 + K);
+            Sim.Add_Thing (W, Shapes (K), On_Table (0.1, 0.05, 0.4), Mu => 0.6);
+            Sim.Add_Thing (W, Block (0.08, 0.08, 0.05), On_Table (-0.12, 0.08, 0.2), Mu => 0.6);
+            Ada.Text_IO.Put_Line ("      " & Names (K).all & ":");
+            Run (W, Interval_Want (Thing_Of (1), Onto, Thing_Of (2), Touched), R);
+            Check (R.Final = Touched, "the " & Names (K).all & " put onto the block does not end touched");
+            Check (Sim.Rests_On (W, 1, 2), "the " & Names (K).all & " does not rest on the block");
+            Check (Sim.Truth (W, 1).Held_By = 0, "the " & Names (K).all & " put onto the block is not let go");
+         end;
+      end loop;
+   end Each_Shape_Onto_A_Block;
+
+   procedure Touch_A_Bar is
+      W : Sim.World;
+      R : Result;
+   begin
+      One_Gripper (W, Turned, 41);
+      Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.05, 0.4), Mu => 0.6);
+      declare
+         Before : constant Rigid := Sim.Truth (W, 1).Pose;
+      begin
+         Run (W, Interval_Want (Role_Of (Grasper), Touching, Thing_Of (1), Touched, 40), R);
+         Check (R.Final = Touched, "touching a bar does not end touched");
+         Check (abs (Sim.Truth (W, 1).Pose.Translation - Before.Translation) < 2.0 * Pitch,
+                "touching a bar shoves it along");
+      end;
+   end Touch_A_Bar;
+
+   procedure Over_An_Obstacle is
+      W : Sim.World;
+      R : Result;
+   begin
+      One_Gripper (W, Turned, 43);
+      Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.12, 0.4), Mu => 0.6);
+      --  A wall that cannot give way, between the hand and the bar.
+      Sim.Add_Thing (W, Block (0.3, 0.02, 0.2), On_Table (0.05, 0.02, 0.0), Mu => 0.6, Fixed => True);
+      Run (W, Height_Want (1, True, Free), R);
+      Check (R.Final = Free, "a bar behind a wall is not lifted");
+      Check (Sim.Truth (W, 2).Pose.Translation = Sim.Table_Frame (W) * [0.05, 0.02, 0.0],
+             "the wall was moved");
+   end Over_An_Obstacle;
+
    procedure Register is
    begin
       Register ("action.run.bar", "a bar is not lifted off the table and put back, or not let go",
                 Bar_Up_And_Down'Access);
+      Register ("action.run.up", "one of the five shapes is not lifted, or not well up when settled",
+                Each_Shape_Up'Access);
+      Register ("action.run.onto", "one of the five shapes is not put onto a block to rest there",
+                Each_Shape_Onto_A_Block'Access);
+      Register ("action.run.touch", "touching a thing does not stop at the touch", Touch_A_Bar'Access);
+      Register ("action.run.detour", "the hand goes through a wall instead of over it", Over_An_Obstacle'Access);
    end Register;
 
 end Driver.Action.Execution.Tests;

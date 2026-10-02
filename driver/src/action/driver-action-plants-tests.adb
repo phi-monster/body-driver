@@ -343,6 +343,11 @@ package body Driver.Action.Plants.Tests is
       end if;
    end Drop;
 
+   --  A closer stops within one of its sub-steps (half a pitch) of what it
+   --  meets; a face point is touching when a little more than that ahead of
+   --  it is inside the thing, and not so far ahead as to pass through a wall.
+   Probe : constant Real := 0.75;
+
    --  The touches of a hand's lobes on the thing they hold, in the world.
    function Grip_Touches (W : World; H : Positive; I : Positive; Tool : Rigid) return Contact.Touch_Vectors.Vector is
       G : constant Sim_Hand := W.Hands (H);
@@ -355,7 +360,7 @@ package body Driver.Action.Plants.Tests is
             Sum    : Vec3 := Zero3;
          begin
             for P of Face_Points (G, K, G.Fraction, W.Pitch / 2.0) loop
-               if Inside_Thing (W, I, Tool * P + W.Pitch * Inward) then
+               if Inside_Thing (W, I, Tool * P + (Probe * W.Pitch) * Inward) then
                   Pts.Append (Tool * P);
                   Sum := Sum + Tool * P;
                end if;

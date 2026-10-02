@@ -93,11 +93,12 @@ package body Driver.Action.Goals is
    end Long_Axis;
 
    function Missing (What : String) return Answer is
-     ((Ok => False, Motion => Contact.Still (Zero3), Gap => Unknown, Done => False,
+     ((Ok => False, Motion => Contact.Still (Zero3), Gap => Unknown, Leg => Real'Last, Done => False,
        Why => To_Unbounded_String ("I have not measured " & What)));
 
-   function Moving (Motion : Contact.Twist; Gap : Estimate; Why : String := "") return Answer is
-     ((Ok => True, Motion => Motion, Gap => Gap, Done => False, Why => To_Unbounded_String (Why)));
+   function Moving (Motion : Contact.Twist; Gap : Estimate; Why : String := ""; Leg : Real := Real'Last)
+     return Answer
+   is ((Ok => True, Motion => Motion, Gap => Gap, Leg => Leg, Done => False, Why => To_Unbounded_String (Why)));
 
    function Twist_Of (S : Snapshot; T : Thing_Id; Q : Quantity; Increase : Boolean) return Answer is
       X    : constant Thing_State := Thing (S, T);
@@ -179,13 +180,15 @@ package body Driver.Action.Goals is
 
       function Holds (Why : String) return Answer is
         ((Ok => True, Motion => Contact.Still (Subject.Centre.Mean), Gap => (Value => 0.0, Sigma => Sigma,
-          Degrees_Of_Freedom => 0), Done => True, Why => To_Unbounded_String (Why)));
+          Degrees_Of_Freedom => 0), Leg => Real'Last, Done => True, Why => To_Unbounded_String (Why)));
 
       function Gap_Of (Value : Real) return Estimate is ((Value => Value, Sigma => Sigma, Degrees_Of_Freedom => 0));
 
       --  A subject lying on a surface goes along it: the part of D into the
       --  surface is dropped, unless D, known to Angle_Sigma, goes straight in.
-      function Along (D : Vec3; Angle_Sigma : Real; Gap : Estimate; Why : String := "") return Answer is
+      function Along (D : Vec3; Angle_Sigma : Real; Gap : Estimate; Why : String := ""; Leg : Real := Real'Last)
+        return Answer
+      is
          U : constant Vec3 := Subject.Up;
       begin
          if abs U > 0.0 and then Real'(D * U) < 0.0 then
@@ -194,16 +197,19 @@ package body Driver.Action.Goals is
             begin
                if not (abs F > 0.0) or else not Significant (Arccos (Real'Min (1.0, -Real'(D * U))), Angle_Sigma)
                then
-                  return (Ok => False, Motion => Contact.Still (Subject.Centre.Mean), Gap => Gap, Done => False,
+                  return (Ok => False, Motion => Contact.Still (Subject.Centre.Mean), Gap => Gap, Leg => Real'Last,
+                          Done => False,
                           Why => To_Unbounded_String ("the only way to do that goes into the surface it lies on"));
                end if;
                return Moving (Contact.Slide (Unit (F)), Gap, "it lies on a surface, so it goes along it");
             end;
          end if;
-         return Moving (Contact.Slide (Unit (D)), Gap, Why);
+         return Moving (Contact.Slide (Unit (D)), Gap, Why, Leg);
       end Along;
 
-      --  Over or under the object along N_O, clear of its top or bottom.
+      --  Over or under the object along N_O, clear of its top or bottom: up
+      --  until clear by more than its noise, across, and for onto down again;
+      --  Gap is the length of that whole path, each leg bounds its own step.
       function Over (Above_It, Then_Down : Boolean) return Answer is
          Flat  : constant Vec3 := Apart - Real'(Apart * N_O) * N_O;
          Level : constant Boolean := Significant (Vector_Gate (2), abs Flat, Sigma);
@@ -211,25 +217,29 @@ package body Driver.Action.Goals is
            (if Above_It then Extent (Subject, N_O, Highest => False) - Extent (Object, N_O, Highest => True)
             else Extent (Object, N_O, Highest => False) - Extent (Subject, N_O, Highest => True));
          Is_Clear : constant Boolean := Clear > 0.0 and then Significant (Clear, Sigma);
-         Way   : constant Vec3 := (if Above_It then N_O else -N_O);
+         Way    : constant Vec3 := (if Above_It then N_O else -N_O);
+         Rise   : constant Real := Real'Max (0.0, Threshold (Scalar_Gate) * Sigma - Clear);
+         Across : constant Real := (if Level then abs Flat else 0.0);
+         Path   : constant Estimate := Gap_Of (Rise + Across + (if Then_Down then Real'Max (0.0, Clear) + Rise else 0.0));
       begin
          if Level then
             if Is_Clear then
-               return Moving (Contact.Slide (Unit (Flat)), Gap_Of (abs Flat + (if Then_Down then Clear else 0.0)),
-                              "it is clear of the other, so it goes across to it");
+               return Moving (Contact.Slide (Unit (Flat)), Path, "it is clear of the other, so it goes across to it",
+                              Leg => Across);
             end if;
-            return Along (Way, Sigma / abs Flat, Gap_Of (abs Flat - Clear),
+            return Along (Way, Sigma / abs Flat, Path,
                           "it is not clear of the other yet, so it goes " & (if Above_It then "up" else "down")
-                          & " first");
+                          & " first", Leg => Rise);
          elsif Is_Clear then
             if Then_Down then
-               return Moving (Contact.Slide (-Way), Gap_Of (Clear), "it is straight over the other, so it goes onto it");
+               return Moving (Contact.Slide (-Way), Path, "it is straight over the other, so it goes onto it",
+                              Leg => Clear);
             end if;
             return Holds ("it is straight " & (if Above_It then "over" else "under") & " the other");
          elsif Then_Down and then not Significant (Clear, Sigma) then
             return Holds ("it is on the other's top as near as I can tell");
          end if;
-         return Along (Way, Sigma / Real'Max (abs Apart, Sigma), Gap_Of (-Clear));
+         return Along (Way, Sigma / Real'Max (abs Apart, Sigma), Path, Leg => Rise);
       end Over;
 
    begin
@@ -324,7 +334,7 @@ package body Driver.Action.Goals is
                      if not Significant (Phi, Long_Sigma) then
                         return Holds ("its long way points at the other as near as I can tell");
                      end if;
-                     return (Ok => True, Done => False, Why => Null_Unbounded_String,
+                     return (Ok => True, Done => False, Why => Null_Unbounded_String, Leg => Real'Last,
                              Motion => Contact.Rotation ((if Phi > 0.0 then Axis else -Axis), 1.0, Subject.Centre.Mean),
                              Gap => (Value => abs Phi, Sigma => Long_Sigma, Degrees_Of_Freedom => 0));
                   end;
@@ -332,5 +342,51 @@ package body Driver.Action.Goals is
             end;
       end case;
    end Toward;
+
+   function Over_Plan (S : Snapshot; Subject, Object : Item; R : Pair_Relation; Margin : Real) return Plan is
+      N : constant Vec3 := (if abs Object.Up > 0.0 then Object.Up else Gravity (S));
+      C : constant Vec3 := Subject.Centre.Mean;
+      P : Plan;
+   begin
+      if not Known (Subject.Centre) or else not Known (Object.Centre) then
+         P.Why := To_Unbounded_String ("I have not measured where the two of them are");
+         return P;
+      elsif not (abs N > 0.0) then
+         P.Why := To_Unbounded_String ("I have not measured which way is up");
+         return P;
+      end if;
+      declare
+         Apart : constant Vec3 := Object.Centre.Mean - C;
+         Flat  : constant Vec3 := Apart - Real'(Apart * N) * N;
+         Low   : constant Real := Extent (Subject, N, Highest => False);
+         High  : constant Real := Extent (Subject, N, Highest => True);
+         Top   : constant Real := Extent (Object, N, Highest => True);
+         Bottom : constant Real := Extent (Object, N, Highest => False);
+      begin
+         if R = Below then
+            declare
+               Lower : constant Real := Real'Max (0.0, High - (Bottom - Margin));
+            begin
+               if Lower > 0.0 and then abs Subject.Up > 0.0 then
+                  P.Why := To_Unbounded_String ("under it is through the surface it lies on");
+                  return P;
+               end if;
+               P.Points (1) := C - Lower * N;
+            end;
+         else
+            P.Points (1) := C + Real'Max (0.0, Top + Margin - Low) * N;
+         end if;
+         P.Points (2) := P.Points (1) + Flat;
+         P.Count := 2;
+         if R = Onto then
+            --  Down until its lowest point is at the other's top.
+            P.Points (3) := P.Points (2) - (Real'((P.Points (2) - C) * N) + Low - Top) * N;
+            P.Count := 3;
+            P.By_Touch := True;
+         end if;
+         P.Ok := True;
+         return P;
+      end;
+   end Over_Plan;
 
 end Driver.Action.Goals;

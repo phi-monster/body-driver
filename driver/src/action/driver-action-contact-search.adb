@@ -131,6 +131,13 @@ package body Driver.Action.Contact.Search is
             E.Sigma := Sqrt (Pos_Sd ** 2 + (Lever * Rot_Sd) ** 2 + Tip_Sd ** 2);
          end if;
       end;
+      if E.Sigma < Real'Last and then Known (Arm_S.Step) then
+         E.Band := Arm_S.Step.Value + Z * E.Sigma;
+         for P of E.Pads loop
+            P.Open := P.Open - E.Band * E.Along;
+            P.Closed := P.Closed - E.Band * E.Along;
+         end loop;
+      end if;
       if Natural (E.Pads.Length) < 2 then
          E.Why_Not := To_Unbounded_String ("this arm has fewer than two measured lobes that close together");
       elsif Unknown or else Depth = Real'Last then
@@ -257,7 +264,8 @@ package body Driver.Action.Contact.Search is
       Reachable : not null access function (Tool : Rigid) return Boolean;
       Best      : out Candidate;
       Found     : out Boolean;
-      Tried     : out Account)
+      Tried     : out Account;
+      Touch_Only : Boolean := False)
    is
       N_Samples : constant Natural := Natural (Thing.Samples.Length);
       N_Pads    : constant Natural := Natural (E.Pads.Length);
@@ -534,7 +542,7 @@ package body Driver.Action.Contact.Search is
          Facing : constant Vec3 := R * P.Facing;
          Back   : constant Vec3 := -(R * E.Along);
       begin
-         return (Face => X + R * (P.Open + F * (P.Closed - P.Open)), Facing => Facing,
+         return (Face => X + R * (P.Open + F * (P.Closed - P.Open)) - E.Band * Back, Facing => Facing,
                  Side => Unit (Cross (Back, Facing)), Back => Back,
                  Half_Width => P.Half_Width, Thickness => P.Thickness, Length => E.Depth + Extra);
       end Box_Of;
@@ -927,68 +935,84 @@ package body Driver.Action.Contact.Search is
             return;
          end if;
          --  The thing is taken to give the least friction under which it can
-         --  be done at all, or what it is known to give if that is more.
+         --  be done at all, or what it is known to give if that is more. When
+         --  nothing that works there can be made, that friction is doubled,
+         --  up to the most the normals can tell from no limit at all or what
+         --  the thing has failed at, and the sets that work there are tried.
          Reference := Real'Max (Reference, Friction.Low);
          Tried.Reference_Mu := Reference;
-         for I in 1 .. N loop
-            Sets (I).Force :=
-              Physics.Need (Sets (I).Touches, Thing.Base, Motion, Thing.Centre.Mean, U, Reference).Force;
-            if Sets (I).Force = Physics.No_Way then
-               Tried.Cannot_Balance := Tried.Cannot_Balance + 1;
-            end if;
-            Key (I) := Sets (I).Force;
-         end loop;
-         Sort (Order);
-         loop
-            declare
-               Pick : Natural := 0;
-               Ok   : Boolean := False;
-            begin
-               --  Worst cases are computed in order of the nominal force
-               --  until no later set could beat the best one found.
+         declare
+            Most : constant Real := Real'Min (Friction.High, 1.0 / Physics.Least_Distinct (Resolution));
+         begin
+            loop
+               Next := 1;
+               Evaluated.Clear;
+               Tried.Cannot_Balance := 0;
+               for I in 1 .. N loop
+                  Sets (I).Force := (if Done (I) then Physics.No_Way
+                                     else Physics.Need (Sets (I).Touches, Thing.Base, Motion, Thing.Centre.Mean, U,
+                                                        Reference).Force);
+                  if Sets (I).Force = Physics.No_Way and then not Done (I) then
+                     Tried.Cannot_Balance := Tried.Cannot_Balance + 1;
+                  end if;
+                  Key (I) := Sets (I).Force;
+               end loop;
+               Sort (Order);
                loop
-                  Pick := 0;
-                  for I of Evaluated loop
-                     if not Done (I) and then (Pick = 0 or else Sets (I).Worst < Sets (Pick).Worst) then
-                        Pick := I;
-                     end if;
-                  end loop;
-                  exit when Next > N or else Sets (Order (Next)).Force = Physics.No_Way
-                    or else (Pick /= 0 and then Sets (Pick).Worst <= Sets (Order (Next)).Force);
                   declare
-                     I : constant Positive := Order (Next);
+                     Pick : Natural := 0;
+                     Ok   : Boolean := False;
                   begin
-                     if not Sets (I).Has_Mu then
-                        Sets (I).Mu_Worst := Worst_Mu (Sets (I), Physics.No_Way);
-                        Sets (I).Has_Mu := True;
-                     end if;
-                     Sets (I).Worst := Worst_Force (Sets (I), Reference);
-                     if Sets (I).Worst = Physics.No_Way then
-                        Tried.Cannot_Balance := Tried.Cannot_Balance + 1;
+                     --  Worst cases are computed in order of the nominal force
+                     --  until no later set could beat the best one found.
+                     loop
+                        Pick := 0;
+                        for I of Evaluated loop
+                           if not Done (I) and then (Pick = 0 or else Sets (I).Worst < Sets (Pick).Worst) then
+                              Pick := I;
+                           end if;
+                        end loop;
+                        exit when Next > N or else Sets (Order (Next)).Force = Physics.No_Way
+                          or else (Pick /= 0 and then Sets (Pick).Worst <= Sets (Order (Next)).Force);
+                        declare
+                           I : constant Positive := Order (Next);
+                        begin
+                           if not Sets (I).Has_Mu then
+                              Sets (I).Mu_Worst := Worst_Mu (Sets (I), Physics.No_Way);
+                              Sets (I).Has_Mu := True;
+                           end if;
+                           Sets (I).Worst := Worst_Force (Sets (I), Reference);
+                           if Sets (I).Worst = Physics.No_Way then
+                              Tried.Cannot_Balance := Tried.Cannot_Balance + 1;
+                           else
+                              Evaluated.Append (I);
+                           end if;
+                        end;
+                        Next := Next + 1;
+                     end loop;
+                     exit when Pick = 0;
+                     Done (Pick) := True;
+                     if Sets (Pick).Mu_Worst >= Friction.High then
+                        Tried.Over_Bound := Tried.Over_Bound + 1;
                      else
-                        Evaluated.Append (I);
+                        if Sets (Pick).Single then
+                           Fit_Single (Sets (Pick), Best, Ok);
+                        else
+                           Realize (Sets (Pick), Best, Ok);
+                        end if;
+                        if Ok then
+                           Found := True;
+                           return;
+                        end if;
+                        Tried.Unreachable := Tried.Unreachable + 1;
                      end if;
                   end;
-                  Next := Next + 1;
                end loop;
-               exit when Pick = 0;
-               Done (Pick) := True;
-               if Sets (Pick).Mu_Worst >= Friction.High then
-                  Tried.Over_Bound := Tried.Over_Bound + 1;
-               else
-                  if Sets (Pick).Single then
-                     Fit_Single (Sets (Pick), Best, Ok);
-                  else
-                     Realize (Sets (Pick), Best, Ok);
-                  end if;
-                  if Ok then
-                     Found := True;
-                     return;
-                  end if;
-                  Tried.Unreachable := Tried.Unreachable + 1;
-               end if;
-            end;
-         end loop;
+               exit when Reference >= Most;
+               Reference := Real'Min (Most, 2.0 * Reference);
+               Tried.Reference_Mu := Reference;
+            end loop;
+         end;
       end Rank;
 
    begin
@@ -1012,7 +1036,7 @@ package body Driver.Action.Contact.Search is
       for M in Obs'Range loop
          Obs (M) := Beside (M);
       end loop;
-      if E.Closes then
+      if E.Closes and then not Touch_Only then
          Enumerate;
       end if;
       --  Single touches: one group per sample; the physics needs only the
