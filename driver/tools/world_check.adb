@@ -30,6 +30,7 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Ada.Unchecked_Conversion;
+with Ada.Unchecked_Deallocation;
 with Interfaces;
 with Driver.Bytes;
 with Driver.Clock;
@@ -376,15 +377,20 @@ procedure World_Check is
 
    package Line_Vectors is new Ada.Containers.Vectors (Natural, Natural);
    Line_Of_Beat : Line_Vectors.Vector;   --  the truth line paired with each beat; 0 for none
+   Robot        : aliased Driver.Robot.Model;   --  the body's own estimators, for its stillness and image lag
 
    function True_Camera (E : Eye_Id; Beat : Natural) return Truth_Camera is
+      --  The eye as it was when the image of that beat was taken: the image
+      --  trails the readings by the lag the body measured (Driver.Robot), and
+      --  the truth's poses go with the readings.
       Name   : constant String := Camera_Name (E);
+      Shot   : constant Integer := Beat - Driver.Robot.Image_Lag (Robot, E);
       Result : Truth_Camera;
    begin
-      if Name /= "" and then Beat <= Line_Of_Beat.Last_Index and then Line_Of_Beat (Beat) > 0
-        and then Truth (Line_Of_Beat (Beat)).Cameras.Contains (Name) and then Known_Lens (Lenses (Name))
+      if Name /= "" and then Shot >= 0 and then Shot <= Line_Of_Beat.Last_Index and then Line_Of_Beat (Shot) > 0
+        and then Truth (Line_Of_Beat (Shot)).Cameras.Contains (Name) and then Known_Lens (Lenses (Name))
       then
-         Result.Optical := Truth (Line_Of_Beat (Beat)).Cameras (Name);
+         Result.Optical := Truth (Line_Of_Beat (Shot)).Cameras (Name);
          Result.Of_Lens := Lenses (Name);
          Result.Known := True;
       end if;
@@ -411,20 +417,21 @@ procedure World_Check is
    package Mesh_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, Mesh);
    Meshes : Mesh_Maps.Map;   --  by geometry key, each read once
 
-   function Words (Path : String) return Driver.Bytes.Byte_Array is
+   type Bytes_Access is access Driver.Bytes.Byte_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Bytes.Byte_Array, Bytes_Access);
+
+   function Words (Path : String) return Bytes_Access is
+      --  A whole raw file, on the heap: a mesh's run to tens of megabytes.
       use Ada.Streams.Stream_IO;
-      F : File_Type;
+      F      : File_Type;
+      Result : Bytes_Access;
+      Last   : Ada.Streams.Stream_Element_Offset;
    begin
       Open (F, In_File, Path);
-      declare
-         Size   : constant Ada.Streams.Stream_Element_Offset := Ada.Streams.Stream_Element_Offset (Ada.Streams.Stream_IO.Size (F));
-         Result : Driver.Bytes.Byte_Array (1 .. Size);
-         Last   : Ada.Streams.Stream_Element_Offset;
-      begin
-         Read (F, Result, Last);
-         Close (F);
-         return Result (1 .. Last);
-      end;
+      Result := new Driver.Bytes.Byte_Array (1 .. Ada.Streams.Stream_Element_Offset (Size (F)));
+      Read (F, Result.all, Last);
+      Close (F);
+      return Result;
    end Words;
 
    function Word_At (B : Driver.Bytes.Byte_Array; At_Byte : Ada.Streams.Stream_Element_Offset)
@@ -473,9 +480,9 @@ procedure World_Check is
                   if Is_True (Doc, Lookup (Doc, M, (if Any_Visual then "visual" else "collision"))) then
                      declare
                         Dir     : constant String := To_String (Store) & "/";
-                        Points  : constant Driver.Bytes.Byte_Array := Words (Dir & Text (Doc, Lookup (Doc, M, "points")));
-                        Counts  : constant Driver.Bytes.Byte_Array := Words (Dir & Text (Doc, Lookup (Doc, M, "counts")));
-                        Indices : constant Driver.Bytes.Byte_Array := Words (Dir & Text (Doc, Lookup (Doc, M, "indices")));
+                        Points  : Bytes_Access := Words (Dir & Text (Doc, Lookup (Doc, M, "points")));
+                        Counts  : Bytes_Access := Words (Dir & Text (Doc, Lookup (Doc, M, "counts")));
+                        Indices : Bytes_Access := Words (Dir & Text (Doc, Lookup (Doc, M, "indices")));
                         First   : constant Natural := Natural (Result.Vertices.Length);
                         Corner  : Ada.Streams.Stream_Element_Offset := Indices'First;
                         function Vertex (N : Interfaces.Integer_32) return Vec3 is
@@ -487,16 +494,16 @@ procedure World_Check is
                                 Points'First + Ada.Streams.Stream_Element_Offset (12 * V);
                            begin
                               Result.Vertices.Append
-                                (Vec3'(Real (To_Float (Word_At (Points, B))), Real (To_Float (Word_At (Points, B + 4))),
-                                       Real (To_Float (Word_At (Points, B + 8)))));
+                                (Vec3'(Real (To_Float (Word_At (Points.all, B))), Real (To_Float (Word_At (Points.all, B + 4))),
+                                       Real (To_Float (Word_At (Points.all, B + 8)))));
                            end;
                         end loop;
                         for Face in 0 .. Counts'Length / 4 - 1 loop
                            declare
                               N : constant Natural := Natural (To_Integer
-                                (Word_At (Counts, Counts'First + Ada.Streams.Stream_Element_Offset (4 * Face))));
+                                (Word_At (Counts.all, Counts'First + Ada.Streams.Stream_Element_Offset (4 * Face))));
                               function Index_At (K : Natural) return Interfaces.Integer_32 is
-                                (To_Integer (Word_At (Indices, Corner + Ada.Streams.Stream_Element_Offset (4 * K))));
+                                (To_Integer (Word_At (Indices.all, Corner + Ada.Streams.Stream_Element_Offset (4 * K))));
                            begin
                               for K in 1 .. N - 2 loop
                                  Result.Triangles.Append
@@ -506,6 +513,9 @@ procedure World_Check is
                               Corner := Corner + Ada.Streams.Stream_Element_Offset (4 * N);
                            end;
                         end loop;
+                        Free (Points);
+                        Free (Counts);
+                        Free (Indices);
                      end;
                   end if;
                end;
@@ -725,7 +735,6 @@ procedure World_Check is
    Next_Line : Positive := 1;   --  the first truth line not yet paired
    Episodes : Natural := 0;
 
-   Robot : aliased Driver.Robot.Model;
    Bench : Driver.World.Offline.Bench;
    Sent  : Driver.Commands.Command := Driver.Commands.Hold;
    Last  : Natural := 0;        --  the last paired beat
@@ -780,7 +789,21 @@ procedure World_Check is
                   Its   : constant Mesh := Mesh_Of (Object_Keys (Name));
                   Where : constant Vec3 := Middle_Of (Its, Pose_Maps.Element (C));
                   Done  : Boolean := False;
+                  Seen  : Unbounded_String;
                begin
+                  --  Every eye the middle of its mesh falls in, as the truth puts it.
+                  for E in 1 .. Eye_Id'Base (Natural (O.Images.Length)) loop
+                     declare
+                        Px      : Driver.Images.Pixel;
+                        Visible : Boolean;
+                     begin
+                        True_Camera (E, Beat).Project (Where, Px, Visible);
+                        if Visible then
+                           Append (Seen, E'Image);
+                        end if;
+                     end;
+                  end loop;
+                  Ada.Text_IO.Put_Line ("beat" & Beat'Image & ": " & Name & " falls in eyes" & To_String (Seen));
                   for E in 1 .. Eye_Id'Base (Natural (O.Images.Length)) loop
                      exit when Done;
                      if Driver.Observations.Has_Image (O, E) and then not Its.Triangles.Is_Empty then

@@ -222,29 +222,7 @@ package body Driver.World.Estimates is
       and then Px.U < Real (Driver.Images.Width (Region)) and then Px.V < Real (Driver.Images.Height (Region))
       and then Driver.Images.Contains (Region, Natural (Real'Floor (Px.U)), Natural (Real'Floor (Px.V))));
 
-   --  The scene's points the eye saw inside a thing's region there are the
-   --  thing's own, unless another thing has them already.
-   procedure Claim (Points : in out Scene_Point_Vectors.Vector; T : Thing_Id; E : Eye_Id; Region : Driver.Images.Mask) is
-   begin
-      for K in Points.First_Index .. Points.Last_Index loop
-         declare
-            P : Scene_Point := Points (K);
-         begin
-            if P.Owner = 0 and then P.Eye = E and then Inside (Region, P.Pixel) then
-               P.Owner := T;
-               Points.Replace_Element (K, P);
-            end if;
-         end;
-      end loop;
-   end Claim;
-
-   procedure Claim (S : in out State; T : Thing_Id; E : Eye_Id; Region : Driver.Images.Mask) is
-   begin
-      Claim (S.Scene, T, E, Region);
-      Claim (S.Incoming, T, E, Region);
-   end Claim;
-
-   procedure Read_Starts (S : in out State; Id : Thing_Id; R : in out Thing_Record) is
+   procedure Read_Starts (Id : Thing_Id; R : in out Thing_Record) is
       I : Positive := 1;
    begin
       while I <= Natural (R.Starts.Length) loop
@@ -264,7 +242,6 @@ package body Driver.World.Estimates is
                                                   Driver.Images.Height (On), Found, Score, Ok, Why);
                   if Ok and then Driver.Images.Count (Found) > 0 then
                      Put_Slot (R, St.Eye, Holding (Tracks.Start (Found, On, St.Beat)));
-                     Claim (S, Id, St.Eye, Found);
                      Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": found in eye" & St.Eye'Image & ","
                                       & Driver.Images.Count (Found)'Image & " pixels");
                   end if;
@@ -364,15 +341,6 @@ package body Driver.World.Estimates is
       end if;
    end Ask_Background;
 
-   function Owner_At (S : State; E : Eye_Id; Px : Driver.Images.Pixel) return Thing_Id'Base is
-   begin
-      for Id in S.Things.First_Index .. S.Things.Last_Index loop
-         if Has_Slot (S.Things (Id), E) and then Inside (Tracks.Region (S.Things (Id).Eyes (E).Track), Px) then
-            return Id;
-         end if;
-      end loop;
-      return 0;
-   end Owner_At;
 
    procedure Surfaces_Changed (S : in out State) is
    begin
@@ -437,10 +405,7 @@ package body Driver.World.Estimates is
                                 (Scene_Point'(Point => M.Point,
                                               Grid  => (Column => S.Next_Column
                                                                   + Natural (Real'Floor (M.In_First.U)) / X.Stride,
-                                                        Row    => Natural (Real'Floor (M.In_First.V)) / X.Stride),
-                                              Eye   => X.From,
-                                              Pixel => M.In_First,
-                                              Owner => Owner_At (S, X.From, M.In_First)));
+                                                        Row    => Natural (Real'Floor (M.In_First.V)) / X.Stride)));
                               Added := Added + 1;
                            end if;
                         end loop;
@@ -486,23 +451,48 @@ package body Driver.World.Estimates is
       end if;
    end Read_Background;
 
-   function Mostly_Of (S : State; F : Driver.World.Supports.Surface; T : Thing_Id) return Boolean is
-      On : Natural := 0;
+   function On_Thing
+     (R         : Thing_Record;
+      X         : Vec3;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      Seen      : not null access constant Observation) return Boolean
+   is
+      --  A point of the scene falls inside the thing's region in an eye that
+      --  has one: it is on the thing, or hidden behind it.
    begin
-      for M of F.Members loop
-         On := On + Boolean'Pos (S.Scene (M).Owner = T);
+      for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
+         if R.Eyes (E).Has then
+            declare
+               Px      : Driver.Images.Pixel;
+               Visible : Boolean;
+            begin
+               Camera_Of (E, Seen).Project (X, Px, Visible);
+               if Visible and then Inside (Tracks.Region (R.Eyes (E).Track), Px) then
+                  return True;
+               end if;
+            end;
+         end if;
       end loop;
-      return 2 * On > Natural (F.Members.Length);
-   end Mostly_Of;
+      return False;
+   end On_Thing;
 
    --  A thing's region changed: the surfaces made of its own points may have
    --  moved with it, so they are dropped, and the scene is measured again.
-   procedure Changed (S : in out State; T : Thing_Id) is
+   procedure Changed
+     (S         : in out State;
+      T         : Thing_Id;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      Seen      : not null access constant Observation)
+   is
       F       : Positive := 1;
       Dropped : Natural := 0;
+      R       : constant Thing_Record := S.Things (T);
+      function Own (Member : Positive) return Boolean is (On_Thing (R, S.Scene (Member).Point.Mean, Camera_Of, Seen));
    begin
       while F <= Natural (S.Surfaces.Length) loop
-         if Mostly_Of (S, S.Surfaces (F), T) then
+         if Driver.World.Supports.Mostly (S.Surfaces (F), Own'Access) then
             S.Surfaces.Delete (F);
             Dropped := Dropped + 1;
          else
@@ -516,14 +506,19 @@ package body Driver.World.Estimates is
       end if;
    end Changed;
 
-   procedure Refresh_Supports (S : in out State) is
+   procedure Refresh_Supports
+     (S         : in out State;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      Seen      : not null access constant Observation) is
    begin
       for Id in S.Things.First_Index .. S.Things.Last_Index loop
          if S.Things (Id).Under_Due then
             declare
                R      : Thing_Record := S.Things (Id);
                Points : Driver.Geometry.Point_Array (1 .. Natural (R.Points.Length));
-               function Own (Member : Positive) return Boolean is (S.Scene (Member).Owner = Id);
+               function Own (Member : Positive) return Boolean is
+                 (On_Thing (R, S.Scene (Member).Point.Mean, Camera_Of, Seen));
             begin
                for K in Points'Range loop
                   Points (K) := R.Points (K).Point;
@@ -573,7 +568,7 @@ package body Driver.World.Estimates is
                Read_Crosses (Id, R, Camera_Of, O.Beat);
                R.Under_Due := R.Under_Due or else R.Has_Points /= Had or else R.Points_At /= Before;
             end;
-            Read_Starts (S, Id, R);
+            Read_Starts (Id, R);
             --  Ask every other eye about a thing one eye sees, once for every
             --  time its region there was measured.
             for From in R.Eyes.First_Index .. R.Eyes.Last_Index loop
@@ -607,14 +602,22 @@ package body Driver.World.Estimates is
             S.Things.Replace_Element (Id, R);
          end;
       end loop;
-      for Id in Moved'Range loop
-         if Moved (Id) then
-            Changed (S, Id);
-            Surfaces_Changed (S);
-         end if;
-      end loop;
+      if (for some M of Moved => M) or else (for some R of S.Things => R.Under_Due) then
+         declare
+            --  The eyes of this beat, for where the scene's points fall in them.
+            Held : constant Observation_Holders.Holder := Observation_Holders.To_Holder (O);
+            Seen : constant Observation_Holders.Constant_Reference_Type := Held.Constant_Reference;
+         begin
+            for Id in Moved'Range loop
+               if Moved (Id) then
+                  Changed (S, Id, Camera_Of, Seen.Element);
+                  Surfaces_Changed (S);
+               end if;
+            end loop;
+            Refresh_Supports (S, Camera_Of, Seen.Element);
+         end;
+      end if;
       Ask_Background (S, Eyes, Camera_Of, Still, O);
-      Refresh_Supports (S);
    end Observe;
 
    procedure Adopt (S : in out State; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id)
@@ -629,8 +632,8 @@ package body Driver.World.Estimates is
          begin
             if Has_Slot (R, E) and then Driver.World.Regions.Same_Pixels (Tracks.Region (R.Eyes (E).Track), Region) then
                Put_Slot (R, E, Holding (Fresh));
+               R.Under_Due := True;
                S.Things.Replace_Element (Id, R);
-               Claim (S, Id, E, Region);
                Thing := Id;
                return;
             end if;
@@ -642,7 +645,6 @@ package body Driver.World.Estimates is
          Put_Slot (R, E, Holding (Fresh));
          S.Things.Append (R);
          Thing := S.Things.Last_Index;
-         Claim (S, Thing, E, Region);
          Driver.Log.Line (Driver.Log.World, "thing" & Thing'Image & ": adopted in eye" & E'Image & ","
                           & Driver.Images.Count (Region)'Image & " pixels");
       end;
@@ -653,17 +655,8 @@ package body Driver.World.Estimates is
       S.Things.Clear;
       S.Places.Clear;
       --  The surfaces stay, as an earlier episode's, until the scene is
-      --  measured again; their points belong to no thing of this episode, and
-      --  a round still out is dropped when it answers.
+      --  measured again; a round still out is dropped when it answers.
       S.Earlier := not S.Surfaces.Is_Empty;
-      for K in S.Scene.First_Index .. S.Scene.Last_Index loop
-         declare
-            P : Scene_Point := S.Scene (K);
-         begin
-            P.Owner := 0;
-            S.Scene.Replace_Element (K, P);
-         end;
-      end loop;
       S.Round := S.Round + 1;
       S.Incoming.Clear;
       S.Due := True;

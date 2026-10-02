@@ -913,7 +913,6 @@ driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed fr
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	return (Mean => (1.0 / Real (R.Points.Length)) * Sum,	1.0	math	the centroid is the points' sum over their count
 driver-world-estimates.adb	return -1;	1	format	a beat before every beat: no measurement asked about yet
-driver-world-estimates.adb	return 2 * On > Natural (F.Members.Length);	2	math	most of them: more than half
 driver-world-estimates.ads	Stride : Positive := 1;	1	structure	a grid at every pixel until it is set
 driver-world-pairs.adb	(Misfit ([From_First, From_Second], X.Mean), Freedom), 1.0)	1.0	statistics	the deviate is already in units of its sigma
 driver-world-pairs.adb	Chi := Chi + (C * P * P - 2.0 * B * P * Q + A * Q * Q) / Det;	2.0	math	the cross term of a two by two quadratic form
@@ -933,16 +932,17 @@ driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C - 1, R) + 1.0, At_Pixel
 driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C - 1, R) + 1.0, At_Pixel (C, R - 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
 driver-world-regions.adb	return (U => Real (Best mod W) + 0.5, V => Real (Best / W) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-world-regions.adb	return (U => Real (Best mod W) + 0.5, V => Real (Best / W) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
-driver-world-supports.adb	Dof : constant Natural := P.Points - 3;	3	statistics	a plane takes three of its points' degrees of freedom
-driver-world-supports.adb	Dof > 0 and then P.Scatter > 1.0	1.0	statistics	a scatter per degree of freedom of one is what the points' own spreads say
+driver-world-supports.adb	Freedom : constant Natural := P.Points - 3;	3	statistics	a plane takes three of its points' degrees of freedom
+driver-world-supports.adb	Freedom > 0 and then P.Scatter > 1.0	1.0	statistics	a scatter per degree of freedom of one is what the points' own spreads say
 driver-world-supports.adb	Head : Positive := 1;	1	structure	vectors are indexed from one
-driver-world-supports.adb	Scale : constant Real := (if Wider then Sqrt (P.Scatter) else 1.0);	1.0	statistics	the points' own spreads, unscaled
+driver-world-supports.adb	Scale : Real := 1.0;	1.0	statistics	the points' own spreads, unscaled
+driver-world-supports.adb	Scale := (if Wider then Sqrt (P.Scatter) else 1.0);	1.0	statistics	the points' own spreads, unscaled
 driver-world-supports.adb	Sigma : constant Real := Sqrt ((P.Tilt_11 + P.Tilt_22) / 2.0 + Up.Sigma ** 2);	2.0	math	the mean of the tilt's two variances
 driver-world-supports.adb	Steps : constant array (1 .. 4) of Grid_Point :=	4	structure	a grid point has four neighbours across its sides
 driver-world-supports.adb	Steps : constant array (1 .. 4) of Grid_Point :=	4	structure	a grid point has four neighbours across its sides
-driver-world-supports.adb	and then Significant (Vector_Gate (Dof), Sqrt (Real (Dof) * P.Scatter), 1.0);	1.0	statistics	the chi square is already a length in units of sigma
+driver-world-supports.adb	and then Significant (Vector_Gate (Freedom), Sqrt (Real (Freedom) * P.Scatter), 1.0);	1.0	statistics	the chi square is already a length in units of sigma
 driver-world-supports.adb	return (if Grid'Length = 0 then 1 else Result);	1	structure	an empty grid spans no places: its lowest above its highest
-driver-world-supports.adb	return 2 * On_It > Natural (S.Members.Length);	2	math	most of them: more than half
+driver-world-supports.adb	return 2 * On > Natural (S.Members.Length);	2	math	most of them: more than half
 driver-world-tracking.adb	+ 1.0 / Real (Count_Ref))))	1.0	math	the variance of a mean of n frames is the frame's variance over n
 driver-world-tracking.adb	K := K + 2;	2	structure	two coordinates per round trip
 driver-world-tracking.adb	Mad_Efficiency : constant := 0.367_5;	0.367_5	statistics	asymptotic efficiency of the median absolute deviation for Gaussian data

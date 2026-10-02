@@ -19,10 +19,10 @@
 --  points that gives (Driver.World.Supports), each pair's grid kept apart
 --  from the others'. The grid is as many pixels apart as the square root of
 --  the image's shorter side, so it has as many rows as each row has pixels
---  between points. A scene point seen on a thing's region in its eye
---  belongs to that thing, so a thing never rests on its own top face; a
---  thing's support is worked out again only when its points or the
---  surfaces change.
+--  between points. A point of the scene that falls inside a thing's region
+--  in an eye that holds it is the thing's own (on it, or hidden behind it),
+--  so a thing never rests on its own top face; a thing's support is worked
+--  out again only when its points or the surfaces change.
 
 with Ada.Containers.Indefinite_Holders;
 with Ada.Containers.Vectors;
@@ -166,15 +166,11 @@ private
 
    package Background_Vectors is new Ada.Containers.Vectors (Positive, Background);
 
-   --  A point of the scene: where both eyes saw it, its place in the grid
-   --  of the eye it was asked from and its pixel there, and the thing whose
-   --  region held that pixel (0: none), so a thing's own faces are known.
+   --  A point of the scene: where both eyes saw it, and its place in the grid
+   --  of the eye it was asked from.
    type Scene_Point is record
       Point : Point_Estimate;
       Grid  : Driver.World.Supports.Grid_Point;
-      Eye   : Eye_Id;
-      Pixel : Driver.Images.Pixel;
-      Owner : Thing_Id'Base := 0;
    end record;
 
    package Scene_Point_Vectors is new Ada.Containers.Vectors (Positive, Scene_Point);

@@ -56,6 +56,10 @@ package Driver.World.Supports is
       Height : Estimate;          --  of the lowest point above it, along Up
    end record;
 
+   function Mostly (S : Surface; Of_It : not null access function (Member : Positive) return Boolean)
+     return Boolean;
+   --  Most of the surface's members are of it.
+
    function Under
      (Surfaces : Surface_Vectors.Vector;
       Points   : Driver.Geometry.Point_Array;

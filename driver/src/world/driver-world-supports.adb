@@ -1,4 +1,5 @@
 with Ada.Containers.Generic_Array_Sort;
+with Ada.Containers.Indefinite_Vectors;
 with Ada.Numerics.Long_Elementary_Functions;
 
 package body Driver.World.Supports is
@@ -197,24 +198,30 @@ package body Driver.World.Supports is
          return Patch;
       end Patches;
 
-      procedure Grow
+      package Patch_Vectors is new Ada.Containers.Indefinite_Vectors
+        (Positive, Driver.Geometry.Flag_Array, Driver.Geometry."=");
+
+      procedure Grow_With
         (Seed  : Driver.Geometry.Flag_Array;
+         Scale : Real;
+         Dof   : Natural;
          Patch : out Driver.Geometry.Flag_Array;
          P     : out Driver.Geometry.Plane_Estimate;
          Ok    : out Boolean)
       is
          --  From the seed, the connected patch of grid neighbours the plane
-         --  through it holds. Each pass fits the patch and keeps those of it,
-         --  and of the points left beside it, whose height off the plane is not
-         --  significant against the point's own spread and the plane's there;
-         --  then the part of them that holds the seed. The points' spreads are
-         --  their own, unless the patch scatters about its plane significantly
-         --  more than they say: then they are scaled up to how it scatters
-         --  (the Birge ratio), and the test rests on the fit's degrees of
-         --  freedom. Only neighbours are tried, so a plane fitted on a small
-         --  patch is never stretched to far points it cannot tell apart. It
-         --  ends when the patch stops changing; one that has not settled after
-         --  one pass per point is no surface.
+         --  through it holds, with the points' spreads scaled by Scale (resting
+         --  on Dof degrees of freedom; none when it is one). Each pass fits the
+         --  patch and keeps those of it, and of the points left beside it, whose
+         --  height off the plane is not significant against their scaled spread
+         --  and the plane's there; then the part of them that holds the seed.
+         --  Only neighbours are tried, so a plane fitted on a small patch is
+         --  never stretched to far points it cannot tell apart. It ends when
+         --  the patch stops changing, or when it comes back to an earlier one:
+         --  then the points it held all through that cycle are the patch, those
+         --  the refits kept flipping left out.
+         Holds  : constant Driver.Uncertain.Gate := Scalar_Gate (Dof);
+         Passed : Patch_Vectors.Vector;   --  the patches of the passes so far
       begin
          Patch := Seed;
          P := (others => <>);
@@ -225,13 +232,6 @@ package body Driver.World.Supports is
             declare
                Candidate : Driver.Geometry.Flag_Array (Points'Range) := Patch;
                Next      : Driver.Geometry.Flag_Array (Points'Range) := [others => False];
-               --  A plane rests on three of its points' degrees of freedom.
-               Dof       : constant Natural := P.Points - 3;
-               Wider     : constant Boolean :=
-                 Dof > 0 and then P.Scatter > 1.0
-                 and then Significant (Vector_Gate (Dof), Sqrt (Real (Dof) * P.Scatter), 1.0);
-               Scale     : constant Real := (if Wider then Sqrt (P.Scatter) else 1.0);
-               Holds     : constant Driver.Uncertain.Gate := Scalar_Gate (if Wider then Dof else 0);
                function Along (I : Positive) return Real is
                  (Sqrt (P.Normal * (Points (I).Covariance * P.Normal)));
             begin
@@ -265,11 +265,61 @@ package body Driver.World.Supports is
                if Next = Patch then
                   return;
                end if;
+               declare
+                  Back_To : constant Patch_Vectors.Extended_Index := Passed.Find_Index (Next);
+               begin
+                  if Back_To /= Patch_Vectors.No_Index then
+                     declare
+                        Core : Driver.Geometry.Flag_Array := Patch;
+                     begin
+                        for K in Back_To .. Passed.Last_Index loop
+                           Core := Core and Passed (K);
+                        end loop;
+                        Patch := Patches (Core, Seed);
+                        exit when not (for some F of Patch => F);
+                        Driver.Geometry.Fit (Points, Patch, P, Ok);
+                        return;
+                     end;
+                  end if;
+               end;
+               Passed.Append (Patch);
                Patch := Next;
                exit when not (for some F of Patch => F);
             end;
          end loop;
          Ok := False;
+      end Grow_With;
+
+      procedure Grow
+        (Seed  : Driver.Geometry.Flag_Array;
+         Patch : out Driver.Geometry.Flag_Array;
+         P     : out Driver.Geometry.Plane_Estimate;
+         Ok    : out Boolean)
+      is
+         --  The patch grown with the points' own spreads, and grown again with
+         --  them scaled to how the patch it gave scatters about its plane
+         --  (the Birge ratio), when significantly more than they say, until a
+         --  patch comes again. The scale is fixed while a patch grows, so points
+         --  the patch does not hold cannot widen it as they enter.
+         Scale : Real := 1.0;
+         Dof   : Natural := 0;
+         Grown : Patch_Vectors.Vector;   --  the patches of the stages so far
+      begin
+         loop
+            Grow_With (Seed, Scale, Dof, Patch, P, Ok);
+            exit when not Ok or else Grown.Contains (Patch);
+            Grown.Append (Patch);
+            declare
+               --  A plane takes three of its points' degrees of freedom.
+               Freedom : constant Natural := P.Points - 3;
+               Wider   : constant Boolean :=
+                 Freedom > 0 and then P.Scatter > 1.0
+                 and then Significant (Vector_Gate (Freedom), Sqrt (Real (Freedom) * P.Scatter), 1.0);
+            begin
+               Scale := (if Wider then Sqrt (P.Scatter) else 1.0);
+               Dof := (if Wider then Freedom else 0);
+            end;
+         end loop;
       end Grow;
 
       function Lower (A, B : Positive) return Boolean is (Height (A) < Height (B));
@@ -352,6 +402,17 @@ package body Driver.World.Supports is
       end loop;
    end Find;
 
+   function Mostly (S : Surface; Of_It : not null access function (Member : Positive) return Boolean)
+     return Boolean
+   is
+      On : Natural := 0;
+   begin
+      for M of S.Members loop
+         On := On + Boolean'Pos (Of_It (M));
+      end loop;
+      return 2 * On > Natural (S.Members.Length);
+   end Mostly;
+
    function Under
      (Surfaces : Surface_Vectors.Vector;
       Points   : Driver.Geometry.Point_Array;
@@ -360,14 +421,7 @@ package body Driver.World.Supports is
    is
       Best : Support;
 
-      function Its_Own_Face (S : Surface) return Boolean is
-         On_It : Natural := 0;
-      begin
-         for M of S.Members loop
-            On_It := On_It + Boolean'Pos (Own (M));
-         end loop;
-         return 2 * On_It > Natural (S.Members.Length);
-      end Its_Own_Face;
+      function Its_Own_Face (S : Surface) return Boolean is (Mostly (S, Own));
    begin
       if Points'Length = 0 or else Up.Sigma >= Real'Last then
          return Best;
