@@ -245,15 +245,14 @@ package body Driver.Robot is
       end if;
    end Arm_Eye;
 
-   --  A pose with the uncertainty of the fit that gave it: its turn by the
-   --  angle the measured pixel noise subtends, its position by that angle
-   --  over the arm's reach (one model unit).
-   function With_Fit_Uncertainty (M : Model; A : Arm_Id; T : Rigid) return Pose_Estimate is
-      S : constant Real := Kinematics.Angle_Sigma (M, A);
+   --  A pose with the uncertainty of the fit that gave it: the covariance
+   --  of the fit's parameters, clustered by keyframe, carried to the eye at
+   --  the readings it was made at (Kinematics.Pose_Covariance).
+   function With_Fit_Uncertainty (M : Model; A : Arm_Id; T : Rigid; Readings : Real_Array) return Pose_Estimate is
+      Turn, Place : Mat3;
    begin
-      return (Pose                => T,
-              Position_Covariance => [[S * S, 0.0, 0.0], [0.0, S * S, 0.0], [0.0, 0.0, S * S]],
-              Rotation_Covariance => [[S * S, 0.0, 0.0], [0.0, S * S, 0.0], [0.0, 0.0, S * S]]);
+      Kinematics.Pose_Covariance (M, A, Readings, Turn, Place);
+      return (Pose => T, Position_Covariance => Place, Rotation_Covariance => Turn);
    end With_Fit_Uncertainty;
 
    function Eye_Pose (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is
@@ -265,7 +264,7 @@ package body Driver.Robot is
          return (others => <>);
       end if;
       Arm_Eye (M, A, O, T, K);
-      return (if K then With_Fit_Uncertainty (M, A, T) else (others => <>));
+      return (if K then With_Fit_Uncertainty (M, A, T, O.Readings.Element (Arm_Group (M, A))) else (others => <>));
    end Eye_Pose;
 
    procedure Project
@@ -316,7 +315,7 @@ package body Driver.Robot is
          return (others => <>);
       end if;
       declare
-         P : constant Pose_Estimate := With_Fit_Uncertainty (M, A, T);
+         P : constant Pose_Estimate := With_Fit_Uncertainty (M, A, T, O.Readings.Element (Arm_Group (M, A)));
       begin
          return (Origin    => (Mean => T.Translation, Covariance => P.Position_Covariance),
                  Direction => (Unit_Vector => Driver.Numerics.Arrays."*" (T.Rotation, Kinematics.Ray_In_Eye (M, A, Px.U, Px.V)),

@@ -43,6 +43,11 @@ package body Driver.Robot.Kinematics.Fit is
       E2 := Cross (W, E1);
    end Perp;
 
+   procedure Across (W : Vec3; E1, E2 : out Vec3) is
+   begin
+      Perp (W, E1, E2);
+   end Across;
+
    function Rot (W : Vec3; Theta : Real) return Mat3 is (Driver.Numerics.Exp (Theta * W));
 
    function Dot (A, B : Vec3) return Real is (A * B);
@@ -715,15 +720,92 @@ package body Driver.Robot.Kinematics.Fit is
                                  Driver.Numerics.Dense.Cholesky (Ar, Lf, Pd);
                                  Determined := Pd;
                                  Variance := [others => Real'Last];
+                                 Report.Covariance.Clear;
+                                 --  The covariance clustered by keyframe: the inverse
+                                 --  normal equations around the spread of every
+                                 --  keyframe's own share of the gradient (each
+                                 --  residual's, the depths eliminated). A keyframe's
+                                 --  matches err together (its rendering, its view),
+                                 --  which sightings taken as independent hide: A9's
+                                 --  focal length and reading scales came out 10 to 20
+                                 --  of those sigmas off the truth.
                                  if Pd then
-                                    for P in 1 .. Reduced loop
-                                       declare
-                                          E : Real_Vector (1 .. Reduced) := [others => 0.0];
-                                       begin
-                                          E (P) := 1.0;
-                                          Variance (P) := Driver.Numerics.Dense.Cholesky_Solve (Lf, E) (P);
-                                       end;
-                                    end loop;
+                                    declare
+                                       Inv   : Grid_Access := new Real_Matrix (1 .. Reduced, 1 .. Reduced);
+                                       Share : Grid_Access := new Real_Matrix'[1 .. Frames => [1 .. Reduced => 0.0]];
+                                       Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
+                                       Clusters : Natural := 0;
+                                    begin
+                                       for P in 1 .. Reduced loop
+                                          declare
+                                             E : Real_Vector (1 .. Reduced) := [others => 0.0];
+                                          begin
+                                             E (P) := 1.0;
+                                             declare
+                                                Column : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, E);
+                                             begin
+                                                for Q in 1 .. Reduced loop
+                                                   Inv (Q, P) := Column (Q);
+                                                end loop;
+                                             end;
+                                          end;
+                                       end loop;
+                                       for I in 1 .. 2 * Used loop
+                                          declare
+                                             Sg  : Sighting renames Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1);
+                                             Psi : constant Real := Huber (R0 (I) / Sigma) / Sigma ** 2 * R0 (I);
+                                          begin
+                                             if Psi /= 0.0 then
+                                                for P in 1 .. Reduced loop
+                                                   declare
+                                                      Jr : Real := 0.0;
+                                                   begin
+                                                      for Q in 1 .. Count loop
+                                                         if Tm (Q, P) /= 0.0 then
+                                                            Jr := Jr + Tm (Q, P) * Jp (I, Q);
+                                                         end if;
+                                                      end loop;
+                                                      if Sg.Track /= Anchor and then C (Sg.Track) > 0.0 then
+                                                         Jr := Jr - Br (P, Sg.Track) / C (Sg.Track) * Jd (I);
+                                                      end if;
+                                                      Share (Sg.Frame, P) := Share (Sg.Frame, P) + Psi * Jr;
+                                                   end;
+                                                end loop;
+                                             end if;
+                                          end;
+                                       end loop;
+                                       for F in 1 .. Frames loop
+                                          if (for some P in 1 .. Reduced => Share (F, P) /= 0.0) then
+                                             Clusters := Clusters + 1;
+                                             for P in 1 .. Reduced loop
+                                                for Q in 1 .. Reduced loop
+                                                   Spread (P, Q) := Spread (P, Q) + Share (F, P) * Share (F, Q);
+                                                end loop;
+                                             end loop;
+                                          end if;
+                                       end loop;
+                                       --  Too few keyframes to tell how theirs spread: not
+                                       --  determined.
+                                       if Clusters > 1 then
+                                          declare
+                                             --  The spread of a mean over the clusters, unbiased.
+                                             Small : constant Real := Real (Clusters) / Real (Clusters - 1);
+                                             V     : constant Real_Matrix := Inv.all * Spread.all * Inv.all;
+                                          begin
+                                             for P in 1 .. Reduced loop
+                                                Variance (P) := Small * V (P, P);
+                                                for Q in 1 .. Reduced loop
+                                                   Report.Covariance.Append (Small * V (P, Q));
+                                                end loop;
+                                             end loop;
+                                          end;
+                                       else
+                                          Determined := False;
+                                       end if;
+                                       Free (Inv);
+                                       Free (Share);
+                                       Free (Spread);
+                                    end;
                                  end if;
                                  Free (Br);
                               end;
@@ -1809,9 +1891,117 @@ package body Driver.Robot.Kinematics.Fit is
       --  Stage 5: the tracks.
       Report.Stage := 5;
       Refine_Tracks (Changes, Sight, Joints, L, Report);
-      Normalize (Joints);
+      declare
+         Sum : Real := 0.0;
+      begin
+         for Frame in 1 .. Frames loop
+            declare
+               T : constant Vec3 := Eye_At (Joints, Changes_Of (Frame)).Translation;
+            begin
+               Sum := Sum + T * T;
+            end;
+         end loop;
+         Normalize (Joints);
+         --  The covariance follows the lengths into model units.
+         if Sum > 0.0 and then not Report.Covariance.Is_Empty then
+            declare
+               F       : constant Real := 1.0 / Sqrt (Sum / Real (Frames));
+               Reduced : constant Natural := 6 + 5 * N;
+               function Length (P : Positive) return Boolean is
+                 (P > 6 and then ((P - 7) mod 5 in 2 .. 3
+                                  or else ((P - 7) mod 5 = 4 and then Joints (Joints'First + (P - 7) / 5).Slide)));
+            begin
+               for P in 1 .. Reduced loop
+                  for Q in 1 .. Reduced loop
+                     declare
+                        K : constant Positive := Report.Covariance.First_Index + (P - 1) * Reduced + Q - 1;
+                        X : Real := Report.Covariance (K);
+                     begin
+                        if Length (P) then
+                           X := F * X;
+                        end if;
+                        if Length (Q) then
+                           X := F * X;
+                        end if;
+                        Report.Covariance.Replace_Element (K, X);
+                     end;
+                  end loop;
+               end loop;
+            end;
+         end if;
+      end;
       Report.Fitted := Report.Determined;
    end Fit;
+
+   procedure Pose_Covariance
+     (Joints      : Joint_Array;
+      Change      : Real_Array;
+      Covariance  : Real_Lists.Vector;
+      Turn, Place : out Mat3)
+   is
+      N        : constant Natural := Joints'Length;
+      Reduced  : constant Natural := 6 + 5 * N;
+      Unknown  : constant Mat3 := [[Real'Last, 0.0, 0.0], [0.0, Real'Last, 0.0], [0.0, 0.0, Real'Last]];
+      function V (P, Q : Positive) return Real is (Covariance (Covariance.First_Index + (P - 1) * Reduced + Q - 1));
+      --  Per joint parameter, how the eye's turn and place move per unit of it.
+      Dturn, Dplace : array (1 .. 5 * N) of Vec3 := [others => [0.0, 0.0, 0.0]];
+   begin
+      Turn := Unknown;
+      Place := Unknown;
+      if Natural (Covariance.Length) /= Reduced * Reduced then
+         return;
+      end if;
+      for J in 1 .. N loop
+         for K in 1 .. 5 loop
+            declare
+               P     : constant Positive := 6 + 5 * (J - 1) + K;
+               Sigma : constant Real := (if V (P, P) > 0.0 then Sqrt (V (P, P)) else 0.0);
+            begin
+               if Sigma > 0.0 then
+                  declare
+                     function Moved (H : Real) return Rigid is
+                        Jx     : Joint_Array := Joints;
+                        A      : Joint renames Jx (Jx'First + J - 1);
+                        E1, E2 : Vec3;
+                     begin
+                        Perp (Joints (Joints'First + J - 1).W, E1, E2);
+                        case K is
+                           when 1 => A.W := Unit (A.W + H * E1);
+                           when 2 => A.W := Unit (A.W + H * E2);
+                           when 3 => A.P := A.P + H * E1;
+                           when 4 => A.P := A.P + H * E2;
+                           when others => A.C := A.C + H;
+                        end case;
+                        return Eye_At (Jx, Change);
+                     end Moved;
+                     Up   : constant Rigid := Moved (Sigma);
+                     Down : constant Rigid := Moved (-Sigma);
+                  begin
+                     Dturn (5 * (J - 1) + K) :=
+                       (1.0 / (2.0 * Sigma)) * Driver.Numerics.Log (Transpose (Down.Rotation) * Up.Rotation);
+                     Dplace (5 * (J - 1) + K) := (1.0 / (2.0 * Sigma)) * (Up.Translation - Down.Translation);
+                  end;
+               end if;
+            end;
+         end loop;
+      end loop;
+      Turn := [others => [others => 0.0]];
+      Place := [others => [others => 0.0]];
+      for A in 1 .. 5 * N loop
+         for B in 1 .. 5 * N loop
+            declare
+               C : constant Real := V (6 + A, 6 + B);
+            begin
+               for R in 1 .. 3 loop
+                  for S in 1 .. 3 loop
+                     Turn (R, S) := Turn (R, S) + Dturn (A) (R) * C * Dturn (B) (S);
+                     Place (R, S) := Place (R, S) + Dplace (A) (R) * C * Dplace (B) (S);
+                  end loop;
+               end loop;
+            end;
+         end loop;
+      end loop;
+   end Pose_Covariance;
 
    procedure Table
      (Changes   : Driver.Numerics.Arrays.Real_Matrix;

@@ -459,6 +459,9 @@ package body Driver.Robot.Kinematics is
                            Result.Joints.Append (Joint_Fit'(W => J.W, P => J.P, C => J.C, Slide => J.Slide));
                         end loop;
                         Result.Lens := (Fx => Lens.Fx, Fy => Lens.Fy, Cx => Lens.Cx, Cy => Lens.Cy, K1 => Lens.K1, K2 => Lens.K2);
+                        for X of Report.Covariance loop
+                           Result.Covariance.Append (X);
+                        end loop;
                         --  A fit that failed keeps the last one that held.
                         if Report.Fitted or else not R.Result.Fitted then
                            R.Result := Result;
@@ -510,6 +513,35 @@ package body Driver.Robot.Kinematics is
       end loop;
       return Identity;
    end Eye_In_Reference;
+
+   procedure Pose_Covariance (M : Model; A : Arm_Id; Readings : Real_Array; Turn, Place : out Mat3) is
+      R : constant Arm_Fit := (if Index_Of (M, A) > 0 then M.Kinematics (Index_Of (M, A)).Result else (others => <>));
+   begin
+      Turn := [[Real'Last, 0.0, 0.0], [0.0, Real'Last, 0.0], [0.0, 0.0, Real'Last]];
+      Place := Turn;
+      if R.Fitted and then Natural (R.Joints.Length) = Readings'Length
+        and then Natural (R.Reference.Length) = Readings'Length
+      then
+         declare
+            Joints : Fit.Joint_Array (1 .. Readings'Length);
+            Change : Real_Array (1 .. Readings'Length);
+            Cov    : Fit.Real_Lists.Vector;
+         begin
+            for J in Joints'Range loop
+               declare
+                  F : constant Joint_Fit := R.Joints (J);
+               begin
+                  Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
+                  Change (J) := Readings (Readings'First + J - 1) - R.Reference (J - 1);
+               end;
+            end loop;
+            for X of R.Covariance loop
+               Cov.Append (X);
+            end loop;
+            Fit.Pose_Covariance (Joints, Change, Cov, Turn, Place);
+         end;
+      end if;
+   end Pose_Covariance;
 
    function Fitted (M : Model; A : Arm_Id) return Boolean is
      (Index_Of (M, A) > 0 and then M.Kinematics (Index_Of (M, A)).Result.Fitted);

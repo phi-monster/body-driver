@@ -387,6 +387,7 @@ private
       Median_Px, Sigma_Px : Real := 0.0;
       Matches   : Natural := 0;           --  keyframes with matches behind it
       Why       : Ada.Strings.Unbounded.Unbounded_String;
+      Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
    end record;
 
    type Arm_Evidence is record
