@@ -26,7 +26,8 @@ package Driver.World.Pairs is
 
    type Match is record
       In_First, In_Second : Driver.Images.Pixel;
-      Point               : Point_Estimate;   --  world frame
+      Point               : Point_Estimate;          --  world frame
+      First               : Eye_Id := Eye_Id'First;   --  the eye In_First is a pixel of, as the caller says
    end record;
 
    package Match_Vectors is new Ada.Containers.Vectors (Positive, Match);

@@ -120,6 +120,7 @@ private
       Own        : Natural := 0;
       Seen       : Observation_Holders.Holder;   --  the observation of that instant
       Inner      : Driver.Images.Pixel;           --  the region's inner point in From
+      Measured   : Driver.Clock.Beat := 0;        --  when the region in From was measured
    end record;
 
    package Cross_Vectors is new Ada.Containers.Vectors (Positive, Cross);
@@ -145,12 +146,23 @@ private
    package Start_Vectors is new Ada.Containers.Vectors (Positive, Start);
    package Point_Vectors is new Ada.Containers.Vectors (Positive, Point_Estimate);
 
+   --  What one pair of eyes saw of a thing, for the measurement of the first
+   --  eye's region it was asked about.
+   type Pair_Seen is record
+      From, Into : Eye_Id;
+      Measured   : Driver.Clock.Beat := 0;
+      Kept       : Driver.World.Pairs.Match_Vectors.Vector;
+   end record;
+
+   package Pair_Seen_Vectors is new Ada.Containers.Vectors (Positive, Pair_Seen);
+
    type Thing_Record is record
       Eyes      : Slot_Vectors.Vector;
       Crosses   : Cross_Vectors.Vector;
       Asked     : Asked_Vectors.Vector;
       Starts    : Start_Vectors.Vector;
-      Points    : Driver.World.Pairs.Match_Vectors.Vector;
+      By_Pair   : Pair_Seen_Vectors.Vector;
+      Points    : Driver.World.Pairs.Match_Vectors.Vector;   --  every pair's, for the regions as they are
       Points_In : Eye_Id := Eye_Id'First;
       Points_At : Driver.Clock.Beat := 0;
       Has_Points : Boolean := False;

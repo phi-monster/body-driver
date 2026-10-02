@@ -142,6 +142,56 @@ package body Driver.World.Estimates is
 
    --  The replies to the pairs asked: the points both eyes saw, and a track
    --  started where the second eye had none.
+   function Inside (Region : Driver.Images.Mask; Px : Driver.Images.Pixel) return Boolean is
+     (Px.U >= 0.0 and then Px.V >= 0.0
+      and then Px.U < Real (Driver.Images.Width (Region)) and then Px.V < Real (Driver.Images.Height (Region))
+      and then Driver.Images.Contains (Region, Natural (Real'Floor (Px.U)), Natural (Real'Floor (Px.V))));
+
+   function Inside_Others
+     (R         : Thing_Record;
+      X         : Vec3;
+      Except    : Eye_Id;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      Seen      : not null access constant Observation) return Boolean
+   is
+      --  A point two eyes saw of the thing falls inside its region in every
+      --  other eye that has one and sees where the point is. A pair can be
+      --  wrong yet meet, when the second eye's match slid along the line the
+      --  first sight draws there (two wrist eyes side by side see rows, and a
+      --  matcher finds wood grain on any row): the point is then on the first
+      --  sight but at another depth, and falls outside the thing elsewhere.
+   begin
+      for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
+         if E /= Except and then R.Eyes (E).Has then
+            declare
+               Px      : Driver.Images.Pixel;
+               Visible : Boolean;
+            begin
+               Camera_Of (E, Seen).Project (X, Px, Visible);
+               if Visible and then not Inside (Tracks.Region (R.Eyes (E).Track), Px) then
+                  return False;
+               end if;
+            end;
+         end if;
+      end loop;
+      return True;
+   end Inside_Others;
+
+   procedure Gather (R : in out Thing_Record; Beat : Driver.Clock.Beat) is
+      --  The thing's points: every pair's, for the regions of the first eyes
+      --  as they are now measured.
+   begin
+      R.Points.Clear;
+      for P of R.By_Pair loop
+         if Has_Slot (R, P.From) and then Tracks.Measured_At (R.Eyes (P.From).Track) = P.Measured then
+            R.Points.Append (P.Kept);
+         end if;
+      end loop;
+      R.Has_Points := not R.Points.Is_Empty;
+      R.Points_At := Beat;
+   end Gather;
+
    procedure Read_Crosses
      (Id        : Thing_Id;
       R         : in out Thing_Record;
@@ -175,11 +225,37 @@ package body Driver.World.Estimates is
                      Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": the instrument did not match eye"
                                       & X.From'Image & " into eye" & X.Into'Image & ": " & To_String (Why));
                   end if;
-                  if not Kept.Is_Empty then
-                     R.Points := Kept;
+                  declare
+                     Met_Before : constant Natural := Natural (Kept.Length);
+                     Within     : Driver.World.Pairs.Match_Vectors.Vector;
+                     Placed     : Boolean := False;
+                  begin
+                     for M of Kept loop
+                        if Inside_Others (R, M.Point.Mean, X.From, Camera_Of, Seen.Element) then
+                           Within.Append (Driver.World.Pairs.Match'(M with delta First => X.From));
+                        end if;
+                     end loop;
+                     Kept := Within;
+                     for K in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
+                        if R.By_Pair (K).From = X.From and then R.By_Pair (K).Into = X.Into then
+                           R.By_Pair.Replace_Element
+                             (K, (From => X.From, Into => X.Into, Measured => X.Measured, Kept => Kept));
+                           Placed := True;
+                        end if;
+                     end loop;
+                     if not Placed then
+                        R.By_Pair.Append (Pair_Seen'(From => X.From, Into => X.Into, Measured => X.Measured, Kept => Kept));
+                     end if;
+                     Gather (R, Seen.Element.Beat);
                      R.Points_In := X.From;
-                     R.Points_At := Seen.Element.Beat;
-                     R.Has_Points := True;
+                     if Met_Before > Natural (Kept.Length) then
+                        Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ":" & Natural'Image
+                                           (Met_Before - Natural (Kept.Length))
+                                         & " points of eyes" & X.From'Image & " and" & X.Into'Image
+                                         & " fall outside it in another eye");
+                     end if;
+                  end;
+                  if not Kept.Is_Empty then
                      Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ":" & Kept.Length'Image
                                       & " points seen by eyes" & X.From'Image & " and" & X.Into'Image & ","
                                       & Apart'Image & " matches whose lines did not meet, the matcher erring by "
@@ -225,11 +301,6 @@ package body Driver.World.Estimates is
          end;
       end loop;
    end Read_Crosses;
-
-   function Inside (Region : Driver.Images.Mask; Px : Driver.Images.Pixel) return Boolean is
-     (Px.U >= 0.0 and then Px.V >= 0.0
-      and then Px.U < Real (Driver.Images.Width (Region)) and then Px.V < Real (Driver.Images.Height (Region))
-      and then Driver.Images.Contains (Region, Natural (Real'Floor (Px.U)), Natural (Real'Floor (Px.V))));
 
    procedure Read_Starts (Id : Thing_Id; R : in out Thing_Record) is
       I : Positive := 1;
@@ -612,7 +683,8 @@ package body Driver.World.Estimates is
                                Points => Point_Holders.To_Holder (Points),
                                Own    => Tracks.Region_Points (T),
                                Seen   => Observation_Holders.To_Holder (O),
-                               Inner  => Driver.World.Regions.Inner_Point (Tracks.Region (T)))));
+                               Inner  => Driver.World.Regions.Inner_Point (Tracks.Region (T)),
+                               Measured => Tracks.Measured_At (T))));
                            Note_Asked (R, From, Into, Tracks.Measured_At (T));
                         end;
                      end if;

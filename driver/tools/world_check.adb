@@ -829,15 +829,21 @@ procedure World_Check is
                   Done  : Boolean := False;
                   Seen  : Unbounded_String;
                begin
-                  --  Every eye the middle of its mesh falls in, as the truth puts it.
+                  --  Every eye the middle of its mesh falls in, as the truth puts it,
+                  --  and where its root falls there, to hold beside the scorer's
+                  --  projection (score --project).
                   for E in 1 .. Eye_Id'Base (Natural (O.Images.Length)) loop
                      declare
-                        Px      : Driver.Images.Pixel;
-                        Visible : Boolean;
+                        Px, Root : Driver.Images.Pixel;
+                        Visible, Root_Visible : Boolean;
                      begin
                         True_Camera (E, Beat).Project (Where, Px, Visible);
+                        True_Camera (E, Beat).Project (Pose_Maps.Element (C).Translation, Root, Root_Visible);
                         if Visible then
                            Append (Seen, E'Image);
+                        end if;
+                        if Root_Visible then
+                           Append (Seen, " (root at " & Image (Root.U, 1) & " " & Image (Root.V, 1) & ")");
                         end if;
                      end;
                   end loop;

@@ -9,6 +9,7 @@ package body Driver.World is
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
+   use type Driver.Observations.Camera_Id;
 
    type Scene_Data is record
       State : Driver.World.Estimates.State;
@@ -111,13 +112,15 @@ package body Driver.World is
       --  Each point by the pixel of the first eye it was seen at, so a
       --  point's neighbours on the surface are its neighbours in the image.
       type Key is record
+         Eye         : Eye_Id;
          Column, Row : Integer;
       end record;
-      function "<" (A, B : Key) return Boolean is (A.Row < B.Row or else (A.Row = B.Row and then A.Column < B.Column));
+      function "<" (A, B : Key) return Boolean is
+        (A.Eye < B.Eye or else (A.Eye = B.Eye and then (A.Row < B.Row or else (A.Row = B.Row and then A.Column < B.Column))));
       package Point_Maps is new Ada.Containers.Ordered_Maps (Key, Positive);
       Index : Point_Maps.Map;
-      function Key_Of (P : Driver.Images.Pixel) return Key is
-        ((Column => Integer (Real'Floor (P.U)), Row => Integer (Real'Floor (P.V))));
+      function Key_Of (M : Driver.World.Pairs.Match) return Key is
+        ((Eye => M.First, Column => Integer (Real'Floor (M.In_First.U)), Row => Integer (Real'Floor (M.In_First.V))));
       function At_Key (K : Key; Found : out Vec3) return Boolean is
          C : constant Point_Maps.Cursor := Index.Find (K);
       begin
@@ -130,18 +133,18 @@ package body Driver.World is
       end At_Key;
    begin
       for I in 1 .. Natural (Points.Length) loop
-         Index.Include (Key_Of (Points (I).In_First), I);
+         Index.Include (Key_Of (Points (I)), I);
       end loop;
       for I in Result'Range loop
          declare
-            K : constant Key := Key_Of (Points (I).In_First);
+            K : constant Key := Key_Of (Points (I));
             Left, Right, Above, Below : Vec3;
             Normal : Vec3 := Zero3;
          begin
             --  The surface's normal from the points beside it in the image;
             --  none where a neighbour is missing.
-            if At_Key ((K.Column - 1, K.Row), Left) and then At_Key ((K.Column + 1, K.Row), Right)
-              and then At_Key ((K.Column, K.Row - 1), Above) and then At_Key ((K.Column, K.Row + 1), Below)
+            if At_Key ((K.Eye, K.Column - 1, K.Row), Left) and then At_Key ((K.Eye, K.Column + 1, K.Row), Right)
+              and then At_Key ((K.Eye, K.Column, K.Row - 1), Above) and then At_Key ((K.Eye, K.Column, K.Row + 1), Below)
             then
                declare
                   N : constant Vec3 := Cross (Right - Left, Below - Above);

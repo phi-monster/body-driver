@@ -273,7 +273,7 @@ package body Driver.World.Pairs is
                      then
                         Apart := Apart + 1;
                      else
-                        Kept.Append (Match'(In_First => P, In_Second => A.To, Point => X));
+                        Kept.Append (Match'(In_First => P, In_Second => A.To, Point => X, First => <>));
                      end if;
                   end if;
                end;
