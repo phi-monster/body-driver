@@ -1,9 +1,18 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 
 package body Driver.Robot.Hand.Tips is
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
+
+   --  Everything sized by presses lives on the heap: the estimates also run
+   --  in the decider's task, whose stack is small.
+   type Index_Array is array (Positive range <>) of Positive;
+   type Index_Access is access Index_Array;
+   type Presses_Access is access Driver.Robot.Hand.Touch.Press_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Index_Array, Index_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Robot.Hand.Touch.Press_Array, Presses_Access);
 
    function Lobes (B : Book) return Natural is (if B.Sights.Is_Empty then 0 else B.Sights.Element'Length);
 
@@ -140,8 +149,8 @@ package body Driver.Robot.Hand.Tips is
          end if;
       end loop;
       declare
-         Presses : Driver.Robot.Hand.Touch.Press_Array (1 .. Count);
-         Of_Kept : array (1 .. Count) of Positive;
+         Presses : Presses_Access := new Driver.Robot.Hand.Touch.Press_Array (1 .. Count);
+         Of_Kept : Index_Access := new Index_Array (1 .. Count);
          N       : Natural := 0;
       begin
          for I in B.Kept.First_Index .. B.Kept.Last_Index loop
@@ -157,7 +166,7 @@ package body Driver.Robot.Hand.Tips is
          end loop;
          declare
             F : constant Driver.Robot.Hand.Touch.Fit_Result :=
-              Driver.Robot.Hand.Touch.Fit (Presses, Known_Sights (T), [1 => (Measured => False)]);
+              Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => (Measured => False)]);
          begin
             B.Fitted := Fit_Holders.To_Holder (F);
             for I in B.Kept.First_Index .. B.Kept.Last_Index loop
@@ -179,6 +188,8 @@ package body Driver.Robot.Hand.Tips is
                end loop;
             end if;
          end;
+         Free (Presses);
+         Free (Of_Kept);
       end;
    end Refit;
 
