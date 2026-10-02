@@ -151,7 +151,7 @@ package body Driver.World.Tracking is
 
    function Region_Points (T : Track) return Natural is (Count (T.Region.Element));
 
-   function Match_Points (T : Track) return Driver.Instrument.Point_Array is
+   function Region_And_Around (T : Track) return Driver.Instrument.Point_Array is
       Region : constant Mask := T.Region.Element;
       Points : Driver.Instrument.Point_Array (1 .. T.Columns * T.Rows);
       Own    : Natural := 0;
@@ -170,7 +170,9 @@ package body Driver.World.Tracking is
          end loop;
       end loop;
       return Points;
-   end Match_Points;
+   end Region_And_Around;
+
+   function Match_Points (T : Track) return Driver.Instrument.Point_Array is (Region_And_Around (T));
 
    procedure Asked_Match (T : in out Track) is
    begin

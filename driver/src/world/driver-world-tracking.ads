@@ -75,6 +75,10 @@ package Driver.World.Tracking is
    function Region_Points (T : Track) return Natural;
    --  How many of Match_Points are the region's own.
 
+   function Region_And_Around (T : Track) return Driver.Instrument.Point_Array;
+   --  The same points, whatever the track's state: what another eye's image
+   --  is asked about for the points both eyes see.
+
    procedure Asked_Match (T : in out Track)
      with Pre => Wants_Match (T);
    --  The points were submitted, from Measured_On to Latest, with round trips.

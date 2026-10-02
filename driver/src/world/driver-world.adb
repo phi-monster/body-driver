@@ -1,65 +1,17 @@
-with Ada.Containers.Indefinite_Holders;
-with Ada.Containers.Vectors;
-with Ada.Strings.Unbounded;
+with Ada.Containers.Ordered_Maps;
+with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
-with Driver.Clock;
-with Driver.Instrument;
-with Driver.Log;
-with Driver.Services;
-with Driver.World.Regions;
-with Driver.World.Tracking;
+with Driver.World.Cameras;
+with Driver.World.Estimates;
+with Driver.World.Pairs;
 
 package body Driver.World is
 
-   use Ada.Strings.Unbounded;
-   use type Driver.Observations.Camera_Id;
-   use type Driver.World.Tracking.Phase;
-
-   package Point_Holders is new Ada.Containers.Indefinite_Holders (Driver.Instrument.Point_Array, Driver.Instrument."=");
-
-   --  A thing in one eye: its track, and the instrument's request out for it.
-   type Slot is record
-      Has     : Boolean := False;
-      Track   : Driver.World.Tracking.Track;
-      Out_Now : Boolean := False;
-      Ticket  : Driver.Services.Ticket;
-      Points  : Point_Holders.Holder;   --  a match request's points
-   end record;
-
-   Empty_Slot : Slot;
-   --  No track; its ticket is never read while Out_Now is False.
-
-   function Holding (T : Driver.World.Tracking.Track) return Slot is
-      Result : Slot;
-   begin
-      Result.Has := True;
-      Result.Track := T;
-      return Result;
-   end Holding;
-
-   package Slot_Vectors is new Ada.Containers.Vectors (Eye_Id, Slot);
-   package Point_Vectors is new Ada.Containers.Vectors (Positive, Point_Estimate);
-
-   type Thing_Record is record
-      Eyes     : Slot_Vectors.Vector;
-      Friction : Friction_Bounds;
-      Touches  : Point_Vectors.Vector;
-   end record;
-
-   package Thing_Vectors is new Ada.Containers.Vectors (Thing_Id, Thing_Record);
-
-   type Surface_Record is record
-      Plane   : Driver.Geometry.Plane_Estimate;
-      Earlier : Boolean := False;
-   end record;
-
-   package Surface_Vectors is new Ada.Containers.Vectors (Surface_Id, Surface_Record);
-   package Place_Vectors is new Ada.Containers.Vectors (Place_Id, Point_Estimate);
+   use Ada.Numerics.Long_Elementary_Functions;
+   use Driver.Numerics.Arrays;
 
    type Scene_Data is record
-      Things   : Thing_Vectors.Vector;
-      Surfaces : Surface_Vectors.Vector;
-      Places   : Place_Vectors.Vector;
+      State : Driver.World.Estimates.State;
    end record;
 
    procedure Free is new Ada.Unchecked_Deallocation (Scene_Data, Scene_Data_Access);
@@ -76,88 +28,8 @@ package body Driver.World is
       end if;
    end Ensure;
 
-   function Has_Slot (R : Thing_Record; E : Eye_Id) return Boolean is
-     (E <= R.Eyes.Last_Index and then R.Eyes (E).Has);
-
-   procedure Put_Slot (R : in out Thing_Record; E : Eye_Id; S : Slot) is
-   begin
-      while R.Eyes.Last_Index < E loop
-         R.Eyes.Append (Empty_Slot);
-      end loop;
-      R.Eyes.Replace_Element (E, S);
-   end Put_Slot;
-
-   --  Asks the instrument for what a slot's track wants, and reads what it answered.
-   procedure Serve (Id : Thing_Id; E : Eye_Id; Here : in out Slot; Beat : Driver.Clock.Beat) is
-      package Tracks renames Driver.World.Tracking;
-   begin
-      if Here.Out_Now and then Driver.Services.Ready (Here.Ticket) then
-         declare
-            Reply : constant Driver.Services.Reply := Driver.Services.Collect (Here.Ticket);
-            Ok    : Boolean;
-            Why   : Unbounded_String;
-         begin
-            Here.Out_Now := False;
-            if Tracks.State (Here.Track) = Tracks.Matching then
-               declare
-                  Points  : constant Driver.Instrument.Point_Array := Here.Points.Element;
-                  Answers : Driver.Instrument.Answer_Array (Points'Range);
-               begin
-                  Driver.Instrument.Read_Match (Reply, True, Answers, Ok, Why);
-                  if Ok then
-                     Tracks.Matched (Here.Track, Points, Answers);
-                  else
-                     Tracks.Failed (Here.Track);
-                  end if;
-               end;
-            else
-               declare
-                  On     : constant Driver.Images.Image := Tracks.Latest (Here.Track);
-                  Found  : Driver.Images.Mask;
-                  Score  : Real;
-               begin
-                  Driver.Instrument.Read_Segment (Reply, Driver.Images.Width (On), Driver.Images.Height (On),
-                                                  Found, Score, Ok, Why);
-                  if Ok then
-                     Tracks.Segmented (Here.Track, Found);
-                  else
-                     Tracks.Failed (Here.Track);
-                  end if;
-               end;
-            end if;
-            if not Ok then
-               Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & " in eye" & E'Image
-                                & ": the instrument did not answer: " & To_String (Why));
-            elsif Tracks.State (Here.Track) = Tracks.Gone then
-               Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & " is gone from eye" & E'Image);
-            end if;
-         end;
-      end if;
-      if not Here.Out_Now and then Tracks.Wants_Match (Here.Track) then
-         declare
-            Points : constant Driver.Instrument.Point_Array := Tracks.Match_Points (Here.Track);
-         begin
-            Here.Ticket := Driver.Instrument.Submit_Match
-              ((Stored => False, Image => Tracks.Measured_On (Here.Track)),
-               (Stored => False, Image => Tracks.Latest (Here.Track)), Points, True, Beat);
-            Here.Points := Point_Holders.To_Holder (Points);
-            Here.Out_Now := True;
-            Tracks.Asked_Match (Here.Track);
-            Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & " changed in eye" & E'Image & "; looking for it");
-         end;
-      elsif not Here.Out_Now and then Tracks.Wants_Segment (Here.Track) then
-         declare
-            Around   : Driver.Instrument.Box;
-            At_Point : Driver.Instrument.Pixel;
-         begin
-            Tracks.Segment_Prompt (Here.Track, Around, At_Point);
-            Here.Ticket := Driver.Instrument.Submit_Segment
-              (Tracks.Segment_On (Here.Track), True, Around, [1 => (At_Pixel => At_Point, On => True)], Beat);
-            Here.Out_Now := True;
-            Tracks.Asked_Segment (Here.Track);
-         end;
-      end if;
-   end Serve;
+   function Known_Thing (S : Scene; T : Thing_Id) return Boolean is
+     (S.Data /= null and then Natural (T) <= Driver.World.Estimates.Thing_Count (S.Data.State));
 
    procedure Observe
      (S    : in out Scene;
@@ -167,45 +39,23 @@ package body Driver.World is
       Sent : Driver.Commands.Command)
    is
       pragma Unreferenced (H, Sent);
-      Still : constant Boolean := Driver.Robot.Still (M);
+      function Camera_Of (E : Eye_Id; Seen : not null access constant Observation)
+        return Driver.World.Cameras.Camera'Class is
+        (Driver.World.Cameras.Of_Body'(Robot => M'Access, Seen => Seen, Eye => E));
    begin
       Ensure (S);
-      for Id in S.Data.Things.First_Index .. S.Data.Things.Last_Index loop
-         declare
-            R : Thing_Record := S.Data.Things (Id);
-         begin
-            for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
-               if R.Eyes (E).Has and then E <= O.Images.Last_Index then
-                  declare
-                     Here : Slot := R.Eyes (E);
-                  begin
-                     Driver.World.Tracking.Observe (Here.Track, O.Images (E), O.Beat, Still);
-                     Serve (Id, E, Here, O.Beat);
-                     R.Eyes.Replace_Element (E, Here);
-                  end;
-               end if;
-            end loop;
-            S.Data.Things.Replace_Element (Id, R);
-         end;
-      end loop;
+      Driver.World.Estimates.Observe
+        (S.Data.State, Driver.Robot.Eye_Count (M), Camera_Of'Access, Driver.Robot.Still (M), O);
    end Observe;
 
    procedure New_Episode (S : in out Scene) is
    begin
       Ensure (S);
-      S.Data.Things.Clear;
-      S.Data.Places.Clear;
-      for F in S.Data.Surfaces.First_Index .. S.Data.Surfaces.Last_Index loop
-         declare
-            R : Surface_Record := S.Data.Surfaces (F);
-         begin
-            R.Earlier := True;
-            S.Data.Surfaces.Replace_Element (F, R);
-         end;
-      end loop;
+      Driver.World.Estimates.New_Episode (S.Data.State);
    end New_Episode;
 
-   function Thing_Count (S : Scene) return Natural is (if S.Data = null then 0 else Natural (S.Data.Things.Length));
+   function Thing_Count (S : Scene) return Natural is
+     (if S.Data = null then 0 else Driver.World.Estimates.Thing_Count (S.Data.State));
 
    procedure Adopt
      (S      : in out Scene;
@@ -216,51 +66,24 @@ package body Driver.World is
       Thing  : out Thing_Id)
    is
       pragma Unreferenced (M);
-      Fresh : constant Driver.World.Tracking.Track := Driver.World.Tracking.Start (Region, O.Images (E), O.Beat);
    begin
       Ensure (S);
-      --  The thing that covers the same pixels in this eye is this thing,
-      --  measured again.
-      for Id in S.Data.Things.First_Index .. S.Data.Things.Last_Index loop
-         declare
-            R : Thing_Record := S.Data.Things (Id);
-         begin
-            if Has_Slot (R, E)
-              and then Driver.World.Regions.Same_Pixels (Driver.World.Tracking.Region (R.Eyes (E).Track), Region)
-            then
-               Put_Slot (R, E, Holding (Fresh));
-               S.Data.Things.Replace_Element (Id, R);
-               Thing := Id;
-               return;
-            end if;
-         end;
-      end loop;
-      declare
-         R : Thing_Record;
-      begin
-         Put_Slot (R, E, Holding (Fresh));
-         S.Data.Things.Append (R);
-         Thing := S.Data.Things.Last_Index;
-         Driver.Log.Line (Driver.Log.World, "thing" & Thing'Image & ": adopted in eye" & E'Image & ","
-                          & Driver.Images.Count (Region)'Image & " pixels");
-      end;
+      Driver.World.Estimates.Adopt (S.Data.State, E, O, Region, Thing);
    end Adopt;
 
    function Seen_In (S : Scene; T : Thing_Id; E : Eye_Id) return Boolean is
-     (S.Data /= null and then T <= S.Data.Things.Last_Index and then Has_Slot (S.Data.Things (T), E)
-      and then Driver.World.Tracking.Seen (S.Data.Things (T).Eyes (E).Track));
+     (Known_Thing (S, T) and then Driver.World.Estimates.Seen_In (S.Data.State, T, E));
 
    function Region_In (S : Scene; T : Thing_Id; E : Eye_Id) return Driver.Images.Mask is
-     (Driver.World.Tracking.Region (S.Data.Things (T).Eyes (E).Track));
-
-   --  Not measured yet: a thing's place in the world comes from two eyes.
+     (Driver.World.Estimates.Region_In (S.Data.State, T, E));
 
    function Centre (S : Scene; T : Thing_Id) return Point_Estimate is
-      pragma Unreferenced (S, T);
       Unmeasured : Point_Estimate;
    begin
-      return Unmeasured;
+      return (if Known_Thing (S, T) then Driver.World.Estimates.Centre (S.Data.State, T) else Unmeasured);
    end Centre;
+
+   --  Not measured yet: the surfaces things rest on, their holding and motion.
 
    function Resting_On (S : Scene; T : Thing_Id) return Surface_Id'Base is (0);
 
@@ -273,35 +96,94 @@ package body Driver.World is
    procedure Remember (S : in out Scene; Point : Point_Estimate; Place : out Place_Id) is
    begin
       Ensure (S);
-      S.Data.Places.Append (Point);
-      Place := S.Data.Places.Last_Index;
+      Driver.World.Estimates.Remember (S.Data.State, Point, Place);
    end Remember;
 
-   function Where (S : Scene; P : Place_Id) return Point_Estimate is (S.Data.Places (P));
+   function Where (S : Scene; P : Place_Id) return Point_Estimate is (Driver.World.Estimates.Where (S.Data.State, P));
 
    function Samples (S : Scene; T : Thing_Id) return Sample_Array is
-      pragma Unreferenced (S, T);
+      Points : constant Driver.World.Pairs.Match_Vectors.Vector :=
+        (if Known_Thing (S, T) then Driver.World.Estimates.Points_Of (S.Data.State, T)
+         else Driver.World.Pairs.Match_Vectors.Empty_Vector);
+      Result : Sample_Array (1 .. Natural (Points.Length));
+      --  Each point by the pixel of the first eye it was seen at, so a
+      --  point's neighbours on the surface are its neighbours in the image.
+      type Key is record
+         Column, Row : Integer;
+      end record;
+      function "<" (A, B : Key) return Boolean is (A.Row < B.Row or else (A.Row = B.Row and then A.Column < B.Column));
+      package Point_Maps is new Ada.Containers.Ordered_Maps (Key, Positive);
+      Index : Point_Maps.Map;
+      function Key_Of (P : Driver.Images.Pixel) return Key is
+        ((Column => Integer (Real'Floor (P.U)), Row => Integer (Real'Floor (P.V))));
+      function At_Key (K : Key; Found : out Vec3) return Boolean is
+         C : constant Point_Maps.Cursor := Index.Find (K);
+      begin
+         Found := Zero3;
+         if Point_Maps.Has_Element (C) then
+            Found := Points (Point_Maps.Element (C)).Point.Mean;
+            return True;
+         end if;
+         return False;
+      end At_Key;
    begin
-      return [1 .. 0 => (others => <>)];
+      for I in 1 .. Natural (Points.Length) loop
+         Index.Include (Key_Of (Points (I).In_First), I);
+      end loop;
+      for I in Result'Range loop
+         declare
+            K : constant Key := Key_Of (Points (I).In_First);
+            Left, Right, Above, Below : Vec3;
+            Normal : Vec3 := Zero3;
+         begin
+            --  The surface's normal from the points beside it in the image;
+            --  none where a neighbour is missing.
+            if At_Key ((K.Column - 1, K.Row), Left) and then At_Key ((K.Column + 1, K.Row), Right)
+              and then At_Key ((K.Column, K.Row - 1), Above) and then At_Key ((K.Column, K.Row + 1), Below)
+            then
+               declare
+                  N : constant Vec3 := Cross (Right - Left, Below - Above);
+               begin
+                  if abs N > 0.0 then
+                     Normal := Unit (N);
+                  end if;
+               end;
+            end if;
+            Result (I) := (Point => Points (I).Point.Mean, Normal => Normal, Seen => True);
+         end;
+      end loop;
+      return Result;
    end Samples;
 
-   function Sample_Sigma (S : Scene; T : Thing_Id) return Real is (Real'Last);
+   function Sample_Sigma (S : Scene; T : Thing_Id) return Real is
+      Points : constant Driver.World.Pairs.Match_Vectors.Vector :=
+        (if Known_Thing (S, T) then Driver.World.Estimates.Points_Of (S.Data.State, T)
+         else Driver.World.Pairs.Match_Vectors.Empty_Vector);
+      Sum : Real := 0.0;
+   begin
+      if Points.Is_Empty then
+         return Real'Last;
+      end if;
+      --  A sample's position uncertainty: its covariance's mean variance per
+      --  axis, averaged over the samples.
+      for M of Points loop
+         Sum := Sum + (M.Point.Covariance (1, 1) + M.Point.Covariance (2, 2) + M.Point.Covariance (3, 3)) / 3.0;
+      end loop;
+      return Sqrt (Sum / Real (Points.Length));
+   end Sample_Sigma;
 
    procedure Touched (S : in out Scene; T : Thing_Id; Point : Point_Estimate) is
-      R : Thing_Record := S.Data.Things (T);
    begin
-      R.Touches.Append (Point);
-      S.Data.Things.Replace_Element (T, R);
+      Driver.World.Estimates.Touched (S.Data.State, T, Point);
    end Touched;
 
    procedure Learn_Friction (S : in out Scene; T : Thing_Id; Bounds : Friction_Bounds) is
-      R : Thing_Record := S.Data.Things (T);
    begin
-      R.Friction := (Low => Real'Max (R.Friction.Low, Bounds.Low), High => Real'Min (R.Friction.High, Bounds.High));
-      S.Data.Things.Replace_Element (T, R);
+      Driver.World.Estimates.Learn_Friction (S.Data.State, T, Bounds);
    end Learn_Friction;
 
-   function Friction (S : Scene; T : Thing_Id) return Friction_Bounds is (S.Data.Things (T).Friction);
+   function Friction (S : Scene; T : Thing_Id) return Friction_Bounds is
+     (Driver.World.Estimates.Friction (S.Data.State, T));
 
    function Predicted (S : Scene; T : Thing_Id; Beats : Natural) return Point_Estimate is
       pragma Unreferenced (Beats);
@@ -309,12 +191,15 @@ package body Driver.World is
       return Centre (S, T);
    end Predicted;
 
-   function Surface_Count (S : Scene) return Natural is (if S.Data = null then 0 else Natural (S.Data.Surfaces.Length));
+   function Surface_Count (S : Scene) return Natural is
+     (if S.Data = null then 0 else Driver.World.Estimates.Surface_Count (S.Data.State));
 
-   function Plane_Of (S : Scene; F : Surface_Id) return Driver.Geometry.Plane_Estimate is (S.Data.Surfaces (F).Plane);
+   function Plane_Of (S : Scene; F : Surface_Id) return Driver.Geometry.Plane_Estimate is
+     (Driver.World.Estimates.Plane_Of (S.Data.State, F));
 
-   function Earlier (S : Scene; F : Surface_Id) return Boolean is (S.Data.Surfaces (F).Earlier);
+   function Earlier (S : Scene; F : Surface_Id) return Boolean is (Driver.World.Estimates.Earlier (S.Data.State, F));
 
-   function Place_Count (S : Scene) return Natural is (if S.Data = null then 0 else Natural (S.Data.Places.Length));
+   function Place_Count (S : Scene) return Natural is
+     (if S.Data = null then 0 else Driver.World.Estimates.Place_Count (S.Data.State));
 
 end Driver.World;
