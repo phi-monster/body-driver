@@ -19,7 +19,12 @@
 --  points that gives (Driver.World.Supports), each pair's grid kept apart
 --  from the others'. The grid is as many pixels apart as the square root of
 --  the image's shorter side, so it has as many rows as each row has pixels
---  between points. A point of the scene that falls inside a thing's region
+--  between points. A surface measured before in the episode stands where a
+--  new measurement neither finds it again nor sees through it (a line of
+--  sight crossing it to a point beyond): eyes that look elsewhere now say
+--  nothing of it. A thing's points are each pair's latest, less those that
+--  fall outside it now in an eye that holds it; an eye that lost it says
+--  nothing either. A point of the scene that falls inside a thing's region
 --  in an eye that holds it is the thing's own (on it, or hidden behind it),
 --  so a thing never rests on its own top face; a thing's support is worked
 --  out again only when its points or the surfaces change.
@@ -187,8 +192,9 @@ private
    --  A point of the scene: where both eyes saw it, and its place in the grid
    --  of the eye it was asked from.
    type Scene_Point is record
-      Point : Point_Estimate;
-      Grid  : Driver.World.Supports.Grid_Point;
+      Point      : Point_Estimate;
+      Grid       : Driver.World.Supports.Grid_Point;
+      From, Into : Eye_Id := Eye_Id'First;   --  the two eyes that saw it
    end record;
 
    package Scene_Point_Vectors is new Ada.Containers.Vectors (Positive, Scene_Point);

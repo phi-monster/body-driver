@@ -451,6 +451,72 @@ package body Driver.World.Estimates is
       end loop;
    end Surfaces_Changed;
 
+   function In_Reach (F : Driver.World.Supports.Surface; X : Vec3) return Boolean is
+      --  Over the surface's reach, along its normal.
+      D : constant Vec3 := X - F.Plane.Centre;
+      A : constant Real := D * F.Plane.Tangent_1;
+      B : constant Real := D * F.Plane.Tangent_2;
+   begin
+      return A >= F.Low_1 and then A <= F.High_1 and then B >= F.Low_2 and then B <= F.High_2;
+   end In_Reach;
+
+   function Found_Again
+     (Old : Driver.World.Supports.Surface; Found : Driver.World.Supports.Surface_Vectors.Vector) return Boolean
+   is
+      --  A surface found now over the old one's reach, or the old one over the
+      --  new one's, at a height the two planes' uncertainties do not part.
+   begin
+      for F of Found loop
+         if In_Reach (Old, F.Plane.Centre) or else In_Reach (F, Old.Plane.Centre) then
+            declare
+               H : constant Estimate :=
+                 Driver.Geometry.Height
+                   (Old.Plane, Point_Estimate'(Mean       => F.Plane.Centre,
+                                               Covariance => (F.Plane.Offset_Sigma ** 2)
+                                                             * Driver.Numerics.Outer (F.Plane.Normal, F.Plane.Normal)));
+            begin
+               if not Significant (Scalar_Gate (H.Degrees_Of_Freedom), H.Value, H.Sigma) then
+                  return True;
+               end if;
+            end;
+         end if;
+      end loop;
+      return False;
+   end Found_Again;
+
+   function Seen_Through
+     (Old       : Driver.World.Supports.Surface;
+      Points    : Scene_Point_Vectors.Vector;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      Seen      : not null access constant Observation) return Boolean
+   is
+      --  A point seen now beyond the surface from an eye that saw it, the
+      --  line of sight crossing the surface's plane within its reach: the eye
+      --  sees through where the surface was.
+      type Two_Eyes is array (1 .. 2) of Eye_Id;
+   begin
+      for P of Points loop
+         for E of Two_Eyes'[P.From, P.Into] loop
+            declare
+               Eye    : constant Vec3 := Camera_Of (E, Seen).Pose.Pose.Translation;
+               Before : constant Real := Driver.Geometry.Height (Old.Plane, Eye);
+               H      : constant Estimate := Driver.Geometry.Height (Old.Plane, P.Point);
+            begin
+               --  The eye on one side, the point significantly on the other.
+               if Before /= 0.0 and then H.Value * Before < 0.0
+                 and then Significant (Scalar_Gate (H.Degrees_Of_Freedom, Tests => 2 * Natural (Points.Length)),
+                                       H.Value, H.Sigma)
+                 and then In_Reach (Old, Eye + (Before / (Before - H.Value)) * (P.Point.Mean - Eye))
+               then
+                  return True;
+               end if;
+            end;
+         end loop;
+      end loop;
+      return False;
+   end Seen_Through;
+
    procedure Read_Background
      (S         : in out State;
       Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
@@ -505,7 +571,9 @@ package body Driver.World.Estimates is
                                 (Scene_Point'(Point => M.Point,
                                               Grid  => (Column => S.Next_Column
                                                                   + Natural (Real'Floor (M.In_First.U)) / X.Stride,
-                                                        Row    => Natural (Real'Floor (M.In_First.V)) / X.Stride)));
+                                                        Row    => Natural (Real'Floor (M.In_First.V)) / X.Stride),
+                                              From  => X.From,
+                                              Into  => X.Into));
                               Added := Added + 1;
                            end if;
                         end loop;
@@ -535,20 +603,46 @@ package body Driver.World.Estimates is
                All_Points : Driver.Geometry.Point_Array (1 .. Natural (S.Incoming.Length));
                All_Grid   : Driver.World.Supports.Grid_Array (1 .. Natural (S.Incoming.Length));
                Found      : Driver.World.Supports.Surface_Vectors.Vector;
+               Scene      : Scene_Point_Vectors.Vector := S.Incoming;
+               Carried    : Natural := 0;
             begin
                for K in All_Points'Range loop
                   All_Points (K) := S.Incoming (K).Point;
                   All_Grid (K) := S.Incoming (K).Grid;
                end loop;
                Driver.World.Supports.Find (All_Points, All_Grid, S.Up, S.Seen_From, Found);
+               --  A surface of this episode stands where this measurement neither
+               --  found it again nor saw through it: eyes that look elsewhere
+               --  now say nothing of it. Its points come along, so its members
+               --  are points of the scene still.
+               if not S.Earlier then
+                  for Old of S.Surfaces loop
+                     if not Found_Again (Old, Found)
+                       and then not Seen_Through (Old, S.Incoming, Camera_Of, S.Round_Seen.Constant_Reference.Element)
+                     then
+                        declare
+                           Kept : Driver.World.Supports.Surface := Old;
+                        begin
+                           Kept.Members.Clear;
+                           for M of Old.Members loop
+                              Scene.Append (S.Scene (M));
+                              Kept.Members.Append (Positive (Scene.Length));
+                           end loop;
+                           Found.Append (Kept);
+                           Carried := Carried + 1;
+                        end;
+                     end if;
+                  end loop;
+               end if;
                S.Surfaces := Found;
-               S.Scene := S.Incoming;
+               S.Scene := Scene;
                S.Scene_Round := S.Round;
                S.Incoming.Clear;
                S.Earlier := False;
                Surfaces_Changed (S);
                Driver.Log.Line (Driver.Log.World, "the scene:" & Found.Length'Image & " surfaces things can rest on, from"
-                                & S.Scene.Length'Image & " points");
+                                & All_Points'Length'Image & " points," & Carried'Image
+                                & " of them measured before and not seen since");
             end;
          end if;
       end if;

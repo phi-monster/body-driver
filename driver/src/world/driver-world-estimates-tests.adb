@@ -43,13 +43,20 @@ package body Driver.World.Estimates.Tests is
    Table_Half : constant := 0.5;
    Match      : constant := 0.3;   --  the matcher's error, pixels per coordinate
 
-   Eyes : constant array (Eye_Id range 1 .. 2) of Driver.World.Tests.Pinhole :=
+   type Eye_Pair is array (Eye_Id range 1 .. 2) of Driver.World.Tests.Pinhole;
+
+   Eyes : constant Eye_Pair :=
      [Driver.World.Tests.Looking_At ([-0.15, -0.55, 0.55], [0.0, 0.0, 0.0], 150.0, Columns, Rows, 0.3),
       Driver.World.Tests.Looking_At ([0.15, -0.55, 0.55], [0.0, 0.0, 0.0], 150.0, Columns, Rows, 0.3)];
+
+   View : Eye_Pair := Eyes;
+   --  The eyes as they look now: the instrument answers for them.
 
    Up : constant Direction_Estimate := (Unit_Vector => [0.0, 0.0, 1.0], Sigma => 0.001);
 
    type Surface_Hit is (Nothing, Table, Box);
+
+   Box_There : Boolean := True;   --  a test can take the box away
 
    procedure First_Hit (Origin, Direction : Vec3; Hit : out Surface_Hit; At_T : out Real) is
       Near : Real := Real'First;
@@ -73,7 +80,7 @@ package body Driver.World.Estimates.Tests is
             end;
          end if;
       end loop;
-      if Into_Box and then Near <= Far and then Near > 0.0 then
+      if Box_There and then Into_Box and then Near <= Far and then Near > 0.0 then
          Hit := Box;
          At_T := Near;
       end if;
@@ -155,7 +162,7 @@ package body Driver.World.Estimates.Tests is
            (Driver.Services.Instrument, "/match",
             Driver.Instrument.Match_Request ((Stored => False, Image => Seen.Images (From)),
                                              (Stored => False, Image => Seen.Images (Into)), Points, True),
-            (Ok   => True, Text => To_Unbounded_String (Reply_Text (Eyes (From), Eyes (Into), Points)),
+            (Ok   => True, Text => To_Unbounded_String (Reply_Text (View (From), View (Into), Points)),
              Why  => Null_Unbounded_String, Lasting => False));
          Answered.Append (T);
       end if;
@@ -242,9 +249,9 @@ package body Driver.World.Estimates.Tests is
    is
       pragma Unreferenced (Seen);
    begin
-      return Eyes (E);
+      return View (E);
    end Camera_Of;
-   --  The pinholes do not move.
+   --  The pinholes move only when a test turns them.
 
    procedure Scene_Flow is
       S     : State;
@@ -344,6 +351,71 @@ package body Driver.World.Estimates.Tests is
       Driver.Services.End_Replay;
    end Scene_Flow;
 
+   procedure Surfaces_Stay is
+      --  The table and the box top, measured; then the eyes close in on the
+      --  box top alone and the scene is measured again. The top is found
+      --  again and the table, which no eye sees now, stays. Then the box is
+      --  taken away: the eyes see the table through where its top was.
+      S    : State;
+      Beat : Driver.Clock.Beat := 1;
+      Gray : constant Driver.Images.Image := Plain (128);
+      Top_Found, Table_Found : Boolean := False;
+
+      procedure Step is
+         O : Observation;
+      begin
+         O.Beat := Beat;
+         O.Images.Append (Gray);
+         O.Images.Append (Gray);
+         Driver.Services.Replay_Beat (Beat);
+         Observe (S, 2, Camera_Of'Access, Up, True, O);
+         Answer_All (S);
+         Beat := Beat + 1;
+      end Step;
+
+      procedure Find_Surfaces is
+      begin
+         Top_Found := False;
+         Table_Found := False;
+         for F of S.Surfaces loop
+            Table_Found := Table_Found or else abs F.Plane.Centre (3) < 0.005;
+            Top_Found := Top_Found or else abs (F.Plane.Centre (3) - Box_Top) < 0.005;
+         end loop;
+      end Find_Surfaces;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 7);
+      Answered.Clear;
+      View := Eyes;
+      Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
+      Step;
+      Step;
+      Find_Surfaces;
+      Check (Table_Found and then Top_Found, "the first measurement did not find the table and the box top");
+      View := [Driver.World.Tests.Looking_At ([-0.03, -0.12, 0.3], [0.0, 0.0, Box_Top], 600.0, Columns, Rows, 0.3),
+               Driver.World.Tests.Looking_At ([0.03, -0.12, 0.3], [0.0, 0.0, Box_Top], 600.0, Columns, Rows, 0.3)];
+      S.Due := True;
+      Step;
+      Step;
+      Find_Surfaces;
+      Check (S.Scene_Round = 2, "the scene was not measured again: round" & S.Scene_Round'Image);
+      Check (Table_Found and then Top_Found and then Surface_Count (S) = 2,
+             "measured again close to the box top, the scene held" & Surface_Count (S)'Image & " surfaces, table "
+             & Table_Found'Image & ", top " & Top_Found'Image);
+      --  The box taken away and the scene measured from afar again: the eyes
+      --  see the table through where its top was, and the top goes.
+      View := Eyes;
+      Box_There := False;
+      S.Due := True;
+      Step;
+      Step;
+      Find_Surfaces;
+      Check (Table_Found and then not Top_Found and then Surface_Count (S) = 1,
+             "with the box gone the scene held" & Surface_Count (S)'Image & " surfaces, table " & Table_Found'Image
+             & ", top " & Top_Found'Image);
+      Box_There := True;
+      Driver.Services.End_Replay;
+   end Surfaces_Stay;
+
    procedure Points_Stay is
       --  The box top's points, as two eyes saw them, with the box held in the
       --  first eye. They stay while it holds the box where they fall, while it
@@ -440,6 +512,9 @@ package body Driver.World.Estimates.Tests is
 
    procedure Register is
    begin
+      Driver.Tests.Register ("world.scene.surfaces_stay",
+                             "a surface no eye sees now is dropped when the scene is measured again, or one the eyes"
+                             & " see through is kept", Surfaces_Stay'Access);
       Driver.Tests.Register ("world.scene.points_stay",
                              "a thing's points go when an eye measures it again or loses it, or stay when an eye holds"
                              & " it elsewhere", Points_Stay'Access);

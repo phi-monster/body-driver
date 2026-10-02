@@ -913,8 +913,10 @@ driver-world-estimates.adb	F : Positive := 1;	1	structure	vectors are indexed fr
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
+driver-world-estimates.adb	and then Significant (Scalar_Gate (H.Degrees_Of_Freedom, Tests => 2 * Natural (Points.Length)),	2	structure	each point is tested from both eyes that saw it
 driver-world-estimates.adb	return (Mean => (1.0 / Real (R.Points.Length)) * Sum,	1.0	math	the centroid is the points' sum over their count
 driver-world-estimates.adb	return -1;	1	format	a beat before every beat: no measurement asked about yet
+driver-world-estimates.adb	type Two_Eyes is array (1 .. 2) of Eye_Id;	2	structure	a point of the scene is seen by two eyes
 driver-world-estimates.ads	Stride : Positive := 1;	1	structure	a grid at every pixel until it is set
 driver-world-pairs.adb	(for all A in 1 .. 3 =>	3	structure	a point has three coordinates
 driver-world-pairs.adb	1.0)	1.0	statistics	the deviate is already in units of its sigma
