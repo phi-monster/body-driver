@@ -87,6 +87,65 @@ package body Driver.Core_Tests is
       Check (not Ok, "rank-deficient system reported full rank");
    end Least_Squares_Exact;
 
+   procedure Least_Squares_In_A_Task is
+      --  A design matrix with a row per observation, solved inside a task with
+      --  the default stack as the decider's estimators are: 100 000 rows of a
+      --  line fit (3.2 MB of working copies).
+      type Matrix_Access is access Real_Matrix;
+      type Vector_Access is access Real_Vector;
+      Rows : constant := 100_000;
+      A    : constant Matrix_Access := new Real_Matrix (1 .. Rows, 1 .. 2);
+      B    : constant Vector_Access := new Real_Vector (1 .. Rows);
+
+      protected Result is
+         procedure Set (Line : Real_Vector; Full : Boolean);
+         function Slope return Real;
+         function Intercept return Real;
+         function Solved return Boolean;
+      private
+         S, C : Real := 0.0;
+         Done : Boolean := False;
+      end Result;
+
+      protected body Result is
+         procedure Set (Line : Real_Vector; Full : Boolean) is
+         begin
+            S := Line (Line'First);
+            C := Line (Line'Last);
+            Done := Full;
+         end Set;
+
+         function Slope return Real is (S);
+         function Intercept return Real is (C);
+         function Solved return Boolean is (Done);
+      end Result;
+   begin
+      for I in 1 .. Rows loop
+         A (I, 1) := Real (I) / Real (Rows);
+         A (I, 2) := 1.0;
+         B (I) := 3.0 * A (I, 1) - 2.0;
+      end loop;
+      declare
+         task Solver;
+
+         task body Solver is
+            X  : Real_Vector (1 .. 2);
+            Ok : Boolean;
+         begin
+            Driver.Numerics.Dense.Least_Squares (A.all, B.all, X, Ok);
+            Result.Set (X, Ok);
+         exception
+            when others =>
+               Result.Set ([0.0, 0.0], False);
+         end Solver;
+      begin
+         null;   --  the block waits for Solver
+      end;
+      Check (Result.Solved, "a tall least squares problem could not be solved in a task with the default stack");
+      Check_Close (Result.Slope, 3.0, 1.0e-9, "tall line fit slope");
+      Check_Close (Result.Intercept, -2.0, 1.0e-9, "tall line fit intercept");
+   end Least_Squares_In_A_Task;
+
    procedure Cholesky_Solve is
       A : constant Real_Matrix := [[4.0, 2.0, 0.4], [2.0, 5.0, 1.0], [0.4, 1.0, 3.0]];
       B : constant Real_Vector := [1.0, -2.0, 0.5];
@@ -678,6 +737,8 @@ package body Driver.Core_Tests is
                              Least_Squares_Exact'Access);
       Driver.Tests.Register ("core.cholesky", "Cholesky accepts indefinite input or solves wrongly",
                              Cholesky_Solve'Access);
+      Driver.Tests.Register ("core.least_squares_task", "a tall least squares problem overflows a task's default stack",
+                             Least_Squares_In_A_Task'Access);
       Driver.Tests.Register ("core.stats", "robust statistics moved by a single outlier", Robust_Statistics'Access);
       Driver.Tests.Register ("core.significance", "the one significance rule misjudges a difference",
                              Significance'Access);

@@ -225,6 +225,38 @@ package body Driver.World.Supports.Tests is
                Check (Raised.Index = 1 and then not Raised.Touching and then abs (Raised.Height.Value - 0.05) < 0.01,
                       "a wild point under a thing above the table made it touch, at" & Raised.Height.Value'Image);
             end;
+            declare
+               --  A face tilted 30 degrees, found 0.3 m off with its tilt
+               --  uncertain by a tenth of a radian, whose reach takes in the
+               --  thing on the table: carried out that far, its plane passes
+               --  2 mm over the table at the thing, uncertain there by some
+               --  3 cm. The thing still rests on the table, which it is surely
+               --  closest above.
+               With_Slope : Surface_Vectors.Vector := Found;
+               Normal     : constant Vec3 := [0.0, -0.5, Sqrt (0.75)];
+               Here       : constant Vec3 := [0.3, 0.2, Table_Z (0.3) + 0.002];
+               Away       : constant Vec3 := [0.0, 0.3, 0.0];
+               Slope      : Surface;
+            begin
+               Slope.Plane := (Centre       => Here + Away - Real'(Normal * Away) * Normal,
+                               Normal       => Normal,
+                               Tangent_1    => [1.0, 0.0, 0.0],
+                               Tangent_2    => Cross (Normal, [1.0, 0.0, 0.0]),
+                               Offset_Sigma => 0.001, Tilt_11 => 0.01, Tilt_12 => 0.0, Tilt_22 => 0.01,
+                               Points       => 40, Scatter => 1.0);
+               Slope.Low_1 := -1.0;
+               Slope.High_1 := 1.0;
+               Slope.Low_2 := -1.0;
+               Slope.High_2 := 1.0;
+               With_Slope.Append (Slope);
+               declare
+                  On : constant Support := Under (With_Slope, Table_Thing, Up, None'Access);
+               begin
+                  Check (On.Index = 1,
+                         "a tilted face carried out far beyond its points, uncertain there by centimetres, was taken"
+                         & " for the table's thing's support: surface" & On.Index'Image & " at" & On.Height.Value'Image);
+               end;
+            end;
             Check (On_Box.Index = 2 and then Resting (On_Box) and then On_Box.Touching,
                    "a thing on the box does not rest on the box");
             Check (Lifted.Index = 1 and then abs (Lifted.Height.Value - 0.2) < 0.01 and then not Lifted.Touching,

@@ -1,3 +1,4 @@
+with Ada.Unchecked_Deallocation;
 with Driver.Pixels;
 
 package body Driver.Robot.Hand.Sweep is
@@ -5,6 +6,12 @@ package body Driver.Robot.Hand.Sweep is
    use Driver.Images;
    use type Driver.Clock.Beat;
    use type Driver.Robot.Hand.Lobes.Closing;
+
+   --  Everything sized by pixels lives on the heap: the estimates also run in
+   --  the decider's task, whose stack is small.
+   type Correspondences_Access is access Driver.Robot.Hand.Lobes.Correspondence_Array;
+   procedure Free is new Ada.Unchecked_Deallocation
+     (Driver.Robot.Hand.Lobes.Correspondence_Array, Correspondences_Access);
 
    function Start (Width, Height : Positive; Channels : Positive; Closer_Noise, Rest_Noise : Real_Array) return State is
      ((Width       => Width,
@@ -102,19 +109,20 @@ package body Driver.Robot.Hand.Sweep is
             end if;
          end loop;
       end loop;
-      declare
-         Points : Driver.Instrument.Point_Array (1 .. (C1 - C0 + 1) * (R1 - R0 + 1));
-         K : Natural := 0;
-      begin
-         for R in R0 .. R1 loop
-            for C in C0 .. C1 loop
-               K := K + 1;
-               --  The pixel's centre.
-               Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);
+      --  Built where it is returned, off the stack.
+      return Points : Driver.Instrument.Point_Array (1 .. (C1 - C0 + 1) * (R1 - R0 + 1)) do
+         declare
+            K : Natural := 0;
+         begin
+            for R in R0 .. R1 loop
+               for C in C0 .. C1 loop
+                  K := K + 1;
+                  --  The pixel's centre.
+                  Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);
+               end loop;
             end loop;
-         end loop;
-         return Points;
-      end;
+         end;
+      end return;
    end Query_Points;
 
    procedure Set_Status (S : in out State; Channel : Positive; To : Progress) is
@@ -154,8 +162,8 @@ package body Driver.Robot.Hand.Sweep is
       subtype Correspondence_Array is Driver.Robot.Hand.Lobes.Correspondence_Array;
       subtype Matcher_Noise is Driver.Robot.Hand.Lobes.Matcher_Noise;
       Changed  : constant Mask := Changed_Of (S, Channel);
-      Ahead    : Correspondence_Array (Points'Range);
-      Behind   : Correspondence_Array (Points'Range);
+      Ahead    : Correspondences_Access := new Correspondence_Array (Points'Range);
+      Behind   : Correspondences_Access := new Correspondence_Array (Points'Range);
       Still_Count : Natural := 0;
    begin
       for K in Points'Range loop
@@ -173,7 +181,7 @@ package body Driver.Robot.Hand.Sweep is
       declare
          --  Pixels that did not change between the ends, both ways round:
          --  what the matcher does with pixels that did not move.
-         Still : Correspondence_Array (1 .. 2 * Still_Count);
+         Still : Correspondences_Access := new Correspondence_Array (1 .. 2 * Still_Count);
          K     : Natural := 0;
          Attached_Still : Mask := Create (S.Width, S.Height);
       begin
@@ -197,9 +205,9 @@ package body Driver.Robot.Hand.Sweep is
             end loop;
          end if;
          declare
-            Noise : constant Matcher_Noise := Driver.Robot.Hand.Lobes.Noise_Of (Still);
+            Noise : constant Matcher_Noise := Driver.Robot.Hand.Lobes.Noise_Of (Still.all);
             Found : constant Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector :=
-              Driver.Robot.Hand.Lobes.Find (Ahead, Behind, Noise, Attached_Still, S.Width, S.Height);
+              Driver.Robot.Hand.Lobes.Find (Ahead.all, Behind.all, Noise, Attached_Still, S.Width, S.Height);
             Per_Channel : Channel_Array := S.Per_Channel.Element;
          begin
             Per_Channel (Channel).Lobes := Found;
@@ -207,7 +215,10 @@ package body Driver.Robot.Hand.Sweep is
             Per_Channel (Channel).Status := (if Found.Is_Empty then Nothing_Moves else Measured);
             S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
          end;
+         Free (Still);
       end;
+      Free (Ahead);
+      Free (Behind);
    end Answer;
 
    function Lobes_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector is
