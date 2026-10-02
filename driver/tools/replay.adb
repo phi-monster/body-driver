@@ -1,7 +1,8 @@
 --  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT]
 --
---  Feeds a recording (Driver.Recording format, uncompressed)
---  through every estimator exactly as the main loop does: each observation is
+--  Feeds a recording (Driver.Recording format, uncompressed; it is read once,
+--  forward, so "zstd -dc run.rec.zst | replay /dev/stdin ..." needs no copy on
+--  disk) through every estimator exactly as the main loop does: each observation is
 --  given to the robot, hand and world estimators together with the last
 --  command sent before it arrived (read back from the recorded replies), the
 --  command in effect while it was captured. At the end the measured body is
@@ -15,10 +16,11 @@
 --  anything; the recorded replies did.
 --
 --  The estimators' service calls are answered as Driver.Services describes
---  for a replay: from the recording's own replies when it holds any for that
---  service, otherwise by the live service at --inst or --eye, and in both
---  cases ready from the beat after the call, so the result never depends on
---  how fast the replay runs.
+--  for a replay: by the live service when --inst or --eye names one (a
+--  recording without service replies, or a new instrument asked again),
+--  otherwise from the recording's own replies; in both cases ready from the
+--  beat after the call, so the result never depends on how fast the replay
+--  runs.
 
 with Ada.Command_Line;
 with Ada.Containers.Indefinite_Ordered_Maps;
@@ -234,6 +236,8 @@ procedure Replay is
       end if;
    end Driver_Message;
 
+   Live : Driver.Services.Service_Set := [others => False];   --  services named on the command line
+
    procedure Configure_Service (S : Driver.Services.Service; Address : String) is
       Colon : constant Natural := Ada.Strings.Fixed.Index (Address, ":", Ada.Strings.Backward);
    begin
@@ -243,6 +247,7 @@ procedure Replay is
       end if;
       Driver.Services.Configure (S, Address (Address'First .. Colon - 1),
                                  Natural'Value (Address (Colon + 1 .. Address'Last)));
+      Live (S) := True;
    end Configure_Service;
 
    --  Service records (Driver.Recording): a first line naming the call
@@ -307,39 +312,13 @@ procedure Replay is
       end if;
    end Service_Reply;
 
-   function Recorded_Services return Driver.Services.Service_Set is
-      --  Which services the recording holds replies of: those are replayed,
-      --  the others answered live.
-      Scan    : Driver.Recording.Reader;
-      Found   : Driver.Services.Service_Set := [others => False];
-      Ok      : Boolean;
-      Kind    : Driver.Recording.Record_Kind;
-      Ns      : Long_Long_Integer;
-      Payload : Driver.Bytes.Buffer;
-
-      procedure Note (Data : Driver.Bytes.Byte_Array) is
-         A : constant Service_Record := Split (Data);
-      begin
-         if A.Known then
-            Found (A.S) := True;
-         end if;
-      end Note;
+   procedure Report_Services is
    begin
-      Driver.Recording.Open (Scan, To_String (Path), Ok);
-      while Ok loop
-         Driver.Recording.Next (Scan, Kind, Ns, Payload, Ok);
-         exit when not Ok;
-         if Driver.Recording."=" (Kind, Driver.Recording.Service_Reply) then
-            Payload.Query (Note'Access);
-         end if;
-      end loop;
-      Driver.Recording.Close (Scan);
       for S in Driver.Services.Service loop
          Line (Core, Driver.Services.Service'Image (S) & " replies: "
-               & (if Found (S) then "from the recording" else "from the live service, when it has an address"));
+               & (if Live (S) then "from the live service named on the command line" else "from the recording"));
       end loop;
-      return Found;
-   end Recorded_Services;
+   end Report_Services;
 
 begin
    if Argument_Count < 1 then
@@ -363,7 +342,8 @@ begin
    if Length (Estimates) > 0 then
       Ada.Text_IO.Create (Out_File, Ada.Text_IO.Out_File, To_String (Estimates));
    end if;
-   Driver.Services.Start_Replay (Recorded_Services);
+   Report_Services;
+   Driver.Services.Start_Replay (Driver.Services."not" (Live));
    Driver.Recording.Open (R, To_String (Path), Opened);
    if not Opened then
       Line (Core, "cannot open the recording " & To_String (Path));

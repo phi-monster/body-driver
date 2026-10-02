@@ -23,7 +23,9 @@ package Driver.Recording is
    type Reader is limited private;
 
    procedure Open (R : in out Reader; Path : String; Ok : out Boolean);
-   --  Ok is False when the file cannot be opened or lacks the header.
+   --  Ok is False when the file cannot be opened or lacks the header. The
+   --  reader only reads forward, so Path may be a pipe (/dev/stdin fed by
+   --  zstd -dc): a compressed recording is read without unpacking it to disk.
 
    procedure Next
      (R           : in out Reader;
