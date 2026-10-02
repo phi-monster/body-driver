@@ -240,7 +240,7 @@ package body Driver.Robot.Motion is
       Freedom : Count_Array (1 .. N) := [others => 0];
       Following : Flag_Array (1 .. N) := [others => False];
       Delivered : Flag_Array (1 .. N) := [others => False];   --  some level moved it along the ask
-      Best, Best_Sigma : Real_Array (1 .. N) := [others => 0.0];   --  the best fraction a level delivered
+      Farthest  : Real_Array (1 .. N) := [others => 0.0];   --  the farthest a level took it along the ask
       Kept    : Real_Array (1 .. N) := [others => 0.0];   --  the offset where it last followed
       Amount  : Real := First;
       Unlooked : Natural := 0;   --  the first beat no look has judged: the looks tile the probe, so
@@ -365,28 +365,30 @@ package body Driver.Robot.Motion is
                Offsets (I) := (if Following (I) then Sign * Amount else Kept (I));
             end loop;
             Move_And_Look (Offsets, Seen, Chance, Now, Moving);
-            --  Which channels still follow: the fraction of the offset each
-            --  delivered, against the best a smaller offset delivered.
+            --  Which channels still follow: whether asking further took each
+            --  further than any smaller offset did, as far as anything can
+            --  tell: by a step an eye watching it can see, or, for a channel no
+            --  eye watches, significantly against the readings' noise. (Not the
+            --  fraction of the offset delivered: a reading held a constant hair
+            --  off its target delivers a fraction that shrinks towards one as
+            --  the offset grows, which exact readings call significant.)
             for I in 1 .. N loop
                if Usable (I) and then Following (I) then
                   declare
-                     F : constant Real := Sign * (Now (I) - Start (I)) / Amount;
-                     S : constant Real := Noise (I) * Sqrt (2.0) / Amount;
+                     Excursion : constant Real := Sign * (Now (I) - Start (I));
+                     V         : constant Estimate := Visible_Step (M, Listed (I).Group, Listed (I).Channel);
+                     Further   : constant Boolean :=
+                       (if Known (V) then Excursion - Farthest (I) >= V.Value
+                        else Driver.Uncertain.Significant (Excursion - Farthest (I), Noise (I) * Sqrt (2.0), Freedom (I)));
                   begin
-                     if Delivered (I) and then F < Best (I) and then not Moving (I)
-                       and then Driver.Uncertain.Significant
-                         (Best (I) - F, Sqrt (S ** 2 + Best_Sigma (I) ** 2), Freedom (I))
-                     then
+                     if Delivered (I) and then not Further and then not Moving (I) then
                         --  Its own end: held where it last followed.
                         Following (I) := False;
                      else
                         Kept (I) := Sign * Amount;
-                        if F > 0.0 and then Driver.Uncertain.Significant (F, S, Freedom (I))
-                          and then (not Delivered (I) or else F > Best (I))
-                        then
+                        if Further then
                            Delivered (I) := True;
-                           Best (I) := F;
-                           Best_Sigma (I) := S;
+                           Farthest (I) := Excursion;
                         end if;
                      end if;
                   end;
