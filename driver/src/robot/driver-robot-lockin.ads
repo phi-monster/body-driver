@@ -33,6 +33,7 @@ private package Driver.Robot.Lockin is
    --  the factor is the square root of its median over the median of that
    --  chi square. Never below one.
 
+   procedure Count_Moved (S : Eye_Stream; Beat : Natural; Count, Tested : out Natural);
    function Moved (M : Model; E : Eye_Id; Beat : Natural) return Boolean;
    --  The eye's image moved at that beat as the lock-in can tell: more of its
    --  textured cells resolved a displacement beyond their noise at rest (their

@@ -1,5 +1,7 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Beats;
+with Driver.Conventions;
+with Driver.Distributions;
 with Driver.Clock;
 with Driver.Log;
 with Driver.Robot.Channels;
@@ -164,6 +166,7 @@ package body Driver.Robot.Motion is
       declare
          Start : Real_Array (1 .. Size) := [others => 0.0];
          Offset : Real := 0.0;
+         Seen_Levels : Natural := 0;   --  doublings in a row some eye saw
       begin
          if Size > 0 then
             Start := Driver.Beats.Latest.Readings.Element (G);
@@ -200,6 +203,7 @@ package body Driver.Robot.Motion is
                C      : Driver.Commands.Command;
                Looked : Natural := 0;
                Lag    : Integer := 0;
+               Rest   : Natural := 0;
             begin
                Offset := Offset + Sign * Step_Size;
                Target (Channel) := Start (Channel) + Offset;
@@ -213,12 +217,27 @@ package body Driver.Robot.Motion is
                   Driver.Beats.Next (B);
                   for E in 1 .. Eye_Count (M) loop
                      Lag := Integer'Max (Lag, Image_Lag (M, Eye_Id (E)));
+                     Rest := Natural'Max (Rest, M.Eyes (Eye_Id (E)).Rest_Count_Beats);
                   end loop;
                   Report.Seen := Seen_Since (M, Report.Last.Started);
                   Driver.Beats.Send (Driver.Commands.Hold);
                   Looked := Looked + 1;
                   exit when Report.Seen or else Looked >= Lag;
                end loop;
+               Seen_Levels := (if Report.Seen then Seen_Levels + 1 else 0);
+               --  An eye's count beats all n of its counts at rest by chance one
+               --  time in n + 1; so many levels in a row are needed for that to
+               --  happen less often than Z's tail.
+               declare
+                  Needed : constant Positive :=
+                    (if Rest = 0 then 1
+                     else Natural'Max (1, Natural (Real'Ceiling
+                       (Ada.Numerics.Long_Elementary_Functions.Log
+                          (1.0 / Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z))
+                        / Ada.Numerics.Long_Elementary_Functions.Log (Real (Rest + 1))))));
+               begin
+                  Report.Seen := Seen_Levels >= Needed;
+               end;
                exit when Report.Seen or else Report.Last.Outcome /= Reached;
                Step_Size := 2.0 * Step_Size;
             end;

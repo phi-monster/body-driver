@@ -333,8 +333,8 @@ package body Driver.Robot is
                     & (if Mt.Kind = Arm_Carried then " on arm" & Arm_Id'Image (Mt.Arm) else "")
                     & ", rest noise " & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & " times its floor"
                     & (if M.Eyes (E).Rest_Counts_Known
-                        then ", " & Driver.Log.Image (M.Eyes (E).Rest_Count_Median, 1) & " +- "
-                             & Driver.Log.Image (M.Eyes (E).Rest_Count_Sigma, 1) & " cells move at rest"
+                        then ", at most" & M.Eyes (E).Rest_Count_Max'Image & " cells move at rest ("
+                             & Driver.Log.Image (M.Eyes (E).Rest_Count_Beats) & " beats)"
                         else "") & ASCII.LF);
          end;
       end loop;

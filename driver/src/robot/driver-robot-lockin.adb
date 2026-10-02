@@ -9,8 +9,6 @@ with Driver.Stats;
 
 package body Driver.Robot.Lockin is
 
-   procedure Count_Moved (S : Eye_Stream; Beat : Natural; Count, Tested : out Natural);
-
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
    use type Driver.Observations.Group_Id;
@@ -416,9 +414,11 @@ package body Driver.Robot.Lockin is
                         Counts (K) := Real (Count);
                      end if;
                   end loop;
-                  S.Rest_Count_Median := Driver.Stats.Median (Counts);
-                  S.Rest_Count_Sigma := Driver.Stats.Robust_Sigma (Counts);
-                  S.Rest_Count_Freedom := Channels.Mad_Degrees_Of_Freedom (Rest);
+                  S.Rest_Count_Max := 0;
+                  for C of Counts loop
+                     S.Rest_Count_Max := Natural'Max (S.Rest_Count_Max, Natural (C));
+                  end loop;
+                  S.Rest_Count_Beats := Rest;
                end;
             end if;
          end;
@@ -466,13 +466,12 @@ package body Driver.Robot.Lockin is
       if Tested = 0 then
          return False;
       end if;
-      --  Against the eye's own counts at rest when they are measured (what its
-      --  own fingers' jitter and the scene do when nobody pushes), else against
-      --  the false alarms of the per-cell test alone.
+      --  More than at any beat nobody pushed (its own fingers' jitter, the
+      --  scene): a count at rest beats all n of them with chance 1 / (n + 1),
+      --  whatever their distribution. Before that is measured, against the
+      --  false alarms of the per-cell test alone.
       return (if S.Rest_Counts_Known
-              then Driver.Uncertain.Significant (Real (Count) - S.Rest_Count_Median, S.Rest_Count_Sigma,
-                                                 S.Rest_Count_Freedom)
-                   and then Real (Count) > S.Rest_Count_Median
+              then Count > S.Rest_Count_Max
               else Regression.Count_Significant
                      (Count, Tested, Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z)));
    end Moved;
