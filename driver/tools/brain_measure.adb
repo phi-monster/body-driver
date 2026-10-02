@@ -31,7 +31,9 @@
 --
 --  Keyboards: Q (height), QH (height, heading), and the same with the
 --  sentence about two things added: Q2 and QH2 (touching, above, below,
---  left, right).
+--  left, right), Q2d and QH2d (touching, above), Q2o and QH2o (touching,
+--  onto); a name ending in s writes that sentence as one key per relation.
+--  Every quantity keyboard allows one stretch per program.
 
 with Ada.Command_Line;
 with Ada.Containers.Vectors;
@@ -129,12 +131,14 @@ procedure Brain_Measure is
       end loop;
       if Ada.Strings.Fixed.Index (Name, "2d") > 0 then
          Two := [Driver.Action.Touching | Driver.Action.Above => True, others => False];
+      elsif Ada.Strings.Fixed.Index (Name, "2o") > 0 then
+         Two := [Driver.Action.Touching | Driver.Action.Onto => True, others => False];
       elsif Ada.Strings.Fixed.Index (Name, "2") > 0 then
          Two := [Driver.Action.Touching | Driver.Action.Above | Driver.Action.Below | Driver.Action.Left
                  | Driver.Action.Right => True, others => False];
       end if;
-      return Driver.Brain.Keyboard.Choose (Q, M, [Driver.Action.Grasper => True, others => False],
-                                           [others => True], True, Two, Eyes);
+      return Driver.Brain.Keyboard.Choose (Q, M, [Driver.Action.Grasper => True, others => False], [others => True],
+                                           True, Two, Eyes);
    end Keys;
 
    --  The sheet as the brain reads it. A keyboard whose name ends in s

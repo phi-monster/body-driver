@@ -50,6 +50,13 @@ Where to hold the thing, from which side to come, and when to close are the
 body's to work out: the brain says only which quantity of which thing should
 change, and which way.
 
+A program on this keyboard asks for one change at most, with `say` lines
+before and after it. The keyboard has no `if` or `try`, so a second change
+could not depend on how the first one ended; the next round shows how it
+ended, and the brain writes the next one then. This is the keyboard's rule,
+not the language's: a program read without the keyboard (a person typing)
+runs every change it has.
+
 ```program
 do the mint green scissors height up until free
 ```
@@ -87,8 +94,9 @@ On every keyboard:
 
 The sentence about two things (`do <thing> <relation> <thing> until
 <ending>`) is not on the quantity keyboard. Measured with Qwen3.5-9B on five
-kinds of task, it made single-thing tasks worse, so it was not adopted
-([`brain-service.md`](brain-service.md), section 6).
+kinds of task, every form tried made the tasks about one thing worse on at
+least one keyboard, so none is offered ([`design/brain.md`](design/brain.md)).
+The parser reads it all the same.
 
 ## 3. Statements
 

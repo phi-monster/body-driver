@@ -166,9 +166,12 @@ package body Driver.Brain.Keyboard is
             Append (G, Word_Rules (K));
 
          when Quantity_Keys =>
-            Rule ("root ::= line (line)*");
-            Rule ("line ::= (change" & (if Has_Any (K.Relations) then " | placing" else "") & " | word) "
+            --  One stretch at most: without control flow a second one could not
+            --  depend on how the first ended.
+            Rule ("root ::= (said)* stretch (said)* | said (said)*");
+            Rule ("stretch ::= (change" & (if Has_Any (K.Relations) then " | placing" else "") & ") "
                   & Quoted (Line_Break));
+            Rule ("said ::= word " & Quoted (Line_Break));
             Rule ("change ::= " & Quoted (Do_Word & " ") & " name " & Quoted (" ") & " qty " & Quoted (" ")
                   & " dir " & Quoted (" " & Until_Word & " ") & " outc");
             if Has_Any (K.Relations) then
@@ -452,8 +455,8 @@ package body Driver.Brain.Keyboard is
             Put ("No part of me can be commanded this round, so a program only speaks.");
 
          when Quantity_Keys =>
-            Put ("<program>  ::= <line> (<line>)*");
-            Put ("<line>     ::= <change>" & (if Has_Any (K.Relations) then " | <placing>" else "") & " | <word>");
+            Put ("<program>  ::= (<word>)* <stretch> (<word>)* | <word> (<word>)*   (one stretch at most)");
+            Put ("<stretch>  ::= <change>" & (if Has_Any (K.Relations) then " | <placing>" else ""));
             Put ("<change>   ::= do <thing> <quantity> <direction> until <ending>");
             if Has_Any (K.Relations) then
                Put ("<placing>  ::= do <thing> <relation> <thing> until <ending>");
