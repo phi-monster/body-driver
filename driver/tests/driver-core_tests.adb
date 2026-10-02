@@ -424,6 +424,7 @@ package body Driver.Core_Tests is
    begin
       Check (not R.Ok and then Ada.Strings.Unbounded.Length (R.Why) > 0,
              "a call without an address pretended to succeed or gave no reason");
+      Check (R.Lasting, "a call without an address was not marked as failing for good");
    end Unconfigured_Service;
 
    procedure Streaming_Error_Body is
@@ -476,6 +477,7 @@ package body Driver.Core_Tests is
            Driver.Services.Call_Streaming (Driver.Services.Brain, "/v1/chat/completions", "{}", Ignore'Access);
       begin
          Check (not R.Ok, "an error status passed as an answer");
+         Check (not R.Lasting, "a service that answered with an error was marked as failing for good");
          Check (Ada.Strings.Unbounded.To_String (R.Text) = Error_Body,
                 "the error body was lost: """ & Ada.Strings.Unbounded.To_String (R.Text) & """");
       end;

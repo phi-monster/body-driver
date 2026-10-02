@@ -73,7 +73,7 @@ package body Driver.Instrument.Tests is
    end Request_Text;
 
    function Reply_Of (Text : String) return Driver.Services.Reply is
-     ((Ok => True, Text => To_Unbounded_String (Text), Why => Null_Unbounded_String));
+     ((Ok => True, Text => To_Unbounded_String (Text), Why => Null_Unbounded_String, Lasting => False));
 
    procedure Match_Replies is
       R   : Answer_Array (1 .. 2);
@@ -90,7 +90,7 @@ package body Driver.Instrument.Tests is
       Check (not Ok, "a reply with fewer answers than points was accepted");
       Read_Match (Reply_Of ("{""ok"":true,""points"":[[3.5,4.0,0.9],[1,1,1]]}"), True, R, Ok, Why);
       Check (not Ok, "a reply without the round trips asked for was accepted");
-      Read_Match ((Ok => False, Text => Null_Unbounded_String, Why => To_Unbounded_String ("down")), True, R, Ok, Why);
+      Read_Match ((Ok => False, Text => Null_Unbounded_String, Why => To_Unbounded_String ("down"), Lasting => False), True, R, Ok, Why);
       Check (not Ok and then To_String (Why) = "down", "a failed call was not passed on");
    end Match_Replies;
 

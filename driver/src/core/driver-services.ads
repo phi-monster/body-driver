@@ -22,6 +22,9 @@ package Driver.Services is
       Ok   : Boolean := False;
       Text : Unbounded_String;   --  the reply body, also when the service reported an error
       Why  : Unbounded_String;   --  what went wrong when Ok is False
+      Lasting : Boolean := False;
+      --  The same call fails the same way whenever it is made (the service has
+      --  no address): asking again cannot help. Every other failure may pass.
    end record;
 
    function Call (S : Service; Path : String; Request : String) return Reply;

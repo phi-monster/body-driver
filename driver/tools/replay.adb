@@ -301,7 +301,7 @@ procedure Replay is
          begin
             Driver.Services.Replay_Reply
               (Q.S, To_String (Q.Second), To_String (Q.Rest),
-               (Ok => Ok, Text => A.Rest, Why => (if Ok then Null_Unbounded_String else A.Second)));
+               (Ok => Ok, Text => A.Rest, Why => (if Ok then Null_Unbounded_String else A.Second), Lasting => False));
             Requests.Delete (To_String (A.Call));
          end;
       end if;
