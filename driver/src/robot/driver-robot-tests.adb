@@ -10,6 +10,7 @@ with Driver.Beats;
 with Driver.Log;
 with Driver.Robot.Boot;
 with Driver.Robot.Kinematics;
+with Driver.Robot.Motion;
 with Driver.Robot.Kinematics.Fit;
 with Ada.Strings.Unbounded;
 with Driver.Robot.Channels;
@@ -931,6 +932,131 @@ package body Driver.Robot.Tests is
       Driver.Log.Line (Driver.Log.Robot, "boot from zero took" & Beats'Image & " beats");
    end Boot_From_Zero;
 
+   --  A probe of a joint read exactly (noise 1e-13) whose reading settles a
+   --  hair off its target, the more the further it goes (by the square of the
+   --  offset, as a joint held against a spring does), and that stops at 1e-3:
+   --  the fraction of each offset it delivers shrinks with every doubling,
+   --  though it follows each one. The probe must double until the joint stops,
+   --  not call the second doubling its end. No eye sees the joint.
+   procedure Probe_A_Drooping_Joint is
+      M     : Model;
+      Done  : Boolean := False with Atomic;
+      Steps : Natural := 0 with Atomic;
+      Limit : constant Real := 1.0e-3;
+
+      task Decider;
+      task body Decider is
+         W : Natural;
+         R : Driver.Robot.Motion.Probe_Report;
+         procedure Estimate is
+         begin
+            Estimate_Now (M);
+         end Estimate;
+      begin
+         --  Long enough at rest for the readings' noise to be measured, and
+         --  a few pushes for the joint's delay and the eyes' lag: the probe
+         --  looks once the reading has had time to follow and the eyes to
+         --  show it.
+         Driver.Robot.Motion.Settle (M, W);
+         Driver.Robot.Motion.Hold (M, 100);
+         for K in 1 .. 16 loop
+            declare
+               C  : Driver.Commands.Command;
+               SR : Driver.Robot.Motion.Step_Report;
+            begin
+               Driver.Commands.Set_Target (C, 5, [(if K mod 2 = 1 then 1.0e-6 else 0.0)]);
+               Driver.Robot.Motion.Step (M, C, SR);
+               Driver.Robot.Motion.Hold (M, 2 + K mod 3);
+               --  Arm 1, which eye 1 sees, for the eyes' lag.
+               Driver.Commands.Set_Target (C, 1, [(if K mod 2 = 1 then 0.1 else 0.0), 0.0]);
+               Driver.Robot.Motion.Step (M, C, SR);
+               Driver.Robot.Motion.Hold (M, 2 + K mod 4);
+            end;
+         end loop;
+         Driver.Beats.Within_A_Beat (Estimate'Access);
+         Driver.Robot.Motion.Gather_Rest (M, 2);
+         --  From an offset of 1e-5, as a group's probe starts from the amount
+         --  the probe of every channel together was first seen at.
+         Driver.Robot.Motion.Probe_Together (M, [1 => (Group => 5, Channel => 1)], 1.0, 1.0e-5, R);
+         Steps := R.Steps;
+         Done := True;
+      exception
+         when others =>
+            Driver.Beats.Release;
+            Done := True;
+      end Decider;
+
+      Now, Shown : Rig_State;
+      Sent  : Driver.Commands.Command;
+      Rng   : Generator;
+   begin
+      begin
+         for B in 0 .. 5_000 loop
+            exit when Done;
+            declare
+               O       : Observation;
+               Took    : Boolean := False;
+               Pending : Driver.Commands.Command;
+            begin
+               O.Beat := Driver.Clock.Beat (B);
+               for E in 1 .. 3 loop
+                  O.Images.Append (Render (E, Shown));
+                  O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+               end loop;
+               O.Readings.Append (Now.Arm_1);
+               O.Readings.Append (Now.Arm_2);
+               O.Readings.Append (Real_Array'(1 => Now.Closer));
+               O.Readings.Append (Real_Array'(1 => Now.Part));
+               O.Readings.Append (Real_Array'(1 => Now.Idle + 1.0e-13 * Gaussian (Rng)));
+               for G in 1 .. 5 loop
+                  O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+               end loop;
+               if B = 0 then
+                  Driver.Commands.Set_Target (Sent, 1, Now.Arm_1);
+                  Driver.Commands.Set_Target (Sent, 2, Now.Arm_2);
+                  Driver.Commands.Set_Target (Sent, 3, [Now.Closer]);
+                  Driver.Commands.Set_Target (Sent, 4, [Now.Part]);
+                  Driver.Commands.Set_Target (Sent, 5, [Now.Idle]);
+               end if;
+               Observe (M, O, Sent);
+               loop
+                  Driver.Beats.Offer (O.Beat, O, Sent, Took);
+                  exit when Took or else Done;
+                  delay 0.0;
+               end loop;
+               exit when not Took;
+               Driver.Beats.Await (Pending);
+               for G in Group_Id range 1 .. 5 loop
+                  if Driver.Commands.Has_Target (Pending, G) then
+                     Driver.Commands.Set_Target (Sent, G, Driver.Commands.Target (Pending, G));
+                  end if;
+               end loop;
+               Shown := Now;
+               Now.Arm_1 := Driver.Commands.Target (Sent, 1);
+               Now.Arm_2 := Driver.Commands.Target (Sent, 2);
+               Now.Closer := Driver.Commands.Target (Sent, 3) (1);
+               Now.Part := Driver.Commands.Target (Sent, 4) (1);
+               declare
+                  T : constant Real := Real'Min (Driver.Commands.Target (Sent, 5) (1), Limit);
+               begin
+                  Now.Idle := T - T * abs T;
+               end;
+            end;
+         end loop;
+      exception
+         when others =>
+            abort Decider;
+            raise;
+      end;
+      if not Done then
+         abort Decider;
+      end if;
+      Check (Done, "the probe did not finish");
+      --  From 1e-5 the joint follows seven doublings, to 1.28e-3, and stops at
+      --  1e-3: the ninth level is the first that takes it no further.
+      Check (Steps = 9, "the probe called the joint's end after" & Steps'Image & " levels, not 9");
+   end Probe_A_Drooping_Joint;
+
    --  ── The kinematics of a synthetic arm ──
    --
    --  Six turning joints carry an eye of 640 x 480 pixels with a focal length
@@ -1149,6 +1275,8 @@ package body Driver.Robot.Tests is
 
    procedure Register is
    begin
+      Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
+                             & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
       Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found, or are "
                              & "found beyond the range the arm moved through", Reach_A_Pose'Access);
       Driver.Tests.Register ("robot.kinematics.small", "a sweep too small to determine the lens and the joints is "

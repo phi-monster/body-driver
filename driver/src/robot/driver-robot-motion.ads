@@ -78,10 +78,12 @@ package Driver.Robot.Motion is
    --  eye whose counts at rest are measured, else Z's tail (Lockin.Moved).
    --  Each move looks for as long as a response takes to show: the longest
    --  measured push delay of a listed group, plus the longest image lag, plus
-   --  the beat itself. A channel stops following at its own end: its reading
-   --  then delivers a fraction of the offset significantly below what a
-   --  smaller offset delivered, and no longer moves; it is held where it last
-   --  followed and takes no further part. The probe ends when an eye saw the
+   --  the beat itself. A channel stops following at its own end: asked
+   --  further, its reading went no further than a smaller offset took it, as
+   --  far as anything can tell (by a step an eye watching it can see, or,
+   --  watched by none, significantly against the readings' noise), and no
+   --  longer moves; it is held where it last followed and takes no further
+   --  part. The probe ends when an eye saw the
    --  body, when no channel follows any more, or after as many doublings as a
    --  float has bits of precision, and returns the body to the hold. A
    --  channel of a group that is not commandable, or that the group does not
