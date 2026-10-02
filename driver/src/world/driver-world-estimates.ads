@@ -153,15 +153,12 @@ private
    package Start_Vectors is new Ada.Containers.Vectors (Positive, Start);
    package Point_Vectors is new Ada.Containers.Vectors (Positive, Point_Estimate);
 
-   package Camera_Holders is new Ada.Containers.Indefinite_Holders
-     (Driver.World.Cameras.Camera'Class, Driver.World.Cameras."=");
-
-   --  What one pair of eyes last saw of a thing, and the second eye as it
-   --  was then.
+   --  What one pair of eyes last saw of a thing, and the observation it was
+   --  seen at (without its images): the eyes as they were then.
    type Pair_Seen is record
       From, Into : Eye_Id;
       Kept       : Driver.World.Pairs.Match_Vectors.Vector;
-      Second     : Camera_Holders.Holder;
+      Then_Seen  : Observation_Holders.Holder;
    end record;
 
    package Pair_Seen_Vectors is new Ada.Containers.Vectors (Positive, Pair_Seen);

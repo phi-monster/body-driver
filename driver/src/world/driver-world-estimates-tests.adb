@@ -44,11 +44,13 @@ package body Driver.World.Estimates.Tests is
    Table_Half : constant := 0.5;
    Match      : constant := 0.3;   --  the matcher's error, pixels per coordinate
 
-   type Eye_Pair is array (Eye_Id range 1 .. 2) of Driver.World.Tests.Pinhole;
+   type Eye_Pair is array (Eye_Id range 1 .. 3) of Driver.World.Tests.Pinhole;
+   --  The flow uses the first two; a test may give the third a view of its own.
 
    Eyes : constant Eye_Pair :=
      [Driver.World.Tests.Looking_At ([-0.15, -0.55, 0.55], [0.0, 0.0, 0.0], 150.0, Columns, Rows, 0.3),
-      Driver.World.Tests.Looking_At ([0.15, -0.55, 0.55], [0.0, 0.0, 0.0], 150.0, Columns, Rows, 0.3)];
+      Driver.World.Tests.Looking_At ([0.15, -0.55, 0.55], [0.0, 0.0, 0.0], 150.0, Columns, Rows, 0.3),
+      Driver.World.Tests.Looking_At ([0.0, -0.55, 0.55], [0.0, 0.0, 0.0], 150.0, Columns, Rows, 0.3)];
 
    View : Eye_Pair := Eyes;
    --  The eyes as they look now: the instrument answers for them.
@@ -429,7 +431,8 @@ package body Driver.World.Estimates.Tests is
       Find_Surfaces;
       Check (Table_Found and then Top_Found, "the first measurement did not find the table and the box top");
       View := [Driver.World.Tests.Looking_At ([-0.03, -0.02, 0.25], [0.0, 0.0, Box_Top], 150.0, Columns, Rows, 0.3),
-               Driver.World.Tests.Looking_At ([0.03, -0.02, 0.25], [0.0, 0.0, Box_Top], 150.0, Columns, Rows, 0.3)];
+               Driver.World.Tests.Looking_At ([0.03, -0.02, 0.25], [0.0, 0.0, Box_Top], 150.0, Columns, Rows, 0.3),
+               Eyes (3)];
       --  One match of each pair lies, half a metre too far along its sight:
       --  a lone line of sight through the table is no hole in it.
       Lie_Depth := 0.5;
@@ -490,7 +493,8 @@ package body Driver.World.Estimates.Tests is
       Step;
       Check (Table_Found, "the first measurement did not find the table");
       View := [Driver.World.Tests.Looking_At ([-0.15, -0.55, 0.55], [-0.15, 8.0, Floor_Z], 150.0, Columns, Rows, 0.3),
-               Driver.World.Tests.Looking_At ([0.15, -0.55, 0.55], [0.15, 8.0, Floor_Z], 150.0, Columns, Rows, 0.3)];
+               Driver.World.Tests.Looking_At ([0.15, -0.55, 0.55], [0.15, 8.0, Floor_Z], 150.0, Columns, Rows, 0.3),
+               Eyes (3)];
       S.Due := True;
       Step;
       Step;
@@ -565,7 +569,11 @@ package body Driver.World.Estimates.Tests is
         Driver.World.Tests.Looking_At ([0.15, -0.55, 0.55], [1.5, 1.5, 0.0], 150.0, Columns, Rows, 0.3);
       Top, Off : Driver.World.Pairs.Match_Vectors.Vector;
       O      : Observation;
+      Instant : Observation;   --  the instant both pairs were seen at, without images
    begin
+      View := Eyes;
+      View (3) := Away;
+      Instant.Beat := 1;
       for I in 0 .. 4 loop
          for J in 0 .. 4 loop
             declare
@@ -593,9 +601,9 @@ package body Driver.World.Estimates.Tests is
          R.Eyes.Append (Slot'(Has => True, Pointed => True, Track => Driver.World.Tracking.Start (Box, Gray, 1),
                               others => <>));
          R.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Top,
-                                      Second => Camera_Holders.To_Holder (Eyes (2))));
+                                      Then_Seen => Observation_Holders.To_Holder (Instant)));
          R.By_Pair.Append (Pair_Seen'(From => 1, Into => 3, Kept => Off,
-                                      Second => Camera_Holders.To_Holder (Away)));
+                                      Then_Seen => Observation_Holders.To_Holder (Instant)));
          S.Things.Append (R);
       end;
       Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
@@ -607,6 +615,7 @@ package body Driver.World.Estimates.Tests is
                and then (for all M of S.Things (1).Points => abs (M.Point.Mean (3) - Box_Top) < 1.0E-9),
              "of the box's points" & S.Things (1).Points.Length'Image & " were kept, not the" & Top.Length'Image
              & " the eye that sees it gave");
+      View := Eyes;
       Driver.Services.End_Replay;
    end Out_Of_View;
 
@@ -682,7 +691,7 @@ package body Driver.World.Estimates.Tests is
       begin
          R.Eyes.Append (Slot'(Has => True, Pointed => True, Track => Driver.World.Tracking.Start (Box, Gray, Beat),
                                others => <>));
-         R.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Top, Second => Camera_Holders.Empty_Holder));
+         R.By_Pair.Append (Pair_Seen'(From => 1, Into => 2, Kept => Top, Then_Seen => Observation_Holders.Empty_Holder));
          S.Things.Append (R);
       end;
       Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);

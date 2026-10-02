@@ -208,6 +208,14 @@ package body Driver.World.Estimates is
       return False;
    end Seen_Where_Pointed;
 
+   function Bare (O : Observation) return Observation_Holders.Holder is
+      --  The observation without its images: what its eyes were, kept long.
+      Copy : Observation := O;
+   begin
+      Copy.Images.Clear;
+      return Observation_Holders.To_Holder (Copy);
+   end Bare;
+
    function In_View
      (R          : Thing_Record;
       From, Into : Eye_Id;
@@ -251,13 +259,24 @@ package body Driver.World.Estimates is
       K   : Positive := 1;
    begin
       while K <= Natural (R.By_Pair.Length) loop
-         if R.By_Pair (K).Second.Is_Empty
-           or else In_View (R, R.By_Pair (K).From, R.By_Pair (K).Into, R.By_Pair (K).Second.Element)
-         then
-            K := K + 1;
-         else
-            R.By_Pair.Delete (K);
-         end if;
+         declare
+            Kept_It : Boolean := True;
+         begin
+            if not R.By_Pair (K).Then_Seen.Is_Empty then
+               declare
+                  Then_Seen : constant Observation_Holders.Constant_Reference_Type :=
+                    R.By_Pair (K).Then_Seen.Constant_Reference;
+               begin
+                  Kept_It := In_View (R, R.By_Pair (K).From, R.By_Pair (K).Into,
+                                      Camera_Of (R.By_Pair (K).Into, Then_Seen.Element));
+               end;
+            end if;
+            if Kept_It then
+               K := K + 1;
+            else
+               R.By_Pair.Delete (K);
+            end if;
+         end;
       end loop;
       for P of R.By_Pair loop
          for M of P.Kept loop
@@ -351,14 +370,14 @@ package body Driver.World.Estimates is
                            if R.By_Pair (K).From = X.From and then R.By_Pair (K).Into = X.Into then
                               R.By_Pair.Replace_Element
                                 (K, (From => X.From, Into => X.Into, Kept => Kept,
-                                     Second => Camera_Holders.To_Holder (Camera_Of (X.Into, Seen.Element))));
+                                     Then_Seen => Bare (Seen.Element.all)));
                               Placed := True;
                            end if;
                         end loop;
                         if not Placed then
                            R.By_Pair.Append
                              (Pair_Seen'(From => X.From, Into => X.Into, Kept => Kept,
-                                         Second => Camera_Holders.To_Holder (Camera_Of (X.Into, Seen.Element))));
+                                         Then_Seen => Bare (Seen.Element.all)));
                         end if;
                         R.Points_In := X.From;
                      end if;
