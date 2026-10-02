@@ -4,9 +4,12 @@
 #
 #   bash qnew.sh NAME TASK CFG SEED LIMIT_MINUTES DRIVER_BIN [BODY_FILE]
 #
-# Output: /root/runs/NAME/{run.rec, truth.jsonl, driver.log, sim.log, meta.txt}, both compressed with
-# zstd at the end; truth.jsonl is the simulator's side-file truth for scoring (harness/robodojo_truth),
-# which the driver never sees, and its geometry goes to the shared store /root/rec/geometry. The run stops when the driver exits, when /root/q/done_NAME appears, or at the limit.
+# Output: /root/runs/NAME/{run.rec.zst, truth.jsonl.zst, driver.log, sim.log, meta.txt}. The recording is
+# compressed while it is written (the driver records into a FIFO that zstd reads), so a live boot,
+# about 2.7 MB a beat, never holds a raw recording on disk; truth.jsonl is compressed at the end.
+# truth.jsonl is the simulator's side-file truth for scoring (harness/robodojo_truth), which the
+# driver never sees; its geometry goes to the shared store /root/rec/geometry. The run stops when
+# the driver exits, when /root/q/done_NAME appears, or at the limit.
 # The brain (127.0.0.1:8078) and the instrument (127.0.0.1:8077) must already be serving; the
 # brain's sampling settings are passed through BL_BRAIN_SAMPLING.
 set -u
@@ -31,8 +34,11 @@ ss -ltn | grep -q ":8077 " || (cd /root/instruments && bash run.sh) || { echo "i
 { echo "task $TASK"; echo "cfg $CFG"; echo "seed $SEED"; echo "driver $(md5sum "$BIN" | cut -d' ' -f1)";
   echo "body ${BODY:-none}"; echo "start $(date +%FT%T)"; } > "$R/meta.txt"
 
+mkfifo "$R/run.rec.fifo"
+zstd -q -T2 -o "$R/run.rec.zst" < "$R/run.rec.fifo" &
+ZST=$!
 BL_BRAIN_SAMPLING="${BL_BRAIN_SAMPLING:-$QWEN_CARD}" setsid nohup "$BIN" --listen 9080 --eye 127.0.0.1:8078 \
-  --inst 127.0.0.1:8077 ${BODY:+--body "$BODY"} --record "$R/run.rec" </dev/null >"$R/driver.log" 2>&1 &
+  --inst 127.0.0.1:8077 ${BODY:+--body "$BODY"} --record "$R/run.rec.fifo" </dev/null >"$R/driver.log" 2>&1 &
 sleep 2
 cd /root/RoboDojo
 BD_TRUTH="$R/truth.jsonl" BD_TRUTH_GEOMETRY=/root/rec/geometry OMNI_KIT_ACCEPT_EULA=YES PATH=/venv/RoboDojo/bin:$PATH \
@@ -49,8 +55,12 @@ while [ "$(date +%s)" -lt $end ]; do
 done
 pkill -9 -f "$P2" 2>/dev/null; pkill -9 -f "$P1" 2>/dev/null; pkill -f -- "$L1$L2" 2>/dev/null
 sleep 2
+pkill -9 -f -- "$L1$L2" 2>/dev/null
+# A driver that never opened the FIFO leaves zstd waiting for a writer: one empty open releases it.
+timeout 5 bash -c ": > '$R/run.rec.fifo'" 2>/dev/null
+wait $ZST
+rm -f "$R/run.rec.fifo"
 { echo "end $(date +%FT%T)"; echo "stop $why"; } >> "$R/meta.txt"
-[ -f "$R/run.rec" ] && zstd -q -T0 --rm "$R/run.rec"
 [ -f "$R/truth.jsonl" ] && zstd -q -T0 --rm "$R/truth.jsonl"
 grep -h "Success nums" "$R/sim.log" | tail -1 >> "$R/meta.txt"
 echo "$(date +%T) new-driver run done: $K ($why)" >> /root/q/queue.log
