@@ -1,5 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Containers.Vectors;
+with Ada.Unchecked_Deallocation;
 with Driver.Robot.Channels;
 with Driver.Stats;
 with Driver.Conventions;
@@ -12,6 +13,16 @@ package body Driver.Robot.Lag is
    use Ada.Numerics.Long_Elementary_Functions;
    use type Driver.Observations.Group_Id;
 
+   --  Everything sized by beats lives on the heap: the estimates also run in
+   --  the decider's task, whose stack is small.
+   type Real_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
+   type Index_Array is array (Positive range <>) of Positive;
+   type Index_Access is access Index_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Index_Array, Index_Access);
+   type Matrix_Access is access Driver.Numerics.Arrays.Real_Matrix;
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Numerics.Arrays.Real_Matrix, Matrix_Access);
+
    type Flags is array (Positive range <>) of Boolean;
 
    --  A series over the beats of the stream (beat B stored at B + 1), with
@@ -20,6 +31,9 @@ package body Driver.Robot.Lag is
       Value : Real_Array (1 .. Length) := [others => 0.0];
       Have  : Flags (1 .. Length) := [others => False];
    end record;
+
+   type Series_Access is access Series;
+   procedure Free is new Ada.Unchecked_Deallocation (Series, Series_Access);
 
    --  Replaces the available values by their ranks among themselves, ties
    --  sharing the average rank.
@@ -35,9 +49,9 @@ package body Driver.Robot.Lag is
          return;
       end if;
       declare
-         Index : array (1 .. N) of Positive;
+         Index : Index_Access := new Index_Array (1 .. N);
          K     : Natural := 0;
-         Ranks : Real_Array (1 .. N);
+         Ranks : Real_Access := new Real_Array (1 .. N);
 
          procedure Sift (Start, Stop : Natural) is
             Root  : Natural := Start;
@@ -97,21 +111,29 @@ package body Driver.Robot.Lag is
          for L in 1 .. N loop
             S.Value (Index (L)) := Ranks (L);
          end loop;
+         Free (Index);
+         Free (Ranks);
       end;
    end Rank;
 
-   --  The first difference of a series, available where both terms are.
-   function Differenced (S : Series) return Series is
-      D : Series (S.Length);
+   --  The first difference of a series, in place, available where both
+   --  terms are: from the last term back, so each term is differenced
+   --  against the one before it while that one still holds its value.
+   procedure Difference (S : in out Series) is
    begin
-      for I in S.Value'First + 1 .. S.Value'Last loop
+      for I in reverse S.Value'First + 1 .. S.Value'Last loop
          if S.Have (I) and then S.Have (I - 1) then
-            D.Value (I) := S.Value (I) - S.Value (I - 1);
-            D.Have (I) := True;
+            S.Value (I) := S.Value (I) - S.Value (I - 1);
+         else
+            S.Value (I) := 0.0;
+            S.Have (I) := False;
          end if;
       end loop;
-      return D;
-   end Differenced;
+      if S.Length > 0 then
+         S.Value (S.Value'First) := 0.0;
+         S.Have (S.Have'First) := False;
+      end if;
+   end Difference;
 
    --  The series takes more than one value.
    function Varies (S : Series) return Boolean is
@@ -145,7 +167,7 @@ package body Driver.Robot.Lag is
       end loop;
       Sorting.Sort (Starts);
       declare
-         Gaps : Real_Array (1 .. Natural (Starts.Length));
+         Gaps : Real_Access := new Real_Array (1 .. Natural (Starts.Length));
          K    : Natural := 0;
       begin
          for I in Starts.First_Index + 1 .. Starts.Last_Index loop
@@ -154,7 +176,11 @@ package body Driver.Robot.Lag is
                Gaps (K) := Real (Starts (I) - Starts (I - 1));
             end if;
          end loop;
-         return (if K = 0 then Last else Natural'Min (Last, Natural (Driver.Stats.Median (Gaps (1 .. K)))));
+         return Result : constant Natural :=
+           (if K = 0 then Last else Natural'Min (Last, Natural (Driver.Stats.Median (Gaps (1 .. K)))))
+         do
+            Free (Gaps);
+         end return;
       end;
    end Identifiable;
 
@@ -175,9 +201,10 @@ package body Driver.Robot.Lag is
          return;
       end if;
       declare
-         Speeds : array (M.Groups.First_Index .. M.Groups.Last_Index) of Series (M.Beats);
+         Speeds : array (M.Groups.First_Index .. M.Groups.Last_Index) of Series_Access := [others => null];
       begin
          for G in Speeds'Range loop
+            Speeds (G) := new Series (M.Beats);
             if M.Groups (G).Commandable then
                for B in 1 .. Last loop
                   if Channels.Has_Reading (M, G, B) and then Channels.Has_Reading (M, G, B - 1) then
@@ -192,8 +219,8 @@ package body Driver.Robot.Lag is
                      end;
                   end if;
                end loop;
-               Speeds (G) := Differenced (Speeds (G));
-               Rank (Speeds (G));
+               Difference (Speeds (G).all);
+               Rank (Speeds (G).all);
             end if;
          end loop;
          declare
@@ -207,7 +234,7 @@ package body Driver.Robot.Lag is
             Rows    : Natural := 0;
          begin
             for G in Speeds'Range loop
-               if M.Groups (G).Commandable and then Varies (Speeds (G)) then
+               if M.Groups (G).Commandable and then Varies (Speeds (G).all) then
                   K := K + 1;
                   Varying (K) := G;
                end if;
@@ -223,8 +250,8 @@ package body Driver.Robot.Lag is
                return 1.0;
             end if;
             declare
-               X    : Driver.Numerics.Arrays.Real_Matrix (1 .. Rows, 1 .. K);
-               Y    : Real_Array (1 .. Rows);
+               X    : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Rows, 1 .. K);
+               Y    : Real_Access := new Real_Array (1 .. Rows);
                R    : Natural := 0;
                Used : Natural;
             begin
@@ -240,8 +267,10 @@ package body Driver.Robot.Lag is
                   end if;
                end loop;
                declare
-                  R2 : constant Real := Regression.Explained_Nonnegative (X, Y, Used);
+                  R2 : constant Real := Regression.Explained_Nonnegative (X.all, Y.all, Used);
                begin
+                  Free (X);
+                  Free (Y);
                   if Used = 0 or else R2 >= 1.0 then
                      return (if Used = 0 then 1.0 else 0.0);
                   end if;
@@ -255,7 +284,7 @@ package body Driver.Robot.Lag is
             declare
                S      : Eye_Stream renames M.Eyes (E);
                N      : constant Natural := Cells (S.Grid);
-               Motion : Series (M.Beats);
+               Motion : Series_Access := new Series (M.Beats);
                Best   : Real := 1.0;     --  the smallest chance of a fit this good by noise
                Lag    : Integer := 0;
                Tests  : Natural := 0;
@@ -286,11 +315,11 @@ package body Driver.Robot.Lag is
                         end;
                      end if;
                   end loop;
-                  Motion := Differenced (Motion);
-                  Rank (Motion);
+                  Difference (Motion.all);
+                  Rank (Motion.all);
                   for Shift in -Bound .. Bound loop
                      declare
-                        Tail : constant Real := Fit_Tail (Motion, Shift);
+                        Tail : constant Real := Fit_Tail (Motion.all, Shift);
                      begin
                         Tests := Tests + 1;
                         if Tail < Best then
@@ -308,9 +337,13 @@ package body Driver.Robot.Lag is
                      M.Lag_Known.Replace_Element (E, True);
                   end if;
                end if;
+               Free (Motion);
             end;
          end loop;
          end;
+         for G in Speeds'Range loop
+            Free (Speeds (G));
+         end loop;
       end;
    end Measure;
 

@@ -15,9 +15,20 @@ with Driver.Robot.Flow;
 
 package body Driver.Robot.Kinematics is
 
-   --  Samples too large for a stack live on the heap.
+   --  Everything sized by beats, keyframes, queries or matches lives on the
+   --  heap: the estimates also run in the decider's task, whose stack is
+   --  small.
    type Real_Access is access Real_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
+   type Answer_Access is access Driver.Instrument.Answer_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Instrument.Answer_Array, Answer_Access);
+   type Point_Access is access Driver.Instrument.Point_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Instrument.Point_Array, Point_Access);
+   type Matrix_Access is access Driver.Numerics.Arrays.Real_Matrix;
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Numerics.Arrays.Real_Matrix, Matrix_Access);
+   type Flag_Array is array (Natural range <>) of Boolean;
+   type Flag_Access is access Flag_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flag_Access);
 
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
@@ -79,15 +90,15 @@ package body Driver.Robot.Kinematics is
             declare
                P      : constant Pending_Match := R.Pending (K);
                Reply  : constant Driver.Services.Reply := Driver.Services.Collect (P.Ticket);
-               Result : Driver.Instrument.Answer_Array (1 .. Natural (R.Query_U.Length));
+               Result : Answer_Access := new Driver.Instrument.Answer_Array (1 .. Natural (R.Query_U.Length));
                Ok     : Boolean;
                Why    : Ada.Strings.Unbounded.Unbounded_String;
                Set    : Match_Set;
             begin
-               Driver.Instrument.Read_Match (Reply, True, Result, Ok, Why);
+               Driver.Instrument.Read_Match (Reply, True, Result.all, Ok, Why);
                if Ok then
                   Set.Frame := P.Frame;
-                  for A of Result loop
+                  for A of Result.all loop
                      Set.To_U.Append (A.To.U);
                      Set.To_V.Append (A.To.V);
                      Set.Back_U.Append (A.Back.U);
@@ -105,6 +116,7 @@ package body Driver.Robot.Kinematics is
                   Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe" & P.Frame'Image
                                    & " has no matches: " & Ada.Strings.Unbounded.To_String (Why));
                end if;
+               Free (Result);
                R.Pending.Delete (K);
             end;
          else
@@ -210,7 +222,7 @@ package body Driver.Robot.Kinematics is
                               Query_Points (M, E, G, R.Query_U, R.Query_V);
                            elsif not R.Query_U.Is_Empty and then not R.Unanswerable then
                               declare
-                                 Points : Driver.Instrument.Point_Array (1 .. Natural (R.Query_U.Length));
+                                 Points : Point_Access := new Driver.Instrument.Point_Array (1 .. Natural (R.Query_U.Length));
                               begin
                                  for P in Points'Range loop
                                     Points (P) := (U => R.Query_U (P - 1), V => R.Query_V (P - 1));
@@ -220,7 +232,8 @@ package body Driver.Robot.Kinematics is
                                      Ticket => Driver.Instrument.Submit_Match
                                        ((Stored => False, Image => R.Frames.First_Element.Image),
                                         (Stored => False, Image => O.Images (E)),
-                                        Points, True, O.Beat)));
+                                        Points.all, True, O.Beat)));
+                                 Free (Points);
                               end;
                            end if;
                         end if;
@@ -264,7 +277,7 @@ package body Driver.Robot.Kinematics is
                   N       : constant Natural := M.Groups (R.Group).Size;
                   Frames  : constant Natural := Natural (R.Frames.Length);
                   Queries : constant Natural := Natural (R.Query_U.Length);
-                  Changes : Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. N);
+                  Changes : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. N);
                   Visible : Real_Array (1 .. N);
                   Count   : Natural := 0;
                   Trips   : Real_Access;
@@ -320,7 +333,7 @@ package body Driver.Robot.Kinematics is
                      --  moved by more than the matcher errs: the median of their
                      --  displacements significant against a round trip's noise.
                      function Moved (S : Match_Set) return Boolean is
-                        D : Real_Array (1 .. Queries);
+                        D : Real_Access := new Real_Array (1 .. Queries);
                         K : Natural := 0;
                      begin
                         for I in 0 .. Queries - 1 loop
@@ -330,10 +343,14 @@ package body Driver.Robot.Kinematics is
                                 ((S.To_U (I) - R.Query_U (I)) ** 2 + (S.To_V (I) - R.Query_V (I)) ** 2);
                            end if;
                         end loop;
-                        return K > 0 and then Driver.Uncertain.Significant (Driver.Stats.Median (D (1 .. K)), Sigma);
+                        return Result : constant Boolean :=
+                          K > 0 and then Driver.Uncertain.Significant (Driver.Stats.Median (D (1 .. K)), Sigma)
+                        do
+                           Free (D);
+                        end return;
                      end Moved;
 
-                     Moving : array (R.Matches.First_Index .. R.Matches.Last_Index) of Boolean;
+                     Moving : Flag_Access := new Flag_Array (R.Matches.First_Index .. R.Matches.Last_Index);
 
                      function Returns (S : Match_Set; I : Natural) return Boolean is
                        (Round_Trip (S, I) and then (for some K in Moving'Range => Moving (K) and then R.Matches (K).Frame = S.Frame));
@@ -369,7 +386,7 @@ package body Driver.Robot.Kinematics is
                               end if;
                            end loop;
                         end loop;
-                        Fit.Fit (Changes, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width, M.Eyes (R.Eye).Grid.Height,
+                        Fit.Fit (Changes.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width, M.Eyes (R.Eye).Grid.Height,
                                  Joints, Lens, Report);
                         --  Up: the table the first arm's eye sees, away from it
                         --  towards the eye (the world is that eye's reference
@@ -380,7 +397,7 @@ package body Driver.Robot.Kinematics is
                               Sigma  : Real;
                               Found  : Boolean;
                            begin
-                              Fit.Table (Changes, Seen.all, Joints, Lens, Normal, Sigma, Found);
+                              Fit.Table (Changes.all, Seen.all, Joints, Lens, Normal, Sigma, Found);
                               if Found then
                                  M.Table_Up := (Unit_Vector => Normal, Sigma => Sigma);
                               end if;
@@ -415,7 +432,9 @@ package body Driver.Robot.Kinematics is
                               else "not fitted (stage" & Report.Stage'Image & "): "
                                    & Ada.Strings.Unbounded.To_String (Report.Why)));
                      end;
+                     Free (Moving);
                   end;
+                  Free (Changes);
                end;
             end if;
          end;

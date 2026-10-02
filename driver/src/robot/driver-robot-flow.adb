@@ -1,9 +1,15 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 
 package body Driver.Robot.Flow is
 
    use Ada.Numerics.Long_Elementary_Functions;
+
+   --  Everything sized by pixels lives on the heap: no stack needs to hold
+   --  a cell of any camera.
+   type Real_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
 
    function Grid_Of (Width, Height : Natural) return Cell_Grid is
      ((Width   => Width,
@@ -73,7 +79,8 @@ package body Driver.Robot.Flow is
                Resolved (Resolved'First + Cell - 1) := False;
                if Nx > 0 and then Ny > 0 then
                   declare
-                     Gx, Gy : Real_Array (1 .. Nx * Ny);
+                     Gx : Real_Access := new Real_Array (1 .. Nx * Ny);
+                     Gy : Real_Access := new Real_Array (1 .. Nx * Ny);
                   begin
                      for Y in Y0 .. Y1 - 1 loop
                         for X in X0 .. X1 - 1 loop
@@ -155,6 +162,8 @@ package body Driver.Robot.Flow is
                              and then abs U <= Real (Nx) / 2.0 and then abs V <= Real (Ny) / 2.0;
                         end if;
                      end;
+                     Free (Gx);
+                     Free (Gy);
                   end;
                end if;
             end;

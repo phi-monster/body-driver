@@ -213,7 +213,10 @@ private
       Moved_At  : Natural := 0;       --  the first beat its reading moved
       Ended     : Boolean := False;
       End_At    : Natural := 0;       --  the first still beat, or where it was given up or cut short
-      Settled   : Boolean := False;   --  ended by coming to rest
+      Settled   : Boolean := False;   --  judged: not cut short by the next push
+      Rested    : Boolean := False;   --  ended with its readings still (not given up while they kept moving)
+      Closest_At : Natural := 0;      --  the beat it came closest to its target, by a step it could be seen to make
+      Closest   : Real := 0.0;        --  how far along its ask it had come then, in reading units
       Length    : Real := 0.0;        --  how far it asked, in reading units
       Shortfall : Estimate;           --  how far short of the target it stopped, along the ask
       Delivered : Estimate;           --  the fraction of the ask it delivered, along the ask

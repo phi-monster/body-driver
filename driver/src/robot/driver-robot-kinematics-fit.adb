@@ -8,7 +8,8 @@ with Driver.Uncertain;
 
 package body Driver.Robot.Kinematics.Fit is
 
-   --  Samples too large for a stack live on the heap.
+   --  Everything sized by sightings, tracks, keyframes or points lives on
+   --  the heap: the fit runs in the decider's task, whose stack is small.
    type Real_Access is access Real_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
 
@@ -18,6 +19,16 @@ package body Driver.Robot.Kinematics.Fit is
    function Ln (X : Real) return Real renames Ada.Numerics.Long_Elementary_Functions.Log;
 
    type Flags is array (Positive range <>) of Boolean;
+   type Flags_Access is access Flags;
+   procedure Free is new Ada.Unchecked_Deallocation (Flags, Flags_Access);
+   type Count_Array is array (Positive range <>) of Natural;
+   type Count_Access is access Count_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Count_Array, Count_Access);
+   type Grid_Access is access Real_Matrix;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Matrix, Grid_Access);
+   type Flag_Grid is array (Positive range <>, Positive range <>) of Boolean;
+   type Flag_Grid_Access is access Flag_Grid;
+   procedure Free is new Ada.Unchecked_Deallocation (Flag_Grid, Flag_Grid_Access);
 
    ---------------------------------------------------------------------------
    --  Geometry
@@ -303,6 +314,10 @@ package body Driver.Robot.Kinematics.Fit is
    --  residuals of a pair cannot tell a flat scene's motions apart, the points
    --  seen from many keyframes can.
 
+   type Rigid_Array is array (Positive range <>) of Rigid;
+   type Rigid_Access is access Rigid_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Rigid_Array, Rigid_Access);
+
    procedure Refine_Tracks
      (Changes : Driver.Numerics.Arrays.Real_Matrix;
       Sight   : Sighting_Array;
@@ -377,9 +392,9 @@ package body Driver.Robot.Kinematics.Fit is
          return;
       end if;
       declare
-         Depth  : Real_Array (1 .. Tracks) := [others => 0.0];   --  the log of each track's depth
-         Has    : array (1 .. Tracks) of Boolean := [others => False];
-         Inlier : array (1 .. S) of Boolean := [others => False];
+         Depth  : Real_Access := new Real_Array'(1 .. Tracks => 0.0);   --  the log of each track's depth
+         Has    : Flags_Access := new Flags'(1 .. Tracks => False);
+         Inlier : Flags_Access := new Flags'(1 .. S => False);
          X      : Real_Array (1 .. Count);
          Changed : Natural := Natural'Last;
          --  Each parameter's variance at the solution, in the reduced set: the
@@ -392,8 +407,7 @@ package body Driver.Robot.Kinematics.Fit is
          procedure Residuals (Xv : Real_Array; Dv : Real_Array; Index : Real_Access; R : out Real_Array) is
             Lx    : constant Lens := Lens_Of (Xv);
             Jx    : constant Joint_Array := Joints_Of (Xv);
-            type Rigid_Array is array (1 .. Frames) of Rigid;
-            Views : Rigid_Array;
+            Views : Rigid_Access := new Rigid_Array (1 .. Frames);
          begin
             for F in 1 .. Frames loop
                Views (F) := Inverse (Eye_At (Jx, Changes_Of (F)));
@@ -410,10 +424,12 @@ package body Driver.Robot.Kinematics.Fit is
                   R (2 * K) := V - Sg.V;
                end;
             end loop;
+            Free (Views);
          end Residuals;
 
          procedure Triangulate is
-            Num, Den : Real_Array (1 .. Tracks) := [others => 0.0];
+            Num : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
+            Den : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
          begin
             for Sg of Sight loop
                declare
@@ -430,6 +446,8 @@ package body Driver.Robot.Kinematics.Fit is
                Has (T) := Den (T) > 0.0 and then Num (T) / Den (T) > 0.0;
                Depth (T) := (if Has (T) then Ln (Num (T) / Den (T)) else 0.0);
             end loop;
+            Free (Num);
+            Free (Den);
          end Triangulate;
       begin
          Triangulate;
@@ -441,7 +459,7 @@ package body Driver.Robot.Kinematics.Fit is
             declare
                Used  : Natural := 0;
             begin
-               for B of Inlier loop
+               for B of Inlier.all loop
                   if B then
                      Used := Used + 1;
                   end if;
@@ -449,7 +467,8 @@ package body Driver.Robot.Kinematics.Fit is
                exit when 2 * Used <= Count + Tracks;
                declare
                   Index : Real_Access := new Real_Array (1 .. Used);
-                  R0, Rn : Real_Access := new Real_Array (1 .. 2 * Used);
+                  R0    : Real_Access := new Real_Array (1 .. 2 * Used);
+                  Rn    : Real_Access := new Real_Array (1 .. 2 * Used);
                   Jp    : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 2 * Used, 1 .. Count);
                   Jd    : Real_Access := new Real_Array (1 .. 2 * Used);
                   K     : Natural := 0;
@@ -466,14 +485,13 @@ package body Driver.Robot.Kinematics.Fit is
                      return C;
                   end Cost;
                begin
-                  Rn := new Real_Array (1 .. 2 * Used);
                   for I in 1 .. S loop
                      if Inlier (I) then
                         K := K + 1;
                         Index (K) := Real (I);
                      end if;
                   end loop;
-                  Residuals (X, Depth, Index, R0.all);
+                  Residuals (X, Depth.all, Index, R0.all);
                   Sigma := Noise_Of (R0.all);
                   if Sigma <= 0.0 then
                      Free (Index);
@@ -493,20 +511,21 @@ package body Driver.Robot.Kinematics.Fit is
                            H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));
                         begin
                            Xp (P) := Xp (P) + H;
-                           Residuals (Xp, Depth, Index, Rn.all);
+                           Residuals (Xp, Depth.all, Index, Rn.all);
                            for I in 1 .. 2 * Used loop
                               Jp (I, P) := (Rn (I) - R0 (I)) / H;
                            end loop;
                         end;
                      end loop;
                      declare
-                        Dp : Real_Array := Depth;
+                        Dp : Real_Access := new Real_Array'(Depth.all);
                         H  : constant Real := Sqrt (Real'Model_Epsilon);
                      begin
                         for T in 1 .. Tracks loop
                            Dp (T) := Dp (T) + H * Real'Max (1.0, abs Depth (T));
                         end loop;
-                        Residuals (X, Dp, Index, Rn.all);
+                        Residuals (X, Dp.all, Index, Rn.all);
+                        Free (Dp);
                         for I in 1 .. 2 * Used loop
                            declare
                               T : constant Positive := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;
@@ -518,9 +537,9 @@ package body Driver.Robot.Kinematics.Fit is
                      declare
                         A  : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Count) := [others => [others => 0.0]];
                         Bm : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Tracks);
-                        C  : Real_Array (1 .. Tracks) := [others => 0.0];
+                        C  : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
                         Gp : Real_Vector (1 .. Count) := [others => 0.0];
-                        Gd : Real_Array (1 .. Tracks) := [others => 0.0];
+                        Gd : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
                         Improved, Lowered : Boolean := False;
                      begin
                         Bm.all := [others => [others => 0.0]];
@@ -551,7 +570,7 @@ package body Driver.Robot.Kinematics.Fit is
                            declare
                               Sm    : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Count) := A;
                               Rhs   : Real_Vector (1 .. Count) := Gp;
-                              Cl    : Real_Array (1 .. Tracks);
+                              Cl    : Real_Access := new Real_Array (1 .. Tracks);
                               Lf    : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Count);
                               Pd    : Boolean;
                               Moves : Boolean := False;
@@ -577,7 +596,7 @@ package body Driver.Robot.Kinematics.Fit is
                                  declare
                                     Dx : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, Rhs);
                                     Xn : Real_Array := X;
-                                    Dn : Real_Array := Depth;
+                                    Dn : Real_Access := new Real_Array'(Depth.all);
                                  begin
                                     for P in 1 .. Count loop
                                        Xn (P) := X (P) + Dx (P);
@@ -597,14 +616,14 @@ package body Driver.Robot.Kinematics.Fit is
                                        end if;
                                     end loop;
                                     if Moves then
-                                       Residuals (Xn, Dn, Index, Rn.all);
+                                       Residuals (Xn, Dn.all, Index, Rn.all);
                                        declare
                                           Cn : constant Real := Cost (Rn.all);
                                        begin
                                           if Cn < Cost0 then
                                              Improved := Cost0 - Cn > Driver.Conventions.Unchanged_Fraction * Cost0;
                                              X := Xn;
-                                             Depth := Dn;
+                                             Depth.all := Dn.all;
                                              R0.all := Rn.all;
                                              Cost0 := Cn;
                                              Lambda := Lambda / 2.0;
@@ -612,10 +631,12 @@ package body Driver.Robot.Kinematics.Fit is
                                           end if;
                                        end;
                                     end if;
+                                    Free (Dn);
                                  end;
                               else
                                  Moves := True;
                               end if;
+                              Free (Cl);
                               exit when Lowered or else not Moves;
                               Lambda := 2.0 * Lambda;
                            end;
@@ -633,7 +654,7 @@ package body Driver.Robot.Kinematics.Fit is
                               Tm  : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Reduced) :=
                                 [others => [others => 0.0]];
                               Anchor : Positive := 1;
-                              Seen_Of : array (1 .. Tracks) of Natural := [others => 0];
+                              Seen_Of : Count_Access := new Count_Array'(1 .. Tracks => 0);
                            begin
                               for K in 1 .. Used loop
                                  declare
@@ -666,10 +687,20 @@ package body Driver.Robot.Kinematics.Fit is
                               end loop;
                               declare
                                  Ar : Driver.Numerics.Arrays.Real_Matrix := Transpose (Tm) * A * Tm;
-                                 Br : constant Driver.Numerics.Arrays.Real_Matrix := Transpose (Tm) * Bm.all;
+                                 Br : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Tracks => 0.0]];
                                  Lf : Driver.Numerics.Arrays.Real_Matrix (1 .. Reduced, 1 .. Reduced);
                                  Pd : Boolean;
                               begin
+                                 Free (Seen_Of);
+                                 for P in 1 .. Reduced loop
+                                    for Q in 1 .. Count loop
+                                       if Tm (Q, P) /= 0.0 then
+                                          for T in 1 .. Tracks loop
+                                             Br (P, T) := Br (P, T) + Tm (Q, P) * Bm (Q, T);
+                                          end loop;
+                                       end if;
+                                    end loop;
+                                 end loop;
                                  for T in 1 .. Tracks loop
                                     if T /= Anchor and then C (T) > 0.0 then
                                        for P in 1 .. Reduced loop
@@ -694,10 +725,13 @@ package body Driver.Robot.Kinematics.Fit is
                                        end;
                                     end loop;
                                  end if;
+                                 Free (Br);
                               end;
                            end;
                         end if;
                         Free (Bm);
+                        Free (C);
+                        Free (Gd);
                         exit when not Improved;
                      end;
                   end loop;
@@ -726,7 +760,7 @@ package body Driver.Robot.Kinematics.Fit is
                for I in 1 .. S loop
                   All_Index (I) := Real (I);
                end loop;
-               Residuals (X, Depth, All_Index, All_R.all);
+               Residuals (X, Depth.all, All_Index, All_R.all);
                Sigma := Noise_Of (All_R.all);
                for I in 1 .. S loop
                   declare
@@ -802,6 +836,9 @@ package body Driver.Robot.Kinematics.Fit is
                end;
             end loop;
          end if;
+         Free (Depth);
+         Free (Has);
+         Free (Inlier);
       end;
    end Refine_Tracks;
 
@@ -865,7 +902,7 @@ package body Driver.Robot.Kinematics.Fit is
       end Fail;
 
       --  The eye at every keyframe under the joints.
-      type Pose_Array is array (1 .. Frames) of Rigid;
+      subtype Pose_Array is Rigid_Array (1 .. Frames);
       procedure Poses_Of (Jx : Joint_Array; P : out Pose_Array) is
       begin
          for Frame in 1 .. Frames loop
@@ -987,11 +1024,12 @@ package body Driver.Robot.Kinematics.Fit is
          --  epipolar constraint is linear in the axis point), the constraints
          --  weighted to Sampson residuals and by Huber at the noise of a first
          --  solution; the median residual left.
-         procedure Best_Phi (J : Positive; F : Real; W : Vec3; Phi : out Real; Median_Px : out Real) is
+         procedure Best_Phi
+           (J : Positive; F : Real; W : Vec3; Phi : out Real; Median_Px : out Real; Ga, Gb, Wt, Rs : out Real_Array)
+         is
             L      : Sight_Line_Array renames Lines (J).all;
             K      : constant Natural := L'Length;
             E1, E2 : Vec3;
-            Ga, Gb, Wt, Rs : Real_Array (1 .. K);
             C      : Real := 1.0;
             Sn     : Real := 0.0;
             R      : Mat3 := Identity3;
@@ -1102,16 +1140,28 @@ package body Driver.Robot.Kinematics.Fit is
                   accept Start (Joint : Positive) do
                      J := Joint;
                   end Start;
-                  for D of Sphere loop
-                     declare
-                        Ph, Md : Real;
-                     begin
-                        Best_Phi (J, F, D, Ph, Md);
-                        if Md < Result.Score then
-                           Result := (Score => Md, W => D, Phi => Ph);
-                        end if;
-                     end;
-                  end loop;
+                  declare
+                     K  : constant Natural := Lines (J)'Length;
+                     Ga : Real_Access := new Real_Array (1 .. K);
+                     Gb : Real_Access := new Real_Array (1 .. K);
+                     Wt : Real_Access := new Real_Array (1 .. K);
+                     Rs : Real_Access := new Real_Array (1 .. K);
+                  begin
+                     for D of Sphere loop
+                        declare
+                           Ph, Md : Real;
+                        begin
+                           Best_Phi (J, F, D, Ph, Md, Ga.all, Gb.all, Wt.all, Rs.all);
+                           if Md < Result.Score then
+                              Result := (Score => Md, W => D, Phi => Ph);
+                           end if;
+                        end;
+                     end loop;
+                     Free (Ga);
+                     Free (Gb);
+                     Free (Wt);
+                     Free (Rs);
+                  end;
                   Best (J) := Result;
                end Scanner;
 
@@ -1183,7 +1233,7 @@ package body Driver.Robot.Kinematics.Fit is
          for Frame in 2 .. Frames loop
             if Single (Frame) > 0 then
                declare
-                  D : Real_Array (1 .. S);
+                  D : Real_Access := new Real_Array (1 .. S);
                   K : Natural := 0;
                begin
                   for X of Sight loop
@@ -1200,6 +1250,7 @@ package body Driver.Robot.Kinematics.Fit is
                         F_High := Real'Max (F_High, Ratio);
                      end;
                   end if;
+                  Free (D);
                end;
             end if;
          end loop;
@@ -1386,10 +1437,19 @@ package body Driver.Robot.Kinematics.Fit is
          declare
             --  Per joint and track: the depth along the reference ray its own
             --  keyframes triangulate, with the joint at distance one.
-            Depth : Real_Matrix (1 .. N, 1 .. Tracks) := [others => [others => 0.0]];
-            Seen  : array (1 .. N, 1 .. Tracks) of Boolean := [others => [others => False]];
-            Num, Den : Real_Matrix (1 .. N, 1 .. Tracks) := [others => [others => 0.0]];
+            Depth : Grid_Access := new Real_Matrix'[1 .. N => [1 .. Tracks => 0.0]];
+            Seen  : Flag_Grid_Access := new Flag_Grid'[1 .. N => [1 .. Tracks => False]];
+            Num   : Grid_Access := new Real_Matrix'[1 .. N => [1 .. Tracks => 0.0]];
+            Den   : Grid_Access := new Real_Matrix'[1 .. N => [1 .. Tracks => 0.0]];
             Rho   : Real_Array (1 .. N) := [others => 1.0];
+
+            procedure Free_All is
+            begin
+               Free (Depth);
+               Free (Seen);
+               Free (Num);
+               Free (Den);
+            end Free_All;
          begin
             for X of Sight loop
                declare
@@ -1458,7 +1518,7 @@ package body Driver.Robot.Kinematics.Fit is
                for A in 1 .. N loop
                   for B in A + 1 .. N loop
                      declare
-                        Logs : Real_Array (1 .. Tracks);
+                        Logs : Real_Access := new Real_Array (1 .. Tracks);
                         K    : Natural := 0;
                      begin
                         for I in 1 .. Tracks loop
@@ -1473,6 +1533,7 @@ package body Driver.Robot.Kinematics.Fit is
                            Shared (A) := Shared (A) + K;
                            Shared (B) := Shared (B) + K;
                         end if;
+                        Free (Logs);
                      end;
                   end loop;
                end loop;
@@ -1506,6 +1567,7 @@ package body Driver.Robot.Kinematics.Fit is
                         Driver.Numerics.Dense.Least_Squares (M_A, M_B, Sol, Full);
                         if not Full then
                            Fail ("the joints share too few tracked points to tell their distances apart");
+                           Free_All;
                            return;
                         end if;
                         for J in 1 .. N loop
@@ -1514,6 +1576,7 @@ package body Driver.Robot.Kinematics.Fit is
                      end;
                   elsif N > 1 then
                      Fail ("no point is tracked into the keyframes of two joints");
+                     Free_All;
                      return;
                   end if;
                end;
@@ -1521,6 +1584,7 @@ package body Driver.Robot.Kinematics.Fit is
             for J in 1 .. N loop
                Joints (Joints'First + J - 1).P := Rho (J) * Joints (Joints'First + J - 1).P;
             end loop;
+            Free_All;
          end;
       end;
       Normalize (Joints);
@@ -1533,7 +1597,7 @@ package body Driver.Robot.Kinematics.Fit is
       declare
          Per_Joint : constant := 6;
          Count     : constant Positive := 6 + Per_Joint * N;
-         Inlier    : Flags (1 .. S) := [others => False];
+         Inlier    : Flags_Access := new Flags'(1 .. S => False);
          Base      : Joint_Array := Joints;
          Changed   : Natural := Natural'Last;
 
@@ -1576,9 +1640,9 @@ package body Driver.Robot.Kinematics.Fit is
          end To_X;
 
          procedure Residuals_Of (Lx : Lens; Jx : Joint_Array; R : out Real_Array) is
-            Poses : Pose_Array;
+            Poses : Rigid_Access := new Pose_Array;
          begin
-            Poses_Of (Jx, Poses);
+            Poses_Of (Jx, Poses.all);
             for I in 1 .. S loop
                declare
                   Rr : Mat3;
@@ -1589,6 +1653,7 @@ package body Driver.Robot.Kinematics.Fit is
                                                   Ray (Lx, Sight (I).U, Sight (I).V), (Lx.Fx + Lx.Fy) / 2.0);
                end;
             end loop;
+            Free (Poses);
          end Residuals_Of;
 
          X : Real_Array (1 .. Count);
@@ -1631,9 +1696,9 @@ package body Driver.Robot.Kinematics.Fit is
 
                   procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
                      Lx    : constant Lens := Lens_Of (Xv);
-                     Poses : Pose_Array;
+                     Poses : Rigid_Access := new Pose_Array;
                   begin
-                     Poses_Of (Joints_Of (Xv), Poses);
+                     Poses_Of (Joints_Of (Xv), Poses.all);
                      for I in 1 .. Used loop
                         declare
                            Rr : Mat3;
@@ -1644,6 +1709,7 @@ package body Driver.Robot.Kinematics.Fit is
                                                            Ray (Lx, Kept (I).U, Kept (I).V), (Lx.Fx + Lx.Fy) / 2.0);
                         end;
                      end loop;
+                     Free (Poses);
                   end Evaluate;
 
                   procedure Solve is new Robust_Fit (Count, Used, Evaluate);
@@ -1693,6 +1759,7 @@ package body Driver.Robot.Kinematics.Fit is
             Free (All_R);
             Free (Fit_R);
          end;
+         Free (Inlier);
       end;
 
       --  The sign of every translation at once, which the epipolar constraint
@@ -1771,7 +1838,8 @@ package body Driver.Robot.Kinematics.Fit is
          type Vec3_Array is array (Positive range <>) of Vec3;
          type Vec3_Access is access Vec3_Array;
          procedure Free is new Ada.Unchecked_Deallocation (Vec3_Array, Vec3_Access);
-         Num, Den : Real_Array (1 .. Tracks) := [others => 0.0];
+         Num      : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
+         Den      : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
          Rays     : Vec3_Access := new Vec3_Array (1 .. Tracks);
          Points   : Vec3_Access := new Vec3_Array (1 .. Tracks);
          Count    : Natural := 0;
@@ -1804,6 +1872,8 @@ package body Driver.Robot.Kinematics.Fit is
             end if;
          end loop;
          Free (Rays);
+         Free (Num);
+         Free (Den);
          if Count < 4 then
             Free (Points);
             return;
@@ -1812,8 +1882,8 @@ package body Driver.Robot.Kinematics.Fit is
             Golden     : constant Real := (3.0 - Sqrt (5.0)) * Ada.Numerics.Pi;
             Directions : constant Natural := 2562;
             Best       : Real := Real'Last;
-            Offsets    : Real_Array (1 .. Count);
-            Gaps       : Real_Array (1 .. Count);
+            Offsets    : Real_Access := new Real_Array (1 .. Count);
+            Gaps       : Real_Access := new Real_Array (1 .. Count);
             Center     : Vec3 := [0.0, 0.0, 0.0];
          begin
             --  The direction whose points lie closest about their median.
@@ -1827,13 +1897,13 @@ package body Driver.Robot.Kinematics.Fit is
                      Offsets (K) := Dot (Nv, Points (K));
                   end loop;
                   declare
-                     C : constant Real := Driver.Stats.Median (Offsets);
+                     C : constant Real := Driver.Stats.Median (Offsets.all);
                   begin
                      for K in 1 .. Count loop
                         Gaps (K) := abs (Offsets (K) - C);
                      end loop;
                      declare
-                        Score : constant Real := Driver.Stats.Median (Gaps);
+                        Score : constant Real := Driver.Stats.Median (Gaps.all);
                      begin
                         if Score < Best then
                            Best := Score;
@@ -1850,7 +1920,7 @@ package body Driver.Robot.Kinematics.Fit is
             loop
                declare
                   Spread : Real;
-                  W      : Real_Array (1 .. Count);
+                  W      : Real_Access := new Real_Array (1 .. Count);
                   Sum_W  : Real := 0.0;
                   Scatter : Mat3 := [others => [others => 0.0]];
                   Values : Vec3;
@@ -1861,14 +1931,17 @@ package body Driver.Robot.Kinematics.Fit is
                      Offsets (K) := Dot (Normal, Points (K));
                   end loop;
                   declare
-                     C : constant Real := Driver.Stats.Median (Offsets);
+                     C : constant Real := Driver.Stats.Median (Offsets.all);
                   begin
                      for K in 1 .. Count loop
                         Gaps (K) := Offsets (K) - C;
                      end loop;
                   end;
-                  Spread := Noise_Of (Gaps);
-                  exit when Spread <= 0.0;
+                  Spread := Noise_Of (Gaps.all);
+                  if Spread <= 0.0 then
+                     Free (W);
+                     exit;
+                  end if;
                   Center := [0.0, 0.0, 0.0];
                   for K in 1 .. Count loop
                      W (K) := Huber (Gaps (K) / Spread);
@@ -1895,6 +1968,7 @@ package body Driver.Robot.Kinematics.Fit is
                      Turn : constant Real := Arccos (Real'Min (1.0, Dot (Next, Normal)));
                   begin
                      Normal := Next;
+                     Free (W);
                      exit when Turn <= Driver.Conventions.Unchanged_Fraction * Sigma;
                   end;
                end;
@@ -1904,6 +1978,8 @@ package body Driver.Robot.Kinematics.Fit is
                Normal := -Normal;
             end if;
             Found := Sigma < Real'Last;
+            Free (Offsets);
+            Free (Gaps);
          end;
          Free (Points);
       end;
@@ -1918,8 +1994,8 @@ package body Driver.Robot.Kinematics.Fit is
       Found         : out Boolean)
    is
       N      : constant Natural := Points'Length;
-      Inlier : array (1 .. N) of Boolean := [others => True];
-      Weight : constant Real_Array (1 .. N) := [others => 1.0];
+      Inlier : Flags_Access := new Flags'(1 .. N => True);
+      Weight : Real_Access := new Real_Array'(1 .. N => 1.0);
       P_Mat  : Real_Matrix (1 .. 3, 1 .. 4) := [others => [others => 0.0]];
 
       function Pt (I : Positive) return Correspondence is (Points (Points'First + I - 1));
@@ -2091,7 +2167,7 @@ package body Driver.Robot.Kinematics.Fit is
       begin
          loop
             declare
-               All_R : Real_Array (1 .. 2 * N);
+               All_R : Real_Access := new Real_Array (1 .. 2 * N);
                Used  : Natural := 0;
                Now_Changed : Natural := 0;
                S     : Real;
@@ -2099,7 +2175,7 @@ package body Driver.Robot.Kinematics.Fit is
                for I in 1 .. N loop
                   Residual (X, I, All_R (2 * I - 1), All_R (2 * I));
                end loop;
-               S := Noise_Of (All_R);
+               S := Noise_Of (All_R.all);
                for I in 1 .. N loop
                   declare
                      Fits : constant Boolean := S > 0.0
@@ -2116,10 +2192,11 @@ package body Driver.Robot.Kinematics.Fit is
                   end;
                end loop;
                Sigma := S;
+               Free (All_R);
                exit when Used < 7 or else Now_Changed >= Changed or else (Now_Changed = 0 and then Changed /= Natural'Last);
                Changed := Now_Changed;
                declare
-                  Index : array (1 .. Used) of Positive;
+                  Index : Count_Access := new Count_Array (1 .. Used);
                   K     : Natural := 0;
 
                   procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
@@ -2138,6 +2215,7 @@ package body Driver.Robot.Kinematics.Fit is
                      end if;
                   end loop;
                   Solve (X, S);
+                  Free (Index);
                   Base_R := Pose_Of (X).Rotation;
                   X (1 .. 3) := [0.0, 0.0, 0.0];
                end;
@@ -2147,6 +2225,8 @@ package body Driver.Robot.Kinematics.Fit is
          L := Lens_Of (X);
          Found := Sigma < Real'Last and then L.Fx > 0.0 and then L.Fy > 0.0;
       end;
+      Free (Inlier);
+      Free (Weight);
    end Resect;
 
 end Driver.Robot.Kinematics.Fit;

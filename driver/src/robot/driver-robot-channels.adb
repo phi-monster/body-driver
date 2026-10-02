@@ -1,5 +1,6 @@
 with Ada.Containers;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Distributions;
 with Driver.Stats;
 
@@ -7,6 +8,11 @@ package body Driver.Robot.Channels is
 
    use Ada.Numerics.Long_Elementary_Functions;
    use type Driver.Observations.Group_Id;
+
+   --  Everything sized by beats lives on the heap: the estimates also run in
+   --  the decider's task, whose stack is small.
+   type Real_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
 
    procedure Append (M : in out Model; O : Observation; Sent : Driver.Commands.Command) is
    begin
@@ -127,7 +133,7 @@ package body Driver.Robot.Channels is
       --  no sign of its own, so its scale is measured about zero. About their
       --  own median, two-valued changes (a reading whose last bit flips back
       --  and forth, one way more often than the other) leave no spread at all.
-      Moved : Real_Array (1 .. 2 * Rest);
+      Moved : Real_Access := new Real_Array (1 .. 2 * Rest);
       K     : Natural := 0;
       Index : constant Natural := First_Channel (M, G) + Channel - 1;
    begin
@@ -146,6 +152,7 @@ package body Driver.Robot.Channels is
          M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. 2 * K)) / Sqrt (2.0));
          M.Noise_Freedom.Replace_Element (Index, Mad_Degrees_Of_Freedom (K));
       end if;
+      Free (Moved);
    end Measure_Channel;
 
    procedure Measure_Noise (M : in out Model) is
@@ -356,35 +363,43 @@ package body Driver.Robot.Channels is
       end loop;
    end Measure;
 
+   function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean is
+      Rest    : Real_Array := D;
+      Watched : Natural := 0;   --  channels an eye watches, their steps below what it sees
+   begin
+      for C in Rest'Range loop
+         declare
+            V : constant Estimate := Visible_Step (M, G, C);
+         begin
+            if Known (V) then
+               --  A channel an eye watches moves when its change is a step the
+               --  eye can see; below that no eye can tell, however the held
+               --  reading jitters.
+               if abs Rest (C) >= V.Value then
+                  return True;
+               end if;
+               Rest (C) := 0.0;
+               Watched := Watched + 1;
+            end if;
+         end;
+      end loop;
+      --  The others against their noise: the change of two readings has
+      --  twice the variance of one.
+      return Watched < Rest'Length and then Significant_Change (M, G, Rest, Sqrt (2.0));
+   end Visible;
+
    function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean is
    begin
       if Beat = 0 or else not Has_Reading (M, G, Beat) or else not Has_Reading (M, G, Beat - 1) then
          return False;
       end if;
       declare
-         D     : Real_Array (1 .. M.Groups (G).Size);
-         Watched : Natural := 0;   --  channels an eye watches, their steps below what it sees
+         D : Real_Array (1 .. M.Groups (G).Size);
       begin
          for C in D'Range loop
             D (C) := Change (M, G, Beat, C);
-            declare
-               V : constant Estimate := Visible_Step (M, G, C);
-            begin
-               if Known (V) then
-                  --  A channel an eye watches moves when its change is a step the
-                  --  eye can see; below that no eye can tell, however the held
-                  --  reading jitters.
-                  if abs D (C) >= V.Value then
-                     return True;
-                  end if;
-                  D (C) := 0.0;
-                  Watched := Watched + 1;
-               end if;
-            end;
          end loop;
-         --  The others against their noise: the change of two readings has
-         --  twice the variance of one.
-         return Watched < D'Length and then Significant_Change (M, G, D, Sqrt (2.0));
+         return Visible (M, G, D);
       end;
    end Moving;
 
