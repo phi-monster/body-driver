@@ -1,105 +1,134 @@
-# 身体协议:机器人和驱动之间说什么
+# The body protocol
 
-这份文档讲你的机器人(或仿真)怎么接到驱动上。驱动不要图纸,也不要你填配置文件。你只要把读数和画面报上来,驱动开机时自己一组一组地推一下,量出每一组数是什么:哪几组是胳膊的关节、哪一组是爪子、哪只眼长在哪条胳膊上。
+This is how a robot, or a simulator, connects to the body driver. The driver
+needs no drawing of the robot and no configuration file. The robot reports
+its readings and its pictures; the driver works out what each group of
+numbers is by pushing it and looking, and from then on it sends the robot
+commands in the robot's own shape.
 
-## 1. 连接
-
-- 驱动起一个 WebSocket 服务:`body_driver --listen <端口>`。机器人那一边是客户端,连过来。
-- 每条消息都是一帧二进制,内容是 msgpack。
-- 线断了,驱动在同一个口上等你重新接上。量到的身体、攥着的命令都留着;重连不算新的一集。
-
-## 2. 机器人发什么
-
-每条消息是一个 map:
-
-| 键 | 是什么 |
-|---|---|
-| `message_type` | `hello` / `prepare_case` / `reset` / `call` / `infer` / `trial_end` / `heartbeat` |
-| `message_id` | 你自己的编号,驱动原样回 |
-| `step` | 可选,驱动原样回(没有就回 0) |
-| `evaluation_id`、`action_case_id`、`trial_id`、`repeat_index`、`sent_at` | 可选,有就原样回 |
-| `payload` | map,见下 |
-
-- `payload.obs`(或者 `payload.observation`):这一拍的观测,见第 3 节。哪种消息带着观测都行,驱动都当新的一帧。
-- 要动作:`message_type = "call"`,`payload.func_name = "get_action"`,通常同时带着这一拍的观测。
-- `reset`:新的一集开始。驱动把这个世界的记忆清掉(脑起的名字、"这只眼里没有它"、手指指向哪儿),量过的身体留着,碰出来的桌面标成"上一集的"。
-
-## 3. 观测:驱动按形状认,不按键名
-
-观测是一个 map,可以一层套一层。驱动把它摊平成一片片叶子(每片叶子带着它从根下来的那串键,叫"路径"),按每片叶子的形状认:
-
-| 叶子 | 认成 |
-|---|---|
-| 字节型(`u1` / `i1`)、形状 H × W × 3 的数组 | 一台彩色相机,RGB |
-| 浮点型(`f4` / `f8`)、形状 H × W、和某台相机一样大 | 那台相机的深度图(路径的公共前缀最长的那台) |
-| 3 × 3 浮点、样子是 [f 0 cx; 0 f cy; 0 0 1] | 那台相机的内参(焦距、主点,像素);没给就由驱动自己量 |
-| 观测最上一层的字符串 `instruction` | 任务句(人的原话,交给脑) |
-| 其余每一个数值数组 | 一组读数 |
-
-数组可以是 msgpack 的普通数组,也可以是 msgpack-numpy 的写法:`{"nd": true, "type": "<f4", "shape": [480, 640], "data": <bin>}`。
-
-至少要有一台相机、一组读数,驱动才开机。缺了就照实说缺什么,接着等下一帧。
-
-### 每一组读数是什么,开机量
-
-驱动不看"几个数、值在什么范围"来认,而是每一组推一下看:读数跟不跟,哪只眼里整幅画面在动,哪只眼里只有一块在动,还是一点都没变。
-
-- 臂:有一只眼的整幅画面跟着它动(那只眼长在它上面),但不是每只眼都动。
-- 扛着全身的那组:每只眼都整幅在动(要两只眼以上才分得出)。
-- 合拢通道(爪子、手指):只有一块在动,那一块在某条臂自己那只眼里。
-- 零件:只有一块在动,不在哪条臂的眼里。
-- 别的读数(比如你报的末端位姿):记下推哪一组时它跟着变。
-
-推法:从极小起,每次翻一倍,直到走得出来、又看得见为止。
-
-### 命令键:你把上一条命令回给驱动看
-
-驱动发动作时按键名发(第 4 节)。要是你在观测里把收到的命令也报回来(同一个最后一节的名字出现两次:一组是读数,一组是命令的回声),驱动就认这个名字是命令键。一个名字都没回的话,每一组都当命令键,推推看;推了不跟的,照实说推不动。
-
-### 接入契约(开机报告里逐组核对)
-
-1. 推一组数,它的读数要跟着走。两个方向都推不动 ⇒ `接入契约第 1 条不满足`。
-2. 读数走了,至少有一只眼里要看得见有东西变。读数跟着走、哪只眼里都没变 ⇒ `第 2 条不满足`(哑巴零件:加眼睛或镜子,代码修不了)。
-3. 没动就别说动了。一个方向推,画面变了;反方向推同样大,读数说走到了,画面却一个像素都没变 ⇒ `第 3 条不满足`(没动却不说)。
-
-## 4. 驱动回什么
-
-每一条请求都回一条,`message_type` 是:`hello` → `hello_ack`,`prepare_case` → `prepare_case_ack`,`reset` → `reset_result`,`call` → `call_result`,`infer` → `infer_result`,`trial_end` → `trial_end_ack`,`heartbeat` → `heartbeat_ack`。`message_id`、`step` 和第 2 节那几个可选键原样带回。
-
-`payload`:
-
-- `hello_ack`:`{"ok": true, "server": "xpolicylab_policy_server", "server_instance_id": "body-driver"}`。
-- `get_action` 的 `call_result`:`{"result": [<动作>]}`。还没有观测、什么都发不出时是 `{"result": []}`。
-- 其余:`{"ok": true}`。
-
-### 动作
-
-一个 map:`{命令键的最后一节名字: [一串数], …}`,每个命令键都带上,一串数的长度和它的读数一样。
-
-- 这一条要动的那几组:发目标(关节读数的目标、末端位姿 xyz + wxyz、合拢通道的目标、扛着全身那组的速度)。
-- 不动的那几组:照它们此刻的读数原样发回去。这一拍没收到它的读数,就发上一回发出去的那一串;一次都没发过、也没读数,这个键这回不发。一个数都不编。
-- 合拢通道:发这一集里最后给过的目标。读数会被外力推着走,"照读数保持"会把被推合了的读数锁住。
-- 一条动作里只有一类目标:关节就全是关节,不混着位姿。
-
-### 三条规矩
-
-1. 应答的形状由你定:键名和数组长度照你报的读数。
-2. 没有新命令,就重发上一条。
-3. 线断了,驱动在同一个口上等你重接;只有你明说 `reset` 才算新的一集。
-
-## 5. 时间
-
-- 一拍 = 你发一帧观测。驱动按收到的帧数数拍,一集从 `reset` 那一帧起数。
-- 画面比读数晚几拍,驱动开机时量(最多查到前后各 4 拍),之后按量到的拍数给每一张画面配读数。你不用对齐它们,但要每一拍都把当时的读数和画面一起报。
-- 画面没收到(这一拍没有这台相机),这一格空着占位,相机的下标不会错位。
-
-## 6. 起一台
+## 1. The connection
 
 ```
-body_driver --listen 9080 --eye 127.0.0.1:8078 --inst 127.0.0.1:8077 --out body.json
+body_driver --listen PORT [--eye HOST:PORT] [--inst HOST:PORT] [--body FILE] [--record FILE]
 ```
 
-- `--eye`:脑服务,见 [`brain-service.md`](brain-service.md)。
-- `--inst`:仪器服务,见 [`instrument-service.md`](instrument-service.md)。
-- `--in` / `--out`:身体文件,见 [`body-file.md`](body-file.md)。
-- 日志里每一行是什么,见 [`log-lines.md`](log-lines.md)。
+- The driver is a WebSocket server on `PORT`; the robot is the client. One
+  robot at a time.
+- Every message is one binary frame holding a msgpack map (text frames are
+  read the same way). Pings are answered.
+- When the connection drops, the driver waits for the robot on the same
+  port. Nothing measured is lost, and a reconnection is not a new episode.
+- `--eye` is the brain ([`brain-service.md`](brain-service.md)), `--inst` the
+  instrument ([`instrument-service.md`](instrument-service.md)), `--body` the
+  body file ([`body-file.md`](body-file.md)). `--record FILE` writes
+  everything that crosses the driver's boundary (robot messages, replies,
+  service calls), so a run can be replayed (`driver/bin/replay`).
+
+## 2. What the robot sends
+
+Every message is a map:
+
+| key | what it is |
+|---|---|
+| `message_type` | `hello`, `prepare_case`, `reset`, `call`, `infer`, `trial_end` or `heartbeat` |
+| `payload` | a map: see below |
+| `message_id`, `evaluation_id`, `action_case_id`, `trial_id`, `repeat_index`, `sent_at` | optional; returned unchanged |
+| `step` | optional; returned unchanged (0 when absent) |
+
+- `payload.obs` (or `payload.observation`) is this beat's observation
+  (section 3). Any message may carry one; each observation is a new beat.
+- To ask for an action: `message_type` `call` with `payload.func_name`
+  `get_action`, usually with this beat's observation.
+- `reset` starts a new episode: the driver forgets this world (the names the
+  brain gave, the places, which pictures showed what) and keeps what it
+  measured about the body.
+
+## 3. The observation: recognized by shape, not by key names
+
+An observation is a map, nested as deep as you like. The driver flattens it
+into leaves, each with the path of keys from the root, and recognizes each
+leaf by its shape:
+
+| leaf | recognized as |
+|---|---|
+| bytes (`u1` or `i1`) shaped height x width x 3 | a colour camera, RGB |
+| floats shaped height x width, the size of a camera | that camera's depth, paired with the camera whose key path shares the longest prefix with it |
+| any other float grid (intrinsics, extrinsics, ...) | recognized and left unused: the driver measures its eyes itself |
+| a string `instruction` at the top level | the person's words: the task, handed to the brain |
+| any other numeric array of one dimension (or a number) | a group of readings |
+
+Arrays may be msgpack arrays or msgpack-numpy maps
+(`{"nd": true, "type": "<f4", "shape": [480, 640], "data": <bin>}`).
+
+The driver starts once an observation has at least one camera and one group
+of readings; until then it says what it lacks and waits for the next one.
+Keep every camera in every observation: a camera missing from one beat is a
+gap at its place, not a shift of the others.
+
+### Command keys
+
+The driver commands a group by the last key of its path. When the robot
+reports back the command it received under the same last key as the reading
+(two groups with the same last key and the same size: one the reading, one
+its echo), that key is the group's command key. When the robot echoes
+nothing anywhere, every group is tried as commandable under its last key.
+
+### What each group is
+
+The driver does not guess a group's meaning from its size or its values.
+At boot it pushes each group a little and watches its readings and every
+eye: an arm moves an eye it carries; what closes a hand shows only a patch
+moving; a base moves every eye at once. What a robot reports that the
+driver must not use (a pose of the hand computed by the robot, true object
+poses) may be in the observation: the driver reads only joint readings,
+commands and images.
+
+### The porting contract
+
+A body runs every program of the language when it does three things
+([`driver/LANGUAGE.md`](../driver/LANGUAGE.md), section 10):
+
+1. Each group can be pushed on its own.
+2. When it is pushed, something changes in some picture: the body's own
+   part, or the whole world as seen by an eye the group carries.
+3. When it was pushed and did not move, its reading says so.
+
+A body that breaks one of them is told which, in the log, and the driver
+holds still. A part that moves while no eye sees anything change is mute:
+add an eye or a mirror, no code can fix it.
+
+## 4. What the driver answers
+
+Every request gets one reply. Its `message_type` is the request's with a
+suffix: `hello_ack`, `prepare_case_ack`, `reset_result`, `call_result`,
+`infer_result`, `trial_end_ack`, `heartbeat_ack` (and `error` for an unknown
+type). The optional identifiers and `step` come back unchanged.
+
+| request | payload of the reply |
+|---|---|
+| `hello` | `{"ok": true, "server": "xpolicylab_policy_server", "server_instance_id": "body-driver"}` |
+| `call` `get_action` | `{"result": [<action>]}`, or `{"result": []}` before any observation was recognized |
+| any other | `{"ok": true}` (`false` for an unknown type) |
+
+### The action
+
+A map from command key to a list of numbers, as many as the group's reading:
+`{"<command key>": [x1, x2, ...], ...}`.
+
+- A group the driver moves this beat gets its target.
+- A group it does not move holds: it gets the last target the driver sent it
+  this episode; if it was never commanded this episode, its reading of this
+  beat; if this beat has no reading for it, what was last sent for it; and if
+  nothing was ever sent, the key is left out. No number is ever made up.
+- What closes a hand gets the last target given to it this episode, not its
+  reading, since an outside push changes the reading and holding the reading
+  would lock the push in.
+
+## 5. Time
+
+- One beat is one observation. The driver counts beats as they arrive, and an
+  episode counts from its `reset`.
+- Report every beat's readings and pictures together, as they are at that
+  beat.
+- While the driver is busy (asking the brain, which takes seconds) every
+  reply holds, so the robot always gets an answer in time.

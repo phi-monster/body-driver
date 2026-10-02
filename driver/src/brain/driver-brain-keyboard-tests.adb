@@ -389,6 +389,15 @@ package body Driver.Brain.Keyboard.Tests is
       Check (Accepts (Grammar (Hand_Body (Two_Things => [Above => True, others => False])),
                       "do the ball above the blue jeans until settled" & LF),
              "the sentence about two things when it is offered");
+      declare
+         One : constant String := G;
+      begin
+         Check (Accepts (One, "say I lift it" & LF & "do scissors height up until settled" & LF & "say up" & LF & "done" & LF)
+                and then Accepts (One, "say I wait" & LF),
+                "one stretch at most: before and after it only say and done");
+         Check (not Accepts (One, "do scissors height up until settled" & LF & "do scissors height down until settled" & LF),
+                "one stretch at most: a second one cannot be typed");
+      end;
    end Quantity_Grammar;
 
    procedure Full_Grammar is

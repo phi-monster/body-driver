@@ -7,9 +7,12 @@
 --    1  a thing this eye sees now that already has the same letters;
 --    2  the eye is asked where the name is, with the brain's words as they
 --       are; the box it gives is segmented, and the patch is the thing that
---       already occupies those pixels, or a new thing, unless the patch is
---       part of the body itself. An eye that cannot point it out passes the
---       question to the other eyes, in camera order;
+--       already occupies those pixels, or a new thing. An eye that cannot
+--       point it out passes the question to the other eyes, in camera order.
+--       A patch that is part of the body itself ends the asking: the eye did
+--       point it out, and parts of the body go by their role, never by a
+--       name, so only the letters of step 3 may still bind it (a thing named
+--       before, now in the hand);
 --    3  when no eye points it out, the letters alone: the same letters, or
 --       letters whose only additions are this round's language words glued
 --       to its ends (the only way the decoder adds letters to a name), and

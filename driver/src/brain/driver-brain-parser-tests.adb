@@ -1,6 +1,12 @@
+with Ada.Command_Line;
+with Ada.Directories;
+with Ada.Strings;
 with Ada.Strings.Unbounded;
+with Ada.Text_IO;
 with Driver.Action;
+with Driver.Brain.Names;
 with Driver.Brain.Programs;
+with Driver.Brain.Termination;
 with Driver.Tests;
 
 package body Driver.Brain.Parser.Tests is
@@ -199,8 +205,91 @@ package body Driver.Brain.Parser.Tests is
              "a sentence is kept as written, colon and capitals included");
    end Lines;
 
+   --  docs/language.md, found from where the self test runs (driver/bin).
+   function Reference return String is
+      Exe  : constant String := Ada.Directories.Full_Name (Ada.Command_Line.Command_Name);
+      Root : constant String := Ada.Directories.Containing_Directory
+        (Ada.Directories.Containing_Directory (Ada.Directories.Containing_Directory (Exe)));
+      Path : constant String := Ada.Directories.Compose (Ada.Directories.Compose (Root, "docs"), "language.md");
+      F    : Ada.Text_IO.File_Type;
+      R    : Unbounded_String;
+   begin
+      if not Ada.Directories.Exists (Path) then
+         return "";
+      end if;
+      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+      while not Ada.Text_IO.End_Of_File (F) loop
+         Append (R, Ada.Text_IO.Get_Line (F) & LF);
+      end loop;
+      Ada.Text_IO.Close (F);
+      return To_String (R);
+   end Reference;
+
+   --  Every block marked program in the reference is read and can end;
+   --  every block marked refused is refused before anything moves.
+   procedure Reference_Examples is
+      Text      : constant String := Reference;
+      Fence     : constant String := "```";
+      Kind      : Unbounded_String;   --  the open block's mark, "" outside a block
+      Block     : Unbounded_String;
+      First     : Positive := Text'First;
+      Programs_Read, Refusals_Read : Natural := 0;
+
+      procedure Judge is
+         P   : Program;
+         Ok  : Boolean;
+         Why : Refusal;
+      begin
+         Parse (To_String (Block), P, Ok, Why);
+         if Ok then
+            Why := Driver.Brain.Termination.Check (P, Driver.Brain.Termination.No_Stretch_Yet,
+                                                   Driver.Brain.Names.Same_Name'Access);
+            Ok := Why.Line = 0;
+         end if;
+         if To_String (Kind) = "program" then
+            Programs_Read := Programs_Read + 1;
+            Check (Ok, "docs/language.md: a program the reference shows is refused (" & To_String (Why.Why) & "):" & LF
+                   & To_String (Block));
+         elsif To_String (Kind) = "refused" then
+            Refusals_Read := Refusals_Read + 1;
+            Check (not Ok, "docs/language.md: a program the reference shows refused is accepted:" & LF
+                   & To_String (Block));
+         end if;
+      end Judge;
+   begin
+      Check (Text'Length > 0, "docs/language.md is not beside the driver");
+      for I in Text'Range loop
+         if Text (I) = ASCII.LF then
+            declare
+               Line : constant String := Text (First .. I - 1);
+            begin
+               if Line'Length >= Fence'Length and then Line (Line'First .. Line'First + Fence'Length - 1) = Fence then
+                  if Length (Kind) = 0 then
+                     Kind := To_Unbounded_String (Line (Line'First + Fence'Length .. Line'Last) & " ");
+                     Kind := Ada.Strings.Unbounded.Trim (Kind, Ada.Strings.Both);
+                     if Length (Kind) = 0 then
+                        Kind := To_Unbounded_String (Fence);   --  an unmarked block: not judged
+                     end if;
+                     Block := Null_Unbounded_String;
+                  else
+                     Judge;
+                     Kind := Null_Unbounded_String;
+                  end if;
+               elsif Length (Kind) > 0 then
+                  Append (Block, Line & LF);
+               end if;
+            end;
+            First := I + 1;
+         end if;
+      end loop;
+      Check (Programs_Read > 0 and then Refusals_Read > 0,
+             "the reference shows" & Programs_Read'Image & " programs and" & Refusals_Read'Image & " refusals");
+   end Reference_Examples;
+
    procedure Register is
    begin
+      Register ("brain.parser.reference", "a program docs/language.md shows is not what the driver reads",
+                Reference_Examples'Access);
       Register ("brain.parser.quantity", "a quantity sentence whose name holds and or a relation word is cut apart",
                 Quantity_Sentence'Access);
       Register ("brain.parser.constraints", "a constraint loses its step, rank, eye, step limit or anyway",

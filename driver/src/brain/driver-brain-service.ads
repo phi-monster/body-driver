@@ -61,6 +61,10 @@ package Driver.Brain.Service is
    function Where_Request (Picture_Url, Name : String) return String;
    --  The request bodies, exactly as sent.
 
+   function Where_Answer_Grammar return String;
+   --  The grammar of the where-is-it answer: {"found":true|false,"bbox_2d":[e,e,e,e]}
+   --  with every edge a whole number from 0 to 1000 and no blank anywhere.
+
    procedure Read_Event (Event : String; Text : in out Unbounded_String; Finish : in out Unbounded_String);
    --  One server-sent event of a streamed answer: its text is appended and
    --  its finish reason, when it has one, kept.
