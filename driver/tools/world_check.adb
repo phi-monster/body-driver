@@ -1543,6 +1543,47 @@ procedure World_Check is
                            end loop;
                            Append (Line, " mm");
                         end;
+                        --  And over each surface: the point that says the thing
+                        --  reaches lowest at its own uncertainty, as the support
+                        --  takes it, where it lies against the surface's reach,
+                        --  and how high over it.
+                        for F in 1 .. Driver.World.Offline.Surface_Count (Bench) loop
+                           declare
+                              Sf     : constant Driver.World.Supports.Surface :=
+                                Driver.World.Offline.Surface_Of (Bench, Driver.World.Surface_Id (F));
+                              Lowest : Natural := 0;
+                              Reach  : Real := Real'Last;
+                           begin
+                              for I in 1 .. Natural (Points.Length) loop
+                                 declare
+                                    H     : constant Estimate := Driver.Geometry.Height (Sf.Plane, Points (I).Point);
+                                    Up_To : constant Real :=
+                                      (if H.Sigma < Real'Last
+                                       then H.Value + Threshold (Scalar_Gate (H.Degrees_Of_Freedom,
+                                                                              Tests => Natural (Points.Length)))
+                                                      * H.Sigma
+                                       else Real'Last);
+                                 begin
+                                    if Up_To < Reach then
+                                       Reach := Up_To;
+                                       Lowest := I;
+                                    end if;
+                                 end;
+                              end loop;
+                              if Lowest > 0 then
+                                 declare
+                                    D : constant Vec3 := Points (Lowest).Point.Mean - Sf.Plane.Centre;
+                                    H : constant Estimate := Driver.Geometry.Height (Sf.Plane, Points (Lowest).Point);
+                                 begin
+                                    Append (Line, "; over surface" & F'Image & " at " & Mm (H.Value) & " +- "
+                                            & Mm (H.Sigma) & " mm, at " & Mm (D * Sf.Plane.Tangent_1) & ", "
+                                            & Mm (D * Sf.Plane.Tangent_2) & " mm in its reach " & Mm (Sf.Low_1)
+                                            & " .. " & Mm (Sf.High_1) & " by " & Mm (Sf.Low_2) & " .. "
+                                            & Mm (Sf.High_2) & " mm");
+                                 end;
+                              end if;
+                           end;
+                        end loop;
                      else
                         declare
                            P : constant Driver.Geometry.Plane_Estimate :=

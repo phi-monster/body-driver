@@ -351,8 +351,25 @@ package body Driver.World.Estimates is
       --  each region's pixels, on a grid as many pixels apart as the square
       --  root of the region's shorter side, carried out along their sights
       --  to the depth of the middle of what is seen of it. Its points may
-      --  cover only a part of what those regions show.
-      R.Outline.Clear;
+      --  cover only a part of what those regions show. An eye that lost the
+      --  thing and looks for it again keeps what it last showed of it, as the
+      --  thing keeps the points the pairs saw: the thing is where it was
+      --  until an eye sees it elsewhere. Its region then is of an earlier
+      --  view, so it is carried out as it was, not again.
+      for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
+         if R.Eyes (E).Has
+           and then (not R.Has_Points or else not R.Eyes (E).Pointed
+                     or else Tracks.State (R.Eyes (E).Track) = Tracks.Gone)
+           and then not R.Eyes (E).Outline.Is_Empty
+         then
+            declare
+               Here : Slot := R.Eyes (E);
+            begin
+               Here.Outline.Clear;
+               R.Eyes.Replace_Element (E, Here);
+            end;
+         end if;
+      end loop;
       if R.Has_Points then
          declare
             Middle : Vec3 := Zero3;
@@ -366,8 +383,9 @@ package body Driver.World.Estimates is
                  and then Driver.Images.Count (Tracks.Region (R.Eyes (E).Track)) > 0
                then
                   declare
+                     Here       : Slot := R.Eyes (E);
                      Eye_Camera : constant Driver.World.Cameras.Camera'Class := Camera_Of (E, Seen);
-                     Region     : constant Driver.Images.Mask := Tracks.Region (R.Eyes (E).Track);
+                     Region     : constant Driver.Images.Mask := Tracks.Region (Here.Track);
                      B          : constant Driver.World.Regions.Box := Driver.World.Regions.Bounds (Region);
                      Stride     : constant Positive :=
                        Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (B.Column_1 - B.Column_0 + 1,
@@ -375,6 +393,7 @@ package body Driver.World.Estimates is
                      Axis       : constant Vec3 := Middle - Eye_Camera.Pose.Pose.Translation;
                      Row        : Natural := B.Row_0;
                   begin
+                     Here.Outline.Clear;
                      while Row <= B.Row_1 loop
                         declare
                            Column : Natural := B.Column_0;
@@ -387,7 +406,7 @@ package body Driver.World.Estimates is
                                     Along : constant Real := Sight.Direction.Unit_Vector * Axis;
                                  begin
                                     if Along > 0.0 and then Sight.Direction.Sigma < Real'Last then
-                                       R.Outline.Append
+                                       Here.Outline.Append
                                          (Point_Estimate'
                                             (Mean       => Sight.Origin.Mean
                                                            + (Real'(Axis * Axis) / Along) * Sight.Direction.Unit_Vector,
@@ -400,6 +419,7 @@ package body Driver.World.Estimates is
                         end;
                         Row := Row + Stride;
                      end loop;
+                     R.Eyes.Replace_Element (E, Here);
                   end;
                end if;
             end loop;
@@ -537,6 +557,23 @@ package body Driver.World.Estimates is
                   if Ok then
                      Driver.World.Pairs.Triangulate (Camera_Of (X.From, Seen.Element), Camera_Of (X.Into, Seen.Element),
                                                      Points, X.Own, Answers.all, Kept, Apart, Far, Error);
+                     if Kept.Is_Empty then
+                        declare
+                           Found : Natural := 0;
+                        begin
+                           for A of Answers.all loop
+                              Found := Found + Boolean'Pos (A.Found);
+                           end loop;
+                           Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": eyes" & X.From'Image & " and"
+                                            & X.Into'Image & " placed none of its" & Points'Length'Image & " pixels;"
+                                            & Found'Image & " were found in eye" & X.Into'Image & ", "
+                                            & (if Error < Real'Last
+                                               then "the matcher erring by " & Driver.Log.Image (Error, 2) & " px"
+                                               else "their round trips gave no matcher's error")
+                                            & "," & Apart'Image & " whose lines did not meet," & Far'Image
+                                            & " too far to place");
+                        end;
+                     end if;
                   else
                      Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": the instrument did not match eye"
                                       & X.From'Image & " into eye" & X.Into'Image & ": " & To_String (Why));
@@ -1307,8 +1344,10 @@ package body Driver.World.Estimates is
          for M of R.Points loop
             With_Foot (M.Point.Mean);
          end loop;
-         for X of R.Outline loop
-            With_Foot (X.Mean);
+         for Here of R.Eyes loop
+            for X of Here.Outline loop
+               With_Foot (X.Mean);
+            end loop;
          end loop;
          return (Mean       => Middle,
                  Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);

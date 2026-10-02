@@ -702,6 +702,33 @@ package body Driver.World.Estimates.Tests is
                    "the box's own middle is significantly off the centre given by a strip of its top, whose"
                    & " sideways sigma is only" & Real'Image (Sqrt (C.Covariance (1, 1))));
          end;
+         --  Something passes over the box in the first eye: its pixels there
+         --  change, and the eye looks for it again. What that eye showed of
+         --  the box stands until an eye sees it elsewhere, as its points do:
+         --  the box's middle is still within the centre's covariance.
+         declare
+            use type Driver.World.Tracking.Phase;
+            Over : constant Driver.Images.Image := Over_Box (Gray, Driver.Bytes.Byte'Last);
+         begin
+            O.Beat := 2;
+            Observe (S, 2, Camera_Of'Access, Up, True, O);
+            O.Images.Replace_Element (1, Over);
+            O.Beat := 3;
+            Observe (S, 2, Camera_Of'Access, Up, True, O);
+            O.Beat := 4;
+            Observe (S, 2, Camera_Of'Access, Up, True, O);
+            Check (Driver.World.Tracking.State (S.Things (1).Eyes (1).Track) /= Driver.World.Tracking.Holding,
+                   "the first eye did not lose the box when its pixels changed");
+            declare
+               C : constant Point_Estimate := Centre (S, 1);
+            begin
+               Check (S.Things (1).Has_Points, "the strip's points were lost when the first eye lost the box");
+               Check (not Significant (C, Point_Estimate'(Mean => Middle, Covariance => [others => [others => 0.0]])),
+                      "the box's own middle is significantly off the centre given by a strip of its top once the"
+                      & " eye it was pointed at in lost it; the sideways sigma is only"
+                      & Real'Image (Sqrt (C.Covariance (1, 1))));
+            end;
+         end;
          Driver.Services.End_Replay;
       end;
    end Centre_Honest;

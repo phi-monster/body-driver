@@ -1286,6 +1286,7 @@ driver-world-estimates.adb	if Elsewhere >= 4 then	4	statistics	a spread in three
 driver-world-estimates.adb	if N >= 4 then	4	statistics	a spread in three dimensions needs one point more than it has dimensions
 driver-world-estimates.adb	if not Behind and then N >= 4 then	4	statistics	a spread in three dimensions needs one point more than it has dimensions
 driver-world-estimates.adb	return -1;	1	format	a beat before every beat: no measurement asked about yet
+driver-world-estimates.adb	then "" & Driver.Log.Image (Error, 2) & ""	2	format	digits printed in a log line or a message
 driver-world-estimates.adb	type Two_Eyes is array (1 .. 2) of Eye_Id;	2	structure	a point of the scene is seen by two eyes
 driver-world-estimates.ads	Stride : Positive := 1;	1	structure	a grid at every pixel until it is set
 driver-world-pairs.adb	(for all A in 1 .. 3 =>	3	structure	a point has three coordinates

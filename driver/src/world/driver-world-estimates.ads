@@ -111,6 +111,7 @@ private
    package Image_Holders is new Ada.Containers.Indefinite_Holders (Driver.Images.Image, Driver.Images."=");
    package Observation_Holders is new Ada.Containers.Indefinite_Holders (Observation, Driver.Observations."=");
    package Request_Holders is new Ada.Containers.Indefinite_Holders (String);
+   package Point_Vectors is new Ada.Containers.Vectors (Positive, Point_Estimate);
 
    --  A thing in one eye: its track, and the instrument's request out for it.
    type Slot is record
@@ -120,6 +121,8 @@ private
       Out_Now : Boolean := False;
       Ticket  : Driver.Services.Ticket;
       Points  : Point_Holders.Holder;   --  a match request's points
+      Outline : Point_Vectors.Vector;   --  a pointed region, carried out to the depth of what is seen of
+                                        --  the thing; kept while the eye looks for it again
    end record;
 
    package Slot_Vectors is new Ada.Containers.Vectors (Eye_Id, Slot);
@@ -155,7 +158,6 @@ private
    end record;
 
    package Start_Vectors is new Ada.Containers.Vectors (Positive, Start);
-   package Point_Vectors is new Ada.Containers.Vectors (Positive, Point_Estimate);
 
    --  What one pair of eyes last saw of a thing, and the observation it was
    --  seen at (without its images): the eyes as they were then.
@@ -179,8 +181,6 @@ private
       Has_Points : Boolean := False;
       Friction  : Friction_Bounds;
       Touches   : Point_Vectors.Vector;
-      Outline   : Point_Vectors.Vector;   --  its regions where it was pointed at, carried out to
-                                          --  the depth of what is seen of it
       Under     : Driver.World.Supports.Support;   --  its support, worked out again when its
       Under_Due : Boolean := True;                 --  points or the surfaces change
    end record;
