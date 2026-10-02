@@ -12,8 +12,8 @@ With BD_TRUTH=FILE, every observation the simulator builds appends one JSON line
 "state" repeats the observation's own state values, so the scorer pairs every line with its
 recorded observation exactly instead of trusting that each line was sent. Positions are in the
 environment's frame (world less the environment origin). A camera pose is that of its optical
-frame (+x right, +y down, +z forward); K is null when the lens is not a pinhole, and "lens" then
-holds the rig's F-theta parameters. Links, cameras and objects are the physics state when the
+frame (+x right, +y down, +z forward); K is that of the rendered image, square pixels (fy = fx), and
+null when the lens is not a pinhole, where "lens" holds the rig's F-theta parameters. Links, cameras and objects are the physics state when the
 observation is built; the image of the same observation may show an earlier state, as the
 renderer lags. An object is reported at its root: the parts of an articulated object are not.
 
@@ -80,9 +80,14 @@ def _cameras(om, env, origin):
         cam = cm.cameras[env][i]
         position, orientation = cam.get_world_pose(camera_axes="ros")
         entry = {"pose": _pose(position, orientation, origin), "resolution": list(cam.get_resolution())}
-        try:
-            entry["K"] = np.asarray(_values(cam.get_intrinsics_matrix())).reshape(3, 3).tolist()
-        except Exception:
+        # The renderer draws square pixels: it derives the vertical aperture from the horizontal one and
+        # the image's shape. get_intrinsics_matrix uses the authored vertical aperture instead, which put
+        # fy 17 % off on the x5 head eye (measured against the images by matching), so fy is fx here.
+        if "pinhole" in cam.get_lens_distortion_model():
+            width, height = cam.get_resolution()
+            f = width * cam.get_focal_length() / cam.get_horizontal_aperture()
+            entry["K"] = [[f, 0.0, width / 2.0], [0.0, f, height / 2.0], [0.0, 0.0, 1.0]]
+        else:
             entry["K"] = None
         lens = cm.camera_config[name].camera.get("lens")
         entry["lens"] = None if lens is None else OmegaConf.to_container(lens, resolve=True)

@@ -394,4 +394,5 @@ begin
       end if;
       Ada.Text_IO.Close (Out_File);
    end if;
+   Driver.Services.Shut_Down;
 end Replay;
