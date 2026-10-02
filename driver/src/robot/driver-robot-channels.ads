@@ -51,14 +51,20 @@ private package Driver.Robot.Channels is
    --  The degrees of freedom the channel's noise rests on (0: known or exact).
    --  Every channel of the group has its noise measured.
 
+   function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean
+     with Pre => D'First = 1 and then D'Length = Group_Size (M, G);
+   --  A change D of the group's readings, one value per channel, is motion:
+   --  a channel an eye watches changed by a step that eye can see
+   --  (Visible_Step: below it no eye can tell, however a held reading
+   --  jitters, and a joint held away from rest jitters far more than it was
+   --  measured to at rest), or the change of the channels no eye watches is
+   --  significant against their noise, as the change of two readings. The
+   --  one test of motion.
+
    function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean;
-   --  The group moved at Beat: a channel an eye watches changed by a step that
-   --  eye can see (Visible_Step: below it no eye can tell, however a held
-   --  reading jitters, and a joint held away from rest jitters far more than
-   --  it was measured to at rest), or the change of the channels no eye
-   --  watches is significant against their noise. False without a reading at
-   --  Beat or Beat - 1, or before noise is measured. The one test of motion:
-   --  push ends, the step tracker, stillness and keyframes all ask it.
+   --  The group moved at Beat: its change from Beat - 1 is Visible. False
+   --  without a reading at Beat or Beat - 1, or before noise is measured.
+   --  Push ends, the step tracker, stillness and keyframes all ask it.
 
    function Asked (M : Model; G : Group_Id; Beat : Natural) return Boolean;
    --  A push starts at Beat: the target in effect changed and asks for

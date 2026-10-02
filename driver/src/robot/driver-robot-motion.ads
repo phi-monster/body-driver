@@ -24,6 +24,7 @@ package Driver.Robot.Motion is
 
    type Step_Report is record
       Outcome   : Step_Outcome := Short;
+      At_Rest   : Boolean := True;   --  every push of the step ended with its readings still
       Beats     : Natural := 0;
       Delivered : Estimate;          --  delivered fraction of the commanded step
       Started   : Natural := 0;      --  how many beats the body had seen when the step was sent

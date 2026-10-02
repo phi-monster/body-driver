@@ -111,7 +111,7 @@ package body Driver.Robot.Stillness is
             begin
                Flow.Bounds (S.Grid, Cell, X0, X1, Y0, Y1);
                declare
-                  V : Real_Array (1 .. (X1 - X0) * (Y1 - Y0));
+                  V : Luma_Access := new Real_Array (1 .. (X1 - X0) * (Y1 - Y0));
                   K : Natural := 0;
                begin
                   for Row in Y0 .. Y1 - 1 loop
@@ -120,7 +120,8 @@ package body Driver.Robot.Stillness is
                         V (K) := Driver.Pixels.Variance (Noise, Column, Row);
                      end loop;
                   end loop;
-                  S.Luma_Variance.Append (Driver.Stats.Median (V));
+                  S.Luma_Variance.Append (Driver.Stats.Median (V.all));
+                  Free (V);
                end;
             end;
          end loop;

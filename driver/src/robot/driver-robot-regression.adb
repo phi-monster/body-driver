@@ -1,4 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Stats;
@@ -6,6 +7,15 @@ with Driver.Stats;
 package body Driver.Robot.Regression is
 
    use Ada.Numerics.Long_Elementary_Functions;
+
+   --  Everything sized by the observations lives on the heap: the estimates
+   --  also run in the decider's task, whose stack is small.
+   type Real_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
+   type Vector_Access is access Real_Vector;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Vector, Vector_Access);
+   type Matrix_Access is access Real_Matrix;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Matrix, Matrix_Access);
 
    Huber_K : constant := Driver.Conventions.Z;
    --  A residual beyond Z sigma is significantly not noise: from there on
@@ -73,16 +83,14 @@ package body Driver.Robot.Regression is
       end;
    end Pseudo_Inverse;
 
-   function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real) return Fit is
+   function Solve_On (X : Real_Matrix; Y : Real_Array; Floor : Real; W, Residual : in out Real_Array) return Fit is
       N  : constant Natural := X'Length (1);
       P  : constant Natural := X'Length (2);
       R0 : constant Integer := X'First (1) - 1;
       C0 : constant Integer := X'First (2) - 1;
       Y0 : constant Integer := Y'First - 1;
-      W  : Real_Array (1 .. N) := [others => 1.0];
       B  : Real_Array (1 .. P) := [others => 0.0];
       A  : Real_Matrix (1 .. P, 1 .. P);
-      Residual : Real_Array (1 .. N);
       S  : Real := 0.0;
       Converged : Boolean := False;
 
@@ -173,6 +181,16 @@ package body Driver.Robot.Regression is
          end;
       end loop;
       return (Columns => P, Beta => B, Scale => S, Normal => A, Converged => Converged);
+   end Solve_On;
+
+   function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real) return Fit is
+      W        : Real_Access := new Real_Array'(1 .. X'Length (1) => 1.0);
+      Residual : Real_Access := new Real_Array (1 .. X'Length (1));
+      Result   : constant Fit := Solve_On (X, Y, Floor, W.all, Residual.all);
+   begin
+      Free (W);
+      Free (Residual);
+      return Result;
    end Solve;
 
    function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean is
@@ -193,14 +211,14 @@ package body Driver.Robot.Regression is
       end;
    end Count_Significant;
 
-   function Explained_Nonnegative (X : Real_Matrix; Y : Real_Array; Used : out Natural) return Real is
+   function Explained_On
+     (X : Real_Matrix; Y : Real_Array; Xc : in out Real_Matrix; Yc : in out Real_Vector; Used : out Natural) return Real
+   is
       N  : constant Natural := X'Length (1);
       P  : constant Natural := X'Length (2);
       R0 : constant Integer := X'First (1) - 1;
       C0 : constant Integer := X'First (2) - 1;
       Y0 : constant Integer := Y'First - 1;
-      Xc : Real_Matrix (1 .. N, 1 .. P);
-      Yc : Real_Vector (1 .. N);
       B  : Real_Vector (1 .. P) := [others => 0.0];
       Positive_Set : array (1 .. P) of Boolean := [others => False];
       Total : Real := 0.0;
@@ -349,6 +367,16 @@ package body Driver.Robot.Regression is
          end if;
       end loop;
       return Real'Max (0.0, 1.0 - Residual_Sum / Total);
+   end Explained_On;
+
+   function Explained_Nonnegative (X : Real_Matrix; Y : Real_Array; Used : out Natural) return Real is
+      Xc     : Matrix_Access := new Real_Matrix (1 .. X'Length (1), 1 .. X'Length (2));
+      Yc     : Vector_Access := new Real_Vector (1 .. X'Length (1));
+      Result : constant Real := Explained_On (X, Y, Xc.all, Yc.all, Used);
+   begin
+      Free (Xc);
+      Free (Yc);
+      return Result;
    end Explained_Nonnegative;
 
    function Coefficient_Variances (F : Fit) return Real_Array is
