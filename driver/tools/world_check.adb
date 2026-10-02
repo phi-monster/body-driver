@@ -87,6 +87,7 @@ procedure World_Check is
    package Pose_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, Rigid);
    package Value_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, Real_Array);
    package Name_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, String);
+   package Count_Vectors is new Ada.Containers.Vectors (Positive, Natural);
    package Real_Holders is new Ada.Containers.Indefinite_Holders (Real_Array);
    package Key_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, String);
    package Vertex_Vectors is new Ada.Containers.Vectors (Positive, Vec3);
@@ -1435,6 +1436,86 @@ procedure World_Check is
                & Mm (P.Centre (2)) & ", " & Mm (P.Centre (3)) & ") mm, tilt " & Image (Tilt, 2)
                & " deg, reach " & Mm (S.High_1 - S.Low_1) & " by " & Mm (S.High_2 - S.Low_2) & " mm; "
                & Mm (P.Centre (3) - Table_Top) & " mm off the table top at its centre");
+            --  What its points lie on: the nearest of the objects and the
+            --  robot's own links, as the truth places them at the last line.
+            declare
+               Near_Names : Name_Vectors.Vector;
+               Near_Count : Count_Vectors.Vector;
+               Gaps       : Real_Array (1 .. Natural (S.Members.Length));
+               function Slot_Of (Name : String) return Positive is
+               begin
+                  for K in Near_Names.First_Index .. Near_Names.Last_Index loop
+                     if Near_Names (K) = Name then
+                        return K;
+                     end if;
+                  end loop;
+                  Near_Names.Append (Name);
+                  Near_Count.Append (0);
+                  return Near_Names.Last_Index;
+               end Slot_Of;
+            begin
+               for I in Gaps'Range loop
+                  declare
+                     X     : constant Vec3 := Driver.World.Offline.Scene_At (Bench, S.Members (I)).Mean;
+                     Best  : Real := Real'Last;
+                     Which : Unbounded_String := To_Unbounded_String ("nothing");
+                  begin
+                     for K in Names.First_Index .. Names.Last_Index loop
+                        if Box_Distance (K, X) < Best then
+                           declare
+                              D : constant Real := Distance (Grid_Of (K), X);
+                           begin
+                              if D < Best then
+                                 Best := D;
+                                 Which := To_Unbounded_String (Names (K));
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                     for C in L.Links.Iterate loop
+                        if Link_Keys.Contains (Pose_Maps.Key (C)) then
+                           declare
+                              Name : constant String := "robot " & Pose_Maps.Key (C);
+                           begin
+                              if not Placed_At.Contains (Name) then
+                                 Placed_At.Include
+                                   (Name, Place (Mesh_Of (Link_Keys (Pose_Maps.Key (C))), Pose_Maps.Element (C)));
+                              end if;
+                              declare
+                                 D : constant Real := Distance (Placed_At (Name), X);
+                              begin
+                                 if D < Best then
+                                    Best := D;
+                                    Which := To_Unbounded_String (Name);
+                                 end if;
+                              end;
+                           end;
+                        end if;
+                     end loop;
+                     Gaps (I) := Best;
+                     declare
+                        K : constant Positive := Slot_Of (To_String (Which));
+                     begin
+                        Near_Count.Replace_Element (K, Near_Count (K) + 1);
+                     end;
+                  end;
+               end loop;
+               if Gaps'Length > 0 then
+                  declare
+                     Most : Positive := Near_Names.First_Index;
+                  begin
+                     for K in Near_Names.First_Index .. Near_Names.Last_Index loop
+                        if Near_Count (K) > Near_Count (Most) then
+                           Most := K;
+                        end if;
+                     end loop;
+                     Ada.Text_IO.Put_Line
+                       ("  its points: most nearest " & Near_Names (Most) & " (" & Natural'Image (Near_Count (Most)) & " of"
+                        & Gaps'Length'Image & "), the median one " & Mm (Driver.Stats.Median (Gaps))
+                        & " mm from what is nearest it");
+                  end;
+               end if;
+            end;
          end;
       end loop;
 
