@@ -25,11 +25,13 @@ package body Driver.Beats is
       entry Take (Beat : out Driver.Clock.Beat);
       procedure Put (Beat : Driver.Clock.Beat; Taken : out Boolean);
       procedure Reply (C : Driver.Commands.Command);
+      procedure Reply_If_Held (C : Driver.Commands.Command);
       entry Collect (C : out Driver.Commands.Command);
    private
       Offered  : Boolean := False;
       Current  : Driver.Clock.Beat := 0;
       Replied  : Boolean := False;
+      Held     : Boolean := False;   --  a beat taken and not yet answered
       Answer   : Driver.Commands.Command := Driver.Commands.Hold;
    end Channel;
 
@@ -39,6 +41,7 @@ package body Driver.Beats is
       begin
          Beat := Current;
          Offered := False;
+         Held := True;
       end Take;
 
       procedure Put (Beat : Driver.Clock.Beat; Taken : out Boolean) is
@@ -56,7 +59,15 @@ package body Driver.Beats is
       begin
          Answer := C;
          Replied := True;
+         Held := False;
       end Reply;
+
+      procedure Reply_If_Held (C : Driver.Commands.Command) is
+      begin
+         if Held then
+            Reply (C);
+         end if;
+      end Reply_If_Held;
 
       entry Collect (C : out Driver.Commands.Command) when Replied is
       begin
@@ -76,19 +87,20 @@ package body Driver.Beats is
       Channel.Reply (C);
    end Send;
 
+   procedure Release is
+   begin
+      Channel.Reply_If_Held (Driver.Commands.Hold);
+   end Release;
+
    procedure Within_A_Beat (During : not null access procedure) is
-      Beat  : Driver.Clock.Beat;
-      Taken : Boolean := False;
+      Beat : Driver.Clock.Beat;
    begin
       Next (Beat);
-      Taken := True;
       During.all;
       Send (Driver.Commands.Hold);
    exception
       when others =>
-         if Taken then
-            Send (Driver.Commands.Hold);   --  the main loop waits for an answer to the beat it gave
-         end if;
+         Release;   --  the main loop waits for an answer to the beat it gave
          raise;
    end Within_A_Beat;
 
