@@ -2,7 +2,8 @@
 --
 --  The instrument matches pixels of one eye's image into the other's, with
 --  round trips; the pixels around the region asked about are matched too,
---  and their round trips measure the matcher's own error. A region pixel's
+--  and the round trips of the right ones among them measure the matcher's
+--  own error (Matcher_Error tells the right from the wrong). A region pixel's
 --  match is kept when its round trip is not significant against that error
 --  and the two lines of sight, the second widened by the matcher's error in
 --  its image, meet within their uncertainty; the point where they meet is
@@ -23,6 +24,19 @@ package Driver.World.Pairs is
    end record;
 
    package Match_Vectors is new Ada.Containers.Vectors (Positive, Match);
+
+   procedure Matcher_Error (Trips : Real_Array; Area : Real; Sigma : out Real; Right : out Real)
+     with Pre => Trips'Length mod 2 = 0 and then Area > 0.0;
+   --  The matcher's error from round trips (each two coordinates, from where
+   --  a pixel was to where its match matched back to). A right match comes
+   --  back by a centred Gaussian error; a wrong one lands anywhere in the
+   --  image, of that Area. The two are told apart by the mixture's maximum
+   --  likelihood (EM, started from every doubling rank of the round trips'
+   --  lengths, each run until its likelihood stops growing), not by a robust
+   --  spread of them all: when the second eye does not see most of what is
+   --  asked, the wrong ones are most of them, and their spread is no
+   --  matcher's error. Sigma is one coordinate of a right match's round trip;
+   --  Right, how many of the round trips the fit takes for right ones.
 
    procedure Triangulate
      (First, Second : Driver.World.Cameras.Camera'Class;

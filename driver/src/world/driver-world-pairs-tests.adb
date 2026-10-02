@@ -147,10 +147,134 @@ package body Driver.World.Pairs.Tests is
       end loop;
    end Box_Top;
 
+   function Uniform return Real is (Real (Ada.Numerics.Float_Random.Random (Gen)));
+
+   procedure Mixed_Round_Trips is
+      --  A thousand round trips, three in ten of right matches erring by a
+      --  pixel per coordinate, the rest of wrong ones coming back anywhere in
+      --  an image of 640 by 480; then a thousand all right, by half a pixel.
+      N     : constant := 1000;
+      Trips : Real_Array (1 .. 2 * N);
+      Sigma, Right : Real;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 67);
+      for I in 1 .. N loop
+         if I mod 10 < 3 then
+            Trips (2 * I - 1) := Gaussian;
+            Trips (2 * I) := Gaussian;
+         else
+            Trips (2 * I - 1) := 640.0 * (Uniform - Uniform);
+            Trips (2 * I) := 480.0 * (Uniform - Uniform);
+         end if;
+      end loop;
+      Matcher_Error (Trips, 640.0 * 480.0, Sigma, Right);
+      Check (abs (Sigma - 1.0) < 0.2 and then abs (Right - 300.0) < 60.0,
+             "with most matches wrong the matcher's error is" & Sigma'Image & " px from" & Right'Image
+             & " right ones, not 1 px from 300");
+      for I in 1 .. 2 * N loop
+         Trips (I) := 0.5 * Gaussian;
+      end loop;
+      Matcher_Error (Trips, 640.0 * 480.0, Sigma, Right);
+      Check (abs (Sigma - 0.5) < 0.05 and then Right > 950.0,
+             "with every match right the matcher's error is" & Sigma'Image & " px from" & Right'Image
+             & " right ones, not 0.5 px from 1000");
+   end Mixed_Round_Trips;
+
+   procedure Mostly_Unseen is
+      --  Two eyes over the box top, the second seeing only three in ten of
+      --  the pixels asked about: the others' matches land anywhere in its
+      --  image and come back anywhere in the first.
+      A : constant Driver.World.Tests.Pinhole :=
+        Driver.World.Tests.Looking_At ([0.2, -0.3, 0.4], [0.5, 0.0, 0.0], 200.0, 160, 120, 0.1);
+      B : constant Driver.World.Tests.Pinhole :=
+        Driver.World.Tests.Looking_At ([0.2, 0.3, 0.4], [0.5, 0.0, 0.0], 200.0, 160, 120, 0.1);
+      Count : Natural := 0;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 71);
+      for R in 0 .. 119 loop
+         for C in 0 .. 159 loop
+            Count := Count + Boolean'Pos (On_Top (Hit (A.Ray ((U => Real (C) + 0.5, V => Real (R) + 0.5)), Top_Height)));
+         end loop;
+      end loop;
+      declare
+         Points  : Driver.Instrument.Point_Array (1 .. Count);
+         Truth   : array (1 .. Count) of Vec3;
+         Seen    : array (1 .. Count) of Boolean;
+         Answers : Driver.Instrument.Answer_Array (1 .. Count);
+         K       : Natural := 0;
+         Kept    : Match_Vectors.Vector;
+         Apart   : Natural;
+         Error   : Real;
+         Wrong_Kept, Right_Kept, Right_Asked : Natural := 0;
+      begin
+         for R in 0 .. 119 loop
+            for C in 0 .. 159 loop
+               declare
+                  P   : constant Driver.Images.Pixel := (U => Real (C) + 0.5, V => Real (R) + 0.5);
+                  Top : constant Vec3 := Hit (A.Ray (P), Top_Height);
+               begin
+                  if On_Top (Top) then
+                     K := K + 1;
+                     Points (K) := P;
+                     Truth (K) := Top;
+                     Seen (K) := K mod 10 < 3;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         for I in Points'Range loop
+            declare
+               To      : Driver.Images.Pixel;
+               Visible : Boolean;
+            begin
+               B.Project (Truth (I), To, Visible);
+               if Seen (I) and then Visible then
+                  Right_Asked := Right_Asked + 1;
+                  Answers (I) := (Found     => True,
+                                  To        => (U => To.U + Matcher_Sigma * Gaussian,
+                                                V => To.V + Matcher_Sigma * Gaussian),
+                                  Back      => (U => Points (I).U + Sqrt (2.0) * Matcher_Sigma * Gaussian,
+                                                V => Points (I).V + Sqrt (2.0) * Matcher_Sigma * Gaussian),
+                                  Certainty => 1.0);
+               else
+                  Answers (I) := (Found     => True,
+                                  To        => (U => 160.0 * Uniform, V => 120.0 * Uniform),
+                                  Back      => (U => 160.0 * Uniform, V => 120.0 * Uniform),
+                                  Certainty => 1.0);
+               end if;
+            end;
+         end loop;
+         --  The region alone, so its own round trips must tell the error.
+         Triangulate (A, B, Points, Points'Length, Answers, Kept, Apart, Error);
+         for M of Kept loop
+            for I in Points'Range loop
+               if Points (I) = M.In_First then
+                  if Seen (I) then
+                     Right_Kept := Right_Kept + 1;
+                  else
+                     Wrong_Kept := Wrong_Kept + 1;
+                  end if;
+               end if;
+            end loop;
+         end loop;
+         Check (Right_Asked > 100 and then Right_Kept >= Right_Asked - Right_Asked / 20,
+                "of" & Right_Asked'Image & " pixels the second eye sees only" & Right_Kept'Image & " were kept");
+         Check (Wrong_Kept <= Right_Asked / 50,
+                Wrong_Kept'Image & " pixels the second eye does not see were kept, the matcher erring by"
+                & Error'Image & " px");
+      end;
+   end Mostly_Unseen;
+
    procedure Register is
    begin
       Driver.Tests.Register ("world.pairs.box", "two eyes' points are off their covariance, or wrong matches are kept",
                              Box_Top'Access);
+      Driver.Tests.Register ("world.pairs.mixture",
+                             "round trips of wrong matches, when most are wrong, are taken for the matcher's error",
+                             Mixed_Round_Trips'Access);
+      Driver.Tests.Register ("world.pairs.unseen",
+                             "matches into an eye that does not see most of what is asked are kept",
+                             Mostly_Unseen'Access);
    end Register;
 
 end Driver.World.Pairs.Tests;
