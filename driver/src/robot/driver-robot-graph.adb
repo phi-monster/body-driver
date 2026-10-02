@@ -149,7 +149,8 @@ package body Driver.Robot.Graph is
                Best_Arm   : Arm_Id'Base := 0;
                Best_Count : Natural := 0;
                Patched    : Boolean := False;
-               Unsure     : Boolean := False;
+               Unsure     : Boolean := False;   --  some eye has not told
+               Undecided_Eye : Boolean := False;   --  some eye told, but not enough to decide
             begin
                for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
                   declare
@@ -163,14 +164,22 @@ package body Driver.Robot.Graph is
                               Best_Count := F.Responding;
                               Best_Arm := Mt.Arm;
                            end if;
-                        when Undecided | Unmeasured =>
+                        when Undecided =>
+                           Unsure := True;
+                           Undecided_Eye := True;
+                        when Unmeasured =>
                            Unsure := True;
                         when Nothing | Whole =>
                            null;
                      end case;
                   end;
                end loop;
-               if Best_Arm > 0 then
+               --  An eye that is undecided may ride on the group: whether it is
+               --  an arm is still open, so it is neither a closer nor a part
+               --  until every eye that saw it has decided.
+               if Undecided_Eye then
+                  null;
+               elsif Best_Arm > 0 then
                   Gr.Roles.Replace_Element (G, Closer);
                   Gr.Arm_Of.Replace_Element (G, Best_Arm);
                elsif Patched then

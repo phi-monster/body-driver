@@ -650,24 +650,29 @@ driver-robot-boot.adb	Col := Col / 2;	2	math	the parity and the next bit of a ro
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P, First_Followed);	0.0	structure	from zero: the first step is the smallest every reading can tell
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P, First_Followed);	1.0	structure	the positive direction for every channel
+driver-robot-boot.adb	Eye : Eye_Id := 1;	1	structure	a placeholder, set before it is read
+driver-robot-boot.adb	Factor (G) := 2.0 * Factor (G);	2.0	numerics	doubling search: each round pushes twice as far as the one before, so the evidence any eye needs is reached in a number of rounds logarithmic in it
+driver-robot-boot.adb	Factor : array (1 .. Count) of Real := [others => 1.0];	1.0	structure	the first round pushes by the amounts the probes found
 driver-robot-boot.adb	G : Group_Id := 1;	1	structure	a group number before the arm's is read
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	2_147_483_647	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	48_271	math	Park and Miller's minimal standard generator: the multiplier
+driver-robot-boot.adb	Group : Group_Id := 1;	1	structure	a placeholder, set before it is read
 driver-robot-boot.adb	Half := Real (Natural'Min (M.Eyes (Eye_Id (Eye)).Grid.Width, M.Eyes (Eye_Id (Eye)).Grid.Height)) / 2.0;	2.0	structure	a view keeps half of itself in sight while turning by half its width
 driver-robot-boot.adb	Offset := 2.0 * Offset;	2.0	math	the sweep doubles its step
 driver-robot-boot.adb	Order (Count + 1) := (Channel => C, Sign => 1.0);	1.0	math	the two directions of a push
 driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	1.0	math	the two directions of a push
 driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	2	structure	two pushes per channel, one each way
-driver-robot-boot.adb	Order (Count) := (Channel => C, Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
-driver-robot-boot.adb	Order (Count) := (Channel => C, Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
+driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0);	1.0	structure	the first round pushes by the amounts the probes found
 driver-robot-boot.adb	R := R / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	2	format	two digits after the point in the log
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	3	format	three exponent digits in the log
 driver-robot-boot.adb	Rows : Positive := 1;	1	structure	a Sylvester matrix starts at order one
 driver-robot-boot.adb	Rows := 2 * Rows;	2	structure	Sylvester orders double
 driver-robot-boot.adb	S : String (1 .. 32);	32	format	wide enough for any Long_Float image
+driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
+driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
 driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
 driver-robot-boot.adb	if N > 1 then	1	structure	cells move several joints
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the parity and the next bit of a row and a column

@@ -436,6 +436,9 @@ package body Driver.Robot is
    function Response (M : Model; G : Group_Id; E : Eye_Id) return Eye_Response is
      (Graph.Effect (M, G, E).Verdict);
 
+   function Responding (M : Model; G : Group_Id; E : Eye_Id) return Natural is
+     (Graph.Effect (M, G, E).Responding);
+
    function Image_Lag (M : Model; E : Eye_Id) return Integer is
      (if E <= M.Lags.Last_Index then M.Lags (E) else 0);
 

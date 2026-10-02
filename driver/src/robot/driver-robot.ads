@@ -171,6 +171,10 @@ package Driver.Robot is
 
    function Response (M : Model; G : Group_Id; E : Eye_Id) return Eye_Response;
 
+   function Responding (M : Model; G : Group_Id; E : Eye_Id) return Natural;
+   --  How many of the eye's textured cells the verdict found responding to
+   --  the group's push.
+
    function Image_Lag (M : Model; E : Eye_Id) return Integer;
    --  How many beats the eye's images trail the readings they belong to:
    --  the image of beat B shows the body as read at beat B - Image_Lag; 0
