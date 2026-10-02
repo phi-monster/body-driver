@@ -127,13 +127,84 @@ procedure Brain_Measure is
       for E in 1 .. Eye_Count loop
          Eyes.Append (Driver.Observations.Camera_Id (E));
       end loop;
-      if Name (Name'Last) = '2' then
+      if Ada.Strings.Fixed.Index (Name, "2d") > 0 then
+         Two := [Driver.Action.Touching | Driver.Action.Above => True, others => False];
+      elsif Ada.Strings.Fixed.Index (Name, "2") > 0 then
          Two := [Driver.Action.Touching | Driver.Action.Above | Driver.Action.Below | Driver.Action.Left
                  | Driver.Action.Right => True, others => False];
       end if;
       return Driver.Brain.Keyboard.Choose (Q, M, [Driver.Action.Grasper => True, others => False],
                                            [others => True], True, Two, Eyes);
    end Keys;
+
+   --  The sheet as the brain reads it. A keyboard whose name ends in s
+   --  writes the sentence about two things as one key per relation, each with
+   --  its meaning on its own line: the same grammar, another sheet.
+   function Sheet_Of (K : Driver.Brain.Keyboard.Keyboard; Name : String) return String is
+      S     : constant String := Driver.Brain.Keyboard.Sheet (K);
+      R     : Unbounded_String;
+      First : Positive := S'First;
+      Skip  : Boolean := False;   --  inside the relation slot's glosses
+
+      type Key is record
+         Word, Meaning : Unbounded_String;
+      end record;
+
+      function "+" (W : String) return Unbounded_String renames To_Unbounded_String;
+
+      Per_Relation : constant array (Positive range <>) of Key :=
+        [(+"touching", +"the first thing ends up against the second"),
+         (+"above", +"the first thing ends up above the second"),
+         (+"below", +"the first thing ends up below the second"),
+         (+"left", +"the first thing ends up to the left of the second, as the large picture shows them"),
+         (+"right", +"the first thing ends up to the right of the second, as the large picture shows them")];
+
+      function Starts (Line, Head : String) return Boolean is
+        (Line'Length >= Head'Length and then Line (Line'First .. Line'First + Head'Length - 1) = Head);
+   begin
+      if Name (Name'Last) /= 's' then
+         return S;
+      end if;
+      for I in S'Range loop
+         if S (I) = ASCII.LF then
+            declare
+               Line : constant String := S (First .. I - 1);
+            begin
+               if Skip and then Starts (Line, "      ") then
+                  null;
+               else
+                  Skip := False;
+                  if Starts (Line, "<line>") then
+                     declare
+                        Keys_Line : Unbounded_String := To_Unbounded_String (Line);
+                        At_P      : constant Natural := Ada.Strings.Fixed.Index (Line, "<placing>");
+                        Listed    : Unbounded_String;
+                     begin
+                        for K of Per_Relation loop
+                           Append (Listed, (if Length (Listed) > 0 then " | " else "") & "<" & K.Word & ">");
+                        end loop;
+                        if At_P > 0 then
+                           Replace_Slice (Keys_Line, At_P - Line'First + 1, At_P - Line'First + 9, To_String (Listed));
+                        end if;
+                        Append (R, Keys_Line & ASCII.LF);
+                     end;
+                  elsif Starts (Line, "<placing>") then
+                     for K of Per_Relation loop
+                        Append (R, "<" & K.Word & "> ::= do <thing> " & K.Word & " <thing> until <ending>   ("
+                                & K.Meaning & ")" & ASCII.LF);
+                     end loop;
+                  elsif Starts (Line, "<relation>") then
+                     Skip := True;
+                  else
+                     Append (R, Line & ASCII.LF);
+                  end if;
+               end if;
+            end;
+            First := I + 1;
+         end if;
+      end loop;
+      return To_String (R);
+   end Sheet_Of;
 
    procedure Configure (Address : String) is
       Colon : constant Natural := Ada.Strings.Fixed.Index (Address, ":", Ada.Strings.Backward);
@@ -241,7 +312,7 @@ procedure Brain_Measure is
       Facts.View := 1;
       Facts.Happened := To_Unbounded_String (Driver.Brain.Round.First_Round);
       Facts.Instruction := To_Unbounded_String (Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, N, "task")));
-      Facts.Sheet := To_Unbounded_String (Driver.Brain.Keyboard.Sheet (K));
+      Facts.Sheet := To_Unbounded_String (Sheet_Of (K, Board));
       declare
          function Image_Of (E : Driver.Brain.Names.Eye_Id) return Driver.Images.Image is (Images (E));
       begin

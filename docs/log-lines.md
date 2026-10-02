@@ -1,76 +1,112 @@
-# 日志:每一行是什么
+# What the log says
 
-驱动的日志写在标准输出上,一行一件事。行首方括号里的字说是哪一部分在说话,后面跟着的符号说是哪一类事。下面按行首列全了;每一类给几行原样的例子,数字换成了"N"。
+The driver writes one line per event to standard output, flushed at once, so
+a log read live is never behind:
 
-## `[装]` 开机前半段:接上、认身体、按关节量运动学
+```
+[topic] text
+```
 
-- `[装] 在 9080 上等这台机器人连过来…` / `接上了。先听一帧,认这台机器人报的东西长什么样。`
-- `[装] 拿到观测了,但认不出来 ⇒ <缺什么>`:至少要一台相机、一组读数(见 [`body-protocol.md`](body-protocol.md) 第 3 节)。
-- `[装] 🔴 接入检查:配点仪器 <host:port> …`:开机第一拍就问一次仪器,连不上照实说是哪个口。
-- `[装] 前半段存的(<路径>.kin.txt):…` / `前半段存进 <路径>.kin.txt(…)`:运动学装回、核对、存盘,见 [`body-file.md`](body-file.md)。
-- `[装] 开机前半段完:N 只手的位姿按关节读数算(用了 N 拍)`
-- `[装] 没接上,退出` / `取不到第一帧,退出`:开不了机,原因就在这一行。
+The topic is one of `core` (the connection, the protocol, the main loop),
+`robot` (measuring the body: groups, eyes, hands), `world` (things and
+surfaces), `action` (stretches) and `brain` (rounds with the brain). A line
+that carries several lines of its own continues them below it, the brain's
+indented with `  | `. Numbers in angle brackets below stand for what the
+driver fills in.
 
-## `[认]` 认观测里的每一片叶子
+This page lists every line the driver writes now. Lines of layers still
+being written are added here as those layers land.
 
-- `[认] 叶子:…`:观测摊平以后的每一片叶子(路径、形状)。
-- `[认] 每组数(开机逐组推一下认它是什么):…`
-- `[认] 🔴 分不开:…`:有两片叶子按形状分不出谁是谁,照实列出来。
+## core
 
-## `[链]` 线
-
-- `[链] 线断了 ⇒ 在同一个口上等对方重新接上(身体量到的东西都留着)…` / `重新接上了(不当作新的一集…)`
-- `[链] 对方连发 N 条没带画面的消息,线还通,继续等`
-- `[链] 取不到画面 ⇒ 退出`
-
-## `[计时]` 时间都花在哪
-
-- `      [计时] 近 50 帧:等帧 N ms/帧 · 解图 N ms/帧 · 一拍 N s · 相机 N 台`:每 50 帧一行。
-- `[计时] 放进世界 …` / `加密完 …`:开机对齐那几步各用了多久。
-
-## `[脑]` 叫脑(见 [`brain-service.md`](brain-service.md) 第 4 节)
-
-- `[脑] 这一集第 N 次叫脑:写一段程序 · N 秒 · 交回 N 行`(没问成就写原因)
-- `[脑] 这一集第 N 次叫脑:问「<名字>」在哪一框 · N 秒 · 框 [l t r b]` / `它说这里指不出`
-- `[脑] 上一集一共叫了脑 N 次(写程序 N 次、问在哪 N 次)`:新的一集开始时印。
-- `[脑] 写程序那一问带着部署给的采样设置(BL_BRAIN_SAMPLING):{…}` / `没设 BL_BRAIN_SAMPLING ⇒ …` / `🔴 BL_BRAIN_SAMPLING 读不成一个 JSON 对象(…)⇒ 不带`:第一次写程序时印一次。
-
-## `[身]` 身体:开机后半段,和之后的每一轮
-
-不带符号的 `[身]` 行是开机量身体时的报告:静止噪声、每个通道推多大、每只手的握区、碰桌面量到的指尖、`接入契约第 N 条不满足`(三条契约见 `body-protocol.md`)。
-
-带符号的行:
-
-| 符号 | 是什么 | 例子 |
-|---|---|---|
-| `──` | 新的一轮:第几轮、看哪台相机、这一集用了几拍、叫过几次脑 | `[身] ── 第 3 轮(第 1 台相机)── 这一集已用 64 拍(开机量身体 45 拍) · 叫过脑 5 次(写程序 3、问在哪 2)` |
-| (没有符号,紧跟在 `──` 后面) | 这一轮给脑看的那段 `YOUR BODY` 原文:量过什么、每只眼、清单上点过名的东西 | `ABOUT MYSELF (measured by me, …)` |
-| `🎹` | 这一轮的键盘:有哪些量、关系、角色、结局,清单几件 | `[身] 🎹 这一轮键盘:量 [height heading tilt away] · 关系 […] · 角色 [grasper pusher] · 结局 […] · 清单 16 件` |
-| `🧠` | 脑:交上来一段程序(下面几行是原文)、问不通、读不下这么长、和上一段一字不差 | `[身] 🧠 它交上来一段程序:` |
-| `📦` | 认名字:眼给的框、框里量到的那一片;和已经量到的某一件同一片像素;按字认出是哪一件;这只眼里指不出它 | `[身] 📦 scissors:脑给的框 [297 283 345 413](第0 台相机)⇒ 框里量到一整块 1687 px · …` |
-| `🔎` | 每个名字、每个角色最后绑到了清单上的哪一件;绑不上的说为什么 | `[身] 🔎 scissors ⇒ 第17 块` |
-| `📍` | `remember` 记下的地方:记住了、按记下的位置绑上 | `[身] 📍 记住了「home」…` |
-| `👁` | 换眼、转眼:你没点眼,换到这条胳膊自己的眼;回到上次认出它的那只眼;把手上的眼转向它 | `[身] 👁 你没点眼;这条胳膊自己的那只眼(第1 只)量得出东西有多远 ⇒ 换过去,…` |
-| `⚖` | 编译和空转的判决:过了,或者哪一行、为什么不过 | `[身] ⚖ 编译过了,空转也走得通` |
-| `▶` | 开始跑一行(原文) | `[身] ▶ do scissors height up until settled` |
-| `⚙` | 这一段怎么走:几何走法、改它的哪个量 | `[身] ⚙ 几何走法:grip 2 onto scissors before closing …` |
-| `📐` | 量到的几何:进场先到它上方、不动的眼挪没挪、指尖、距离 | `[身] 📐 进场:先到它上方 ⇒ amount: arrived above it …` |
-| `✋` | 手:选哪只手、下去之前先合几成、合到哪、拿没拿住 | `[身] ✋ 下去之前每一块先合 N(行程的 N%;…)⇒ 读数 N` |
-| `⇒`(缩进两格) | 一段收尾时执行器那句话:脑下一轮在 `WHAT YOU JUST DID` 里看到的就是它 | `[身]   ⇒ I closed grip 2 until the picture stopped changing (…)` |
-
-`[身]` 行里引号「」中间的是脑的原话,一个字不改。
-
-## 别的输出(环境变量打开)
-
-| 变量 | 写什么 |
+| line | meaning |
 |---|---|
-| `BL_DUMP=<目录>` | 每一轮给脑看的那张图(`grid_000001.bmp` …)和开机核对用的文本(`check.txt`、`fixed_eye.txt`、`align_arm<k>.txt`) |
-| `BL_VID=<目录>` | 全分辨率灰度逐帧图(开头密、后面疏,编号连续,能拼成录像);按关节读数算出的手的位姿 `fk_poses.txt` |
-| `BL_FILM=<目录>` | 半分辨率抽帧 |
-| `BL_STEPSHOT=1` | 走路时每一步落一张图 |
-| `BL_CUTLOG=1` | 每台相机切块的窗口和块数 |
-| `BL_LIFE=<文件>` | 经历账:每做完一段追加一行 `beat N \| eye N \| …`,跨炮留着、只追加不清。最后 6 行进下一轮给脑的 `WHAT I HAVE DONE BEFORE`。不设就写在身体文件旁边(`<身体文件>.life.txt`);身体文件也没给就不记 |
-| `BL_ORDER=<一句话>` | 任务句(盖过观测里的 `instruction`) |
-| `BL_LOOK=1` | 只看不动 |
-| `BL_BRAIN=<目录>` | 人当脑,见 `brain-service.md` 第 5 节 |
-| `BL_BRAIN_SAMPLING=<JSON 对象>` | 写程序那一问的采样设置,原样并进请求,见 `brain-service.md` 第 2 节 |
+| `listening on port <n>` | the WebSocket server is up; the robot may connect ([`body-protocol.md`](body-protocol.md)) |
+| `cannot listen on port <n>` | the port is taken or not allowed; the driver exits |
+| `usage: body_driver --listen PORT [--eye HOST:PORT] [--inst HOST:PORT] [--body FILE] [--record FILE]` | `--listen` is missing; the driver exits |
+| `the robot connected` | a client finished the handshake |
+| `the robot disconnected; waiting for it on the same port` | the client went away; nothing measured is lost, and a client that connects again is served on |
+| `the robot reports:` | the first observation was recognized; one line per camera, group and unused leaf follows (below) |
+| `waiting: the driver needs at least one camera and one group of readings, got <layout>` | the observation lacks a camera or a group; the next one is looked at again |
+| `a robot message that is not a protocol message was ignored` | a message that is not msgpack, or not a map |
+| `the body could not be measured; holding still` | the boot found the body breaking the porting contract; the reason was logged by the boot; every reply holds |
+
+The layout lines after `the robot reports:`:
+
+```
+camera <k>: <path> <width> x <height>[, depth <path>]
+group <k>: <path>, <n> values, command key <key>[, echoed at <path>]
+group <k>: <path>, <n> values, not commandable
+unused: <path>
+instruction: present
+```
+
+## robot
+
+The hand (measured at boot):
+
+| line | meaning |
+|---|---|
+| `hand: closer group <g> on arm <a> is watched in eye <e>[, its own]` | the group that closes a hand, and the eye that watches it |
+| `hand: closer group <g> channel <c> seen at both ends in eye <e>; asking where <n> pixels went` | the closing was seen open and shut; the instrument is asked to match pixels between the two |
+| `hand: the instrument did not answer for closer group <g> channel <c>: <why>` | that channel's sweep is not used |
+| `hand: closer group <g> channel <c> has no visible step measured; not swept` | the channel's response is unmeasured, so it is not swept |
+| `hand <n>: a press at the <opening> opening, <k> kept` | a fingertip press on a surface was recorded |
+| `hand <n>: a press with the closer at neither measured opening is not used` | the hand was neither at its measured open nor at its shut opening |
+| `hand <n>: up, the arm's pose or the eye's mount is unmeasured; no press` | a press cannot be aimed yet |
+| `hand <n>: cannot aim a press: <why>` / `hand <n>: cannot press lower: <why>` | the motion planner refused the press |
+| `hand: measured` | what was measured about every hand, one line each |
+
+## brain
+
+### Settings and episodes
+
+| line | meaning |
+|---|---|
+| `BL_BRAIN_SAMPLING: both questions carry it as it is: <json>` | the deployment's sampling is merged into every request ([`brain-service.md`](brain-service.md), section 2) |
+| `BL_BRAIN_SAMPLING: it is not set, so the service samples by its own defaults` | nothing is merged |
+| `BL_BRAIN_SAMPLING: it is not one JSON object (<why>), so it is not used: <text>` | the variable is not usable |
+| `BL_BRAIN_SAMPLING: it sets "<member>", which the driver writes itself, so it is not used: <text>` | the variable sets model, messages, stream, structured_outputs or response_format |
+| `a new episode: <instruction>` | the rounds begin, with the person's words |
+| `the last episode called the brain <n> times (<a> programs, <b> where-is-it questions)` | the count of the episode that ended |
+| `the brain said done after <n> rounds` | the task is finished; the rounds end |
+| `the rounds stopped on <exception>: <message>; holding still until the next episode` | a failure inside the rounds; the body holds and the next episode starts over |
+
+### A round
+
+```
+[brain] round 2: the brain looks through eye 1, quantity keyboard
+[brain] call 3 of this episode: write a program, 1.4 s, complete (line 2 is done outside every block), 2 lines kept
+[brain] the program:
+[brain]   | do the scissors height up until free
+[brain]   | done
+[brain] call 4 of this episode: where is "the scissors", 0.9 s, box from (472, 176) to (507, 262)
+[brain] "the scissors": thing 1 (eye 1 boxed it)
+[brain] what happened:
+[brain]   | line 1: do the scissors height up until free -- ended free: ...
+[brain]   | line 2: done came before you saw how the lines above it ended, so I ask you again.
+```
+
+| line | meaning |
+|---|---|
+| `round <n>: the brain looks through eye <k>, <quantity \| full \| speech-only> keyboard` | a round begins: the large picture's eye, and the keyboard this round ([`language.md`](language.md), section 2) |
+| `call <n> of this episode: write a program, <s> s, <how> (<why>), <k> lines kept` | the brain answered; how reading ended (`ended by itself`, `complete`, `ran away`, `stopped by the service`, `failed`) and why; how many finished lines are kept |
+| `call <n> of this episode: where is "<name>", <s> s, box from (<u>, <v>) to (<u>, <v>)` | an eye pointed the name out, in that eye's pixels |
+| `call <n> of this episode: where is "<name>", <s> s, not here (<why>)` | that eye cannot see it; the next eye is asked |
+| `call <n> of this episode: where is "<name>", <s> s, no answer (<why>)` | the service failed; no other eye is asked for the name |
+| `the program:` | the kept lines, as written |
+| `"<name>": thing <n> (<account>)` / `place <n> (...)` / `not bound (<account>)` | how each name of the program was bound, with every step that led there ([`language.md`](language.md), section 7) |
+| `refused before anything moved:` | the program was refused: the line, why, and what to write instead |
+| `the brain says: <sentence>` | a `say` line ran |
+| `what happened:` | what the next round will tell the brain, line by line |
+| `the brain looks through eye <k> from the next round on` | a `say look = <k>` ran |
+| `new words from the person: <words>` | the task changed; the next round carries the new words |
+| `no eye has a picture this beat; looking again` | the round waits for a picture |
+| `the episode ended while the brain was writing` | the answer is dropped; nothing of it runs |
+| `no program: <why>` | the brain service could not be read; nothing moves this round |
+
+## Tools
+
+`driver/bin/replay`, `frame`, `score`, `feed`, `proxy`, `brain_measure` and
+`fake_brain` print their own lines; each tool's first comment says what it
+prints.
