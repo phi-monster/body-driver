@@ -62,7 +62,8 @@ package body Driver.World.Estimates.Tests is
    Box_There   : Boolean := True;    --  a test can take the box away
    Floor_There : Boolean := False;   --  or put a floor half a metre below the table
    Floor_Z     : constant := -0.5;
-   Lie_Depth   : Real := 0.0;        --  when set, the matcher answers the middle point of each request
+   Lie_At      : Natural := 0;       --  which point of a request the lie is told of: 0 for the middle one
+   Lie_Depth   : Real := 0.0;        --  when set, the matcher answers that point of each request
                                      --  where that much further along its sight would be
 
    procedure First_Hit (Origin, Direction : Vec3; Hit : out Surface_Hit; At_T : out Real) is
@@ -147,7 +148,7 @@ package body Driver.World.Estimates.Tests is
                   First_Hit (C, D, Again, T2);
                   Visible := Visible and then Again /= Nothing and then abs (C + T2 * D - X) < 1.0e-6;
                end;
-               if Lie_Depth > 0.0 and then I = Points'First + Points'Length / 2 then
+               if Lie_Depth /= 0.0 and then I = (if Lie_At > 0 then Points'First + Lie_At - 1 else Points'First + Points'Length / 2) then
                   --  The one lie: matched where the second eye would see a point
                   --  further along the first sight, on the line it draws there.
                   Into.Project (R.Origin.Mean + (T + Lie_Depth) * R.Direction.Unit_Vector, Px, Visible);
@@ -505,6 +506,121 @@ package body Driver.World.Estimates.Tests is
       Driver.Services.End_Replay;
    end Grazing_Sight;
 
+   procedure Points_Borne_Out is
+      --  The box pointed at in the first eye and matched into the second, the
+      --  matcher lying about one pixel of the box's own each time: first half
+      --  a metre further along the first eye's sight, which is under the table
+      --  the first eye sees there; then, the box measured again, a fifth of a
+      --  metre nearer, in the air above the box, where nothing of the box is
+      --  as its points from the first time place it. Neither lie is kept.
+      S     : State;
+      Beat  : Driver.Clock.Beat := 1;
+      Gray  : constant Driver.Images.Image := Plain (128);
+      Box_T : Thing_Id;
+
+      function Seen_Now return Observation is
+         O : Observation;
+      begin
+         O.Beat := Beat;
+         O.Images.Append (Gray);
+         O.Images.Append (Gray);
+         return O;
+      end Seen_Now;
+
+      procedure Step is
+      begin
+         Driver.Services.Replay_Beat (Beat);
+         Observe (S, 2, Camera_Of'Access, Up, True, Seen_Now);
+         Answer_All (S);
+         Beat := Beat + 1;
+      end Step;
+
+      function Lowest return Real is
+         Z : Real := Real'Last;
+      begin
+         for M of S.Things (Box_T).Points loop
+            Z := Real'Min (Z, M.Point.Mean (3));
+         end loop;
+         return Z;
+      end Lowest;
+
+      function Highest return Real is
+         Z : Real := Real'First;
+      begin
+         for M of S.Things (Box_T).Points loop
+            Z := Real'Max (Z, M.Point.Mean (3));
+         end loop;
+         return Z;
+      end Highest;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 17);
+      Answered.Clear;
+      View := Eyes;
+      Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
+      Step;
+      Step;
+      Lie_At := 1;
+      Lie_Depth := 0.5;
+      Adopt (S, 1, Seen_Now, Box_Region, Box_T);
+      Step;
+      Step;
+      Check (S.Things (Box_T).Has_Points and then Lowest > -0.01,
+             "a point under the table the first eye sees was kept for the box, at" & Lowest'Image);
+      Lie_Depth := -0.2;
+      Adopt (S, 1, Seen_Now, Box_Region, Box_T);
+      Step;
+      Step;
+      Check (Highest < Box_Top + 0.01,
+             "a point in the air above the box, apart from its other points, was kept for it, at" & Highest'Image);
+      Lie_At := 0;
+      Lie_Depth := 0.0;
+      Driver.Services.End_Replay;
+   end Points_Borne_Out;
+
+   procedure Centre_Honest is
+      --  The box seen only from above, over the table: its points all lie on
+      --  its top, 0.08 up. The middle of what is seen is the top's middle; the
+      --  box's own middle is half way down. The centre given must not claim
+      --  the top's middle as the box's to within a millimetre.
+      S      : State;
+      R      : Thing_Record;
+      Small  : constant Mat3 := [[1.0E-6, 0.0, 0.0], [0.0, 1.0E-6, 0.0], [0.0, 0.0, 1.0E-6]];
+      Table  : Driver.World.Supports.Surface;
+      Middle : constant Vec3 := [0.0, 0.0, Box_Top / 2.0];
+   begin
+      S.Up := Up;
+      Table.Plane := (Centre       => Zero3, Normal => [0.0, 0.0, 1.0], Tangent_1 => [1.0, 0.0, 0.0],
+                      Tangent_2    => [0.0, 1.0, 0.0], Offset_Sigma => 1.0E-3, Tilt_11 => 1.0E-6, Tilt_12 => 0.0,
+                      Tilt_22      => 1.0E-6, Points => 100, Scatter => 1.0);
+      Table.Low_1 := -Table_Half;
+      Table.High_1 := Table_Half;
+      Table.Low_2 := -Table_Half;
+      Table.High_2 := Table_Half;
+      S.Surfaces.Append (Table);
+      for I in 0 .. 4 loop
+         for J in 0 .. 4 loop
+            R.Points.Append
+              (Driver.World.Pairs.Match'
+                 (In_First => (U => 0.0, V => 0.0), In_Second => (U => 0.0, V => 0.0), First => 1,
+                  Point    => (Mean => [Box_Half * Real (I - 2) / 2.5, Box_Half * Real (J - 2) / 2.5, Box_Top],
+                               Covariance => Small)));
+         end loop;
+      end loop;
+      R.Has_Points := True;
+      R.Under := (Index => 1, Height => (Value => Box_Top, Sigma => 1.0E-3, Degrees_Of_Freedom => 0),
+                  Touching => False);
+      S.Things.Append (R);
+      declare
+         C : constant Point_Estimate := Centre (S, 1);
+      begin
+         Check (abs (C.Mean (3) - Box_Top) < 1.0E-9,
+                "the centre given is not the middle of what is seen:" & C.Mean (3)'Image);
+         Check (not Significant (C, Point_Estimate'(Mean => Middle, Covariance => [others => [others => 0.0]])),
+                "the box's own middle, " & Box_Top'Image & " / 2 up, is significantly off the centre given, whose"
+                & " height is uncertain by only" & Real'Image (Sqrt (C.Covariance (3, 3))));
+      end;
+   end Centre_Honest;
+
    procedure Found_Elsewhere is
       --  The box pointed at in the first eye and matched into the second,
       --  where the instrument then segments it as a block of the table in the
@@ -742,6 +858,12 @@ package body Driver.World.Estimates.Tests is
       Driver.Tests.Register ("world.scene.grazing",
                              "lines of sight that pass a surface's edge take it away",
                              Grazing_Sight'Access);
+      Driver.Tests.Register ("world.scene.borne_out",
+                             "a point a pair saw is kept for a thing behind a surface its first eye sees, or apart from"
+                             & " the thing's other points", Points_Borne_Out'Access);
+      Driver.Tests.Register ("world.scene.centre_honest",
+                             "a solid seen from one side is given the middle of its seen side as its own, to a small"
+                             & " sigma", Centre_Honest'Access);
       Driver.Tests.Register ("world.scene.found_elsewhere",
                              "a region found in an eye whose points all fall outside the thing where it was pointed at"
                              & " stays the thing", Found_Elsewhere'Access);

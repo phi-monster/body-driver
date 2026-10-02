@@ -25,7 +25,11 @@
 --  nothing of it. A thing's points are each pair's latest, less those that
 --  fall outside it now in an eye that holds it where the brain pointed at
 --  it (a region found here may be part of it); an eye that lost it says
---  nothing either. A point of the scene that falls inside a thing's region
+--  nothing either. A new point is kept only when the scene and the thing's
+--  other points bear it out, each at its own uncertainty: no surface the
+--  first eye sees lies in front of it, and it lies within the thing as its
+--  points from the other pairs and earlier beats place it (the thing is
+--  still between pushes). A point of the scene that falls inside a thing's region
 --  in an eye that holds it is the thing's own (on it, or hidden behind it),
 --  so a thing never rests on its own top face; a thing's support is worked
 --  out again only when its points or the surfaces change.

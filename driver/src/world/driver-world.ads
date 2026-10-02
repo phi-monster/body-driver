@@ -79,6 +79,11 @@ package Driver.World is
      with Pre => Seen_In (S, T, E);
 
    function Centre (S : Scene; T : Thing_Id) return Point_Estimate;
+   --  The middle of what the eyes see of it, on its seen surface. Its
+   --  covariance is not that middle's own small uncertainty but how far the
+   --  seen points, and the space under them down to its support, lie from
+   --  it: a solid seen from one side has its own middle behind and under what
+   --  is seen, somewhere within that.
 
    function Resting_On (S : Scene; T : Thing_Id) return Surface_Id'Base;
    --  The surface under it, or 0 when none is measured: the highest one its
