@@ -1,0 +1,64 @@
+with Ada.Numerics.Long_Elementary_Functions;
+
+package body Driver.Robot.Hand.Presses is
+
+   use Ada.Numerics.Long_Elementary_Functions;
+   use Driver.Numerics.Arrays;
+
+   function Moved_Into (From, To : Pose_Estimate) return Direction_Estimate is
+      --  The way the tool went from one pose to the other, in its frame at the
+      --  second; unknown when the move is not significant against the poses'
+      --  own uncertainty.
+      Unknown_Direction : Direction_Estimate;
+      Step : constant Point_Estimate := (Mean => To.Pose.Translation - From.Pose.Translation,
+                                         Covariance => From.Position_Covariance + To.Position_Covariance);
+   begin
+      if not Known (Step) or else not Significant (Position (From), Position (To)) then
+         return Unknown_Direction;
+      end if;
+      declare
+         Length : constant Real := abs Step.Mean;
+         U      : constant Vec3 := (1.0 / Length) * Step.Mean;
+         --  Across the move, the positions' uncertainty turns it by that much
+         --  over its length.
+         Across : constant Real := Sqrt ((Step.Covariance (1, 1) + Step.Covariance (2, 2) + Step.Covariance (3, 3)
+                                          - U * (Step.Covariance * U)) / 2.0);
+      begin
+         return (Unit_Vector => Transpose (To.Pose.Rotation) * U, Sigma => Across / Length);
+      end;
+   end Moved_Into;
+
+   procedure Observe
+     (W       : in out Watcher;
+      Beat    : Driver.Clock.Beat;
+      Blocked : Boolean;
+      Still   : Boolean;
+      Tool    : Pose_Estimate;
+      Closer  : Real_Array;
+      Found   : out Boolean;
+      Press   : out Event)
+   is
+   begin
+      Found := False;
+      Press := (others => <>);
+      case W.State is
+         when Free =>
+            if Blocked then
+               W.State := Pressing;
+               W.Approach := (if W.Stood then Moved_Into (W.Last_Still, Tool) else (others => <>));
+            elsif Still then
+               W.Stood := True;
+               W.Last_Still := Tool;
+            end if;
+         when Pressing =>
+            if Still and then not Blocked then
+               Found := True;
+               Press := (Tool => Tool, Approach => W.Approach, Closer => Reading_Holders.To_Holder (Closer), Beat => Beat);
+               W.State := Free;
+               W.Stood := True;
+               W.Last_Still := Tool;
+            end if;
+      end case;
+   end Observe;
+
+end Driver.Robot.Hand.Presses;
