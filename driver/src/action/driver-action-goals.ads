@@ -32,6 +32,10 @@ package Driver.Action.Goals is
    function Word (Q : Quantity) return String;
    --  The keyboard word.
 
+   function Meaning (Q : Quantity) return String;
+   --  What it is and which way up changes it, in the words the brain is
+   --  shown: the definition above, never how to bring it about.
+
    type Quantity_Set is array (Quantity) of Boolean;
 
    function Changeable (S : Snapshot) return Quantity_Set;

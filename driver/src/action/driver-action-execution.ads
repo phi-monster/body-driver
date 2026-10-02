@@ -18,9 +18,19 @@
 --  which body or which task it serves.
 
 with Driver.Action.Plants;
+with Driver.Action.Snapshots;
 
 package Driver.Action.Execution is
 
    procedure Execute (P : in out Driver.Action.Plants.Plant'Class; W : Want; R : out Result);
+
+   function Bindable (S : Driver.Action.Snapshots.Snapshot; R : Role) return Boolean;
+   --  Some arm can play the role now: a grasper closes lobes on things, a
+   --  pusher touches without closing, me carries the whole body and every
+   --  eye.
+
+   function Usable (S : Driver.Action.Snapshots.Snapshot; R : Relation) return Boolean;
+   --  What the relation is judged by is measured and some part can bring it
+   --  about (Driver.Action.Usable); into is not built yet.
 
 end Driver.Action.Execution;

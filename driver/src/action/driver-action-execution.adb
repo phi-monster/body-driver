@@ -5,7 +5,6 @@ with Driver.Action.Contact.Wrench;
 with Driver.Action.Goals;
 with Driver.Action.Grids;
 with Driver.Action.Monitor;
-with Driver.Action.Snapshots;
 with Driver.Conventions;
 with Driver.Log;
 with Driver.Numerics;
@@ -438,6 +437,25 @@ package body Driver.Action.Execution is
       end loop;
       return Best < Real'Last;
    end Bound;
+
+   function Bindable (S : Snapshot; R : Role) return Boolean is
+      A : Arm_Id;
+   begin
+      return Bound (S, R, Zero3, A);
+   end Bindable;
+
+   function Usable (S : Snapshot; R : Relation) return Boolean is
+      Arms      : constant Boolean := not S.Arms.Is_Empty;
+      Up        : constant Boolean := abs Gravity (S) > 0.0;
+      Still_Eye : constant Boolean := (for some E of S.Eyes => E.On_Arm = 0 and then Known (Position (E.Pose)));
+   begin
+      return (case R is
+                 when Touching | Press | Clear | Still    => Arms,
+                 when Above | Below | Onto | Off | Facing => Arms and then Up,
+                 when Left | Right | Nearer | Farther     => Arms and then Still_Eye,
+                 when Close | Open                        => Bindable (S, Grasper),
+                 when Into                                => False);
+   end Usable;
 
    function Role_Word (R : Role) return String is
      (case R is when Me => "me", when Grasper => "grasper", when Pusher => "pusher");

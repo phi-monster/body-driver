@@ -1,5 +1,6 @@
 with Ada.Numerics;
 with Ada.Text_IO;
+with Driver.Action.Goals;
 with Driver.Action.Plants.Tests;
 with Driver.Action.Snapshots;
 with Driver.Action.Snapshots.Tests;
@@ -184,8 +185,40 @@ package body Driver.Action.Execution.Tests is
              "the wall was moved");
    end Over_An_Obstacle;
 
+   procedure Usable_By_What_Is_Measured is
+      W : Sim.World;
+      S : Snapshot;
+   begin
+      One_Gripper (W, Turned, 51);
+      Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.05, 0.4), Mu => 0.6);
+      W.Look (S);
+      Check (Usable (S, Left) and then Usable (S, Nearer) and then Usable (S, Onto) and then Usable (S, Close)
+             and then Usable (S, Touching), "a relation this body can measure and bring about is not offered");
+      Check (not Usable (S, Into), "into is offered though it is not built");
+      S.Eyes (1).On_Arm := 1;
+      Check (not Usable (S, Left) and then not Usable (S, Farther), "left or farther is offered with no still eye");
+      S.Up := (others => <>);
+      Check (not Usable (S, Onto) and then not Usable (S, Above), "onto or above is offered with no gravity measured");
+      S.Hands.Clear;
+      Check (not Usable (S, Close) and then not Usable (S, Open), "close or open is offered with no grasper");
+      S.Arms.Clear;
+      Check (not Usable (S, Touching) and then not Usable (S, Still), "a relation is offered to a body with no arm");
+   end Usable_By_What_Is_Measured;
+
+   procedure Every_Quantity_Has_A_Meaning is
+   begin
+      for Q in Goals.Quantity loop
+         Check (Meaning (Goals.Word (Q))'Length > 0, "the quantity " & Goals.Word (Q) & " has no meaning to show");
+      end loop;
+      Check (Meaning ("weight") = "", "a word that is no quantity is given a meaning");
+   end Every_Quantity_Has_A_Meaning;
+
    procedure Register is
    begin
+      Register ("action.sheet.usable", "a relation is offered that this body cannot measure or bring about",
+                Usable_By_What_Is_Measured'Access);
+      Register ("action.sheet.meaning", "a quantity is offered without its meaning, or a non-quantity gets one",
+                Every_Quantity_Has_A_Meaning'Access);
       Register ("action.run.bar", "a bar is not lifted off the table and put back, or not let go",
                 Bar_Up_And_Down'Access);
       Register ("action.run.up", "one of the five shapes is not lifted, or not well up when settled",

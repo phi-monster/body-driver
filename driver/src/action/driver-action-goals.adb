@@ -15,6 +15,12 @@ package body Driver.Action.Goals is
    function Word (Q : Quantity) return String is
      (case Q is when Height => "height", when Heading => "heading", when Tilt => "tilt");
 
+   function Meaning (Q : Quantity) return String is
+     (case Q is
+         when Height  => "how high it is above the surface it rests on; up takes it off that surface",
+         when Heading => "which way its long side points about its up; up turns it counter-clockwise about its up",
+         when Tilt    => "how far it leans, as the eye that stays still sees it; up leans its top away from that eye");
+
    function Gravity (S : Snapshot) return Vec3 is
      (if S.Up.Sigma < Real'Last and then abs S.Up.Unit_Vector > 0.0 then Unit (S.Up.Unit_Vector) else Zero3);
 
