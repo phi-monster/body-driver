@@ -60,10 +60,8 @@ package body Driver.Recording is
       Payload.Clear;
       Kind := Connection;
       Nanoseconds := 0;
-      if End_Of_File (R.File) then
-         Ok := False;
-         return;
-      end if;
+      --  The end shows as a head that cannot be read whole, not as End_Of_File,
+      --  which needs the file's size: a recording can be read from a pipe.
       Read_Exactly (R.File, Head, Ok);
       if not Ok then
          return;
