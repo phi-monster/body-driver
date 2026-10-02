@@ -174,13 +174,19 @@ driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps app
 driver-clock.adb	function Nanoseconds_Of (S : Duration) return Long_Long_Integer is (Long_Long_Integer (Real (S) * 1.0e9));	1.0e9	format	nanoseconds per second (the recording format counts nanoseconds)
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
 driver-conventions.ads	Z : constant := 3.0;	3.0	statistics	the significance level of the one test (documented in Conventions)
+driver-distributions.adb	(Bernoulli (K) / (Real (2 * K * (2 * K - 1)) * Y ** (2 * K - 1)));	2	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	(Bernoulli (K) / (Real (2 * K * (2 * K - 1)) * Y ** (2 * K - 1)));	2	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	(Bernoulli (K) / (Real (2 * K * (2 * K - 1)) * Y ** (2 * K - 1)));	2	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
 driver-distributions.adb	(Sqrt (Chi_Square_Quantile (Two_Sided_Tail, 1)));	1	math	a squared standard Gaussian is a chi square of one degree of freedom
 driver-distributions.adb	(Upper_Incomplete_Gamma (1, Z * Z * Half, Log_Gamma_Halves (1)));	1	math	a = 1/2 counted in halves: erfc (x) = Q (1/2, x^2)
 driver-distributions.adb	(Upper_Incomplete_Gamma (1, Z * Z * Half, Log_Gamma_Halves (1)));	1	math	a = 1/2 counted in halves: erfc (x) = Q (1/2, x^2)
+driver-distributions.adb	43867.0 / 798.0];	43867.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	43867.0 / 798.0];	798.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
 driver-distributions.adb	A_Down : constant Real := A - 1.0;	1.0	math	the a - 1 of the incomplete beta continued fraction
 driver-distributions.adb	A_Up : constant Real := A + 1.0;	1.0	math	the a + 1 of the incomplete beta continued fraction
 driver-distributions.adb	Ap := Ap + 1.0;	1.0	math	successive terms of the incomplete gamma series
 driver-distributions.adb	B := B + 2.0;	2.0	math	the incomplete gamma continued fraction's denominators grow by two
+driver-distributions.adb	Bernoulli : constant array (1 .. 9) of Real :=	9	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
 driver-distributions.adb	C : Real := 1.0 / Tiny;	1.0	numerics	Lentz's method starts C at the reciprocal of its stand-in for zero
 driver-distributions.adb	C : Real := 1.0;	1.0	math	Lentz's method starts C at one
 driver-distributions.adb	C := Clamp_Away_From_Zero (1.0 + Even / C);	1.0	math	Lentz's recurrence C = 1 + a / C
@@ -192,22 +198,51 @@ driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Even * D);	1.0	m
 driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Odd * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
 driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Odd * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
 driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (An * D + B);	1.0	math	Lentz's recurrence D = 1 / (b + a D)
+driver-distributions.adb	First : constant Real := (Z ** 3 + Z) / 4.0;	4.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	1482.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	1920.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	776.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	79.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	92_160.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;	945.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
 driver-distributions.adb	Half : constant := 0.5;	0.5	math	one half: arguments counted in halves, and the midpoint of a bisection
+driver-distributions.adb	Half_Log_Two_Pi : constant := 0.918_938_533_204_672_741_780_329_736_406;	0.918_938_533_204_672_741_780_329_736_406	math	ln (2 pi) / 2 of Stirling's formula
 driver-distributions.adb	Hi : Real := 1.0;	1.0	math	the incomplete beta's argument lies in [0, 1]
 driver-distributions.adb	Hi := 2.0 * Hi;	2.0	numerics	the bracket widens by doubling until it holds the quantile
-driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	1	math	the Gamma recurrence starts at Gamma (1/2) for an odd count of halves
-driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	1	math	the Gamma recurrence starts at Gamma (1/2) for an odd count of halves
-driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	2	math	the Gamma recurrence starts at Gamma (1) for an even count of halves
-driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	2	math	the Gamma recurrence starts at Gamma (1) for an even count of halves
-driver-distributions.adb	J := J + 2;	2	math	the Gamma recurrence steps by one, which is two halves
-driver-distributions.adb	Sum : Real := (if Halves mod 2 = 1 then Half * Log (Ada.Numerics.Pi) else 0.0);	1	math	an odd count of halves starts from ln Gamma (1/2) = ln sqrt pi
-driver-distributions.adb	Sum : Real := (if Halves mod 2 = 1 then Half * Log (Ada.Numerics.Pi) else 0.0);	2	math	parity of the count of halves
+driver-distributions.adb	Second : constant Real := (5.0 * Z ** 5 + 16.0 * Z ** 3 + 3.0 * Z) / 96.0;	16.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Second : constant Real := (5.0 * Z ** 5 + 16.0 * Z ** 3 + 3.0 * Z) / 96.0;	3.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Second : constant Real := (5.0 * Z ** 5 + 16.0 * Z ** 3 + 3.0 * Z) / 96.0;	5.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Second : constant Real := (5.0 * Z ** 5 + 16.0 * Z ** 3 + 3.0 * Z) / 96.0;	96.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
 driver-distributions.adb	Term : Real := 1.0 / A;	1.0	math	first term of the incomplete gamma series
+driver-distributions.adb	Third : constant Real := (3.0 * Z ** 7 + 19.0 * Z ** 5 + 17.0 * Z ** 3 - 15.0 * Z) / 384.0;	15.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Third : constant Real := (3.0 * Z ** 7 + 19.0 * Z ** 5 + 17.0 * Z ** 3 - 15.0 * Z) / 384.0;	17.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Third : constant Real := (3.0 * Z ** 7 + 19.0 * Z ** 5 + 17.0 * Z ** 3 - 15.0 * Z) / 384.0;	19.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Third : constant Real := (3.0 * Z ** 7 + 19.0 * Z ** 5 + 17.0 * Z ** 3 - 15.0 * Z) / 384.0;	3.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
+driver-distributions.adb	Third : constant Real := (3.0 * Z ** 7 + 19.0 * Z ** 5 + 17.0 * Z ** 3 - 15.0 * Z) / 384.0;	384.0	math	Cornish-Fisher series of the t quantile (Abramowitz and Stegun 26.7.5)
 driver-distributions.adb	Twice : constant Real := 2.0 * Mr;	2.0	math	the 2m terms of the incomplete beta continued fraction
+driver-distributions.adb	W : constant Real := 1.0 + U;	1.0	math	ln (1 + u) through w = 1 + u with its rounding divided out
 driver-distributions.adb	X : constant Real := Beta_Quantile (Two_Sided_Tail, Degrees_Of_Freedom, 1);	1	math	b = 1/2 counted in halves: the t tail is I_x (nu / 2, 1 / 2)
+driver-distributions.adb	Y := Y + 1.0;	1.0	math	the recurrence Gamma (y + 1) = y Gamma (y)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	1.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	1.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	1.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	1.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	2730.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	30.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	30.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	3617.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	42.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	5.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	510.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	6.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	6.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	66.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	691.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
+driver-distributions.adb	[1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,	7.0	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)
 driver-distributions.adb	elsif X >= 1.0 then	1.0	math	the incomplete beta is 1 at x = 1
 driver-distributions.adb	exit when abs (Factor - 1.0) <= Precision;	1.0	numerics	converged when the next factor is one to working precision
 driver-distributions.adb	exit when abs (Factor - 1.0) <= Precision;	1.0	numerics	converged when the next factor is one to working precision
+driver-distributions.adb	if W = 1.0 then	1.0	math	ln (1 + u) through w = 1 + u with its rounding divided out
 driver-distributions.adb	if X < (A + 1.0) / (A + B + 2.0) then	1.0	math	the fraction converges quickly below (a + 1) / (a + b + 2)
 driver-distributions.adb	if X < (A + 1.0) / (A + B + 2.0) then	2.0	math	the fraction converges quickly below (a + 1) / (a + b + 2)
 driver-distributions.adb	if X < A + 1.0 then	1.0	math	the incomplete gamma series converges quickly below a + 1
@@ -216,6 +251,7 @@ driver-distributions.adb	return 1.0;	1.0	math	Q (a, 0) = 1 and I_1 (a, b) = 1
 driver-distributions.adb	return Gaussian_Two_Sided_Quantile (Real'Min (1.0, Tail));	1.0	math	a probability is at most one
 driver-distributions.adb	return Incomplete_Beta (Degrees_Of_Freedom, 1, Nu / (Nu + T * T), Log_Beta_Halves (Degrees_Of_Freedom, 1));	1	math	b = 1/2 counted in halves: the t tail is I_x (nu / 2, 1 / 2)
 driver-distributions.adb	return Incomplete_Beta (Degrees_Of_Freedom, 1, Nu / (Nu + T * T), Log_Beta_Halves (Degrees_Of_Freedom, 1));	1	math	b = 1/2 counted in halves: the t tail is I_x (nu / 2, 1 / 2)
+driver-distributions.adb	return Log (W) * U / (W - 1.0);	1.0	math	ln (1 + u) through w = 1 + u with its rounding divided out
 driver-distributions.ads	with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;	1.0	math	a probability is at most one
 driver-distributions.ads	with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;	1.0	math	a probability is at most one
 driver-distributions.ads	with Pre => Upper_Tail > 0.0 and then Upper_Tail <= 1.0;	1.0	math	a probability is at most one

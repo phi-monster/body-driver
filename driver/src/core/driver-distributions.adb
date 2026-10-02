@@ -19,23 +19,72 @@ package body Driver.Distributions is
 
    Half : constant := 0.5;
 
-   function Log_Gamma_Halves (Halves : Positive) return Real;
-   --  ln Gamma (Halves / 2), exactly by the recurrence Gamma (x + 1) = x Gamma (x)
-   --  from Gamma (1/2) = sqrt (pi) or Gamma (1) = 1.
+   --  Stirling's series for ln Gamma, ln Gamma (y) = (y - 1/2) ln y - y + ln (2 pi) / 2 + S (y)
+   --  with S (y) = sum over k of B_2k / (2k (2k - 1) y^(2k - 1)), the Bernoulli numbers B_2k.
+   Bernoulli : constant array (1 .. 9) of Real :=
+     [1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0, -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0,
+      43867.0 / 798.0];
+   --  The last one is not summed: its term bounds what the others leave out.
 
-   function Log_Gamma_Halves (Halves : Positive) return Real is
-      Sum : Real := (if Halves mod 2 = 1 then Half * Log (Ada.Numerics.Pi) else 0.0);
-      J   : Positive := (if Halves mod 2 = 1 then 1 else 2);
+   Half_Log_Two_Pi : constant := 0.918_938_533_204_672_741_780_329_736_406;
+   --  ln (2 pi) / 2.
+
+   function Series_Term (K : Positive; Y : Real) return Real is
+     (Bernoulli (K) / (Real (2 * K * (2 * K - 1)) * Y ** (2 * K - 1)));
+
+   function Series (Y : Real) return Real is
+      S : Real := 0.0;
    begin
-      while J < Halves loop
-         Sum := Sum + Log (Real (J) * Half);
-         J := J + 2;
+      for K in reverse 1 .. Bernoulli'Last - 1 loop
+         S := S + Series_Term (K, Y);
       end loop;
-      return Sum;
-   end Log_Gamma_Halves;
+      return S;
+   end Series;
+
+   function Converged (Y : Real) return Boolean is
+     --  The first term left out is below the rounding of ln Gamma (y).
+     (abs Series_Term (Bernoulli'Last, Y) <= Precision * abs ((Y - Half) * Log (Y) - Y + Half_Log_Two_Pi));
+
+   function Log_Gamma (X : Real) return Real is
+      --  Raised by Gamma (y + 1) = y Gamma (y) until the series has converged.
+      Y     : Real := X;
+      Shift : Real := 0.0;
+   begin
+      while not Converged (Y) loop
+         Shift := Shift + Log (Y);
+         Y := Y + 1.0;
+      end loop;
+      return (Y - Half) * Log (Y) - Y + Half_Log_Two_Pi + Series (Y) - Shift;
+   end Log_Gamma;
+
+   function Log_Gamma_Halves (Halves : Positive) return Real is (Log_Gamma (Real (Halves) * Half));
+   --  ln Gamma (Halves / 2), to rounding and in constant time for any argument.
+
+   function Log_One_Plus (U : Real) return Real is
+      --  ln (1 + u) without the cancellation of forming 1 + u first (the
+      --  rounding of 1 + u is divided out again).
+      W : constant Real := 1.0 + U;
+   begin
+      if W = 1.0 then
+         return U;
+      end if;
+      return Log (W) * U / (W - 1.0);
+   end Log_One_Plus;
 
    function Log_Beta_Halves (A_Halves, B_Halves : Positive) return Real is
-     (Log_Gamma_Halves (A_Halves) + Log_Gamma_Halves (B_Halves) - Log_Gamma_Halves (A_Halves + B_Halves));
+      --  ln B (a, b) = ln Gamma (b) + ln Gamma (a) - ln Gamma (a + b) with a the
+      --  larger. When the series has converged at a, the difference of the two
+      --  large logarithms is written without them:
+      --    -b ln a - (a + b - 1/2) ln (1 + b / a) + b + S (a) - S (a + b),
+      --  which keeps the rounding of a quantity like a ln a out of the result.
+      A : constant Real := Real (Natural'Max (A_Halves, B_Halves)) * Half;
+      B : constant Real := Real (Natural'Min (A_Halves, B_Halves)) * Half;
+   begin
+      if not Converged (A) then
+         return Log_Gamma (A) + Log_Gamma (B) - Log_Gamma (A + B);
+      end if;
+      return Log_Gamma (B) - B * Log (A) - (A + B - Half) * Log_One_Plus (B / A) + B + Series (A) - Series (A + B);
+   end Log_Beta_Halves;
 
    function Clamp_Away_From_Zero (X : Real) return Real is (if abs X < Tiny then Tiny else X);
 
@@ -222,10 +271,26 @@ package body Driver.Distributions is
    end Student_T_Two_Sided_Tail;
 
    function Student_T_Quantile (Two_Sided_Tail : Real; Degrees_Of_Freedom : Positive) return Real is
-      --  The tail is I_x (nu / 2, 1 / 2) with x = nu / (nu + t^2).
-      X : constant Real := Beta_Quantile (Two_Sided_Tail, Degrees_Of_Freedom, 1);
+      --  The tail is I_x (nu / 2, 1 / 2) with x = nu / (nu + t^2). Its bisection
+      --  costs time in proportion to nu (the continued fraction near x = 1), so
+      --  at large nu the Cornish-Fisher series about the Gaussian quantile
+      --  (Abramowitz and Stegun 26.7.5) is used instead, wherever its last term
+      --  is below the rounding of the result: there the two agree to rounding.
+      Z  : constant Real := Gaussian_Two_Sided_Quantile (Two_Sided_Tail);
+      N  : constant Real := Real (Degrees_Of_Freedom);
+      First  : constant Real := (Z ** 3 + Z) / 4.0;
+      Second : constant Real := (5.0 * Z ** 5 + 16.0 * Z ** 3 + 3.0 * Z) / 96.0;
+      Third  : constant Real := (3.0 * Z ** 7 + 19.0 * Z ** 5 + 17.0 * Z ** 3 - 15.0 * Z) / 384.0;
+      Fourth : constant Real := (79.0 * Z ** 9 + 776.0 * Z ** 7 + 1482.0 * Z ** 5 - 1920.0 * Z ** 3 - 945.0 * Z) / 92_160.0;
    begin
-      return Sqrt (Real (Degrees_Of_Freedom) * (1.0 - X) / X);
+      if abs (Fourth / N ** 4) <= Real'Epsilon * Z then
+         return Z + First / N + Second / N ** 2 + Third / N ** 3 + Fourth / N ** 4;
+      end if;
+      declare
+         X : constant Real := Beta_Quantile (Two_Sided_Tail, Degrees_Of_Freedom, 1);
+      begin
+         return Sqrt (N * (1.0 - X) / X);
+      end;
    end Student_T_Quantile;
 
    function F_Upper_Tail (F : Real; Numerator, Denominator : Positive) return Real is
