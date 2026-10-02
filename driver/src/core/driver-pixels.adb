@@ -9,19 +9,31 @@ package body Driver.Pixels is
    Quantization : constant := 1.0 / 12.0;
    --  The variance of a value rounded to whole levels: a uniform step of one level.
 
+   type Real_Array_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Array_Access);
+
    function Empty (Width, Height : Positive) return View is
-     ((Width  => Width,
-       Height => Height,
-       Count  => 0,
-       Means  => Real_Holders.To_Holder ([1 .. Width * Height => 0.0]),
-       Sums   => Real_Holders.To_Holder ([1 .. Width * Height => 0.0])));
+      --  The zero fields are filled on the heap: two VGA fields (4.9 MB) built
+      --  as aggregates are stack temporaries, more than a task's stack holds.
+      Zeros : Real_Array_Access := new Real_Array (1 .. Width * Height);
+   begin
+      for Z of Zeros.all loop
+         Z := 0.0;
+      end loop;
+      return Result : constant View :=
+        (Width  => Width,
+         Height => Height,
+         Count  => 0,
+         Means  => Real_Holders.To_Holder (Zeros.all),
+         Sums   => Real_Holders.To_Holder (Zeros.all))
+      do
+         Free (Zeros);
+      end return;
+   end Empty;
 
    function Width (V : View) return Natural is (V.Width);
    function Height (V : View) return Natural is (V.Height);
    function Frames (V : View) return Natural is (V.Count);
-
-   type Real_Array_Access is access Real_Array;
-   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Array_Access);
 
    procedure Add (V : in out View; I : Driver.Images.Image) is
       Mr : constant Real_Holders.Reference_Type := V.Means.Reference;
