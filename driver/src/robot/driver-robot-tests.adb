@@ -9,6 +9,7 @@ with Driver.Observations;
 with Driver.Beats;
 with Driver.Log;
 with Driver.Robot.Boot;
+with Driver.Services;
 with Driver.Robot.Channels;
 with Driver.Robot.Hand;
 with Driver.Robot.Flow;
@@ -682,6 +683,10 @@ package body Driver.Robot.Tests is
       if not Done then
          abort Decider;
       end if;
+      --  The boot's estimators submitted to the instrument (which has no
+      --  address here), and the worker that answered keeps a program alive
+      --  until it is let go.
+      Driver.Services.Shut_Down;
       Check (Done, "the boot did not finish within" & Bound'Image & " beats");
       --  The rig's idle group takes commands and moves nothing: the boot must
       --  name the clause it breaks and hold still.

@@ -123,7 +123,11 @@ package body Driver.Robot.Channels is
    --  repeats measure the jitter. A channel that repeats exactly at every rest
    --  beat has noise zero: any change of it is motion.
    procedure Measure_Channel (M : in out Model; G : Group_Id; Channel : Positive; Rest : Natural) is
-      Moved : Real_Array (1 .. Rest);
+      --  Every nonzero change at rest, and its negation: a change at rest has
+      --  no sign of its own, so its scale is measured about zero. About their
+      --  own median, two-valued changes (a reading whose last bit flips back
+      --  and forth, one way more often than the other) leave no spread at all.
+      Moved : Real_Array (1 .. 2 * Rest);
       K     : Natural := 0;
       Index : constant Natural := First_Channel (M, G) + Channel - 1;
    begin
@@ -131,13 +135,15 @@ package body Driver.Robot.Channels is
          if At_Rest (M, G, B) and then Change (M, G, B, Channel) /= 0.0 then
             K := K + 1;
             Moved (K) := Change (M, G, B, Channel);
+            Moved (Rest + K) := -Change (M, G, B, Channel);
          end if;
       end loop;
       if K = 0 then
          M.Noise.Replace_Element (Index, 0.0);
          M.Noise_Freedom.Replace_Element (Index, 0);
       else
-         M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. K)) / Sqrt (2.0));
+         Moved (K + 1 .. 2 * K) := Moved (Rest + 1 .. Rest + K);
+         M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. 2 * K)) / Sqrt (2.0));
          M.Noise_Freedom.Replace_Element (Index, Mad_Degrees_Of_Freedom (K));
       end if;
    end Measure_Channel;

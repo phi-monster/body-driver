@@ -42,20 +42,55 @@ package Driver.Robot.Motion is
       Last      : Step_Report;        --  the last step's report
    end record;
 
+   function Hold_Of (M : Model; G : Group_Id; Channel : Positive) return Real;
+   --  What the group holds the channel at now: the target in effect, or its
+   --  reading when the group was never commanded. Moves are taken from here,
+   --  so a return lands where the body was held, not where it sagged to.
+
+   type Channel_Ref is record
+      Group   : Group_Id := 1;
+      Channel : Positive := 1;
+   end record;
+
+   type Channel_Refs is array (Positive range <>) of Channel_Ref;
+
+   procedure Probe_Together
+     (M         : in out Model;
+      Channels  : Channel_Refs;
+      Direction : Real;
+      First     : Real;
+      Report    : out Probe_Report)
+     with Pre => Direction /= 0.0 and then First >= 0.0;
+   --  Takes every listed channel away from its hold by one common amount, in
+   --  the sign of Direction, doubling the amount from First (from the
+   --  smallest step every listed reading can tell from its noise when First
+   --  is 0) until some eye sees the body move: the smallest move worth
+   --  pushing by, found without knowing any unit. A level counts as seen when
+   --  that many moves in a row, alternating between the hold and the amount,
+   --  were each seen as make such a run rarer than Z's tail over every level
+   --  a probe may try; one move is a false alarm with a chance of at most the
+   --  sum, over the verdicts it looked at, of one in (rest counts + 1) for an
+   --  eye whose counts at rest are measured, else Z's tail (Lockin.Moved).
+   --  Each move looks for as long as a response takes to show: the longest
+   --  measured push delay of a listed group, plus the longest image lag, plus
+   --  the beat itself. A channel stops following at its own end: its reading
+   --  then delivers a fraction of the offset significantly below what a
+   --  smaller offset delivered, and no longer moves; it is held where it last
+   --  followed and takes no further part. The probe ends when an eye saw the
+   --  body, when no channel follows any more, or after as many doublings as a
+   --  float has bits of precision, and returns the body to the hold. A
+   --  channel of a group that is not commandable, or that the group does not
+   --  have, takes no part; with none left, nothing is probed (Steps = 0).
+
    procedure Probe (M : in out Model; G : Group_Id; Channel : Positive; Direction : Real; Report : out Probe_Report)
      with Pre => Direction /= 0.0;
-   --  Takes one channel away from where it reads, in the sign of Direction,
-   --  by steps that double, until some eye's image moves as the lock-in can
-   --  tell (Lockin.Moved): the smallest move worth pushing a channel by,
-   --  found without knowing its units. The
-   --  first step is the smallest change its reading can confirm (the
-   --  significance threshold of a change, from its measured noise); a
-   --  reading without jitter starts at the resolution of the group's largest
-   --  reading. It stops early when a step comes out blocked or short (the
-   --  reading no longer follows: a limit), and gives up after as many
-   --  doublings as a float has bits of precision. The channel stays where the
-   --  probe left it. A group that is not commandable, or a channel it does
-   --  not have, is not probed (Steps = 0).
+   --  Probe_Together with that one channel, from its own noise.
+
+   procedure Gather_Rest (M : in out Model; Probes : Natural);
+   --  Holds the body still for as long as one more still beat shortens the
+   --  confirmations of that many probes by more beats than it costs (an
+   --  eye's false alarms are bounded by its counts at rest, so a seen run is
+   --  shorter the more of them there are), then re-estimates.
 
    type Pose_Goal is record
       Pose          : Rigid;

@@ -1,3 +1,6 @@
+with Ada.Strings;
+with Ada.Strings.Fixed;
+with Ada.Text_IO;
 with Driver.Beats;
 with Driver.Commands;
 with Driver.Log;
@@ -8,6 +11,16 @@ with Driver.Robot.Motion;
 package body Driver.Robot.Boot is
 
    use type Driver.Robot.Motion.Step_Outcome;
+
+   package Real_IO is new Ada.Text_IO.Float_IO (Real);
+
+   --  A number in the log with its magnitude: probe sizes span many decades.
+   function Scientific (X : Real) return String is
+      S : String (1 .. 32);
+   begin
+      Real_IO.Put (S, X, Aft => 2, Exp => 3);
+      return Ada.Strings.Fixed.Trim (S, Ada.Strings.Both);
+   end Scientific;
 
    --  A repeatable uniform generator (Park and Miller's minimal standard),
    --  for push orders that no other group's repeats.
@@ -53,20 +66,21 @@ package body Driver.Robot.Boot is
          Estimate_Now (M);
       end Estimate;
 
-      --  The group's readings now.
-      function Readings_Of (G : Group_Id; Size : Natural) return Real_Array is
+      --  What the group holds now (Motion.Hold_Of): moves are taken from here.
+      function Holds_Of (G : Group_Id; Size : Natural) return Real_Array is
          Result : Real_Array (1 .. Size) := [others => 0.0];
          procedure Read is
-            O : Observation renames Driver.Beats.Latest.all;
          begin
-            if Natural (G) <= Natural (O.Readings.Length) and then O.Readings.Element (G)'Length = Size then
-               Result := O.Readings.Element (G);
+            if Natural (G) <= Group_Count (M) and then Group_Size (M, G) = Size then
+               for C in 1 .. Size loop
+                  Result (C) := Driver.Robot.Motion.Hold_Of (M, G, C);
+               end loop;
             end if;
          end Read;
       begin
          Driver.Beats.Within_A_Beat (Read'Access);
          return Result;
-      end Readings_Of;
+      end Holds_Of;
 
       procedure Go_To (G : Group_Id; Target : Real_Array; Report : out Driver.Robot.Motion.Step_Report) is
          C : Driver.Commands.Command;
@@ -76,10 +90,11 @@ package body Driver.Robot.Boot is
       end Go_To;
 
       --  Finds how far each channel of the group must move for an eye to see
-      --  it, then pushes every channel both ways by that much, in an order no
-      --  other group shares, for the lock-in to tell the groups apart.
-      procedure Recognize (G : Group_Id; Size : Positive) is
-         Start  : constant Real_Array := Readings_Of (G, Size);
+      --  it, from the amount at which the whole body was first seen, then
+      --  pushes every channel both ways by that much, in an order no other
+      --  group shares, for the lock-in to tell the groups apart.
+      procedure Recognize (G : Group_Id; Size : Positive; From : Real) is
+         Start  : constant Real_Array := Holds_Of (G, Size);
          Amount : Real_Array (1 .. Size) := [others => 0.0];
          Report : Driver.Robot.Motion.Step_Report;
          Order  : Push_Array (1 .. 2 * Size);
@@ -90,8 +105,7 @@ package body Driver.Robot.Boot is
                declare
                   P : Driver.Robot.Motion.Probe_Report;
                begin
-                  Driver.Robot.Motion.Probe (M, G, C, Sign, P);
-                  Go_To (G, Start, Report);
+                  Driver.Robot.Motion.Probe_Together (M, [1 => (Group => G, Channel => C)], Sign, From, P);
                   if P.Seen then
                      Amount (C) := P.Excursion;
                      exit;
@@ -99,8 +113,9 @@ package body Driver.Robot.Boot is
                end;
             end loop;
             Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & C'Image
-                             & (if Amount (C) > 0.0 then " is seen when moved by " & Driver.Log.Image (Amount (C), 6)
-                                else " moves nothing any eye sees"));
+                             & (if Amount (C) > 0.0
+                                then " is seen when moved by " & Scientific (Amount (C)) & " reading units"
+                                else " moves nothing any eye sees, up to where it stops following"));
          end loop;
          for C in 1 .. Size loop
             if Amount (C) > 0.0 then
@@ -156,7 +171,7 @@ package body Driver.Robot.Boot is
                   end loop;
                end if;
             end Read_Plan;
-            Start  : constant Real_Array := Readings_Of (G, Size);
+            Start  : constant Real_Array := Holds_Of (G, Size);
             Report : Driver.Robot.Motion.Step_Report;
          begin
             Driver.Beats.Within_A_Beat (Read_Plan'Access);
@@ -244,11 +259,55 @@ package body Driver.Robot.Boot is
          end Read_Groups;
       begin
          Driver.Beats.Within_A_Beat (Read_Groups'Access);
-         for G in 1 .. Count loop
-            if Commandable (G) and then Sizes (G) > 0 then
-               Recognize (Group_Id (G), Sizes (G));
+         declare
+            Total : Natural := 0;
+         begin
+            for G in 1 .. Count loop
+               if Commandable (G) then
+                  Total := Total + Sizes (G);
+               end if;
+            end loop;
+            if Total = 0 then
+               Driver.Log.Line (Driver.Log.Robot, "boot: no group takes a command; nothing can be moved to be measured");
+               return;
             end if;
-         end loop;
+            declare
+               Refs : Driver.Robot.Motion.Channel_Refs (1 .. Total);
+               K    : Natural := 0;
+               P    : Driver.Robot.Motion.Probe_Report;
+            begin
+               for G in 1 .. Count loop
+                  if Commandable (G) then
+                     for C in 1 .. Sizes (G) loop
+                        K := K + 1;
+                        Refs (K) := (Group => Group_Id (G), Channel => C);
+                     end loop;
+                  end if;
+               end loop;
+               --  Every commandable channel together first, by one amount: it
+               --  stops at the first move an eye sees, so no channel has moved
+               --  more than twice what an eye needs to see it, whatever its
+               --  units; each channel alone then starts from there.
+               Driver.Robot.Motion.Gather_Rest (M, Total + 1);
+               Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);
+               if not P.Seen then
+                  Driver.Beats.Within_A_Beat (Estimate'Access);
+                  Driver.Beats.Within_A_Beat (Read_Body'Access);
+                  Driver.Log.Line
+                    (Driver.Log.Robot, "boot: nothing any eye sees moved while every commandable channel moved"
+                     & " together, up to where each stopped following its command (porting contract, clause 2);"
+                     & " the boot stops");
+                  return;
+               end if;
+               Driver.Log.Line (Driver.Log.Robot, "boot: every commandable channel moved together is first seen at "
+                                & Scientific (P.Excursion) & " reading units, after" & P.Steps'Image & " doublings");
+               for G in 1 .. Count loop
+                  if Commandable (G) and then Sizes (G) > 0 then
+                     Recognize (Group_Id (G), Sizes (G), P.Excursion);
+                  end if;
+               end loop;
+            end;
+         end;
       end;
       Driver.Beats.Within_A_Beat (Estimate'Access);
       Driver.Beats.Within_A_Beat (Read_Body'Access);

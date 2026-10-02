@@ -4,6 +4,7 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
+with Driver.Robot.Lag;
 with Driver.Robot.Regression;
 with Driver.Stats;
 
@@ -380,7 +381,12 @@ package body Driver.Robot.Lockin is
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
             S    : Eye_Stream renames M.Eyes (E);
-            Lag  : constant Natural := Natural (Integer'Max (0, (if E <= M.Lags.Last_Index then M.Lags (E) else 0)));
+            --  An eye whose lag is not measured may show a push as late as
+            --  any lag the stream can tell.
+            Lag  : constant Natural :=
+              (if E <= M.Lag_Known.Last_Index and then M.Lag_Known (E)
+               then Natural (Integer'Max (0, M.Lags (E)))
+               else Driver.Robot.Lag.Longest (M));
             Rest : Natural := 0;
 
             function At_Rest (B : Natural) return Boolean is

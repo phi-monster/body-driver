@@ -158,6 +158,9 @@ package body Driver.Robot.Lag is
       end;
    end Identifiable;
 
+   function Longest (M : Model) return Natural is
+     (if M.Beats > 0 then Identifiable (M, M.Beats - 1) else 0);
+
    procedure Measure (M : in out Model) is
       Last : constant Integer := M.Beats - 1;
       Bound : constant Natural := (if M.Beats > 0 then Identifiable (M, M.Beats - 1) else 0);

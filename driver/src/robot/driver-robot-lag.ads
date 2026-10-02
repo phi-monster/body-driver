@@ -28,4 +28,8 @@ private package Driver.Robot.Lag is
    --  Re-measures the lag of every eye from the whole stream; an eye whose
    --  motion follows no push stays unmeasured, with lag 0.
 
+   function Longest (M : Model) return Natural;
+   --  The longest lag the stream can tell (the shifts Measure tries): how far
+   --  back a push may still show in an eye whose lag is not measured.
+
 end Driver.Robot.Lag;

@@ -7,6 +7,7 @@ with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Graph;
+with Driver.Robot.Kinematics;
 with Driver.Robot.Lag;
 with Driver.Robot.Lockin;
 with Driver.Robot.Steps;
@@ -130,8 +131,8 @@ package body Driver.Robot is
             Stillness.Measure_Luma_Noise (S);
          end if;
       end loop;
-      Lockin.Measure_Rest_Noise (M);
       Lag.Measure (M);
+      Lockin.Measure_Rest_Noise (M);
       Lockin.Measure (M);
       Graph.Derive (M);
       M.Graph_Evidence := M.Beats;
@@ -144,6 +145,7 @@ package body Driver.Robot is
       Channels.Append (M, O, Sent);
       Steps.Track (M, M.Beats);
       Observe_Eyes (M, O);
+      Kinematics.Observe (M, O);
       M.Beats := M.Beats + 1;
       --  The estimates are redone whenever the evidence behind them has
       --  doubled: a logarithmic number of times over any stream.

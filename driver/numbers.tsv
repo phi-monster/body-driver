@@ -471,10 +471,13 @@ driver-robot-body_file.ads	Graph_Method : constant := 1;	1	format	the first vers
 driver-robot-body_file.ads	Lag_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Lockin_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Noise_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
-driver-robot-boot.adb	& (if Amount (C) > 0.0 then "" & Driver.Log.Image (Amount (C), 6)	6	format	digits printed in a log line or a message
+driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log names
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Driver.Robot.Motion.Hold (M, 1);	1	structure	a view needs a second still frame to measure its noise
+driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	0.0	structure	from zero: the first step is the smallest every reading can tell
+driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	1.0	structure	the positive direction for every channel
+driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, [1 => (Group => G, Channel => C)], Sign, From, P);	1	structure	one channel at a time
 driver-robot-boot.adb	G : Group_Id := 1;	1	structure	a group number before the arm's is read
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	2_147_483_647	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	48_271	math	Park and Miller's minimal standard generator: the multiplier
@@ -488,13 +491,17 @@ driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	2	struc
 driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
+driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	2	format	two digits after the point in the log
+driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	3	format	three exponent digits in the log
+driver-robot-boot.adb	S : String (1 .. 32);	32	format	wide enough for any Long_Float image
 driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-channels.adb	(Driver.Uncertain.Vector_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	math	the squared deviations are already in units of each channel's sigma
 driver-robot-channels.adb	Half : constant Real := 0.5;	0.5	math	the median of the absolute value of a unit Gaussian is its two-sided quantile at one half
 driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	the first round takes every change for motion: noise zero
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, 0.0);	0.0	math	a reading that repeats exactly at every rest beat has no jitter: any change of it is motion
-driver-robot-channels.adb	M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. K)) / Sqrt (2.0));	2.0	math	the change of two readings has twice the variance of one
+driver-robot-channels.adb	M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. 2 * K)) / Sqrt (2.0));	2.0	math	a change is the difference of two readings
+driver-robot-channels.adb	Moved : Real_Array (1 .. 2 * Rest);	2	structure	the changes and their negations
 driver-robot-channels.adb	Phi : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
 driver-robot-channels.adb	Phi : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
 driver-robot-channels.adb	S.Targets.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
@@ -622,6 +629,9 @@ driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P
 driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	Sqrt (2.0) * Reading_Noise (M, R.Group, C)));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-kinematics.adb	U.Append (Real (X0 + X1) / 2.0);	2.0	math	the centre of a cell
+driver-robot-kinematics.adb	V.Append (Real (Y0 + Y1) / 2.0);	2.0	math	the centre of a cell
+driver-robot-kinematics.adb	if Natural (R.Frames.Length) = 1 then	1	structure	the first keyframe is the reference
 driver-robot-lag.adb	Best : Real := 1.0;	1.0	math	a probability: no fit yet, so noise explains everything
 driver-robot-lag.adb	Child := 2 * Root;	2	structure	in a binary heap the children of node k are 2 k and 2 k + 1
 driver-robot-lag.adb	I : Positive := 1;	1	structure	arrays are indexed from one
@@ -655,15 +665,25 @@ driver-robot-lockin.adb	if B >= Natural (S.Measured.Length) or else not S.Measur
 driver-robot-lockin.adb	return Pushes <= 1;	1	structure	a row is a reference only while at most one group is pushed
 driver-robot-motion.adb	& Driver.Log.Image (E.Delivered.Value, 3) & "" & Driver.Log.Image (E.Length, 4)	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (E.Delivered.Value, 3) & "" & Driver.Log.Image (E.Length, 4)	4	format	digits printed in a log line or a message
-driver-robot-motion.adb	(1.0 / Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z))	1.0	math	the tail as a probability, inverted for its logarithm
 driver-robot-motion.adb	(Driver.Uncertain.Scalar_Gate (Channels.Noise_Freedom (M, G, Channel))) * Sigma * Sqrt (2.0);	2.0	math	a change is the difference of two readings
-driver-robot-motion.adb	(if Rest = 0 then 1	1	structure	without counts at rest, the per-cell false-alarm test judges one level
+driver-robot-motion.adb	(if M.Eyes (E).Rest_Counts_Known then 1.0 / Real (M.Eyes (E).Rest_Count_Beats + 1) else Tail);	1.0	math	the order statistic: one in n plus one
+driver-robot-motion.adb	Amount := 2.0 * Amount;	2.0	structure	the probe doubles
 driver-robot-motion.adb	Least : Estimate := (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0);	1.0	math	the whole step delivered, until a push says less
+driver-robot-motion.adb	Probe_Together (M, [1 => (Group => G, Channel => Channel)], Direction, 0.0, Report);	0.0	structure	from zero: the first step is the smallest the reading can tell
+driver-robot-motion.adb	Probe_Together (M, [1 => (Group => G, Channel => Channel)], Direction, 0.0, Report);	1	structure	one channel
+driver-robot-motion.adb	Run : Natural := 1;	1	structure	the first seen move starts the run
+driver-robot-motion.adb	S : constant Real := Noise (I) * Sqrt (2.0) / Amount;	2.0	math	a change is the difference of two readings
 driver-robot-motion.adb	Sign : constant Real := (if Direction > 0.0 then 1.0 else -1.0);	1.0	math	the two directions of a probe
 driver-robot-motion.adb	Sign : constant Real := (if Direction > 0.0 then 1.0 else -1.0);	1.0	math	the two directions of a probe
-driver-robot-motion.adb	Step_Size := 2.0 * Step_Size;	2.0	math	the probe doubles its step
-driver-robot-motion.adb	Step_Size := Real'Model_Epsilon * (if Scale > 0.0 then Scale else 1.0);	1.0	structure	the resolution of one reading unit when every reading is zero: no size to scale by
-driver-robot-motion.adb	else Natural'Max (1, Natural (Real'Ceiling	1	structure	at least one level
+driver-robot-motion.adb	Wait : Natural := 1;	1	structure	the beat the move shows in the readings
+driver-robot-motion.adb	Window : Natural := 2;	2	structure	the beat of the move and the beat it shows in the readings
+driver-robot-motion.adb	Window := Natural'Max (Window, 2 + Natural'Max (0, Image_Lag (M, Eye_Id (E))));	2	structure	the beat of the move and the beat it shows in the readings
+driver-robot-motion.adb	elsif Chance >= 1.0 then	1.0	math	a chance of one or more cannot be beaten by any run
+driver-robot-motion.adb	return (if K >= Real (Natural'Last) then Natural'Last else Natural'Max (1, Natural (K)));	1	structure	at least one move
+driver-robot-motion.adb	return 1;	1	structure	one move suffices when false alarms cannot happen
+driver-robot-motion.adb	return Real'Model_Epsilon * (if Scale > 0.0 then Scale else 1.0);	1.0	structure	one reading unit when every reading is zero
+driver-robot-motion.ads	Channel : Positive := 1;	1	structure	channels are numbered from one
+driver-robot-motion.ads	Group : Group_Id := 1;	1	structure	groups are numbered from one
 driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	1.0	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
 driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
 driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
