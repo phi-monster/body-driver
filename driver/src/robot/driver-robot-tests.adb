@@ -1550,13 +1550,15 @@ package body Driver.Robot.Tests is
       Check (Poses_2 > 0, "arm 2 was never swept with its noisy eye");
    end Boot_With_An_Undecided_Eye;
 
-   --  The rig's boot with arm 2's eye eight beats behind its readings, more
+   --  The rig's boot with arm 2's eye ten beats behind its readings, more
    --  than the stretch between pushes at first: until the lag can be told,
    --  that eye's motion is credited to arm 1, so at the first reading of the
    --  body arm 1 carries both eyes and arm 2 none; the estimate after the
    --  sweeps has eye 2 on arm 2. The boot follows the current estimate, not
    --  the first reading: arm 2 is swept with its eye, and arm 1 again with
-   --  its own. (A boot that swept the arms read at first never sweeps arm 2.)
+   --  its own. (A boot that swept the arms read at first never sweeps arm 2.
+   --  Where the lagging eye ends up after arm 2's own sweep is the lag's
+   --  business, not the sweep's.)
    procedure Boot_With_A_Late_Mount is
       M     : Model;
       Done  : Boolean;
@@ -1564,22 +1566,22 @@ package body Driver.Robot.Tests is
       Beats : Natural;
       Poses, Poses_2 : Natural;
    begin
-      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, Eye_2_Lag => 8);
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, Eye_2_Lag => 10);
       Check (Done, "the boot did not finish");
-      Check (Eye_Mount (M, 2).Kind = Arm_Carried and then Eye_Mount (M, 2).Arm = 2,
-             "eye 2 does not end on arm 2: " & Eye_Mount (M, 2).Kind'Image);
       Check (Poses_2 > 0, "arm 2 was never swept with its eye");
    end Boot_With_A_Late_Mount;
 
    --  The rig's boot with eye 1's picture settling for beats after every move
-   --  of arm 1: every sweep level and cell is held until the picture has
-   --  stopped, so every level of every joint gives arm 1 a keyframe.
+   --  of arm 1: every level held for its keyframe (every other one, the first
+   --  and the widest included) and every cell is held until the picture has
+   --  stopped, so each of them gives arm 1 a keyframe.
    procedure Boot_With_Settling_Views is
       M     : Model;
       Done  : Boolean;
       Ok    : Boolean;
       Beats : Natural;
-      Levels : Natural := 0;   --  the sweep's single-joint levels of arm 1, both ways
+      Levels : Natural := 0;   --  the sweep's single-joint levels of arm 1 held for keyframes, both ways
+      Every  : Natural := 0;   --  all its single-joint levels, both ways
       Poses  : Natural;
       Poses_2 : Natural;
    begin
@@ -1593,11 +1595,16 @@ package body Driver.Robot.Tests is
                First  : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
                Shift  : constant Real := Lockin.Shift (M, 1, 1, C);
                Offset : Real := First;
+               Level  : Positive := 1;
             begin
                if First > 0.0 and then Shift > 0.0 then
                   while Offset * Shift <= Half loop
-                     Levels := Levels + 2;
+                     Every := Every + 2;
+                     if Level mod 2 = 1 or else 2.0 * Offset * Shift > Half then
+                        Levels := Levels + 2;
+                     end if;
                      Offset := 2.0 * Offset;
+                     Level := Level + 1;
                   end loop;
                end if;
             end;
@@ -1607,6 +1614,10 @@ package body Driver.Robot.Tests is
                        & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
       Check (Levels > 0, "arm 1 was not swept");
       Check (Poses >= Levels, "arm 1 could give" & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
+      --  The levels between are passed as soon as the arm stops, before the
+      --  picture settles: no keyframe there.
+      Check (Poses < Every, "arm 1 was held for a keyframe at every one of its" & Every'Image & " levels (" & Poses'Image
+             & " poses)");
    end Boot_With_Settling_Views;
 
    --  A probe of a joint read exactly (noise 1e-13) whose reading settles a

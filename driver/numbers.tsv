@@ -658,6 +658,7 @@ driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	2_147_483
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	48_271	math	Park and Miller's minimal standard generator: the multiplier
 driver-robot-boot.adb	Group : Group_Id := 1;	1	structure	a placeholder, set before it is read
 driver-robot-boot.adb	Half := Real (Natural'Min (M.Eyes (Eye_Id (Eye)).Grid.Width, M.Eyes (Eye_Id (Eye)).Grid.Height)) / 2.0;	2.0	structure	a view keeps half of itself in sight while turning by half its width
+driver-robot-boot.adb	Level : Positive := 1;	1	structure	levels are counted from the first
 driver-robot-boot.adb	Offset := 2.0 * Offset;	2.0	math	the sweep doubles its step
 driver-robot-boot.adb	Order (Count + 1) := (Channel => C, Sign => 1.0);	1.0	math	the two directions of a push
 driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	1.0	math	the two directions of a push
@@ -674,11 +675,14 @@ driver-robot-boot.adb	S : String (1 .. 32);	32	format	wide enough for any Long_F
 driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
 driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
 driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
+driver-robot-boot.adb	and then (Level mod 2 = 1 or else Report.Outcome /= Driver.Robot.Motion.Reached	1	structure	the first level is held, and every other one from it
+driver-robot-boot.adb	and then (Level mod 2 = 1 or else Report.Outcome /= Driver.Robot.Motion.Reached	2	numerics	keyframes one per two doublings: the held levels turn the joint four times as far each, spanning every scale from the matcher's limit to the widest turn as one per doubling does (A9's arm: 59 keyframes against 97, the same fit against truth)
 driver-robot-boot.adb	if N > 1 then	1	structure	cells move several joints
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
+driver-robot-boot.adb	or else 2.0 * Offset * Per_Unit (P.Channel) > Half)	2.0	numerics	doubling search: the next level, which would turn the view past its half, is not taken, so this one is the widest
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-boot.adb	then "" & Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
 driver-robot-channels.adb	(Driver.Uncertain.Vector_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	math	the squared deviations are already in units of each channel's sigma
