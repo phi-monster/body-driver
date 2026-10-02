@@ -21,21 +21,28 @@ package body Driver.Robot is
    use type Driver.Observations.Camera_Id;
 
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Luma_Access);
+   type Flag_Access is access Flow.Flag_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Flow.Flag_Array, Flag_Access);
 
    --  The displacement of every cell of the eye from its previous frame to
    --  its current one, appended to its stream.
    procedure Measure_Displacement (S : in out Eye_Stream)
      with Pre => S.Has_Previous and then Cells (S.Grid) > 0
    is
-      N : constant Positive := Cells (S.Grid);
-      Du, Dv, Condition, Cell_Noise : Real_Array (1 .. N);
-      Resolved : Flow.Flag_Array (1 .. N);
+      --  Sized by cells: on the heap.
+      N          : constant Positive := Cells (S.Grid);
+      Du         : Luma_Access := new Real_Array (1 .. N);
+      Dv         : Luma_Access := new Real_Array (1 .. N);
+      Condition  : Luma_Access := new Real_Array (1 .. N);
+      Cell_Noise : Luma_Access := new Real_Array (1 .. N);
+      Resolved   : Flag_Access := new Flow.Flag_Array (1 .. N);
    begin
       --  A cell at rest moves by its pixels' noise times the eye's rest factor.
       for C in 1 .. N loop
          Cell_Noise (C) := S.Luma_Variance.Element (C - 1) * S.Rest_Factor ** 2;
       end loop;
-      Flow.Displacements (S.Grid, S.Previous.all, S.Current.all, Cell_Noise, Du, Dv, Condition, Resolved);
+      Flow.Displacements (S.Grid, S.Previous.all, S.Current.all, Cell_Noise.all, Du.all, Dv.all, Condition.all,
+                          Resolved.all);
       for C in 1 .. N loop
          S.Du.Append (Du (C));
          S.Dv.Append (Dv (C));
@@ -43,6 +50,11 @@ package body Driver.Robot is
          S.Resolved.Append (Resolved (C));
       end loop;
       S.Measured.Append (True);
+      Free (Du);
+      Free (Dv);
+      Free (Condition);
+      Free (Cell_Noise);
+      Free (Resolved);
    end Measure_Displacement;
 
    procedure Observe_Eyes (M : in out Model; O : Observation) is

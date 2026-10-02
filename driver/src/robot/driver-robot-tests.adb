@@ -1,3 +1,4 @@
+with Ada.Exceptions;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Bytes;
 with Driver.Clock;
@@ -378,6 +379,51 @@ package body Driver.Robot.Tests is
       end if;
       Estimate_Now (M);
    end Exercise_Rig;
+
+   --  The decider runs the estimates in a task of its own, whose stack is
+   --  GNAT's default (2 MiB), a fraction of the environment task's where the
+   --  other tests estimate: nothing an estimate keeps per beat, cell or pixel
+   --  may live on a stack. A long history, every group pushed in turn, then
+   --  the estimate in such a task. The estimators that kept their samples on
+   --  the stack overflowed it on this rig between 10 600 and 12 000 beats.
+   procedure Estimate_In_A_Task is
+      M       : Model;
+      R       : Rig;
+      Rest    : constant Rig_State := (others => <>);
+      History : constant := 16_000;
+      Done    : Boolean := False with Atomic;
+      Failure : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      for B in 1 .. 5 loop
+         Step (M, R, Rest);
+      end loop;
+      while R.Beat < History loop
+         Exercise (M, R, Arm_1, 0.1, 8);
+         Exercise (M, R, Arm_2, 0.1, 8);
+         Exercise (M, R, Closer, 0.1, 8);
+         Exercise (M, R, Part, 0.1, 8);
+         Exercise (M, R, Idle, 0.1, 8);
+      end loop;
+      declare
+         task Decider;
+         task body Decider is
+         begin
+            Estimate_Now (M);
+            Done := True;
+         exception
+            when E : others =>
+               Failure := Ada.Strings.Unbounded.To_Unbounded_String (Ada.Exceptions.Exception_Information (E));
+         end Decider;
+      begin
+         null;
+      end;
+      Check (Done, "the estimate over" & R.Beat'Image & " beats failed in a task: "
+             & Ada.Strings.Unbounded.To_String (Failure));
+      if Done then
+         Check (Role (M, 1) = Arm, "arm 1 is an arm, got " & Role (M, 1)'Image);
+         Check (Role (M, 2) = Arm, "arm 2 is an arm, got " & Role (M, 2)'Image);
+      end if;
+   end Estimate_In_A_Task;
 
    --  A group only ever pushed together with another is not classified:
    --  what the eyes saw cannot be told from what its partner did.
@@ -788,6 +834,162 @@ package body Driver.Robot.Tests is
          end;
       end if;
    end Step_Ends_Despite_New_Jitter;
+
+   --  A group that never answered a push yet, asked beyond the limit it
+   --  rests at (a live x5's closer at 1.0, asked 1.000244 by Recognize):
+   --  nothing answers, and the push must be given up once the longest wait
+   --  any push of the body took for its answer is over, not after as many
+   --  beats as the stream had (A8 held that closer 3763 beats). Group 1
+   --  answers its pushes a beat after each; group 2 is pushed once, at 100.
+   procedure Unanswered_Push_Of_An_Unanswered_Group is
+      M      : Model;
+      Rng    : Generator;
+      O      : Observation;
+      Sent   : Driver.Commands.Command;
+      Limit  : constant Real := 1.0;
+      Arm, Arm_Target : Real := 0.0;
+      Closer_Target   : Real := Limit;
+   begin
+      for B in 0 .. 140 loop
+         if B in 40 | 52 then
+            Arm_Target := 0.01;
+         elsif B in 46 | 58 then
+            Arm_Target := 0.0;
+         elsif B in 41 | 47 | 53 | 59 then
+            Arm := Arm_Target;
+         elsif B = 100 then
+            Closer_Target := Limit + 2.44e-4;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Arm + 1.0e-12 * Gaussian (Rng)));
+         O.Readings.Append (Real_Array'(1 => Limit + 1.0e-12 * Gaussian (Rng)));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Arm_Target]);
+         Driver.Commands.Set_Target (Sent, 2, [Closer_Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (M.Groups (1).Delay_Known, "group 1's delay is not measured");
+      Check (Steps.Episodes (M, 2) = 1, "group 2 is pushed once, got" & Steps.Episodes (M, 2)'Image);
+      if M.Groups (1).Delay_Known and then Steps.Episodes (M, 2) = 1 then
+         declare
+            E : constant Episode := M.Groups (2).Episodes (1);
+         begin
+            Check (E.Ended and then E.End_At - E.Start <= M.Groups (1).Delay_Beats + 1,
+                   "the push nothing answers is still waited for"
+                   & Natural'Image ((if E.Ended then E.End_At else 140) - E.Start) & " beats after it began; the body"
+                   & " answered within" & M.Groups (1).Delay_Beats'Image);
+            Check (not E.Ended or else E.Blocked, "the push nothing answered is not called blocked");
+         end;
+      end if;
+   end Unanswered_Push_Of_An_Unanswered_Group;
+
+   --  A joint stopped short of its target by something it keeps chattering
+   --  against (a live x5's arm 2 in its first Hadamard cell: joint 3 moved by
+   --  20 to 240 visible steps every beat for 800 beats and never came to
+   --  rest) moves every beat and never comes closer: its push must end soon
+   --  after it stopped coming closer, judged blocked and not at rest. A free
+   --  push that then rings about its target for longer than it took to get
+   --  there still ends at rest, not blocked. Pushes 1 to 4 go back and forth
+   --  by 0.01 for the joint's delay to be measured; push 5 asks 1.0 and meets
+   --  the obstacle at 0.5; push 6 goes back to 0.
+   procedure Step_Ends_Against_Chatter is
+      M        : Model;
+      Rng      : Generator;
+      O        : Observation;
+      Sent     : Driver.Commands.Command;
+      Step     : constant Real := 0.009;   --  the visible step of the eye put in below
+      Obstacle : constant Real := 0.5;
+      Target, Reading, Ring : Real := 0.0;
+   begin
+      --  Short of 128 beats, whose estimate would measure the lock-in afresh.
+      for B in 0 .. 126 loop
+         --  The estimate at 64 beats measured the delay and the lock-in afresh;
+         --  then the eye: ten cells moving 100 pixels per reading unit.
+         if B = 64 then
+            declare
+               S : Eye_Stream renames M.Eyes (1);
+            begin
+               S.Kept_Groups.Clear;
+               S.Kept_Channels.Clear;
+               S.Gains.Clear;
+               S.Gain_Variances.Clear;
+               S.Kept_Groups.Append (1);
+               S.Kept_Channels.Append (1);
+               for Cell in 1 .. 10 loop
+                  S.Gains.Append (1.0e4);
+                  S.Gain_Variances.Append (1.0);
+               end loop;
+               M.Graph.Effects.Replace_Element
+                 (1, (Verdict => Whole, Responding => 10, Textured => 10,
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+            end;
+         end if;
+         if B in 40 | 46 | 52 | 58 then
+            Target := (if B in 40 | 52 then 0.01 else 0.0);
+         elsif B in 41 | 47 | 53 | 59 then
+            Reading := Target;
+         elsif B = 66 then
+            Target := 1.0;
+         elsif B in 67 .. 68 then
+            --  Seven eighths of the way to the obstacle each beat.
+            Reading := Obstacle - (Obstacle - Reading) / 8.0;
+         elsif B in 69 .. 100 then
+            --  Bouncing off it: 2 and 24 visible steps short of it in turn.
+            Reading := Obstacle - Step * (if B mod 2 = 0 then 2.0 else 24.0);
+         end if;
+         if B = 100 then
+            Target := 0.0;
+         elsif B = 101 then
+            Ring := 0.1;
+            Reading := Ring;
+         elsif B > 101 then
+            --  About the target, each swing the other way and 0.6 as wide.
+            Ring := -0.6 * Ring;
+            Reading := Ring;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Reading + 1.0e-12 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Known (Visible_Step (M, 1, 1)), "the eye's visible step is known");
+      Check (Steps.Episodes (M, 1) = 6, "six pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 6 then
+         for K in 1 .. 4 loop
+            declare
+               E : constant Episode := M.Groups (1).Episodes (K);
+            begin
+               Check (E.Ended and then E.Rested and then not E.Blocked,
+                      "free push" & K'Image & " did not end at rest, unblocked");
+            end;
+         end loop;
+         declare
+            E : constant Episode := M.Groups (1).Episodes (5);
+         begin
+            Check (E.Ended and then E.Settled, "the push against the obstacle never ends while the joint chatters");
+            Check (not E.Ended or else not E.Settled or else E.End_At - E.Closest_At <= 2 * (E.Closest_At - E.Start) + 1,
+                   "the push against the obstacle ends" & Natural'Image (E.End_At - E.Closest_At)
+                   & " beats after it last came closer," & Natural'Image (E.Closest_At - E.Start) & " beats after it began");
+            Check (E.Blocked and then not E.Rested, "the push against the obstacle is not judged blocked, still moving");
+         end;
+         declare
+            E : constant Episode := M.Groups (1).Episodes (6);
+         begin
+            Check (E.Ended and then E.Settled and then E.Rested and then not E.Blocked,
+                   "the push that rang about its target did not end at rest, unblocked");
+         end;
+      end if;
+   end Step_Ends_Against_Chatter;
 
    --  A joint an eye watches, read exactly as a simulator reads it: every push
    --  closes all but 1.45 % of its ask in one beat and stops there, which is
@@ -1516,6 +1718,8 @@ package body Driver.Robot.Tests is
 
    procedure Register is
    begin
+      Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
+                             & "stack, as the decider's does", Estimate_In_A_Task'Access);
       Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
       Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found, or are "
@@ -1535,6 +1739,12 @@ package body Driver.Robot.Tests is
                              & "so the wait for every answer never ends", Answers_Read_For_An_Unlisted_Arm'Access);
       Driver.Tests.Register ("robot.steps.jitter", "a push never ends when the held reading jitters more than it did at "
                              & "rest", Step_Ends_Despite_New_Jitter'Access);
+      Driver.Tests.Register ("robot.steps.unanswered", "a push of a group that never answered yet, which nothing "
+                             & "answers, is waited for longer than any push of the body took to answer",
+                             Unanswered_Push_Of_An_Unanswered_Group'Access);
+      Driver.Tests.Register ("robot.steps.chatter", "a push against something its joint keeps chattering against never "
+                             & "ends, or a free push that rings about its target is given up or called blocked",
+                             Step_Ends_Against_Chatter'Access);
       Driver.Tests.Register ("robot.steps.sight", "a push of a joint an eye watches is called blocked though it stopped "
                              & "short by less than the eye can see, or asked less than the eye can see", Step_Short_Of_Sight'Access);
       Driver.Tests.Register ("robot.steps", "a free push that falls as short as free pushes do is called blocked, a "

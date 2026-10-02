@@ -209,7 +209,11 @@ package body Driver.Robot.Boot is
                         begin
                            Pose (P.Channel) := Start (P.Channel) + P.Sign * Offset;
                            Go_To (G, Pose, Report);
-                           Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                           --  An arm given up while it kept moving (chattering
+                           --  against what stops it) gives no keyframe there.
+                           if Report.At_Rest then
+                              Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                           end if;
                            exit when Report.Outcome /= Driver.Robot.Motion.Reached;
                         end;
                         Offset := 2.0 * Offset;
@@ -261,7 +265,9 @@ package body Driver.Robot.Boot is
                               end;
                            end loop;
                            Go_To (G, Pose, Report);
-                           Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                           if Report.At_Rest then
+                              Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                           end if;
                         end;
                      end loop;
                      Go_To (G, Start, Report);

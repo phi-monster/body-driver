@@ -143,6 +143,42 @@ package body Driver.Pixels.Tests is
       end loop;
    end Bulk_Reads;
 
+   procedure Empty_In_A_Task is
+      --  The decider runs the estimators in a task with the default stack, so
+      --  an empty view of a VGA frame must be made there.
+      protected Result is
+         procedure Set (Made : Boolean);
+         function Get return Boolean;
+      private
+         Value : Boolean := False;
+      end Result;
+
+      protected body Result is
+         procedure Set (Made : Boolean) is
+         begin
+            Value := Made;
+         end Set;
+
+         function Get return Boolean is (Value);
+      end Result;
+   begin
+      declare
+         task Maker;
+
+         task body Maker is
+            V : constant View := Empty (640, 480);
+         begin
+            Result.Set (Width (V) = 640 and then Height (V) = 480);
+         exception
+            when others =>
+               Result.Set (False);
+         end Maker;
+      begin
+         null;   --  the block waits for Maker to finish
+      end;
+      Check (Result.Get, "an empty VGA view could not be made in a task with the default stack");
+   end Empty_In_A_Task;
+
    procedure Register is
    begin
       Driver.Tests.Register ("pixels.still", "still pixels are called changed more often than Z promises",
@@ -152,6 +188,7 @@ package body Driver.Pixels.Tests is
                              Noiseless_Renders'Access);
       Driver.Tests.Register ("pixels.bulk", "the whole-view means or variances differ from the per-pixel ones",
                              Bulk_Reads'Access);
+      Driver.Tests.Register ("pixels.task", "an empty VGA view overflows a task's default stack", Empty_In_A_Task'Access);
    end Register;
 
 end Driver.Pixels.Tests;

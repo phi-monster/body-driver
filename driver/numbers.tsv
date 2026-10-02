@@ -682,7 +682,7 @@ driver-robot-channels.adb	Half : constant Real := 0.5;	0.5	math	the median of th
 driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	the first round takes every change for motion: noise zero
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, 0.0);	0.0	math	a reading that repeats exactly at every rest beat has no jitter: any change of it is motion
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. 2 * K)) / Sqrt (2.0));	2.0	math	a change is the difference of two readings
-driver-robot-channels.adb	Moved : Real_Array (1 .. 2 * Rest);	2	structure	the changes and their negations
+driver-robot-channels.adb	Moved : Real_Access := new Real_Array (1 .. 2 * Rest);	2	structure	the changes and their negations
 driver-robot-channels.adb	Phi : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
 driver-robot-channels.adb	Phi : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
 driver-robot-channels.adb	S.Targets.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
@@ -693,7 +693,8 @@ driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (
 driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	2	statistics	a spread takes two samples
 driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	8.0	math	the median absolute deviation's asymptotic efficiency at the Gaussian is 8 c^2 phi (c)^2
 driver-robot-channels.adb	return Significant_Change (M, G, Ask, 1.0);	1.0	math	a target against one reading carries that reading's noise once
-driver-robot-channels.adb	return Watched < D'Length and then Significant_Change (M, G, D, Sqrt (2.0));	2.0	math	a change is the difference of two readings
+driver-robot-channels.adb	return Watched < Rest'Length and then Significant_Change (M, G, Rest, Sqrt (2.0));	2.0	math	a change is the difference of two readings
+driver-robot-channels.ads	with Pre => D'First = 1 and then D'Length = Group_Size (M, G);	1	structure	one value per channel, the channels counted from one
 driver-robot-flow.adb	(Driver.Uncertain.Vector_Gate (2), Final,	2	structure	a displacement has two components
 driver-robot-flow.adb	(Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;	2.0	math	the smaller eigenvalue of a symmetric 2 x 2 matrix, (trace - sqrt (trace^2 - 4 det)) / 2
 driver-robot-flow.adb	(Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;	4.0	math	the smaller eigenvalue of a symmetric 2 x 2 matrix, (trace - sqrt (trace^2 - 4 det)) / 2
@@ -829,8 +830,8 @@ driver-robot-kinematics-fit.adb	A : constant Vec3 := (if abs W (1) <= abs W (2) 
 driver-robot-kinematics-fit.adb	A := A - Ln (2.0) / 2.0;	2.0	numerics	half an octave each way when a single ratio brackets the focal length; the bracketing widens it as needed
 driver-robot-kinematics-fit.adb	A := A - Ln (2.0) / 2.0;	2.0	numerics	half an octave each way when a single ratio brackets the focal length; the bracketing widens it as needed
 driver-robot-kinematics-fit.adb	A, B : Positive := 1;	1	structure	indexes start at one
+driver-robot-kinematics-fit.adb	All_R : Real_Access := new Real_Array (1 .. 2 * N);	2	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
 driver-robot-kinematics-fit.adb	All_R : Real_Access := new Real_Array (1 .. 2 * S);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-fit.adb	All_R : Real_Array (1 .. 2 * N);	2	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
 driver-robot-kinematics-fit.adb	Anchor : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	Anchor : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	B := B + Ln (2.0) / 2.0;	2.0	numerics	half an octave each way when a single ratio brackets the focal length; the bracketing widens it as needed
@@ -920,7 +921,7 @@ driver-robot-kinematics-fit.adb	Pn : Real_Matrix (1 .. 3, 1 .. 4);	4	structure	t
 driver-robot-kinematics-fit.adb	Q : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5);	0.5	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	R (2 * K - 1) := U - Sg.U;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	R (2 * K) := V - Sg.V;	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-fit.adb	R0, Rn : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	R0 : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	R1 (8 + K) := -Un * Xh (K);	8	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
 driver-robot-kinematics-fit.adb	R1, R2 : Real_Vector (1 .. 12) := [others => 0.0];	12	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
 driver-robot-kinematics-fit.adb	R2 (4 + K) := Xh (K);	4	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
@@ -940,7 +941,7 @@ driver-robot-kinematics-fit.adb	Residual (Xv, Index (J), R (R'First + 2 * J - 2)
 driver-robot-kinematics-fit.adb	Residual (Xv, Index (J), R (R'First + 2 * J - 2), R (R'First + 2 * J - 1));	2	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
 driver-robot-kinematics-fit.adb	Residual (Xv, Index (J), R (R'First + 2 * J - 2), R (R'First + 2 * J - 1));	2	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
 driver-robot-kinematics-fit.adb	Rho : Real_Array (1 .. N) := [others => 1.0];	1.0	structure	distances before they are measured
-driver-robot-kinematics-fit.adb	Rn := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	Rn : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	S : constant Real := 1.0 / Sqrt (abs Determinant (K_Inv * Mm)) ** (1.0 / 3.0);	1.0	math	the cube root of a determinant: a matrix's scale
@@ -976,7 +977,7 @@ driver-robot-kinematics-fit.adb	Vectors : Real_Matrix (1 .. 12, 1 .. 12);	12	str
 driver-robot-kinematics-fit.adb	Vectors : Real_Matrix (1 .. 12, 1 .. 12);	12	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
 driver-robot-kinematics-fit.adb	Vx := 1.0;	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	Vy := 1.0;	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
-driver-robot-kinematics-fit.adb	Weight : constant Real_Array (1 .. N) := [others => 1.0];	1.0	structure	every point weighs alike in the linear solution
+driver-robot-kinematics-fit.adb	Weight : Real_Access := new Real_Array'(1 .. N => 1.0);	1.0	structure	every point weighs alike in the linear solution
 driver-robot-kinematics-fit.adb	Wt (I) := (if Ga (I) ** 2 + Gb (I) ** 2 > 0.0 then 1.0 / (Ga (I) ** 2 + Gb (I) ** 2) else 0.0);	1.0	math	the algebraic residual normalized
 driver-robot-kinematics-fit.adb	X (1 .. 3) := [0.0, 0.0, 0.0];	3	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
 driver-robot-kinematics-fit.adb	X (3 * (J - 1) + 3) := Arctan (Base (Base'First + J - 1).P * E2, Base (Base'First + J - 1).P * E1);	3	structure	the positions of the parameters in the vector
@@ -1134,7 +1135,7 @@ driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Coun
 driver-robot-regression.adb	Alpha : Real := 1.0;	1.0	math	the whole step to the restricted least-squares solution, cut back where a coefficient would turn negative
 driver-robot-regression.adb	Eigensystem ((S + Transpose (S)) / 2.0, Values, Vectors);	2.0	numerics	symmetrizing removes round-off asymmetry before the eigendecomposition
 driver-robot-regression.adb	Scale (J) := (if D > 0.0 then Sqrt (D) else 1.0);	1.0	math	a zero diagonal entry belongs to a zero row and column, which scaling leaves as it is
-driver-robot-regression.adb	W : Real_Array (1 .. N) := [others => 1.0];	1.0	math	the iteration starts from ordinary least squares, every weight one
+driver-robot-regression.adb	W : Real_Access := new Real_Array'(1 .. X'Length (1) => 1.0);	1.0	math	the iteration starts from ordinary least squares, every weight one
 driver-robot-regression.adb	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean is	1	structure	a count that is no best of many is one test
 driver-robot-regression.adb	return (if R = 0.0 then 1.0 else 0.0);	1.0	math	with a zero scale only exact fits keep their weight
 driver-robot-regression.adb	return (if U <= Huber_K then 1.0 else Huber_K / U);	1.0	math	Huber's weight is one inside the cutoff

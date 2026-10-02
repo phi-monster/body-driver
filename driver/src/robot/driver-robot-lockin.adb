@@ -11,9 +11,21 @@ with Driver.Stats;
 
 package body Driver.Robot.Lockin is
 
-   --  Samples too large for a stack live on the heap.
+   --  Everything sized by beats, cells or pixels lives on the heap: the
+   --  estimates also run in the decider's task, whose stack is small.
    type Real_Access is access Real_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
+   type Natural_Array is array (Positive range <>) of Natural;
+   type Natural_Access is access Natural_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Natural_Array, Natural_Access);
+   type Matrix_Access is access Driver.Numerics.Arrays.Real_Matrix;
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.Numerics.Arrays.Real_Matrix, Matrix_Access);
+   type Flags is array (Positive range <>) of Boolean;
+   type Flags_Access is access Flags;
+   procedure Free is new Ada.Unchecked_Deallocation (Flags, Flags_Access);
+   type Flag_Grid is array (Positive range <>, Driver.Observations.Group_Id range <>) of Boolean;
+   type Flag_Grid_Access is access Flag_Grid;
+   procedure Free is new Ada.Unchecked_Deallocation (Flag_Grid, Flag_Grid_Access);
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
@@ -29,7 +41,7 @@ package body Driver.Robot.Lockin is
    type Column_Array is array (Positive range <>) of Column;
 
    function Median_Shift (S : Eye_Stream; Kept, Column, Count : Positive) return Real is
-      Values : Real_Array (1 .. Count);
+      Values : Real_Access := new Real_Array (1 .. Count);
       K      : Natural := 0;
    begin
       for Cell in 0 .. Natural (S.Shifts.Length) / Kept - 1 loop
@@ -38,7 +50,9 @@ package body Driver.Robot.Lockin is
             Values (K) := S.Shifts (Cell * Kept + Column - 1);
          end if;
       end loop;
-      return Driver.Stats.Median (Values);
+      return Result : constant Real := Driver.Stats.Median (Values.all) do
+         Free (Values);
+      end return;
    end Median_Shift;
 
    procedure Measure (M : in out Model) is
@@ -112,7 +126,7 @@ package body Driver.Robot.Lockin is
             --  A regression needs more observations than coefficients.
             if Rows > All_Columns + 1 then
                declare
-                  Beat_Of : array (1 .. Rows) of Natural;
+                  Beat_Of : Natural_Access := new Natural_Array (1 .. Rows);
                   Cols    : Column_Array (1 .. All_Columns);
                   Kept    : Natural := 0;
                begin
@@ -153,17 +167,18 @@ package body Driver.Robot.Lockin is
                   end loop;
                   if Kept > 0 then
                      declare
-                        X : Real_Matrix (1 .. Rows, 1 .. Kept + 1);
-                        Responding : array (1 .. N, M.Groups.First_Index .. M.Groups.Last_Index) of Boolean :=
-                          [others => [others => False]];
-                        Textured : array (1 .. N) of Boolean := [others => False];
+                        X : Matrix_Access := new Real_Matrix (1 .. Rows, 1 .. Kept + 1);
+                        Responding : Flag_Grid_Access :=
+                          new Flag_Grid'[1 .. N => [M.Groups.First_Index .. M.Groups.Last_Index => False]];
+                        Textured : Flags_Access := new Flags'[1 .. N => False];
                         --  One cell: its displacements regressed on the pushes, over
                         --  the beats where the cell resolved one, and for every
                         --  group whether its block responds.
                         procedure Fit_Resolved (Cell : Positive; Here : Positive) is
-                           Xc     : Real_Matrix (1 .. Here, 1 .. Kept + 1);
-                           U, V   : Real_Array (1 .. Here);
-                           Floors : Real_Array (1 .. Here);
+                           Xc     : Matrix_Access := new Real_Matrix (1 .. Here, 1 .. Kept + 1);
+                           U      : Real_Access := new Real_Array (1 .. Here);
+                           V      : Real_Access := new Real_Array (1 .. Here);
+                           Floors : Real_Access := new Real_Array (1 .. Here);
                            K      : Natural := 0;
                         begin
                            for R in 1 .. Rows loop
@@ -179,9 +194,9 @@ package body Driver.Robot.Lockin is
                               end if;
                            end loop;
                            declare
-                              Floor : constant Real := Driver.Stats.Median (Floors);
-                              Fu    : constant Regression.Fit := Regression.Solve (Xc, U, Floor);
-                              Fv    : constant Regression.Fit := Regression.Solve (Xc, V, Floor);
+                              Floor : constant Real := Driver.Stats.Median (Floors.all);
+                              Fu    : constant Regression.Fit := Regression.Solve (Xc.all, U.all, Floor);
+                              Fv    : constant Regression.Fit := Regression.Solve (Xc.all, V.all, Floor);
                            begin
                               S.Noise.Append (Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0));
                               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -240,10 +255,14 @@ package body Driver.Robot.Lockin is
                                  end loop;
                               end;
                            end;
+                           Free (Xc);
+                           Free (U);
+                           Free (V);
+                           Free (Floors);
                         end Fit_Resolved;
 
                         procedure Fit_Cell (Cell : Positive) is
-                           Cond : Real_Array (1 .. Rows);
+                           Cond : Real_Access := new Real_Array (1 .. Rows);
                            Here : Natural := 0;
                         begin
                            for R in 1 .. Rows loop
@@ -255,7 +274,8 @@ package body Driver.Robot.Lockin is
                            --  A cell can show a displacement when it has texture in two
                            --  directions, and it is tested when it resolved more
                            --  displacements than the fit has coefficients.
-                           Textured (Cell) := Driver.Stats.Median (Cond) > 0.0 and then Here > Kept + 1;
+                           Textured (Cell) := Driver.Stats.Median (Cond.all) > 0.0 and then Here > Kept + 1;
+                           Free (Cond);
                            if not Textured (Cell) then
                               S.Noise.Append (Real'Last);
                               S.Gains.Append (0.0, Ada.Containers.Count_Type (Kept));
@@ -328,8 +348,12 @@ package body Driver.Robot.Lockin is
                               end;
                            end loop;
                         end;
+                        Free (X);
+                        Free (Responding);
+                        Free (Textured);
                      end;
                   end if;
+                  Free (Beat_Of);
                end;
             end if;
          end;
@@ -417,20 +441,14 @@ package body Driver.Robot.Lockin is
             S.Rest_Counts_Known := Rest > 1;
             if S.Rest_Counts_Known then
                declare
-                  Counts : Real_Array (1 .. Rest);
-                  K      : Natural := 0;
                   Count, Tested : Natural;
                begin
+                  S.Rest_Count_Max := 0;
                   for B in 1 .. M.Beats - 1 loop
                      if At_Rest (B) then
-                        K := K + 1;
                         Count_Moved (S, B, Count, Tested);
-                        Counts (K) := Real (Count);
+                        S.Rest_Count_Max := Natural'Max (S.Rest_Count_Max, Count);
                      end if;
-                  end loop;
-                  S.Rest_Count_Max := 0;
-                  for C of Counts loop
-                     S.Rest_Count_Max := Natural'Max (S.Rest_Count_Max, Natural (C));
                   end loop;
                   S.Rest_Count_Beats := Rest;
                end;
@@ -503,7 +521,7 @@ package body Driver.Robot.Lockin is
          return Real'Last;
       end if;
       declare
-         Values : Real_Array (1 .. Count);
+         Values : Real_Access := new Real_Array (1 .. Count);
          K      : Natural := 0;
       begin
          for X of S.Noise loop
@@ -512,7 +530,9 @@ package body Driver.Robot.Lockin is
                Values (K) := X;
             end if;
          end loop;
-         return Driver.Stats.Median (Values);
+         return Result : constant Real := Driver.Stats.Median (Values.all) do
+            Free (Values);
+         end return;
       end;
    end Cell_Noise;
 
