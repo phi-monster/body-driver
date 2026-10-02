@@ -1,3 +1,4 @@
+with Ada.Strings.Unbounded;
 with Driver.Base64;
 with Driver.Bytes;
 with Driver.Json;
@@ -114,6 +115,18 @@ package body Driver.Instrument.Tests is
       Check (not Ok, "runs past the image were accepted");
    end Segment_Replies;
 
+   procedure Large_Reply is
+      --  Clearing a reply's answers must not build a frame-sized temporary:
+      --  a request about tens of thousands of points overflowed the stack.
+      type Answers_Access is access Answer_Array;
+      Answers : constant Answers_Access := new Answer_Array (1 .. 1_000_000);
+      Ok      : Boolean;
+      Why     : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      Read_Match ((Ok => False, others => <>), False, Answers.all, Ok, Why);
+      Check (not Ok, "a failed reply was read as an answer");
+   end Large_Reply;
+
    procedure Register is
    begin
       Driver.Tests.Register ("instrument.base64", "base64 differs from RFC 4648", Base64_Vectors'Access);
@@ -121,6 +134,7 @@ package body Driver.Instrument.Tests is
       Driver.Tests.Register ("instrument.request", "a match request does not say what was meant", Request_Text'Access);
       Driver.Tests.Register ("instrument.match", "a match reply that does not fit is used", Match_Replies'Access);
       Driver.Tests.Register ("instrument.segment", "a segment reply that does not fit is used", Segment_Replies'Access);
+      Driver.Tests.Register ("instrument.large_reply", "reading many answers overflows the stack", Large_Reply'Access);
    end Register;
 
 end Driver.Instrument.Tests;
