@@ -36,9 +36,10 @@
 --  CLOSER group) seen through a known similarity and offset, and scores them;
 --  a correct scorer reports the scale it was given and no error.
 --
---  score --project RECORDING TRUTH BEAT EYE prints, for every link the truth
---  puts inside that eye's image at that beat, its pixel: drawn on the frame
---  (driver/tools/frame), it checks the truth's camera model against the images.
+--  score --project RECORDING TRUTH BEAT EYE prints, for every link and every
+--  object the truth puts inside that eye's image at that beat, its pixel:
+--  drawn on the frame (driver/tools/frame), it checks the truth's camera
+--  model against the images.
 
 with Ada.Command_Line;
 with Ada.Containers.Indefinite_Holders;
@@ -93,6 +94,7 @@ procedure Score is
    type Truth_Line is record
       Links   : Pose_Maps.Map;    --  link name -> world pose, metres
       Cameras : Pose_Maps.Map;    --  camera name -> optical frame
+      Objects : Pose_Maps.Map;    --  object instance -> root pose
       State   : Value_Maps.Map;   --  state key -> the observation's own values
    end record;
 
@@ -170,11 +172,18 @@ procedure Score is
             declare
                L       : Truth_Line;
                Links   : constant Node := Lookup (Doc, Root (Doc), "links");
+               Objects : constant Node := Lookup (Doc, Root (Doc), "objects");
                Cameras : constant Node := Lookup (Doc, Root (Doc), "cameras");
                State   : constant Node := Lookup (Doc, Root (Doc), "state");
             begin
                for I in 1 .. Count (Doc, Links) loop
                   L.Links.Include (Member_Name (Doc, Links, I), Quaternion_Pose (Numbers_Of (Doc, Member_Value (Doc, Links, I))));
+               end loop;
+               for I in 1 .. Count (Doc, Objects) loop
+                  if Lookup (Doc, Member_Value (Doc, Objects, I), "pose") /= No_Node then
+                     L.Objects.Include (Member_Name (Doc, Objects, I),
+                                        Quaternion_Pose (Numbers_Of (Doc, Lookup (Doc, Member_Value (Doc, Objects, I), "pose"))));
+                  end if;
                end loop;
                for I in 1 .. Count (Doc, State) loop
                   L.State.Include (Member_Name (Doc, State, I), Numbers_Of (Doc, Member_Value (Doc, State, I)));
@@ -1374,6 +1383,19 @@ procedure Score is
                if Visible and then U in 0.0 .. Real (Lenses (Name).Width) and then V in 0.0 .. Real (Lenses (Name).Height)
                then
                   Ada.Text_IO.Put_Line (Pose_Maps.Key (C) & " " & Image (U, 1) & " " & Image (V, 1));
+               end if;
+            end;
+         end loop;
+         for C in L.Objects.Iterate loop
+            declare
+               P : constant Vec3 := Inverse (Cam) * Pose_Maps.Element (C).Translation;
+               U, V : Real;
+               Visible : Boolean;
+            begin
+               True_Pixel (Lenses (Name), P, U, V, Visible);
+               if Visible and then U in 0.0 .. Real (Lenses (Name).Width) and then V in 0.0 .. Real (Lenses (Name).Height)
+               then
+                  Ada.Text_IO.Put_Line ("object:" & Pose_Maps.Key (C) & " " & Image (U, 1) & " " & Image (V, 1));
                end if;
             end;
          end loop;
