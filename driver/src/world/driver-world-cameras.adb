@@ -33,4 +33,7 @@ package body Driver.World.Cameras is
 
    function Pose (C : Of_Body) return Pose_Estimate is (Driver.Robot.Eye_Pose (C.Robot.all, C.Eye, C.Seen.all));
 
+   function Self_Mask (C : Of_Body) return Driver.Images.Mask is
+     (Driver.Robot.Self_Mask (C.Robot.all, C.Eye, C.Seen.all));
+
 end Driver.World.Cameras;

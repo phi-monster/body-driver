@@ -9,6 +9,20 @@
 --  (Driver.World.Pairs) as the thing's samples and starting a track in an
 --  eye that had none, segmented around where its pixels went; and reads
 --  every reply on a later beat.
+--
+--  The scene itself is measured at a still beat when nothing is being
+--  looked for again: at the start of an episode, and again whenever a
+--  thing's region changed, since what moved may have carried a surface with
+--  it (the surfaces mostly of that thing's own points are dropped at once).
+--  A grid of each eye's image, less the pixels showing the robot, is
+--  matched into every other eye, and the supports are found among all the
+--  points that gives (Driver.World.Supports), each pair's grid kept apart
+--  from the others'. The grid is as many pixels apart as the square root of
+--  the image's shorter side, so it has as many rows as each row has pixels
+--  between points. A scene point seen on a thing's region in its eye
+--  belongs to that thing, so a thing never rests on its own top face; a
+--  thing's support is worked out again only when its points or the
+--  surfaces change.
 
 with Ada.Containers.Indefinite_Holders;
 with Ada.Containers.Vectors;
@@ -18,6 +32,7 @@ with Driver.Instrument;
 with Driver.Services;
 with Driver.World.Cameras;
 with Driver.World.Pairs;
+with Driver.World.Supports;
 with Driver.World.Tracking;
 
 private package Driver.World.Estimates is
@@ -29,10 +44,15 @@ private package Driver.World.Estimates is
       Eyes      : Natural;
       Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
                                              return Driver.World.Cameras.Camera'Class;
+      Up        : Direction_Estimate;
       Still     : Boolean;
       O         : Observation);
    --  One beat. Camera_Of gives an eye's camera at the beat of an
-   --  observation: this one, or the one a reply arriving now was asked at.
+   --  observation: this one, or the one a reply arriving now was asked at;
+   --  Up is the body's measured up.
+
+   function Support_Of (S : State; T : Thing_Id) return Driver.World.Supports.Support;
+   --  The support under the thing's points, and its height above it.
 
    procedure Adopt (S : in out State; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id);
    procedure New_Episode (S : in out State);
@@ -122,22 +142,52 @@ private
       Has_Points : Boolean := False;
       Friction  : Friction_Bounds;
       Touches   : Point_Vectors.Vector;
+      Under     : Driver.World.Supports.Support;   --  its support, worked out again when its
+      Under_Due : Boolean := True;                 --  points or the surfaces change
    end record;
 
    package Thing_Vectors is new Ada.Containers.Vectors (Thing_Id, Thing_Record);
 
-   type Surface_Record is record
-      Plane   : Driver.Geometry.Plane_Estimate;
-      Earlier : Boolean := False;
-   end record;
-
-   package Surface_Vectors is new Ada.Containers.Vectors (Surface_Id, Surface_Record);
    package Place_Vectors is new Ada.Containers.Vectors (Place_Id, Point_Estimate);
 
+   --  A grid of one eye's image matched into another's at one still instant.
+   type Background is record
+      From, Into : Eye_Id;
+      Ticket     : Driver.Services.Ticket;
+      Points     : Point_Holders.Holder;
+      Stride     : Positive := 1;
+      Round      : Natural := 0;
+   end record;
+
+   package Background_Vectors is new Ada.Containers.Vectors (Positive, Background);
+
+   --  A point of the scene: where both eyes saw it, its place in the grid
+   --  of the eye it was asked from and its pixel there, and the thing whose
+   --  region held that pixel (0: none), so a thing's own faces are known.
+   type Scene_Point is record
+      Point : Point_Estimate;
+      Grid  : Driver.World.Supports.Grid_Point;
+      Eye   : Eye_Id;
+      Pixel : Driver.Images.Pixel;
+      Owner : Thing_Id'Base := 0;
+   end record;
+
+   package Scene_Point_Vectors is new Ada.Containers.Vectors (Positive, Scene_Point);
+
    type State is limited record
-      Things   : Thing_Vectors.Vector;
-      Surfaces : Surface_Vectors.Vector;
-      Places   : Place_Vectors.Vector;
+      Things      : Thing_Vectors.Vector;
+      Surfaces    : Driver.World.Supports.Surface_Vectors.Vector;
+      Scene       : Scene_Point_Vectors.Vector;   --  the points the surfaces were found among
+      Earlier     : Boolean := False;             --  the surfaces are an earlier episode's
+      Due         : Boolean := True;              --  the scene is to be measured at the next still beat
+      Round       : Natural := 0;                 --  the latest measurement of the scene asked
+      Asking      : Background_Vectors.Vector;    --  its matches out now
+      Incoming    : Scene_Point_Vectors.Vector;   --  and the points they gave so far
+      Next_Column : Natural := 0;                 --  where the next pair's grid starts among them
+      Seen_From   : Vec3 := Zero3;                --  where an eye that saw them stands
+      Round_Seen  : Observation_Holders.Holder;   --  the observation they were asked at
+      Up          : Direction_Estimate;
+      Places      : Place_Vectors.Vector;
    end record;
 
 end Driver.World.Estimates;

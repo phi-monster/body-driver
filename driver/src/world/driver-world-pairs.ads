@@ -34,8 +34,11 @@ package Driver.World.Pairs is
      with Pre => Answers'Length = Points'Length and then Own <= Points'Length;
    --  Points are pixels of First, the region's Own first, the pixels around
    --  it after; Answers are the matcher's, into Second's image of the same
-   --  instant. Apart counts the matches that came back but whose lines of
-   --  sight do not meet. Nothing is kept when nothing around the region came
-   --  back to tell the matcher's error by.
+   --  instant. The round trips of the pixels around measure the matcher's
+   --  error; when none were asked (Own is every point: the background, say,
+   --  which is itself what is asked about), those of all the points do.
+   --  Apart counts the matches that came back but whose lines of sight do
+   --  not meet. Nothing is kept when none of that sample came back to tell
+   --  the matcher's error by.
 
 end Driver.World.Pairs;

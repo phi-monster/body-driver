@@ -59,11 +59,14 @@ package body Driver.World.Pairs is
       Kept          : out Match_Vectors.Vector;
       Apart         : out Natural)
    is
+      --  The points whose round trips measure the matcher's error: those
+      --  around the region, or all of them when nothing around was asked.
+      First_Sample : constant Positive := (if Own < Points'Length then Own + 1 else 1);
       Around : Natural := 0;
    begin
       Kept.Clear;
       Apart := 0;
-      for I in Own + 1 .. Points'Length loop
+      for I in First_Sample .. Points'Length loop
          Around := Around + Boolean'Pos (Answers (Answers'First + I - 1).Found);
       end loop;
       if Around = 0 then
@@ -73,7 +76,7 @@ package body Driver.World.Pairs is
          Trips : Real_Array (1 .. 2 * Around);
          K     : Natural := 0;
       begin
-         for I in Own + 1 .. Points'Length loop
+         for I in First_Sample .. Points'Length loop
             declare
                A : Driver.Instrument.Answer renames Answers (Answers'First + I - 1);
                P : constant Driver.Images.Pixel := Points (Points'First + I - 1);

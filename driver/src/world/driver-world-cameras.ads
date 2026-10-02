@@ -28,6 +28,9 @@ package Driver.World.Cameras is
    function Pose (C : Camera) return Pose_Estimate is abstract;
    --  The eye's frame in the world.
 
+   function Self_Mask (C : Camera) return Driver.Images.Mask is abstract;
+   --  The pixels of the eye that show the robot itself.
+
    function Radians_Per_Pixel (C : Camera'Class; Px : Pixel) return Real;
    --  How far the line of sight turns from one pixel to the next there,
    --  measured on the camera itself: what an image position's uncertainty in
@@ -45,5 +48,6 @@ package Driver.World.Cameras is
    overriding function Ray (C : Of_Body; Px : Pixel) return Ray_Estimate;
    overriding procedure Project (C : Of_Body; Point : Vec3; Px : out Pixel; Visible : out Boolean);
    overriding function Pose (C : Of_Body) return Pose_Estimate;
+   overriding function Self_Mask (C : Of_Body) return Driver.Images.Mask;
 
 end Driver.World.Cameras;

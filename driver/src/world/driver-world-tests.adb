@@ -1,11 +1,11 @@
 with Driver.Bytes;
 with Driver.Commands;
-with Driver.Images;
 with Driver.Robot;
 with Driver.Robot.Hand;
 with Driver.Tests;
 with Driver.World.Pairs.Tests;
 with Driver.World.Regions.Tests;
+with Driver.World.Supports.Tests;
 with Driver.World.Tracking.Tests;
 
 package body Driver.World.Tests is
@@ -93,6 +93,7 @@ package body Driver.World.Tests is
                              Adopted_And_Remembered'Access);
       Driver.World.Regions.Tests.Register;
       Driver.World.Pairs.Tests.Register;
+      Driver.World.Supports.Tests.Register;
       Driver.World.Tracking.Tests.Register;
    end Register;
 

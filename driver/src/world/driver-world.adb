@@ -4,6 +4,7 @@ with Ada.Unchecked_Deallocation;
 with Driver.World.Cameras;
 with Driver.World.Estimates;
 with Driver.World.Pairs;
+with Driver.World.Supports;
 
 package body Driver.World is
 
@@ -45,7 +46,7 @@ package body Driver.World is
    begin
       Ensure (S);
       Driver.World.Estimates.Observe
-        (S.Data.State, Driver.Robot.Eye_Count (M), Camera_Of'Access, Driver.Robot.Still (M), O);
+        (S.Data.State, Driver.Robot.Eye_Count (M), Camera_Of'Access, Driver.Robot.Up (M), Driver.Robot.Still (M), O);
    end Observe;
 
    procedure New_Episode (S : in out Scene) is
@@ -83,11 +84,22 @@ package body Driver.World is
       return (if Known_Thing (S, T) then Driver.World.Estimates.Centre (S.Data.State, T) else Unmeasured);
    end Centre;
 
-   --  Not measured yet: the surfaces things rest on, their holding and motion.
+   function Resting_On (S : Scene; T : Thing_Id) return Surface_Id'Base is
+     (if Known_Thing (S, T) then Surface_Id'Base (Driver.World.Estimates.Support_Of (S.Data.State, T).Index) else 0);
 
-   function Resting_On (S : Scene; T : Thing_Id) return Surface_Id'Base is (0);
+   function Height_Above_Support (S : Scene; T : Thing_Id) return Estimate is
+   begin
+      if not Known_Thing (S, T) then
+         return Unknown;
+      end if;
+      declare
+         Under : constant Driver.World.Supports.Support := Driver.World.Estimates.Support_Of (S.Data.State, T);
+      begin
+         return (if Under.Index = 0 then Unknown else Under.Height);
+      end;
+   end Height_Above_Support;
 
-   function Height_Above_Support (S : Scene; T : Thing_Id) return Estimate is (Unknown);
+   --  Not measured yet: what holds a thing, and its motion.
 
    function Held_By (S : Scene; T : Thing_Id) return Driver.Robot.Hand.Hand_Id'Base is (0);
 
