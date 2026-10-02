@@ -180,10 +180,15 @@ package body Driver.World.Pairs.Tests is
              & " right ones, not 0.5 px from 1000");
    end Mixed_Round_Trips;
 
+   Back_Near : Boolean := False;
+   --  Whether the wrong matches come back near where they set out, as a
+   --  matcher can when it is consistently wrong.
+
    procedure Mostly_Unseen is
       --  Two eyes over the box top, the second seeing only three in ten of
       --  the pixels asked about: the others' matches land anywhere in its
-      --  image and come back anywhere in the first.
+      --  image and come back anywhere in the first, or, when Back_Near is
+      --  set, within some six pixels of where they set out.
       A : constant Driver.World.Tests.Pinhole :=
         Driver.World.Tests.Looking_At ([0.2, -0.3, 0.4], [0.5, 0.0, 0.0], 200.0, 160, 120, 0.1);
       B : constant Driver.World.Tests.Pinhole :=
@@ -239,7 +244,10 @@ package body Driver.World.Pairs.Tests is
                else
                   Answers (I) := (Found     => True,
                                   To        => (U => 160.0 * Uniform, V => 120.0 * Uniform),
-                                  Back      => (U => 160.0 * Uniform, V => 120.0 * Uniform),
+                                  Back      =>
+                                    (if Back_Near
+                                     then (U => Points (I).U + 6.0 * Gaussian, V => Points (I).V + 6.0 * Gaussian)
+                                     else (U => 160.0 * Uniform, V => 120.0 * Uniform)),
                                   Certainty => 1.0);
                end if;
             end;
@@ -259,11 +267,24 @@ package body Driver.World.Pairs.Tests is
          end loop;
          Check (Right_Asked > 100 and then Right_Kept >= Right_Asked - Right_Asked / 20,
                 "of" & Right_Asked'Image & " pixels the second eye sees only" & Right_Kept'Image & " were kept");
-         Check (Wrong_Kept <= Right_Asked / 50,
+         --  A wrong match landing on the line its first sight draws in the second
+         --  eye meets it whatever it shows: about one in forty here, by chance.
+         --  No two eyes can tell those; any more than one in twenty, they could.
+         Check (Wrong_Kept <= (Count - Right_Asked) / 20,
                 Wrong_Kept'Image & " pixels the second eye does not see were kept, the matcher erring by"
                 & Error'Image & " px");
       end;
    end Mostly_Unseen;
+
+   procedure Consistently_Wrong is
+      --  The same, the wrong matches coming back within some six pixels of
+      --  where they set out: their round trips cannot tell them apart, their
+      --  lines of sight can.
+   begin
+      Back_Near := True;
+      Mostly_Unseen;
+      Back_Near := False;
+   end Consistently_Wrong;
 
    procedure Register is
    begin
@@ -275,6 +296,9 @@ package body Driver.World.Pairs.Tests is
       Driver.Tests.Register ("world.pairs.unseen",
                              "matches into an eye that does not see most of what is asked are kept",
                              Mostly_Unseen'Access);
+      Driver.Tests.Register ("world.pairs.consistent",
+                             "wrong matches that come back near where they set out are kept",
+                             Consistently_Wrong'Access);
    end Register;
 
 end Driver.World.Pairs.Tests;

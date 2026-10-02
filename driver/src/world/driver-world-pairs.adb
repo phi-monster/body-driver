@@ -12,15 +12,28 @@ package body Driver.World.Pairs is
    function Round_Trip (A : Driver.Instrument.Answer; From : Driver.Images.Pixel) return Real is
      (Sqrt ((A.Back.U - From.U) ** 2 + (A.Back.V - From.V) ** 2));
 
-   procedure Matcher_Error (Trips : Real_Array; Area : Real; Sigma : out Real; Right : out Real) is
-      N       : constant Natural := Trips'Length / 2;
-      Squared : Real_Array (1 .. N);   --  each round trip's squared length
-      Sorted  : Real_Array (1 .. N);
-      Best    : Real := Real'First;    --  the best likelihood found so far
-      Wrong   : constant Real := 1.0 / Area;   --  a wrong match's density
+   procedure Mixture
+     (Squared    : Real_Array;
+      Dimensions : Positive;
+      Measure    : Real;
+      Sigma      : out Real;
+      Right      : out Real)
+   is
+      --  Errors of right matches, a centred isotropic Gaussian in that many
+      --  dimensions, mixed with those of wrong ones, spread evenly over a
+      --  range of that Measure; each error given by its squared length. The
+      --  mixture's maximum likelihood (EM, started from every doubling rank of
+      --  the errors' lengths, each run until its likelihood stops growing):
+      --  Sigma of one coordinate of a right match's error, and how many of the
+      --  errors are of right ones.
+      N      : constant Natural := Squared'Length;
+      Sorted : Real_Array := Squared;
+      Best   : Real := Real'First;   --  the best likelihood found so far
+      Wrong  : constant Real := 1.0 / Measure;   --  a wrong match's density
+      K      : constant Real := Real (Dimensions);
 
       procedure Fit (Start : Real) is
-         --  EM from a right match's spread Start, half the trips taken right.
+         --  EM from a right match's spread Start, half the errors taken right.
          S2   : Real := Start * Start;   --  one coordinate's variance
          Pi   : Real := 0.5;              --  the share of right ones
          Last : Real := Real'First;
@@ -33,7 +46,7 @@ package body Driver.World.Pairs is
             begin
                for D of Squared loop
                   declare
-                     G : constant Real := Exp (-D / (2.0 * S2)) / (2.0 * Ada.Numerics.Pi * S2);
+                     G : constant Real := Exp (-D / (2.0 * S2)) / (2.0 * Ada.Numerics.Pi * S2) ** (K / 2.0);
                      P : constant Real := Pi * G + (1.0 - Pi) * Wrong;
                      W : constant Real := Pi * G / P;
                   begin
@@ -49,7 +62,7 @@ package body Driver.World.Pairs is
                   Sigma := Sqrt (S2);
                   Right := Pi * Real (N);
                end if;
-               S2 := Spread / (2.0 * Weight);
+               S2 := Spread / (K * Weight);
                Pi := Weight / Real (N);
             end;
          end loop;
@@ -63,24 +76,29 @@ package body Driver.World.Pairs is
       if N = 0 then
          return;
       end if;
-      for I in 1 .. N loop
-         Squared (I) := Trips (Trips'First + 2 * (I - 1)) ** 2 + Trips (Trips'First + 2 * I - 1) ** 2;
-      end loop;
       if (for all D of Squared => D = 0.0) then
-         --  Every pixel came back exactly: no error to see.
+         --  Every error is nought: no error to see.
          Sigma := 0.0;
          Right := Real (N);
          return;
       end if;
-      Sorted := Squared;
       Sort (Sorted);
       loop
-         if Sorted (Rank) > 0.0 then
-            Fit (Sqrt (Sorted (Rank) / 2.0));
+         if Sorted (Sorted'First + Rank - 1) > 0.0 then
+            Fit (Sqrt (Sorted (Sorted'First + Rank - 1) / K));
          end if;
          exit when Rank = N;
          Rank := Positive'Min (N, 2 * Rank);
       end loop;
+   end Mixture;
+
+   procedure Matcher_Error (Trips : Real_Array; Area : Real; Sigma : out Real; Right : out Real) is
+      Squared : Real_Array (1 .. Trips'Length / 2);   --  each round trip's squared length
+   begin
+      for I in Squared'Range loop
+         Squared (I) := Trips (Trips'First + 2 * (I - 1)) ** 2 + Trips (Trips'First + 2 * I - 1) ** 2;
+      end loop;
+      Mixture (Squared, 2, Area, Sigma, Right);
    end Matcher_Error;
 
    function Across_Basis (U : Vec3; Second : Boolean) return Vec3 is
@@ -167,13 +185,18 @@ package body Driver.World.Pairs is
          declare
             --  The right round trips' two coordinates each are the error's
             --  degrees of freedom.
-            Gate       : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural (Real'Floor (2.0 * Right)));
-            --  A round trip is two matchings; one of them errs by that over the square root of two.
-            Match_Sigma : constant Real := Trip_Sigma / Sqrt (2.0);
+            Gate      : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural (Real'Floor (2.0 * Right)));
             --  Two lines of sight meeting in a point leave one degree of freedom.
-            Freedom     : constant Positive := 1;
+            Freedom   : constant Positive := 1;
+            --  The matches that came back, and how far, in the second eye's
+            --  pixels, each one's two lines of sight pass each other.
+            Candidate : array (1 .. Own) of Natural := [others => 0];
+            Off       : Real_Array (1 .. Own);
+            Count     : Natural := 0;
+            Diagonal  : constant Real := Sqrt (Real (Second.Width) ** 2 + Real (Second.Height) ** 2);
+            Line_Sigma : Real;
+            Line_Right : Real;
          begin
-            Error := Match_Sigma;
             for I in 1 .. Own loop
                declare
                   A : Driver.Instrument.Answer renames Answers (Answers'First + I - 1);
@@ -181,28 +204,77 @@ package body Driver.World.Pairs is
                begin
                   if A.Found and then not Significant (Gate, Round_Trip (A, P), Trip_Sigma) then
                      declare
-                        From_First  : constant Ray_Estimate := First.Ray (P);
-                        From_Second : Ray_Estimate := Second.Ray (A.To);
-                        Turn        : constant Real := Driver.World.Cameras.Radians_Per_Pixel (Second, A.To);
-                        X           : Point_Estimate;
-                        Met         : Boolean;
+                        R1   : constant Ray_Estimate := First.Ray (P);
+                        R2   : constant Ray_Estimate := Second.Ray (A.To);
+                        Turn : constant Real := Driver.World.Cameras.Radians_Per_Pixel (Second, A.To);
+                        U1   : constant Vec3 := R1.Direction.Unit_Vector;
+                        U2   : constant Vec3 := R2.Direction.Unit_Vector;
+                        W0   : constant Vec3 := R1.Origin.Mean - R2.Origin.Mean;
+                        B    : constant Real := U1 * U2;
+                        Skew : constant Real := 1.0 - B * B;
                      begin
-                        if Turn < Real'Last and then From_Second.Direction.Sigma < Real'Last then
-                           From_Second.Direction.Sigma :=
-                             Sqrt (From_Second.Direction.Sigma ** 2 + (Match_Sigma * Turn) ** 2);
-                           Driver.Geometry.Meet ([From_First, From_Second], X, Met);
-                           if Met then
-                              if Significant
-                                (Driver.Distributions.Chi_Square_Deviate
-                                   (Misfit ([From_First, From_Second], X.Mean), Freedom), 1.0)
-                              then
-                                 Apart := Apart + 1;
-                              else
-                                 Kept.Append (Match'(In_First => P, In_Second => A.To, Point => X));
+                        if Turn < Real'Last and then R1.Direction.Sigma < Real'Last and then R2.Direction.Sigma < Real'Last
+                          and then Skew > 0.0
+                        then
+                           declare
+                              --  The closest points of the two lines.
+                              S  : constant Real := (B * (U2 * W0) - U1 * W0) / Skew;
+                              T  : constant Real := ((U2 * W0) - B * (U1 * W0)) / Skew;
+                              Q1 : constant Vec3 := R1.Origin.Mean + S * U1;
+                              Q2 : constant Vec3 := R2.Origin.Mean + T * U2;
+                           begin
+                              if S > 0.0 and then T > 0.0 then
+                                 Count := Count + 1;
+                                 Candidate (Count) := I;
+                                 Off (Count) := abs (Q1 - Q2) / (T * Turn);
                               end if;
-                           end if;
+                           end;
                         end if;
                      end;
+                  end if;
+               end;
+            end loop;
+            if Count = 0 then
+               return;
+            end if;
+            --  The matcher's error across the line the first sight draws in the
+            --  second eye, from the matches whose lines pass close, told from
+            --  the wrong ones, which pass anywhere within the image: a matcher
+            --  can be wrong yet come back, and only the geometry tells.
+            declare
+               Squared : Real_Array (1 .. Count);
+            begin
+               for C in Squared'Range loop
+                  Squared (C) := Off (C) ** 2;
+               end loop;
+               Mixture (Squared, 1, 2.0 * Diagonal, Line_Sigma, Line_Right);
+            end;
+            if not (Line_Sigma < Real'Last) or else Line_Right < 1.0 then
+               return;
+            end if;
+            Error := Line_Sigma;
+            for C in 1 .. Count loop
+               declare
+                  I           : constant Positive := Candidate (C);
+                  A           : Driver.Instrument.Answer renames Answers (Answers'First + I - 1);
+                  P           : constant Driver.Images.Pixel := Points (Points'First + I - 1);
+                  From_First  : constant Ray_Estimate := First.Ray (P);
+                  From_Second : Ray_Estimate := Second.Ray (A.To);
+                  Turn        : constant Real := Driver.World.Cameras.Radians_Per_Pixel (Second, A.To);
+                  X           : Point_Estimate;
+                  Met         : Boolean;
+               begin
+                  From_Second.Direction.Sigma := Sqrt (From_Second.Direction.Sigma ** 2 + (Line_Sigma * Turn) ** 2);
+                  Driver.Geometry.Meet ([From_First, From_Second], X, Met);
+                  if Met then
+                     if Significant
+                       (Driver.Distributions.Chi_Square_Deviate (Misfit ([From_First, From_Second], X.Mean), Freedom),
+                        1.0)
+                     then
+                        Apart := Apart + 1;
+                     else
+                        Kept.Append (Match'(In_First => P, In_Second => A.To, Point => X));
+                     end if;
                   end if;
                end;
             end loop;

@@ -916,27 +916,29 @@ driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed fr
 driver-world-estimates.adb	return (Mean => (1.0 / Real (R.Points.Length)) * Sum,	1.0	math	the centroid is the points' sum over their count
 driver-world-estimates.adb	return -1;	1	format	a beat before every beat: no measurement asked about yet
 driver-world-estimates.ads	Stride : Positive := 1;	1	structure	a grid at every pixel until it is set
-driver-world-pairs.adb	(Misfit ([From_First, From_Second], X.Mean), Freedom), 1.0)	1.0	statistics	the deviate is already in units of its sigma
+driver-world-pairs.adb	1.0)	1.0	statistics	the deviate is already in units of its sigma
 driver-world-pairs.adb	Chi := Chi + (C * P * P - 2.0 * B * P * Q + A * Q * Q) / Det;	2.0	math	the cross term of a two by two quadratic form
 driver-world-pairs.adb	First_Sample : constant Positive := (if Own < Points'Length then Own + 1 else 1);	1	structure	the points after the region's own, or all of them from the first
-driver-world-pairs.adb	Fit (Sqrt (Sorted (Rank) / 2.0));	2.0	math	a round trip's squared length is two coordinates' worth
 driver-world-pairs.adb	Freedom : constant Positive := 1;	1	statistics	two lines of sight give four image coordinates for a point's three: one degree of freedom
-driver-world-pairs.adb	G : constant Real := Exp (-D / (2.0 * S2)) / (2.0 * Ada.Numerics.Pi * S2);	2.0	math	the two-dimensional Gaussian density
-driver-world-pairs.adb	G : constant Real := Exp (-D / (2.0 * S2)) / (2.0 * Ada.Numerics.Pi * S2);	2.0	math	the two-dimensional Gaussian density
+driver-world-pairs.adb	G : constant Real := Exp (-D / (2.0 * S2)) / (2.0 * Ada.Numerics.Pi * S2) ** (K / 2.0);	2.0	math	the Gaussian density in k dimensions
+driver-world-pairs.adb	G : constant Real := Exp (-D / (2.0 * S2)) / (2.0 * Ada.Numerics.Pi * S2) ** (K / 2.0);	2.0	math	the Gaussian density in k dimensions
+driver-world-pairs.adb	G : constant Real := Exp (-D / (2.0 * S2)) / (2.0 * Ada.Numerics.Pi * S2) ** (K / 2.0);	2.0	math	the Gaussian density in k dimensions
 driver-world-pairs.adb	Gate : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural (Real'Floor (2.0 * Right)));	2	structure	a round trip has two coordinates
 driver-world-pairs.adb	Gate : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural (Real'Floor (2.0 * Right)));	2.0	statistics	each right round trip gives two degrees of freedom
 driver-world-pairs.adb	K := K + 2;	2	structure	two coordinates per round trip
-driver-world-pairs.adb	Match_Sigma : constant Real := Trip_Sigma / Sqrt (2.0);	2.0	statistics	a round trip is two matches, each carrying the noise of one
-driver-world-pairs.adb	N : constant Natural := Trips'Length / 2;	2	structure	two coordinates per round trip
+driver-world-pairs.adb	Mixture (Squared, 1, 2.0 * Diagonal, Line_Sigma, Line_Right);	1	structure	the distance across a line is one coordinate
+driver-world-pairs.adb	Mixture (Squared, 1, 2.0 * Diagonal, Line_Sigma, Line_Right);	2.0	math	a signed distance spans the image's diagonal either way
+driver-world-pairs.adb	Mixture (Squared, 2, Area, Sigma, Right);	2	structure	a round trip has two coordinates
 driver-world-pairs.adb	Pi : Real := 0.5;	0.5	statistics	an even start: a round trip as likely right as wrong
 driver-world-pairs.adb	Rank : Positive := 1;	1	structure	ranks are counted from one
 driver-world-pairs.adb	Rank := Positive'Min (N, 2 * Rank);	2	structure	the mixture is started from doubling ranks
-driver-world-pairs.adb	S2 := Spread / (2.0 * Weight);	2.0	math	two coordinates share a round trip's squared length
 driver-world-pairs.adb	Squared (I) := Trips (Trips'First + 2 * (I - 1)) ** 2 + Trips (Trips'First + 2 * I - 1) ** 2;	2	structure	two coordinates per round trip
 driver-world-pairs.adb	Squared (I) := Trips (Trips'First + 2 * (I - 1)) ** 2 + Trips (Trips'First + 2 * I - 1) ** 2;	2	structure	two coordinates per round trip
+driver-world-pairs.adb	Squared : Real_Array (1 .. Trips'Length / 2);	2	structure	two coordinates per round trip
 driver-world-pairs.adb	Trips (K + 2) := A.Back.V - P.V;	2	structure	two coordinates per round trip
 driver-world-pairs.adb	Trips : Real_Array (1 .. 2 * Around);	2	structure	two coordinates per round trip
-driver-world-pairs.adb	Wrong : constant Real := 1.0 / Area;	1.0	math	a uniform density over the image
+driver-world-pairs.adb	Wrong : constant Real := 1.0 / Measure;	1.0	math	a uniform density over its range
+driver-world-pairs.adb	if not (Line_Sigma < Real'Last) or else Line_Right < 1.0 then	1.0	statistics	not even one right match to tell the error by
 driver-world-pairs.adb	if not (Trip_Sigma < Real'Last) or else Right < 1.0 then	1.0	statistics	not even one right match to tell the error by
 driver-world-pairs.ads	with Pre => Trips'Length mod 2 = 0 and then Area > 0.0;	2	structure	two coordinates per round trip
 driver-world-regions.adb	Diagonal : constant Real := Sqrt (2.0);	2.0	math	a diagonal step between pixels is the square root of two

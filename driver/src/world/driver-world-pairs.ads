@@ -1,15 +1,21 @@
 --  Points two eyes see at the same instant.
 --
 --  The instrument matches pixels of one eye's image into the other's, with
---  round trips; the pixels around the region asked about are matched too,
---  and the round trips of the right ones among them measure the matcher's
---  own error (Matcher_Error tells the right from the wrong). A region pixel's
---  match is kept when its round trip is not significant against that error
---  and the two lines of sight, the second widened by the matcher's error in
---  its image, meet within their uncertainty; the point where they meet is
---  then a point of what both eyes see, with its covariance. Plain geometry
---  on the cameras and the matcher's replies: the caller talks to the
---  instrument.
+--  round trips; the pixels around the region asked about are matched too.
+--  A region pixel's match is kept when two tests pass, each against an
+--  error measured on the matches themselves, the right ones told from the
+--  wrong by a mixture (Matcher_Error):
+--  - its round trip is not significant against the round trips of the
+--    right matches;
+--  - the two lines of sight, the second widened by the matcher's error
+--    across the line the first draws in the second eye, meet within their
+--    uncertainty. That error is measured from how far the matches' lines
+--    pass each other: a matcher can be wrong yet come back, and only the
+--    geometry tells.
+--  The point where they meet is then a point of what both eyes see, with
+--  its covariance. A wrong match that lands on that line meets it whatever
+--  it shows; no two eyes can tell those. Plain geometry on the cameras and
+--  the matcher's replies: the caller talks to the instrument.
 
 with Ada.Containers.Vectors;
 with Driver.Images;
@@ -52,8 +58,9 @@ package Driver.World.Pairs is
    --  instant. The round trips of the pixels around measure the matcher's
    --  error; when none were asked (Own is every point: the background, say,
    --  which is itself what is asked about), those of all the points do.
-   --  Error is the matcher's error measured, in pixels per coordinate of one
-   --  match (Real'Last when nothing measured it). Apart counts the matches
+   --  Error is the matcher's error measured across the lines the first sights
+   --  draw in the second eye, in pixels (Real'Last when nothing measured it).
+   --  Apart counts the matches
    --  that came back but whose lines of sight do not meet. Nothing is kept
    --  when none of that sample came back to tell the matcher's error by.
 
