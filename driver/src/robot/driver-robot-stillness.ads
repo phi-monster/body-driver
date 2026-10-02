@@ -24,7 +24,9 @@
 --  Before anything is measured nothing is still: a group whose noise is not
 --  measured yet, or an eye not yet judged, makes the body not still.
 --
---  The body is still when every group and every eye is.
+--  The body is still when every group is, and every eye's picture has
+--  stopped changing since the body last began to move (Eye_Settled, the one
+--  stop rule): the rule the boot waits by, wherever it waits for an eye.
 
 private package Driver.Robot.Stillness is
 
@@ -41,6 +43,29 @@ private package Driver.Robot.Stillness is
    --  below the 8-bit quantization): how noisy a resting pixel of the cell
    --  is. Left as it was when the noise view is not of the grid's size.
 
+   --  Whether an eye's picture has stopped changing, the one stop rule of the
+   --  repository: this beat's change (the mean absolute luma change against
+   --  the beat before) no longer shrinks against the last beat's by more than
+   --  the unchanged fraction of it (Driver.Conventions.Unchanged_Fraction), or
+   --  has fallen below that fraction of the largest change since the body
+   --  began to move; and the change over two beats exceeds this beat's by no
+   --  more than Z times how much this beat's change differs from the last one.
+   --  A uniform drift changes the picture as much every beat, so it stops
+   --  shrinking but adds up over two beats; a picture that only flickers does
+   --  not. There is no floor: a tail that decays slowly ends when it stops
+   --  decaying, and a picture with something moving elsewhere in view settles
+   --  at that level. Once stopped it stays stopped until the body next begins
+   --  to move.
+
+   procedure Watch (S : in out Eye_Stream; Began_Moving : Boolean);
+   --  One beat of the eye, after its frames moved on (Current this beat's,
+   --  Previous and Before the two before, as far as they exist): measures the
+   --  picture's change and feeds the watch, which starts afresh when the body
+   --  began to move at this beat.
+
+   function Eye_Settled (M : Model; E : Eye_Id) return Boolean;
+   --  The eye's picture has stopped since the body last began to move.
+
    function Group_Still (M : Model; G : Group_Id; Beat : Natural) return Boolean;
    --  False while the group's noise is not measured or a reading is missing.
 
@@ -48,6 +73,7 @@ private package Driver.Robot.Stillness is
    --  At the latest beat; False until the eye has been judged.
 
    function All_Still (M : Model) return Boolean;
-   --  Every group and every eye still at the latest beat.
+   --  Every group still at the latest beat, and every eye's picture settled
+   --  (Eye_Settled).
 
 end Driver.Robot.Stillness;

@@ -139,6 +139,56 @@ package body Driver.Robot.Stillness is
 
    function Eye_Still (M : Model; E : Eye_Id) return Boolean is (M.Eyes (E).Is_Still);
 
+   function Mean_Change (A, B : Real_Array) return Real
+     with Pre => A'Length = B'Length and then A'Length > 0
+   is
+      Sum : Real := 0.0;
+   begin
+      for I in A'Range loop
+         Sum := Sum + abs (A (I) - B (I - A'First + B'First));
+      end loop;
+      return Sum / Real (A'Length);
+   end Mean_Change;
+
+   procedure Watch (S : in out Eye_Stream; Began_Moving : Boolean) is
+      U : constant Real := Driver.Conventions.Unchanged_Fraction;
+   begin
+      S.Change_1 := -1.0;
+      S.Change_2 := -1.0;
+      if S.Current /= null and then S.Previous /= null and then S.Has_Previous
+        and then S.Current'Length = S.Previous'Length and then S.Current'Length > 0
+      then
+         S.Change_1 := Mean_Change (S.Current.all, S.Previous.all);
+         if S.Before /= null and then S.Has_Before and then S.Before'Length = S.Current'Length then
+            S.Change_2 := Mean_Change (S.Current.all, S.Before.all);
+         end if;
+      end if;
+      if Began_Moving then
+         S.Watch_Peak := 0.0;
+         S.Watch_Have := False;
+         S.Watch_Done := False;
+      end if;
+      --  A beat without two frames to compare counts neither way.
+      if S.Change_1 >= 0.0 then
+         declare
+            C1 : constant Real := S.Change_1;
+            C2 : constant Real := S.Change_2;
+         begin
+            S.Watch_Peak := Real'Max (S.Watch_Peak, C1);
+            if S.Watch_Have
+              and then (S.Watch_Last - C1 <= U * S.Watch_Last or else C1 <= U * S.Watch_Peak)
+              and then (C2 < 0.0 or else C2 - C1 <= Driver.Conventions.Z * abs (C1 - S.Watch_Last))
+            then
+               S.Watch_Done := True;
+            end if;
+            S.Watch_Last := C1;
+            S.Watch_Have := True;
+         end;
+      end if;
+   end Watch;
+
+   function Eye_Settled (M : Model; E : Eye_Id) return Boolean is (M.Eyes (E).Watch_Done);
+
    function All_Still (M : Model) return Boolean is
    begin
       if M.Beats = 0 then
@@ -150,7 +200,7 @@ package body Driver.Robot.Stillness is
          end if;
       end loop;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
-         if not Eye_Still (M, E) then
+         if not Eye_Settled (M, E) then
             return False;
          end if;
       end loop;

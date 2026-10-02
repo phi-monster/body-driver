@@ -257,8 +257,19 @@ private
       Grid          : Cell_Grid;
       Previous      : Luma_Access;           --  luma of the last frame
       Current       : Luma_Access;           --  luma of this beat's frame
+      Before        : Luma_Access;           --  luma of the frame two beats ago
       Means, Variances : Luma_Access;        --  the stillness test's per-pixel reads of its views
       Has_Previous  : Boolean := False;      --  Previous is the frame of the beat before, of the grid's size
+      Has_Before    : Boolean := False;      --  Before is the frame two beats ago, of the grid's size
+      --  Whether the picture has stopped changing since the body last began to
+      --  move (Driver.Robot.Stillness, Settled): this beat's mean luma change
+      --  against the beat before and against two beats before, and the watch
+      --  over them.
+      Change_1, Change_2 : Real := -1.0;     --  at the latest beat; negative when not measured
+      Watch_Last    : Real := 0.0;           --  the last measured Change_1
+      Watch_Peak    : Real := 0.0;           --  the largest Change_1 since the body began to move
+      Watch_Have    : Boolean := False;      --  a last Change_1 was measured since then
+      Watch_Done    : Boolean := False;      --  the picture has stopped since then
       Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat
       Condition     : Real_Vectors.Vector;   --  Cells values per beat
       Resolved      : Flag_Vectors.Vector;   --  Cells values per beat: the displacement was measured (Flow)
@@ -393,6 +404,7 @@ private
       Noise_Freedom  : Count_Vectors.Vector;       --  the degrees of freedom each noise rests on
       Lags           : Lag_Vectors.Vector;
       Lag_Known      : Eye_Flag_Vectors.Vector;    --  per eye: its lag stood out of every shift tried
+      Began_Moving   : Flag_Vectors.Vector;        --  per beat: some commandable group began to move
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph
       Kinematics     : Arm_Evidence_Vectors.Vector;   --  per arm with an eye
