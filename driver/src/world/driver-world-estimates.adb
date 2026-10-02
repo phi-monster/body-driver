@@ -1,3 +1,4 @@
+with Ada.Containers.Ordered_Sets;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Driver.Log;
@@ -494,12 +495,23 @@ package body Driver.World.Estimates is
                                              return Driver.World.Cameras.Camera'Class;
       Seen      : not null access constant Observation) return Boolean
    is
-      --  A point seen now beyond the surface from an eye that saw it, the
-      --  line of sight crossing the surface's plane within its reach: the eye
-      --  sees through where the surface was.
+      --  Points seen now significantly beyond the surface from an eye that saw
+      --  them, each line of sight crossing the surface's plane inside its
+      --  reach; and those points a patch of the grid they were asked on (a two
+      --  by two block), as a surface itself must be to be found: then the eyes
+      --  see through where the surface was. A lone point, or a row, is no more
+      --  a hole in a surface than it is a surface: one wrong match, its depth
+      --  slid along the line its first sight draws in the second eye, sees
+      --  through anything.
       type Two_Eyes is array (1 .. 2) of Eye_Id;
-   begin
-      for P of Points loop
+      Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));
+      function "<" (A, B : Driver.World.Supports.Grid_Point) return Boolean is
+        (A.Column < B.Column or else (A.Column = B.Column and then A.Row < B.Row));
+      package Cell_Sets is new Ada.Containers.Ordered_Sets (Driver.World.Supports.Grid_Point, "<", Driver.World.Supports."=");
+      Through : Cell_Sets.Set;
+
+      function Sees_Through (P : Scene_Point) return Boolean is
+      begin
          for E of Two_Eyes'[P.From, P.Into] loop
             declare
                Eye    : constant Vec3 := Camera_Of (E, Seen).Pose.Pose.Translation;
@@ -508,14 +520,27 @@ package body Driver.World.Estimates is
             begin
                --  The eye on one side, the point significantly on the other.
                if Before /= 0.0 and then H.Value * Before < 0.0
-                 and then Significant (Scalar_Gate (H.Degrees_Of_Freedom, Tests => 2 * Natural (Points.Length)),
-                                       H.Value, H.Sigma)
+                 and then Significant (Scalar_Gate (H.Degrees_Of_Freedom, Tests => Tests), H.Value, H.Sigma)
                  and then In_Reach (Old, Eye + (Before / (Before - H.Value)) * (P.Point.Mean - Eye))
                then
                   return True;
                end if;
             end;
          end loop;
+         return False;
+      end Sees_Through;
+
+      function Has (C, R : Integer) return Boolean is (Through.Contains ((Column => C, Row => R)));
+   begin
+      for P of Points loop
+         if Sees_Through (P) then
+            Through.Include (P.Grid);
+         end if;
+      end loop;
+      for G of Through loop
+         if Has (G.Column + 1, G.Row) and then Has (G.Column, G.Row + 1) and then Has (G.Column + 1, G.Row + 1) then
+            return True;
+         end if;
       end loop;
       return False;
    end Seen_Through;

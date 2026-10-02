@@ -54,9 +54,13 @@ package body Driver.World.Estimates.Tests is
 
    Up : constant Direction_Estimate := (Unit_Vector => [0.0, 0.0, 1.0], Sigma => 0.001);
 
-   type Surface_Hit is (Nothing, Table, Box);
+   type Surface_Hit is (Nothing, Table, Box, Floor);
 
-   Box_There : Boolean := True;   --  a test can take the box away
+   Box_There   : Boolean := True;    --  a test can take the box away
+   Floor_There : Boolean := False;   --  or put a floor half a metre below the table
+   Floor_Z     : constant := -0.5;
+   Lie_Depth   : Real := 0.0;        --  when set, the matcher answers the middle point of each request
+                                     --  where that much further along its sight would be
 
    procedure First_Hit (Origin, Direction : Vec3; Hit : out Surface_Hit; At_T : out Real) is
       Near : Real := Real'First;
@@ -94,6 +98,16 @@ package body Driver.World.Estimates.Tests is
                At_T := T;
             end if;
          end;
+         if Floor_There and then Hit = Nothing then
+            declare
+               T : constant Real := (Floor_Z - Origin (3)) / Direction (3);
+            begin
+               if T > 0.0 then
+                  Hit := Floor;
+                  At_T := T;
+               end if;
+            end;
+         end if;
       end if;
    end First_Hit;
 
@@ -130,6 +144,11 @@ package body Driver.World.Estimates.Tests is
                   First_Hit (C, D, Again, T2);
                   Visible := Visible and then Again /= Nothing and then abs (C + T2 * D - X) < 1.0e-6;
                end;
+               if Lie_Depth > 0.0 and then I = Points'First + Points'Length / 2 then
+                  --  The one lie: matched where the second eye would see a point
+                  --  further along the first sight, on the line it draws there.
+                  Into.Project (R.Origin.Mean + (T + Lie_Depth) * R.Direction.Unit_Vector, Px, Visible);
+               end if;
             end if;
             Append (Text, (if I = Points'First then "" else ","));
             Append (Back, (if I = Points'First then "" else ","));
@@ -391,16 +410,20 @@ package body Driver.World.Estimates.Tests is
       Step;
       Find_Surfaces;
       Check (Table_Found and then Top_Found, "the first measurement did not find the table and the box top");
-      View := [Driver.World.Tests.Looking_At ([-0.03, -0.12, 0.3], [0.0, 0.0, Box_Top], 600.0, Columns, Rows, 0.3),
-               Driver.World.Tests.Looking_At ([0.03, -0.12, 0.3], [0.0, 0.0, Box_Top], 600.0, Columns, Rows, 0.3)];
+      View := [Driver.World.Tests.Looking_At ([-0.03, -0.02, 0.25], [0.0, 0.0, Box_Top], 150.0, Columns, Rows, 0.3),
+               Driver.World.Tests.Looking_At ([0.03, -0.02, 0.25], [0.0, 0.0, Box_Top], 150.0, Columns, Rows, 0.3)];
+      --  One match of each pair lies, half a metre too far along its sight:
+      --  a lone line of sight through the table is no hole in it.
+      Lie_Depth := 0.5;
       S.Due := True;
       Step;
       Step;
       Find_Surfaces;
       Check (S.Scene_Round = 2, "the scene was not measured again: round" & S.Scene_Round'Image);
       Check (Table_Found and then Top_Found and then Surface_Count (S) = 2,
-             "measured again close to the box top, the scene held" & Surface_Count (S)'Image & " surfaces, table "
+             "measured again close to the box top, one match lying, the scene held" & Surface_Count (S)'Image & " surfaces, table "
              & Table_Found'Image & ", top " & Top_Found'Image);
+      Lie_Depth := 0.0;
       --  The box taken away and the scene measured from afar again: the eyes
       --  see the table through where its top was, and the top goes.
       View := Eyes;
@@ -415,6 +438,50 @@ package body Driver.World.Estimates.Tests is
       Box_There := True;
       Driver.Services.End_Replay;
    end Surfaces_Stay;
+
+   procedure Grazing_Sight is
+      --  The table measured; then the eyes look past its far edge at a floor
+      --  half a metre below. Every floor point lies significantly beyond the
+      --  table's plane, but its lines of sight cross that plane past the
+      --  table's edge: they do not see through the table.
+      S    : State;
+      Beat : Driver.Clock.Beat := 1;
+      Gray : constant Driver.Images.Image := Plain (128);
+
+      procedure Step is
+         O : Observation;
+      begin
+         O.Beat := Beat;
+         O.Images.Append (Gray);
+         O.Images.Append (Gray);
+         Driver.Services.Replay_Beat (Beat);
+         Observe (S, 2, Camera_Of'Access, Up, True, O);
+         Answer_All (S);
+         Beat := Beat + 1;
+      end Step;
+
+      function Table_Found return Boolean is
+        (for some F of S.Surfaces => abs F.Plane.Centre (3) < 0.005 and then F.Plane.Normal (3) > 0.9);
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 11);
+      Answered.Clear;
+      View := Eyes;
+      Floor_There := True;
+      Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
+      Step;
+      Step;
+      Check (Table_Found, "the first measurement did not find the table");
+      View := [Driver.World.Tests.Looking_At ([-0.15, -0.55, 0.55], [-0.15, 8.0, Floor_Z], 150.0, Columns, Rows, 0.3),
+               Driver.World.Tests.Looking_At ([0.15, -0.55, 0.55], [0.15, 8.0, Floor_Z], 150.0, Columns, Rows, 0.3)];
+      S.Due := True;
+      Step;
+      Step;
+      Check (S.Scene_Round = 2, "the scene was not measured again: round" & S.Scene_Round'Image);
+      Check (Table_Found, "lines of sight past the table's edge took the table away");
+      View := Eyes;
+      Floor_There := False;
+      Driver.Services.End_Replay;
+   end Grazing_Sight;
 
    procedure Points_Stay is
       --  The box top's points, as two eyes saw them, with the box held in the
@@ -536,6 +603,9 @@ package body Driver.World.Estimates.Tests is
       Driver.Tests.Register ("world.scene.surfaces_stay",
                              "a surface no eye sees now is dropped when the scene is measured again, or one the eyes"
                              & " see through is kept", Surfaces_Stay'Access);
+      Driver.Tests.Register ("world.scene.grazing",
+                             "lines of sight that pass a surface's edge take it away",
+                             Grazing_Sight'Access);
       Driver.Tests.Register ("world.scene.points_stay",
                              "a thing's points go when an eye measures it again or loses it or a found region lies"
                              & " elsewhere, or stay when the eye it was pointed at in holds"
