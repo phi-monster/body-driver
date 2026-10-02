@@ -215,6 +215,56 @@ package body Driver.Robot.Boot is
                   end;
                   Go_To (G, Start, Report);
                end loop;
+               --  Then every swept joint at once, in cells whose signs no two
+               --  share (the rows of a Sylvester-Hadamard matrix after its first,
+               --  its columns after its first): a joint's own frames tell its
+               --  axis but not how far that axis is from the others', which only
+               --  frames that move several joints show. Each joint moves the view
+               --  by its share of half of it, so the cell keeps most of the view.
+               declare
+                  Swept : array (1 .. Size) of Positive;
+                  N     : Natural := 0;
+                  Rows  : Positive := 1;
+               begin
+                  for C in 1 .. Size loop
+                     if Per_Unit (C) > 0.0 and then First (C) > 0.0 then
+                        N := N + 1;
+                        Swept (N) := C;
+                     end if;
+                  end loop;
+                  while Rows < N + 1 loop
+                     Rows := 2 * Rows;
+                  end loop;
+                  if N > 1 then
+                     for Row in 1 .. Rows - 1 loop
+                        declare
+                           Pose : Real_Array := Start;
+                        begin
+                           for K in 1 .. N loop
+                              declare
+                                 Bits : Natural := 0;
+                                 R    : Natural := Row;
+                                 Col  : Natural := K;
+                              begin
+                                 --  H (Row, K) = (-1) ** (the bits Row and K share)
+                                 while R > 0 and then Col > 0 loop
+                                    if R mod 2 = 1 and then Col mod 2 = 1 then
+                                       Bits := Bits + 1;
+                                    end if;
+                                    R := R / 2;
+                                    Col := Col / 2;
+                                 end loop;
+                                 Pose (Swept (K)) := Start (Swept (K))
+                                   + (if Bits mod 2 = 0 then 1.0 else -1.0) * Half / (Real (N) * Per_Unit (Swept (K)));
+                              end;
+                           end loop;
+                           Go_To (G, Pose, Report);
+                           Driver.Robot.Motion.Hold (M, 1);
+                        end;
+                     end loop;
+                     Go_To (G, Start, Report);
+                  end if;
+               end;
             end;
             Driver.Robot.Motion.Settle (M, Waited);
          end;
