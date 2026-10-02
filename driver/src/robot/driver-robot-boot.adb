@@ -238,6 +238,7 @@ package body Driver.Robot.Boot is
          end Read_Size;
       begin
          Driver.Beats.Within_A_Beat (Read_Size'Access);
+         Driver.Robot.Motion.Hold_For_Twin (M, A);
          declare
             First, Per_Unit : Real_Array (1 .. Size) := [others => 0.0];
             Half   : Real := 0.0;

@@ -135,7 +135,9 @@ package body Driver.Robot.Motion is
          if Eye_Mount (M, Eye_Id (E)).Kind = Arm_Carried and then Eye_Mount (M, Eye_Id (E)).Arm = A then
             declare
                Per_Unit : constant Real := Lockin.Shift (M, Eye_Id (E), Arm_Group (M, A), Channel);
-               Noise    : constant Real := Lockin.Cell_Noise (M, Eye_Id (E));
+               --  The larger of the cells' displacement noise and the matcher's:
+               --  a keyframe is judged by the matcher, its view by the cells.
+               Noise    : constant Real := Real'Max (Lockin.Cell_Noise (M, Eye_Id (E)), Kinematics.Match_Noise (M, A));
             begin
                return (if Per_Unit > 0.0 and then Noise < Real'Last then Driver.Conventions.Z * Noise / Per_Unit else 0.0);
             end;
@@ -159,6 +161,22 @@ package body Driver.Robot.Motion is
          exit when Done;
       end loop;
    end Hold_For_Keyframe;
+
+   procedure Hold_For_Twin (M : in out Model; A : Arm_Id) is
+      B    : Driver.Clock.Beat;
+      Done : Boolean;
+
+      function Carries_An_Eye return Boolean is
+        (for some E in 1 .. Eye_Count (M) =>
+           Eye_Mount (M, Eye_Id (E)).Kind = Arm_Carried and then Eye_Mount (M, Eye_Id (E)).Arm = A);
+   begin
+      loop
+         Driver.Beats.Next (B);
+         Done := not Carries_An_Eye or else Kinematics.Twin_Answered (M, A);
+         Driver.Beats.Send (Driver.Commands.Hold);
+         exit when Done;
+      end loop;
+   end Hold_For_Twin;
 
    procedure Hold_While_Matching (M : in out Model) is
       B    : Driver.Clock.Beat;

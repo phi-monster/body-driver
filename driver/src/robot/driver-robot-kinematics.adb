@@ -144,6 +144,44 @@ package body Driver.Robot.Kinematics is
       return 0;
    end Index_Of;
 
+   --  The noise of a round trip over the evidence's answers: the robust
+   --  scale about zero of every answer's return to its query, both
+   --  coordinates; 0 without answers.
+   function Round_Trip_Sigma (R : Arm_Evidence) return Real is
+      Queries : constant Natural := Natural (R.Query_U.Length);
+      Count   : Natural := 0;
+   begin
+      for S of R.Matches loop
+         for I in 0 .. Queries - 1 loop
+            if S.Found (I) then
+               Count := Count + 1;
+            end if;
+         end loop;
+      end loop;
+      if Count = 0 then
+         return 0.0;
+      end if;
+      declare
+         Trips : Real_Access := new Real_Array (1 .. 2 * Count);
+         K     : Natural := 0;
+      begin
+         for S of R.Matches loop
+            for I in 0 .. Queries - 1 loop
+               if S.Found (I) then
+                  Trips (K + 1) := abs (S.Back_U (I) - R.Query_U (I));
+                  Trips (K + 2) := abs (S.Back_V (I) - R.Query_V (I));
+                  K := K + 2;
+               end if;
+            end loop;
+         end loop;
+         return Sigma : constant Real :=
+           Driver.Stats.Median (Trips.all) / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5)
+         do
+            Free (Trips);
+         end return;
+      end;
+   end Round_Trip_Sigma;
+
    function Held_Still (M : Model; A : Arm_Id; Beat : Natural) return Boolean is
       E : constant Eye_Id'Base := Eye_Of (M, A);
       G : constant Group_Id := Arm_Group (M, A);
@@ -204,7 +242,9 @@ package body Driver.Robot.Kinematics is
                         --  A view worth matching shows something new: against every
                         --  keyframe, some channel moved by at least the step its eye
                         --  can see (Visible_Step). None is taken before those steps
-                        --  are measured.
+                        --  are measured. The second keyframe is the reference's
+                        --  still twin, at its pose: its matches are the matcher's
+                        --  own error, known before the arm moves.
                         for F of R.Frames loop
                            declare
                               Apart : Boolean := False;
@@ -227,7 +267,8 @@ package body Driver.Robot.Kinematics is
                            for C in Now'Range loop
                               Seeable := Seeable or else Known (Visible_Step (M, G, C));
                            end loop;
-                           Fresh := Fresh and then Seeable;
+                           Fresh := Seeable
+                             and then (Fresh or else (Natural (R.Frames.Length) = 1 and then Beat > R.Frames (1).Beat));
                         end;
                         if Fresh and then not R.Unanswerable then
                            declare
@@ -267,6 +308,21 @@ package body Driver.Robot.Kinematics is
       end loop;
    end Observe;
 
+   function Match_Noise (M : Model; A : Arm_Id) return Real is
+     (if Index_Of (M, A) > 0 then Round_Trip_Sigma (M.Kinematics (Index_Of (M, A))) else 0.0);
+
+   function Twin_Answered (M : Model; A : Arm_Id) return Boolean is
+   begin
+      if Index_Of (M, A) = 0 then
+         return False;
+      end if;
+      declare
+         R : Arm_Evidence renames M.Kinematics (Index_Of (M, A));
+      begin
+         return R.Unanswerable or else (Natural (R.Frames.Length) >= 2 and then R.Pending.Is_Empty);
+      end;
+   end Twin_Answered;
+
    function Matched (M : Model; A : Arm_Id) return Natural is
      (if Index_Of (M, A) > 0 then Natural (M.Kinematics (Index_Of (M, A)).Matches.Length) else 0);
 
@@ -296,9 +352,7 @@ package body Driver.Robot.Kinematics is
                   Queries : constant Natural := Natural (R.Query_U.Length);
                   Changes : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. N);
                   Visible : Real_Array (1 .. N);
-                  Count   : Natural := 0;
-                  Trips   : Real_Access;
-                  Sigma   : Real := 0.0;
+                  Sigma   : constant Real := Round_Trip_Sigma (R);
                begin
                   for F in 1 .. Frames loop
                      for C in 1 .. N loop
@@ -312,33 +366,6 @@ package body Driver.Robot.Kinematics is
                         Visible (C) := (if Known (V) then V.Value else 0.0);
                      end;
                   end loop;
-                  --  The noise of a round trip: the robust scale about zero of
-                  --  every answer's return to its query, both coordinates.
-                  for S of R.Matches loop
-                     for I in 0 .. Queries - 1 loop
-                        if S.Found (I) then
-                           Count := Count + 1;
-                        end if;
-                     end loop;
-                  end loop;
-                  if Count > 0 then
-                     Trips := new Real_Array (1 .. 2 * Count);
-                     declare
-                        K : Natural := 0;
-                     begin
-                        for S of R.Matches loop
-                           for I in 0 .. Queries - 1 loop
-                              if S.Found (I) then
-                                 Trips (K + 1) := abs (S.Back_U (I) - R.Query_U (I));
-                                 Trips (K + 2) := abs (S.Back_V (I) - R.Query_V (I));
-                                 K := K + 2;
-                              end if;
-                           end loop;
-                        end loop;
-                     end;
-                     Sigma := Driver.Stats.Median (Trips.all) / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5);
-                     Free (Trips);
-                  end if;
                   declare
                      function Round_Trip (S : Match_Set; I : Natural) return Boolean is
                        (S.Found (I)
