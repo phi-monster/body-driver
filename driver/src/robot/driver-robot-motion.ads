@@ -6,6 +6,7 @@
 --  These are decider operations: they exchange beats with the main loop
 --  through Driver.Beats and must only be called from the decider task.
 
+with Ada.Containers.Indefinite_Vectors;
 with Ada.Strings.Unbounded;
 with Driver.Commands;
 
@@ -119,9 +120,13 @@ package Driver.Robot.Motion is
 
 private
 
+   package Waypoint_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, Real_Array);
+
    type Plan is record
-      State  : Plan_Status := Unmeasured;
-      Reason : Unbounded_String;
+      State     : Plan_Status := Unmeasured;
+      Reason    : Unbounded_String;
+      Group     : Group_Id := 1;
+      Waypoints : Waypoint_Vectors.Vector;   --  the arm's targets in turn, the goal last
    end record;
 
 end Driver.Robot.Motion;

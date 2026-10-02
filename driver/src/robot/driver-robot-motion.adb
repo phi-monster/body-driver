@@ -475,20 +475,112 @@ package body Driver.Robot.Motion is
    end Gather_Rest;
 
    function Plan_Reach (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan is
-      pragma Unreferenced (M, A, O, Goal);
+      use Driver.Numerics.Arrays;
+
+      function Refused (State : Plan_Status; Why : String) return Plan is
+        ((State => State, Reason => To_Unbounded_String (Why), others => <>));
    begin
-      return (State => Unmeasured, Reason => To_Unbounded_String ("the arm's kinematics are not measured yet"));
+      if Natural (A) > Arm_Count (M) or else not Kinematics.Fitted (M, A) then
+         return Refused (Unmeasured, "the arm's kinematics are not measured yet");
+      end if;
+      declare
+         G    : constant Group_Id := Arm_Group (M, A);
+         Size : constant Natural := Group_Size (M, G);
+         Tool : constant Pose_Estimate := Tool_Pose (M, A, O);
+      begin
+         if Size = 0 or else Natural (G) > Natural (O.Readings.Length) or else O.Readings.Element (G)'Length /= Size then
+            return Refused (Unmeasured, "the arm's readings are missing at that beat");
+         elsif Tool.Position_Covariance (1, 1) = Real'Last then
+            return Refused (Unmeasured, "the arm is not measured into the world yet");
+         end if;
+         declare
+            --  The joints' range: the readings the arm has moved through, where
+            --  it was free; beyond them nothing is known.
+            Low, High : Real_Array (1 .. Size);
+            Sigma : constant Real := Kinematics.Angle_Sigma (M, A);
+            Start : constant Real_Array (1 .. Size) := O.Readings.Element (G);
+            From  : constant Rigid := Tool.Pose;
+            Result : Plan := (State => Planned, Reason => Null_Unbounded_String, Group => G, others => <>);
+            Failed : Boolean := False;
+            Worst_Position, Worst_Turn : Real := 0.0;
+
+            --  The pose a fraction of the way from the start to the goal:
+            --  straight in position, about one axis in turn.
+            function Along (S : Real) return Rigid is
+              ((Rotation    => From.Rotation
+                                 * Driver.Numerics.Exp (S * Driver.Numerics.Log (Transpose (From.Rotation)
+                                                                                   * Goal.Pose.Rotation)),
+                Translation => (1.0 - S) * From.Translation + S * Goal.Pose.Translation));
+
+            --  Solves the path from Fraction A (readings Q) to B; a segment the
+            --  solver cannot close from where the last one ended is halved, at
+            --  most as many times as a float has bits.
+            procedure Reach (A_Of, B_Of : Real; Q : in out Real_Array; Depth : Natural) is
+               Next : Real_Array (1 .. Size);
+               Position_Off, Turn_Off : Real;
+            begin
+               Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only and then B_Of = 1.0,
+                                      Low, High, Next, Position_Off, Turn_Off);
+               if not Driver.Uncertain.Significant (Position_Off, Sigma)
+                 and then not Driver.Uncertain.Significant (Turn_Off, Sigma)
+               then
+                  Result.Waypoints.Append (Next);
+                  Q := Next;
+               elsif Depth < Real'Machine_Mantissa then
+                  Reach (A_Of, (A_Of + B_Of) / 2.0, Q, Depth + 1);
+                  if not Failed then
+                     Reach ((A_Of + B_Of) / 2.0, B_Of, Q, Depth + 1);
+                  end if;
+               else
+                  Failed := True;
+                  Worst_Position := Position_Off;
+                  Worst_Turn := Turn_Off;
+               end if;
+            end Reach;
+
+            Q : Real_Array (1 .. Size) := Start;
+         begin
+            for C in 1 .. Size loop
+               Low (C) := Real'Last;
+               High (C) := Real'First;
+               for B in 0 .. M.Beats - 1 loop
+                  if Channels.Has_Reading (M, G, B) then
+                     Low (C) := Real'Min (Low (C), Channels.Reading (M, G, B, C));
+                     High (C) := Real'Max (High (C), Channels.Reading (M, G, B, C));
+                  end if;
+               end loop;
+               Low (C) := Real'Min (Low (C), Start (C));
+               High (C) := Real'Max (High (C), Start (C));
+            end loop;
+            if Sigma = Real'Last then
+               return Refused (Unmeasured, "the arm's fit has no uncertainty");
+            end if;
+            Reach (0.0, 1.0, Q, 0);
+            if Failed then
+               return Refused (Unreachable, "within the readings the arm has moved through, the goal stays"
+                               & Real'Image (Worst_Position) & " model units and" & Real'Image (Worst_Turn)
+                               & " rad away");
+            end if;
+            return Result;
+         end;
+      end;
    end Plan_Reach;
 
    function Status (P : Plan) return Plan_Status is (P.State);
    function Why (P : Plan) return String is (To_String (P.Reason));
 
    procedure Follow (M : in out Model; P : Plan; Report : out Step_Report) is
-      pragma Unreferenced (M, P);
    begin
-      --  Only a planned path is followed (the precondition); none can be
-      --  planned before the kinematics are measured.
-      Report := (others => <>);
+      Report := (Outcome => Reached, others => <>);
+      for W of P.Waypoints loop
+         declare
+            C : Driver.Commands.Command;
+         begin
+            Driver.Commands.Set_Target (C, P.Group, W);
+            Step (M, C, Report);
+         end;
+         exit when Report.Outcome /= Reached;
+      end loop;
    end Follow;
 
 end Driver.Robot.Motion;

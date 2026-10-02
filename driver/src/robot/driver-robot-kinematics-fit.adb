@@ -1909,4 +1909,244 @@ package body Driver.Robot.Kinematics.Fit is
       end;
    end Table;
 
+   procedure Resect
+     (Points        : Correspondence_Array;
+      Width, Height : Positive;
+      Pose          : out Rigid;
+      L             : out Lens;
+      Sigma         : out Real;
+      Found         : out Boolean)
+   is
+      N      : constant Natural := Points'Length;
+      Inlier : array (1 .. N) of Boolean := [others => True];
+      Weight : constant Real_Array (1 .. N) := [others => 1.0];
+      P_Mat  : Real_Matrix (1 .. 3, 1 .. 4) := [others => [others => 0.0]];
+
+      function Pt (I : Positive) return Correspondence is (Points (Points'First + I - 1));
+
+      --  The weighted direct linear transform: the projection matrix as the
+      --  least eigenvector of the conditioned equations, the points and the
+      --  pixels first centred and scaled to unit spread.
+      procedure Linear is
+         Cx, Cy : Real := 0.0;
+         C3     : Vec3 := [0.0, 0.0, 0.0];
+         Sp, Sx : Real := 0.0;
+         Sw     : Real := 0.0;
+      begin
+         for I in 1 .. N loop
+            if Inlier (I) then
+               Sw := Sw + Weight (I);
+               Cx := Cx + Weight (I) * Pt (I).U;
+               Cy := Cy + Weight (I) * Pt (I).V;
+               C3 := C3 + Weight (I) * Pt (I).X;
+            end if;
+         end loop;
+         Cx := Cx / Sw;
+         Cy := Cy / Sw;
+         C3 := (1.0 / Sw) * C3;
+         for I in 1 .. N loop
+            if Inlier (I) then
+               Sp := Sp + Weight (I) * ((Pt (I).U - Cx) ** 2 + (Pt (I).V - Cy) ** 2);
+               Sx := Sx + Weight (I) * Dot (Pt (I).X - C3, Pt (I).X - C3);
+            end if;
+         end loop;
+         Sp := Sqrt (Sp / Sw);
+         Sx := Sqrt (Sx / Sw);
+         declare
+            A : Real_Matrix (1 .. 12, 1 .. 12) := [others => [others => 0.0]];
+            Values  : Real_Vector (1 .. 12);
+            Vectors : Real_Matrix (1 .. 12, 1 .. 12);
+         begin
+            for I in 1 .. N loop
+               if Inlier (I) then
+                  declare
+                     Xn : constant Vec3 := (1.0 / Sx) * (Pt (I).X - C3);
+                     Xh : constant Real_Vector (1 .. 4) := [Xn (1), Xn (2), Xn (3), 1.0];
+                     Un : constant Real := (Pt (I).U - Cx) / Sp;
+                     Vn : constant Real := (Pt (I).V - Cy) / Sp;
+                     R1, R2 : Real_Vector (1 .. 12) := [others => 0.0];
+                  begin
+                     for K in 1 .. 4 loop
+                        R1 (K) := Xh (K);
+                        R1 (8 + K) := -Un * Xh (K);
+                        R2 (4 + K) := Xh (K);
+                        R2 (8 + K) := -Vn * Xh (K);
+                     end loop;
+                     for P in 1 .. 12 loop
+                        for Q in P .. 12 loop
+                           A (P, Q) := A (P, Q) + Weight (I) * (R1 (P) * R1 (Q) + R2 (P) * R2 (Q));
+                        end loop;
+                     end loop;
+                  end;
+               end if;
+            end loop;
+            for P in 1 .. 12 loop
+               for Q in P + 1 .. 12 loop
+                  A (Q, P) := A (P, Q);
+               end loop;
+            end loop;
+            Eigensystem (A, Values, Vectors);
+            declare
+               Least : Positive := 1;
+               Pn    : Real_Matrix (1 .. 3, 1 .. 4);
+               --  Undo the conditioning: P = Tp^-1 Pn Tx.
+               Tp_Inv : constant Real_Matrix (1 .. 3, 1 .. 3) := [[Sp, 0.0, Cx], [0.0, Sp, Cy], [0.0, 0.0, 1.0]];
+               Tx     : constant Real_Matrix (1 .. 4, 1 .. 4) :=
+                 [[1.0 / Sx, 0.0, 0.0, -C3 (1) / Sx], [0.0, 1.0 / Sx, 0.0, -C3 (2) / Sx],
+                  [0.0, 0.0, 1.0 / Sx, -C3 (3) / Sx], [0.0, 0.0, 0.0, 1.0]];
+            begin
+               for K in 2 .. 12 loop
+                  if Values (K) < Values (Least) then
+                     Least := K;
+                  end if;
+               end loop;
+               for R in 1 .. 3 loop
+                  for C in 1 .. 4 loop
+                     Pn (R, C) := Vectors (4 * (R - 1) + C, Least);
+                  end loop;
+               end loop;
+               P_Mat := Tp_Inv * Pn * Tx;
+            end;
+         end;
+      end Linear;
+
+      --  P = K [R | t]: K from the upper Cholesky factor of M M^T (through the
+      --  exchange of rows and columns), R = K^-1 M, t = K^-1 p4.
+      procedure Factor (K_Out : out Mat3; R_Out : out Mat3; T_Out : out Vec3) is
+         Mm : Mat3;
+         P4 : Vec3;
+      begin
+         for R in 1 .. 3 loop
+            for C in 1 .. 3 loop
+               Mm (R, C) := P_Mat (R, C);
+            end loop;
+            P4 (R) := P_Mat (R, 4);
+         end loop;
+         --  The scale\x27s sign: the points lie in front, so the depth row of the
+         --  first point projects positive.
+         if Mm (3, 1) * Pt (1).X (1) + Mm (3, 2) * Pt (1).X (2) + Mm (3, 3) * Pt (1).X (3) + P4 (3) < 0.0 then
+            Mm := -Mm;
+            P4 := -P4;
+         end if;
+         declare
+            Aa : constant Mat3 := Mm * Transpose (Mm);
+            J  : constant Mat3 := [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
+            Lf : Real_Matrix (1 .. 3, 1 .. 3);
+            Pd : Boolean;
+         begin
+            Driver.Numerics.Dense.Cholesky (J * Aa * J, Lf, Pd);
+            K_Out := J * Lf * J;
+            if K_Out (3, 3) /= 0.0 then
+               K_Out := (1.0 / K_Out (3, 3)) * K_Out;
+            end if;
+            declare
+               K_Inv : constant Mat3 := Inverse (K_Out);
+               S     : constant Real := 1.0 / Sqrt (abs Determinant (K_Inv * Mm)) ** (1.0 / 3.0);
+            begin
+               R_Out := Driver.Numerics.Orthonormalize (S * (K_Inv * Mm));
+               T_Out := S * (K_Inv * P4);
+            end;
+         end;
+      end Factor;
+
+      K0 : Mat3;
+      R0 : Mat3;
+      T0 : Vec3;
+   begin
+      Pose := Identity;
+      L := (Fx | Fy => 1.0, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, others => 0.0);
+      Sigma := Real'Last;
+      Found := False;
+      if N < 7 then
+         return;
+      end if;
+      Linear;
+      Factor (K0, R0, T0);
+      if K0 (1, 1) <= 0.0 or else K0 (2, 2) <= 0.0 then
+         return;
+      end if;
+      --  Everything by robust least squares: the turn (a small rotation on
+      --  the linear one), the place, then log Fx, log Fy, Cx, Cy, K1, K2.
+      declare
+         Base_R : Mat3 := R0;
+         X      : Real_Array (1 .. 12) :=
+           [0.0, 0.0, 0.0, T0 (1), T0 (2), T0 (3), Ln (K0 (1, 1)), Ln (K0 (2, 2)), K0 (1, 3), K0 (2, 3), 0.0, 0.0];
+         Changed : Natural := Natural'Last;
+
+         function Lens_Of (Xv : Real_Array) return Lens is
+           ((Fx => Exp (Xv (7)), Fy => Exp (Xv (8)), Cx => Xv (9), Cy => Xv (10), K1 => Xv (11), K2 => Xv (12)));
+
+         function Pose_Of (Xv : Real_Array) return Rigid is
+           ((Rotation => Driver.Numerics.Exp ([Xv (1), Xv (2), Xv (3)]) * Base_R, Translation => [Xv (4), Xv (5), Xv (6)]));
+
+         procedure Residual (Xv : Real_Array; I : Positive; Du, Dv : out Real) is
+            Lx : constant Lens := Lens_Of (Xv);
+            U, V : Real;
+            Ahead : Boolean;
+         begin
+            Project (Lx, Pose_Of (Xv) * Pt (I).X, U, V, Ahead);
+            Du := U - Pt (I).U;
+            Dv := V - Pt (I).V;
+         end Residual;
+      begin
+         loop
+            declare
+               All_R : Real_Array (1 .. 2 * N);
+               Used  : Natural := 0;
+               Now_Changed : Natural := 0;
+               S     : Real;
+            begin
+               for I in 1 .. N loop
+                  Residual (X, I, All_R (2 * I - 1), All_R (2 * I));
+               end loop;
+               S := Noise_Of (All_R);
+               for I in 1 .. N loop
+                  declare
+                     Fits : constant Boolean := S > 0.0
+                       and then not Driver.Uncertain.Significant (All_R (2 * I - 1), S)
+                       and then not Driver.Uncertain.Significant (All_R (2 * I), S);
+                  begin
+                     if Fits /= Inlier (I) then
+                        Now_Changed := Now_Changed + 1;
+                        Inlier (I) := Fits;
+                     end if;
+                     if Fits then
+                        Used := Used + 1;
+                     end if;
+                  end;
+               end loop;
+               Sigma := S;
+               exit when Used < 7 or else Now_Changed >= Changed or else (Now_Changed = 0 and then Changed /= Natural'Last);
+               Changed := Now_Changed;
+               declare
+                  Index : array (1 .. Used) of Positive;
+                  K     : Natural := 0;
+
+                  procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
+                  begin
+                     for J in 1 .. Used loop
+                        Residual (Xv, Index (J), R (R'First + 2 * J - 2), R (R'First + 2 * J - 1));
+                     end loop;
+                  end Evaluate;
+
+                  procedure Solve is new Robust_Fit (12, 2 * Used, Evaluate);
+               begin
+                  for I in 1 .. N loop
+                     if Inlier (I) then
+                        K := K + 1;
+                        Index (K) := I;
+                     end if;
+                  end loop;
+                  Solve (X, S);
+                  Base_R := Pose_Of (X).Rotation;
+                  X (1 .. 3) := [0.0, 0.0, 0.0];
+               end;
+            end;
+         end loop;
+         Pose := Pose_Of (X);
+         L := Lens_Of (X);
+         Found := Sigma < Real'Last and then L.Fx > 0.0 and then L.Fy > 0.0;
+      end;
+   end Resect;
+
 end Driver.Robot.Kinematics.Fit;

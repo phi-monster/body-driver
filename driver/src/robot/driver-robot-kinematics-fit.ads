@@ -118,4 +118,27 @@ package Driver.Robot.Kinematics.Fit is
    --  Normal points to the side of the reference eye; Sigma is its angular
    --  uncertainty.
 
+   --  A point of the reference eye's frame and where another eye sees it.
+   type Correspondence is record
+      X    : Vec3 := [0.0, 0.0, 0.0];
+      U, V : Real := 0.0;
+   end record;
+
+   type Correspondence_Array is array (Positive range <>) of Correspondence;
+
+   procedure Resect
+     (Points        : Correspondence_Array;
+      Width, Height : Positive;
+      Pose          : out Rigid;
+      L             : out Lens;
+      Sigma         : out Real;
+      Found         : out Boolean);
+   --  Another eye's lens and where it stands, from points of known position
+   --  it sees: Pose maps the points' frame into the eye's (X_eye = Pose * X).
+   --  The direct linear transform of the projection matrix, factored into the
+   --  lens and the pose, then everything (the lens with its two radial terms)
+   --  by robust least squares on the reprojection, the points that fit
+   --  re-chosen until the choice no longer changes. Sigma is the measured
+   --  pixel noise; Found is False when the points cannot determine it.
+
 end Driver.Robot.Kinematics.Fit;
