@@ -382,6 +382,11 @@ package body Driver.Robot.Kinematics.Fit is
          Inlier : array (1 .. S) of Boolean := [others => False];
          X      : Real_Array (1 .. Count);
          Changed : Natural := Natural'Last;
+         --  Each parameter's variance at the solution, in the reduced set: the
+         --  lens (6), then per joint its tilt (2), its point across the axis
+         --  (2) and its reading scale (1).
+         Variance   : Real_Array (1 .. 6 + 5 * N) := [others => Real'Last];
+         Determined : Boolean := False;
 
          --  The reprojection residuals of the chosen sightings (2 each).
          procedure Residuals (Xv : Real_Array; Dv : Real_Array; Index : Real_Access; R : out Real_Array) is
@@ -615,6 +620,83 @@ package body Driver.Robot.Kinematics.Fit is
                               Lambda := 2.0 * Lambda;
                            end;
                         end loop;
+                        --  At the solution: what the sightings leave each
+                        --  parameter uncertain by, the undamped normal equations
+                        --  inverted after the two freedoms the images cannot fix
+                        --  are removed: an axis point slides along its axis
+                        --  (only the point nearest the eye is kept, two numbers in
+                        --  the plane across the axis), and every length scales
+                        --  together (the depth of the track seen most is held).
+                        if not Improved then
+                           declare
+                              Reduced : constant Positive := 6 + 5 * N;
+                              Tm  : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Reduced) :=
+                                [others => [others => 0.0]];
+                              Anchor : Positive := 1;
+                              Seen_Of : array (1 .. Tracks) of Natural := [others => 0];
+                           begin
+                              for K in 1 .. Used loop
+                                 declare
+                                    T : constant Positive := Sight (Sight'First + Natural (Index (K)) - 1).Track;
+                                 begin
+                                    Seen_Of (T) := Seen_Of (T) + 1;
+                                    if Seen_Of (T) > Seen_Of (Anchor) then
+                                       Anchor := T;
+                                    end if;
+                                 end;
+                              end loop;
+                              for P in 1 .. 6 loop
+                                 Tm (P, P) := 1.0;
+                              end loop;
+                              for J in 1 .. N loop
+                                 declare
+                                    O  : constant Natural := 6 + Per_Joint * (J - 1);
+                                    Ro : constant Natural := 6 + 5 * (J - 1);
+                                    E1, E2 : Vec3;
+                                 begin
+                                    Perp (Base (Base'First + J - 1).W, E1, E2);
+                                    Tm (O + 1, Ro + 1) := 1.0;
+                                    Tm (O + 2, Ro + 2) := 1.0;
+                                    for D in 1 .. 3 loop
+                                       Tm (O + 2 + D, Ro + 3) := E1 (D);
+                                       Tm (O + 2 + D, Ro + 4) := E2 (D);
+                                    end loop;
+                                    Tm (O + 6, Ro + 5) := 1.0;
+                                 end;
+                              end loop;
+                              declare
+                                 Ar : Driver.Numerics.Arrays.Real_Matrix := Transpose (Tm) * A * Tm;
+                                 Br : constant Driver.Numerics.Arrays.Real_Matrix := Transpose (Tm) * Bm.all;
+                                 Lf : Driver.Numerics.Arrays.Real_Matrix (1 .. Reduced, 1 .. Reduced);
+                                 Pd : Boolean;
+                              begin
+                                 for T in 1 .. Tracks loop
+                                    if T /= Anchor and then C (T) > 0.0 then
+                                       for P in 1 .. Reduced loop
+                                          if Br (P, T) /= 0.0 then
+                                             for Q in 1 .. Reduced loop
+                                                Ar (P, Q) := Ar (P, Q) - Br (P, T) * Br (Q, T) / C (T);
+                                             end loop;
+                                          end if;
+                                       end loop;
+                                    end if;
+                                 end loop;
+                                 Driver.Numerics.Dense.Cholesky (Ar, Lf, Pd);
+                                 Determined := Pd;
+                                 Variance := [others => Real'Last];
+                                 if Pd then
+                                    for P in 1 .. Reduced loop
+                                       declare
+                                          E : Real_Vector (1 .. Reduced) := [others => 0.0];
+                                       begin
+                                          E (P) := 1.0;
+                                          Variance (P) := Driver.Numerics.Dense.Cholesky_Solve (Lf, E) (P);
+                                       end;
+                                    end loop;
+                                 end if;
+                              end;
+                           end;
+                        end if;
                         Free (Bm);
                         exit when not Improved;
                      end;
@@ -683,6 +765,43 @@ package body Driver.Robot.Kinematics.Fit is
          end loop;
          L := Lens_Of (X);
          Joints := Joints_Of (X);
+         --  Fitted only when the sightings determine every parameter that has a
+         --  value of its own: each focal length and each reading scale
+         --  significant against its uncertainty, and each axis known to a
+         --  cone whose Z-sigma edge stays within a quarter turn of it.
+         Report.Determined := Determined;
+         if not Determined then
+            Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
+              ("the sightings do not determine the lens and the joints (the normal equations are singular)");
+         else
+            Report.Focal_Sigma := L.Fx * Sqrt (Variance (1));
+            if not Driver.Uncertain.Significant (L.Fx, L.Fx * Sqrt (Variance (1)))
+              or else not Driver.Uncertain.Significant (L.Fy, L.Fy * Sqrt (Variance (2)))
+            then
+               Report.Determined := False;
+               Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
+                 ("the sightings leave the focal lengths undetermined: " & Real'Image (L.Fx) & " +-"
+                  & Real'Image (L.Fx * Sqrt (Variance (1))) & " and " & Real'Image (L.Fy) & " +-"
+                  & Real'Image (L.Fy * Sqrt (Variance (2))) & " px");
+            end if;
+            for J in 1 .. N loop
+               declare
+                  O    : constant Natural := 6 + 5 * (J - 1);
+                  Tilt : constant Real := Sqrt (Variance (O + 1) + Variance (O + 2));
+                  C    : constant Real := Joints (Joints'First + J - 1).C;
+               begin
+                  if Report.Determined
+                    and then (Driver.Conventions.Z * Tilt >= Ada.Numerics.Pi / 2.0
+                              or else not Driver.Uncertain.Significant (C, Sqrt (Variance (O + 5))))
+                  then
+                     Report.Determined := False;
+                     Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
+                       ("the sightings leave joint" & J'Image & " undetermined: its axis to" & Real'Image (Tilt)
+                        & " rad, its scale" & Real'Image (C) & " +-" & Real'Image (Sqrt (Variance (O + 5))));
+                  end if;
+               end;
+            end loop;
+         end if;
       end;
    end Refine_Tracks;
 
@@ -1624,7 +1743,7 @@ package body Driver.Robot.Kinematics.Fit is
       Report.Stage := 5;
       Refine_Tracks (Changes, Sight, Joints, L, Report);
       Normalize (Joints);
-      Report.Fitted := True;
+      Report.Fitted := Report.Determined;
    end Fit;
 
    procedure Table

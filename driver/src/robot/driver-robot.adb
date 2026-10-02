@@ -155,7 +155,22 @@ package body Driver.Robot is
       end if;
    end Observe;
 
-   function Booted (M : Model) return Boolean is (M.Is_Booted);
+   --  Booted once the kinematics of every arm that carries an eye are
+   --  fitted, and of one at least: a function of the evidence, so a replay
+   --  finds the boot where the run did.
+   function Booted (M : Model) return Boolean is
+      Any : Boolean := False;
+   begin
+      for E in M.Graph.Mounts.First_Index .. M.Graph.Mounts.Last_Index loop
+         if M.Graph.Mounts (E).Kind = Arm_Carried then
+            if not Kinematics.Fitted (M, M.Graph.Mounts (E).Arm) then
+               return False;
+            end if;
+            Any := True;
+         end if;
+      end loop;
+      return Any;
+   end Booted;
 
    function Role (M : Model; G : Group_Id) return Group_Role is
      (if G <= M.Graph.Roles.Last_Index then M.Graph.Roles (G) else Unclassified);

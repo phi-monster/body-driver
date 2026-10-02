@@ -127,7 +127,7 @@ package body Driver.Robot.Steps is
                         elsif Beat - E.Start > Wait then
                            Finish (M, G, Beat, Answered => False, Settled => True);
                         end if;
-                     elsif not Channels.Moving (M, G, Beat) then
+                     elsif not Channels.Moving (M, G, Beat) or else Channels.Converged (M, G, Beat, E.Length) then
                         Finish (M, G, Beat, Answered => True, Settled => True);
                      end if;
                   end;

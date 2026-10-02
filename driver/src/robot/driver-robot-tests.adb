@@ -14,6 +14,7 @@ with Ada.Strings.Unbounded;
 with Driver.Robot.Channels;
 with Driver.Robot.Hand;
 with Driver.Robot.Flow;
+with Driver.Robot.Graph;
 with Driver.Robot.Regression;
 with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
@@ -281,7 +282,7 @@ package body Driver.Robot.Tests is
       Step (M, R, Target, Target);
    end Step;
 
-   type Push_Kind is (Arm_1, Arm_2, Closer, Part, Idle, Lockstep);
+   type Push_Kind is (Arm_1, Arm_2, Closer, Part, Idle, Lockstep, Closer_With_Arm_1);
 
    --  Pushes one group away by Amount and back, Times times, holding two
    --  beats after each move; Lockstep moves both arms together.
@@ -298,9 +299,27 @@ package body Driver.Robot.Tests is
          when Lockstep =>
             Away.Arm_1 := [Amount, 0.0];
             Away.Arm_2 := [Amount, 0.0];
+         when Closer_With_Arm_1 =>
+            Away.Arm_1 := [Amount, Amount / 2.0];
+            Away.Closer := Amount;
       end case;
       for T in 1 .. Times loop
-         if Kind = Lockstep then
+         if Kind = Closer_With_Arm_1 then
+            --  Commanded together, the closer answering a beat after the arm:
+            --  at that beat it alone still moves.
+            for K in 1 .. 2 loop
+               declare
+                  Goal  : constant Rig_State := (if K = 1 then Away else Rest);
+                  First : Rig_State := Goal;
+               begin
+                  First.Closer := (if K = 1 then Amount / 2.0 else Amount / 2.0);
+                  Step (M, R, Goal, First);
+                  for B in 1 .. Hold_Beats (R) loop
+                     Step (M, R, Goal);
+                  end loop;
+               end;
+            end loop;
+         elsif Kind = Lockstep then
             --  Arm 1 overshoots and comes back while arm 2 is still on its way:
             --  arm 1 moves away from its target while its own push is still
             --  being answered.
@@ -355,6 +374,33 @@ package body Driver.Robot.Tests is
       end if;
       Estimate_Now (M);
    end Exercise_Rig;
+
+   --  A group only ever pushed together with another is not classified:
+   --  what the eyes saw cannot be told from what its partner did.
+   procedure Unprobed_Group_Stays_Unclassified is
+      M    : Model;
+      R    : Rig;
+      Rest : constant Rig_State := (others => <>);
+   begin
+      for B in 1 .. 5 loop
+         Step (M, R, Rest);
+      end loop;
+      Exercise (M, R, Arm_1, 0.1, 8);
+      Exercise (M, R, Arm_2, 0.1, 8);
+      Exercise (M, R, Closer_With_Arm_1, 0.1, 8);
+      Estimate_Now (M);
+      Check (Role (M, 1) = Arm, "arm 1 is an arm, got " & Role (M, 1)'Image);
+      --  What a lock-in could credit the closer with while it only ever moved
+      --  beside arm 1 (as a live boot's first shared probe did): a patch in
+      --  arm 1's eye. Its role must still wait for its own pushes.
+      M.Graph.Effects.Replace_Element
+        ((3 - 1) * Eye_Count (M) + 1,
+         (Verdict => Patch, Responding => 8, Textured => 48,
+          Fraction => (Value => 8.0 / 48.0, Sigma => 0.05, Degrees_Of_Freedom => 0)));
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, 3) = Unclassified, "the closer pushed only with arm 1 is " & Role (M, 3)'Image);
+      Check (Closer_Arm (M, 3) = 0, "the closer pushed only with arm 1 is given arm" & Closer_Arm (M, 3)'Image);
+   end Unprobed_Group_Stays_Unclassified;
 
    procedure Roles_Of_A_Synthetic_Body is
       M : Model;
@@ -510,6 +556,46 @@ package body Driver.Robot.Tests is
          Check (S.Is_Still, "the moved patch rests again at frame" & B'Image);
       end loop;
    end Eye_Stillness;
+
+   --  A joint held away from where it rested can jitter far more than it did
+   --  at rest (a live x5 arm: 7e-18 at rest, 8e-17 held 1.5e-5 away). Its push
+   --  must still end once the answer has converged.
+   procedure Step_Ends_Despite_New_Jitter is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Target, Reading : Real := 0.0;
+   begin
+      for B in 0 .. 99 loop
+         if B = 40 then
+            Target := 1.0;
+         end if;
+         if B > 40 then
+            --  Each beat closes seven eighths of the gap.
+            Reading := Target - (Target - Reading) / 8.0;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Reading + (if B > 40 then 1.0e-4 else 1.0e-6) * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Steps.Episodes (M, 1) = 1, "one push, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 1 then
+         declare
+            E : constant Episode := M.Groups (1).Episodes (1);
+         begin
+            Check (E.Ended, "the push never ends while the held reading jitters more than at rest");
+            Check (not E.Ended or else E.End_At - E.Start <= 12,
+                   "the push ends" & Natural'Image (E.End_At - E.Start) & " beats after it began");
+         end;
+      end if;
+   end Step_Ends_Despite_New_Jitter;
 
    procedure Step_Responses is
       M    : Model;
@@ -708,10 +794,10 @@ package body Driver.Robot.Tests is
    --  signs are the rows of a Sylvester-Hadamard matrix; a 16 x 12 grid of the
    --  reference view is followed into every keyframe with 0.2 pixels of noise.
 
-   procedure Kinematics_Of_A_Synthetic_Arm is
+   procedure Synthetic_Sweep (Scale : Real; Expect_Fit : Boolean) is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N       : constant := 6;
-      Levels  : constant Real_Array := [0.05, -0.05, 0.1, -0.1, 0.2, -0.2];
+      Levels  : constant Real_Array := [0.05 * Scale, -0.05 * Scale, 0.1 * Scale, -0.1 * Scale, 0.2 * Scale, -0.2 * Scale];
       Cells   : constant := 7;
       Frames  : constant Positive := 1 + N * Levels'Length + Cells;
       Columns : constant := 16;
@@ -759,7 +845,7 @@ package body Driver.Robot.Tests is
                   R := R / 2;
                   C := C / 2;
                end loop;
-               Changes (1 + N * Levels'Length + Row, J) := (if Bits mod 2 = 0 then 0.05 else -0.05);
+               Changes (1 + N * Levels'Length + Row, J) := (if Bits mod 2 = 0 then 0.05 else -0.05) * Scale;
             end;
          end loop;
       end loop;
@@ -801,7 +887,12 @@ package body Driver.Robot.Tests is
          Found  : Fit.Lens;
          Report : Fit.Fit_Report;
       begin
-         Fit.Fit (Changes, [1 .. N => 0.01], All_Seen (1 .. Seen), 640, 480, Joints, Found, Report);
+         Fit.Fit (Changes, [1 .. N => 0.01 * Scale], All_Seen (1 .. Seen), 640, 480, Joints, Found, Report);
+         if not Expect_Fit then
+            Check (not Report.Fitted, "a sweep of" & Real'Image (0.2 * Scale) & " rad at most was fitted, focal"
+                   & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy));
+            return;
+         end if;
          Check (Report.Fitted, "the fit did not succeed: stage" & Report.Stage'Image & ", "
                 & Ada.Strings.Unbounded.To_String (Report.Why));
          if not Report.Fitted then
@@ -854,15 +945,31 @@ package body Driver.Robot.Tests is
          Driver.Log.Line (Driver.Log.Robot, "kinematics test: focal " & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy)
                           & ", median " & Real'Image (Report.Median_Px) & " px over" & Report.Used'Image & " sightings");
       end;
+   end Synthetic_Sweep;
+
+   procedure Kinematics_Of_A_Synthetic_Arm is
+   begin
+      Synthetic_Sweep (1.0, Expect_Fit => True);
    end Kinematics_Of_A_Synthetic_Arm;
+
+   --  The same arm swept a five-hundredth as far: the image moves by less
+   --  than its noise, and the fit must say it cannot tell.
+   procedure Kinematics_Of_A_Small_Sweep is
+   begin
+      Synthetic_Sweep (0.002, Expect_Fit => False);
+   end Kinematics_Of_A_Small_Sweep;
 
    procedure Register is
    begin
+      Driver.Tests.Register ("robot.kinematics.small", "a sweep too small to determine the lens and the joints is "
+                             & "reported fitted", Kinematics_Of_A_Small_Sweep'Access);
       Driver.Tests.Register ("robot.kinematics", "the arm's axes, the eye's lens or the eye's pose at a new pose come "
                              & "out wrong from noisy matches of single-joint and Hadamard keyframes",
                              Kinematics_Of_A_Synthetic_Arm'Access);
       Driver.Tests.Register ("robot.boot", "the boot does not finish, deadlocks with the main loop, or does not "
                              & "recognize the rig's groups when it pushes them itself", Boot_From_Zero'Access);
+      Driver.Tests.Register ("robot.steps.jitter", "a push never ends when the held reading jitters more than it did at "
+                             & "rest", Step_Ends_Despite_New_Jitter'Access);
       Driver.Tests.Register ("robot.steps", "a free push that falls as short as free pushes do is called blocked, a "
                              & "push stopped by an obstacle or never answered is called free, or the wait for an "
                              & "answer is not the measured delay", Step_Responses'Access);
@@ -872,6 +979,8 @@ package body Driver.Robot.Tests is
                              & "is credited with a lockstep partner's eye, a reaction to another push is taken for "
                              & "a push, the tail of a slow response is taken for rest, or the step an eye can see is "
                              & "misjudged", Roles_Of_A_Synthetic_Body'Access);
+      Driver.Tests.Register ("robot.unprobed", "a group never pushed on its own is given a role from what moved "
+                             & "with it", Unprobed_Group_Stays_Unclassified'Access);
       Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "
                              & "given noise zero, so its jitter passes for motion), a hold is taken for a push, or a "
                              & "push never ends", Channel_Noise_And_Pushes'Access);

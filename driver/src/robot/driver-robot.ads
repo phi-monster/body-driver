@@ -86,6 +86,7 @@ package Driver.Robot is
    --  seconds, during which the robot holds.
 
    function Booted (M : Model) return Boolean;
+   --  The kinematics of every arm that carries an eye are measured.
 
    function Role (M : Model; G : Group_Id) return Group_Role;
 

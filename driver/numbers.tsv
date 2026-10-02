@@ -812,6 +812,7 @@ driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P
 driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	Sqrt (2.0) * Reading_Noise (M, R.Group, C)));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-kinematics-fit.adb	& "" & Real'Image (C) & "" & Real'Image (Sqrt (Variance (O + 5))));	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),	2	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),	2	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),	3	structure	the positions of the parameters in the vector
@@ -825,6 +826,7 @@ driver-robot-kinematics-fit.adb	A := A - Ln (2.0) / 2.0;	2.0	numerics	half an oc
 driver-robot-kinematics-fit.adb	A := A - Ln (2.0) / 2.0;	2.0	numerics	half an octave each way when a single ratio brackets the focal length; the bracketing widens it as needed
 driver-robot-kinematics-fit.adb	A, B : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	All_R : Real_Access := new Real_Array (1 .. 2 * S);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	Anchor : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	Anchor : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	B := B + Ln (2.0) / 2.0;	2.0	numerics	half an octave each way when a single ratio brackets the focal length; the bracketing widens it as needed
 driver-robot-kinematics-fit.adb	B := B + Ln (2.0) / 2.0;	2.0	numerics	half an octave each way when a single ratio brackets the focal length; the bracketing widens it as needed
@@ -840,6 +842,7 @@ driver-robot-kinematics-fit.adb	D : constant Real := 1.0 + L.K1 * R2 + L.K2 * R2
 driver-robot-kinematics-fit.adb	Directions : constant Natural := 2562;	2562	numerics	the directions the first search scans, as many as an icosahedron split four times; only where the later fits start depends on it
 driver-robot-kinematics-fit.adb	Directions : constant Natural := 2562;	2562	numerics	the directions the table's normal is searched over, the lattice the fit scans; only where the refinement starts depends on it
 driver-robot-kinematics-fit.adb	Dp (T) := Dp (T) + H * Real'Max (1.0, abs Depth (T));	1.0	numerics	the scale floor of a finite difference
+driver-robot-kinematics-fit.adb	E (P) := 1.0;	1.0	math	a unit vector of the identity
 driver-robot-kinematics-fit.adb	F : constant Real := 1.0 / Sqrt (Sum / Real (Frames));	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
@@ -873,6 +876,9 @@ driver-robot-kinematics-fit.adb	Lens0 : Lens := (Fx | Fy => 1.0, Cx => Real (Wid
 driver-robot-kinematics-fit.adb	Lens0 : Lens := (Fx | Fy => 1.0, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, others => 0.0);	2.0	structure	the principal point starts at the image centre
 driver-robot-kinematics-fit.adb	Lens0 : Lens := (Fx | Fy => 1.0, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, others => 0.0);	2.0	structure	the principal point starts at the image centre
 driver-robot-kinematics-fit.adb	M_A (P_Count + 1, Anchor) := 1.0;	1.0	structure	the anchor joint's row
+driver-robot-kinematics-fit.adb	O : constant Natural := 6 + 5 * (J - 1);	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	O : constant Natural := 6 + 5 * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	O : constant Natural := 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 3 * (J - 1);	3	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the vector
@@ -896,6 +902,8 @@ driver-robot-kinematics-fit.adb	R (2 * K) := V - Sg.V;	2	structure	two residuals
 driver-robot-kinematics-fit.adb	R0, Rn : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Ray (Lx, Kept (I).U, Kept (I).V), (Lx.Fx + Lx.Fy) / 2.0);	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	Ray (Lx, Sight (I).U, Sight (I).V), (Lx.Fx + Lx.Fy) / 2.0);	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
+driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Report.Stage := 1;	1	structure	the stages' numbers
 driver-robot-kinematics-fit.adb	Report.Stage := 2;	2	structure	the stages' numbers
 driver-robot-kinematics-fit.adb	Report.Stage := 3;	3	structure	the stages' numbers
@@ -903,11 +911,28 @@ driver-robot-kinematics-fit.adb	Report.Stage := 4;	4	structure	the stages' numbe
 driver-robot-kinematics-fit.adb	Report.Stage := 5;	5	structure	the stages' numbers
 driver-robot-kinematics-fit.adb	Rho : Real_Array (1 .. N) := [others => 1.0];	1.0	structure	distances before they are measured
 driver-robot-kinematics-fit.adb	Rn := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Sm (P, P) := A (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
 driver-robot-kinematics-fit.adb	Spread : constant Real := Sqrt (Real'Max (0.0, ((A11 - A22) / 2.0) ** 2 + A12 ** 2));	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	T : constant Positive := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	T : constant Positive := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	Tilt : constant Real := Sqrt (Variance (O + 1) + Variance (O + 2));	2	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (O + 1, Ro + 1) := 1.0;	1.0	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (O + 2 + D, Ro + 3) := E1 (D);	2	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (O + 2 + D, Ro + 3) := E1 (D);	3	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (O + 2 + D, Ro + 4) := E2 (D);	2	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (O + 2 + D, Ro + 4) := E2 (D);	4	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (O + 2, Ro + 2) := 1.0;	1.0	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (O + 2, Ro + 2) := 1.0;	2	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (O + 2, Ro + 2) := 1.0;	2	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (O + 6, Ro + 5) := 1.0;	1.0	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (O + 6, Ro + 5) := 1.0;	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (O + 6, Ro + 5) := 1.0;	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Tm (P, P) := 1.0;	1.0	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Turn : constant Real := Arccos (Real'Min (1.0, Dot (Next, Normal)));	1.0	math	a weighted mean, a cosine bound
+driver-robot-kinematics-fit.adb	Variance : Real_Array (1 .. 6 + 5 * N) := [others => Real'Last];	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Variance : Real_Array (1 .. 6 + 5 * N) := [others => Real'Last];	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Vx := 1.0;	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	Vy := 1.0;	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	Wt (I) := (if Ga (I) ** 2 + Gb (I) ** 2 > 0.0 then 1.0 / (Ga (I) ** 2 + Gb (I) ** 2) else 0.0);	1.0	math	the algebraic residual normalized
@@ -927,24 +952,28 @@ driver-robot-kinematics-fit.adb	Z : constant Real := 1.0 - 2.0 * (Real (I) - 0.5
 driver-robot-kinematics-fit.adb	Z : constant Real := 1.0 - 2.0 * (Real (I) - 0.5) / Real (Directions);	0.5	math	the Fibonacci lattice on the sphere
 driver-robot-kinematics-fit.adb	Z : constant Real := 1.0 - 2.0 * (Real (I) - 0.5) / Real (Directions);	2.0	math	the Fibonacci lattice on the sphere
 driver-robot-kinematics-fit.adb	Z : constant Real := 1.0 - 2.0 * (Real (I) - 0.5) / Real (Directions);	2.0	math	the Fibonacci lattice on the sphere
+driver-robot-kinematics-fit.adb	and then (Driver.Conventions.Z * Tilt >= Ada.Numerics.Pi / 2.0	2.0	math	a quarter turn
 driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Sigma)	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I), Sigma);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	else Driver.Conventions.Z * (abs Z_Value - 0.5 * Driver.Conventions.Z));	0.5	math	the Huber function
 driver-robot-kinematics-fit.adb	elsif N > 1 then	1	structure	cells move several joints
 driver-robot-kinematics-fit.adb	exit when 2 * Used <= Count + Tracks;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	exit when B - A <= Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs A);	1.0	numerics	the scale floor of a finite difference and of a bracket width
+driver-robot-kinematics-fit.adb	for D in 1 .. 3 loop	3	math	three coordinates
 driver-robot-kinematics-fit.adb	for Frame in 2 .. Frames loop	2	structure	the keyframes and joints after the first
 driver-robot-kinematics-fit.adb	for Frame in 2 .. Frames loop	2	structure	the keyframes and joints after the first
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for J in 2 .. N loop	2	structure	the keyframes and joints after the first
+driver-robot-kinematics-fit.adb	for P in 1 .. 6 loop	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	for Pass in 1 .. 2 loop	2	structure	the side solved once unweighted, once weighted to Sampson residuals
 driver-robot-kinematics-fit.adb	if Count < 4 then	4	math	four points determine a plane with a spread
 driver-robot-kinematics-fit.adb	if N = 0 or else S = 0 or else Frames < 2 then	2	structure	the keyframes and joints after the first
 driver-robot-kinematics-fit.adb	if N > 1 and then P_Count > 0 then	1	structure	cells move several joints
 driver-robot-kinematics-fit.adb	if Pass = 1 then	1	structure	the side solved once unweighted, once weighted to Sampson residuals
 driver-robot-kinematics-fit.adb	if Tracks < 3 then	3	math	three points determine a plane
+driver-robot-kinematics-fit.adb	or else not Driver.Uncertain.Significant (C, Sqrt (Variance (O + 5))))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	return Sigma / (2.0 * Sqrt (Real (Count)) * F);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	return [X, Y, 1.0];	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.ads	C : Real := 1.0;	1.0	structure	a joint turns one radian per reading unit until fitted

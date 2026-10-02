@@ -1,3 +1,4 @@
+with Driver.Conventions;
 with Ada.Containers;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Distributions;
@@ -260,6 +261,7 @@ package body Driver.Robot.Channels is
             Active : Boolean := False;
             Moved  : Boolean := False;
             Onset  : Natural := 0;
+            Length : Real := 0.0;
          begin
             if M.Groups (G).Commandable then
                --  The response delay: the longest wait from a push's start to
@@ -285,6 +287,14 @@ package body Driver.Robot.Channels is
                   Active := True;
                   Onset := B;
                   Moved := Moving (M, G, B);
+                  --  How far the push asks: its target from the reading before.
+                  Length := 0.0;
+                  if B > 0 and then Has_Reading (M, G, B - 1) and then Has_Target (M, G, B) then
+                     for C in 1 .. M.Groups (G).Size loop
+                        Length := Length + (Target (M, G, B, C) - Reading (M, G, B - 1, C)) ** 2;
+                     end loop;
+                  end if;
+                  Length := Sqrt (Length);
                elsif Active then
                   --  Until the reading first moves the push waits out the
                   --  delay; after that its response lasts, overshoot and all,
@@ -295,7 +305,7 @@ package body Driver.Robot.Channels is
                      if not Moved and then B - Onset >= Delay_Beats then
                         Active := False;
                      end if;
-                  elsif not Moving (M, G, B) then
+                  elsif not Moving (M, G, B) or else Converged (M, G, B, Length) then
                      Active := False;
                   end if;
                end if;
@@ -355,6 +365,18 @@ package body Driver.Robot.Channels is
          end;
       end loop;
    end Measure;
+
+   function Converged (M : Model; G : Group_Id; Beat : Natural; Length : Real) return Boolean is
+      Sum : Real := 0.0;
+   begin
+      if Beat = 0 or else not Has_Reading (M, G, Beat) or else not Has_Reading (M, G, Beat - 1) then
+         return False;
+      end if;
+      for C in 1 .. M.Groups (G).Size loop
+         Sum := Sum + Change (M, G, Beat, C) ** 2;
+      end loop;
+      return Sqrt (Sum) < Driver.Conventions.Unchanged_Fraction * Length;
+   end Converged;
 
    function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean is
    begin

@@ -87,6 +87,8 @@ package Driver.Robot.Kinematics.Fit is
       Median_Px  : Real := 0.0;        --  their median Sampson residual
       Sigma_Px   : Real := 0.0;        --  the noise measured from them
       Flipped    : Boolean := False;   --  every translation changed sign to put the points in front
+      Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
+      Focal_Sigma : Real := Real'Last; --  the uncertainty of the focal length across
    end record;
 
    procedure Fit
