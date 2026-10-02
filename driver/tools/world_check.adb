@@ -634,10 +634,17 @@ procedure World_Check is
             end loop;
          end;
       end loop;
-      --  Cells as large as a triangle is on the average: a triangle then lies
-      --  in a few cells, and a cell holds a few triangles. (Only the search's
-      --  speed depends on it; the distance it finds is exact.)
-      S.Size := Real'Max (Extent / Real (3 * S.Triangles.Length), Real'Model_Small);
+      --  Cells as large as a triangle is on the average, but no more of them
+      --  across the mesh's box than its triangles: a fine mesh of millions
+      --  would otherwise give a search millions of empty cells to look into.
+      --  (Only the search's speed depends on it; the distance it finds is exact.)
+      declare
+         Side : constant Real :=
+           (Real'Max (S.High (1) - S.Low (1), Real'Model_Small) * Real'Max (S.High (2) - S.Low (2), Real'Model_Small)
+            * Real'Max (S.High (3) - S.Low (3), Real'Model_Small) / Real (S.Triangles.Length)) ** (1.0 / 3.0);
+      begin
+         S.Size := Real'Max (Real'Max (Extent / Real (3 * S.Triangles.Length), Side), Real'Model_Small);
+      end;
       for N in S.Triangles.First_Index .. S.Triangles.Last_Index loop
          declare
             T  : constant Triangle := S.Triangles (N);
@@ -704,23 +711,46 @@ procedure World_Check is
             Hi : constant Cell := Cell_Of (S, P + [Reach, Reach, Reach]);
             All_In : constant Boolean :=
               (for all A in 1 .. 3 => P (A) - Reach <= S.Low (A) and then P (A) + Reach >= S.High (A));
+            I0 : constant Integer := Integer'Max (Lo.I, First.I);
+            I1 : constant Integer := Integer'Min (Hi.I, Final.I);
+            J0 : constant Integer := Integer'Max (Lo.J, First.J);
+            J1 : constant Integer := Integer'Min (Hi.J, Final.J);
+            K0 : constant Integer := Integer'Max (Lo.K, First.K);
+            K1 : constant Integer := Integer'Min (Hi.K, Final.K);
+            --  The cube's cells, or the occupied ones when there are fewer.
+            Spanned : constant Real :=
+              Real (Integer'Max (0, I1 - I0 + 1)) * Real (Integer'Max (0, J1 - J0 + 1)) * Real (Integer'Max (0, K1 - K0 + 1));
          begin
             Best := Real'Last;
-            for I in Integer'Max (Lo.I, First.I) .. Integer'Min (Hi.I, Final.I) loop
-               for J in Integer'Max (Lo.J, First.J) .. Integer'Min (Hi.J, Final.J) loop
-                  for K in Integer'Max (Lo.K, First.K) .. Integer'Min (Hi.K, Final.K) loop
-                     declare
-                        Position : constant Cell_Maps.Cursor := S.Cells.Find ((I, J, K));
-                     begin
-                        if Cell_Maps.Has_Element (Position) then
-                           for N of S.Cells.Constant_Reference (Position) loop
-                              Best := Real'Min (Best, abs (P - Closest_On (S.Triangles (N), P)));
-                           end loop;
-                        end if;
-                     end;
+            if Spanned > Real (S.Cells.Length) then
+               for Position in S.Cells.Iterate loop
+                  declare
+                     C : constant Cell := Cell_Maps.Key (Position);
+                  begin
+                     if C.I in I0 .. I1 and then C.J in J0 .. J1 and then C.K in K0 .. K1 then
+                        for N of S.Cells.Constant_Reference (Position) loop
+                           Best := Real'Min (Best, abs (P - Closest_On (S.Triangles (N), P)));
+                        end loop;
+                     end if;
+                  end;
+               end loop;
+            else
+               for I in I0 .. I1 loop
+                  for J in J0 .. J1 loop
+                     for K in K0 .. K1 loop
+                        declare
+                           Position : constant Cell_Maps.Cursor := S.Cells.Find ((I, J, K));
+                        begin
+                           if Cell_Maps.Has_Element (Position) then
+                              for N of S.Cells.Constant_Reference (Position) loop
+                                 Best := Real'Min (Best, abs (P - Closest_On (S.Triangles (N), P)));
+                              end loop;
+                           end if;
+                        end;
+                     end loop;
                   end loop;
                end loop;
-            end loop;
+            end if;
             exit when Best <= Reach or else All_In;
             Reach := 2.0 * Reach;
          end;
