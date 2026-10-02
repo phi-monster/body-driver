@@ -644,3 +644,29 @@ driver-wire.adb	when 0 | 1 | 2 =>	1	format	WebSocket framing and handshake (RFC 
 driver-wire.adb	when 0 | 1 | 2 =>	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	when 8 =>	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	when 9 =>	9	format	WebSocket framing and handshake (RFC 6455)
+driver-world-cameras.adb	Beside : constant Ray_Estimate := C.Ray ((U => Px.U + 1.0, V => Px.V));	1.0	structure	the next pixel along the row
+driver-world-regions.adb	Diagonal : constant Real := Sqrt (2.0);	2.0	math	a diagonal step between pixels is the square root of two
+driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C + 1, R) + 1.0, At_Pixel (C, R + 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
+driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C + 1, R) + 1.0, At_Pixel (C, R + 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
+driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C - 1, R) + 1.0, At_Pixel (C, R - 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
+driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C - 1, R) + 1.0, At_Pixel (C, R - 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
+driver-world-regions.adb	return (U => Real (Best mod W) + 0.5, V => Real (Best / W) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-regions.adb	return (U => Real (Best mod W) + 0.5, V => Real (Best / W) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-tracking.adb	+ 1.0 / Real (Count_Ref))))	1.0	math	the variance of a mean of n frames is the frame's variance over n
+driver-world-tracking.adb	K := K + 2;	2	structure	two coordinates per round trip
+driver-world-tracking.adb	Mad_Efficiency : constant := 0.367_5;	0.367_5	statistics	asymptotic efficiency of the median absolute deviation for Gaussian data
+driver-world-tracking.adb	Points (Around) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-tracking.adb	Points (Around) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-tracking.adb	Points (Own) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-tracking.adb	Points (Own) := (U => Real (T.Column_0 + C) + 0.5, V => Real (T.Row_0 + R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-tracking.adb	RGB (RGB'First + Driver.Bytes.Offset (3 * ((Row_0 + R) * W + Column_0 + C) + K - 1));	3	format	three bytes per RGB pixel
+driver-world-tracking.adb	Result (Driver.Bytes.Offset (3 * (R * Columns + C) + K)) :=	3	format	three bytes per RGB pixel
+driver-world-tracking.adb	Result : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset (3 * Columns * Rows));	3	format	three bytes per RGB pixel
+driver-world-tracking.adb	Sqrt (Ref_Variance (I) * (1.0 / Real (Driver.Pixels.Frames (Latest_Two))	1.0	math	the variance of a mean of n frames is the frame's variance over n
+driver-world-tracking.adb	Trips (K + 2) := A.Back.V - P.V;	2	structure	two coordinates per round trip
+driver-world-tracking.adb	Trips : Real_Array (1 .. 2 * Still_Found);	2	structure	two coordinates per round trip
+driver-world-tracking.adb	Vector_Gate (2, Natural (Real'Floor (Mad_Efficiency * Real (2 * Still_Found))));	2	structure	an image displacement has two components
+driver-world-tracking.adb	Vector_Gate (2, Natural (Real'Floor (Mad_Efficiency * Real (2 * Still_Found))));	2	structure	an image displacement has two components
+driver-world-tracking.adb	for K in 1 .. 3 loop	3	format	three bytes per RGB pixel
+driver-world-tracking.adb	if Driver.Pixels.Frames (T.Reference) >= 2 and then not T.Older.Is_Empty and then Changed (T) then	2	statistics	a pixel's own variance needs two frames
+driver-world.adb	(Tracks.Segment_On (Here.Track), True, Around, [1 => (At_Pixel => At_Point, On => True)], Beat);	1	structure	one point prompts the segmentation
