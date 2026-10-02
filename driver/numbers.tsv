@@ -17,6 +17,23 @@ driver-base64.adb	Sextet : constant := 2 ** 6;	2	format	each base64 character ca
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	2	format	a partial group of three bytes still takes four characters
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	3	format	base64 takes three bytes at a time
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	4	format	three bytes make four characters
+driver-brain-keyboard.adb	Rule ("");	"0	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"1	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Sentence_Rule : constant String := "";	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-live.adb	Half : constant := 0.5;	0.5	format	the centre of a pixel is half a pixel from its corner (Driver.Images coordinates)
+driver-brain-pictures.adb	Channels : constant := 3;	3	format	bytes per RGB pixel
+driver-brain-runaway.adb	for Length in 1 .. (N - S.First_Index) / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the words read
+driver-brain-runaway.adb	for Length in 1 .. L / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the lines read
+driver-brain-runaway.adb	for Length in 1 .. Natural (Slot.Length) / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the units read
+driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
+driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
+driver-brain-service.adb	& "";	"0	format	box edges are thousandths of the picture, from 0
+driver-brain-service.adb	& "";	"1000	format	box edges are thousandths of the picture, up to 1000
+driver-brain-service.adb	& Driver.Log.Image (Real (A.Seconds), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:197)
+driver-brain-service.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:284)
+driver-brain-service.adb	Thousandths : constant := 1000.0;	1000.0	format	boxes are given in thousandths of the picture (docs/brain-service.md)
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
 driver-clock.adb	function Nanoseconds_Of (S : Duration) return Long_Long_Integer is (Long_Long_Integer (Real (S) * 1.0e9));	1.0e9	format	nanoseconds per second (the recording format counts nanoseconds)
@@ -427,7 +444,7 @@ driver-observations.adb	if S'Length = 3 and then S (S'First + 2) = 3 and then S 
 driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
 driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
 driver-observations.ads	Key_Separator : constant Character := Character'Val (31);	31	format	ASCII unit separator
-driver-pixels.adb	(if V.Count > 1 then V.Sums.Constant_Reference.Element (K) / Real (V.Count - 1) else 0.0);	1	statistics	a sample variance needs two frames
+driver-pixels.adb	(if Frames > 1 then Sum / Real (Frames - 1) else 0.0);	1	statistics	a sample variance needs two frames
 driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	1.0	math	the variance of a uniform step of one level is 1/12
 driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	12.0	math	the variance of a uniform step of one level is 1/12
 driver-protocol.adb	Pairs : Natural := 3;	3	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
@@ -494,13 +511,87 @@ driver-robot-hand-touch.adb	E : Equations (Presses => Presses'Length, K => 3);	3
 driver-robot-hand-touch.adb	E.Plane (I, 1) := -1.0;	1.0	math	a surface raised by its offset error lowers the tip's height by the same amount
 driver-robot-hand-touch.adb	Found : Surface_Index (Presses'Range) := [others => 1];	1	structure	surfaces are numbered from one
 driver-robot-hand-touch.adb	Next : constant Real := Real'Max (1.0, Noise * (Res * Res) / Real (Dof));	1.0	statistics	the presses' noise is never below what the arm's pose predicts
+driver-robot-hand-aims.adb	(if Size > Real'Model_Epsilon then Exp (Arctan (Size, Now * Goal) * ((1.0 / Size) * Axis))	1.0	math	a vector over its length is its unit vector
+driver-robot-hand-frames.adb	Across : constant Real := (Turn (1, 1) + Turn (2, 2) + Turn (3, 3) - U * (Turn * U)) / 2.0;	2.0	math	the mean of the turn's variance about the two axes across the line
+driver-robot-hand-lobes.adb	+ 1.0 / Real (Li.Count_There) + 1.0 / Real (Lj.Count_There));	1.0	math	the variance of a mean of n pixels is the pixel variance over n
+driver-robot-hand-lobes.adb	+ 1.0 / Real (Li.Count_There) + 1.0 / Real (Lj.Count_There));	1.0	math	the variance of a mean of n pixels is the pixel variance over n
+driver-robot-hand-lobes.adb	Best := Real'Min (Best, Sqrt ((Real (C) + 0.5 - P.U) ** 2 + (Real (R) + 0.5 - P.V) ** 2));	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-lobes.adb	Best := Real'Min (Best, Sqrt ((Real (C) + 0.5 - P.U) ** 2 + (Real (R) + 0.5 - P.V) ** 2));	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-lobes.adb	Diagonal : constant Real := Sqrt (2.0);	2.0	math	a diagonal step between pixels is the square root of two
+driver-robot-hand-lobes.adb	Displacement_Gate => Vector_Gate (2),	2	structure	an image displacement has two components
+driver-robot-hand-lobes.adb	Displacement_Gate => Vector_Gate (2, Dof),	2	structure	an image displacement has two components
+driver-robot-hand-lobes.adb	Dist.Replace_Element (Index (W, C, R), 0.0);	0.0	math	where the lobe is attached its distance to the attachment is zero
+driver-robot-hand-lobes.adb	Dof : constant Natural := Natural (Real'Floor (Mad_Efficiency * Real (2 * Count)));	2	structure	two coordinates per correspondence
+driver-robot-hand-lobes.adb	Family : constant Gate := Vector_Gate (2, Noise.Displacement.Degrees_Of_Freedom, Tests => Tests);	2	structure	an image displacement has two components
+driver-robot-hand-lobes.adb	Mad_Efficiency : constant := 0.367_5;	0.367_5	statistics	asymptotic efficiency of the median absolute deviation for Gaussian data
+driver-robot-hand-lobes.adb	Moves, Trips : Real_Array (1 .. 2 * Count);	2	structure	two coordinates per correspondence
+driver-robot-hand-lobes.adb	Pixel_Variance : constant Real := Noise.Displacement.Sigma ** 2 + 1.0 / 12.0;	1.0	math	the variance of a uniform of unit width is 1/12: where in its pixel a point lies
+driver-robot-hand-lobes.adb	Pixel_Variance : constant Real := Noise.Displacement.Sigma ** 2 + 1.0 / 12.0;	12.0	math	the variance of a uniform of unit width is 1/12: where in its pixel a point lies
+driver-robot-hand-lobes.adb	Round_Trip_Gate => Vector_Gate (2));	2	structure	an image displacement has two components
+driver-robot-hand-lobes.adb	Round_Trip_Gate => Vector_Gate (2, Dof));	2	structure	an image displacement has two components
+driver-robot-hand-lobes.adb	Step : constant Real := (if Dr /= 0 and then Dc /= 0 then Diagonal else 1.0);	1.0	math	a step between side neighbours is one pixel
+driver-robot-hand-lobes.adb	Su := Su + Real (C) + 0.5;	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-lobes.adb	Sv := Sv + Real (R) + 0.5;	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-lobes.adb	Variance := Pixel_Variance * (1.0 / Real (L.Count_Here) + 1.0 / Real (L.Count_There));	1.0	math	the variance of a mean of n pixels is the pixel variance over n
+driver-robot-hand-lobes.adb	Variance := Pixel_Variance * (1.0 / Real (L.Count_Here) + 1.0 / Real (L.Count_There));	1.0	math	the variance of a mean of n pixels is the pixel variance over n
+driver-robot-hand-lobes.adb	Variance := Variance + Pixel_Variance * (1.0 / Real (Li.Count_Here) + 1.0 / Real (Lj.Count_Here)	1.0	math	the variance of a mean of n pixels is the pixel variance over n
+driver-robot-hand-lobes.adb	Variance := Variance + Pixel_Variance * (1.0 / Real (Li.Count_Here) + 1.0 / Real (Lj.Count_Here)	1.0	math	the variance of a mean of n pixels is the pixel variance over n
+driver-robot-hand-lobes.adb	elsif Natural (Lobes.Length) = 1 and then Width (Attached) > 0 and then Count (Attached) > 0 then	1	structure	a single lobe closes against what it is attached to
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	if Natural (Lobes.Length) >= 2 then	2	structure	lobes close towards one another when there are two or more
+driver-robot-hand-measure.adb	By := 2.0 * By;	2.0	numerics	a search for an unknown distance grows its step geometrically, doubling
+driver-robot-hand-measure.adb	Lean : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;	4.0	math	half-way between away from the other lobes and across from them
+driver-robot-hand-measure.adb	Offset := 2.0 * Offset;	2.0	numerics	a search for an unknown distance grows its step geometrically, doubling
+driver-robot-hand-measure.adb	Tilt := 2.0 * Tilt;	2.0	numerics	a search for an unknown size grows geometrically, doubling
+driver-robot-hand-measure.adb	then Driver.Robot.Hand.Aims.Spread (Sight, [1 => R.Lobes (Lobe).Sights (Other_End).Ray.Direction.Unit_Vector])	1	structure	the one other line of sight of a lone lobe
+driver-robot-hand-measure.adb	while Tilt < Ada.Numerics.Pi / 2.0 loop	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
+driver-robot-hand-presses.adb	- U * (Step.Covariance * U)) / 2.0);	2.0	math	the mean of the variance about the two axes across the move
+driver-robot-hand-presses.adb	U : constant Vec3 := (1.0 / Length) * Step.Mean;	1.0	math	a vector over its length is its unit vector
+driver-robot-hand-sweep.adb	Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-sweep.adb	Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-sweep.adb	Still : Correspondence_Array (1 .. 2 * Still_Count);	2	structure	each unchanged pixel is matched both ways round
+driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses, Known_Sights (T), [1 => (Measured => False)]);	1	structure	a hand's presses are fitted on one surface
+driver-robot-hand-tips.adb	Presses (N) := (Tool => K.Event.Tool, Sight => Index_Of (T, K.Lobe, K.Opening), Surface => 1);	1	structure	a hand's presses are fitted on one surface
+driver-robot-hand-tips.adb	Spread := Spread + (Across * Across) / 2.0;	2.0	math	the mean of the squared angle about the two axes across the direction
+driver-robot-hand-touch.adb	A (R, J + F) := -1.0;	1.0	math	a higher surface lowers the height by as much
+driver-robot-hand-touch.adb	Base (Row + 1, CF) := 1.0 / P.Offset_Sigma;	1.0	math	a prior's row is whitened by its own sigma
+driver-robot-hand-touch.adb	Base (Row + 2, CF + 1) := 1.0 / L11;	1.0	math	the inverse of the tilt covariance's Cholesky factor
+driver-robot-hand-touch.adb	Base (Row + 2, CF + 1) := 1.0 / L11;	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Base (Row + 3, CF + 1) := -L21 / (L11 * L22);	3	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	1.0	math	the inverse of the tilt covariance's Cholesky factor
+driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	3	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Base (Row, CF + 2) := -(Nominal (F).Tangent_2 * (Y - Nominal (F).Centre));	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Base (Row, CF) := -1.0;	1.0	math	a higher surface lowers the height by as much
+driver-robot-hand-touch.adb	C13 : constant Real := Solution_Cov (CF, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Next : constant Real := Real'Max (1.0, Scale * (Res * Res) / Real (Dof));	1.0	statistics	the noise is never taken below the one predicted
 driver-robot-hand-touch.adb	Noise : Real := 1.0;	1.0	statistics	the presses' noise starts at what the arm's pose predicts
+driver-robot-hand-touch.adb	Noise_Dof := (if Scale > 1.0 then Dof else 0);	1.0	statistics	the predicted noise, not raised by the scatter
+driver-robot-hand-touch.adb	Nominal (F) := Moved (Nominal (F), Solution_Q (CF), Solution_Q (CF + 1), Solution_Q (CF + 2));	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Pinned (Rows + C, C) := 1.0;	1.0	math	an unknown nothing bears on is pinned by a unit row
 driver-robot-hand-touch.adb	Plane_Unknowns : constant := 3;	3	structure	a surface's error is its offset and its two tilts
-driver-robot-hand-touch.adb	S : Solution (K => 1);	1	structure	a tip on a known line of sight has one unknown, its distance
-driver-robot-hand-touch.adb	S : Solution (K => 3);	3	structure	a free tip has three unknowns, its coordinates
-driver-robot-hand-touch.adb	S.Degrees_Of_Freedom := (if Noise > 1.0 then Dof else 0);	1.0	statistics	the scale was measured when it exceeds the predicted noise
-driver-robot-hand-touch.adb	Scale : Real := 1.0 / Noise;	1.0	statistics	the predicted noise in units of the measured scale
-driver-robot-hand-touch.adb	Solve (E, Presses, Surfaces, [1 => 0.0], S, Stopped, Sunk);	1	structure	the single unknown of a tip on a line of sight
+driver-robot-hand-touch.adb	Point_Unknowns : constant := 3;	3	structure	a point has three coordinates
+driver-robot-hand-touch.adb	S : constant Real := (if Press_Of_Row (R) > 0 then Sigma (R) * Sqrt (Scale) else 1.0);	1.0	math	a prior's rows are whitened already
+driver-robot-hand-touch.adb	Scale : Real := 1.0;	1.0	statistics	the noise starts at the one predicted
+driver-robot-hand-touch.adb	Sigma : Real_Vector (1 .. Rows) := [others => 1.0];	1.0	math	a prior's rows are whitened already
+driver-robot-hand-touch.adb	T12 : constant Real := Solution_Cov (CF + 1, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	T22 : constant Real := Solution_Cov (CF + 2, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	T22 : constant Real := Solution_Cov (CF + 2, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	W : constant Positive := (if As = On_Sight then 1 else Point_Unknowns);	1	structure	a tip on its line has one unknown, the distance along it
+driver-robot-hand-touch.adb	Without : Real := 1.0 / Scale;	1.0	statistics	the others' noise in units of the predicted one
 driver-robot-hand-touch.adb	if Chosen (I) and then Significant (Deleted (I), 1.0, Dof_Of (I))	1.0	math	a residual already in units of its own sigma
 driver-robot-hand-touch.adb	if Dof > 1 and then (Chi - Res (J) ** 2 / Free) / Real (Dof - 1) > Scale then	1	statistics	the others need a degree of freedom left to measure their scatter
 driver-robot-hand-touch.adb	if Presses'Length < 2 or else not Known (Origin) or else Direction.Sigma >= Real'Last then	2	structure	one press to fix the distance and one to check it
@@ -538,6 +629,23 @@ driver-robot.adb	S.Du.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure
 driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
 driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
 driver-robot.adb	if M.Beats >= 2 * M.Graph_Evidence then	2	numerics	re-estimating when the evidence doubles keeps the number of re-estimates logarithmic in the stream
+driver-robot-hand-touch.adb	if Dof > 1 and then (Chi - Res (R) ** 2 / Free) / Real (Dof - 1) > Without then	1	statistics	leaving a press out leaves one degree of freedom less
+driver-robot-hand-touch.adb	then Moved (Prior (F).Plane, Correction (Plane_Unknowns * F - 2), Correction (Plane_Unknowns * F - 1),	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-views.adb	(Driver.Pixels.Frames (V.Frames) >= 2 and then Driver.Pixels.Frames (Before.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
+driver-robot-hand-views.adb	(Driver.Pixels.Frames (V.Frames) >= 2 and then Driver.Pixels.Frames (Before.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
+driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + C - 1);	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1);	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1);	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-hand-views.adb	Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-hand-views.adb	and then Significant (A (I) - B (B'First + I - A'First), Sqrt (2.0) * Noise (Noise'First + I - A'First))	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-hand-views.adb	if Driver.Pixels.Frames (V.Frames) >= 2 then	2	statistics	a pixel's own variance needs two frames
+driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
+driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
+driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message
+driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message
+driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
+driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
+driver-robot-hand.adb	Sqrt (2.0) * Reading_Noise (M, R.Group, C)));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-stats.adb	Child := 2 * Root;	2	math	heap sort and median index arithmetic
 driver-stats.adb	Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
 driver-stats.adb	Gaussian_MAD_To_Sigma : constant := 1.482_602_218_505_602;	1.482_602_218_505_602	statistics	1 / Phi^-1 (3/4): MAD to sigma for Gaussian data

@@ -149,7 +149,9 @@ package body Driver.Services is
             H : constant Driver.Http.Response :=
               Driver.Http.Post_Streaming (To_String (Endpoints (S).Host), Endpoints (S).Port, Path, Request,
                                           On_Data'Access);
-            R : constant Reply := (Ok => H.Ok, Text => Data, Why => H.Why);
+            --  An error reply is not a stream: its body (a JSON error, say) is
+            --  the text, as for a blocking call.
+            R : constant Reply := (Ok => H.Ok, Text => (if H.Ok then Data else H.Body_Text), Why => H.Why);
          begin
             Record_Reply (Call_Head, R);
             return R;
