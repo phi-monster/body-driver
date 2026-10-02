@@ -69,8 +69,10 @@ package Driver.World.Tracking is
 
    function Match_Points (T : Track) return Driver.Instrument.Point_Array
      with Pre => Wants_Match (T);
-   --  The centres of the region's pixels, in the image it was measured on,
-   --  followed by those of the pixels around it.
+   --  The centres of the region's pixels asked about, in the image it was
+   --  measured on, followed by those around it: the region's edge whole, and
+   --  its inside and the box around it on a grid as many pixels apart as the
+   --  square root of the box's shorter side.
 
    function Region_Points (T : Track) return Natural;
    --  How many of Match_Points are the region's own.
