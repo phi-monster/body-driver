@@ -5,6 +5,7 @@ with Driver.Commands;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Images;
+with Driver.Instrument;
 with Driver.Observations;
 with Driver.Beats;
 with Driver.Log;
@@ -537,6 +538,38 @@ package body Driver.Robot.Tests is
          end;
       end loop;
    end Sweep_Starts_Where_A_Cell_Tells;
+
+   --  An arm's match was asked, then the graph stopped listing the arm (an
+   --  estimate told its eye or group otherwise): its answer must still be
+   --  read, or the boot's wait for every answer never ends.
+   procedure Answers_Read_For_An_Unlisted_Arm is
+      M : Model;
+      R : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
+   begin
+      R.Pending.Append
+        (Pending_Match'(Frame  => 2,
+                        Ticket => Driver.Instrument.Submit_Match
+                          ((Stored => False, Image => Driver.Images.No_Image),
+                           (Stored => False, Image => Driver.Images.No_Image),
+                           [1 => (U => 1.0, V => 1.0)], True, 0)));
+      M.Kinematics.Append (R);
+      Check (Driver.Robot.Kinematics.Pending (M) = 1, "the match was not asked");
+      for B in 0 .. 3 loop
+         declare
+            O    : Observation;
+            Sent : Driver.Commands.Command;
+         begin
+            O.Beat := Driver.Clock.Beat (B);
+            O.Readings.Append (Real_Array'(1 => 0.0));
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+            Driver.Commands.Set_Target (Sent, 1, [0.0]);
+            Observe (M, O, Sent);
+         end;
+      end loop;
+      Check (Arm_Count (M) = 0, "the graph lists an arm");
+      Check (Driver.Robot.Kinematics.Pending (M) = 0,
+             "the answer to an arm the graph no longer lists is never read: the boot waits forever");
+   end Answers_Read_For_An_Unlisted_Arm;
 
    procedure Roles_Of_A_Synthetic_Body is
       M : Model;
@@ -1498,6 +1531,8 @@ package body Driver.Robot.Tests is
                              & "the arm stopped gives no keyframe", Boot_With_Settling_Views'Access);
       Driver.Tests.Register ("robot.sweep.start", "a joint's sweep starts below where one cell of its eye tells the "
                              & "view moved", Sweep_Starts_Where_A_Cell_Tells'Access);
+      Driver.Tests.Register ("robot.answers.unlisted", "the answers to an arm the graph no longer lists are never read, "
+                             & "so the wait for every answer never ends", Answers_Read_For_An_Unlisted_Arm'Access);
       Driver.Tests.Register ("robot.steps.jitter", "a push never ends when the held reading jitters more than it did at "
                              & "rest", Step_Ends_Despite_New_Jitter'Access);
       Driver.Tests.Register ("robot.steps.sight", "a push of a joint an eye watches is called blocked though it stopped "

@@ -130,6 +130,12 @@ package body Driver.Robot.Kinematics is
    procedure Observe (M : in out Model; O : Observation) is
       Beat : constant Natural := M.Beats;
    begin
+      --  Every arm's answers, whether or not the graph lists the arm now: a
+      --  request is pending until its answer is read (Hold_While_Matching
+      --  waits for all of them).
+      for R of M.Kinematics loop
+         Collect (R);
+      end loop;
       for A in 1 .. Arm_Count (M) loop
          declare
             Arm : constant Arm_Id := Arm_Id (A);
@@ -154,7 +160,6 @@ package body Driver.Robot.Kinematics is
                declare
                   R : Arm_Evidence renames M.Kinematics (Index);
                begin
-                  Collect (R);
                   if Held_Still (M, Arm, Beat)
                     and then E <= O.Images.Last_Index and then Driver.Observations.Has_Image (O, E)
                   then
