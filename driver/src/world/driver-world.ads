@@ -81,10 +81,20 @@ package Driver.World is
    function Centre (S : Scene; T : Thing_Id) return Point_Estimate;
 
    function Resting_On (S : Scene; T : Thing_Id) return Surface_Id'Base;
-   --  The surface it rests on, or 0 when none is measured.
+   --  The surface under it, or 0 when none is measured: the highest one its
+   --  lowest point seen is over and not below.
 
    function Height_Above_Support (S : Scene; T : Thing_Id) return Estimate;
-   --  Along Up, from the surface it rests on; unknown when it rests on none.
+   --  Of its lowest point seen, along Up, from the surface it rests on;
+   --  unknown when it rests on none.
+
+   function Bottom_Seen (S : Scene; T : Thing_Id) return Boolean;
+   --  Its lowest point seen is on the surface it rests on, within their
+   --  uncertainties: the eyes see it touch. When not, Height_Above_Support
+   --  is no height but a bound: the eyes see nothing of the thing lower, and
+   --  what they do not see of it (the sides and underside of a box seen from
+   --  above, the underside of a ball) may reach down to the surface, on which
+   --  it may then rest. False when it rests on none.
 
    function Held_By (S : Scene; T : Thing_Id) return Driver.Robot.Hand.Hand_Id'Base;
    --  The hand holding it, or 0.

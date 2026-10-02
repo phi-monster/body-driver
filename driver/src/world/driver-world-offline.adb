@@ -40,6 +40,8 @@ package body Driver.World.Offline is
    function Height_Above_Support (B : Bench; T : Thing_Id) return Estimate is
      (Estimates.Height_Above_Support (B.State, T));
 
+   function Bottom_Seen (B : Bench; T : Thing_Id) return Boolean is (Estimates.Bottom_Seen (B.State, T));
+
    function Surface_Count (B : Bench) return Natural is (Estimates.Surface_Count (B.State));
 
    function Surface_Of (B : Bench; F : Surface_Id) return Driver.World.Supports.Surface is

@@ -1421,9 +1421,15 @@ procedure World_Check is
                            P : constant Driver.Geometry.Plane_Estimate :=
                              Driver.World.Offline.Plane_Of (Bench, Under);
                         begin
-                           Append (Line, "; rests on surface" & Under'Image & " at " & Mm (Height.Value) & " +- "
-                                   & Mm (Height.Sigma) & " mm (truth " & Mm (True_H) & " mm, off by "
-                                   & Mm (Height.Value - True_H) & " mm); that surface is "
+                           if Driver.World.Offline.Bottom_Seen (Bench, T) then
+                              Append (Line, "; rests on surface" & Under'Image & ", its bottom seen touching it at "
+                                      & Mm (Height.Value) & " +- " & Mm (Height.Sigma));
+                           else
+                              Append (Line, "; over surface" & Under'Image & ", its bottom unseen: nothing of it seen lower"
+                                      & " than " & Mm (Height.Value) & " +- " & Mm (Height.Sigma));
+                           end if;
+                           Append (Line, " mm (truth " & Mm (True_H) & " mm, off by " & Mm (Height.Value - True_H)
+                                   & " mm); that surface is "
                                    & Mm (Plane_Z (P, Lowests (Own_K) (1), Lowests (Own_K) (2)) - Table_Top)
                                    & " mm off the table top under it");
                         end;

@@ -183,6 +183,59 @@ package body Driver.World.Estimates is
       return True;
    end Inside_Pointed;
 
+   function Seen_Where_Pointed
+     (R         : Thing_Record;
+      X         : Vec3;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      Seen      : not null access constant Observation) return Boolean
+   is
+      --  Some eye holding the thing where it was pointed at sees where X is.
+   begin
+      for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
+         if Holds (R, E) and then R.Eyes (E).Pointed then
+            declare
+               Px      : Driver.Images.Pixel;
+               Visible : Boolean;
+            begin
+               Camera_Of (E, Seen).Project (X, Px, Visible);
+               if Visible then
+                  return True;
+               end if;
+            end;
+         end if;
+      end loop;
+      return False;
+   end Seen_Where_Pointed;
+
+   function In_View
+     (R          : Thing_Record;
+      From, Into : Eye_Id;
+      Second     : Driver.World.Cameras.Camera'Class) return Boolean
+   is
+      --  The thing in the second eye's view, as the points the other pairs saw
+      --  place it; in view when no other pair saw it, as nothing says not.
+      Seen_By_Others : Boolean := False;
+   begin
+      for P of R.By_Pair loop
+         if P.From /= From or else P.Into /= Into then
+            for M of P.Kept loop
+               Seen_By_Others := True;
+               declare
+                  Px      : Driver.Images.Pixel;
+                  Visible : Boolean;
+               begin
+                  Second.Project (M.Point.Mean, Px, Visible);
+                  if Visible then
+                     return True;
+                  end if;
+               end;
+            end loop;
+         end if;
+      end loop;
+      return not Seen_By_Others;
+   end In_View;
+
    procedure Gather
      (R         : in out Thing_Record;
       Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
@@ -190,9 +243,22 @@ package body Driver.World.Estimates is
       Seen      : not null access constant Observation)
    is
       --  The thing's points: every pair's latest, but those outside it now in
-      --  an eye that holds it.
+      --  an eye that holds it where it was pointed at. A pair whose second
+      --  eye, as it was then, saw nothing of the thing as the other pairs
+      --  place it saw something else, and is dropped: its first answer came
+      --  before any other said where the thing is.
       Now : Driver.World.Pairs.Match_Vectors.Vector;
+      K   : Positive := 1;
    begin
+      while K <= Natural (R.By_Pair.Length) loop
+         if R.By_Pair (K).Second.Is_Empty
+           or else In_View (R, R.By_Pair (K).From, R.By_Pair (K).Into, R.By_Pair (K).Second.Element)
+         then
+            K := K + 1;
+         else
+            R.By_Pair.Delete (K);
+         end if;
+      end loop;
       for P of R.By_Pair loop
          for M of P.Kept loop
             if Inside_Pointed (R, M.Point.Mean, Camera_Of, Seen) then
@@ -245,24 +311,54 @@ package body Driver.World.Estimates is
                      Met_Before : constant Natural := Natural (Kept.Length);
                      Within     : Driver.World.Pairs.Match_Vectors.Vector;
                      Placed     : Boolean := False;
+                     Judged     : Natural := 0;   --  met points a pointed eye holding the thing sees
                   begin
+                     --  The second eye does not see the thing now, as its other
+                     --  points place it: whatever the pair matched there is not
+                     --  it, however well the lines met.
+                     if not Kept.Is_Empty
+                       and then not In_View (R, X.From, X.Into, Camera_Of (X.Into, Seen.Element))
+                     then
+                        Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": eye" & X.Into'Image
+                                         & " does not see it now;" & Kept.Length'Image & " points of eyes"
+                                         & X.From'Image & " and" & X.Into'Image & " are not it");
+                        Kept.Clear;
+                     end if;
                      for M of Kept loop
+                        if Seen_Where_Pointed (R, M.Point.Mean, Camera_Of, Seen.Element) then
+                           Judged := Judged + 1;
+                        end if;
                         if Inside_Pointed (R, M.Point.Mean, Camera_Of, Seen.Element) then
                            Within.Append (Driver.World.Pairs.Match'(M with delta First => X.From));
                         end if;
                      end loop;
                      Kept := Within;
+                     --  A region this layer found, whose points the eyes where the
+                     --  thing was pointed at see and none of them inside it there,
+                     --  is not the thing: it is dropped, and asks for no more pairs.
+                     if Has_Slot (R, X.From) and then not R.Eyes (X.From).Pointed and then Judged > 0
+                       and then Kept.Is_Empty
+                     then
+                        Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": its region in eye" & X.From'Image
+                                         & " is not it: none of the" & Judged'Image
+                                         & " points it gave falls inside it where it was pointed at");
+                        R.Eyes.Replace_Element (X.From, Empty_Slot);
+                     end if;
                      --  What the pair saw before stands until it sees the thing
                      --  again: not seeing it now says nothing of where it is.
                      if not Kept.Is_Empty then
                         for K in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
                            if R.By_Pair (K).From = X.From and then R.By_Pair (K).Into = X.Into then
-                              R.By_Pair.Replace_Element (K, (From => X.From, Into => X.Into, Kept => Kept));
+                              R.By_Pair.Replace_Element
+                                (K, (From => X.From, Into => X.Into, Kept => Kept,
+                                     Second => Camera_Holders.To_Holder (Camera_Of (X.Into, Seen.Element))));
                               Placed := True;
                            end if;
                         end loop;
                         if not Placed then
-                           R.By_Pair.Append (Pair_Seen'(From => X.From, Into => X.Into, Kept => Kept));
+                           R.By_Pair.Append
+                             (Pair_Seen'(From => X.From, Into => X.Into, Kept => Kept,
+                                         Second => Camera_Holders.To_Holder (Camera_Of (X.Into, Seen.Element))));
                         end if;
                         R.Points_In := X.From;
                      end if;
@@ -962,6 +1058,9 @@ package body Driver.World.Estimates is
 
    function Height_Above_Support (S : State; T : Thing_Id) return Estimate is
      (if S.Things (T).Under.Index = 0 then Unknown else S.Things (T).Under.Height);
+
+   function Bottom_Seen (S : State; T : Thing_Id) return Boolean is
+     (S.Things (T).Under.Index /= 0 and then S.Things (T).Under.Touching);
 
    function Surface_Of (S : State; F : Surface_Id) return Driver.World.Supports.Surface is (S.Surfaces (Positive (F)));
 

@@ -913,6 +913,7 @@ driver-world-estimates.adb	F : Positive := 1;	1	structure	vectors are indexed fr
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
+driver-world-estimates.adb	K : Positive := 1;	1	structure	the pairs are counted from one
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	1	structure	a family holds at least one test
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	2	structure	each point is tested from both eyes that saw it
 driver-world-estimates.adb	return (Mean => (1.0 / Real (R.Points.Length)) * Sum,	1.0	math	the centroid is the points' sum over their count

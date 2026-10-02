@@ -90,6 +90,9 @@ package body Driver.World is
    function Height_Above_Support (S : Scene; T : Thing_Id) return Estimate is
      (if Known_Thing (S, T) then Driver.World.Estimates.Height_Above_Support (S.Data.State, T) else Unknown);
 
+   function Bottom_Seen (S : Scene; T : Thing_Id) return Boolean is
+     (Known_Thing (S, T) and then Driver.World.Estimates.Bottom_Seen (S.Data.State, T));
+
    --  Not measured yet: what holds a thing, and its motion.
 
    function Held_By (S : Scene; T : Thing_Id) return Driver.Robot.Hand.Hand_Id'Base is (0);

@@ -454,11 +454,18 @@ package body Driver.World.Supports is
                                                      H.Value, H.Sigma))
                  and then (Best.Index = 0 or else Up_H.Value < Best.Height.Value)
                then
-                  Best := (Index => F, Height => Up_H);
+                  Best := (Index => F, Height => Up_H, Touching => False);
                end if;
             end;
          end;
       end loop;
+      --  Its lowest point on the support within their uncertainties: the eyes
+      --  see it touch. Above it: they see no lower, and what they do not see
+      --  may reach down to the support.
+      Best.Touching := Best.Index /= 0
+        and then not (Best.Height.Value > 0.0
+                      and then Significant (Scalar_Gate (Best.Height.Degrees_Of_Freedom, Tests => Points'Length),
+                                            Best.Height.Value, Best.Height.Sigma));
       return Best;
    end Under;
 

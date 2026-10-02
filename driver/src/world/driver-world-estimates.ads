@@ -62,6 +62,7 @@ private package Driver.World.Estimates is
 
    function Resting_On (S : State; T : Thing_Id) return Surface_Id'Base;
    function Height_Above_Support (S : State; T : Thing_Id) return Estimate;
+   function Bottom_Seen (S : State; T : Thing_Id) return Boolean;
    --  As Driver.World's: no support and Unknown before one is found.
 
    procedure Adopt (S : in out State; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id);
@@ -152,10 +153,15 @@ private
    package Start_Vectors is new Ada.Containers.Vectors (Positive, Start);
    package Point_Vectors is new Ada.Containers.Vectors (Positive, Point_Estimate);
 
-   --  What one pair of eyes last saw of a thing.
+   package Camera_Holders is new Ada.Containers.Indefinite_Holders
+     (Driver.World.Cameras.Camera'Class, Driver.World.Cameras."=");
+
+   --  What one pair of eyes last saw of a thing, and the second eye as it
+   --  was then.
    type Pair_Seen is record
       From, Into : Eye_Id;
       Kept       : Driver.World.Pairs.Match_Vectors.Vector;
+      Second     : Camera_Holders.Holder;
    end record;
 
    package Pair_Seen_Vectors is new Ada.Containers.Vectors (Positive, Pair_Seen);
