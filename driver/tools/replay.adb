@@ -7,9 +7,11 @@
 --  command in effect while it was captured. At the end the measured body is
 --  written to the body file. With --estimates, every beat after boot writes
 --  one JSON line with each arm's tool pose and each eye's pose (row-major 4 x 4,
---  world frame), and the last line holds, for each eye, the lines of sight of a
---  grid of pixels in the eye's own frame, so the estimates can be scored
---  against simulator truth whatever model produced them. Nothing here decides
+--  world frame); two last lines hold, for each eye, the lines of sight of a
+--  grid of pixels in the eye's own frame, and each hand's tips in its tool
+--  frame (with the press direction that defines each tip and the closer
+--  readings it belongs to), so the estimates can be scored against simulator
+--  truth whatever model produced them. Nothing here decides
 --  anything; the recorded replies did.
 --
 --  The estimators' service calls are answered as Driver.Services describes
@@ -101,6 +103,48 @@ procedure Replay is
       end loop;
       Ada.Text_IO.Put_Line (Out_File, To_String (Line_Text) & "]}");
    end Write_Beat;
+
+   procedure Write_Hands is
+      --  Each hand's tips in its arm's tool frame, with the press direction
+      --  that defines them and the closer readings they belong to.
+      use Driver.Robot.Hand;
+      Line_Text : Unbounded_String := To_Unbounded_String ("{""hands"":[");
+
+      function Vector_Json (V : Driver.Numerics.Vec3) return String is
+        ("[" & Driver.Json.Number_Image (V (1)) & "," & Driver.Json.Number_Image (V (2)) & ","
+         & Driver.Json.Number_Image (V (3)) & "]");
+
+      function Readings_Json (X : Driver.Real_Array) return String is
+         R : Unbounded_String := To_Unbounded_String ("[");
+      begin
+         for I in X'Range loop
+            Append (R, (if I = X'First then "" else ",") & Driver.Json.Number_Image (X (I)));
+         end loop;
+         return To_String (R) & "]";
+      end Readings_Json;
+   begin
+      for Id in 1 .. Hand_Count (Hands) loop
+         declare
+            H : constant Hand_Id := Hand_Id (Id);
+         begin
+            Append (Line_Text, (if Id > 1 then "," else "") & "{""arm"":" & Natural'Image (Natural (Arm_Of (Hands, H)))
+                    & ",""closer"":""" & To_String (Layout.Groups (Closer_Group (Hands, H)).Path) & """,""lobes"":[");
+            for Lobe in 1 .. Lobe_Count (Hands, H) loop
+               Append (Line_Text, (if Lobe > 1 then ",{" else "{"));
+               for At_Opening in Opening loop
+                  Append (Line_Text, (if At_Opening = Opening'First then "" else ",") & """"
+                          & (if At_Opening = Open then "open" else "closed") & """:{""tip"":"
+                          & Vector_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening).Mean) & ",""press"":"
+                          & Vector_Json (Press_Direction (Hands, H, Lobe, At_Opening).Unit_Vector) & ",""reading"":"
+                          & Readings_Json (Closer_Reading (Hands, H, At_Opening)) & "}");
+               end loop;
+               Append (Line_Text, "}");
+            end loop;
+            Append (Line_Text, "]}");
+         end;
+      end loop;
+      Ada.Text_IO.Put_Line (Out_File, To_String (Line_Text) & "]}");
+   end Write_Hands;
 
    procedure Write_Rays (O : Driver.Observations.Observation) is
       use Driver.Numerics.Arrays;
@@ -346,6 +390,7 @@ begin
    if Length (Estimates) > 0 then
       if Driver.Robot.Booted (Robot) then
          Write_Rays (Last_Obs);
+         Write_Hands;
       end if;
       Ada.Text_IO.Close (Out_File);
    end if;

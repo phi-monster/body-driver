@@ -1,20 +1,48 @@
 --  The body driver: one executable, its self test and the offline replay tool.
 --  Build: alr build.  Prove the SPARK units: alr exec -- gnatprove -P driver.gpr
+--  BD_BUILD=asan (alr build -- -XBD_BUILD=asan) builds the same programs with
+--  AddressSanitizer into obj-asan and bin-asan, for the merge gate; the
+--  normal build is untouched.
 project Driver is
+   type Build_Kind is ("normal", "asan");
+   Build : Build_Kind := external ("BD_BUILD", "normal");
+
    for Source_Dirs use ("src/**", "tests", "tools");
-   for Object_Dir use "obj";
-   for Exec_Dir use "bin";
+   case Build is
+      when "normal" =>
+         for Object_Dir use "obj";
+         for Exec_Dir use "bin";
+      when "asan" =>
+         for Object_Dir use "obj-asan";
+         for Exec_Dir use "bin-asan";
+   end case;
    for Create_Missing_Dirs use "True";
-   for Main use ("body_driver.adb", "selftest.adb", "replay.adb", "frame.adb", "score.adb", "numbers.adb", "deadcode.adb", "proxy.adb", "feed.adb");
+   for Main use ("body_driver.adb", "selftest.adb", "replay.adb", "frame.adb", "score.adb", "numbers.adb", "deadcode.adb", "proxy.adb",
+                 "feed.adb", "brain_measure.adb", "fake_brain.adb");
+
+   Common_Switches := ("-gnat2022", "-gnata", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g");
 
    package Compiler is
-      for Default_Switches ("Ada") use
-        ("-gnat2022", "-gnata", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g");
+      case Build is
+         when "normal" =>
+            for Default_Switches ("Ada") use Common_Switches;
+         when "asan" =>
+            for Default_Switches ("Ada") use Common_Switches & ("-fsanitize=address", "-fno-omit-frame-pointer");
+      end case;
    end Compiler;
 
    package Binder is
       for Default_Switches ("Ada") use ("-Es");
    end Binder;
+
+   package Linker is
+      case Build is
+         when "normal" =>
+            null;
+         when "asan" =>
+            for Default_Switches ("Ada") use ("-fsanitize=address");
+      end case;
+   end Linker;
 
    package Prove is
       for Proof_Switches ("Ada") use ("--level=2", "--timeout=60");
