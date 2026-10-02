@@ -154,7 +154,7 @@ package body Driver.World.Estimates.Tests is
             Driver.Instrument.Match_Request ((Stored => False, Image => Seen.Images (From)),
                                              (Stored => False, Image => Seen.Images (Into)), Points, True),
             (Ok   => True, Text => To_Unbounded_String (Reply_Text (Eyes (From), Eyes (Into), Points)),
-             Why  => Null_Unbounded_String));
+             Why  => Null_Unbounded_String, Lasting => False));
          Answered.Append (T);
       end if;
    end Answer;
