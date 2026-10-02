@@ -3,12 +3,12 @@ with Driver.Action.Goals;
 with Driver.Action.Plants.Live;
 with Driver.Action.Snapshots;
 with Driver.Beats;
-with Driver.Uncertain;
 
 package body Driver.Action is
 
    use Driver.Action.Snapshots;
    use Driver.Uncertain;
+   use type Driver.Robot.Arm_Id;
 
    --  The estimates at the latest beat; within a beat's window.
    function Now (C : Context) return Snapshot is
@@ -37,6 +37,30 @@ package body Driver.Action is
    end Meaning;
 
    function Can_Bind (C : Context; R : Role) return Boolean is (Driver.Action.Execution.Bindable (Now (C), R));
+
+   function Role_Hand (C : Context; R : Role) return Driver.Robot.Hand.Hand_Id'Base is
+      S : constant Snapshot := Now (C);
+      A : Arm_Id;
+   begin
+      if R = Grasper and then Driver.Action.Execution.Bound_Arm (S, R, A) then
+         for H of S.Hands loop
+            if H.Arm = A then
+               return H.Id;
+            end if;
+         end loop;
+      end if;
+      return 0;
+   end Role_Hand;
+
+   function Role_Point (C : Context; R : Role) return Point_Estimate is
+      S : constant Snapshot := Now (C);
+      A : Arm_Id;
+   begin
+      if Driver.Action.Execution.Bound_Arm (S, R, A) then
+         return Driver.Action.Execution.Part_Point (S, A);
+      end if;
+      return (others => <>);
+   end Role_Point;
 
    function Usable_In (S : Snapshot; R : Relation) return Boolean renames Driver.Action.Execution.Usable;
 

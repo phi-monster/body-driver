@@ -17,6 +17,7 @@ package body Driver.Action.Execution.Tests is
    use Driver.Action.Snapshots;
    use Driver.Action.Snapshots.Tests;
    use type Driver.Action.Snapshots.Hand_Id;
+   use type Driver.Action.Snapshots.Arm_Id;
 
    package Sim renames Driver.Action.Plants.Tests;
 
@@ -185,6 +186,35 @@ package body Driver.Action.Execution.Tests is
              "the wall was moved");
    end Over_An_Obstacle;
 
+   --  How far the thing has turned about the table's up since Before.
+   function Turned_About_Up (W : Sim.World; T : Thing_Id; Before : Rigid) return Real is
+      Up  : constant Vec3 := Rotate (Sim.Table_Frame (W), [0.0, 0.0, 1.0]);
+      Rot : constant Vec3 := Driver.Numerics.Log (Sim.Truth (W, T).Pose.Rotation * Transpose (Before.Rotation));
+   begin
+      return Rot * Up;
+   end Turned_About_Up;
+
+   procedure Long_Shapes_Turned is
+      Long : constant Model_Array := [Bar (0.2, 0.02, 0.02), Scissors (0.18, 0.016, 0.006)];
+   begin
+      for K in Long'Range loop
+         declare
+            W : Sim.World;
+            R : Result;
+            Before : Rigid;
+         begin
+            One_Gripper (W, Turned, 71 + K);
+            Sim.Add_Thing (W, Long (K), On_Table (0.05, 0.05, 0.4), Mu => 0.6);
+            Before := Sim.Truth (W, 1).Pose;
+            Run (W, (Kind => Change, Until_Endings => Endings (Timeout), Max_Steps => 3, Eye => Any_Eye,
+                     Anyway => False, Thing => 1, Quantity => 2, Increase => True), R);
+            Check (R.Final = Timeout, "a heading turned for three steps does not end by its step limit");
+            Check (Turned_About_Up (W, 1, Before) > 0.0, "heading up does not turn it counter-clockwise about up");
+            Check (abs Sim.Lowest (W, 1) < Pitch, "turning its heading took it off the table");
+         end;
+      end loop;
+   end Long_Shapes_Turned;
+
    procedure Usable_By_What_Is_Measured is
       W : Sim.World;
       S : Snapshot;
@@ -205,6 +235,42 @@ package body Driver.Action.Execution.Tests is
       Check (not Usable (S, Touching) and then not Usable (S, Still), "a relation is offered to a body with no arm");
    end Usable_By_What_Is_Measured;
 
+   procedure Roles_Bind_To_What_Can_Play_Them is
+      W : Sim.World;
+      S : Snapshot;
+      A : Arm_Id;
+   begin
+      One_Gripper (W, Turned, 53);
+      Sim.Add_Arm (W, Base => [0.3, -0.3, 0.0], Reach => 0.8, Tool => Down_At (0.3, -0.1, 0.25), Lag => 2,
+                   Rate => 0.5, Delivery_Low => 0.7, Delivery_High => 0.85, Wrist => Pi, Tilt => Pi / 2.0,
+                   Plate_Radius => 0.02);
+      W.Look (S);
+      declare
+         Has : constant Boolean := Bound_Arm (S, Grasper, A);
+      begin
+         Check (Has and then A = 1, "the grasper is not bound to the arm with the gripper");
+      end;
+      declare
+         Has : constant Boolean := Bound_Arm (S, Pusher, A);
+      begin
+         Check (Has and then A = 2, "the pusher is not bound to the arm that ends in a plate");
+      end;
+      declare
+         Has : constant Boolean := Bound_Arm (S, Me, A);
+      begin
+         Check (not Has and then A = Arm_Id'First, "me is bound though no arm carries the whole body");
+      end;
+      declare
+         Middle : constant Vec3 := Part_Point (S, 1).Mean;
+         Tool   : constant Rigid := Arm (S, 1).Tool.Pose;
+         Inside : constant Vec3 := Transpose (Tool.Rotation) * (Middle - Tool.Translation);
+      begin
+         --  Between the lobes of the gripper: on its axis, within its depth.
+         Check (abs Inside (1) < Sigma * 10.0 and then Inside (3) > 0.0 and then Inside (3) < 0.04,
+                "the grasper's point is not between its lobes");
+      end;
+   end Roles_Bind_To_What_Can_Play_Them;
+
    procedure Every_Quantity_Has_A_Meaning is
    begin
       for Q in Goals.Quantity loop
@@ -219,12 +285,16 @@ package body Driver.Action.Execution.Tests is
                 Usable_By_What_Is_Measured'Access);
       Register ("action.sheet.meaning", "a quantity is offered without its meaning, or a non-quantity gets one",
                 Every_Quantity_Has_A_Meaning'Access);
+      Register ("action.sheet.roles", "a role binds to an arm that cannot play it, or its point is not on the part",
+                Roles_Bind_To_What_Can_Play_Them'Access);
       Register ("action.run.bar", "a bar is not lifted off the table and put back, or not let go",
                 Bar_Up_And_Down'Access);
       Register ("action.run.up", "one of the five shapes is not lifted, or not well up when settled",
                 Each_Shape_Up'Access);
       Register ("action.run.onto", "one of the five shapes is not put onto a block to rest there",
                 Each_Shape_Onto_A_Block'Access);
+      Register ("action.run.turn", "a long thing's heading is not turned the way up turns it, on the table",
+                Long_Shapes_Turned'Access);
       Register ("action.run.touch", "touching a thing does not stop at the touch", Touch_A_Bar'Access);
       Register ("action.run.detour", "the hand goes through a wall instead of over it", Over_An_Obstacle'Access);
    end Register;
