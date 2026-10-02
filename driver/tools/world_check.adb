@@ -1708,6 +1708,63 @@ procedure World_Check is
                                    & " mm); that surface is "
                                    & Mm (Plane_Z (P, Lowests (Own_K) (1), Lowests (Own_K) (2)) - Table_Top)
                                    & " mm off the table top under it");
+                           --  Where on the thing its lowest point is, as the support
+                           --  takes it: how far above the mesh's lowest vertex, and
+                           --  on what face of the mesh (the nearest triangle's turn
+                           --  from level: 0 a face that lies flat, as a bottom or a
+                           --  top does, 90 a side).
+                           declare
+                              Up_To : Real_Array (1 .. Natural (Points.Length));
+                              Taken : array (Up_To'Range) of Boolean := [others => False];
+                              Own   : constant Placed := Grid_Of (Own_K);
+                           begin
+                              for I in Up_To'Range loop
+                                 declare
+                                    H : constant Estimate := Driver.Geometry.Height (P, Points (I).Point);
+                                 begin
+                                    Up_To (I) :=
+                                      (if H.Sigma < Real'Last
+                                       then H.Value + Threshold (Scalar_Gate (H.Degrees_Of_Freedom,
+                                                                              Tests => Natural (Points.Length)))
+                                                      * H.Sigma
+                                       else Real'Last);
+                                 end;
+                              end loop;
+                              Append (Line, "; its lowest points, above its mesh's lowest vertex and the turn from"
+                                      & " level of the face nearest them:");
+                              for K in 1 .. Natural'Min (3, Up_To'Length) loop
+                                 declare
+                                    Lowest  : Natural := 0;
+                                 begin
+                                    for I in Up_To'Range loop
+                                       if not Taken (I) and then (Lowest = 0 or else Up_To (I) < Up_To (Lowest)) then
+                                          Lowest := I;
+                                       end if;
+                                    end loop;
+                                    Taken (Lowest) := True;
+                                    declare
+                                       X       : constant Vec3 := Points (Lowest).Point.Mean;
+                                       Nearest : Real := Real'Last;
+                                       Turn    : Real := 0.0;
+                                    begin
+                                       for T of Own.Triangles loop
+                                          declare
+                                             D : constant Real := abs (X - Closest_On (T, X));
+                                             N : constant Vec3 := Cross (T.B - T.A, T.C - T.A);
+                                          begin
+                                             if D < Nearest and then abs N > 0.0 then
+                                                Nearest := D;
+                                                Turn := Degrees_Per_Radian
+                                                        * Arccos (Real'Min (1.0, abs (N (3)) / abs N));
+                                             end if;
+                                          end;
+                                       end loop;
+                                       Append (Line, " " & Mm (X (3) - Lowests (Own_K) (3)) & " mm, "
+                                               & Image (Turn, 1) & " deg (" & Mm (Nearest) & " mm from it)");
+                                    end;
+                                 end;
+                              end loop;
+                           end;
                         end;
                      end if;
                   end;
