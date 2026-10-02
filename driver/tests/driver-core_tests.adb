@@ -506,6 +506,52 @@ package body Driver.Core_Tests is
       Check (Driver.Commands.Is_Hold (Reply), "a beat taken only to look did not answer hold");
    end Beat_Window;
 
+   procedure Released_Beat is
+      --  A decider that fails while it holds a beat must not leave the main
+      --  loop waiting for an answer that never comes.
+      task Failing;
+      task body Failing is
+         Beat : Driver.Clock.Beat;
+      begin
+         Driver.Beats.Next (Beat);
+         raise Program_Error;
+      exception
+         when others =>
+            Driver.Beats.Release;
+      end Failing;
+
+      task Waiter is
+         entry Answered (C : out Driver.Commands.Command);
+      end Waiter;
+      task body Waiter is
+         Reply : Driver.Commands.Command;
+      begin
+         Driver.Beats.Await (Reply);
+         accept Answered (C : out Driver.Commands.Command) do
+            C := Reply;
+         end Answered;
+      end Waiter;
+
+      Took  : Boolean := False;
+      Reply : Driver.Commands.Command;
+      O     : Driver.Observations.Observation;
+   begin
+      while not Took loop
+         Driver.Beats.Offer (0, O, Driver.Commands.Hold, Took);
+         if not Took then
+            delay 0.001;
+         end if;
+      end loop;
+      select
+         Waiter.Answered (Reply);
+         Check (Driver.Commands.Is_Hold (Reply), "a failed decider's beat was answered with a move");
+      or
+         delay 10.0;
+         Check (False, "a failed decider's beat was never answered");
+         abort Waiter;
+      end select;
+   end Released_Beat;
+
    procedure Person_Words is
       use Driver.Beats;
       Before : constant Natural := Words_Heard;
@@ -586,6 +632,8 @@ package body Driver.Core_Tests is
                              Streaming_Error_Body'Access);
       Driver.Tests.Register ("core.beat_window", "a decider that only looks moves the robot or never runs",
                              Beat_Window'Access);
+      Driver.Tests.Register ("core.released_beat", "a decider that fails holding a beat leaves the main loop waiting",
+                             Released_Beat'Access);
       Driver.Tests.Register ("core.person_words", "new words are missed, or old ones counted again",
                              Person_Words'Access);
       Driver.Tests.Register ("core.replayed_services",
