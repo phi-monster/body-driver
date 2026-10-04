@@ -56,14 +56,14 @@ package body Driver.Robot.Hand.Tests is
          Followed := To /= Reading;
          Reading := To;
       end Push;
-      function Extends return Boolean is (True);
-      Down_Pushes, Up_Pushes : Natural := 0;
+      function Shows return Showing is (Something_New);
+      Down_Pushes, Up_Pushes, Unseen : Natural := 0;
       Down_Answered, Up_Answered : Boolean := False;
    begin
-      Sweep_Way (-1.0, 0.1, Push'Access, Extends'Access, Down_Pushes, Down_Answered);
+      Sweep_Way (-1.0, 0.1, 0.1, Push'Access, Shows'Access, Down_Pushes, Unseen, Down_Answered);
       Reading := 1.0;
       Asked := 0;
-      Sweep_Way (1.0, 0.1, Push'Access, Extends'Access, Up_Pushes, Up_Answered);
+      Sweep_Way (1.0, 0.1, 0.1, Push'Access, Shows'Access, Up_Pushes, Unseen, Up_Answered);
       Check (Down_Answered and then Down_Pushes = 6,
              "down from its upper end the closer was pushed" & Down_Pushes'Image & " times, not to its lower end"
              & " (0.9, 0.8, 0.6, 0.2, 0 and once more)");

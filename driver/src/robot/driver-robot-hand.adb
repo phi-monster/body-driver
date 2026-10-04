@@ -490,15 +490,20 @@ package body Driver.Robot.Hand is
    procedure Sweep_Way
      (Way      : Real;
       Step     : Real;
+      Seen_By  : Real;
       Push     : not null access procedure (Offset : Real; Followed : out Boolean);
-      Extends  : not null access function return Boolean;
+      Shows    : not null access function return Showing;
       Pushes   : out Natural;
+      Unseen   : out Natural;
       Answered : out Boolean)
    is
       Offset   : Real := Step;
       Followed : Boolean;
+      Shown    : Boolean := False;   --  some push of this way has shown the views something
+      Seen     : Showing;
    begin
       Pushes := 0;
+      Unseen := 0;
       Answered := False;
       loop
          Push (Way * Offset, Followed);
@@ -506,7 +511,20 @@ package body Driver.Robot.Hand is
          if Pushes = 1 then
             Answered := Followed;
          end if;
-         exit when not Followed or else not Extends.all;
+         exit when not Followed;
+         --  Each asking is a beat later; the view forms once the body rests.
+         loop
+            Seen := Shows.all;
+            exit when Seen /= Not_Yet;
+         end loop;
+         if Seen = Something_New then
+            Shown := True;
+         else
+            Unseen := Unseen + Boolean'Pos (not Shown);
+            --  Nothing new: past the end once something was shown, stuck
+            --  once a push that moves the view by a pixel has not.
+            exit when Shown or else Offset >= Seen_By;
+         end if;
          Offset := 2.0 * Offset;
       end loop;
    end Sweep_Way;

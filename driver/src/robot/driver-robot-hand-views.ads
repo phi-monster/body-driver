@@ -52,6 +52,14 @@ package Driver.Robot.Hand.Views is
    --  The view being gathered, were it to end now, would extend one of the
    --  channel's ends: what a sweep asks before it pushes further.
 
+   function Gathered (T : Tracker) return Boolean;
+   --  A view is being gathered and has the two frames a view is judged by
+   --  (its pixels say how much they vary on their own): Would_Extend says
+   --  something of it. Right after a push the body is still coming to rest,
+   --  and every reading that moves against its own noise starts the view
+   --  again: on A11 the arm's readings moved by 4e-10 after a closer push,
+   --  against a noise of 2.4e-16, and came within it six beats later.
+
    function Unseen_Travel (T : Tracker; Channel : Positive) return Boolean;
    --  The channel was seen still at significantly different readings, and
    --  the eye saw nothing change between them: its push moves nothing here.

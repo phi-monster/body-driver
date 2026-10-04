@@ -1,6 +1,7 @@
 with Driver.Beats;
 with Driver.Geometry;
 with Driver.Robot.Hand.Aims;
+with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 
 --  The decider that measures the hands. Every closer channel is swept from
@@ -94,6 +95,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
    procedure Sweep_Channel (G : Group_Id; C : Positive) is
       Start : Real := 0.0;
       Step  : Estimate;
+      Pixel : Real := 0.0;   --  the push that moves the own eye's view by a pixel
       Never : Ada.Strings.Unbounded.Unbounded_String;
       Still_A_Closer : Boolean := False;
       procedure Read_Start (O : Observation) is
@@ -102,6 +104,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
       begin
          Start := R (R'First + C - 1);
          Step := Visible_Step (M, G, C);
+         Pixel := (if P > 0 then Seen_By (Driver.Robot.Lockin.Shift (M, H.Data.Pairs (P).Eye, G, C)) else 0.0);
          Never := Ada.Strings.Unbounded.To_Unbounded_String
            (if P > 0 then Sweeps.Refusal (H.Data.Pairs (P).Sweep) else "");
          Still_A_Closer := Sweepable (H, M, G);
@@ -124,44 +127,68 @@ procedure Measure (H : in out Hands; M : in out Model) is
                           & " has no visible step measured; not swept");
          return;
       end if;
-      --  Each way doubles its push from the visible step while each push shows
-      --  the eye something new and the reading follows it; the first push the
-      --  reading does not follow is the channel's end that way (a closer at an
-      --  end of its travel answers only away from it), where the doubling
-      --  stops. A channel that follows neither way at its first push, the
-      --  amount the eyes saw it move by, is stuck where it is.
+      --  Each way doubles its push from the visible step while the reading
+      --  follows it and, once its views have shown something, while each push
+      --  shows them something new (Sweep_Way); the first push the reading does
+      --  not follow is the channel's end that way (a closer at an end of its
+      --  travel answers only away from it), where the doubling stops. A
+      --  channel that follows neither way at its first push, the amount the
+      --  eyes saw it move by, is stuck where it is.
+      Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image & " from "
+                       & Driver.Log.Image (Start, 6) & ", pushed from " & Driver.Log.Image (Step.Value, 4)
+                       & ", the step the eyes can see it make at all, and without its views seeing it at most to "
+                       & (if Pixel > 0.0 then Driver.Log.Image (Pixel, 4) & ", where its view moves a pixel"
+                          else "that: how far its view moves is not measured"));
       declare
          Answered_Ways : Natural := 0;
+         Gone          : Boolean := False;   --  the group is no longer a closer the hand watches
          procedure Push (Offset : Real; Followed : out Boolean) is
          begin
-            Move_Channel (G, C, Start + Offset, Followed);
+            --  A push not made is not followed: the sweep ends.
+            Followed := False;
+            if not Gone then
+               Move_Channel (G, C, Start + Offset, Followed);
+            end if;
          end Push;
-         function Extends return Boolean is
-            Result : Boolean := False;
-            procedure Read_Extends (O : Observation) is
+         function Shows return Driver.Robot.Hand.Showing is
+            Result : Driver.Robot.Hand.Showing := Driver.Robot.Hand.Not_Yet;
+            procedure Read_Shows (O : Observation) is
                pragma Unreferenced (O);
                P : constant Natural := Own_Pair (G);
             begin
-               Result := P > 0 and then Sweeps.Would_Extend (H.Data.Pairs (P).Sweep, C);
-            end Read_Extends;
+               Gone := P = 0 or else not Sweepable (H, M, G);
+               if Gone then
+                  Result := Driver.Robot.Hand.Nothing_New;
+               elsif Sweeps.Gathered (H.Data.Pairs (P).Sweep) then
+                  Result := (if Sweeps.Would_Extend (H.Data.Pairs (P).Sweep, C) then Driver.Robot.Hand.Something_New
+                             else Driver.Robot.Hand.Nothing_New);
+               end if;
+            end Read_Shows;
          begin
-            Hold_Beat (Read_Extends'Access);
+            Hold_Beat (Read_Shows'Access);
             return Result;
-         end Extends;
+         end Shows;
       begin
          for Way of Real_Array'[-1.0, 1.0] loop
             declare
-               Pushes   : Natural;
-               Answered : Boolean;
+               Pushes, Unseen : Natural;
+               Answered       : Boolean;
             begin
-               Driver.Robot.Hand.Sweep_Way (Way, Step.Value, Push'Access, Extends'Access, Pushes, Answered);
+               Driver.Robot.Hand.Sweep_Way (Way, Step.Value, Pixel, Push'Access, Shows'Access, Pushes, Unseen,
+                                            Answered);
                Answered_Ways := Answered_Ways + Boolean'Pos (Answered);
                Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
-                                & (if Way < 0.0 then " down" else " up") & ":" & Pushes'Image & " pushes, "
+                                & (if Way < 0.0 then " down" else " up") & ":" & Pushes'Image & " pushes,"
+                                & Unseen'Image & " of them before its views showed it anything; "
                                 & (if Answered then "following from the first" else "at its end there"));
             end;
             Move_Channel (G, C, Start);
          end loop;
+         if Gone then
+            Driver.Log.Line (Driver.Log.Robot, "hand: group" & G'Image & " is no longer a closer the hand watches;"
+                             & " its sweep of channel" & C'Image & " ends");
+            return;
+         end if;
          if Answered_Ways = 0 then
             Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
                              & " follows neither way by its visible step; it is stuck, and not swept");

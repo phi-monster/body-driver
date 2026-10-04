@@ -217,6 +217,126 @@ package body Driver.Robot.Hand.Sweep.Tests is
              & Asked_At'Image & " pixels asked");
    end Swept_In_A_Task;
 
+   --  A11's closer: at the upper end of its travel, 0 to 1, swept down and up
+   --  from there through the views of its own eye as Hand.Measure sweeps it,
+   --  from the step its lock-in sees (group 5's, 1.7e-5 of the travel).
+   --
+   --  The frames' fingers move 45 columns over the travel and are drawn at
+   --  whole columns, so a pair of still views shows a push from a ninetieth
+   --  of the travel on, and the view moves a pixel at a forty-fifth: the
+   --  lock-in's step is some six hundred times below what the views show.
+   --
+   --  The rest of the body is an arm whose reading repeats to 1e-16 at rest
+   --  and, after each push, settles back over Settling beats from 1e-10,
+   --  ten times closer each beat, as A11's arm 1 did from -3.9e-10 against
+   --  a noise of 2.4e-16: every beat of that starts the view again. Each push
+   --  is followed by one more beat (Hand.Measure's step ends at the closer's
+   --  first still beat and holds one more); each asking of Shows is a beat.
+   --
+   --  Echo: the reading follows any command, past the end too, where the
+   --  fingers stay. Once: Shows is asked once a push and takes an unformed
+   --  view for nothing new, as A11's sweep did.
+   Rest_Noise  : constant Real := 1.0e-16;
+   Disturbance : constant Real := 1.0e-10;
+   Settling    : constant := 7;
+
+   type Sweep_Outcome is record
+      Down, Up    : Natural := 0;   --  pushes each way
+      Unseen_Down : Natural := 0;
+      Furthest_Up : Real := 0.0;    --  the largest push up asked
+      Ends        : Boolean := False;
+      Low, High   : Real := 0.0;
+   end record;
+
+   function Swept (Step, Pixel : Real; Echo, Once : Boolean) return Sweep_Outcome is
+      S       : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => Rest_Noise]);
+      B       : Driver.Clock.Beat := 0;
+      Reading : Real := 1.0;
+      Left    : Natural := 0;      --  beats of the arm's settling still to come
+      Result  : Sweep_Outcome;
+      function Shown_At (R : Real) return Driver.Images.Image is (Frame (Real'Min (1.0, Real'Max (0.0, R))));
+      procedure Beat_On (Still : Boolean) is
+         Arm : constant Real := (if Left > 0 then Disturbance * 0.1 ** (Settling - Left) else 0.0);
+      begin
+         Observe (S, At_Beat (B), Still, [1 => Reading], [1 => Arm], Shown_At (Reading));
+         B := B + 1;
+         Left := (if Left > 0 then Left - 1 else 0);
+      end Beat_On;
+      procedure Go_To (Target : Real; Followed : out Boolean) is
+         To : constant Real := (if Echo then Target else Real'Min (1.0, Real'Max (0.0, Target)));
+      begin
+         Followed := To /= Reading;
+         Reading := To;
+         Left := (if Followed then Settling else 0);
+         Beat_On (Still => False);
+         Beat_On (Still => True);
+      end Go_To;
+      procedure Push (Offset : Real; Followed : out Boolean) is
+      begin
+         if Offset > 0.0 then
+            Result.Furthest_Up := Real'Max (Result.Furthest_Up, Offset);
+         end if;
+         Go_To (1.0 + Offset, Followed);
+      end Push;
+      function Shows return Driver.Robot.Hand.Showing is
+      begin
+         Beat_On (Still => True);
+         if not Gathered (S) and then not Once then
+            return Driver.Robot.Hand.Not_Yet;
+         end if;
+         return (if Gathered (S) and then Would_Extend (S, 1) then Driver.Robot.Hand.Something_New
+                 else Driver.Robot.Hand.Nothing_New);
+      end Shows;
+      Answered : Boolean;
+      Unseen   : Natural;
+      Back     : Boolean;
+   begin
+      for I in 1 .. 3 loop
+         Beat_On (Still => True);
+      end loop;
+      Driver.Robot.Hand.Sweep_Way (-1.0, Step, Pixel, Push'Access, Shows'Access, Result.Down, Result.Unseen_Down,
+                                   Answered);
+      Go_To (1.0, Back);
+      Driver.Robot.Hand.Sweep_Way (1.0, Step, Pixel, Push'Access, Shows'Access, Result.Up, Unseen, Answered);
+      Go_To (1.0, Back);
+      for I in 1 .. Settling + 3 loop
+         Beat_On (Still => True);
+      end loop;
+      Result.Ends := Wants_Correspondences (S, 1);
+      if Result.Ends then
+         Result.Low := Views.Reading (Low_End (S, 1), 1);
+         Result.High := Views.Reading (High_End (S, 1), 1);
+      end if;
+      return Result;
+   end Swept;
+
+   procedure Below_The_Views is
+      Lockin_Step : constant Real := 1.7e-5;
+      Pixel       : constant Real := Driver.Robot.Hand.Seen_By (45.0);
+      As_A11      : constant Sweep_Outcome := Swept (Lockin_Step, 0.0, Echo => False, Once => True);
+      Unwaited    : constant Sweep_Outcome := Swept (Lockin_Step, Pixel, Echo => False, Once => True);
+      Now         : constant Sweep_Outcome := Swept (Lockin_Step, Pixel, Echo => False, Once => False);
+      Echoed      : constant Sweep_Outcome := Swept (Lockin_Step, Pixel, Echo => True, Once => False);
+   begin
+      --  As A11 swept: one push each way, and both ends the view it began in.
+      Check (not As_A11.Ends and then As_A11.Down = 1, "A11's sweep found ends, or pushed" & As_A11.Down'Image
+             & " times down");
+      --  Pushing on unseen is not enough while the views are asked too soon.
+      Check (not Unwaited.Ends, "a sweep that asks its views before they form found ends");
+      Check (Now.Ends and then Now.Low = 0.0 and then Now.High = 1.0,
+             "a sweep from a step its views cannot see, its arm settling after each push, did not find both ends "
+             & "of the travel: " & (if Now.Ends then Real'Image (Now.Low) & " to" & Real'Image (Now.High) else "none")
+             & " after" & Now.Down'Image & " pushes down," & Now.Unseen_Down'Image & " unseen");
+      Check (Now.Unseen_Down > 0 and then Lockin_Step * 2.0 ** (Now.Unseen_Down - 1) <= Pixel,
+             "its pushes went on unseen past where its view moves a pixel:" & Now.Unseen_Down'Image & " unseen");
+      Check (Now.Up = 1, "up from its upper end the closer was pushed" & Now.Up'Image & " times, not once");
+      --  A reading that echoes the command past the end: up, nothing is ever
+      --  seen, and the pushes stop within a doubling of a pixel's push.
+      Check (Echoed.Furthest_Up >= Pixel and then Echoed.Furthest_Up < 2.0 * Pixel,
+             "an echoing closer pushed past its end unseen was asked" & Real'Image (Echoed.Furthest_Up)
+             & " past it, a pixel's push being" & Real'Image (Pixel));
+   end Below_The_Views;
+
    procedure Nothing_Seen is
       --  A channel whose push changes nothing this eye sees.
       S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
@@ -302,6 +422,8 @@ package body Driver.Robot.Hand.Sweep.Tests is
                              & "decider's does", Swept_In_A_Task'Access);
       Driver.Tests.Register ("hand.sweep.nothing", "a push that changes nothing in the eye is sent to the matcher",
                              Nothing_Seen'Access);
+      Driver.Tests.Register ("hand.sweep.blind", "a sweep from a step its views cannot see stops at its first push "
+                             & "with no ends (A11), or pushes unseen without bound", Below_The_Views'Access);
    end Register;
 
 end Driver.Robot.Hand.Sweep.Tests;
