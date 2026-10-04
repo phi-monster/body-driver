@@ -135,6 +135,24 @@ package body Driver.Action.Plants.Live is
       end;
    end Spacing_Of;
 
+   function Arm_Of
+     (Robot : Driver.Robot.Model;
+      A     : Driver.Action.Snapshots.Arm_Id;
+      O     : Driver.Observations.Observation) return Driver.Action.Snapshots.Arm_State
+   is
+      X : Arm_State;
+   begin
+      X.Id := A;
+      X.Tool := Driver.Robot.Tool_Pose (Robot, A, O);
+      Resolution_Of (Robot, A, O, X.Step, X.Turn_Step);
+      X.Carries_Eye := (for some E in 1 .. Driver.Robot.Eye_Count (Robot) =>
+                          Driver.Robot.Eye_Mount (Robot, Driver.Robot.Eye_Id (E)).Kind = Driver.Robot.Arm_Carried
+                          and then Driver.Robot.Eye_Mount (Robot, Driver.Robot.Eye_Id (E)).Arm = A);
+      X.Carries_All := Driver.Robot.Carrier_Group (Robot) /= 0
+        and then Driver.Robot.Arm_Group (Robot, A) = Driver.Robot.Carrier_Group (Robot);
+      return X;
+   end Arm_Of;
+
    function Snapshot_Of
      (Robot : Driver.Robot.Model;
       Hands : Driver.Robot.Hand.Hands;
@@ -156,18 +174,7 @@ package body Driver.Action.Plants.Live is
          end;
       end loop;
       for A in 1 .. Driver.Robot.Arm_Count (Robot) loop
-         declare
-            Id : constant Arm_Id := Arm_Id (A);
-            X  : Arm_State;
-         begin
-            X.Id := Id;
-            X.Tool := Driver.Robot.Tool_Pose (Robot, Id, O);
-            Resolution_Of (Robot, Id, O, X.Step, X.Turn_Step);
-            X.Carries_Eye := (for some E of S.Eyes => E.On_Arm = Id);
-            X.Carries_All := Driver.Robot.Carrier_Group (Robot) /= 0
-              and then Driver.Robot.Arm_Group (Robot, Id) = Driver.Robot.Carrier_Group (Robot);
-            S.Arms.Append (X);
-         end;
+         S.Arms.Append (Arm_Of (Robot, Arm_Id (A), O));
       end loop;
       for H in 1 .. Robot_Hand.Hand_Count (Hands) loop
          declare
@@ -254,10 +261,13 @@ package body Driver.Action.Plants.Live is
       return S;
    end Snapshot_Of;
 
+   --  The models are read only in a beat's window: the main loop changes
+   --  them every beat, whether the decider takes the beat or not.
    overriding procedure Look (P : in out Live; S : out Driver.Action.Snapshots.Snapshot) is
       procedure During is
       begin
          P.Last := Driver.Beats.Latest.all;
+         S := Snapshot_Of (P.Robot.all, P.Hands.all, P.Scene.all, P.Last);
       end During;
    begin
       if not P.Started then
@@ -265,18 +275,44 @@ package body Driver.Action.Plants.Live is
          P.Started := True;
       end if;
       Driver.Beats.Within_A_Beat (During'Access);
-      S := Snapshot_Of (P.Robot.all, P.Hands.all, P.Scene.all, P.Last);
    end Look;
 
-   overriding function Reach (P : Live; Goal : Arm_Goal) return Reach_Answer is
-      Plan : constant Motion.Plan :=
-        Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only));
+   overriding procedure Within (P : in out Live; During : not null access procedure) is
+      procedure Held is
+      begin
+         P.Last := Driver.Beats.Latest.all;
+         P.Inside := True;
+         During.all;
+         P.Inside := False;
+      exception
+         when others =>
+            P.Inside := False;
+            raise;
+      end Held;
    begin
-      case Motion.Status (Plan) is
-         when Motion.Planned     => return (Status => Reachable, Why => Null_Unbounded_String);
-         when Motion.Unreachable => return (Status => Unreachable, Why => To_Unbounded_String (Motion.Why (Plan)));
-         when Motion.Unmeasured  => return (Status => Unmeasured, Why => To_Unbounded_String (Motion.Why (Plan)));
-      end case;
+      Driver.Beats.Within_A_Beat (Held'Access);
+   end Within;
+
+   procedure Must_Be_Inside (P : Live; What : String) is
+   begin
+      if not P.Inside then
+         raise Program_Error with What & " asked outside a beat's window, where the models change";
+      end if;
+   end Must_Be_Inside;
+
+   overriding function Reach (P : Live; Goal : Arm_Goal) return Reach_Answer is
+   begin
+      Must_Be_Inside (P, "a reach");
+      declare
+         Plan : constant Motion.Plan :=
+           Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only));
+      begin
+         case Motion.Status (Plan) is
+            when Motion.Planned     => return (Status => Reachable, Why => Null_Unbounded_String);
+            when Motion.Unreachable => return (Status => Unreachable, Why => To_Unbounded_String (Motion.Why (Plan)));
+            when Motion.Unmeasured  => return (Status => Unmeasured, Why => To_Unbounded_String (Motion.Why (Plan)));
+         end case;
+      end;
    end Reach;
 
    --  A blocked push is blocked whether it moved first or not; an unblocked
@@ -303,9 +339,15 @@ package body Driver.Action.Plants.Live is
       end if;
       for G of O.Arms loop
          declare
-            Plan : constant Motion.Plan :=
-              Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last, (Pose => G.Tool, Position_Only => G.Position_Only));
+            Plan : Motion.Plan;
+            --  Planned from the readings of the beat it is planned in.
+            procedure Planning is
+            begin
+               P.Last := Driver.Beats.Latest.all;
+               Plan := Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last, (Pose => G.Tool, Position_Only => G.Position_Only));
+            end Planning;
          begin
+            Driver.Beats.Within_A_Beat (Planning'Access);
             if Motion.Status (Plan) = Motion.Planned then
                declare
                   Step : Motion.Step_Report;
@@ -323,16 +365,21 @@ package body Driver.Action.Plants.Live is
       end loop;
       for C of O.Closers loop
          declare
-            Open    : constant Real_Array := Robot_Hand.Closer_Reading (P.Hands.all, C.Hand, Robot_Hand.Open);
-            Closed  : constant Real_Array := Robot_Hand.Closer_Reading (P.Hands.all, C.Hand, Robot_Hand.Closed_Empty);
             Targets : Driver.Commands.Command := Driver.Commands.Hold;
-            Values  : Real_Array (Open'Range);
             Step    : Motion.Step_Report;
+            --  The closer's readings open and closed, read in a beat's window.
+            procedure Aiming is
+               Open   : constant Real_Array := Robot_Hand.Closer_Reading (P.Hands.all, C.Hand, Robot_Hand.Open);
+               Closed : constant Real_Array := Robot_Hand.Closer_Reading (P.Hands.all, C.Hand, Robot_Hand.Closed_Empty);
+               Values : Real_Array (Open'Range);
+            begin
+               for K in Open'Range loop
+                  Values (K) := Open (K) + C.Fraction * (Closed (K) - Open (K));
+               end loop;
+               Driver.Commands.Set_Target (Targets, Robot_Hand.Closer_Group (P.Hands.all, C.Hand), Values);
+            end Aiming;
          begin
-            for K in Open'Range loop
-               Values (K) := Open (K) + C.Fraction * (Closed (K) - Open (K));
-            end loop;
-            Driver.Commands.Set_Target (Targets, Robot_Hand.Closer_Group (P.Hands.all, C.Hand), Values);
+            Driver.Beats.Within_A_Beat (Aiming'Access);
             Motion.Step (P.Robot.all, Targets, Step);
             R.Closers.Append (Closer_Result'(Hand => C.Hand, Outcome => Outcome_Of (Step)));
             R.Beats := R.Beats + Step.Beats;
@@ -341,16 +388,26 @@ package body Driver.Action.Plants.Live is
    end Move;
 
    overriding function Predicted (P : Live; T : Driver.Action.Snapshots.Thing_Id; Beats : Natural)
-     return Point_Estimate is (World.Predicted (P.Scene.all, T, Beats));
+     return Point_Estimate is
+   begin
+      Must_Be_Inside (P, "a prediction");
+      return World.Predicted (P.Scene.all, T, Beats);
+   end Predicted;
 
    overriding procedure Learn (P : in out Live; L : Lesson) is
+      procedure Recording is
+      begin
+         case L.Kind is
+            when Friction_Learned =>
+               World.Learn_Friction (P.Scene.all, L.Thing, (Low => L.Bounds.Low, High => L.Bounds.High));
+            when Touched_At =>
+               World.Touched (P.Scene.all, L.Thing, L.Point);
+         end case;
+      end Recording;
    begin
-      case L.Kind is
-         when Friction_Learned =>
-            World.Learn_Friction (P.Scene.all, L.Thing, (Low => L.Bounds.Low, High => L.Bounds.High));
-         when Touched_At =>
-            World.Touched (P.Scene.all, L.Thing, L.Point);
-      end case;
+      --  The world is written in a beat's window too: the main loop writes it
+      --  every beat.
+      Driver.Beats.Within_A_Beat (Recording'Access);
    end Learn;
 
    overriding function Episode_Over (P : Live) return Boolean is
@@ -358,6 +415,7 @@ package body Driver.Action.Plants.Live is
 
    overriding function In_View (P : Live; Point : Vec3) return Boolean is
    begin
+      Must_Be_Inside (P, "a view");
       for E in 1 .. Driver.Robot.Eye_Count (P.Robot.all) loop
          declare
             Id      : constant Driver.Robot.Eye_Id := Driver.Robot.Eye_Id (E);

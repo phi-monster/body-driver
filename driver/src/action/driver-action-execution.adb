@@ -372,21 +372,27 @@ package body Driver.Action.Execution is
                Lift : Real := E.Depth + E.Sigma;
                Via_1, Via_2 : Rigid;
                Found : Boolean := False;
+               --  Raised until the way over is clear or out of reach, where the
+               --  body's reach can be asked.
+               procedure Over_The_Top is
+               begin
+                  loop
+                     Via_1 := (Rotation => From.Rotation, Translation => From.Translation + Lift * Up);
+                     Via_2 := (Rotation => Goal.Rotation, Translation => Goal.Translation + Lift * Up);
+                     exit when P.Reach ((Arm => A, Tool => Via_1, Position_Only => False)).Status /= Reachable
+                       or else P.Reach ((Arm => A, Tool => Via_2, Position_Only => False)).Status /= Reachable;
+                     if Clear_Way (X.S, E, From, Via_1, Held, Near)
+                       and then Clear_Way (X.S, E, Via_1, Via_2, Held, Near)
+                       and then Clear_Way (X.S, E, Via_2, Goal, Held, Near)
+                     then
+                        Found := True;
+                        exit;
+                     end if;
+                     Lift := 2.0 * Lift;
+                  end loop;
+               end Over_The_Top;
             begin
-               loop
-                  Via_1 := (Rotation => From.Rotation, Translation => From.Translation + Lift * Up);
-                  Via_2 := (Rotation => Goal.Rotation, Translation => Goal.Translation + Lift * Up);
-                  exit when P.Reach ((Arm => A, Tool => Via_1, Position_Only => False)).Status /= Reachable
-                    or else P.Reach ((Arm => A, Tool => Via_2, Position_Only => False)).Status /= Reachable;
-                  if Clear_Way (X.S, E, From, Via_1, Held, Near)
-                    and then Clear_Way (X.S, E, Via_1, Via_2, Held, Near)
-                    and then Clear_Way (X.S, E, Via_2, Goal, Held, Near)
-                  then
-                     Found := True;
-                     exit;
-                  end if;
-                  Lift := 2.0 * Lift;
-               end loop;
+               P.Within (Over_The_Top'Access);
                if not Found then
                   Outcome := Refused;
                   Why := To_Unbounded_String ("no clear way there: straight is blocked and every way over the top "
@@ -511,39 +517,44 @@ package body Driver.Action.Execution is
             Force : Real := Real'Last;
             Arm_Of_Best : Arm_Id := Arm_Id'First;
             Before_Centre : constant Point_Estimate := Thing (X.S, T).Centre;
+            --  Every arm's search, where the body's reach can be asked.
+            procedure Searching is
+            begin
+               for A of X.S.Arms loop
+                  if Only_Arm /= 0 and then A.Id /= Only_Arm then
+                     null;
+                  elsif Busy (X.S, A.Id, T) then
+                     Note_Tried (X, "arm " & Img (Integer (A.Id)) & " holds something else");
+                  else
+                     declare
+                        E     : constant Search.Effector := Search.Effector_Of (X.S, A.Id);
+                        Arm_Id_Now : constant Arm_Id := A.Id;
+                        --  What the travel there keeps clear of: everything.
+                        Near  : constant Grids.Grid := Obstacles (X.S, E.Sigma, 0, 0);
+                        function Can_Reach (Tool : Rigid) return Boolean is
+                          (P.Reach ((Arm => Arm_Id_Now, Tool => Tool, Position_Only => False)).Status = Reachable);
+                        function Can_Be_Free (Tool : Rigid; Fractions : Search.Real_Vectors.Vector) return Boolean is
+                          (Free_At (X.S, Arm_Id_Now, Near, Tool, Fractions));
+                        C     : Search.Candidate;
+                        Found : Boolean;
+                        Acc   : Search.Account;
+                     begin
+                        Search.Find (Search.Shape_Of (X.S, T), Beside_Of (X.S, T), E, Motion, Gravity (X.S),
+                                     Thing (X.S, T).Friction, Can_Reach'Access, Can_Be_Free'Access, C, Found, Acc,
+                                     Touch_Only);
+                        if Found and then C.Force < Force then
+                           Best := C;
+                           Force := C.Force;
+                           Arm_Of_Best := A.Id;
+                        elsif not Found then
+                           Note_Tried (X, "arm " & Img (Integer (A.Id)) & ": " & Search.Say (Acc));
+                        end if;
+                     end;
+                  end if;
+               end loop;
+            end Searching;
          begin
-            for A of X.S.Arms loop
-               if Only_Arm /= 0 and then A.Id /= Only_Arm then
-                  null;
-               elsif Busy (X.S, A.Id, T) then
-                  Note_Tried (X, "arm " & Img (Integer (A.Id)) & " holds something else");
-               else
-                  declare
-                     E     : constant Search.Effector := Search.Effector_Of (X.S, A.Id);
-                     Arm_Id_Now : constant Arm_Id := A.Id;
-                     --  What the travel there keeps clear of: everything.
-                     Near  : constant Grids.Grid := Obstacles (X.S, E.Sigma, 0, 0);
-                     function Can_Reach (Tool : Rigid) return Boolean is
-                       (P.Reach ((Arm => Arm_Id_Now, Tool => Tool, Position_Only => False)).Status = Reachable);
-                     function Can_Be_Free (Tool : Rigid; Fractions : Search.Real_Vectors.Vector) return Boolean is
-                       (Free_At (X.S, Arm_Id_Now, Near, Tool, Fractions));
-                     C     : Search.Candidate;
-                     Found : Boolean;
-                     Acc   : Search.Account;
-                  begin
-                     Search.Find (Search.Shape_Of (X.S, T), Beside_Of (X.S, T), E, Motion, Gravity (X.S),
-                                  Thing (X.S, T).Friction, Can_Reach'Access, Can_Be_Free'Access, C, Found, Acc,
-                                  Touch_Only);
-                     if Found and then C.Force < Force then
-                        Best := C;
-                        Force := C.Force;
-                        Arm_Of_Best := A.Id;
-                     elsif not Found then
-                        Note_Tried (X, "arm " & Img (Integer (A.Id)) & ": " & Search.Say (Acc));
-                     end if;
-                  end;
-               end if;
-            end loop;
+            P.Within (Searching'Access);
             if Force = Real'Last then
                return;
             end if;
@@ -810,59 +821,64 @@ package body Driver.Action.Execution is
             Step    : Real := 0.0;
             Ahead, Band : Real := Real'Last;
             Res     : Arm_Result;
+
+            --  How far this step goes, where the body's reach and view can be
+            --  asked: as far as the contact ahead, the goal, a wanted freedom
+            --  and the reach and view allow.
+            procedure Choosing is
+               Fine  : constant Real := Resolution (Now, Goal.Motion);
+               Limit : Real := Real'Last;
+               function Fits (S : Real) return Boolean is
+                 (P.Reach ((Arm => G.Arm, Tool => Moved (Goal.Motion, S, Now.Tool.Pose), Position_Only => False))
+                    .Status = Reachable
+                  and then P.In_View (Contact.Apply (Contact.Scaled (Goal.Motion, S), Centre.Mean)));
+            begin
+               if Ahead < Real'Last then
+                  Limit := Real'Max (Fine, Ahead - Band);
+               end if;
+               if Pushing then
+                  Limit := Fine;
+               elsif Known (Goal.Gap) then
+                  Limit := Real'Min (Limit, Real'Max (Fine, Real'Min (Goal.Gap.Value, Goal.Leg)));
+               elsif Goal.Leg < Real'Last then
+                  Limit := Real'Min (Limit, Real'Max (Fine, Goal.Leg));
+               end if;
+               if Wanted (Free) and then Supported then
+                  --  The rise is judged against its own noise: go just far enough for that.
+                  Limit := Real'Min (Limit, Real'Max (Fine, Z * Sqrt (2.0) * Largest_Sigma (Start.Covariance)
+                                                       - Real'((Centre.Mean - Start.Mean) * Up0)));
+               end if;
+               if Limit < Real'Last and then Fits (Limit) then
+                  Step := Limit;
+               else
+                  --  Doubled from the smallest step while it fits, then halved back down to it.
+                  declare
+                     Low  : Real := 0.0;
+                     High : Real := Fine;
+                  begin
+                     while High < Limit and then Fits (High) loop
+                        Low := High;
+                        High := 2.0 * High;
+                     end loop;
+                     High := Real'Min (High, Limit);
+                     while High - Low > Fine loop
+                        if Fits ((Low + High) / 2.0) then
+                           Low := (Low + High) / 2.0;
+                        else
+                           High := (Low + High) / 2.0;
+                        end if;
+                     end loop;
+                     Step := Low;
+                  end;
+               end if;
+               if Step < Fine then
+                  Step := 0.0;
+               end if;
+            end Choosing;
          begin
             if Goal.Ok and then (not Goal.Done or else Pushing) then
                Contact_Ahead (X.S, Moving_Points (X.S, T, G.Arm), Sigma, T, Goal.Motion, Ahead, Band);
-               declare
-                  Fine  : constant Real := Resolution (Now, Goal.Motion);
-                  Limit : Real := Real'Last;
-                  function Fits (S : Real) return Boolean is
-                    (P.Reach ((Arm => G.Arm, Tool => Moved (Goal.Motion, S, Now.Tool.Pose), Position_Only => False))
-                       .Status = Reachable
-                     and then P.In_View (Contact.Apply (Contact.Scaled (Goal.Motion, S), Centre.Mean)));
-               begin
-                  if Ahead < Real'Last then
-                     Limit := Real'Max (Fine, Ahead - Band);
-                  end if;
-                  if Pushing then
-                     Limit := Fine;
-                  elsif Known (Goal.Gap) then
-                     Limit := Real'Min (Limit, Real'Max (Fine, Real'Min (Goal.Gap.Value, Goal.Leg)));
-                  elsif Goal.Leg < Real'Last then
-                     Limit := Real'Min (Limit, Real'Max (Fine, Goal.Leg));
-                  end if;
-                  if Wanted (Free) and then Supported then
-                     --  The rise is judged against its own noise: go just far enough for that.
-                     Limit := Real'Min (Limit, Real'Max (Fine, Z * Sqrt (2.0) * Largest_Sigma (Start.Covariance)
-                                                          - Real'((Centre.Mean - Start.Mean) * Up0)));
-                  end if;
-                  if Limit < Real'Last and then Fits (Limit) then
-                     Step := Limit;
-                  else
-                     --  Doubled from the smallest step while it fits, then halved back down to it.
-                     declare
-                        Low  : Real := 0.0;
-                        High : Real := Fine;
-                     begin
-                        while High < Limit and then Fits (High) loop
-                           Low := High;
-                           High := 2.0 * High;
-                        end loop;
-                        High := Real'Min (High, Limit);
-                        while High - Low > Fine loop
-                           if Fits ((Low + High) / 2.0) then
-                              Low := (Low + High) / 2.0;
-                           else
-                              High := (Low + High) / 2.0;
-                           end if;
-                        end loop;
-                        Step := Low;
-                     end;
-                  end if;
-                  if Step < Fine then
-                     Step := 0.0;
-                  end if;
-               end;
+               P.Within (Choosing'Access);
             end if;
             F.Commanded := Step > 0.0;
             F.Exhausted := Goal.Ok and then (not Goal.Done or else Pushing) and then Step = 0.0;

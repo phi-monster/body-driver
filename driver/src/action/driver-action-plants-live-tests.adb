@@ -1,3 +1,15 @@
+with Ada.Environment_Variables;
+with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Text_IO;
+with Driver.Robot.Motion;
+with Driver.Uncertain;
+with Driver.Numerics;
+with Driver.Action.Contact;
+use Ada.Numerics.Long_Elementary_Functions;
+use Driver.Uncertain;
+use Driver.Numerics;
+use Driver.Numerics.Arrays;
+use Driver.Action.Contact;
 with Driver.Beats;
 with Driver.Bytes;
 with Driver.Clock;
@@ -143,8 +155,124 @@ package body Driver.Action.Plants.Live.Tests is
       end loop;
    end Unmeasured_Body_Refuses;
 
+   procedure Probe_Body is
+      M   : Driver.Robot.Model;
+      Ok  : Boolean;
+      Why : Unbounded_String;
+      O   : Driver.Observations.Observation;
+   begin
+      if not Ada.Environment_Variables.Exists ("BD_BODY") then
+         return;
+      end if;
+      Driver.Robot.Load_Body (M, Ada.Environment_Variables.Value ("BD_BODY"), Ok, Why);
+      Ada.Text_IO.Put_Line ("load " & Ok'Image & ": " & To_String (Why));
+      for G in 1 .. Driver.Robot.Group_Count (M) loop
+         O.Readings.Append (Real_Array'(1 .. Driver.Robot.Group_Size (M, Driver.Robot.Group_Id (G)) => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+      end loop;
+      declare
+         T  : constant Pose_Estimate := Driver.Robot.Tool_Pose (M, 1, O);
+         U  : constant Direction_Estimate := Driver.Robot.Up (M);
+         R  : constant Mat3 := T.Pose.Rotation;
+         function Img (V : Vec3) return String is (V (1)'Image & V (2)'Image & V (3)'Image);
+      begin
+         Ada.Text_IO.Put_Line ("arms" & Driver.Robot.Arm_Count (M)'Image & " tool at" & Img (T.Pose.Translation)
+                               & " |t|" & Real'(abs T.Pose.Translation)'Image);
+         Ada.Text_IO.Put_Line ("tool x" & Img ([R (1, 1), R (2, 1), R (3, 1)]) & " y" & Img ([R (1, 2), R (2, 2), R (3, 2)])
+                               & " z" & Img ([R (1, 3), R (2, 3), R (3, 3)]));
+         Ada.Text_IO.Put_Line ("up" & Img (U.Unit_Vector) & " z.up" & Real'([R (1, 3), R (2, 3), R (3, 3)] * U.Unit_Vector)'Image
+                               & " pos sigma" & Sqrt (T.Position_Covariance (1, 1))'Image
+                               & " rot sigma" & Sqrt (T.Rotation_Covariance (1, 1))'Image);
+         declare
+            E1, E2 : Vec3;
+            N : constant Vec3 := U.Unit_Vector;
+         begin
+            Plane_Basis (N, E1, E2);
+            for Dir in 1 .. 6 loop
+               declare
+                  D : constant Vec3 := (case Dir is when 1 => N, when 2 => -N, when 3 => E1, when 4 => -E1,
+                                         when 5 => E2, when others => -E2);
+               begin
+                  for K in 0 .. 8 loop
+                     declare
+                        Dist : constant Real := 0.005 * 2.0 ** K;
+                        Goal : constant Driver.Robot.Motion.Pose_Goal :=
+                          (Pose => (Rotation => R, Translation => T.Pose.Translation + Dist * D), Position_Only => False);
+                        P : constant Driver.Robot.Motion.Plan := Driver.Robot.Motion.Plan_Reach (M, 1, O, Goal);
+                        use type Driver.Robot.Motion.Plan_Status;
+                     begin
+                        Ada.Text_IO.Put_Line ("dir" & Dir'Image & " dist" & Dist'Image & " "
+                                              & Driver.Robot.Motion.Status (P)'Image
+                                              & (if Driver.Robot.Motion.Status (P) /= Driver.Robot.Motion.Planned
+                                                 then " " & Driver.Robot.Motion.Why (P) else ""));
+                        exit when Driver.Robot.Motion.Status (P) /= Driver.Robot.Motion.Planned;
+                     end;
+                  end loop;
+               end;
+            end loop;
+            --  Turning the tool about up and about its own axes.
+            for Axis in 1 .. 4 loop
+               for K in 0 .. 6 loop
+                  declare
+                     A_Ax : constant Vec3 := (case Axis is when 1 => N, when 2 => [R (1, 1), R (2, 1), R (3, 1)],
+                                              when 3 => [R (1, 2), R (2, 2), R (3, 2)],
+                                              when others => [R (1, 3), R (2, 3), R (3, 3)]);
+                     Ang : constant Real := 0.05 * 2.0 ** K;
+                     Goal : constant Driver.Robot.Motion.Pose_Goal :=
+                       (Pose => (Rotation => Exp (Ang * A_Ax) * R, Translation => T.Pose.Translation),
+                        Position_Only => False);
+                     P : constant Driver.Robot.Motion.Plan := Driver.Robot.Motion.Plan_Reach (M, 1, O, Goal);
+                     use type Driver.Robot.Motion.Plan_Status;
+                  begin
+                     Ada.Text_IO.Put_Line ("turn axis" & Axis'Image & " angle" & Ang'Image & " "
+                                           & Driver.Robot.Motion.Status (P)'Image);
+                     exit when Driver.Robot.Motion.Status (P) /= Driver.Robot.Motion.Planned;
+                  end;
+               end loop;
+            end loop;
+         end;
+         for J in 1 .. 6 loop
+            declare
+               O2 : Driver.Observations.Observation := O;
+               Q  : Real_Array := O.Readings (1);
+            begin
+               Q (J) := 0.1;
+               O2.Readings.Replace_Element (1, Q);
+               declare
+                  T2 : constant Pose_Estimate := Driver.Robot.Tool_Pose (M, 1, O2);
+               begin
+                  Ada.Text_IO.Put_Line ("joint" & J'Image & " +0.1 moves the tool by"
+                                        & Real'(abs (T2.Pose.Translation - T.Pose.Translation))'Image
+                                        & " and turns it by" & Angle (Transpose (R) * T2.Pose.Rotation)'Image);
+               end;
+            end;
+         end loop;
+         for E in 1 .. Driver.Robot.Eye_Count (M) loop
+            declare
+               P : constant Pose_Estimate := Driver.Robot.Eye_Pose (M, Driver.Robot.Eye_Id (E), O);
+            begin
+               Ada.Text_IO.Put_Line ("eye" & E'Image & " mount " & Driver.Robot.Eye_Mount (M, Driver.Robot.Eye_Id (E)).Kind'Image
+                                     & " at" & Img (P.Pose.Translation));
+            end;
+         end loop;
+         for G in 1 .. Driver.Robot.Group_Count (M) loop
+            for C in 1 .. Driver.Robot.Group_Size (M, Driver.Robot.Group_Id (G)) loop
+               declare
+                  V : constant Estimate := Driver.Robot.Visible_Step (M, Driver.Robot.Group_Id (G), C);
+               begin
+                  if Known (V) then
+                     Ada.Text_IO.Put_Line ("group" & G'Image & " channel" & C'Image & " visible step" & V.Value'Image
+                                           & " role " & Driver.Robot.Role (M, Driver.Robot.Group_Id (G))'Image);
+                  end if;
+               end;
+            end loop;
+         end loop;
+      end;
+   end Probe_Body;
+
    procedure Register is
    begin
+      Register ("action.probe.body", "probe", Probe_Body'Access);
       Register ("action.live.unmeasured", "the action layer over the real lower layers deadlocks with the main loop, "
                 & "raises, or moves on a body that has measured nothing", Unmeasured_Body_Refuses'Access);
    end Register;
