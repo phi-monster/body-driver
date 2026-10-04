@@ -85,4 +85,26 @@ private
 
    overriding procedure Finalize (H : in out Hands);
 
+   procedure Sweep_Way
+     (Way      : Real;
+      Step     : Real;
+      Push     : not null access procedure (Offset : Real; Followed : out Boolean);
+      Extends  : not null access function return Boolean;
+      Pushes   : out Natural;
+      Answered : out Boolean)
+     with Pre => Way /= 0.0 and then Step > 0.0;
+   --  One way of a closer channel's sweep: pushed Way by Step, then by twice
+   --  as much each time, from where the sweep began, for as long as each push
+   --  shows the eye something the last end did not (Extends) and the
+   --  channel's reading follows it (Push says whether the body judged it
+   --  moved along the ask). The first push it does not follow is the
+   --  channel's end this way, and the doubling stops there: a controller that
+   --  does not clamp takes a command past the end as full effort. Pushes
+   --  counts the pushes; Answered, whether the first one followed.
+
+   function Sweepable (H : Hands; M : Model; G : Group_Id) return Boolean;
+   --  The group is a closer by the body's roles now, and the hand watches it
+   --  in an eye its arm, as the body has it now, carries: the only groups
+   --  swept as closers.
+
 end Driver.Robot.Hand;

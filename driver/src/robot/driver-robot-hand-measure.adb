@@ -47,18 +47,27 @@ procedure Measure (H : in out Hands; M : in out Model) is
    end Own_Pair;
    --  Read inside a held beat.
 
-   procedure Move_Group (G : Group_Id; Target : Real_Array) is
+   procedure Move_Group (G : Group_Id; Target : Real_Array; Followed : out Boolean) is
       --  One step of the group to Target, settled, and one more still beat so
-      --  the eye's view there has two frames.
+      --  the eye's view there has two frames. Followed: the body judged that
+      --  the step moved the group along its ask (not Blocked: pushing did not
+      --  move it at all).
       Command : Driver.Commands.Command;
       Report  : Driver.Robot.Motion.Step_Report;
    begin
       Driver.Commands.Set_Target (Command, G, Target);
       Driver.Robot.Motion.Step (M, Command, Report);
       Hold_Beat (null);
+      Followed := Report.Outcome /= Driver.Robot.Motion.Blocked;
    end Move_Group;
 
-   procedure Move_Channel (G : Group_Id; Channel : Positive; To : Real) is
+   procedure Move_Group (G : Group_Id; Target : Real_Array) is
+      Followed : Boolean;
+   begin
+      Move_Group (G, Target, Followed);
+   end Move_Group;
+
+   procedure Move_Channel (G : Group_Id; Channel : Positive; To : Real; Followed : out Boolean) is
       --  One channel to To, the group's other channels as they read now.
       Now : Driver.Robot.Hand.Views.Reading_Holders.Holder;
       procedure Read_Now (O : Observation) is
@@ -71,14 +80,21 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Target : Real_Array := Now.Element;
       begin
          Target (Target'First + Channel - 1) := To;
-         Move_Group (G, Target);
+         Move_Group (G, Target, Followed);
       end;
+   end Move_Channel;
+
+   procedure Move_Channel (G : Group_Id; Channel : Positive; To : Real) is
+      Followed : Boolean;
+   begin
+      Move_Channel (G, Channel, To, Followed);
    end Move_Channel;
 
    procedure Sweep_Channel (G : Group_Id; C : Positive) is
       Start : Real := 0.0;
       Step  : Estimate;
       Never : Ada.Strings.Unbounded.Unbounded_String;
+      Still_A_Closer : Boolean := False;
       procedure Read_Start (O : Observation) is
          R : constant Real_Array := O.Readings.Element (G);
          P : constant Natural := Own_Pair (G);
@@ -87,9 +103,15 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Step := Visible_Step (M, G, C);
          Never := Ada.Strings.Unbounded.To_Unbounded_String
            (if P > 0 then Sweeps.Refusal (H.Data.Pairs (P).Sweep) else "");
+         Still_A_Closer := Sweepable (H, M, G);
       end Read_Start;
    begin
       Hold_Beat (Read_Start'Access);
+      if not Still_A_Closer then
+         Driver.Log.Line (Driver.Log.Robot, "hand: group" & G'Image & " is no longer a closer the hand watches;"
+                          & " channel" & C'Image & " not swept");
+         return;
+      end if;
       if Ada.Strings.Unbounded.Length (Never) > 0 then
          Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
                           & " not swept: the instrument can never answer ("
@@ -101,25 +123,50 @@ procedure Measure (H : in out Hands; M : in out Model) is
                           & " has no visible step measured; not swept");
          return;
       end if;
-      for Way of Real_Array'[-1.0, 1.0] loop
-         declare
-            Offset  : Real := Step.Value;
-            Extends : Boolean := True;
+      --  Each way doubles its push from the visible step while each push shows
+      --  the eye something new and the reading follows it; the first push the
+      --  reading does not follow is the channel's end that way (a closer at an
+      --  end of its travel answers only away from it), where the doubling
+      --  stops. A channel that follows neither way at its first push, the
+      --  amount the eyes saw it move by, is stuck where it is.
+      declare
+         Answered_Ways : Natural := 0;
+         procedure Push (Offset : Real; Followed : out Boolean) is
+         begin
+            Move_Channel (G, C, Start + Offset, Followed);
+         end Push;
+         function Extends return Boolean is
+            Result : Boolean := False;
             procedure Read_Extends (O : Observation) is
                pragma Unreferenced (O);
                P : constant Natural := Own_Pair (G);
             begin
-               Extends := P > 0 and then Sweeps.Would_Extend (H.Data.Pairs (P).Sweep, C);
+               Result := P > 0 and then Sweeps.Would_Extend (H.Data.Pairs (P).Sweep, C);
             end Read_Extends;
          begin
-            while Extends loop
-               Move_Channel (G, C, Start + Way * Offset);
-               Hold_Beat (Read_Extends'Access);
-               Offset := 2.0 * Offset;
-            end loop;
-         end;
-         Move_Channel (G, C, Start);
-      end loop;
+            Hold_Beat (Read_Extends'Access);
+            return Result;
+         end Extends;
+      begin
+         for Way of Real_Array'[-1.0, 1.0] loop
+            declare
+               Pushes   : Natural;
+               Answered : Boolean;
+            begin
+               Driver.Robot.Hand.Sweep_Way (Way, Step.Value, Push'Access, Extends'Access, Pushes, Answered);
+               Answered_Ways := Answered_Ways + Boolean'Pos (Answered);
+               Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
+                                & (if Way < 0.0 then " down" else " up") & ":" & Pushes'Image & " pushes, "
+                                & (if Answered then "following from the first" else "at its end there"));
+            end;
+            Move_Channel (G, C, Start);
+         end loop;
+         if Answered_Ways = 0 then
+            Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
+                             & " follows neither way by its visible step; it is stuck, and not swept");
+            return;
+         end if;
+      end;
       --  The estimators ask the instrument once both ends are seen; wait for
       --  its answer, then open the channel.
       declare
@@ -289,11 +336,11 @@ procedure Measure (H : in out Hands; M : in out Model) is
    end Press_Lobe;
 
    Count : Natural := 0;
-   procedure Read_Pairs (O : Observation) is
+   procedure Read_Groups (O : Observation) is
       pragma Unreferenced (O);
    begin
-      Count := Natural (H.Data.Pairs.Length);
-   end Read_Pairs;
+      Count := Group_Count (M);
+   end Read_Groups;
    procedure Read_Hands (O : Observation) is
       pragma Unreferenced (O);
    begin
@@ -310,48 +357,59 @@ begin
    if H.Data = null then
       H.Data := new Hand_Data;
    end if;
-   --  Sweep every channel of every closer an eye on its arm watches.
-   Hold_Beat (Read_Pairs'Access);
-   for I in 1 .. Count loop
+   --  Sweep every channel of every closer an eye on its arm watches, by the
+   --  body's roles as they are when that closer's sweep begins: the boot
+   --  re-reads them, and a group it no longer takes for a closer is not
+   --  swept as one, while one it came to take for one is.
+   Hold_Beat (Read_Groups'Access);
+   for G in 1 .. Group_Id'Base (Count) loop
       declare
-         G        : Group_Id;
-         Own      : Boolean := False;
+         Now      : Boolean := False;
          Channels : Natural := 0;
-         procedure Read_Pair (O : Observation) is
+         procedure Read_Group (O : Observation) is
             pragma Unreferenced (O);
+            P : constant Natural := Own_Pair (G);
          begin
-            G := H.Data.Pairs (I).Group;
-            Own := H.Data.Pairs (I).Own;
-            Channels := Sweeps.Channels (H.Data.Pairs (I).Sweep);
-         end Read_Pair;
+            Now := Sweepable (H, M, G);
+            Channels := (if P > 0 then Sweeps.Channels (H.Data.Pairs (P).Sweep) else 0);
+         end Read_Group;
       begin
-         Hold_Beat (Read_Pair'Access);
-         if Own then
+         Hold_Beat (Read_Group'Access);
+         if Now then
             for C in 1 .. Channels loop
                Sweep_Channel (G, C);
             end loop;
          end if;
       end;
    end loop;
-   --  Press every lobe of every hand found, at both openings.
+   --  Press every lobe of every hand found, at both openings: a hand whose
+   --  group the body no longer takes for a closer of its arm is gone by then.
    Hold_Beat (Read_Hands'Access);
    for Id in 1 .. Hand_Id'Base (Count) loop
       for Which in Opening loop
          declare
-            R : Hand_Record;
+            R    : Hand_Record;
+            Here : Boolean := False;
             procedure Read_Hand (O : Observation) is
                pragma Unreferenced (O);
             begin
-               R := H.Data.Found (Id);
+               Here := Id <= H.Data.Found.Last_Index
+                 and then Role (M, H.Data.Found (Id).Group) = Closer
+                 and then Closer_Arm (M, H.Data.Found (Id).Group) = H.Data.Found (Id).Arm;
+               if Here then
+                  R := H.Data.Found (Id);
+               end if;
             end Read_Hand;
          begin
             Hold_Beat (Read_Hand'Access);
-            Move_Group (R.Group, R.Readings (Which).Element);
-            for L in 1 .. Natural (R.Lobes.Length) loop
-               if R.Lobes (L).Sights (Which).Known then
-                  Press_Lobe (Id, R, L, Which);
-               end if;
-            end loop;
+            if Here then
+               Move_Group (R.Group, R.Readings (Which).Element);
+               for L in 1 .. Natural (R.Lobes.Length) loop
+                  if R.Lobes (L).Sights (Which).Known then
+                     Press_Lobe (Id, R, L, Which);
+                  end if;
+               end loop;
+            end if;
          end;
       end loop;
    end loop;
