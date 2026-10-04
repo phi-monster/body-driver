@@ -90,16 +90,21 @@ package Driver.World is
    --  lowest point seen is over and not below.
 
    function Height_Above_Support (S : Scene; T : Thing_Id) return Estimate;
-   --  Of its lowest point seen, along Up, from the surface it rests on;
-   --  unknown when it rests on none.
+   --  Of its lowest point seen, along Up, from the surface it rests on: a
+   --  bound on how far above the surface the thing's bottom can be, never the
+   --  bottom's height. Where the thing meets the surface, the surface hides
+   --  it from every eye above: the lowest points seen lie up the thing's side
+   --  or on its rim, a pixel or more above that contact (1 to 4 mm on the
+   --  table recordings), and what the eyes do not see of it (the underside
+   --  of a ball, the sides of a box seen from above) may reach lower still.
+   --  Unknown when it rests on none.
 
-   function Bottom_Seen (S : Scene; T : Thing_Id) return Boolean;
+   function No_Gap_Seen (S : Scene; T : Thing_Id) return Boolean;
    --  Its lowest point seen is on the surface it rests on, within their
-   --  uncertainties: the eyes see it touch. When not, Height_Above_Support
-   --  is no height but a bound: the eyes see nothing of the thing lower, and
-   --  what they do not see of it (the sides and underside of a box seen from
-   --  above, the underside of a ball) may reach down to the surface, on which
-   --  it may then rest. False when it rests on none.
+   --  uncertainties: the eyes see no gap between the two, and it may rest
+   --  there. When not, they see nothing of it lower than the height above
+   --  the surface, which bounds a gap or what they do not see of it. False
+   --  when it rests on none.
 
    function Held_By (S : Scene; T : Thing_Id) return Driver.Robot.Hand.Hand_Id'Base;
    --  The hand holding it, or 0.

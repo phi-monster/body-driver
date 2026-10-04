@@ -66,7 +66,7 @@ private package Driver.World.Estimates is
 
    function Resting_On (S : State; T : Thing_Id) return Surface_Id'Base;
    function Height_Above_Support (S : State; T : Thing_Id) return Estimate;
-   function Bottom_Seen (S : State; T : Thing_Id) return Boolean;
+   function No_Gap_Seen (S : State; T : Thing_Id) return Boolean;
    --  As Driver.World's: no support and Unknown before one is found.
 
    procedure Adopt (S : in out State; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id);

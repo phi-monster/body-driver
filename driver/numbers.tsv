@@ -1282,6 +1282,7 @@ driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count
 driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	F : Positive := 1;	1	structure	vectors are indexed from one
+driver-world-estimates.adb	Gate : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural'Min (Old.Freedom, Answer.Freedom));	2	structure	a turn of a direction has two coordinates
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
@@ -1289,6 +1290,7 @@ driver-world-estimates.adb	K : Positive := 1;	1	structure	the pairs are counted 
 driver-world-estimates.adb	Middle : constant Vec3 := (1.0 / N) * Sum;	1.0	math	a mean over the points
 driver-world-estimates.adb	Middle := (1.0 / Real (Elsewhere)) * Middle;	1.0	math	a mean over the other pairs' points
 driver-world-estimates.adb	Middle := (1.0 / Real (N)) * Middle;	1.0	math	a mean over the points
+driver-world-estimates.adb	Middle := (1.0 / Real (Old.Kept.Length)) * Middle;	1.0	math	a mean: the sum over the count
 driver-world-estimates.adb	Middle := (1.0 / Real (R.Points.Length)) * Middle;	1.0	math	a mean over the points
 driver-world-estimates.adb	Off := Significant (Vector_Gate (3, N - 1, Tests => Tests), Sqrt (Real'Max (0.0, D * (C * D))), 1.0);	1.0	statistics	the distance is already in units of its sigma
 driver-world-estimates.adb	Off := Significant (Vector_Gate (3, N - 1, Tests => Tests), Sqrt (Real'Max (0.0, D * (C * D))), 1.0);	3	structure	a point has three coordinates
@@ -1299,12 +1301,15 @@ driver-world-estimates.adb	Sqrt (Real'Max (0.0, D * (C * D))), 1.0)	1.0	statisti
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	1	structure	a family holds at least one test
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	2	structure	each point is tested from both eyes that saw it
 driver-world-estimates.adb	Tests : constant Positive := Natural'Max (1, Natural (Kept.Length));	1	structure	a family holds at least one test
+driver-world-estimates.adb	Turn : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Cosine)));	1.0	numerics	a cosine rounded past one is one, where Arccos is defined
+driver-world-estimates.adb	Turn : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Cosine)));	1.0	numerics	a cosine rounded past one is one, where Arccos is defined
 driver-world-estimates.adb	if Elsewhere >= 4 then	4	statistics	a spread in three dimensions needs one point more than it has dimensions
 driver-world-estimates.adb	if N >= 4 then	4	statistics	a spread in three dimensions needs one point more than it has dimensions
 driver-world-estimates.adb	if not Behind and then N >= 4 then	4	statistics	a spread in three dimensions needs one point more than it has dimensions
 driver-world-estimates.adb	return -1;	1	format	a beat before every beat: no measurement asked about yet
 driver-world-estimates.adb	then "" & Driver.Log.Image (Error, 2) & ""	2	format	digits printed in a log line or a message
 driver-world-estimates.adb	type Two_Eyes is array (1 .. 2) of Eye_Id;	2	structure	a point of the scene is seen by two eyes
+driver-world-estimates.adb	type Two_Eyes is array (1 .. 2) of Eye_Id;	2	structure	a pair is two eyes
 driver-world-estimates.ads	Stride : Positive := 1;	1	structure	a grid at every pixel until it is set
 driver-world-pairs.adb	(for all A in 1 .. 3 =>	3	structure	a point has three coordinates
 driver-world-pairs.adb	1.0)	1.0	statistics	the deviate is already in units of its sigma

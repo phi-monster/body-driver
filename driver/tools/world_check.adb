@@ -1697,15 +1697,20 @@ procedure World_Check is
                            P : constant Driver.Geometry.Plane_Estimate :=
                              Driver.World.Offline.Plane_Of (Bench, Under);
                         begin
-                           if Driver.World.Offline.Bottom_Seen (Bench, T) then
-                              Append (Line, "; rests on surface" & Under'Image & ", its bottom seen touching it at "
-                                      & Mm (Height.Value) & " +- " & Mm (Height.Sigma));
-                           else
-                              Append (Line, "; over surface" & Under'Image & ", its bottom unseen: nothing of it seen lower"
-                                      & " than " & Mm (Height.Value) & " +- " & Mm (Height.Sigma));
-                           end if;
-                           Append (Line, " mm (truth " & Mm (True_H) & " mm, off by " & Mm (Height.Value - True_H)
-                                   & " mm); that surface is "
+                           --  The height is a bound on how far above the surface the
+                           --  thing's bottom can be: the truth holds it when the
+                           --  true bottom is not significantly above it.
+                           Append (Line, (if Driver.World.Offline.No_Gap_Seen (Bench, T)
+                                          then "; rests on surface" & Under'Image & ", no gap seen"
+                                          else "; over surface" & Under'Image & ", a gap or an unseen part under it")
+                                   & ": nothing of it seen lower than " & Mm (Height.Value) & " +- " & Mm (Height.Sigma)
+                                   & " mm (truth " & Mm (True_H) & " mm, "
+                                   & (if True_H > Height.Value
+                                         and then Significant (Scalar_Gate (Height.Degrees_Of_Freedom),
+                                                               True_H - Height.Value, Height.Sigma)
+                                      then "above the bound by " & Mm (True_H - Height.Value) & " mm"
+                                      else "within the bound, " & Mm (Height.Value - True_H) & " mm under it")
+                                   & "); that surface is "
                                    & Mm (Plane_Z (P, Lowests (Own_K) (1), Lowests (Own_K) (2)) - Table_Top)
                                    & " mm off the table top under it");
                            --  Where on the thing its lowest point is, as the support

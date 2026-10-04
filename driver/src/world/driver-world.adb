@@ -90,8 +90,8 @@ package body Driver.World is
    function Height_Above_Support (S : Scene; T : Thing_Id) return Estimate is
      (if Known_Thing (S, T) then Driver.World.Estimates.Height_Above_Support (S.Data.State, T) else Unknown);
 
-   function Bottom_Seen (S : Scene; T : Thing_Id) return Boolean is
-     (Known_Thing (S, T) and then Driver.World.Estimates.Bottom_Seen (S.Data.State, T));
+   function No_Gap_Seen (S : Scene; T : Thing_Id) return Boolean is
+     (Known_Thing (S, T) and then Driver.World.Estimates.No_Gap_Seen (S.Data.State, T));
 
    --  Not measured yet: what holds a thing, and its motion.
 

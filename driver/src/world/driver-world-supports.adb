@@ -548,8 +548,9 @@ package body Driver.World.Supports is
          end;
       end loop;
       --  Its lowest point on the support within their uncertainties: the eyes
-      --  see it touch. Above it: they see no lower, and what they do not see
-      --  may reach down to the support.
+      --  see no gap. Above it: they see no lower, and what they do not see
+      --  may reach down to the support. Either way the contact itself is
+      --  hidden by the support, and the height is a bound.
       Best.Touching := Best.Index /= 0
         and then not (Best.Height.Value > 0.0
                       and then Significant (Scalar_Gate (Best.Height.Degrees_Of_Freedom, Tests => Points'Length),

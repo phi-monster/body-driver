@@ -540,9 +540,13 @@ package body Driver.World.Estimates is
       Latest, Earlier : Natural := 0;   --  the pair's entries, the earlier view first
 
       function Elsewhere (Old : Pair_Seen) return Boolean is
-         --  The thing's middle, as the old answer placed it, lies in either eye
-         --  at pixels the two answers' matcher errors tell apart, by the one
-         --  significance rule.
+         --  Either eye stands elsewhere as the thing sees it: from the thing's
+         --  middle, as the old answer placed it, the eye's place then and now
+         --  lie at directions the two answers' matcher errors, as angles at
+         --  that eye, tell apart by the one significance rule. Where the eye
+         --  looks does not count: an eye that only turned sees each point along
+         --  the same line as before, and a wrong match comes back to it; one
+         --  that moved, even still looking at the thing, does not.
          type Two_Eyes is array (1 .. 2) of Eye_Id;
       begin
          if Old.Then_Seen.Is_Empty or else Answer.Then_Seen.Is_Empty or else Old.Kept.Is_Empty
@@ -553,7 +557,7 @@ package body Driver.World.Estimates is
          declare
             Before : constant Observation_Holders.Constant_Reference_Type := Old.Then_Seen.Constant_Reference;
             Now    : constant Observation_Holders.Constant_Reference_Type := Answer.Then_Seen.Constant_Reference;
-            Sigma  : constant Real := Sqrt (Old.Error ** 2 + Answer.Error ** 2);
+            Error  : constant Real := Sqrt (Old.Error ** 2 + Answer.Error ** 2);
             Gate   : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural'Min (Old.Freedom, Answer.Freedom));
             Middle : Vec3 := Zero3;
          begin
@@ -563,15 +567,25 @@ package body Driver.World.Estimates is
             Middle := (1.0 / Real (Old.Kept.Length)) * Middle;
             for E of Two_Eyes'[Answer.From, Answer.Into] loop
                declare
-                  Then_Px, Now_Px           : Driver.Images.Pixel;
-                  Then_Visible, Now_Visible : Boolean;
+                  Then_Eye : constant Driver.World.Cameras.Camera'Class := Camera_Of (E, Before.Element);
+                  Now_Eye  : constant Driver.World.Cameras.Camera'Class := Camera_Of (E, Now.Element);
+                  To_Then  : constant Vec3 := Then_Eye.Pose.Pose.Translation - Middle;
+                  To_Now   : constant Vec3 := Now_Eye.Pose.Pose.Translation - Middle;
+                  Px       : Driver.Images.Pixel;
+                  Visible  : Boolean;
                begin
-                  Camera_Of (E, Before.Element).Project (Middle, Then_Px, Then_Visible);
-                  Camera_Of (E, Now.Element).Project (Middle, Now_Px, Now_Visible);
-                  if Then_Visible and then Now_Visible
-                    and then Significant (Gate, Sqrt ((Now_Px.U - Then_Px.U) ** 2 + (Now_Px.V - Then_Px.V) ** 2), Sigma)
-                  then
-                     return True;
+                  Now_Eye.Project (Middle, Px, Visible);
+                  if Visible and then abs To_Then > 0.0 and then abs To_Now > 0.0 then
+                     declare
+                        Cosine : constant Real :=
+                          Real'(To_Then * To_Now) / (Real'(abs To_Then) * Real'(abs To_Now));
+                        Turn   : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Cosine)));
+                        Per    : constant Real := Driver.World.Cameras.Radians_Per_Pixel (Now_Eye, Px);
+                     begin
+                        if Per < Real'Last and then Significant (Gate, Turn, Error * Per) then
+                           return True;
+                        end if;
+                     end;
                   end if;
                end;
             end loop;
@@ -1455,7 +1469,7 @@ package body Driver.World.Estimates is
    function Height_Above_Support (S : State; T : Thing_Id) return Estimate is
      (if S.Things (T).Under.Index = 0 then Unknown else S.Things (T).Under.Height);
 
-   function Bottom_Seen (S : State; T : Thing_Id) return Boolean is
+   function No_Gap_Seen (S : State; T : Thing_Id) return Boolean is
      (S.Things (T).Under.Index /= 0 and then S.Things (T).Under.Touching);
 
    function Surface_Of (S : State; F : Surface_Id) return Driver.World.Supports.Surface is (S.Surfaces (Positive (F)));
