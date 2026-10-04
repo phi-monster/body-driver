@@ -1,4 +1,5 @@
 with Driver.Beats;
+with Driver.Geometry;
 with Driver.Robot.Hand.Aims;
 with Driver.Robot.Motion;
 
@@ -199,10 +200,16 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end;
    end Sweep_Channel;
 
-   --  One press: the hand turned about the eye so that Along points down
-   --  along gravity, then lowered until blocked, let go, and lifted back.
+   --  One press of a lobe at an opening: the hand turned about the eye so
+   --  that Along points down along gravity, then lowered until blocked
+   --  (Driver.Robot.Hand.Descend), let go, and lifted back. The contact is
+   --  predicted once the presses so far fix the lobe's tip and the surface
+   --  (Tips.Tip, Tips.Surface): its height above that plane along Up, its
+   --  sigma the plane's there with the tip's and the tool pose's. Before that
+   --  nothing predicts it (a lobe's tip rides with its eye, so no view of the
+   --  surface tells how far below the tip it is) and the descent creeps.
    --  False when the arm cannot reach it or the body does not say where down is.
-   function Press_Once (Id : Hand_Id; R : Hand_Record; Along : Vec3) return Boolean is
+   function Press_Once (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening; Along : Vec3) return Boolean is
       Above  : Rigid;
       Plan   : Driver.Robot.Motion.Plan;
       Report : Driver.Robot.Motion.Step_Report;
@@ -241,6 +248,58 @@ procedure Measure (H : in out Hands; M : in out Model) is
                           Position_Only => False));
       end Read_Lower;
 
+      Unplanned : Boolean := False;   --  a step could not be planned
+      procedure Lower (Step : Real; Reached : out Boolean) is
+      begin
+         By := Step;
+         Hold_Beat (Read_Lower'Access);
+         if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
+            Unplanned := True;
+            Reached := False;
+            return;
+         end if;
+         Driver.Robot.Motion.Follow (M, Plan, Report);
+         Reached := Report.Outcome = Driver.Robot.Motion.Reached;
+      end Lower;
+
+      function Gap return Estimate is
+         --  The lobe's tip above the surface the presses so far fixed, along Up.
+         Result : Estimate := Unknown;
+         procedure Read_Gap (O : Observation) is
+            B    : Driver.Robot.Hand.Tips.Book renames H.Data.Found (Id).Book;
+            Tip  : constant Point_Estimate := Driver.Robot.Hand.Tips.Tip (B, Lobe, Which);
+            P    : constant Driver.Geometry.Plane_Estimate := Driver.Robot.Hand.Tips.Surface (B);
+            Tool : constant Pose_Estimate := Tool_Pose (M, R.Arm, O);
+         begin
+            if Known (Tip) and then Driver.Geometry.Known (P) and then Tool.Position_Covariance (1, 1) < Real'Last then
+               declare
+                  Rot    : constant Mat3 := Tool.Pose.Rotation;
+                  Here   : constant Vec3 := Tool.Pose * Tip.Mean;
+                  --  A turn of the tool by a small rotation vector w moves the
+                  --  tip by w x (R Tip), so its height by w . Lever.
+                  Lever  : constant Vec3 := Cross (Rot * Tip.Mean, P.Normal);
+                  On_It  : constant Estimate :=
+                    Driver.Geometry.Height
+                      (P, Point_Estimate'(Mean       => Here,
+                                          Covariance => Rot * Tip.Covariance * Transpose (Rot)
+                                                        + Tool.Position_Covariance));
+                  Lean   : constant Real := P.Normal * (-Into);
+               begin
+                  if Lean > 0.0 then
+                     Result := (Value              => On_It.Value / Lean,
+                                Sigma              => Sqrt (On_It.Sigma ** 2
+                                                            + Lever * (Tool.Rotation_Covariance * Lever)) / Lean,
+                                Degrees_Of_Freedom => On_It.Degrees_Of_Freedom);
+                  end if;
+               end;
+            end if;
+         end Read_Gap;
+      begin
+         Hold_Beat (Read_Gap'Access);
+         return Result;
+      end Gap;
+      Steps : Natural;
+
       procedure Read_Arm (O : Observation) is
       begin
          Arm_Is := Arm_Group (M, R.Arm);
@@ -263,18 +322,24 @@ procedure Measure (H : in out Hands; M : in out Model) is
          return False;
       end if;
       Driver.Robot.Motion.Follow (M, Plan, Report);
-      By := Least;
-      loop
-         Hold_Beat (Read_Lower'Access);
-         if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
-            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": cannot press lower: "
-                             & Driver.Robot.Motion.Why (Plan));
-            return False;
-         end if;
-         Driver.Robot.Motion.Follow (M, Plan, Report);
-         exit when Report.Outcome /= Driver.Robot.Motion.Reached;
-         By := 2.0 * By;
-      end loop;
+      declare
+         First : constant Estimate := Gap;
+      begin
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": pressing lobe" & Lobe'Image & " at "
+                          & (if Which = Open then "open" else "closed")
+                          & (if Known (First)
+                             then ", " & Driver.Log.Image (First.Value, 4) & " +- " & Driver.Log.Image (First.Sigma, 4)
+                                  & " above the surface the presses so far fixed"
+                             else ", nothing yet predicting the surface below its tip: by "
+                                  & Driver.Log.Image (Least, 4) & " a step until blocked"));
+      end;
+      Driver.Robot.Hand.Descend (Gap'Access, Least, Lower'Access, Steps);
+      if Unplanned then
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": cannot press lower: " & Driver.Robot.Motion.Why (Plan));
+         return False;
+      end if;
+      Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": blocked after" & Steps'Image & " steps, the last by "
+                       & Driver.Log.Image (By, 4));
       --  Let go: the arm held where the block left it, so the hand rests.
       Hold_Beat (Read_Arm'Access);
       Move_Group (Arm_Is, Arm_Now.Element);
@@ -315,7 +380,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Agreed := Driver.Robot.Hand.Tips.Latest_Agrees (H.Data.Found (Id).Book);
          end Read_Agreed;
       begin
-         if not Press_Once (Id, R, Sight) or else Scale <= 0.0 then
+         if not Press_Once (Id, R, Lobe, Which, Sight) or else Scale <= 0.0 then
             return;
          end if;
          --  Leaning to either side of away, half-way to across.
@@ -325,7 +390,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                Tilt : Real := Scale;
             begin
                while Tilt < Ada.Numerics.Pi / 2.0 loop
-                  exit when not Press_Once (Id, R, Driver.Robot.Hand.Aims.Tilted (Sight, Lean, Tilt));
+                  exit when not Press_Once (Id, R, Lobe, Which, Driver.Robot.Hand.Aims.Tilted (Sight, Lean, Tilt));
                   Hold_Beat (Read_Agreed'Access);
                   exit when not Agreed;
                   Tilt := 2.0 * Tilt;

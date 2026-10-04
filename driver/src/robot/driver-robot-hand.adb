@@ -511,6 +511,42 @@ package body Driver.Robot.Hand is
       end loop;
    end Sweep_Way;
 
+   procedure Descend
+     (Gap   : not null access function return Estimate;
+      Least : Real;
+      Lower : not null access procedure (By : Real; Reached : out Boolean);
+      Steps : out Natural)
+   is
+      Fast    : Real := Least;   --  the next step of the fast part, doubling
+      Reached : Boolean;
+   begin
+      Steps := 0;
+      loop
+         declare
+            G  : constant Estimate := Gap.all;
+            By : Real := Least;
+         begin
+            if Known (G) then
+               declare
+                  --  How far the tip may go before it is within Z sigma of the
+                  --  predicted contact.
+                  Room : constant Real := G.Value - Threshold (Scalar_Gate (G.Degrees_Of_Freedom)) * G.Sigma;
+               begin
+                  if Room >= Least then
+                     By := Real'Min (Fast, Room);
+                     Fast := 2.0 * Fast;
+                  else
+                     By := Real'Max (G.Sigma, Least);
+                  end if;
+               end;
+            end if;
+            Lower (By, Reached);
+            Steps := Steps + 1;
+            exit when not Reached;
+         end;
+      end loop;
+   end Descend;
+
    function Sweepable (H : Hands; M : Model; G : Group_Id) return Boolean is
      (H.Data /= null
       and then (for some P of H.Data.Pairs => P.Group = G and then P.Own and then Still_A_Pair (P, M)));
