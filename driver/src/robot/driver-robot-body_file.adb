@@ -62,6 +62,11 @@ package body Driver.Robot.Body_File is
 
    function Three (X : Vec3) return String is ("[" & Num (X (1)) & ", " & Num (X (2)) & ", " & Num (X (3)) & "]");
 
+   function Nine (R : Mat3) return String is
+     ("[" & Num (R (1, 1)) & ", " & Num (R (1, 2)) & ", " & Num (R (1, 3)) & ", "
+      & Num (R (2, 1)) & ", " & Num (R (2, 2)) & ", " & Num (R (2, 3)) & ", "
+      & Num (R (3, 1)) & ", " & Num (R (3, 2)) & ", " & Num (R (3, 3)) & "]");
+
    function Text (M : Model) return String is
       T : Unbounded_String;
 
@@ -193,7 +198,16 @@ package body Driver.Robot.Body_File is
                  & "}, ""used"": " & Int (F.Used) & ", ""median_px"": " & Num (F.Median_Px)
                  & ", ""sigma_px"": " & Num (F.Sigma_Px) & ", ""matches"": " & Int (F.Matches)
                  & ", ""why"": " & Driver.Json.Quote (To_String (F.Why))
-                 & ", ""covariance"": " & Reals (F.Covariance) & "}");
+                 & ", ""covariance"": " & Reals (F.Covariance)
+                 & ", ""table"": {""found"": " & Flag (F.Table_Found) & ", ""normal"": " & Three (F.Table_Normal)
+                 & ", ""offset"": " & Num (F.Table_Offset) & ", ""offset_sigma"": " & Num (F.Table_Offset_Sigma)
+                 & ", ""sigma"": " & Num (F.Table_Sigma) & "}"
+                 & ", ""placed"": " & Flag (F.Placed)
+                 & ", ""placement"": {""rotation"": " & Nine (F.Placement.Rotation)
+                 & ", ""centre"": " & Three (F.Placement.Translation)
+                 & ", ""scale"": " & Num (F.Scale) & ", ""scale_sigma"": " & Num (F.Scale_Sigma)
+                 & ", ""covariance"": " & Reals (F.Placement_Covariance)
+                 & ", ""px"": " & Num (F.Placed_Px) & ", ""points"": " & Int (F.Placed_Points) & "}}");
          end;
       end loop;
       Add ("]}}" & LF);
@@ -265,6 +279,11 @@ package body Driver.Robot.Body_File is
 
       function Three_Of (N : Node) return Vec3 is
         ([Value (Item (N, 1)), Value (Item (N, 2)), Value (Item (N, 3))]);
+
+      function Nine_Of (N : Node) return Mat3 is
+        ([[Value (Item (N, 1)), Value (Item (N, 2)), Value (Item (N, 3))],
+          [Value (Item (N, 4)), Value (Item (N, 5)), Value (Item (N, 6))],
+          [Value (Item (N, 7)), Value (Item (N, 8)), Value (Item (N, 9))]]);
 
       Restored : Stored_Flags := [others => False];
    begin
@@ -529,6 +548,24 @@ package body Driver.Robot.Body_File is
                      R.Result.Matches := Natural'Max (0, Whole (X, "matches"));
                      R.Result.Why := To_Unbounded_String (Driver.Json.Text (Doc, Field (X, "why")));
                      R.Result.Covariance := Reals_Of (Field (X, "covariance"));
+                     declare
+                        T : constant Node := Field (X, "table");
+                        P : constant Node := Field (X, "placement");
+                     begin
+                        R.Result.Table_Found := Truth (T, "found");
+                        R.Result.Table_Normal := Three_Of (Field (T, "normal"));
+                        R.Result.Table_Offset := Value (Field (T, "offset"));
+                        R.Result.Table_Offset_Sigma := Value (Field (T, "offset_sigma"));
+                        R.Result.Table_Sigma := Value (Field (T, "sigma"));
+                        R.Result.Placed := Truth (X, "placed");
+                        R.Result.Placement := (Rotation    => Nine_Of (Field (P, "rotation")),
+                                               Translation => Three_Of (Field (P, "centre")));
+                        R.Result.Scale := Value (Field (P, "scale"));
+                        R.Result.Scale_Sigma := Value (Field (P, "scale_sigma"));
+                        R.Result.Placement_Covariance := Reals_Of (Field (P, "covariance"));
+                        R.Result.Placed_Px := Value (Field (P, "px"));
+                        R.Result.Placed_Points := Natural'Max (0, Whole (P, "points"));
+                     end;
                      M.Kinematics.Append (R);
                   end;
                end loop;

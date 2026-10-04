@@ -86,6 +86,18 @@ package Driver.Robot.Kinematics.Fit is
    function Term_Of (Joint : Positive; T : Joint_Term) return Positive is
      (Lens_Terms + Joint_Terms * (Joint - 1) + Joint_Term'Pos (T) + 1);
 
+   function Unit_Sigma
+     (Joints     : Joint_Array;
+      Changes    : Driver.Numerics.Arrays.Real_Matrix;
+      Covariance : Real_Lists.Vector) return Real
+     with Pre => Changes'Length (2) = Joints'Length;
+   --  How uncertain the fit's unit is against its own depths, relative: the
+   --  unit is the root mean square of the eye positions over the keyframes
+   --  (Changes, one keyframe a row), and the fit's covariance holds the
+   --  joints' lengths against its depths; each joint term is moved by its
+   --  standard deviation either way. Real'Last when the covariance is not
+   --  the fit's of these joints.
+
    procedure Pose_Covariance
      (Joints      : Joint_Array;
       Change      : Real_Array;
@@ -122,6 +134,8 @@ package Driver.Robot.Kinematics.Fit is
       Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
       Focal_Sigma : Real := Real'Last; --  the uncertainty of the focal length across
       Covariance : Real_Lists.Vector;  --  of the parameters above, row by row; empty when not determined
+      Depths     : Real_Lists.Vector;  --  per track, the depth of its point along its reference line of
+                                       --  sight as the track refinement found it; 0 where it has none
    end record;
 
    procedure Fit
@@ -134,22 +148,66 @@ package Driver.Robot.Kinematics.Fit is
       Report     : out Fit_Report)
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length;
 
-   procedure Table
+   type Track_Point is record
+      Known : Boolean := False;   --  triangulated in front of the reference eye
+      X     : Vec3 := [0.0, 0.0, 0.0];
+   end record;
+
+   type Track_Point_Array is array (Positive range <>) of Track_Point;
+
+   procedure Track_Points
      (Changes   : Driver.Numerics.Arrays.Real_Matrix;
       Sightings : Sighting_Array;
       Joints    : Joint_Array;
       L         : Lens;
-      Normal    : out Vec3;
-      Sigma     : out Real;
-      Found     : out Boolean)
+      Points    : out Track_Point_Array)
+     with Pre => Changes'Length (2) = Joints'Length;
+   --  Every track's point in the reference eye's frame, indexed by track: on
+   --  its reference line of sight, at the depth least squares over the
+   --  keyframes it was followed into gives it.
+
+   procedure Table
+     (Changes      : Driver.Numerics.Arrays.Real_Matrix;
+      Sightings    : Sighting_Array;
+      Joints       : Joint_Array;
+      L            : Lens;
+      Normal       : out Vec3;
+      Offset       : out Real;
+      Offset_Sigma : out Real;
+      Sigma        : out Real;
+      Found        : out Boolean)
      with Pre => Changes'Length (2) = Joints'Length;
    --  The plane most of the tracked points lie on, in the reference eye's
    --  frame: every track triangulated from its keyframes, the plane's normal
    --  the direction whose median distance of the points from their median
    --  offset is least (over the same lattice of directions the fit searches),
    --  then refined by Huber-weighted least squares at the measured spread.
-   --  Normal points to the side of the reference eye; Sigma is its angular
-   --  uncertainty.
+   --  Normal points to the side of the reference eye, and the plane holds the
+   --  points X with Normal * X = Offset, so the eye at the origin is -Offset
+   --  from it (Offset_Sigma its uncertainty along Normal); Sigma is the
+   --  normal's angular uncertainty.
+
+   --  One point in two frames.
+   type Point_Pair is record
+      From, To : Vec3 := [0.0, 0.0, 0.0];
+   end record;
+
+   type Point_Pair_Array is array (Positive range <>) of Point_Pair;
+
+   procedure Similarity
+     (Pairs       : Point_Pair_Array;
+      Rotation    : out Mat3;
+      Translation : out Vec3;
+      Scale       : out Real;
+      Scale_Sigma : out Real;
+      Spread      : out Real;
+      Used        : out Natural;
+      Found       : out Boolean);
+   --  To = Scale * Rotation * From + Translation: the closed form for the
+   --  weighted pairs (Umeyama's), then Huber weights on the residuals at
+   --  their measured spread (Spread, per coordinate), the pairs that fit
+   --  re-chosen until the choice settles. Scale_Sigma is the scale's
+   --  uncertainty: the spread over the points' own spread about their centre.
 
    --  A point of the reference eye's frame and where another eye sees it.
    type Correspondence is record
@@ -158,6 +216,24 @@ package Driver.Robot.Kinematics.Fit is
    end record;
 
    type Correspondence_Array is array (Positive range <>) of Correspondence;
+
+   procedure Resect_Pose
+     (Points     : Correspondence_Array;
+      L          : Lens;
+      Initial    : Rigid;
+      Placement  : out Rigid;
+      Covariance : out Real_Lists.Vector;
+      Sigma      : out Real;
+      Used       : out Natural;
+      Found      : out Boolean);
+   --  Where an eye of known lens stands among points of known position it
+   --  sees. Placement maps the eye's frame into the points' (its rotation
+   --  holds the eye's axes, its translation the eye's centre), from Initial
+   --  by robust least squares on the reprojection, the points that fit
+   --  re-chosen until the choice settles. Covariance (6 x 6, row by row) is
+   --  that of Placement's turn (the rotation vector in the points' frame that
+   --  takes it to the truth) and of its centre: the sandwich over the points.
+   --  Sigma is the pixel noise of the points that fit.
 
    procedure Resect
      (Points        : Correspondence_Array;

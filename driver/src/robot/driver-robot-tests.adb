@@ -2110,11 +2110,16 @@ package body Driver.Robot.Tests is
          if Frame_Error = 0.0 then
          declare
             Normal : Vec3;
+            Offset, Offset_Sigma : Real;
             Sigma  : Real;
             Flat   : Boolean;
          begin
-            Fit.Table (Changes, All_Seen (1 .. Seen), Joints, Found, Normal, Sigma, Flat);
+            Fit.Table (Changes, All_Seen (1 .. Seen), Joints, Found, Normal, Offset, Offset_Sigma, Sigma, Flat);
             Check (Flat, "no table found");
+            --  The reference eye, at the origin, lies on the side the normal points
+            --  to: its distance from the table is minus the offset.
+            Check (Offset < 0.0 and then Offset_Sigma < -Offset, "the table's offset is" & Offset'Image & " +-"
+                   & Offset_Sigma'Image);
             Check (Arccos (Real'Min (1.0, Normal * Unit (Table))) < Noise / 40.0,
                    "the table's normal is off by" & Real'Image (Arccos (Real'Min (1.0, Normal * Unit (Table)))) & " rad");
             Check (Sigma < Noise / 40.0, "the table's normal is uncertain by" & Sigma'Image & " rad");
@@ -2349,6 +2354,273 @@ package body Driver.Robot.Tests is
       Driver.Robot.Kinematics.Refit (M);
    end Build_Fitted_Arm;
 
+   --  Two arms of six joints, each carrying its eye, the second one and a half
+   --  times the first's size, seeing one table: the first arm's reference eye
+   --  is the world, the second's stands at Second (X_world = Second * X_eye,
+   --  in the units the scene is drawn in). Both sweeps' keyframes and the
+   --  first arm's reference matched into the second's are synthetic matches
+   --  with 0.1 px of noise. Truth_Of gives each arm's true joints.
+   Sizes : constant array (1 .. 2) of Real := [1.0, 1.5];
+
+   function Truth_Of (A : Positive) return Driver.Robot.Kinematics.Fit.Joint_Array is
+      Axes   : constant array (1 .. 6) of Vec3 :=
+        [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
+      Points : constant array (1 .. 6) of Vec3 :=
+        [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
+      Truth  : Driver.Robot.Kinematics.Fit.Joint_Array (1 .. 6);
+   begin
+      for J in 1 .. 6 loop
+         declare
+            W : constant Vec3 := Unit (Axes (J));
+            P : constant Vec3 := Sizes (A) * Points (J);
+         begin
+            Truth (J) := (W => W, P => P - Real'(P * W) * W, C => 1.0, Slide => False);
+         end;
+      end loop;
+      return Truth;
+   end Truth_Of;
+
+   --  The keyframes both arms' sweeps take: the reference and its still twin,
+   --  every joint at every level, the Hadamard rows.
+   function Sweep_Changes return Real_Matrix is
+      N      : constant := 6;
+      Levels : constant Real_Array := [0.05, -0.05, 0.1, -0.1, 0.2, -0.2];
+      Rows_H : constant := 7;
+      C      : Real_Matrix (1 .. 2 + N * Levels'Length + Rows_H, 1 .. N) := [others => [others => 0.0]];
+   begin
+      for J in 1 .. N loop
+         for L in Levels'Range loop
+            C (2 + (J - 1) * Levels'Length + L, J) := Levels (L);
+         end loop;
+      end loop;
+      for Row in 1 .. Rows_H loop
+         for J in 1 .. N loop
+            declare
+               Bits : Natural := 0;
+               A    : Natural := Row;
+               B    : Natural := J;
+            begin
+               while A > 0 and then B > 0 loop
+                  if A mod 2 = 1 and then B mod 2 = 1 then
+                     Bits := Bits + 1;
+                  end if;
+                  A := A / 2;
+                  B := B / 2;
+               end loop;
+               C (2 + N * Levels'Length + Row, J) := (if Bits mod 2 = 0 then 0.05 else -0.05);
+            end;
+         end loop;
+      end loop;
+      return C;
+   end Sweep_Changes;
+
+   --  The table's point on the line of sight through (U, V) of an eye at
+   --  Placed in the world (X_world = Placed * X_eye), in that eye's frame.
+   function Table_Point (Placed : Rigid; U, V : Real) return Vec3 is
+      Lens    : constant Driver.Robot.Kinematics.Fit.Lens :=
+        (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Table_N : constant Vec3 := Unit ([0.0, -0.6, -0.8]);   --  in the world, away from the first eye
+      Table_O : constant Real := -1.0;                       --  one unit from the first eye
+      H  : constant Vec3 := Driver.Robot.Kinematics.Fit.Ray (Lens, U, V);
+      Nr : constant Vec3 := Transpose (Placed.Rotation) * Table_N;
+      Oa : constant Real := Table_O - Real'(Table_N * Placed.Translation);
+   begin
+      return (Oa / Real'(Nr * H)) * H;
+   end Table_Point;
+
+   procedure Build_Two_Arms (M : in out Model; Second : Rigid) is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      N       : constant := 6;
+      Columns : constant := 16;
+      Rows    : constant := 12;
+      Noise   : constant := 0.1;
+      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Changes : constant Real_Matrix := Sweep_Changes;
+      Placed  : constant array (1 .. 2) of Rigid := [Identity, Second];
+      Arms    : array (1 .. 2) of Arm_Evidence;
+      Rng     : Generator;
+      Cells   : constant := 4;
+
+      function On_Table (A : Positive; U, V : Real) return Vec3 is (Table_Point (Placed (A), U, V));
+
+      procedure Match (A : Positive; Seen_From : Rigid; Frame : Positive; Into : in out Match_Set_Vectors.Vector;
+                       From_Arm : Positive) is
+         --  Seen_From maps From_Arm's reference frame into the eye that looks.
+         Set : Match_Set;
+      begin
+         Set.Frame := Frame;
+         for I in 0 .. Natural (Arms (From_Arm).Query_U.Length) - 1 loop
+            declare
+               X     : constant Vec3 := On_Table (From_Arm, Arms (From_Arm).Query_U (I), Arms (From_Arm).Query_V (I));
+               U, V  : Real;
+               Ahead : Boolean;
+            begin
+               Fit.Project (Lens, Seen_From * X, U, V, Ahead);
+               Set.To_U.Append (U + Noise * Gaussian (Rng));
+               Set.To_V.Append (V + Noise * Gaussian (Rng));
+               Set.Back_U.Append (Arms (From_Arm).Query_U (I) + Noise * Gaussian (Rng));
+               Set.Back_V.Append (Arms (From_Arm).Query_V (I) + Noise * Gaussian (Rng));
+               Set.Found.Append (Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0);
+            end;
+         end loop;
+         Into.Append (Set);
+         pragma Unreferenced (A);
+      end Match;
+   begin
+      for A in 1 .. 2 loop
+         M.Groups.Append (Group_Stream'(Size => N, Commandable => True, others => <>));
+         declare
+            S : Eye_Stream;
+         begin
+            S.Grid := (Width => 640, Height => 480, Columns => 2, Rows => 2);
+            for C in 1 .. N loop
+               S.Kept_Groups.Append (A);
+               S.Kept_Channels.Append (C);
+            end loop;
+            for Cell in 1 .. Cells loop
+               S.Noise.Append (Noise);
+               for C in 1 .. N loop
+                  S.Gains.Append (1.0e16);
+                  S.Gain_Variances.Append (1.0);
+                  S.Shifts.Append (400.0);
+               end loop;
+            end loop;
+            M.Eyes.Append (S);
+         end;
+      end loop;
+      --  Each group moves its own eye's whole view and nothing of the other's.
+      M.Graph.Effects.Append (Eye_Effect'(Verdict => Whole, Responding => Cells, Textured => Cells, others => <>));
+      M.Graph.Effects.Append (Eye_Effect'(Verdict => Nothing, Textured => Cells, others => <>));
+      M.Graph.Effects.Append (Eye_Effect'(Verdict => Nothing, Textured => Cells, others => <>));
+      M.Graph.Effects.Append (Eye_Effect'(Verdict => Whole, Responding => Cells, Textured => Cells, others => <>));
+      for A in 1 .. 2 loop
+         M.Graph.Arms.Append (Group_Id (A));
+         M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => Arm_Id (A)));
+         Arms (A) := (Arm => Arm_Id (A), Group => Group_Id (A), Eye => Eye_Id (A), others => <>);
+         for Gy in 1 .. Rows loop
+            for Gx in 1 .. Columns loop
+               Arms (A).Query_U.Append ((Real (Gx) - 0.5) * 640.0 / Real (Columns));
+               Arms (A).Query_V.Append ((Real (Gy) - 0.5) * 480.0 / Real (Rows));
+            end loop;
+         end loop;
+         for F in Changes'Range (1) loop
+            declare
+               K : Keyframe;
+               D : Real_Array (1 .. N);
+            begin
+               K.Beat := F;
+               for J in 1 .. N loop
+                  K.Readings.Append (Changes (F, J));
+                  D (J) := Changes (F, J);
+               end loop;
+               Arms (A).Frames.Append (K);
+               if F > 1 then
+                  Match (A, Inverse (Driver.Robot.Kinematics.Fit.Eye_At (Truth_Of (A), D)), F, Arms (A).Matches, A);
+               end if;
+            end;
+         end loop;
+      end loop;
+      --  The first arm's reference matched into the second's.
+      Match (2, Inverse (Second), 1, Arms (2).World_Matches, 1);
+      Arms (2).World_Asked := True;
+      Arms (2).World_Group := 1;
+      Arms (2).World_Reference := Arms (1).Frames.First_Element.Beat;
+      M.Kinematics.Append (Arms (1));
+      M.Kinematics.Append (Arms (2));
+      Driver.Robot.Kinematics.Refit (M);
+   end Build_Two_Arms;
+
+   --  How long the arm's fit unit is in the units the scene is drawn in: its
+   --  fitted eye positions over its keyframes against the true ones, by least
+   --  squares (the fit makes their root mean square one unit).
+   function Unit_Of (M : Model; A : Positive) return Real is
+      Changes : constant Real_Matrix := Sweep_Changes;
+      Num, Den : Real := 0.0;
+   begin
+      for F in Changes'Range (1) loop
+         declare
+            D : Real_Array (1 .. 6);
+         begin
+            for J in 1 .. 6 loop
+               D (J) := Changes (F, J);
+            end loop;
+            declare
+               T : constant Vec3 := Driver.Robot.Kinematics.Fit.Eye_At (Truth_Of (A), D).Translation;
+               G : constant Vec3 := Driver.Robot.Kinematics.Eye_In_Reference (M, Arm_Id (A), D).Translation;
+            begin
+               Num := Num + T * G;
+               Den := Den + G * G;
+            end;
+         end;
+      end loop;
+      return Num / Den;
+   end Unit_Of;
+
+   --  A second arm, its eye at its reference keyframe turned and moved from the
+   --  first's and its body half again as large, is placed in the first arm's
+   --  world: where its eye stands, how it is turned, the scale of its lengths,
+   --  and its eye at a pose no keyframe had, against the true scene in the
+   --  first arm's units, each within Z of its own sigma. Both lenses' errors
+   --  are in it: the resection holds them fixed, and its sigma must carry them.
+   procedure Place_A_Second_Arm is
+      M      : Model;
+      Second : constant Rigid := (Rotation => Driver.Numerics.Exp ([0.12, -0.2, 0.08]), Translation => [0.25, 0.04, 0.05]);
+      Placement : Rigid;
+      Scale  : Real;
+      Known  : Boolean;
+   begin
+      Build_Two_Arms (M, Second);
+      Check (Driver.Robot.Kinematics.Fitted (M, 1) and then Driver.Robot.Kinematics.Fitted (M, 2), "the arms are not fitted");
+      Driver.Robot.Kinematics.In_World (M, 2, Placement, Scale, Known);
+      Check (Known, "the second arm is not placed in the world");
+      if not Known then
+         return;
+      end if;
+      declare
+         U1 : constant Real := Unit_Of (M, 1);
+         U2 : constant Real := Unit_Of (M, 2);
+         R  : Arm_Fit renames M.Kinematics (2).Result;
+         function C (P, Q : Positive) return Real is (R.Placement_Covariance ((P - 1) * 6 + Q - 1));
+         Turn_Sigma   : constant Real := Sqrt (C (1, 1) + C (2, 2) + C (3, 3));
+         Centre_Sigma : constant Real := Sqrt (C (4, 4) + C (5, 5) + C (6, 6));
+         Turned : constant Real := Driver.Numerics.Angle (Transpose (Placement.Rotation) * Second.Rotation);
+         Moved  : constant Real := abs (Placement.Translation - (1.0 / U1) * Second.Translation);
+      begin
+         Check (Turned <= Driver.Conventions.Z * Turn_Sigma,
+                "the second eye is turned by" & Turned'Image & " rad, its sigma" & Turn_Sigma'Image);
+         Check (Moved <= Driver.Conventions.Z * Centre_Sigma,
+                "the second eye is off by" & Moved'Image & " world units, its sigma" & Centre_Sigma'Image);
+         Check (abs (Scale - U2 / U1) <= Driver.Conventions.Z * R.Scale_Sigma,
+                "the second arm's scale is" & Scale'Image & " against" & Real'Image (U2 / U1) & ", its sigma"
+                & R.Scale_Sigma'Image);
+         --  Its eye at a pose no keyframe had, in the world.
+         declare
+            Q        : constant Real_Array (1 .. 6) := [0.15, -0.1, 0.08, -0.12, 0.1, -0.15];
+            True_Eye : constant Rigid := Second * Driver.Robot.Kinematics.Fit.Eye_At (Truth_Of (2), Q);
+            E        : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 2, Q);
+            Got      : constant Rigid := (Rotation    => Placement.Rotation * E.Rotation,
+                                          Translation => Placement.Rotation * (Scale * E.Translation) + Placement.Translation);
+            Turn, Place : Mat3;
+            Off      : constant Real := abs (Got.Translation - (1.0 / U1) * True_Eye.Translation);
+            Off_Turn : constant Real := Driver.Numerics.Angle (Transpose (Got.Rotation) * True_Eye.Rotation);
+         begin
+            Driver.Robot.Kinematics.World_Pose_Covariance (M, 2, Q, Turn, Place);
+            Check (Off <= Driver.Conventions.Z * Sqrt (Place (1, 1) + Place (2, 2) + Place (3, 3)),
+                   "the second eye at a new pose is off by" & Off'Image & " world units, its sigma"
+                   & Real'Image (Sqrt (Place (1, 1) + Place (2, 2) + Place (3, 3))));
+            Check (Off_Turn <= Driver.Conventions.Z * Sqrt (Turn (1, 1) + Turn (2, 2) + Turn (3, 3)),
+                   "the second eye at a new pose is turned by" & Off_Turn'Image & " rad, its sigma"
+                   & Real'Image (Sqrt (Turn (1, 1) + Turn (2, 2) + Turn (3, 3))));
+            Driver.Log.Line (Driver.Log.Robot, "placement test: turned" & Turned'Image & " sigma" & Turn_Sigma'Image
+                             & "; off" & Moved'Image & " sigma" & Centre_Sigma'Image & "; scale" & Scale'Image
+                             & " against" & Real'Image (U2 / U1) & " sigma" & R.Scale_Sigma'Image
+                             & "; new pose off" & Off'Image & " sigma"
+                             & Real'Image (Sqrt (Place (1, 1) + Place (2, 2) + Place (3, 3)))
+                             & ", turned" & Off_Turn'Image & " sigma" & Real'Image (Sqrt (Turn (1, 1) + Turn (2, 2) + Turn (3, 3))));
+         end;
+      end;
+   end Place_A_Second_Arm;
+
    procedure Kinematics_With_An_Offset_Reference is
       M : Model;
    begin
@@ -2558,6 +2830,8 @@ package body Driver.Robot.Tests is
                              & "quantities of unchanged methods are measured again", Body_File_Method_Change'Access);
       Driver.Tests.Register ("robot.body.plan", "a body reloaded from its file cannot plan a reach without a "
                              & "stream or an instrument", Plan_On_A_Reloaded_Body'Access);
+      Driver.Tests.Register ("robot.world.place", "a second arm seen through its own eye's view of the first arm's "
+                             & "points is placed in the wrong spot, turn or scale, beyond its own sigma", Place_A_Second_Arm'Access);
       Driver.Tests.Register ("robot.kinematics.offset", "an arm whose reference keyframe lies off its sweep's base by "
                              & "less than a keyframe's match can tell is not fitted", Kinematics_With_An_Offset_Reference'Access);
       Driver.Tests.Register ("robot.kinematics.small", "a sweep too small to determine the lens and the joints is "

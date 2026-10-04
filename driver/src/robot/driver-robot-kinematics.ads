@@ -67,6 +67,19 @@ private package Driver.Robot.Kinematics is
 
    function Fitted (M : Model; A : Arm_Id) return Boolean;
 
+   procedure In_World (M : Model; A : Arm_Id; Placement : out Rigid; Scale : out Real; Known : out Boolean);
+   --  The arm's reference frame in the world: X_world = Placement * (Scale *
+   --  X). The world is the first arm's reference frame (identity, scale
+   --  one, once fitted); every other arm is placed by Refit: the first arm's
+   --  tracked points, matched into the arm's reference view, are where its
+   --  eye stood among them (a resection with the arm's own lens), and the
+   --  points both arms tracked give the scale of its lengths.
+
+   procedure World_Pose_Covariance (M : Model; A : Arm_Id; Readings : Real_Array; Turn, Place : out Mat3);
+   --  Pose_Covariance carried into the world: the arm's own, turned and
+   --  scaled by its placement, with the placement's own (its turn, its
+   --  centre, its scale) added; Real'Last on the diagonal until it is placed.
+
    procedure Pose_Covariance (M : Model; A : Arm_Id; Readings : Real_Array; Turn, Place : out Mat3);
    --  What the fit's own uncertainty (clustered by keyframe) leaves the
    --  arm's eye at those readings uncertain by, in the reference frame:
