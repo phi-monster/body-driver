@@ -60,9 +60,15 @@ package body Driver.Robot.Hand.Views is
             Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + C - 1);
             P     : End_Pair renames Ends (C);
          begin
-            if P.Low.Is_Empty or else not Comparable (T, P.Low.Element, V, C) then
+            if P.Low.Is_Empty
+              or else (Driver.Pixels.Frames (V.Frames) >= 2 and then not Comparable (T, P.Low.Element, V, C))
+            then
                --  The first view of this channel, or the background changed:
-               --  the old ends cannot be compared with what comes now.
+               --  the old ends cannot be compared with what comes now. A view
+               --  of one frame says nothing of that: while the body comes to
+               --  rest from a push, every beat whose readings still move
+               --  against their noise is a view of its own (A11's arm, after
+               --  each closer push), and each would have thrown the ends away.
                P := (Low => View_Holders.To_Holder (V), High => View_Holders.To_Holder (V), others => <>);
             end if;
             if Driver.Pixels.Frames (V.Frames) >= 2 then
@@ -185,6 +191,9 @@ package body Driver.Robot.Hand.Views is
          end;
       end;
    end Would_Extend;
+
+   function Gathered (T : Tracker) return Boolean is
+     (not T.Current.Is_Empty and then Driver.Pixels.Frames (T.Current.Constant_Reference.Element.Frames) >= 2);
 
    function Unseen_Travel (T : Tracker; Channel : Positive) return Boolean is
       Ends : constant End_Holders.Constant_Reference_Type := T.Ends.Constant_Reference;

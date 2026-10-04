@@ -85,22 +85,55 @@ private
 
    overriding procedure Finalize (H : in out Hands);
 
+   type Showing is (Not_Yet, Nothing_New, Something_New);
+   --  What the views of a closer's own eye make of a push: Not_Yet while the
+   --  view taken since it cannot be judged (Driver.Robot.Hand.Views.Gathered),
+   --  or whether it shows the eye something its last end did not.
+
    procedure Sweep_Way
      (Way      : Real;
       Step     : Real;
+      Seen_By  : Real;
       Push     : not null access procedure (Offset : Real; Followed : out Boolean);
-      Extends  : not null access function return Boolean;
+      Shows    : not null access function return Showing;
       Pushes   : out Natural;
+      Unseen   : out Natural;
       Answered : out Boolean)
-     with Pre => Way /= 0.0 and then Step > 0.0;
+     with Pre => Way /= 0.0 and then Step > 0.0 and then Seen_By >= 0.0;
    --  One way of a closer channel's sweep: pushed Way by Step, then by twice
-   --  as much each time, from where the sweep began, for as long as each push
-   --  shows the eye something the last end did not (Extends) and the
-   --  channel's reading follows it (Push says whether the body judged it
-   --  moved along the ask). The first push it does not follow is the
-   --  channel's end this way, and the doubling stops there: a controller that
-   --  does not clamp takes a command past the end as full effort. Pushes
-   --  counts the pushes; Answered, whether the first one followed.
+   --  as much each time, from where the sweep began, for as long as the
+   --  channel's reading follows each push (Push says whether the body judged
+   --  it moved along the ask) and each shows the eye something the last end
+   --  did not. The first push the reading does not follow is the channel's
+   --  end this way, and the doubling stops there: a controller that does not
+   --  clamp takes a command past the end as full effort.
+   --
+   --  After each push Shows is asked again, a beat later each time, for as
+   --  long as it cannot say: the push's view forms only once the body has
+   --  come to rest from it, as long as that takes (Driver.Robot.Motion.Settle
+   --  waits the same way). A11 asked it once, two beats after each push,
+   --  while the arm was still settling and its view a frame old: nothing
+   --  new, whatever the push.
+   --
+   --  Step is the smallest push any eye can see the channel make at all
+   --  (Visible_Step): the lock-in's, which tells it from many beats of
+   --  pushing, far below what one pair of still views shows. So the first
+   --  pushes may show the views nothing; they double on while the reading
+   --  follows until one does, and the views tell the ends from then on. They
+   --  go no further than Seen_By, the push that moves the channel's view by
+   --  a pixel: a channel that moves shows a pair of views by then, and one
+   --  that shows nothing is stuck there, at an end whose reading echoes the
+   --  command. A11's first push, 1.7e-5 of the travel, moved its view by
+   --  two thousandths of a pixel. Pushes counts the pushes, Unseen those
+   --  before the views showed anything; Answered, whether the first push
+   --  was followed.
+
+   function Seen_By (Shift : Real) return Real is (if Shift /= 0.0 then 1.0 / abs Shift else 0.0);
+   --  The push that moves an eye's view by one pixel when the channel moves
+   --  it Shift pixels a reading unit (Driver.Robot.Lockin.Shift): a whole
+   --  pixel's step of a textured patch changes its pixels by the texture's
+   --  own contrast, which a still view tells; a fraction of a pixel may
+   --  change none. Zero, no blind push, when the shift is not measured.
 
    type Descent_Steps is record
       Fast  : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact

@@ -81,6 +81,8 @@ package body Driver.Robot.Hand.Sweep is
    function Would_Extend (S : State; Channel : Positive) return Boolean is
      (Driver.Robot.Hand.Views.Would_Extend (S.Views, Channel));
 
+   function Gathered (S : State) return Boolean is (Driver.Robot.Hand.Views.Gathered (S.Views));
+
    function Wants_Correspondences (S : State; Channel : Positive) return Boolean is
      (Status (S, Channel) = Waiting and then not S.Per_Channel.Constant_Reference.Element (Channel).Changed.Is_Empty
       and then Driver.Robot.Hand.Views.Has_Ends (S.Views, Channel));
