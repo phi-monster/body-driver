@@ -26,10 +26,14 @@ Every quantity is stored with its uncertainty and the version of the method
 that measured it.
 
 - A quantity whose measuring method has changed since it was stored is
-  measured again; the others are reloaded.
-- The reloaded body is checked against what the robot shows now (a push and
-  a look). A quantity the robot contradicts is measured again; one it agrees
-  with is kept.
+  measured again, and so is every quantity measured from it (section 4); the
+  others are reloaded.
+- A file whose key (the size of every group, which groups take commands,
+  the size of every image) is not what the robot reports belongs to another
+  body: nothing is reloaded from it.
+- What is reloaded stands for the session: the boot skips the stages that
+  measured it, and the estimators do not measure it again. The readings'
+  travel and the step responses go on growing from what was reloaded.
 - Quantities are never patched by hand, and a stored number is never taken
   over a measurement that disagrees with it.
 
@@ -43,5 +47,22 @@ Every number in the file was measured by this robot. A number edited by hand
 is a number nobody measured, which the driver's rules forbid. To measure
 again, delete the file or give another path.
 
-The layout of the file is the boot's (driver/src/robot, Driver.Robot.Boot);
-it is described here once that layer lands on main.
+## 4. What it holds
+
+A JSON object. `key` is the body's shape; `beats` how many beats measured it.
+Every other member is one quantity with its `method`, listed with what it is
+measured from:
+
+| Member | What | Measured from |
+|---|---|---|
+| `noise` | every channel's reading noise and its degrees of freedom | the readings |
+| `travel` | every channel's lowest and highest reading so far | the readings |
+| `steps` | every group's longest wait for an answer, its free pushes' shortfalls | the noise |
+| `lags` | every eye's image lag, and whether it is known | the noise |
+| `responses` | every eye's cell noise at rest, what each channel's push does to each cell, each group's effect on the eye | the noise, the lags |
+| `graph` | every group's role and arm, the arms, the carrier, every eye's mount | the responses |
+| `kinematics` | every arm's fit (joints, lens, uncertainty), the table's normal | the graph, the responses |
+
+`Driver.Robot.Load_Body` reloads a file into a model by the same rules; a
+model that has seen no robot takes the file's groups and eyes, so a measured
+body can be loaded and planned on with no robot connected.

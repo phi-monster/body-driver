@@ -201,17 +201,19 @@ package body Driver.Robot.Boot is
                Recognized.Append (Recognized_Channel'(Ref => Ref, Amount => Amount (C), Ended => P.At_End));
                for S in Driver.Robot.Motion.Sense loop
                   if P.At_End (S) then
-                     Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & C'Image & " is at its end "
-                                      & Way (S) & ": it delivered nothing that way up to "
-                                      & Scientific (From * 2.0 ** (P.Levels (S) - 1))
-                                      & " reading units, while it answered the other way");
+                     Driver.Log.Line
+                       (Driver.Log.Robot, "boot: group" & G'Image & " channel" & C'Image & " is at its end "
+                        & Way (S) & ": it delivered nothing that way up to "
+                        & Scientific (From * 2.0 ** (P.Levels (S) - 1))
+                        & " reading units, while it answered the other way");
                   end if;
                end loop;
                Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & C'Image
                                 & (if Amount (C) > 0.0
                                    then " is seen when moved by " & Scientific (Amount (C)) & " reading units"
                                    elsif P.Dead
-                                   then " answers neither way up to " & Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))
+                                   then " answers neither way up to "
+                                        & Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))
                                         & " reading units, where every other channel of the body had answered: dead or"
                                         & " disconnected; it is not probed further"
                                    else " moves nothing any eye sees, up to where it stops following"));
@@ -251,7 +253,8 @@ package body Driver.Robot.Boot is
                   end if;
                end loop;
                if Eye > 0 then
-                  Half := Real (Natural'Min (M.Eyes (Eye_Id (Eye)).Grid.Width, M.Eyes (Eye_Id (Eye)).Grid.Height)) / 2.0;
+                  Half := Real (Natural'Min (M.Eyes (Eye_Id (Eye)).Grid.Width, M.Eyes (Eye_Id (Eye)).Grid.Height))
+                    / 2.0;
                   for C in 1 .. Size loop
                      Per_Unit (C) := Lockin.Shift (M, Eye_Id (Eye), G, C);
                      First (C) := Driver.Robot.Motion.Sweep_Start (M, A, C);
@@ -417,7 +420,9 @@ package body Driver.Robot.Boot is
             for A in 1 .. Arm_Count (M) loop
                for E in 1 .. Eye_Count (M) loop
                   --  The eye the sweep moves: the last one the arm carries.
-                  if Eye_Mount (M, Eye_Id (E)).Kind = Arm_Carried and then Eye_Mount (M, Eye_Id (E)).Arm = Arm_Id (A) then
+                  if Eye_Mount (M, Eye_Id (E)).Kind = Arm_Carried
+                    and then Eye_Mount (M, Eye_Id (E)).Arm = Arm_Id (A)
+                  then
                      Next := Arm_Id (A);
                      Pair := (Group => Arm_Group (M, Arm_Id (A)), Eye => Eye_Id (E));
                   end if;
@@ -452,130 +457,164 @@ package body Driver.Robot.Boot is
       Ok := False;
       Driver.Log.Line (Driver.Log.Robot, "boot: holding still to measure the body at rest");
       Driver.Robot.Motion.Settle (M, Waited);
+      --  A body file from an earlier boot: what it holds stands, what it does
+      --  not is measured below (Load_Body). Read once the robot has answered
+      --  a held beat, so the key has every group that takes commands.
+      if Body_File'Length > 0 then
+         declare
+            Loaded : Boolean := False;
+            Why    : Ada.Strings.Unbounded.Unbounded_String;
+            procedure Reload is
+            begin
+               Load_Body (M, Body_File, Loaded, Why);
+            end Reload;
+         begin
+            Driver.Beats.Within_A_Beat (Reload'Access);
+            Driver.Log.Line (Driver.Log.Robot, "boot: " & (if Loaded then "from " & Body_File & ", " else "")
+                             & Ada.Strings.Unbounded.To_String (Why));
+         end;
+      end if;
       Driver.Beats.Within_A_Beat (Estimate'Access);
       Driver.Beats.Within_A_Beat (Read_Count'Access);
       declare
-         Commandable : array (1 .. Count) of Boolean := [others => False];
-         Sizes       : array (1 .. Count) of Natural := [others => 0];
-         procedure Read_Groups is
+         Recognized_Before, Fitted_Before : Boolean := False;
+         procedure Read_Reloaded is
          begin
-            for G in 1 .. Count loop
-               Commandable (G) := Is_Commandable (M, Group_Id (G));
-               Sizes (G) := Group_Size (M, Group_Id (G));
-            end loop;
-         end Read_Groups;
+            Recognized_Before := Reloaded (M, Stored_Graph);
+            Fitted_Before := Reloaded (M, Stored_Kinematics);
+         end Read_Reloaded;
       begin
-         Driver.Beats.Within_A_Beat (Read_Groups'Access);
-         declare
-            Total : Natural := 0;
-         begin
-            for G in 1 .. Count loop
-               if Commandable (G) then
-                  Total := Total + Sizes (G);
-               end if;
-            end loop;
-            if Total = 0 then
-               Driver.Log.Line (Driver.Log.Robot, "boot: no group takes a command; nothing can be moved to be measured");
-               return;
-            end if;
+         Driver.Beats.Within_A_Beat (Read_Reloaded'Access);
+         if not Recognized_Before then
             declare
-               Refs : Driver.Robot.Motion.Channel_Refs (1 .. Total);
-               K    : Natural := 0;
-               P    : Driver.Robot.Motion.Probe_Report;
-            begin
-               for G in 1 .. Count loop
-                  if Commandable (G) then
-                     for C in 1 .. Sizes (G) loop
-                        K := K + 1;
-                        Refs (K) := (Group => Group_Id (G), Channel => C);
-                     end loop;
-                  end if;
-               end loop;
-               --  Every commandable channel together first, by one amount: it
-               --  stops at the first move an eye sees, so no channel has moved
-               --  more than twice what an eye needs to see it, whatever its
-               --  units; each channel alone then starts from there.
-               Driver.Robot.Motion.Gather_Rest (M, Total + 1);
-               declare
-                  First_Followed : Real_Array (1 .. Total);
+               Commandable : array (1 .. Count) of Boolean := [others => False];
+               Sizes       : array (1 .. Count) of Natural := [others => 0];
+               procedure Read_Groups is
                begin
-                  Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P, First_Followed);
-                  for K in Refs'Range loop
-                     Record_Answer (Refs (K), First_Followed (K));
+                  for G in 1 .. Count loop
+                     Commandable (G) := Is_Commandable (M, Group_Id (G));
+                     Sizes (G) := Group_Size (M, Group_Id (G));
                   end loop;
-               end;
-               if not P.Seen then
-                  Driver.Beats.Within_A_Beat (Estimate'Access);
-                  Driver.Beats.Within_A_Beat (Read_Body'Access);
-                  Driver.Log.Line
-                    (Driver.Log.Robot, "boot: nothing any eye sees moved while every commandable channel moved"
-                     & " together, up to where each stopped following its command (porting contract, clause 2);"
-                     & " the boot stops");
-                  return;
-               end if;
-               Driver.Log.Line (Driver.Log.Robot, "boot: every commandable channel moved together is first seen at "
-                                & Scientific (P.Excursion) & " reading units, after" & P.Steps'Image & " doublings");
-               for G in 1 .. Count loop
-                  if Commandable (G) and then Sizes (G) > 0 then
-                     Recognize (Group_Id (G), Sizes (G), P.Excursion);
-                  end if;
-               end loop;
-               Driver.Beats.Within_A_Beat (Estimate'Access);
-               --  An undecided verdict is too little evidence, not an answer: a
-               --  group some eye is undecided about is pushed again, at twice
-               --  the amounts of its last round, until every eye has decided, or
-               --  a round leaves the cells each undecided eye found responding
-               --  no more than they were (the evidence stopped growing).
+               end Read_Groups;
+            begin
+               Driver.Beats.Within_A_Beat (Read_Groups'Access);
                declare
-                  Eyes : Natural := 0;
-                  procedure Read_Eyes is
-                  begin
-                     Eyes := Eye_Count (M);
-                  end Read_Eyes;
+                  Total : Natural := 0;
                begin
-                  Driver.Beats.Within_A_Beat (Read_Eyes'Access);
+                  for G in 1 .. Count loop
+                     if Commandable (G) then
+                        Total := Total + Sizes (G);
+                     end if;
+                  end loop;
+                  if Total = 0 then
+                     Driver.Log.Line
+                       (Driver.Log.Robot, "boot: no group takes a command; nothing can be moved to be measured");
+                     return;
+                  end if;
                   declare
-                     type Count_Grid is array (1 .. Count, 1 .. Eyes) of Natural;
-                     Last   : Count_Grid := [others => [others => 0]];
-                     Now    : Count_Grid;
-                     Factor : array (1 .. Count) of Real := [others => 1.0];
-                     Again  : array (1 .. Count) of Boolean;
-                     procedure Read_Undecided is
-                     begin
-                        for G in 1 .. Count loop
-                           Again (G) := False;
-                           for E in 1 .. Eyes loop
-                              Now (G, E) := 0;
-                              if Commandable (G) and then Response (M, Group_Id (G), Eye_Id (E)) = Undecided then
-                                 Now (G, E) := Responding (M, Group_Id (G), Eye_Id (E));
-                                 Again (G) := Again (G) or else Now (G, E) > Last (G, E);
-                              end if;
-                           end loop;
-                        end loop;
-                     end Read_Undecided;
+                     Refs : Driver.Robot.Motion.Channel_Refs (1 .. Total);
+                     K    : Natural := 0;
+                     P    : Driver.Robot.Motion.Probe_Report;
                   begin
-                     loop
-                        Driver.Beats.Within_A_Beat (Read_Undecided'Access);
-                        exit when (for all G in Again'Range => not Again (G));
-                        for G in Again'Range loop
-                           if Again (G) then
-                              Factor (G) := 2.0 * Factor (G);
-                              Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " leaves an eye undecided;"
-                                               & " pushed again at" & Integer'Image (Integer (Factor (G)))
-                                               & " times its amounts");
-                              Push_Both_Ways (Group_Id (G), Sizes (G), Factor (G));
-                           end if;
-                        end loop;
-                        Last := Now;
-                        Driver.Beats.Within_A_Beat (Estimate'Access);
+                     for G in 1 .. Count loop
+                        if Commandable (G) then
+                           for C in 1 .. Sizes (G) loop
+                              K := K + 1;
+                              Refs (K) := (Group => Group_Id (G), Channel => C);
+                           end loop;
+                        end if;
                      end loop;
+                     --  Every commandable channel together first, by one amount: it
+                     --  stops at the first move an eye sees, so no channel has moved
+                     --  more than twice what an eye needs to see it, whatever its
+                     --  units; each channel alone then starts from there.
+                     Driver.Robot.Motion.Gather_Rest (M, Total + 1);
+                     declare
+                        First_Followed : Real_Array (1 .. Total);
+                     begin
+                        Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P, First_Followed);
+                        for K in Refs'Range loop
+                           Record_Answer (Refs (K), First_Followed (K));
+                        end loop;
+                     end;
+                     if not P.Seen then
+                        Driver.Beats.Within_A_Beat (Estimate'Access);
+                        Driver.Beats.Within_A_Beat (Read_Body'Access);
+                        Driver.Log.Line
+                          (Driver.Log.Robot, "boot: nothing any eye sees moved while every commandable channel moved"
+                           & " together, up to where each stopped following its command (porting contract, clause 2);"
+                           & " the boot stops");
+                        return;
+                     end if;
+                     Driver.Log.Line
+                       (Driver.Log.Robot, "boot: every commandable channel moved together is first seen at "
+                        & Scientific (P.Excursion) & " reading units, after" & P.Steps'Image & " doublings");
+                     for G in 1 .. Count loop
+                        if Commandable (G) and then Sizes (G) > 0 then
+                           Recognize (Group_Id (G), Sizes (G), P.Excursion);
+                        end if;
+                     end loop;
+                     Driver.Beats.Within_A_Beat (Estimate'Access);
+                     --  An undecided verdict is too little evidence, not an answer: a
+                     --  group some eye is undecided about is pushed again, at twice
+                     --  the amounts of its last round, until every eye has decided, or
+                     --  a round leaves the cells each undecided eye found responding
+                     --  no more than they were (the evidence stopped growing).
+                     declare
+                        Eyes : Natural := 0;
+                        procedure Read_Eyes is
+                        begin
+                           Eyes := Eye_Count (M);
+                        end Read_Eyes;
+                     begin
+                        Driver.Beats.Within_A_Beat (Read_Eyes'Access);
+                        declare
+                           type Count_Grid is array (1 .. Count, 1 .. Eyes) of Natural;
+                           Last   : Count_Grid := [others => [others => 0]];
+                           Now    : Count_Grid;
+                           Factor : array (1 .. Count) of Real := [others => 1.0];
+                           Again  : array (1 .. Count) of Boolean;
+                           procedure Read_Undecided is
+                           begin
+                              for G in 1 .. Count loop
+                                 Again (G) := False;
+                                 for E in 1 .. Eyes loop
+                                    Now (G, E) := 0;
+                                    if Commandable (G) and then Response (M, Group_Id (G), Eye_Id (E)) = Undecided then
+                                       Now (G, E) := Responding (M, Group_Id (G), Eye_Id (E));
+                                       Again (G) := Again (G) or else Now (G, E) > Last (G, E);
+                                    end if;
+                                 end loop;
+                              end loop;
+                           end Read_Undecided;
+                        begin
+                           loop
+                              Driver.Beats.Within_A_Beat (Read_Undecided'Access);
+                              exit when (for all G in Again'Range => not Again (G));
+                              for G in Again'Range loop
+                                 if Again (G) then
+                                    Factor (G) := 2.0 * Factor (G);
+                                    Driver.Log.Line
+                                      (Driver.Log.Robot, "boot: group" & G'Image & " leaves an eye undecided;"
+                                       & " pushed again at" & Integer'Image (Integer (Factor (G)))
+                                       & " times its amounts");
+                                    Push_Both_Ways (Group_Id (G), Sizes (G), Factor (G));
+                                 end if;
+                              end loop;
+                              Last := Now;
+                              Driver.Beats.Within_A_Beat (Estimate'Access);
+                           end loop;
+                        end;
+                     end;
                   end;
                end;
             end;
-         end;
+         end if;
+         Driver.Beats.Within_A_Beat (Read_Body'Access);
+         if not Fitted_Before then
+            Sweep_Every_Arm;
+         end if;
       end;
-      Driver.Beats.Within_A_Beat (Read_Body'Access);
-      Sweep_Every_Arm;
       Driver.Robot.Hand.Measure (H, M);
       declare
          procedure Store is
