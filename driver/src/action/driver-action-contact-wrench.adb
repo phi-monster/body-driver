@@ -28,19 +28,35 @@ package body Driver.Action.Contact.Wrench is
       return [F (1), F (2), F (3), M (1), M (2), M (3)];
    end Wrench_Of;
 
+   --  Where each edge of the polygon lies around the cone, computed once.
+   type Edge_Table is array (0 .. Edges - 1) of Real;
+   Edge_Cos : constant Edge_Table := [for K in Edge_Table'Range => Cos (2.0 * Pi * Real (K) / Real (Edges))];
+   Edge_Sin : constant Edge_Table := [for K in Edge_Table'Range => Sin (2.0 * Pi * Real (K) / Real (Edges))];
+
    --  The edges of a friction cone about the unit N, each carrying one unit
-   --  of normal force.
+   --  of normal force. An edge's moment is the normal's plus its tangential
+   --  part's, each taken once: the cross product is linear.
    procedure Add_Cone (To : in out Generator_Vectors.Vector; N, Point, Centre : Vec3; Mu : Real) is
       T1, T2 : Vec3;
    begin
       Plane_Basis (N, T1, T2);
-      for K in 0 .. Edges - 1 loop
-         declare
-            Theta : constant Real := 2.0 * Pi * Real (K) / Real (Edges);
-         begin
-            To.Append (Wrench_Of (N + Mu * (Cos (Theta) * T1 + Sin (Theta) * T2), Point, Centre));
-         end;
-      end loop;
+      declare
+         R  : constant Vec3 := Point - Centre;
+         MN : constant Vec3 := Cross (R, N);
+         M1 : constant Vec3 := Cross (R, T1);
+         M2 : constant Vec3 := Cross (R, T2);
+      begin
+         for K in Edge_Table'Range loop
+            declare
+               C : constant Real := Mu * Edge_Cos (K);
+               S : constant Real := Mu * Edge_Sin (K);
+            begin
+               To.Append (Wrench6'[N (1) + (C * T1 (1) + S * T2 (1)), N (2) + (C * T1 (2) + S * T2 (2)),
+                                   N (3) + (C * T1 (3) + S * T2 (3)), MN (1) + (C * M1 (1) + S * M2 (1)),
+                                   MN (2) + (C * M1 (2) + S * M2 (2)), MN (3) + (C * M1 (3) + S * M2 (3))]);
+            end;
+         end loop;
+      end;
    end Add_Cone;
 
    type Flat is record

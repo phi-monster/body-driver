@@ -184,8 +184,31 @@ package body Driver.Action.Contact.Wrench.Tests is
       Check (not Beyond.Rests and then Beyond.Margin < 0.0, "a centre beyond the foot is said to rest");
    end Rests_With_Margin;
 
+   procedure Degenerate_Balance_Ends is
+      --  A program the search on a bar met: two opposed touches at its bottom
+      --  edge, their normals turned the worst way the measurement allows,
+      --  lifting it. The moment rows have nothing on their right-hand side,
+      --  and taking the most improving column for every pivot goes round a
+      --  cycle there for ever. It must end, at the force Bland's rule alone
+      --  finds.
+      T : Touch_Vectors.Vector;
+      A : Answer;
+   begin
+      T.Append (Touch'(Point => [5.13694762170866E-02, 3.25757104785479E-02, 0.0],
+                       Inward => [3.72025551942260E-01, -8.79923176281257E-01, 2.95520206661340E-01],
+                       Patch => 7.5E-03, Tension => False));
+      T.Append (Touch'(Point => [5.91578430632596E-02, 1.41544905984902E-02, 0.0],
+                       Inward => [-3.72025551942260E-01, 8.79923176281257E-01, -2.95520206661340E-01],
+                       Patch => 7.5E-03, Tension => False));
+      A := Need (T, No_Footing, Slide ([0.0, 0.0, 1.0]), [0.0, 0.0, 0.01], [0.0, 0.0, 1.0], 3.16836573328104E-01);
+      Check (A.Why = None, "a lift the touches can make is judged " & A.Why'Image);
+      Check_Close (A.Force, 1.59810185373185E+03, 1.0E-6, "the least force of a degenerate balance");
+   end Degenerate_Balance_Ends;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("action.wrench.cycle", "a pivot that does not move the solution is taken by the most "
+                             & "improving column, which goes round a cycle for ever", Degenerate_Balance_Ends'Access);
       Driver.Tests.Register ("action.wrench.squeeze", "an opposed pair is judged without friction, or by the frame",
                              Squeeze_Off_Surface'Access);
       Driver.Tests.Register ("action.wrench.slide", "sliding friction of the surface is left out of a slide along it",

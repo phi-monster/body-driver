@@ -1,11 +1,14 @@
 --  Linear programs in standard form: minimize Cost * X subject to A * X = B
 --  and X >= 0.
 --
---  A dense two-phase simplex method with Bland's rule, which never cycles, so
---  it ends without any cap on its iterations. Rows are scaled to unit size
---  before solving, and an entry counts as zero below the square root of the
---  machine epsilon: the point where cancellation in the eliminations leaves
---  no trustworthy digit. Nothing else is chosen.
+--  A dense two-phase simplex method. The column that improves the objective
+--  most enters (Dantzig's rule) whenever its step moves the solution; a pivot
+--  that would not move it is chosen by Bland's rule instead. Only pivots that
+--  do not move can make a cycle, Bland's rule never cycles, so it ends
+--  without any cap on its iterations. Rows are scaled to unit size before
+--  solving, and an entry counts as zero below the square root of the machine
+--  epsilon: the point where cancellation in the eliminations leaves no
+--  trustworthy digit. Nothing else is chosen.
 
 package Driver.Action.Contact.Simplex is
 

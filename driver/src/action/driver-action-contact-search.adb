@@ -138,6 +138,64 @@ package body Driver.Action.Contact.Search is
             P.Closed := P.Closed - E.Band * E.Along;
          end loop;
       end if;
+      for K in 1 .. Natural (E.Pads.Length) loop
+         E.First.Append (K);
+      end loop;
+      if Natural (E.Pads.Length) >= 2 and then abs E.Along > 0.0 and then Tip_Sd < Real'Last then
+         declare
+            N   : constant Positive := Natural (E.Pads.Length);
+            Mid : Vec3 := Zero3;
+            --  Two measured points of the hand are the same point.
+            function Same (A, B : Vec3) return Boolean is
+              (not Significant (Point_Estimate'(Mean => A, Covariance => (Tip_Sd ** 2) * Identity3),
+                                Point_Estimate'(Mean => B, Covariance => (Tip_Sd ** 2) * Identity3)));
+         begin
+            for P of E.Pads loop
+               Mid := Mid + P.Closed / Real (N);
+            end loop;
+            for Count in reverse 2 .. N loop
+               if N mod Count = 0 then
+                  declare
+                     R     : constant Mat3 := Exp ((2.0 * Pi / Real (Count)) * E.Along);
+                     S     : constant Rigid := (Rotation => R, Translation => Mid - R * Mid);
+                     Image : array (1 .. N) of Natural := [others => 0];
+                     Taken : array (1 .. N) of Boolean := [others => False];
+                  begin
+                     for K in 1 .. N loop
+                        for J in 1 .. N loop
+                           if Image (K) = 0 and then not Taken (J) and then E.Pads (J).Closer = E.Pads (K).Closer
+                             and then Same (S * E.Pads (K).Open, E.Pads (J).Open)
+                             and then Same (S * E.Pads (K).Closed, E.Pads (J).Closed)
+                             and then not Significant (E.Pads (J).Half_Width - E.Pads (K).Half_Width, Tip_Sd)
+                             and then not Significant (E.Pads (J).Thickness - E.Pads (K).Thickness, Tip_Sd)
+                           then
+                              Image (K) := J;
+                              Taken (J) := True;
+                           end if;
+                        end loop;
+                     end loop;
+                     if (for all K in 1 .. N => Image (K) /= 0) then
+                        E.Repeats := Count;
+                        E.Repeat := S;
+                        for K in 1 .. N loop
+                           declare
+                              J     : Positive := K;
+                              Least : Positive := K;
+                           begin
+                              for Step in 1 .. Count - 1 loop
+                                 J := Image (J);
+                                 Least := Positive'Min (Least, J);
+                              end loop;
+                              E.First.Replace_Element (K, Least);
+                           end;
+                        end loop;
+                        exit;
+                     end if;
+                  end;
+               end if;
+            end loop;
+         end;
+      end if;
       if Natural (E.Pads.Length) < 2 then
          E.Why_Not := To_Unbounded_String ("this arm has fewer than two measured lobes that close together");
       elsif Unknown or else Depth = Real'Last then
@@ -205,6 +263,30 @@ package body Driver.Action.Contact.Search is
 
    type Vec3_Array is array (Positive range <>) of Vec3;
 
+   type Flag_Array is array (Positive range <>) of Boolean;
+
+   type Meeting is record
+      Sample  : Positive := 1;
+      Sq      : Real := 0.0;   --  the closer's fraction where the face meets it
+      Centred : Real := 0.0;   --  its distance from the face's centre line there
+   end record;
+
+   type Meeting_Array is array (Positive range <>) of Meeting;
+
+   --  What is kept per sample of the thing and per point beside it, on the
+   --  heap: a thing can have many samples, and a decider's stack is not
+   --  sized for them.
+   type Sample_Table (Samples, Others_Near : Natural) is record
+      Pts   : Vec3_Array (1 .. Samples);
+      Nrm   : Vec3_Array (1 .. Samples);
+      Has_N : Flag_Array (1 .. Samples);
+      Met   : Meeting_Array (1 .. Samples);   --  one face's meetings, while they are sorted out
+      Obs   : Vec3_Array (1 .. Others_Near);
+   end record;
+
+   type Sample_Table_Access is access Sample_Table;
+   procedure Free is new Ada.Unchecked_Deallocation (Sample_Table, Sample_Table_Access);
+
    type Pin_Record is record
       Pad_Index, Sample : Positive;
       Psi               : Real := 0.0;     --  turn about the sample's normal
@@ -224,6 +306,7 @@ package body Driver.Action.Contact.Search is
       Has_Mu     : Boolean := False;        --  Mu_Worst is computed
       Force      : Real := Physics.No_Way;  --  normals as measured, at the reference friction
       Worst      : Real := Physics.No_Way;  --  normals tilted the worst way, at the reference friction
+      Fails_At   : Real := Real'First;      --  the most friction at which some normal it allows was shown to fail
       Single     : Boolean := False;        --  one touch: its placement is fitted afterwards
       Sample     : Natural := 0;            --  for a single touch, which sample
    end record;
@@ -262,6 +345,7 @@ package body Driver.Action.Contact.Search is
       Up        : Vec3;
       Friction  : Friction_Bounds;
       Reachable : not null access function (Tool : Rigid) return Boolean;
+      Can_Travel : not null access function (Tool : Rigid; Closers : Real_Vectors.Vector) return Boolean;
       Best      : out Candidate;
       Found     : out Boolean;
       Tried     : out Account;
@@ -270,10 +354,12 @@ package body Driver.Action.Contact.Search is
       N_Samples : constant Natural := Natural (Thing.Samples.Length);
       N_Pads    : constant Natural := Natural (E.Pads.Length);
       N_Closers : constant Natural := Natural (E.Closers.Length);
-      Pts   : Vec3_Array (1 .. N_Samples);
-      Nrm   : Vec3_Array (1 .. N_Samples);
-      Has_N : array (1 .. N_Samples) of Boolean;
-      Obs   : Vec3_Array (1 .. Natural (Beside.Length));
+      Table : Sample_Table_Access := new Sample_Table (N_Samples, Natural (Beside.Length));
+      Pts   : Vec3_Array renames Table.Pts;
+      Nrm   : Vec3_Array renames Table.Nrm;
+      Has_N : Flag_Array renames Table.Has_N;
+      Met   : Meeting_Array renames Table.Met;
+      Obs   : Vec3_Array renames Table.Obs;
       Low_Corner, High_Corner : Vec3 := Zero3;
       Res   : constant Real := Thing.Pitch;
       Sig   : constant Real := (if E.Sigma < Real'Last and then Thing.Sigma < Real'Last
@@ -312,11 +398,26 @@ package body Driver.Action.Contact.Search is
 
       --  The fraction at which a face, at A0 with its closer open and moving
       --  V per unit fraction, first meets a sample that faces it within its
-      --  footprint; Real'Last when none does before the closer is shut.
+      --  footprint; Real'Last when none does before the closer is shut. Of
+      --  samples met within the resolution of each other (a flat face meets
+      --  a flat face all at once), the touch is the one nearest the face's
+      --  centre line: the middle of the patch the faces share.
+      --
+      --  The arithmetic is written out per component: this runs for every
+      --  sample and every face at every placement, and the standard vector
+      --  operators return their results through the secondary stack.
       procedure First_Meeting
         (A0, V, Facing, Back : Vec3; Half_Width : Real; Face : Footprint; S : out Real; Hit : out Natural)
       is
          Speed : constant Real := V * Facing;
+         Fx    : constant Real := Facing (1);
+         Fy    : constant Real := Facing (2);
+         Fz    : constant Real := Facing (3);
+         Bx    : constant Real := Back (1);
+         By    : constant Real := Back (2);
+         Bz    : constant Real := Back (3);
+         Count : Natural := 0;   --  samples the face meets, in Met
+         Off   : Real := Real'Last;
       begin
          S := Real'Last;
          Hit := 0;
@@ -324,28 +425,47 @@ package body Driver.Action.Contact.Search is
             return;
          end if;
          for M in 1 .. N_Samples loop
-            if Has_N (M) and then Nrm (M) * Facing < 0.0 then
+            if Has_N (M) and then (Nrm (M) (1) * Fx + Nrm (M) (2) * Fy) + Nrm (M) (3) * Fz < 0.0 then
                declare
-                  Sq : constant Real := ((Pts (M) - A0) * Facing) / Speed;
+                  P  : Vec3 renames Pts (M);
+                  Sq : constant Real :=
+                    (((P (1) - A0 (1)) * Fx + (P (2) - A0 (2)) * Fy) + (P (3) - A0 (3)) * Fz) / Speed;
                begin
-                  if Sq >= 0.0 and then Sq <= 1.0 and then Sq < S then
+                  if Sq >= 0.0 and then Sq <= 1.0 and then (S = Real'Last or else (Sq - S) * Speed <= Res) then
                      declare
-                        D    : constant Vec3 := Pts (M) - (A0 + Sq * V);
-                        Flat : constant Vec3 := D - Real'(D * Facing) * Facing;
-                        L    : constant Real := D * Back;
-                        Fits : constant Boolean :=
+                        Dx : constant Real := P (1) - (A0 (1) + Sq * V (1));
+                        Dy : constant Real := P (2) - (A0 (2) + Sq * V (2));
+                        Dz : constant Real := P (3) - (A0 (3) + Sq * V (3));
+                        DF : constant Real := (Dx * Fx + Dy * Fy) + Dz * Fz;
+                        Gx : constant Real := Dx - DF * Fx;   --  across the face
+                        Gy : constant Real := Dy - DF * Fy;
+                        Gz : constant Real := Dz - DF * Fz;
+                        L  : constant Real := (Dx * Bx + Dy * By) + Dz * Bz;
+                        Cx : constant Real := Gx - L * Bx;    --  from the face's centre line
+                        Cy : constant Real := Gy - L * By;
+                        Cz : constant Real := Gz - L * Bz;
+                        Centred : constant Real := Sqrt ((Cx * Cx + Cy * Cy) + Cz * Cz);
+                        Fits    : constant Boolean :=
                           (case Face is
-                              when Disc       => abs Flat <= Half_Width,
-                              when Whole_Face => abs (Flat - L * Back) <= Half_Width and then L >= -Res
-                                                 and then L <= E.Depth);
+                              when Disc       => Sqrt ((Gx * Gx + Gy * Gy) + Gz * Gz) <= Half_Width,
+                              when Whole_Face => Centred <= Half_Width and then L >= -Res and then L <= E.Depth);
                      begin
                         if Fits then
-                           S := Sq;
-                           Hit := M;
+                           S := Real'Min (S, Sq);
+                           Count := Count + 1;
+                           Met (Count) := (Sample => M, Sq => Sq, Centred => Centred);
                         end if;
                      end;
                   end if;
                end;
+            end if;
+         end loop;
+         --  The face stops at the first meeting; of the samples met within
+         --  the resolution of it, the most central is the touch.
+         for J in 1 .. Count loop
+            if (Met (J).Sq - S) * Speed <= Res and then Met (J).Centred < Off then
+               Hit := Met (J).Sample;
+               Off := Met (J).Centred;
             end if;
          end loop;
       end First_Meeting;
@@ -476,11 +596,12 @@ package body Driver.Action.Contact.Search is
       function Steps_For (L : Real) return Positive is
         (if L <= Res then 1 else Positive (Real'Ceiling (2.0 * Pi * L / Res)));
 
-      --  First pass: every contact set the closers make.
+      --  First pass: every contact set the closers make, from one pad of each
+      --  of the hand's symmetric orbits.
       procedure Enumerate is
       begin
          for K in 1 .. N_Pads loop
-            if Moves (E.Pads (K)) then
+            if Moves (E.Pads (K)) and then E.First (K) = K then
                declare
                   Steps : constant Positive := Steps_For (Lever (K, 0.0));
                begin
@@ -547,17 +668,45 @@ package body Driver.Action.Contact.Search is
                  Half_Width => P.Half_Width, Thickness => P.Thickness, Length => E.Depth + Extra);
       end Box_Of;
 
-      --  Inside the box grown by Margin on every side: behind the face by its
-      --  thickness, across by half its width, back along the lobe by Length.
-      function Inside (B : Box; Q : Vec3; Margin : Real) return Boolean is
-         D : constant Vec3 := Q - B.Face;
-         A : constant Real := D * B.Facing;
-         C : constant Real := D * B.Side;
-         L : constant Real := D * B.Back;
+      --  Some point is inside the box grown by Margin on every side: behind
+      --  the face by its thickness, across by half its width, back along the
+      --  lobe by Length. Written out per component, as First_Meeting is.
+      function Any_Inside (B : Box; Points : Vec3_Array; Margin : Real) return Boolean is
+         Fx : constant Real := B.Face (1);
+         Fy : constant Real := B.Face (2);
+         Fz : constant Real := B.Face (3);
+         Nx : constant Real := B.Facing (1);
+         Ny : constant Real := B.Facing (2);
+         Nz : constant Real := B.Facing (3);
+         Sx : constant Real := B.Side (1);
+         Sy : constant Real := B.Side (2);
+         Sz : constant Real := B.Side (3);
+         Bx : constant Real := B.Back (1);
+         By : constant Real := B.Back (2);
+         Bz : constant Real := B.Back (3);
       begin
-         return A <= Margin and then A >= -B.Thickness - Margin and then abs C <= B.Half_Width + Margin
-           and then L >= -Margin and then L <= B.Length + Margin;
-      end Inside;
+         for Q of Points loop
+            declare
+               Dx : constant Real := Q (1) - Fx;
+               Dy : constant Real := Q (2) - Fy;
+               Dz : constant Real := Q (3) - Fz;
+               A  : constant Real := (Dx * Nx + Dy * Ny) + Dz * Nz;
+            begin
+               if A <= Margin and then A >= -B.Thickness - Margin
+                 and then abs ((Dx * Sx + Dy * Sy) + Dz * Sz) <= B.Half_Width + Margin
+               then
+                  declare
+                     L : constant Real := (Dx * Bx + Dy * By) + Dz * Bz;
+                  begin
+                     if L >= -Margin and then L <= B.Length + Margin then
+                        return True;
+                     end if;
+                  end;
+               end if;
+            end;
+         end loop;
+         return False;
+      end Any_Inside;
 
       function Below_Floor (P : Vec3) return Boolean is
         (abs Thing.Floor_Up > 0.0 and then (P - Thing.Floor_Point) * Thing.Floor_Up < -Z * Thing.Floor_Sigma);
@@ -585,18 +734,21 @@ package body Driver.Action.Contact.Search is
       --  has left the thing behind, Z sigma further.
       function Judge (R : Mat3; X : Vec3; Before, At_Touch : Fractions; Travel : out Real) return Verdict is
          Back  : constant Vec3 := -(R * E.Along);
+         Bx    : constant Real := Back (1);
+         By    : constant Real := Back (2);
+         Bz    : constant Real := Back (3);
+         Far   : Real := Real'First;   --  the farthest any sample lies back toward the hand
          Reach : Real := 0.0;
          Mid   : Vec3 := Zero3;
          Span  : Real := 0.0;
       begin
+         --  Every face looks back the same way, so the sample farthest back
+         --  is the same for all of them.
+         for Q of Pts loop
+            Far := Real'Max (Far, (Q (1) * Bx + Q (2) * By) + Q (3) * Bz);
+         end loop;
          for P of E.Pads loop
-            declare
-               B : constant Box := Box_Of (P, R, X, Before (P.Closer), 0.0);
-            begin
-               for M in 1 .. N_Samples loop
-                  Reach := Real'Max (Reach, (Pts (M) - B.Face) * Back);
-               end loop;
-            end;
+            Reach := Real'Max (Reach, Far - Box_Of (P, R, X, Before (P.Closer), 0.0).Face * Back);
             Mid := Mid + Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face / Real (N_Pads);
          end loop;
          Travel := Reach + Z * Sig;
@@ -606,17 +758,11 @@ package body Driver.Action.Contact.Search is
             begin
                if Below_Floor (B) then
                   return Through_Surface;
+               elsif Any_Inside (B, Pts, Z * Sig) then
+                  return Into_Material;
+               elsif Any_Inside (B, Obs, Z * Sig) then
+                  return Through_Others;
                end if;
-               for M in 1 .. N_Samples loop
-                  if Inside (B, Pts (M), Z * Sig) then
-                     return Into_Material;
-                  end if;
-               end loop;
-               for Q of Obs loop
-                  if Inside (B, Q, Z * Sig) then
-                     return Through_Others;
-                  end if;
-               end loop;
             end;
          end loop;
          --  Nothing of the thing goes further between the lobes than the
@@ -628,13 +774,23 @@ package body Driver.Action.Contact.Search is
                Span := Real'Max (Span, abs (F - Real'(F * Back) * Back) + P.Half_Width);
             end;
          end loop;
-         for M in 1 .. N_Samples loop
+         for Q of Pts loop
             declare
-               D     : constant Vec3 := Pts (M) - Mid;
-               Along : constant Real := D * Back;
+               Dx    : constant Real := Q (1) - Mid (1);
+               Dy    : constant Real := Q (2) - Mid (2);
+               Dz    : constant Real := Q (3) - Mid (3);
+               Along : constant Real := (Dx * Bx + Dy * By) + Dz * Bz;
             begin
-               if Along > E.Depth and then abs (D - Along * Back) <= Span then
-                  return Too_Deep;
+               if Along > E.Depth then
+                  declare
+                     Ax : constant Real := Dx - Along * Bx;
+                     Ay : constant Real := Dy - Along * By;
+                     Az : constant Real := Dz - Along * Bz;
+                  begin
+                     if Sqrt ((Ax * Ax + Ay * Ay) + Az * Az) <= Span then
+                        return Too_Deep;
+                     end if;
+                  end;
                end if;
             end;
          end loop;
@@ -694,19 +850,27 @@ package body Driver.Action.Contact.Search is
                            V := Judge (R, X, Before, Stops, Travel);
                            case V is
                               when Fits =>
+                                 --  The same lobes in the same places from each tool
+                                 --  pose the hand's symmetry allows: the first reachable.
                                  declare
-                                    Tool  : constant Rigid := (Rotation => R, Translation => X);
-                                    Hover : constant Rigid :=
-                                      (Rotation => R, Translation => X - Travel * (R * E.Along));
+                                    Tool  : Rigid := (Rotation => R, Translation => X);
+                                    Hover : Rigid := (Rotation => R, Translation => X - Travel * (R * E.Along));
+                                    Undo  : constant Rigid := Inverse (E.Repeat);
                                  begin
-                                    if Reachable (Tool) and then Reachable (Hover) then
-                                       Out_C := (Tool => Tool, Hover => Hover, Before => To_Vector (Before),
-                                                 At_Touch => To_Vector (Stops), Touches => G.Touches,
-                                                 Mu_Nominal => G.Mu_Nominal, Mu_Worst => G.Mu_Worst,
-                                                 Force => G.Worst);
-                                       Ok := True;
-                                       return;
-                                    end if;
+                                    for Variant in 1 .. E.Repeats loop
+                                       if Reachable (Tool) and then Reachable (Hover)
+                                         and then Can_Travel (Hover, To_Vector (Before))
+                                       then
+                                          Out_C := (Tool => Tool, Hover => Hover, Before => To_Vector (Before),
+                                                    At_Touch => To_Vector (Stops), Touches => G.Touches,
+                                                    Mu_Nominal => G.Mu_Nominal, Mu_Worst => G.Mu_Worst,
+                                                    Force => G.Worst);
+                                          Ok := True;
+                                          return;
+                                       end if;
+                                       Tool := Tool * Undo;
+                                       Hover := Hover * Undo;
+                                    end loop;
                                  end;
                               when Into_Material   => Tried.Into_Material := Tried.Into_Material + 1;
                               when Too_Deep        => Tried.Too_Deep := Tried.Too_Deep + 1;
@@ -730,6 +894,7 @@ package body Driver.Action.Contact.Search is
          I     : constant Positive := G.Sample;
          N     : constant Vec3 := Nrm (I);
          Parts : Sample_Vectors.Vector;
+         Now_Closers : Real_Vectors.Vector;   --  a single touch keeps the closers as they are
          --  Behind the nearest sample by more than the uncertainty: in the
          --  material. Outside the thing's box grown by that much: clear.
          function Penetrates (W : Vec3) return Boolean is
@@ -752,6 +917,9 @@ package body Driver.Action.Contact.Search is
       begin
          Ok := False;
          Out_C := (others => <>);
+         for C of E.Closers loop
+            Now_Closers.Append (C.Now);
+         end loop;
          for Q of E.Ends loop
             Parts.Append (Q);
          end loop;
@@ -798,14 +966,12 @@ package body Driver.Action.Contact.Search is
                                  Tool  : constant Rigid := (Rotation => R, Translation => X);
                                  Hover : constant Rigid := (Rotation => R, Translation => X + (Clear + Z * Sig) * N);
                               begin
-                                 if Reachable (Tool) and then Reachable (Hover) then
-                                    Out_C := (Tool => Tool, Hover => Hover, Before => Real_Vectors.Empty_Vector,
-                                              At_Touch => Real_Vectors.Empty_Vector, Touches => G.Touches,
+                                 if Reachable (Tool) and then Reachable (Hover)
+                                   and then Can_Travel (Hover, Now_Closers)
+                                 then
+                                    Out_C := (Tool => Tool, Hover => Hover, Before => Now_Closers,
+                                              At_Touch => Now_Closers, Touches => G.Touches,
                                               Mu_Nominal => G.Mu_Nominal, Mu_Worst => G.Mu_Worst, Force => G.Worst);
-                                    for C of E.Closers loop
-                                       Out_C.Before.Append (C.Now);
-                                       Out_C.At_Touch.Append (C.Now);
-                                    end loop;
                                     Ok := True;
                                     return;
                                  end if;
@@ -865,6 +1031,22 @@ package body Driver.Action.Contact.Search is
          return (if M < Below then M else Physics.No_Way);
       end Worst_Mu;
 
+      --  It works at Mu for the normals as measured and for each tilt the
+      --  measurement cannot exclude: what any friction below Mu needs, so a
+      --  set that fails it cannot need less; the first failure ends it.
+      function Robust_At (G : Group; Mu : Real) return Boolean is
+      begin
+         if Physics.Need (G.Touches, Thing.Base, Motion, Thing.Centre.Mean, U, Mu).Force = Physics.No_Way then
+            return False;
+         end if;
+         for T of Tilted (G.Touches) loop
+            if Physics.Need (T, Thing.Base, Motion, Thing.Centre.Mean, U, Mu).Force = Physics.No_Way then
+               return False;
+            end if;
+         end loop;
+         return True;
+      end Robust_At;
+
       --  How nearly two of its touches press against each other: the least
       --  cosine between two inward normals; a single touch comes after all.
       function Opposition (G : Group) return Real is
@@ -878,10 +1060,13 @@ package body Driver.Action.Contact.Search is
          return C;
       end Opposition;
 
+      --  The most force any normal the measurement allows needs at Mu, from
+      --  the nominal force already found; No_Way at the first that fails.
       function Worst_Force (G : Group; Mu : Real) return Real is
-         F : Real := Physics.Need (G.Touches, Thing.Base, Motion, Thing.Centre.Mean, U, Mu).Force;
+         F : Real := G.Force;
       begin
          for T of Tilted (G.Touches) loop
+            exit when F = Physics.No_Way;
             F := Real'Max (F, Physics.Need (T, Thing.Base, Motion, Thing.Centre.Mean, U, Mu).Force);
          end loop;
          return F;
@@ -902,20 +1087,17 @@ package body Driver.Action.Contact.Search is
          Next      : Positive := 1;            --  in Order, the first set whose worst case is not computed
          Evaluated : Index_Vectors.Vector;     --  sets with a worst case, not yet tried
       begin
-         --  The least worst-case friction of any set. A set that cannot do it
-         --  at the least found so far cannot lower it, which one program
-         --  shows; only the others are searched, below that bound. Sets whose
-         --  touches oppose most come first, which only makes the bound fall
-         --  sooner.
+         --  The least worst-case friction of any set. A set that does not work
+         --  at the least found so far, for every normal the measurement
+         --  allows, cannot lower it, which at most five programs show; only
+         --  the others are searched, below that bound. Sets whose touches
+         --  oppose most come first, which only makes the bound fall sooner.
          for I in 1 .. N loop
             Key (I) := Opposition (Sets (I));
          end loop;
          Sort (Order);
          for I of Order loop
-            if Reference = Physics.No_Way
-              or else Physics.Need (Sets (I).Touches, Thing.Base, Motion, Thing.Centre.Mean, U, Reference).Force
-                      < Physics.No_Way
-            then
+            if Reference = Physics.No_Way or else Robust_At (Sets (I), Reference) then
                Sets (I).Mu_Nominal := Least (Sets (I).Touches, Reference);
                if Sets (I).Mu_Nominal < Reference then
                   declare
@@ -928,32 +1110,46 @@ package body Driver.Action.Contact.Search is
                      end if;
                   end;
                end if;
+            else
+               Sets (I).Fails_At := Reference;
             end if;
          end loop;
          if Reference = Physics.No_Way then
             Tried.Cannot_Balance := Tried.Distinct;
             return;
          end if;
-         --  The thing is taken to give the least friction under which it can
-         --  be done at all, or what it is known to give if that is more. When
-         --  nothing that works there can be made, that friction is doubled,
-         --  up to the most the normals can tell from no limit at all or what
-         --  the thing has failed at, and the sets that work there are tried.
-         Reference := Real'Max (Reference, Friction.Low);
-         Tried.Reference_Mu := Reference;
+         --  The thing is taken to give the least friction the normals can
+         --  tell from the least under which it can be done at all: one
+         --  resolution of their angle above it, as the least friction they can
+         --  tell from none is one resolution above none. At the very friction
+         --  a set needs it holds only with a squeeze without bound, so the
+         --  sets that work there would all be ones that barely do. Or the
+         --  thing is taken to give what it is known to give, if that is more.
+         --  When nothing that works there can be made, that friction is
+         --  doubled, up to the most the normals can tell from no limit at
+         --  all or what the thing has failed at, and the sets that work there
+         --  are tried.
          declare
             Most : constant Real := Real'Min (Friction.High, 1.0 / Physics.Least_Distinct (Resolution));
          begin
+            Reference := Real'Max (Friction.Low,
+                                   Real'Min (Most, Tan (Real'Min (Arctan (Reference) + Resolution,
+                                                                  Pi / 2.0 - Resolution))));
+            Tried.Reference_Mu := Reference;
             loop
                Next := 1;
                Evaluated.Clear;
                Tried.Cannot_Balance := 0;
+               --  Less friction never lets more work: a set already shown to fail
+               --  at this friction or more, for some normal it allows, cannot be
+               --  picked here and is not computed again.
                for I in 1 .. N loop
-                  Sets (I).Force := (if Done (I) then Physics.No_Way
+                  Sets (I).Force := (if Done (I) or else Sets (I).Fails_At >= Reference then Physics.No_Way
                                      else Physics.Need (Sets (I).Touches, Thing.Base, Motion, Thing.Centre.Mean, U,
                                                         Reference).Force);
                   if Sets (I).Force = Physics.No_Way and then not Done (I) then
                      Tried.Cannot_Balance := Tried.Cannot_Balance + 1;
+                     Sets (I).Fails_At := Real'Max (Sets (I).Fails_At, Reference);
                   end if;
                   Key (I) := Sets (I).Force;
                end loop;
@@ -977,13 +1173,10 @@ package body Driver.Action.Contact.Search is
                         declare
                            I : constant Positive := Order (Next);
                         begin
-                           if not Sets (I).Has_Mu then
-                              Sets (I).Mu_Worst := Worst_Mu (Sets (I), Physics.No_Way);
-                              Sets (I).Has_Mu := True;
-                           end if;
                            Sets (I).Worst := Worst_Force (Sets (I), Reference);
                            if Sets (I).Worst = Physics.No_Way then
                               Tried.Cannot_Balance := Tried.Cannot_Balance + 1;
+                              Sets (I).Fails_At := Reference;
                            else
                               Evaluated.Append (I);
                            end if;
@@ -992,6 +1185,13 @@ package body Driver.Action.Contact.Search is
                      end loop;
                      exit when Pick = 0;
                      Done (Pick) := True;
+                     --  Its frictions, for the bound and for what is learned if it
+                     --  slips, only for the sets actually picked.
+                     if not Sets (Pick).Has_Mu then
+                        Sets (Pick).Mu_Nominal := Least (Sets (Pick).Touches, Physics.No_Way);
+                        Sets (Pick).Mu_Worst := Worst_Mu (Sets (Pick), Physics.No_Way);
+                        Sets (Pick).Has_Mu := True;
+                     end if;
                      if Sets (Pick).Mu_Worst >= Friction.High then
                         Tried.Over_Bound := Tried.Over_Bound + 1;
                      else
@@ -1020,6 +1220,7 @@ package body Driver.Action.Contact.Search is
       Found := False;
       Tried := (others => <>);
       if N_Samples = 0 or else not (Res > 0.0) or else Sig = Real'Last or else not Known (Thing.Centre) then
+         Free (Table);
          return;
       end if;
       Low_Corner := Thing.Samples (1).Point;
@@ -1061,6 +1262,7 @@ package body Driver.Action.Contact.Search is
       begin
          if Physics.Need (None, Thing.Base, Motion, Thing.Centre.Mean, U, 0.0).Why = Physics.Footing_In_Way then
             Tried.Surface_In_Way := True;
+            Free (Table);
             return;
          end if;
       end;
@@ -1084,7 +1286,18 @@ package body Driver.Action.Contact.Search is
          Free (Sets);
          Free (Order);
          Free (Key);
+      exception
+         when others =>
+            Free (Sets);
+            Free (Order);
+            Free (Key);
+            raise;
       end;
+      Free (Table);
+   exception
+      when others =>
+         Free (Table);
+         raise;
    end Find;
 
 end Driver.Action.Contact.Search;
