@@ -124,42 +124,18 @@ package body Driver.Brain.Live is
       Driver.Brain.Service.Ask_Where (B.Now.Images (E), Name, Answer, Where, Why);
    end Ask_Where;
 
-   function Own_Point (M : Driver.Images.Mask; Found : out Boolean) return Driver.Images.Pixel is
-      Su, Sv : Real := 0.0;
-      N      : Natural := 0;
-      Best   : Driver.Images.Pixel;
-      Near   : Real := Real'Last;
-      Half   : constant := 0.5;   --  the centre of a pixel (Driver.Images)
+   function Mostly (Part, Whole : Driver.Images.Mask) return Boolean is
+      Inside : Natural := 0;
    begin
-      for R in 0 .. Driver.Images.Height (M) - 1 loop
-         for C in 0 .. Driver.Images.Width (M) - 1 loop
-            if Driver.Images.Contains (M, C, R) then
-               Su := Su + Real (C) + Half;
-               Sv := Sv + Real (R) + Half;
-               N := N + 1;
+      for R in 0 .. Natural'Min (Driver.Images.Height (Part), Driver.Images.Height (Whole)) - 1 loop
+         for C in 0 .. Natural'Min (Driver.Images.Width (Part), Driver.Images.Width (Whole)) - 1 loop
+            if Driver.Images.Contains (Whole, C, R) and then Driver.Images.Contains (Part, C, R) then
+               Inside := Inside + 1;
             end if;
          end loop;
       end loop;
-      Found := N > 0;
-      if not Found then
-         return (others => <>);
-      end if;
-      for R in 0 .. Driver.Images.Height (M) - 1 loop
-         for C in 0 .. Driver.Images.Width (M) - 1 loop
-            if Driver.Images.Contains (M, C, R) then
-               declare
-                  D : constant Real := (Real (C) + Half - Su / Real (N)) ** 2 + (Real (R) + Half - Sv / Real (N)) ** 2;
-               begin
-                  if D < Near then
-                     Near := D;
-                     Best := (U => Real (C) + Half, V => Real (R) + Half);
-                  end if;
-               end;
-            end if;
-         end loop;
-      end loop;
-      return Best;
-   end Own_Point;
+      return 2 * Inside > Driver.Images.Count (Whole);
+   end Mostly;
 
    overriding procedure Identify
      (B     : in out Body_Link;
@@ -172,26 +148,22 @@ package body Driver.Brain.Live is
       Region : Driver.Images.Mask;
       Score  : Real;
       Ok     : Boolean;
-      Point  : Driver.Images.Pixel;
       No_Points : constant Driver.Instrument.Prompt_Array := [];
 
       --  Is the patch part of the body, a thing already known, or a new one?
-      --  A point on both the body and a known thing is that thing (held in
-      --  front of the fingers).
+      --  A patch mostly on the body is a known thing it is also mostly on
+      --  (held in front of the fingers), or else the body itself.
       procedure During is
          O    : constant Driver.Observations.Observation := Driver.Beats.Latest.all;
          S    : Driver.World.Scene renames B.C.Scene.all;
          Self : constant Driver.Images.Mask := Driver.Robot.Self_Mask (B.C.Robot.all, E, O);
-         C    : constant Natural := Natural (Real'Floor (Point.U));
-         R    : constant Natural := Natural (Real'Floor (Point.V));
       begin
-         if Driver.Images.Contains (Self, C, R) then
+         if Mostly (Self, Region) then
             for K in 1 .. Driver.World.Thing_Count (S) loop
                declare
                   Known : constant Driver.World.Thing_Id := Driver.World.Thing_Id (K);
                begin
-                  if Driver.World.Seen_In (S, Known, E)
-                    and then Driver.Images.Contains (Driver.World.Region_In (S, Known, E), C, R)
+                  if Driver.World.Seen_In (S, Known, E) and then Mostly (Driver.World.Region_In (S, Known, E), Region)
                   then
                      Found := Driver.Brain.Names.A_Thing;
                      T := Known;
@@ -200,7 +172,7 @@ package body Driver.Brain.Live is
                end;
             end loop;
             Found := Driver.Brain.Names.Part_Of_Me;
-            Why := To_Unbounded_String ("its pixels lie on my own body in that eye");
+            Why := To_Unbounded_String ("most of its pixels lie on my own body in that eye");
             return;
          end if;
          Driver.World.Adopt (S, B.C.Robot.all, E, O, Region, T);
@@ -218,8 +190,7 @@ package body Driver.Brain.Live is
          Why := "the instrument could not segment it: " & Why;
          return;
       end if;
-      Point := Own_Point (Region, Ok);
-      if not Ok then
+      if Driver.Images.Count (Region) = 0 then
          Why := To_Unbounded_String ("nothing in the box stands apart from its surroundings");
          return;
       end if;
@@ -272,26 +243,14 @@ package body Driver.Brain.Live is
             when Driver.Action.Place_Operand =>
                P := Driver.World.Where (S, Who.Place);
             when Driver.Action.Role_Operand =>
-               --  Which hand is the grasper is settled per stretch; with one hand
-               --  it can only be that one, and with more the body does not guess.
-               if Who.The_Role /= Driver.Action.Grasper then
-                  Ok := False;
-                  Why := To_Unbounded_String ("I cannot yet tell where " & Driver.Brain.Words.Word (Who.The_Role)
-                                              & " is as a place");
-                  return;
-               elsif Driver.Robot.Hand.Hand_Count (B.C.Hands.all) /= 1 then
-                  Ok := False;
-                  Why := To_Unbounded_String
-                    ("I have" & Natural'Image (Driver.Robot.Hand.Hand_Count (B.C.Hands.all))
-                     & " hands and which one is the grasper is settled stretch by stretch, so I do not guess which"
-                     & " one you mean; remember where the thing in it is instead");
-                  return;
-               end if;
-               P := Driver.Robot.Hand.Grip_Centre (B.C.Hands.all, B.C.Robot.all, Driver.Robot.Hand.Hand_Id'First,
-                                                   Driver.Beats.Latest.all);
+               --  Where the part the role is bound to now is (Driver.Action):
+               --  the same for every body, however many parts could play it.
+               P := Driver.Action.Role_Point (B.C.all, Who.The_Role);
                if not Driver.Uncertain.Known (P) then
                   Ok := False;
-                  Why := To_Unbounded_String ("I have not measured yet where my grasper closes");
+                  Why := To_Unbounded_String
+                    ("no part of me plays " & Driver.Brain.Words.Word (Who.The_Role)
+                     & " now, or I have not measured where it is, so I cannot remember where it is");
                   return;
                end if;
             when Driver.Action.Nothing =>
