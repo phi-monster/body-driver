@@ -44,3 +44,7 @@ git commit -q -m "$MESSAGE
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 git log -1 --format="merged %h"
+# The owner keeps GitHub current (10-05): every merge is pushed. A failed push leaves the merge in place.
+if ! git push -q origin HEAD:main; then
+  echo "merged, but the push to origin failed; push by hand"
+fi
