@@ -2496,6 +2496,65 @@ package body Driver.Robot.Kinematics.Fit is
       end;
    end Linear_Homography;
 
+   --  The homography (its eight free entries, X) by robust least squares at
+   --  Sigma on the points Fits selects; Sigma becomes their noise. Not
+   --  inlined: inlined into its caller (GNAT 16.1 at -O2), the nested
+   --  Evaluate reads past the frame its up-level variables are given, which
+   --  AddressSanitizer reports.
+   procedure Refine_Homography
+     (Points : Plane_Point_Array;
+      Fits   : Flag_Array;
+      X      : in out Real_Array;
+      Sigma  : in out Real)
+     with No_Inline
+   is
+      Used  : Natural := 0;
+      Index : Count_Access;
+   begin
+      for I in Points'Range loop
+         if Fits (I) then
+            Used := Used + 1;
+         end if;
+      end loop;
+      Index := new Count_Array (1 .. Used);
+      declare
+         K : Natural := 0;
+      begin
+         for I in Points'Range loop
+            if Fits (I) then
+               K := K + 1;
+               Index (K) := I;
+            end if;
+         end loop;
+      end;
+      declare
+         procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
+            Hv : constant Mat3 := Homography_Of (Xv);
+         begin
+            for J in 1 .. Used loop
+               declare
+                  P     : Plane_Point renames Points (Index (J));
+                  U, V  : Real;
+                  Ahead : Boolean;
+               begin
+                  Apply (Hv, P.X, P.Y, U, V, Ahead);
+                  R (R'First + 2 * J - 2) := (if Ahead then U - P.U else Real'Last);
+                  R (R'First + 2 * J - 1) := (if Ahead then V - P.V else Real'Last);
+               end;
+            end loop;
+         end Evaluate;
+
+         procedure Solve is new Robust_Fit (8, 2 * Used, Evaluate);
+         R : Real_Access := new Real_Array (1 .. 2 * Used);
+      begin
+         Solve (X, Sigma);
+         Evaluate (X, R.all);
+         Sigma := Noise_Of (R.all);
+         Free (R);
+      end;
+      Free (Index);
+   end Refine_Homography;
+
    procedure Plane_Homography
      (Points : Plane_Point_Array;
       H      : out Mat3;
@@ -2584,41 +2643,7 @@ package body Driver.Robot.Kinematics.Fit is
                end loop;
                exit when Used <= Minimal or else Now_Changed = 0 or else Now_Changed >= Changed;
                Changed := Now_Changed;
-               declare
-                  Index : Count_Access := new Count_Array (1 .. Used);
-                  K     : Natural := 0;
-
-                  procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
-                     Hv : constant Mat3 := Homography_Of (Xv);
-                  begin
-                     for J in 1 .. Used loop
-                        declare
-                           P     : Plane_Point renames Points (Index (J));
-                           U, V  : Real;
-                           Ahead : Boolean;
-                        begin
-                           Apply (Hv, P.X, P.Y, U, V, Ahead);
-                           R (R'First + 2 * J - 2) := (if Ahead then U - P.U else Real'Last);
-                           R (R'First + 2 * J - 1) := (if Ahead then V - P.V else Real'Last);
-                        end;
-                     end loop;
-                  end Evaluate;
-
-                  procedure Solve is new Robust_Fit (8, 2 * Used, Evaluate);
-                  R : Real_Access := new Real_Array (1 .. 2 * Used);
-               begin
-                  for I in Points'Range loop
-                     if Fits (I) then
-                        K := K + 1;
-                        Index (K) := I;
-                     end if;
-                  end loop;
-                  Solve (X, Sigma);
-                  Evaluate (X, R.all);
-                  Sigma := Noise_Of (R.all);
-                  Free (R);
-                  Free (Index);
-               end;
+               Refine_Homography (Points, Fits, X, Sigma);
                exit when Sigma <= 0.0;
             end;
          end loop;
