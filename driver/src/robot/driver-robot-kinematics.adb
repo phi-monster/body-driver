@@ -12,6 +12,7 @@ with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
+with Driver.Robot.Lockin;
 
 package body Driver.Robot.Kinematics is
 
@@ -311,6 +312,22 @@ package body Driver.Robot.Kinematics is
    function Match_Noise (M : Model; A : Arm_Id) return Real is
      (if Index_Of (M, A) > 0 then Round_Trip_Sigma (M.Kinematics (Index_Of (M, A))) else 0.0);
 
+   function Keyframe_Step (M : Model; A : Arm_Id; Channel : Positive) return Real is
+      E : constant Eye_Id'Base := Eye_Of (M, A);
+   begin
+      if E = 0 then
+         return 0.0;
+      end if;
+      declare
+         Per_Unit : constant Real := Lockin.Shift (M, E, Arm_Group (M, A), Channel);
+         --  The larger of the cells' displacement noise and the matcher's: a
+         --  keyframe is judged by the matcher, its view by the cells.
+         Noise    : constant Real := Real'Max (Lockin.Cell_Noise (M, E), Match_Noise (M, A));
+      begin
+         return (if Per_Unit > 0.0 and then Noise < Real'Last then Driver.Conventions.Z * Noise / Per_Unit else 0.0);
+      end;
+   end Keyframe_Step;
+
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean is
    begin
       if Index_Of (M, A) = 0 then
@@ -360,11 +377,7 @@ package body Driver.Robot.Kinematics is
                      end loop;
                   end loop;
                   for C in 1 .. N loop
-                     declare
-                        V : constant Estimate := Visible_Step (M, R.Group, C);
-                     begin
-                        Visible (C) := (if Known (V) then V.Value else 0.0);
-                     end;
+                     Visible (C) := Keyframe_Step (M, R.Arm, C);
                   end loop;
                   declare
                      function Round_Trip (S : Match_Set; I : Natural) return Boolean is
@@ -459,6 +472,9 @@ package body Driver.Robot.Kinematics is
                            Result.Joints.Append (Joint_Fit'(W => J.W, P => J.P, C => J.C, Slide => J.Slide));
                         end loop;
                         Result.Lens := (Fx => Lens.Fx, Fy => Lens.Fy, Cx => Lens.Cx, Cy => Lens.Cy, K1 => Lens.K1, K2 => Lens.K2);
+                        for X of Report.Covariance loop
+                           Result.Covariance.Append (X);
+                        end loop;
                         --  A fit that failed keeps the last one that held.
                         if Report.Fitted or else not R.Result.Fitted then
                            R.Result := Result;
@@ -510,6 +526,35 @@ package body Driver.Robot.Kinematics is
       end loop;
       return Identity;
    end Eye_In_Reference;
+
+   procedure Pose_Covariance (M : Model; A : Arm_Id; Readings : Real_Array; Turn, Place : out Mat3) is
+      R : constant Arm_Fit := (if Index_Of (M, A) > 0 then M.Kinematics (Index_Of (M, A)).Result else (others => <>));
+   begin
+      Turn := [[Real'Last, 0.0, 0.0], [0.0, Real'Last, 0.0], [0.0, 0.0, Real'Last]];
+      Place := Turn;
+      if R.Fitted and then Natural (R.Joints.Length) = Readings'Length
+        and then Natural (R.Reference.Length) = Readings'Length
+      then
+         declare
+            Joints : Fit.Joint_Array (1 .. Readings'Length);
+            Change : Real_Array (1 .. Readings'Length);
+            Cov    : Fit.Real_Lists.Vector;
+         begin
+            for J in Joints'Range loop
+               declare
+                  F : constant Joint_Fit := R.Joints (J);
+               begin
+                  Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
+                  Change (J) := Readings (Readings'First + J - 1) - R.Reference (J - 1);
+               end;
+            end loop;
+            for X of R.Covariance loop
+               Cov.Append (X);
+            end loop;
+            Fit.Pose_Covariance (Joints, Change, Cov, Turn, Place);
+         end;
+      end if;
+   end Pose_Covariance;
 
    function Fitted (M : Model; A : Arm_Id) return Boolean is
      (Index_Of (M, A) > 0 and then M.Kinematics (Index_Of (M, A)).Result.Fitted);

@@ -1928,7 +1928,10 @@ package body Driver.Robot.Tests is
    --  signs are the rows of a Sylvester-Hadamard matrix; a 16 x 12 grid of the
    --  reference view is followed into every keyframe with 0.2 pixels of noise.
 
-   procedure Synthetic_Sweep (Scale : Real; Expect_Fit : Boolean) is
+   --  Frame_Error is the spread of an error shared by every point of a
+   --  keyframe (its rendering, its view), each keyframe's drawn at random:
+   --  the fit's reported uncertainty must still cover its errors.
+   procedure Synthetic_Sweep (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0) is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N       : constant := 6;
       Levels  : constant Real_Array := [0.05 * Scale, -0.05 * Scale, 0.1 * Scale, -0.1 * Scale, 0.2 * Scale, -0.2 * Scale];
@@ -1992,6 +1995,10 @@ package body Driver.Robot.Tests is
                D (J) := Changes (F, J);
             end loop;
             T := Inverse (Fit.Eye_At (Truth, D));
+            declare
+               Shared_U : constant Real := Frame_Error * Gaussian (Rng);
+               Shared_V : constant Real := Frame_Error * Gaussian (Rng);
+            begin
             for Gy in 1 .. Rows loop
                for Gx in 1 .. Columns loop
                   declare
@@ -2005,8 +2012,8 @@ package body Driver.Robot.Tests is
                      Ahead : Boolean;
                   begin
                      Fit.Project (Lens, T * X, U, V, Ahead);
-                     U := U + Noise * Gaussian (Rng);
-                     V := V + Noise * Gaussian (Rng);
+                     U := U + Noise * Gaussian (Rng) + Shared_U;
+                     V := V + Noise * Gaussian (Rng) + Shared_V;
                      if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
                         Seen := Seen + 1;
                         All_Seen (Seen) := (Frame => F, Track => (Gy - 1) * Columns + Gx, U0 => U0, V0 => V0, U => U, V => V);
@@ -2014,6 +2021,7 @@ package body Driver.Robot.Tests is
                   end;
                end loop;
             end loop;
+            end;
          end;
       end loop;
       declare
@@ -2032,13 +2040,19 @@ package body Driver.Robot.Tests is
          if not Report.Fitted then
             return;
          end if;
-         Check_Close (Found.Fx, Lens.Fx, Lens.Fx * Noise / 40.0, "the focal length across");
-         Check_Close (Found.Fy, Lens.Fy, Lens.Fy * Noise / 40.0, "the focal length down");
-         for J in 1 .. N loop
-            Check (Arccos (Real'Min (1.0, Joints (J).W * Truth (J).W)) < Noise / 40.0,
-                   "joint" & J'Image & "'s axis is off by"
-                   & Real'Image (Arccos (Real'Min (1.0, Joints (J).W * Truth (J).W))) & " rad");
-         end loop;
+         --  The fit's own uncertainty covers its errors: within Z of its sigmas.
+         Check (abs (Found.Fx - Lens.Fx) <= Driver.Conventions.Z * Report.Focal_Sigma,
+                "the focal length is off by" & Real'Image (Found.Fx - Lens.Fx) & " px, its sigma"
+                & Report.Focal_Sigma'Image);
+         if Frame_Error = 0.0 then
+            Check_Close (Found.Fx, Lens.Fx, Lens.Fx * Noise / 40.0, "the focal length across");
+            Check_Close (Found.Fy, Lens.Fy, Lens.Fy * Noise / 40.0, "the focal length down");
+            for J in 1 .. N loop
+               Check (Arccos (Real'Min (1.0, Joints (J).W * Truth (J).W)) < Noise / 40.0,
+                      "joint" & J'Image & "'s axis is off by"
+                      & Real'Image (Arccos (Real'Min (1.0, Joints (J).W * Truth (J).W))) & " rad");
+            end loop;
+         end if;
          --  The eye at a pose no keyframe had, lengths in the fit's units.
          declare
             Test  : constant Real_Array (1 .. N) := [0.15, -0.1, 0.08, -0.12, 0.1, -0.15];
@@ -2058,13 +2072,40 @@ package body Driver.Robot.Tests is
             Scale := Sqrt (Scale / Real (Frames));
             Want := Fit.Eye_At (Truth, Test);
             Got := Fit.Eye_At (Joints, Test);
-            Check (abs (Scale * Got.Translation - Want.Translation) < Scale * Noise / 40.0,
-                   "the eye at a new pose is off by" & Real'Image (abs (Scale * Got.Translation - Want.Translation) / Scale)
-                   & " of the arm's reach");
-            Check (Driver.Numerics.Angle (Transpose (Got.Rotation) * Want.Rotation) < Noise / 40.0,
-                   "the eye at a new pose is turned by"
-                   & Real'Image (Driver.Numerics.Angle (Transpose (Got.Rotation) * Want.Rotation)) & " rad");
+            if Frame_Error = 0.0 then
+               Check (abs (Scale * Got.Translation - Want.Translation) < Scale * Noise / 40.0,
+                      "the eye at a new pose is off by" & Real'Image (abs (Scale * Got.Translation - Want.Translation) / Scale)
+                      & " of the arm's reach");
+               Check (Driver.Numerics.Angle (Transpose (Got.Rotation) * Want.Rotation) < Noise / 40.0,
+                      "the eye at a new pose is turned by"
+                      & Real'Image (Driver.Numerics.Angle (Transpose (Got.Rotation) * Want.Rotation)) & " rad");
+            end if;
+            --  The pose's own uncertainty covers its error: within Z of the
+            --  root of its covariance's trace (model units, radians).
+            declare
+               Turn, Place : Mat3;
+               Off  : constant Real := abs (Got.Translation - (1.0 / Scale) * Want.Translation);
+               Turned : constant Real := Driver.Numerics.Angle (Transpose (Got.Rotation) * Want.Rotation);
+            begin
+               Fit.Pose_Covariance (Joints, Test, Report.Covariance, Turn, Place);
+               --  The fit's covariance covers every joint it was given: the
+               --  pose's uncertainty is known.
+               Check (Turn (1, 1) < Real'Last and then Place (1, 1) < Real'Last,
+                      "the fit's covariance does not cover its joints:" & Report.Covariance.Length'Image & " entries for"
+                      & N'Image & " joints");
+               Check (Off <= Driver.Conventions.Z * Sqrt (Place (1, 1) + Place (2, 2) + Place (3, 3)),
+                      "the eye at a new pose is off by" & Off'Image & " model units, its sigma"
+                      & Real'Image (Sqrt (Place (1, 1) + Place (2, 2) + Place (3, 3))));
+               Check (Turned <= Driver.Conventions.Z * Sqrt (Turn (1, 1) + Turn (2, 2) + Turn (3, 3)),
+                      "the eye at a new pose is turned by" & Turned'Image & " rad, its sigma"
+                      & Real'Image (Sqrt (Turn (1, 1) + Turn (2, 2) + Turn (3, 3))));
+               Driver.Log.Line (Driver.Log.Robot, "kinematics test honesty: focal off" & Real'Image (Found.Fx - Lens.Fx)
+                                & " sigma" & Report.Focal_Sigma'Image & "; pose off" & Off'Image & " sigma"
+                                & Real'Image (Sqrt (Place (1, 1) + Place (2, 2) + Place (3, 3))) & "; turn" & Turned'Image
+                                & " sigma" & Real'Image (Sqrt (Turn (1, 1) + Turn (2, 2) + Turn (3, 3))));
+            end;
          end;
+         if Frame_Error = 0.0 then
          declare
             Normal : Vec3;
             Sigma  : Real;
@@ -2076,6 +2117,7 @@ package body Driver.Robot.Tests is
                    "the table's normal is off by" & Real'Image (Arccos (Real'Min (1.0, Normal * Unit (Table)))) & " rad");
             Check (Sigma < Noise / 40.0, "the table's normal is uncertain by" & Sigma'Image & " rad");
          end;
+         end if;
          Driver.Log.Line (Driver.Log.Robot, "kinematics test: focal " & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy)
                           & ", median " & Real'Image (Report.Median_Px) & " px over" & Report.Used'Image & " sightings");
       end;
@@ -2155,6 +2197,162 @@ package body Driver.Robot.Tests is
       Check (not M.Kinematics (1).Result.Fitted, "the refit keeps the fit of a group that is no arm");
    end Stale_Fit_Is_No_Arms;
 
+   --  A10's arm 2: its reference keyframe came from a push of the
+   --  recognition rounds, 3e-5 rad down on one joint, so every keyframe of
+   --  its sweep differs from the reference in that joint too. That is ten
+   --  times the step the eye's lock-in can tell over many beats, and a
+   --  twentieth of what one keyframe's match can: the fit must judge the
+   --  keyframes by the match, or no joint has a keyframe of its own (the
+   --  replay of A10, its lock-in steps grown finer, fitted no arm 2).
+   procedure Kinematics_With_An_Offset_Reference is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      N       : constant := 6;
+      Levels  : constant Real_Array := [0.05, -0.05, 0.1, -0.1, 0.2, -0.2];
+      Rows_H  : constant := 7;          --  the Hadamard keyframes
+      Columns : constant := 16;
+      Rows    : constant := 12;
+      Noise   : constant := 0.1;        --  the matcher's, pixels per coordinate
+      Offset  : constant := 3.0e-5;     --  the reference's joint 3 below the sweep's base
+      Table   : constant Vec3 := [0.0, -0.6, -0.8];
+      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Truth   : Fit.Joint_Array (1 .. N);
+      Axes    : constant array (1 .. N) of Vec3 :=
+        [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
+      Points  : constant array (1 .. N) of Vec3 :=
+        [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
+      Base    : constant Real_Array (1 .. N) := [others => 0.0];
+      Ref     : Real_Array (1 .. N) := Base;
+      M       : Model;
+      R       : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
+      Rng     : Generator;
+      Cells   : constant := 4;
+
+      procedure Add_Frame (Readings : Real_Array) is
+         K : Keyframe;
+      begin
+         K.Beat := Natural (R.Frames.Length) + 1;
+         for X of Readings loop
+            K.Readings.Append (X);
+         end loop;
+         R.Frames.Append (K);
+         if Natural (R.Frames.Length) > 1 then
+            declare
+               D   : Real_Array (1 .. N);
+               T   : Rigid;
+               Set : Match_Set;
+            begin
+               for J in 1 .. N loop
+                  D (J) := Readings (J) - Ref (J);
+               end loop;
+               T := Inverse (Fit.Eye_At (Truth, D));
+               Set.Frame := Natural (R.Frames.Length);
+               for I in 0 .. Natural (R.Query_U.Length) - 1 loop
+                  declare
+                     H     : constant Vec3 := Fit.Ray (Lens, R.Query_U (I), R.Query_V (I));
+                     X     : constant Vec3 := (-1.0 / Real'(Unit (Table) * H)) * H;
+                     U, V  : Real;
+                     Ahead : Boolean;
+                  begin
+                     Fit.Project (Lens, T * X, U, V, Ahead);
+                     Set.To_U.Append (U + Noise * Gaussian (Rng));
+                     Set.To_V.Append (V + Noise * Gaussian (Rng));
+                     Set.Back_U.Append (R.Query_U (I) + Noise * Gaussian (Rng));
+                     Set.Back_V.Append (R.Query_V (I) + Noise * Gaussian (Rng));
+                     Set.Found.Append (Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0);
+                  end;
+               end loop;
+               R.Matches.Append (Set);
+            end;
+         end if;
+      end Add_Frame;
+   begin
+      for J in 1 .. N loop
+         declare
+            W : constant Vec3 := Unit (Axes (J));
+         begin
+            Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => 1.0, Slide => False);
+         end;
+      end loop;
+      --  The body: one arm of six channels carrying one eye, whose lock-in,
+      --  like any over many beats, sees steps far finer than a keyframe's
+      --  match: 1.3e-8 rad against 6.5e-4.
+      M.Groups.Append (Group_Stream'(Size => N, Commandable => True, others => <>));
+      declare
+         S : Eye_Stream;
+      begin
+         S.Grid := (Width => 640, Height => 480, Columns => 2, Rows => 2);
+         for C in 1 .. N loop
+            S.Kept_Groups.Append (1);
+            S.Kept_Channels.Append (C);
+         end loop;
+         for Cell in 1 .. Cells loop
+            S.Noise.Append (Noise);
+            for C in 1 .. N loop
+               S.Gains.Append (1.0e16);
+               S.Gain_Variances.Append (1.0);
+               S.Shifts.Append (400.0);
+            end loop;
+         end loop;
+         M.Eyes.Append (S);
+      end;
+      M.Graph.Effects.Append (Eye_Effect'(Verdict => Whole, Responding => Cells, Textured => Cells, others => <>));
+      M.Graph.Arms.Append (1);
+      M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => 1));
+      for Gy in 1 .. Rows loop
+         for Gx in 1 .. Columns loop
+            R.Query_U.Append ((Real (Gx) - 0.5) * 640.0 / Real (Columns));
+            R.Query_V.Append ((Real (Gy) - 0.5) * 480.0 / Real (Rows));
+         end loop;
+      end loop;
+      --  The reference off the base, its still twin, then the sweep from the
+      --  base: every joint at every level, and the Hadamard rows.
+      Ref (3) := -Offset;
+      Add_Frame (Ref);
+      Add_Frame (Ref);
+      for J in 1 .. N loop
+         for L of Levels loop
+            declare
+               Q : Real_Array := Base;
+            begin
+               Q (J) := L;
+               Add_Frame (Q);
+            end;
+         end loop;
+      end loop;
+      for Row in 1 .. Rows_H loop
+         declare
+            Q : Real_Array := Base;
+         begin
+            for J in 1 .. N loop
+               declare
+                  Bits : Natural := 0;
+                  A    : Natural := Row;
+                  C    : Natural := J;
+               begin
+                  while A > 0 and then C > 0 loop
+                     if A mod 2 = 1 and then C mod 2 = 1 then
+                        Bits := Bits + 1;
+                     end if;
+                     A := A / 2;
+                     C := C / 2;
+                  end loop;
+                  Q (J) := (if Bits mod 2 = 0 then 0.05 else -0.05);
+               end;
+            end loop;
+            Add_Frame (Q);
+         end;
+      end loop;
+      M.Kinematics.Append (R);
+      Driver.Robot.Kinematics.Refit (M);
+      Check (Driver.Robot.Kinematics.Fitted (M, 1),
+             "the arm whose reference lay 3e-5 rad off its sweep's base is not fitted: "
+             & Ada.Strings.Unbounded.To_String (M.Kinematics (1).Result.Why));
+      if Driver.Robot.Kinematics.Fitted (M, 1) then
+         Check (abs (M.Kinematics (1).Result.Lens.Fx - Lens.Fx) < Lens.Fx * Noise / 40.0,
+                "its focal length came out" & M.Kinematics (1).Result.Lens.Fx'Image);
+      end if;
+   end Kinematics_With_An_Offset_Reference;
+
    procedure Kinematics_Of_A_Synthetic_Arm is
    begin
       Synthetic_Sweep (1.0, Expect_Fit => True);
@@ -2166,6 +2364,16 @@ package body Driver.Robot.Tests is
    begin
       Synthetic_Sweep (0.002, Expect_Fit => False);
    end Kinematics_Of_A_Small_Sweep;
+
+   --  The same arm, every keyframe's points sharing an error of 0.3 pixels
+   --  (a rendering, a view, the matcher on that pair), as A9's matches did:
+   --  sightings taken as independent hide it, and the fit's focal length
+   --  and pose come out many of their sigmas off; clustered by keyframe, the
+   --  fit's own uncertainty covers its errors.
+   procedure Kinematics_With_Shared_Errors is
+   begin
+      Synthetic_Sweep (1.0, Expect_Fit => True, Frame_Error => 0.3);
+   end Kinematics_With_Shared_Errors;
 
    procedure Register is
    begin
@@ -2180,6 +2388,10 @@ package body Driver.Robot.Tests is
                              & "found beyond the range the arm moved through", Reach_A_Pose'Access);
       Driver.Tests.Register ("robot.kinematics.stale", "the fit of a group that stopped being an arm, or of an eye it no "
                              & "longer carries, is still taken for the arm's", Stale_Fit_Is_No_Arms'Access);
+      Driver.Tests.Register ("robot.kinematics.shared", "the fit's focal length or eye pose is off by more than Z of "
+                             & "its own sigmas when every keyframe's points share an error", Kinematics_With_Shared_Errors'Access);
+      Driver.Tests.Register ("robot.kinematics.offset", "an arm whose reference keyframe lies off its sweep's base by "
+                             & "less than a keyframe's match can tell is not fitted", Kinematics_With_An_Offset_Reference'Access);
       Driver.Tests.Register ("robot.kinematics.small", "a sweep too small to determine the lens and the joints is "
                              & "reported fitted", Kinematics_Of_A_Small_Sweep'Access);
       Driver.Tests.Register ("robot.kinematics", "the arm's axes, the eye's lens or the eye's pose at a new pose come "

@@ -37,10 +37,13 @@
 --  Robust means Huber weights at Z (Driver.Conventions) on residuals divided
 --  by the noise measured from them.
 
+with Ada.Containers.Vectors;
 with Ada.Strings.Unbounded;
 with Driver.Numerics;
 
 package Driver.Robot.Kinematics.Fit is
+
+   package Real_Lists is new Ada.Containers.Vectors (Positive, Real);
 
 
 
@@ -68,6 +71,35 @@ package Driver.Robot.Kinematics.Fit is
      with Pre => Change'Length = J'Length;
    --  The eye at readings Q0 + Change, in the reference eye's frame.
 
+   procedure Across (W : Vec3; E1, E2 : out Vec3);
+   --  Two unit directions across W that make a right-handed frame with it.
+
+   --  The fit reports the covariance of these parameters, in this order: the
+   --  lens (Lens_Terms: the logarithms of Fx and Fy, Cx, Cy, K1, K2), then per
+   --  joint its Joint_Terms: the tilt of its axis along the two directions
+   --  across it (Across), the point on it nearest the reference eye moved
+   --  along the same two, and its reading scale.
+   Lens_Terms : constant := 6;
+   type Joint_Term is (Tilt_1, Tilt_2, Point_1, Point_2, Scale);
+   Joint_Terms : constant := Joint_Term'Pos (Joint_Term'Last) + 1;
+   function Terms (Joints : Natural) return Natural is (Lens_Terms + Joint_Terms * Joints);
+   function Term_Of (Joint : Positive; T : Joint_Term) return Positive is
+     (Lens_Terms + Joint_Terms * (Joint - 1) + Joint_Term'Pos (T) + 1);
+
+   procedure Pose_Covariance
+     (Joints      : Joint_Array;
+      Change      : Real_Array;
+      Covariance  : Real_Lists.Vector;
+      Turn, Place : out Mat3)
+     with Pre => Change'Length = Joints'Length;
+   --  What the fit's uncertainty leaves the eye at readings Q0 + Change
+   --  (Eye_At) uncertain by: the covariance of its turn (the rotation vector
+   --  that takes it to the truth, in the reference frame, as
+   --  Driver.Uncertain has it) and of its place, from the joints'
+   --  parameters, each moved by its standard deviation either way. Turn and
+   --  Place are Real'Last on the diagonal when the covariance is not the
+   --  fit's of these joints.
+
    --  A point the reference keyframe shows at (U0, V0), seen again at (U, V)
    --  in keyframe Frame (2 or more; the reference is 1).
    type Sighting is record
@@ -89,6 +121,7 @@ package Driver.Robot.Kinematics.Fit is
       Flipped    : Boolean := False;   --  every translation changed sign to put the points in front
       Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
       Focal_Sigma : Real := Real'Last; --  the uncertainty of the focal length across
+      Covariance : Real_Lists.Vector;  --  of the parameters above, row by row; empty when not determined
    end record;
 
    procedure Fit
