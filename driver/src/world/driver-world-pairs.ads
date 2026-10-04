@@ -40,8 +40,8 @@ package Driver.World.Pairs is
    --  a pixel was to where its match matched back to). A right match comes
    --  back by a centred Gaussian error; a wrong one lands anywhere in the
    --  image, of that Area. The two are told apart by the mixture's maximum
-   --  likelihood (EM, started from every doubling rank of the round trips'
-   --  lengths, each run until its likelihood stops growing), not by a robust
+   --  likelihood (climbed from every doubling rank of the round trips'
+   --  lengths until it stops growing), not by a robust
    --  spread of them all: when the second eye does not see most of what is
    --  asked, the wrong ones are most of them, and their spread is no
    --  matcher's error. The fit is then made again within its own gate, the
@@ -60,7 +60,8 @@ package Driver.World.Pairs is
       Kept          : out Match_Vectors.Vector;
       Apart         : out Natural;
       Unplaced      : out Natural;
-      Error         : out Real)
+      Error         : out Real;
+      Error_Freedom : out Natural)
      with Pre => Answers'Length = Points'Length and then Own <= Points'Length;
    --  Points are pixels of First, the region's Own first, the pixels around
    --  it after; Answers are the matcher's, into Second's image of the same
@@ -68,10 +69,37 @@ package Driver.World.Pairs is
    --  error; when none were asked (Own is every point: the background, say,
    --  which is itself what is asked about), those of all the points do.
    --  Error is the matcher's error measured across the lines the first sights
-   --  draw in the second eye, in pixels (Real'Last when nothing measured it).
+   --  draw in the second eye, in pixels (Real'Last when nothing measured it),
+   --  and the degrees of freedom it rests on.
    --  Apart counts the matches that came back but whose lines of sight do not
    --  meet; Unplaced, those whose lines meet too far along them to tell how
    --  far. Nothing is kept when none of that sample came back to tell the
    --  matcher's error by.
+
+private
+
+   procedure Fit_Mixture
+     (Squared    : Real_Array;
+      Dimensions : Positive;
+      Measure    : Real;
+      Sigma      : out Real;
+      Right      : out Real;
+      Passes     : in out Natural);
+   --  One fit of that mixture, over the whole range: its maximum likelihood,
+   --  climbed from every doubling rank of the errors' lengths.
+
+   function Ball (Dimensions : Positive; Radius : Real) return Real;
+   --  The measure of the errors in that many dimensions no longer than Radius.
+
+   procedure Mixture
+     (Squared    : Real_Array;
+      Dimensions : Positive;
+      Measure    : Real;
+      Sigma      : out Real;
+      Right      : out Real;
+      Passes     : in out Natural);
+   --  The fit Matcher_Error and Triangulate make, of errors given by their
+   --  squared lengths in that many dimensions, the wrong ones spread over a
+   --  range of that Measure; Passes counts the times it went over them.
 
 end Driver.World.Pairs;

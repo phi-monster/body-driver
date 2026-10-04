@@ -200,6 +200,34 @@ package body Driver.World.Supports.Tests is
             Check (On_Table.Index = 1 and then Resting (On_Table) and then On_Table.Touching,
                    "a thing on the table does not rest on it");
             declare
+               --  A flat thing at the table's near edge: its top over the
+               --  table's last points, its rim, the lowest of it, touching the
+               --  table beyond them, where the thing itself hides the table. It
+               --  rests on the table. The same thing a hand's breadth further
+               --  out, over none of the table, rests on nothing.
+               At_Edge, Beyond : Driver.Geometry.Point_Array (1 .. Thing_Points);
+            begin
+               for I in At_Edge'Range loop
+                  declare
+                     Rim : constant Boolean := 3 * I <= Thing_Points;
+                     X   : constant Real := (if Rim then 0.17 + 0.02 * Uniform else 0.2 + 0.05 * Uniform);
+                     Y   : constant Real := 0.04 * (Uniform - 0.5);
+                  begin
+                     At_Edge (I) := Seen_Truly ([X, Y, Table_Z (X) + (if Rim then 0.0 else 0.02)]);
+                     Beyond (I) := Seen_Truly ([X - 0.1, Y, Table_Z (X - 0.1) + (if Rim then 0.0 else 0.02)]);
+                  end;
+               end loop;
+               declare
+                  Edge_On : constant Support := Under (Found, At_Edge, Up, None'Access);
+                  Off     : constant Support := Under (Found, Beyond, Up, None'Access);
+               begin
+                  Check (Edge_On.Index = 1 and then Edge_On.Touching,
+                         "a thing whose rim touches the table just beyond the table's own points, where the thing hides"
+                         & " it, does not rest on it: surface" & Edge_On.Index'Image);
+                  Check (Off.Index = 0, "a thing over none of the table rests on surface" & Off.Index'Image);
+               end;
+            end;
+            declare
                --  One wild point among them, its mean far under the table but
                --  uncertain by a hand's breadth (as a wrong match leaves one):
                --  it says nothing of how low the thing reaches. On the table,

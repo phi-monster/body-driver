@@ -87,6 +87,7 @@ procedure World_Check is
    package Pose_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, Rigid);
    package Value_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, Real_Array);
    package Name_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, String);
+   package Count_Vectors is new Ada.Containers.Vectors (Positive, Natural);
    package Real_Holders is new Ada.Containers.Indefinite_Holders (Real_Array);
    package Key_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, String);
    package Vertex_Vectors is new Ada.Containers.Vectors (Positive, Vec3);
@@ -1435,6 +1436,113 @@ procedure World_Check is
                & Mm (P.Centre (2)) & ", " & Mm (P.Centre (3)) & ") mm, tilt " & Image (Tilt, 2)
                & " deg, reach " & Mm (S.High_1 - S.Low_1) & " by " & Mm (S.High_2 - S.Low_2) & " mm; "
                & Mm (P.Centre (3) - Table_Top) & " mm off the table top at its centre");
+            --  What its points lie on: the nearest of the objects and the
+            --  robot's own links, as the truth places them at the last line.
+            declare
+               Near_Names : Name_Vectors.Vector;
+               Near_Count : Count_Vectors.Vector;
+               Gaps       : Real_Array (1 .. Natural (S.Members.Length));
+               function Slot_Of (Name : String) return Positive is
+               begin
+                  for K in Near_Names.First_Index .. Near_Names.Last_Index loop
+                     if Near_Names (K) = Name then
+                        return K;
+                     end if;
+                  end loop;
+                  Near_Names.Append (Name);
+                  Near_Count.Append (0);
+                  return Near_Names.Last_Index;
+               end Slot_Of;
+               Candidates : Name_Vectors.Vector;   --  the names of the meshes, placed in Placed_At
+            begin
+               for K in Names.First_Index .. Names.Last_Index loop
+                  declare
+                     Unused : constant Placed := Grid_Of (K);
+                     pragma Unreferenced (Unused);
+                  begin
+                     Candidates.Append (Names (K));
+                  end;
+               end loop;
+               for C in L.Links.Iterate loop
+                  if Link_Keys.Contains (Pose_Maps.Key (C)) then
+                     declare
+                        Name : constant String := "robot " & Pose_Maps.Key (C);
+                     begin
+                        if not Placed_At.Contains (Name) then
+                           Placed_At.Include
+                             (Name, Place (Mesh_Of (Link_Keys (Pose_Maps.Key (C))), Pose_Maps.Element (C)));
+                        end if;
+                        Candidates.Append (Name);
+                     end;
+                  end if;
+               end loop;
+               for I in Gaps'Range loop
+                  declare
+                     X     : constant Vec3 := Driver.World.Offline.Scene_At (Bench, S.Members (I)).Mean;
+                     Best  : Real := Real'Last;
+                     Which : Unbounded_String := To_Unbounded_String ("nothing");
+                     --  Each mesh's box first, nearest first: no triangle of a mesh
+                     --  is nearer than its box, so the search ends once a box is no
+                     --  nearer than the nearest triangle found.
+                     Boxes : Real_Array (1 .. Natural (Candidates.Length));
+                     Tried : array (Boxes'Range) of Boolean := [others => False];
+                  begin
+                     for K in Boxes'Range loop
+                        declare
+                           M : constant Placed := Placed_At (Candidates (K));
+                           D : Vec3 := Zero3;
+                        begin
+                           for A in 1 .. 3 loop
+                              D (A) := Real'Max (0.0, Real'Max (M.Low (A) - X (A), X (A) - M.High (A)));
+                           end loop;
+                           Boxes (K) := (if M.Triangles.Is_Empty then Real'Last else abs D);
+                        end;
+                     end loop;
+                     loop
+                        declare
+                           Next : Natural := 0;
+                        begin
+                           for K in Boxes'Range loop
+                              if not Tried (K) and then (Next = 0 or else Boxes (K) < Boxes (Next)) then
+                                 Next := K;
+                              end if;
+                           end loop;
+                           exit when Next = 0 or else Boxes (Next) >= Best;
+                           Tried (Next) := True;
+                           declare
+                              D : constant Real := Distance (Placed_At (Candidates (Next)), X);
+                           begin
+                              if D < Best then
+                                 Best := D;
+                                 Which := To_Unbounded_String (Candidates (Next));
+                              end if;
+                           end;
+                        end;
+                     end loop;
+                     Gaps (I) := Best;
+                     declare
+                        K : constant Positive := Slot_Of (To_String (Which));
+                     begin
+                        Near_Count.Replace_Element (K, Near_Count (K) + 1);
+                     end;
+                  end;
+               end loop;
+               if Gaps'Length > 0 then
+                  declare
+                     Most : Positive := Near_Names.First_Index;
+                  begin
+                     for K in Near_Names.First_Index .. Near_Names.Last_Index loop
+                        if Near_Count (K) > Near_Count (Most) then
+                           Most := K;
+                        end if;
+                     end loop;
+                     Ada.Text_IO.Put_Line
+                       ("  its points: most nearest " & Near_Names (Most) & " (" & Natural'Image (Near_Count (Most)) & " of"
+                        & Gaps'Length'Image & "), the median one " & Mm (Driver.Stats.Median (Gaps))
+                        & " mm from what is nearest it");
+                  end;
+               end if;
+            end;
          end;
       end loop;
 
@@ -1543,22 +1651,125 @@ procedure World_Check is
                            end loop;
                            Append (Line, " mm");
                         end;
+                        --  And over each surface: the point that says the thing
+                        --  reaches lowest at its own uncertainty, as the support
+                        --  takes it, where it lies against the surface's reach,
+                        --  and how high over it.
+                        for F in 1 .. Driver.World.Offline.Surface_Count (Bench) loop
+                           declare
+                              Sf     : constant Driver.World.Supports.Surface :=
+                                Driver.World.Offline.Surface_Of (Bench, Driver.World.Surface_Id (F));
+                              Lowest : Natural := 0;
+                              Reach  : Real := Real'Last;
+                           begin
+                              for I in 1 .. Natural (Points.Length) loop
+                                 declare
+                                    H     : constant Estimate := Driver.Geometry.Height (Sf.Plane, Points (I).Point);
+                                    Up_To : constant Real :=
+                                      (if H.Sigma < Real'Last
+                                       then H.Value + Threshold (Scalar_Gate (H.Degrees_Of_Freedom,
+                                                                              Tests => Natural (Points.Length)))
+                                                      * H.Sigma
+                                       else Real'Last);
+                                 begin
+                                    if Up_To < Reach then
+                                       Reach := Up_To;
+                                       Lowest := I;
+                                    end if;
+                                 end;
+                              end loop;
+                              if Lowest > 0 then
+                                 declare
+                                    D : constant Vec3 := Points (Lowest).Point.Mean - Sf.Plane.Centre;
+                                    H : constant Estimate := Driver.Geometry.Height (Sf.Plane, Points (Lowest).Point);
+                                 begin
+                                    Append (Line, "; over surface" & F'Image & " at " & Mm (H.Value) & " +- "
+                                            & Mm (H.Sigma) & " mm, at " & Mm (D * Sf.Plane.Tangent_1) & ", "
+                                            & Mm (D * Sf.Plane.Tangent_2) & " mm in its reach " & Mm (Sf.Low_1)
+                                            & " .. " & Mm (Sf.High_1) & " by " & Mm (Sf.Low_2) & " .. "
+                                            & Mm (Sf.High_2) & " mm");
+                                 end;
+                              end if;
+                           end;
+                        end loop;
                      else
                         declare
                            P : constant Driver.Geometry.Plane_Estimate :=
                              Driver.World.Offline.Plane_Of (Bench, Under);
                         begin
-                           if Driver.World.Offline.Bottom_Seen (Bench, T) then
-                              Append (Line, "; rests on surface" & Under'Image & ", its bottom seen touching it at "
-                                      & Mm (Height.Value) & " +- " & Mm (Height.Sigma));
-                           else
-                              Append (Line, "; over surface" & Under'Image & ", its bottom unseen: nothing of it seen lower"
-                                      & " than " & Mm (Height.Value) & " +- " & Mm (Height.Sigma));
-                           end if;
-                           Append (Line, " mm (truth " & Mm (True_H) & " mm, off by " & Mm (Height.Value - True_H)
-                                   & " mm); that surface is "
+                           --  The height is a bound on how far above the surface the
+                           --  thing's bottom can be: the truth holds it when the
+                           --  true bottom is not significantly above it.
+                           Append (Line, (if Driver.World.Offline.No_Gap_Seen (Bench, T)
+                                          then "; rests on surface" & Under'Image & ", no gap seen"
+                                          else "; over surface" & Under'Image & ", a gap or an unseen part under it")
+                                   & ": nothing of it seen lower than " & Mm (Height.Value) & " +- " & Mm (Height.Sigma)
+                                   & " mm (truth " & Mm (True_H) & " mm, "
+                                   & (if True_H > Height.Value
+                                         and then Significant (Scalar_Gate (Height.Degrees_Of_Freedom),
+                                                               True_H - Height.Value, Height.Sigma)
+                                      then "above the bound by " & Mm (True_H - Height.Value) & " mm"
+                                      else "within the bound, " & Mm (Height.Value - True_H) & " mm under it")
+                                   & "); that surface is "
                                    & Mm (Plane_Z (P, Lowests (Own_K) (1), Lowests (Own_K) (2)) - Table_Top)
                                    & " mm off the table top under it");
+                           --  Where on the thing its lowest point is, as the support
+                           --  takes it: how far above the mesh's lowest vertex, and
+                           --  on what face of the mesh (the nearest triangle's turn
+                           --  from level: 0 a face that lies flat, as a bottom or a
+                           --  top does, 90 a side).
+                           declare
+                              Up_To : Real_Array (1 .. Natural (Points.Length));
+                              Taken : array (Up_To'Range) of Boolean := [others => False];
+                              Own   : constant Placed := Grid_Of (Own_K);
+                           begin
+                              for I in Up_To'Range loop
+                                 declare
+                                    H : constant Estimate := Driver.Geometry.Height (P, Points (I).Point);
+                                 begin
+                                    Up_To (I) :=
+                                      (if H.Sigma < Real'Last
+                                       then H.Value + Threshold (Scalar_Gate (H.Degrees_Of_Freedom,
+                                                                              Tests => Natural (Points.Length)))
+                                                      * H.Sigma
+                                       else Real'Last);
+                                 end;
+                              end loop;
+                              Append (Line, "; its lowest points, above its mesh's lowest vertex and the turn from"
+                                      & " level of the face nearest them:");
+                              for K in 1 .. Natural'Min (3, Up_To'Length) loop
+                                 declare
+                                    Lowest  : Natural := 0;
+                                 begin
+                                    for I in Up_To'Range loop
+                                       if not Taken (I) and then (Lowest = 0 or else Up_To (I) < Up_To (Lowest)) then
+                                          Lowest := I;
+                                       end if;
+                                    end loop;
+                                    Taken (Lowest) := True;
+                                    declare
+                                       X       : constant Vec3 := Points (Lowest).Point.Mean;
+                                       Nearest : Real := Real'Last;
+                                       Turn    : Real := 0.0;
+                                    begin
+                                       for T of Own.Triangles loop
+                                          declare
+                                             D : constant Real := abs (X - Closest_On (T, X));
+                                             N : constant Vec3 := Cross (T.B - T.A, T.C - T.A);
+                                          begin
+                                             if D < Nearest and then abs N > 0.0 then
+                                                Nearest := D;
+                                                Turn := Degrees_Per_Radian
+                                                        * Arccos (Real'Min (1.0, abs (N (3)) / abs N));
+                                             end if;
+                                          end;
+                                       end loop;
+                                       Append (Line, " " & Mm (X (3) - Lowests (Own_K) (3)) & " mm, "
+                                               & Image (Turn, 1) & " deg (" & Mm (Nearest) & " mm from it)");
+                                    end;
+                                 end;
+                              end loop;
+                           end;
                         end;
                      end if;
                   end;
