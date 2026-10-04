@@ -1,21 +1,24 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Beats;
 with Driver.Commands;
+with Driver.Geometry;
 with Driver.Images;
 with Driver.Robot.Motion;
+with Driver.Stats;
 
 package body Driver.Action.Plants.Live is
 
    use Ada.Numerics.Long_Elementary_Functions;
+   use Driver.Numerics.Arrays;
    use Driver.Uncertain;
    use type Driver.Robot.Mount_Kind;
    use type Driver.Robot.Motion.Plan_Status;
    use type Driver.Robot.Group_Id;
    use type Driver.Robot.Arm_Id;
-   use type Driver.World.Thing_Id;
 
    package Robot_Hand renames Driver.Robot.Hand;
    package World renames Driver.World;
+   package Motion renames Driver.Robot.Motion;
 
    function Largest_Sigma (C : Mat3) return Real is
      (Sqrt (Real'Max (C (1, 1), Real'Max (C (2, 2), C (3, 3)))));
@@ -28,7 +31,7 @@ package body Driver.Action.Plants.Live is
    is
       G : constant Driver.Robot.Group_Id := Robot_Hand.Closer_Group (H, Id);
    begin
-      if not Driver.Observations.Has_Reading (O, G) then
+      if Natural (G) > Natural (O.Readings.Length) or else not Driver.Observations.Has_Reading (O, G) then
          return Unknown;
       end if;
       declare
@@ -61,13 +64,82 @@ package body Driver.Action.Plants.Live is
       end;
    end Fraction_Of;
 
+   --  How finely the arm places its tool: of every joint's smallest visible
+   --  step, the largest shift and turn of the tool it makes, as the arm's
+   --  kinematics give the tool at readings moved by that step. Unknown while
+   --  a joint's step or the tool's pose is not measured.
+   procedure Resolution_Of (M : Driver.Robot.Model; A : Arm_Id; O : Driver.Observations.Observation;
+                            Shift, Turn : out Estimate)
+   is
+      G     : constant Driver.Robot.Group_Id := Driver.Robot.Arm_Group (M, A);
+      Here  : constant Pose_Estimate := Driver.Robot.Tool_Pose (M, A, O);
+   begin
+      Shift := Unknown;
+      Turn := Unknown;
+      if not Known (Position (Here)) or else Natural (G) > Natural (O.Readings.Length)
+        or else not Driver.Observations.Has_Reading (O, G)
+      then
+         return;
+      end if;
+      declare
+         Readings : constant Real_Array := O.Readings (G);
+         Most_Shift, Most_Turn : Real := 0.0;
+      begin
+         for C in 1 .. Driver.Robot.Group_Size (M, G) loop
+            declare
+               Least : constant Estimate := Driver.Robot.Visible_Step (M, G, C);
+               Moved : Driver.Observations.Observation;
+               R     : Real_Array := Readings;
+            begin
+               if not Known (Least) then
+                  return;
+               end if;
+               R (R'First + C - 1) := R (R'First + C - 1) + Least.Value;
+               Moved.Readings := O.Readings;
+               Moved.Readings.Replace_Element (G, R);
+               declare
+                  There : constant Pose_Estimate := Driver.Robot.Tool_Pose (M, A, Moved);
+               begin
+                  if not Known (Position (There)) then
+                     return;
+                  end if;
+                  Most_Shift := Real'Max (Most_Shift, abs (There.Pose.Translation - Here.Pose.Translation));
+                  Most_Turn := Real'Max (Most_Turn, Angle (Transpose (Here.Pose.Rotation) * There.Pose.Rotation));
+               end;
+            end;
+         end loop;
+         Shift := (Value => Most_Shift, Sigma => Largest_Sigma (Here.Position_Covariance), Degrees_Of_Freedom => 0);
+         Turn := (Value => Most_Turn, Sigma => Largest_Sigma (Here.Rotation_Covariance), Degrees_Of_Freedom => 0);
+      end;
+   end Resolution_Of;
+
+   --  The spacing of a thing's samples: the median of each sample's distance
+   --  to its nearest neighbour.
+   function Spacing_Of (S : Sample_Vectors.Vector) return Real is
+      N : constant Natural := Natural (S.Length);
+   begin
+      if N < 2 then
+         return 0.0;
+      end if;
+      declare
+         Nearest : Real_Array (1 .. N) := [others => Real'Last];
+      begin
+         for I in 1 .. N loop
+            for J in 1 .. N loop
+               if I /= J then
+                  Nearest (I) := Real'Min (Nearest (I), abs (S (I).Point - S (J).Point));
+               end if;
+            end loop;
+         end loop;
+         return Driver.Stats.Median (Nearest);
+      end;
+   end Spacing_Of;
+
    function Snapshot_Of
      (Robot : Driver.Robot.Model;
       Hands : Driver.Robot.Hand.Hands;
       Scene : Driver.World.Scene;
-      O     : Driver.Observations.Observation;
-      Learned : Driver.Action.Snapshots.Thing_Vectors.Vector := Driver.Action.Snapshots.Thing_Vectors.Empty_Vector)
-     return Driver.Action.Snapshots.Snapshot
+      O     : Driver.Observations.Observation) return Driver.Action.Snapshots.Snapshot
    is
       S : Snapshot;
    begin
@@ -90,6 +162,7 @@ package body Driver.Action.Plants.Live is
          begin
             X.Id := Id;
             X.Tool := Driver.Robot.Tool_Pose (Robot, Id, O);
+            Resolution_Of (Robot, Id, O, X.Step, X.Turn_Step);
             X.Carries_Eye := (for some E of S.Eyes => E.On_Arm = Id);
             X.Carries_All := Driver.Robot.Carrier_Group (Robot) /= 0
               and then Driver.Robot.Arm_Group (Robot, Id) = Driver.Robot.Carrier_Group (Robot);
@@ -120,19 +193,45 @@ package body Driver.Action.Plants.Live is
             S.Hands.Append (X);
          end;
       end loop;
+      for F in 1 .. World.Surface_Count (Scene) loop
+         declare
+            P : constant Driver.Geometry.Plane_Estimate := World.Plane_Of (Scene, Surface_Id (F));
+         begin
+            if P.Offset_Sigma < Real'Last and then abs P.Normal > 0.0 then
+               S.Surfaces.Append (Surface_State'(Id       => Surface_Id (F),
+                                                 Point    => (Mean => P.Centre,
+                                                              Covariance => (P.Offset_Sigma ** 2) * Identity3),
+                                                 Normal   => (Unit_Vector => Unit (P.Normal),
+                                                              Sigma => Sqrt (Real'Max (P.Tilt_11, P.Tilt_22))),
+                                                 Of_Thing => 0));
+            end if;
+         end;
+      end loop;
+      for P in 1 .. World.Place_Count (Scene) loop
+         S.Places.Append (Place_State'(Id => Place_Id (P), Point => World.Where (Scene, Place_Id (P))));
+      end loop;
       for T in 1 .. World.Thing_Count (Scene) loop
          declare
             Id   : constant Thing_Id := Thing_Id (T);
             X    : Thing_State;
             Most : Natural := 0;
+            Seen : constant World.Sample_Array := World.Samples (Scene, Id);
+            Rub  : constant World.Friction_Bounds := World.Friction (Scene, Id);
          begin
             X.Id := Id;
             X.Centre := World.Centre (Scene, Id);
-            X.Sigma := (if Known (X.Centre) then Largest_Sigma (X.Centre.Covariance) else Real'Last);
+            for K in Seen'Range loop
+               X.Samples.Append (Sample'(Point => Seen (K).Point, Normal => Seen (K).Normal));
+            end loop;
+            X.Sigma := World.Sample_Sigma (Scene, Id);
+            X.Pitch := Spacing_Of (X.Samples);
+            --  A normal fitted to neighbours one spacing apart, each Sigma off.
+            X.Normal_Sigma := (if X.Pitch > 0.0 and then X.Sigma < Real'Last then X.Sigma / X.Pitch else Real'Last);
             X.Support := World.Resting_On (Scene, Id);
             X.Height := World.Height_Above_Support (Scene, Id);
             X.Held_By := World.Held_By (Scene, Id);
             X.Moving := World.Moving (Scene, Id);
+            X.Friction := (Low => Rub.Low, High => Rub.High);
             for E in 1 .. Natural (S.Eyes.Length) loop
                if World.Seen_In (Scene, Id, Driver.Robot.Eye_Id (E)) then
                   X.Seen := True;
@@ -147,11 +246,6 @@ package body Driver.Action.Plants.Live is
                         end if;
                      end;
                   end if;
-               end if;
-            end loop;
-            for L of Learned loop
-               if L.Id = Id then
-                  X.Friction := L.Friction;
                end if;
             end loop;
             S.Things.Append (X);
@@ -171,30 +265,29 @@ package body Driver.Action.Plants.Live is
          P.Started := True;
       end if;
       Driver.Beats.Within_A_Beat (During'Access);
-      P.Looked := True;
-      S := Snapshot_Of (P.Robot.all, P.Hands.all, P.Scene.all, P.Last, P.Learned);
+      S := Snapshot_Of (P.Robot.all, P.Hands.all, P.Scene.all, P.Last);
    end Look;
 
    overriding function Reach (P : Live; Goal : Arm_Goal) return Reach_Answer is
-      Plan : constant Driver.Robot.Motion.Plan :=
-        Driver.Robot.Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last,
-                                        (Pose => Goal.Tool, Position_Only => Goal.Position_Only));
+      Plan : constant Motion.Plan :=
+        Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only));
    begin
-      case Driver.Robot.Motion.Status (Plan) is
-         when Driver.Robot.Motion.Planned =>
-            return (Status => Reachable, Why => Null_Unbounded_String);
-         when Driver.Robot.Motion.Unreachable =>
-            return (Status => Unreachable, Why => To_Unbounded_String (Driver.Robot.Motion.Why (Plan)));
-         when Driver.Robot.Motion.Unmeasured =>
-            return (Status => Unmeasured, Why => To_Unbounded_String (Driver.Robot.Motion.Why (Plan)));
+      case Motion.Status (Plan) is
+         when Motion.Planned     => return (Status => Reachable, Why => Null_Unbounded_String);
+         when Motion.Unreachable => return (Status => Unreachable, Why => To_Unbounded_String (Motion.Why (Plan)));
+         when Motion.Unmeasured  => return (Status => Unmeasured, Why => To_Unbounded_String (Motion.Why (Plan)));
       end case;
    end Reach;
 
-   function Outcome_Of (O : Driver.Robot.Motion.Step_Outcome) return Step_Outcome is
-     (case O is
-         when Driver.Robot.Motion.Reached => Reached,
-         when Driver.Robot.Motion.Blocked => Blocked,
-         when Driver.Robot.Motion.Short   => Short);
+   --  A blocked push is blocked whether it moved first or not; an unblocked
+   --  step that delivered significantly less than the whole is short.
+   function Outcome_Of (R : Motion.Step_Report) return Step_Outcome is
+     (case R.Outcome is
+         when Motion.Blocked | Motion.Short => Blocked,
+         when Motion.Reached =>
+           (if Known (R.Delivered) and then R.Delivered.Value < 1.0
+              and then Significant (1.0 - R.Delivered.Value, R.Delivered.Sigma, R.Delivered.Degrees_Of_Freedom)
+            then Short else Reached));
 
    procedure Nothing is null;
 
@@ -210,22 +303,21 @@ package body Driver.Action.Plants.Live is
       end if;
       for G of O.Arms loop
          declare
-            Plan : constant Driver.Robot.Motion.Plan :=
-              Driver.Robot.Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last,
-                                              (Pose => G.Tool, Position_Only => G.Position_Only));
+            Plan : constant Motion.Plan :=
+              Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last, (Pose => G.Tool, Position_Only => G.Position_Only));
          begin
-            if Driver.Robot.Motion.Status (Plan) = Driver.Robot.Motion.Planned then
+            if Motion.Status (Plan) = Motion.Planned then
                declare
-                  Step : Driver.Robot.Motion.Step_Report;
+                  Step : Motion.Step_Report;
                begin
-                  Driver.Robot.Motion.Follow (P.Robot.all, Plan, Step);
-                  R.Arms.Append (Arm_Result'(Arm => G.Arm, Outcome => Outcome_Of (Step.Outcome),
-                                             Delivered => Step.Delivered, Why => Step.Detail));
+                  Motion.Follow (P.Robot.all, Plan, Step);
+                  R.Arms.Append (Arm_Result'(Arm => G.Arm, Outcome => Outcome_Of (Step), Delivered => Step.Delivered,
+                                             Why => Step.Detail));
                   R.Beats := R.Beats + Step.Beats;
                end;
             else
                R.Arms.Append (Arm_Result'(Arm => G.Arm, Outcome => Refused, Delivered => Unknown,
-                                          Why => To_Unbounded_String (Driver.Robot.Motion.Why (Plan))));
+                                          Why => To_Unbounded_String (Motion.Why (Plan))));
             end if;
          end;
       end loop;
@@ -235,44 +327,30 @@ package body Driver.Action.Plants.Live is
             Closed  : constant Real_Array := Robot_Hand.Closer_Reading (P.Hands.all, C.Hand, Robot_Hand.Closed_Empty);
             Targets : Driver.Commands.Command := Driver.Commands.Hold;
             Values  : Real_Array (Open'Range);
-            Step    : Driver.Robot.Motion.Step_Report;
+            Step    : Motion.Step_Report;
          begin
             for K in Open'Range loop
                Values (K) := Open (K) + C.Fraction * (Closed (K) - Open (K));
             end loop;
             Driver.Commands.Set_Target (Targets, Robot_Hand.Closer_Group (P.Hands.all, C.Hand), Values);
-            Driver.Robot.Motion.Step (P.Robot.all, Targets, Step);
-            R.Closers.Append (Closer_Result'(Hand => C.Hand, Outcome => Outcome_Of (Step.Outcome)));
+            Motion.Step (P.Robot.all, Targets, Step);
+            R.Closers.Append (Closer_Result'(Hand => C.Hand, Outcome => Outcome_Of (Step)));
             R.Beats := R.Beats + Step.Beats;
          end;
       end loop;
    end Move;
 
    overriding function Predicted (P : Live; T : Driver.Action.Snapshots.Thing_Id; Beats : Natural)
-     return Point_Estimate
-   is
-      pragma Unreferenced (Beats);
-   begin
-      return World.Centre (P.Scene.all, T);
-   end Predicted;
+     return Point_Estimate is (World.Predicted (P.Scene.all, T, Beats));
 
    overriding procedure Learn (P : in out Live; L : Lesson) is
    begin
-      if L.Kind = Friction_Learned then
-         for X of P.Learned loop
-            if X.Id = L.Thing then
-               X.Friction := L.Bounds;
-               return;
-            end if;
-         end loop;
-         declare
-            X : Driver.Action.Snapshots.Thing_State;
-         begin
-            X.Id := L.Thing;
-            X.Friction := L.Bounds;
-            P.Learned.Append (X);
-         end;
-      end if;
+      case L.Kind is
+         when Friction_Learned =>
+            World.Learn_Friction (P.Scene.all, L.Thing, (Low => L.Bounds.Low, High => L.Bounds.High));
+         when Touched_At =>
+            World.Touched (P.Scene.all, L.Thing, L.Point);
+      end case;
    end Learn;
 
    overriding function Episode_Over (P : Live) return Boolean is

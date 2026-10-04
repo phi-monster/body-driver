@@ -4,6 +4,7 @@ with Driver.Action.Contact.Wrench.Tests;
 with Driver.Action.Execution.Tests;
 with Driver.Action.Goals.Tests;
 with Driver.Action.Monitor.Tests;
+with Driver.Action.Plants.Live.Tests;
 
 package body Driver.Action.Tests is
 
@@ -15,6 +16,7 @@ package body Driver.Action.Tests is
       Driver.Action.Goals.Tests.Register;
       Driver.Action.Monitor.Tests.Register;
       Driver.Action.Execution.Tests.Register;
+      Driver.Action.Plants.Live.Tests.Register;
    end Register;
 
 end Driver.Action.Tests;
