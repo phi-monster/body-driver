@@ -226,3 +226,69 @@ no thing are also a "cannot see" made it worse (7 of 30, and one scissors
 name lost), so the question stayed as it was. Such names come from the old
 driver's prompt: on the current keyboards, 333 stretches written for the 20
 questions used clean names only (`the pen`, `the lego man`, ...).
+
+### On colour recordings, scored against the truth
+
+The TX5U and TX5V recordings carry the simulator's truth beside them: every
+object's pose and mesh, and every camera's pose and lens. `brain_scene`
+draws from it, for each eye's picture, which object every pixel shows (the
+nearest surface wins; the robot's links too). The two recordings are the
+same table of ten objects and the same first 218 beats of motion; the arm
+eyes see the table only in those beats. Twelve scenes were taken, six from
+each (TX5U beats 50, 106, 143, 186, 204, 300; TX5V 98, 120, 150, 162, 198,
+400; the image drawn from the truth one beat earlier, the lag the frames
+show), two of them with both arm eyes on the wall.
+
+Each scene was asked, through the driver's round and keyboard (QH, one
+stretch), "Lift X off the table." for each of the ten objects, once looking
+through eye 1 (the fixed one, as a task starts) and once through each arm eye
+(as after `say look = n`), and "Lift one of the things on the table,
+whichever you like." three times per view. Every name the programs wrote was
+asked of every eye; every box was segmented by the instrument as Identify
+asks it; the binder ran on those answers. What a patch is was read off the
+truth: the object most of its pixels show, or the body, or nothing. What a
+name meant was read off its words (all 33 distinct names were checked by
+hand).
+
+Identify used to call a patch part of the body when the pixel nearest its
+middle lay on the body. A keyboard under a gripper finger was 99 % keyboard
+and still "part of me" (2127 of 2149 pixels). A patch is now what most of its
+pixels are (`Mostly`): 4 bindings came right, 1 that was right by luck (a
+patch 55 % on the finger) went wrong.
+
+| named-target names (277 that point at one object) | TX5U | TX5V |
+|---|---|---|
+| bound to the object meant | 111 / 135 | 125 / 142 |
+| without the black stand | 108 / 119 | 124 / 128 |
+
+By object (both recordings): cutter 31/31, jeans 24/24, ball 27/28, fan
+25/26, Lego figure 23/24, keyboard 30/32, scissors 24/26, pen 30/33, paddle
+18/23, black stand 4/30. Free choice: 79 of 79.
+
+The wrong ones, by cause (of 283 names):
+
+- wording, 6: every one on the Lego figure, `the`, `the thing`, `the red
+  robot`. Each came after a `say` line that wrote "Lego" with a capital; a
+  name slot takes lower case only, so `do the Lego` could not be typed.
+- the eye's box, 33: 26 for "the black stand" (eye 1, the only eye that
+  shows it, said it cannot see it 14 times in 30; the arm eyes boxed a black
+  gripper finger with whatever lay under it 50 times in 60); the paddle under
+  the right gripper, which no eye pointed out, 4; an arm eye that does not
+  show the thing boxing another one, 3 (the scissors as the pen twice, the
+  fan as the paddle).
+- segmentation, 8: the box of a small or thin thing in the fixed eye (pen 3,
+  ball, Lego figure) segmented as the table, 5; the patch mostly the gripper
+  over the keyboard or the paddle, 3.
+
+The where question alone, every eye of every name but the stand's: an eye
+that shows the thing boxed it 422 times in 467 and said it cannot see it 44
+times; an eye that does not show it said so 269 times in 274 and boxed
+another thing 5 times. Looking through an arm eye, a name was bound right 69
+of 70 times when that eye shows the thing and 68 of 78 when it does not
+(the stand left out).
+
+Of the 360 named-task rounds, 77 named nothing: 6 of 120 through eye 1,
+71 of 240 after a look to an arm eye, where the program was `say look = 2`
+written again until it was cut, a `say` holding the change (`say do the
+baseball height up until free`), or talk cut at the token limit; 30 rounds
+ended at a done with no change before it, which ends the task.

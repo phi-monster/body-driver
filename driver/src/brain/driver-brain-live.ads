@@ -71,9 +71,10 @@ package Driver.Brain.Live is
       Prompt  : String;
       Keys    : Driver.Brain.Keyboard.Keyboard) return Driver.Brain.Service.Answer;
 
-   function Own_Point (M : Driver.Images.Mask; Found : out Boolean) return Driver.Images.Pixel;
-   --  The pixel of the patch nearest its centroid: a point that is surely on
-   --  it, whatever its shape.
+   function Mostly (Part, Whole : Driver.Images.Mask) return Boolean;
+   --  More than half of Whole's pixels lie in Part. A patch is what most of
+   --  its pixels are, never what one point of it is: a finger over the middle
+   --  of a thing does not make the thing part of the body.
 
 private
 

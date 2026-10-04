@@ -25,12 +25,23 @@
 --    brain_measure names HOST:PORT REPLAY.json REPEATS OUT.jsonl
 --       Binds the names of recorded programs with the driver's binder, the
 --       eyes asked live, and scores each binding against what the name meant.
+--    brain_measure where-all HOST:PORT QUESTIONS.json ANSWERS.jsonl OUT.jsonl
+--    brain_measure patches HOST:PORT QUESTIONS.json WHERE.jsonl OUT.jsonl
+--    brain_measure bind-score QUESTIONS.json ANSWERS.jsonl WHERE.jsonl PATCHES.jsonl MEANT.json OUT.jsonl
+--       Binding on scenes with truth (driver/tools/brain_scene), in three
+--       steps: every eye asked where every name of a keyboard run's programs
+--       is; every box segmented by the instrument (HOST:PORT) as the live
+--       Identify asks it; the binder replayed on those answers and patches,
+--       each patch taken as the object most of its pixels show, and scored.
 --
 --  QUESTIONS.json is an array of objects:
 --    id, task, kind (lift | turn | push | next_to | on), thing, other (the
---    second thing's key word, or ""), eyes (PPM files, the first is the large
---    picture), mounts ("fixed" or "arm <n>", one per eye), keyboards (names
---    below). Sampling comes from BL_BRAIN_SAMPLING, as in the driver.
+--    second thing's key word, or ""), eyes (PPM files, in camera order),
+--    mounts ("fixed" or "arm <n>", one per eye), keyboards (names below),
+--    and optionally view (the eye whose picture is the large one, 1 when
+--    absent) and happened (what the round says happened before; a first
+--    round's words when absent). Sampling comes from BL_BRAIN_SAMPLING, as
+--    in the driver.
 --
 --  Keyboards: Q (height), QH (height, heading), and the same with the
 --  sentence about two things added: Q2 and QH2 (touching, above, below,
@@ -39,6 +50,7 @@
 --  Every quantity keyboard allows one stretch per program.
 
 with Ada.Command_Line;
+with Ada.Containers.Indefinite_Ordered_Maps;
 with Ada.Containers.Indefinite_Vectors;
 with Ada.Containers.Vectors;
 with Ada.Directories;
@@ -59,6 +71,7 @@ with Driver.Brain.Wants;
 with Driver.Bytes;
 with Driver.Clock;
 with Driver.Images;
+with Driver.Instrument;
 with Driver.Json;
 with Driver.Log;
 with Driver.Observations;
@@ -70,6 +83,8 @@ procedure Brain_Measure is
    use Ada.Strings.Unbounded;
    use Ada.Command_Line;
    use type Driver.Brain.Names.Pointing;
+   use type Driver.Brain.Names.Binding_Kind;
+   use type Driver.Brain.Names.Patch;
    use type Driver.Brain.Programs.Statement_Kind;
    use type Driver.Brain.Programs.Constraint_Kind;
    use type Driver.Action.Relation;
@@ -298,12 +313,20 @@ procedure Brain_Measure is
       Picture : Driver.Images.Image;
    end record;
 
+   --  The eye a question looks through: its "view", else the first.
+   function View_Of (Doc : Driver.Json.Document; N : Driver.Json.Node) return Driver.Observations.Camera_Id is
+     (if Driver.Json."/=" (Driver.Json.Lookup (Doc, N, "view"), Driver.Json.No_Node)
+      then Driver.Observations.Camera_Id (Natural (Driver.Json.Number (Doc, Driver.Json.Lookup (Doc, N, "view"))))
+      else 1);
+
    function Setting_Of (Doc : Driver.Json.Document; N : Driver.Json.Node; Board : String) return Setting is
-      Eyes   : constant Driver.Json.Node := Driver.Json.Lookup (Doc, N, "eyes");
-      Mounts : constant Driver.Json.Node := Driver.Json.Lookup (Doc, N, "mounts");
-      Images : Driver.Observations.Image_Vectors.Vector;
-      Facts  : Driver.Brain.Round.Facts;
-      K      : constant Driver.Brain.Keyboard.Keyboard := Keys (Board, Driver.Json.Count (Doc, Eyes));
+      Eyes     : constant Driver.Json.Node := Driver.Json.Lookup (Doc, N, "eyes");
+      Mounts   : constant Driver.Json.Node := Driver.Json.Lookup (Doc, N, "mounts");
+      Happened : constant Driver.Json.Node := Driver.Json.Lookup (Doc, N, "happened");
+      View     : constant Driver.Observations.Camera_Id := View_Of (Doc, N);
+      Images   : Driver.Observations.Image_Vectors.Vector;
+      Facts    : Driver.Brain.Round.Facts;
+      K        : constant Driver.Brain.Keyboard.Keyboard := Keys (Board, Driver.Json.Count (Doc, Eyes));
    begin
       for E in 1 .. Driver.Json.Count (Doc, Eyes) loop
          Images.Append (Read_Ppm (Driver.Json.Text (Doc, Driver.Json.Element (Doc, Eyes, E))));
@@ -317,12 +340,15 @@ procedure Brain_Measure is
                             else (Kind => Driver.Robot.Arm_Carried,
                                   Arm  => Driver.Robot.Arm_Id'Value (M (M'First + 4 .. M'Last))))));
          end;
-         if E > 1 then
+         --  The other eyes below the view, in camera order, as a round shows them.
+         if Driver.Observations."/=" (Driver.Observations.Camera_Id (E), View) then
             Facts.Strip.Append (Driver.Observations.Camera_Id (E));
          end if;
       end loop;
-      Facts.View := 1;
-      Facts.Happened := To_Unbounded_String (Driver.Brain.Round.First_Round);
+      Facts.View := View;
+      Facts.Happened := To_Unbounded_String
+        (if Driver.Json."/=" (Happened, Driver.Json.No_Node) then Driver.Json.Text (Doc, Happened)
+         else Driver.Brain.Round.First_Round);
       Facts.Instruction := To_Unbounded_String (Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, N, "task")));
       Facts.Sheet := To_Unbounded_String (Sheet_Of (K, Board));
       declare
@@ -330,7 +356,7 @@ procedure Brain_Measure is
       begin
          return (Keys    => K,
                  Prompt  => To_Unbounded_String (Driver.Brain.Round.Prompt (Facts)),
-                 Picture => Driver.Brain.Pictures.Compose (Images (1), Facts.Strip, Image_Of'Access));
+                 Picture => Driver.Brain.Pictures.Compose (Images (View), Facts.Strip, Image_Of'Access));
       end;
    end Setting_Of;
 
@@ -968,6 +994,783 @@ procedure Brain_Measure is
       Ada.Text_IO.Close (Out_F);
    end Bindings_Run;
 
+   ---------------------------------------------------------------------------
+   --  Binding measured on scenes with truth (driver/tools/brain_scene), in
+   --  three steps so the instrument, which other runs share, is held only
+   --  while it segments: every eye asked where every name of a keyboard run's
+   --  programs is (where-all); every box an eye gave segmented as the live
+   --  Identify asks it (patches); the binder replayed on those answers, its
+   --  patches told apart by the truth's labels of their pixels, and scored
+   --  (bind-score). A question of such a run also holds "labels" (the PGM of
+   --  each eye), "objects" (the objects in label order) and "target" (the
+   --  object its task names, or "").
+
+   Robot_Label : constant := 255;   --  brain_scene's label for the robot's own pixels
+
+   type Text_Access is access String;
+
+   type Label_Image is record
+      Width, Height : Natural := 0;
+      Data          : Text_Access;   --  one character per pixel, row by row
+   end record;
+
+   function Read_Pgm (Path : String) return Label_Image is
+      S : constant String := Slurp (Path);
+      I : Positive := S'First;
+
+      function Field return Natural is
+         First : Positive;
+      begin
+         while S (I) in ' ' | ASCII.LF | ASCII.CR | ASCII.HT loop
+            I := I + 1;
+         end loop;
+         First := I;
+         while S (I) in '0' .. '9' loop
+            I := I + 1;
+         end loop;
+         return Natural'Value (S (First .. I - 1));
+      end Field;
+   begin
+      if S (I .. I + 1) /= "P5" then
+         raise Constraint_Error with Path & " is not a binary PGM";
+      end if;
+      I := I + 2;
+      declare
+         W : constant Positive := Field;
+         H : constant Positive := Field;
+         M : constant Natural := Field;
+         pragma Unreferenced (M);
+      begin
+         return (Width => W, Height => H, Data => new String'(S (I + 1 .. I + W * H)));
+      end;
+   end Read_Pgm;
+
+   function Label_At (L : Label_Image; Column, Row : Natural) return Natural is
+     (Character'Pos (L.Data (L.Data'First + Row * L.Width + Column)));
+
+   type Count_Array is array (0 .. Robot_Label) of Natural;
+
+   --  The labels of the pixels whose centres lie in the box.
+   function Counts_In (L : Label_Image; B : Driver.Brain.Names.Box) return Count_Array is
+      Half : constant := 0.5;   --  the centre of a pixel (Driver.Images)
+      R    : Count_Array := [others => 0];
+      C0   : constant Integer := Integer'Max (0, Integer (Driver.Real'Ceiling (B.Top_Left.U - Half)));
+      C1   : constant Integer := Integer'Min (L.Width - 1, Integer (Driver.Real'Floor (B.Bottom_Right.U - Half)));
+      R0   : constant Integer := Integer'Max (0, Integer (Driver.Real'Ceiling (B.Top_Left.V - Half)));
+      R1   : constant Integer := Integer'Min (L.Height - 1, Integer (Driver.Real'Floor (B.Bottom_Right.V - Half)));
+   begin
+      for Row in R0 .. R1 loop
+         for Column in C0 .. C1 loop
+            R (Label_At (L, Column, Row)) := R (Label_At (L, Column, Row)) + 1;
+         end loop;
+      end loop;
+      return R;
+   end Counts_In;
+
+   function All_Counts (L : Label_Image) return Count_Array is
+     (Counts_In (L, (Top_Left => (U => 0.0, V => 0.0),
+                     Bottom_Right => (U => Driver.Real (L.Width), V => Driver.Real (L.Height)))));
+
+   --  The object most of the counted pixels show, robot and nothing left out; 0 when none.
+   function Most_Object (C : Count_Array) return Natural is
+      Best : Natural := 0;
+   begin
+      for L in 1 .. Robot_Label - 1 loop
+         if C (L) > 0 and then (Best = 0 or else C (L) > C (Best)) then
+            Best := L;
+         end if;
+      end loop;
+      return Best;
+   end Most_Object;
+
+   function Counts_Text (C : Count_Array) return String is
+      R : Unbounded_String;
+   begin
+      for L in C'Range loop
+         if C (L) > 0 then
+            Append (R, (if Length (R) > 0 then "," else "") & "[" & Driver.Log.Image (L) & ","
+                    & Driver.Log.Image (C (L)) & "]");
+         end if;
+      end loop;
+      return "[" & To_String (R) & "]";
+   end Counts_Text;
+
+   function Box_Text (B : Driver.Brain.Names.Box) return String is
+     (Driver.Log.Image (B.Top_Left.U, 2) & "," & Driver.Log.Image (B.Top_Left.V, 2) & ","
+      & Driver.Log.Image (B.Bottom_Right.U, 2) & "," & Driver.Log.Image (B.Bottom_Right.V, 2));
+
+   function Pointing_Text (P : Driver.Brain.Names.Pointing) return String is
+     (case P is
+         when Driver.Brain.Names.Boxed     => "boxed",
+         when Driver.Brain.Names.Not_Here  => "not_here",
+         when Driver.Brain.Names.No_Answer => "no_answer");
+
+   function Question_Node (Doc : Driver.Json.Document; Id : String) return Driver.Json.Node is
+   begin
+      for Q in 1 .. Driver.Json.Count (Doc, Driver.Json.Root (Doc)) loop
+         declare
+            N : constant Driver.Json.Node := Driver.Json.Element (Doc, Driver.Json.Root (Doc), Q);
+         begin
+            if Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, N, "id")) = Id then
+               return N;
+            end if;
+         end;
+      end loop;
+      return Driver.Json.No_Node;
+   end Question_Node;
+
+   function Eye_File (Doc : Driver.Json.Document; N : Driver.Json.Node; Field : String;
+                      E : Driver.Observations.Camera_Id) return String is
+     (Driver.Json.Text (Doc, Driver.Json.Element (Doc, Driver.Json.Lookup (Doc, N, Field), Positive (E))));
+
+   --  The eyes in the order the binder asks them: the view, then the others in camera order.
+   function Asking_Order (View : Driver.Observations.Camera_Id; Count : Natural)
+                          return Driver.Brain.Names.Eye_Vectors.Vector is
+      R : Driver.Brain.Names.Eye_Vectors.Vector;
+   begin
+      R.Append (View);
+      for E in 1 .. Count loop
+         if Driver.Observations."/=" (Driver.Observations.Camera_Id (E), View) then
+            R.Append (Driver.Observations.Camera_Id (E));
+         end if;
+      end loop;
+      return R;
+   end Asking_Order;
+
+   --  Calls Visit for every answer of a keyboard run whose question is in the
+   --  file and whose program reads.
+   procedure Over_Answers
+     (Q_Doc : Driver.Json.Document;
+      Path  : String;
+      Visit : not null access procedure (Q : Driver.Json.Node; Id : String; Rep : Natural; Board : String;
+                                         P : Driver.Brain.Programs.Program))
+   is
+      F     : Ada.Text_IO.File_Type;
+      A_Doc : Driver.Json.Document;
+      Ok    : Boolean;
+      Why   : Unbounded_String;
+   begin
+      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+      while not Ada.Text_IO.End_Of_File (F) loop
+         Driver.Json.Parse (Ada.Text_IO.Get_Line (F), A_Doc, Ok, Why);
+         if Ok then
+            declare
+               Root : constant Driver.Json.Node := Driver.Json.Root (A_Doc);
+               Id   : constant String := Driver.Json.Text (A_Doc, Driver.Json.Lookup (A_Doc, Root, "id"));
+               QN   : constant Driver.Json.Node := Question_Node (Q_Doc, Id);
+               P    : Driver.Brain.Programs.Program;
+               Bad  : Driver.Brain.Programs.Refusal;
+            begin
+               Driver.Brain.Parser.Parse (Driver.Json.Text (A_Doc, Driver.Json.Lookup (A_Doc, Root, "program")), P, Ok, Bad);
+               if Ok and then Driver.Json."/=" (QN, Driver.Json.No_Node) then
+                  Visit (QN, Id, Natural (Driver.Json.Number (A_Doc, Driver.Json.Lookup (A_Doc, Root, "rep"))),
+                         Driver.Json.Text (A_Doc, Driver.Json.Lookup (A_Doc, Root, "keyboard")), P);
+               end if;
+            end;
+         end if;
+      end loop;
+      Ada.Text_IO.Close (F);
+   end Over_Answers;
+
+   --  brain_measure where-all HOST:PORT QUESTIONS.json ANSWERS.jsonl OUT.jsonl
+   procedure Where_All_Run is
+      Q_Doc : Driver.Json.Document;
+      Ok    : Boolean;
+      Why   : Unbounded_String;
+      Out_F : Ada.Text_IO.File_Type;
+
+      procedure Ask (Q : Driver.Json.Node; Id : String; Rep : Natural; Board : String;
+                     P : Driver.Brain.Programs.Program) is
+         pragma Unreferenced (Board);
+         Count  : constant Natural := Driver.Json.Count (Q_Doc, Driver.Json.Lookup (Q_Doc, Q, "eyes"));
+         Images : Driver.Observations.Image_Vectors.Vector;
+      begin
+         for E in 1 .. Count loop
+            Images.Append (Read_Ppm (Eye_File (Q_Doc, Q, "eyes", Driver.Observations.Camera_Id (E))));
+         end loop;
+         for N of Driver.Brain.Wants.Names_Of (P) loop
+            for E of Asking_Order (View_Of (Q_Doc, Q), Count) loop
+               declare
+                  Found : Driver.Brain.Names.Pointing;
+                  Where : Driver.Brain.Names.Box;
+                  Said  : Unbounded_String;
+               begin
+                  Driver.Brain.Service.Ask_Where (Images (E), N, Found, Where, Said);
+                  Ada.Text_IO.Put_Line
+                    (Out_F, "{""id"":" & Driver.Json.Quote (Id) & ",""rep"":" & Driver.Log.Image (Rep)
+                     & ",""name"":" & Driver.Json.Quote (N) & ",""eye"":" & Driver.Log.Image (Natural (E))
+                     & ",""answer"":" & Driver.Json.Quote (Pointing_Text (Found)) & ",""box"":[" & Box_Text (Where)
+                     & "],""why"":" & Driver.Json.Quote (To_String (Said)) & "}");
+                  Ada.Text_IO.Flush (Out_F);
+                  Ada.Text_IO.Put_Line (Id & Rep'Image & " | " & N & " | eye" & E'Image & ": " & Pointing_Text (Found));
+               end;
+            end loop;
+         end loop;
+      end Ask;
+   begin
+      Configure (Argument (2));
+      Driver.Json.Parse (Slurp (Argument (3)), Q_Doc, Ok, Why);
+      if not Ok then
+         Ada.Text_IO.Put_Line ("questions: " & To_String (Why));
+         return;
+      end if;
+      Ada.Text_IO.Create (Out_F, Ada.Text_IO.Append_File, Argument (5));
+      Over_Answers (Q_Doc, Argument (4), Ask'Access);
+      Ada.Text_IO.Close (Out_F);
+   end Where_All_Run;
+
+   function Box_Of (Doc : Driver.Json.Document; N : Driver.Json.Node) return Driver.Brain.Names.Box is
+      function At_K (K : Positive) return Driver.Real is (Driver.Json.Number (Doc, Driver.Json.Element (Doc, N, K)));
+   begin
+      return (Top_Left => (U => At_K (1), V => At_K (2)), Bottom_Right => (U => At_K (3), V => At_K (4)));
+   end Box_Of;
+
+   package Label_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, Label_Image);
+   Label_Cache : Label_Maps.Map;
+
+   function Labels_Of (Path : String) return Label_Image is
+   begin
+      if not Label_Cache.Contains (Path) then
+         Label_Cache.Include (Path, Read_Pgm (Path));
+      end if;
+      return Label_Cache (Path);
+   end Labels_Of;
+
+   --  brain_measure patches HOST:PORT QUESTIONS.json WHERE.jsonl OUT.jsonl (HOST:PORT: the instrument)
+   procedure Patches_Run is
+      Q_Doc, W_Doc : Driver.Json.Document;
+      Ok           : Boolean;
+      Why          : Unbounded_String;
+      In_F, Out_F  : Ada.Text_IO.File_Type;
+      Done         : Label_Maps.Map;   --  the keys segmented already; the value is unused
+      No_Points    : constant Driver.Instrument.Prompt_Array := [];
+      Colon        : constant Natural := Ada.Strings.Fixed.Index (Argument (2), ":", Ada.Strings.Backward);
+   begin
+      Driver.Services.Configure (Driver.Services.Instrument, Argument (2) (Argument (2)'First .. Colon - 1),
+                                 Natural'Value (Argument (2) (Colon + 1 .. Argument (2)'Last)));
+      Driver.Json.Parse (Slurp (Argument (3)), Q_Doc, Ok, Why);
+      if not Ok then
+         Ada.Text_IO.Put_Line ("questions: " & To_String (Why));
+         return;
+      end if;
+      Ada.Text_IO.Open (In_F, Ada.Text_IO.In_File, Argument (4));
+      Ada.Text_IO.Create (Out_F, Ada.Text_IO.Append_File, Argument (5));
+      while not Ada.Text_IO.End_Of_File (In_F) loop
+         Driver.Json.Parse (Ada.Text_IO.Get_Line (In_F), W_Doc, Ok, Why);
+         if Ok and then Driver.Json.Text (W_Doc, Driver.Json.Lookup (W_Doc, Driver.Json.Root (W_Doc), "answer")) = "boxed"
+         then
+            declare
+               Root  : constant Driver.Json.Node := Driver.Json.Root (W_Doc);
+               QN    : constant Driver.Json.Node :=
+                 Question_Node (Q_Doc, Driver.Json.Text (W_Doc, Driver.Json.Lookup (W_Doc, Root, "id")));
+               E     : constant Driver.Observations.Camera_Id :=
+                 Driver.Observations.Camera_Id (Natural (Driver.Json.Number (W_Doc, Driver.Json.Lookup (W_Doc, Root, "eye"))));
+               B     : constant Driver.Brain.Names.Box := Box_Of (W_Doc, Driver.Json.Lookup (W_Doc, Root, "box"));
+            begin
+               if Driver.Json."/=" (QN, Driver.Json.No_Node) then
+                  declare
+                     Picture : constant String := Eye_File (Q_Doc, QN, "eyes", E);
+                     Key     : constant String := Picture & " " & Box_Text (B);
+                  begin
+                     if not Done.Contains (Key) then
+                        Done.Include (Key, (others => <>));
+                        declare
+                           L      : constant Label_Image := Labels_Of (Eye_File (Q_Doc, QN, "labels", E));
+                           Region : Driver.Images.Mask;
+                           Score  : Driver.Real;
+                           Seg_Ok : Boolean;
+                           Said   : Unbounded_String;
+                           Counts : Count_Array := [others => 0];
+                           Inside : Natural := 0;   --  the patch's pixels whose centres lie in the box
+                           Half   : constant := 0.5;   --  the centre of a pixel (Driver.Images)
+                        begin
+                           Driver.Instrument.Segment
+                             (Read_Ppm (Picture), Has_Box => True,
+                              Around => (X0 => B.Top_Left.U, Y0 => B.Top_Left.V, X1 => B.Bottom_Right.U,
+                                         Y1 => B.Bottom_Right.V),
+                              Points => No_Points, Region => Region, Score => Score, Ok => Seg_Ok, Why => Said);
+                           if Seg_Ok then
+                              for Row in 0 .. Driver.Images.Height (Region) - 1 loop
+                                 for Column in 0 .. Driver.Images.Width (Region) - 1 loop
+                                    if Driver.Images.Contains (Region, Column, Row) then
+                                       Counts (Label_At (L, Column, Row)) := Counts (Label_At (L, Column, Row)) + 1;
+                                       if Driver.Real (Column) + Half in B.Top_Left.U .. B.Bottom_Right.U
+                                         and then Driver.Real (Row) + Half in B.Top_Left.V .. B.Bottom_Right.V
+                                       then
+                                          Inside := Inside + 1;
+                                       end if;
+                                    end if;
+                                 end loop;
+                              end loop;
+                           end if;
+                           Ada.Text_IO.Put_Line
+                             (Out_F, "{""key"":" & Driver.Json.Quote (Key) & ",""ok"":" & (if Seg_Ok then "true" else "false")
+                              & ",""why"":" & Driver.Json.Quote (To_String (Said))
+                              & ",""score"":" & Driver.Log.Image ((if Seg_Ok then Score else 0.0), 3)
+                              & ",""pixels"":" & Driver.Log.Image (if Seg_Ok then Driver.Images.Count (Region) else 0)
+                              & ",""inside"":" & Driver.Log.Image (Inside)
+                              & ",""labels"":" & Counts_Text (Counts) & "}");
+                           Ada.Text_IO.Flush (Out_F);
+                        end;
+                     end if;
+                  end;
+               end if;
+            end;
+         end if;
+      end loop;
+      Ada.Text_IO.Close (In_F);
+      Ada.Text_IO.Close (Out_F);
+      Ada.Text_IO.Put_Line (Done.Length'Image & " boxes segmented");
+   end Patches_Run;
+
+   --  What the replayed binder asked and was told, step by step.
+   type Step is record
+      Eye         : Driver.Observations.Camera_Id := 1;
+      Answer      : Driver.Brain.Names.Pointing := Driver.Brain.Names.No_Answer;
+      In_Box      : Count_Array := [others => 0];
+      Identified  : Boolean := False;
+      Found       : Driver.Brain.Names.Patch := Driver.Brain.Names.No_Patch;
+      Patch_Label : Natural := 0;    --  the label most of the patch's pixels off the robot show
+      On_Me       : Natural := 0;    --  the patch's pixels on the robot
+      Pixels      : Natural := 0;
+   end record;
+
+   package Step_Vectors is new Ada.Containers.Vectors (Positive, Step);
+
+   type Where_Entry is record
+      Answer : Driver.Brain.Names.Pointing := Driver.Brain.Names.No_Answer;
+      Where  : Driver.Brain.Names.Box;
+   end record;
+
+   package Where_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, Where_Entry);
+
+   type Patch_Entry is record
+      Ok     : Boolean := False;
+      Pixels : Natural := 0;
+      Counts : Count_Array := [others => 0];
+   end record;
+
+   package Patch_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, Patch_Entry);
+   package Path_Vectors is new Ada.Containers.Indefinite_Vectors (Driver.Observations.Camera_Id, String);
+   package Labels_Vectors is new Ada.Containers.Vectors (Driver.Observations.Camera_Id, Label_Image);
+   package Counts_Vectors is new Ada.Containers.Vectors (Driver.Observations.Camera_Id, Count_Array);
+
+   Wheres  : Where_Maps.Map;   --  by id|rep|name|eye
+   Patches : Patch_Maps.Map;   --  by picture and box
+
+   type Cached_Eyes is new Driver.Brain.Names.Senses with record
+      Prefix     : Unbounded_String;   --  id|rep|
+      Pictures   : Path_Vectors.Vector;
+      Labels     : Labels_Vectors.Vector;
+      Shown      : Counts_Vectors.Vector;   --  each eye's count of every label
+      Objects    : Natural := 0;
+      Steps      : Step_Vectors.Vector;
+      Background : Natural := 0;   --  patches on no object so far, each a thing of its own
+   end record;
+
+   overriding function Eyes (S : Cached_Eyes) return Driver.Brain.Names.Eye_Vectors.Vector;
+   overriding function Sees (S : Cached_Eyes; T : Driver.Brain.Names.Thing_Id; E : Driver.Brain.Names.Eye_Id)
+                             return Boolean;
+   overriding procedure Ask_Where
+     (S      : in out Cached_Eyes;
+      E      : Driver.Brain.Names.Eye_Id;
+      Name   : String;
+      Answer : out Driver.Brain.Names.Pointing;
+      Where  : out Driver.Brain.Names.Box;
+      Why    : out Unbounded_String);
+   overriding procedure Identify
+     (S     : in out Cached_Eyes;
+      E     : Driver.Brain.Names.Eye_Id;
+      Where : Driver.Brain.Names.Box;
+      Found : out Driver.Brain.Names.Patch;
+      T     : out Driver.Brain.Names.Thing_Id;
+      Why   : out Unbounded_String);
+
+   overriding function Eyes (S : Cached_Eyes) return Driver.Brain.Names.Eye_Vectors.Vector is
+      R : Driver.Brain.Names.Eye_Vectors.Vector;
+   begin
+      for E in S.Pictures.First_Index .. S.Pictures.Last_Index loop
+         R.Append (E);
+      end loop;
+      return R;
+   end Eyes;
+
+   overriding function Sees (S : Cached_Eyes; T : Driver.Brain.Names.Thing_Id; E : Driver.Brain.Names.Eye_Id)
+                             return Boolean is
+     (Natural (T) <= S.Objects and then S.Shown (E) (Natural (T)) > 0);
+
+   overriding procedure Ask_Where
+     (S      : in out Cached_Eyes;
+      E      : Driver.Brain.Names.Eye_Id;
+      Name   : String;
+      Answer : out Driver.Brain.Names.Pointing;
+      Where  : out Driver.Brain.Names.Box;
+      Why    : out Unbounded_String)
+   is
+      Key : constant String := To_String (S.Prefix) & Name & "|" & Driver.Log.Image (Natural (E));
+      St  : Step;
+   begin
+      Why := Null_Unbounded_String;
+      if Wheres.Contains (Key) then
+         Answer := Wheres (Key).Answer;
+         Where := Wheres (Key).Where;
+      else
+         Answer := Driver.Brain.Names.No_Answer;
+         Where := (others => <>);
+         Why := To_Unbounded_String ("this eye was not asked in the run");
+      end if;
+      St.Eye := E;
+      St.Answer := Answer;
+      if Answer = Driver.Brain.Names.Boxed then
+         St.In_Box := Counts_In (S.Labels (E), Where);
+      end if;
+      S.Steps.Append (St);
+   end Ask_Where;
+
+   overriding procedure Identify
+     (S     : in out Cached_Eyes;
+      E     : Driver.Brain.Names.Eye_Id;
+      Where : Driver.Brain.Names.Box;
+      Found : out Driver.Brain.Names.Patch;
+      T     : out Driver.Brain.Names.Thing_Id;
+      Why   : out Unbounded_String)
+   is
+      Key : constant String := S.Pictures (E) & " " & Box_Text (Where);
+      St  : Step := S.Steps.Last_Element;
+   begin
+      Why := Null_Unbounded_String;
+      T := Driver.Brain.Names.Thing_Id'First;
+      Found := Driver.Brain.Names.No_Patch;
+      if Patches.Contains (Key) and then Patches (Key).Ok and then Patches (Key).Pixels > 0 then
+         declare
+            P    : constant Patch_Entry := Patches (Key);
+            Most : Natural := 0;   --  the label most pixels off the robot show, nothing included
+         begin
+            for L in 1 .. Robot_Label - 1 loop
+               if P.Counts (L) > P.Counts (Most) then
+                  Most := L;
+               end if;
+            end loop;
+            St.Pixels := P.Pixels;
+            St.On_Me := P.Counts (Robot_Label);
+            St.Patch_Label := Most;
+            --  As the live Identify (Driver.Brain.Live.Mostly): a patch most of
+            --  whose pixels are on the body is part of me; any other is the
+            --  thing on those pixels. The truth gives each pixel one label, so
+            --  no pixel of the body is also a thing's.
+            if 2 * P.Counts (Robot_Label) > P.Pixels then
+               Found := Driver.Brain.Names.Part_Of_Me;
+               Why := To_Unbounded_String ("most of its pixels lie on my own body in that eye");
+            elsif Most > 0 then
+               Found := Driver.Brain.Names.A_Thing;
+               T := Driver.Brain.Names.Thing_Id (Most);
+            else
+               S.Background := S.Background + 1;
+               Found := Driver.Brain.Names.A_Thing;
+               T := Driver.Brain.Names.Thing_Id (S.Objects + S.Background);
+            end if;
+         end;
+      elsif not Patches.Contains (Key) then
+         Why := To_Unbounded_String ("the box was not segmented in the run");
+      end if;
+      St.Identified := True;
+      St.Found := Found;
+      S.Steps.Replace_Element (S.Steps.Last_Index, St);
+   end Identify;
+
+   --  brain_measure bind-score QUESTIONS.json ANSWERS.jsonl WHERE.jsonl PATCHES.jsonl MEANT.json OUT.jsonl
+   --
+   --  MEANT.json says what each name meant, for scoring only: {"names":
+   --  {name: object | "?" | "none"}, "words": {object: [word, ...]}}. A name
+   --  it does not list is taken to mean the one object whose words its
+   --  letters hold, marked "auto", or "?" when they hold none or several;
+   --  "?" is a name that points at no one object, "none" one that points at
+   --  nothing in the scene.
+   procedure Bind_Score_Run is
+      Q_Doc, M_Doc, L_Doc : Driver.Json.Document;
+      Ok    : Boolean;
+      Why   : Unbounded_String;
+      In_F  : Ada.Text_IO.File_Type;
+      Out_F : Ada.Text_IO.File_Type;
+      Names_Node, Words_Node : Driver.Json.Node;
+      Total, Right_Count : Natural := 0;
+
+      function Meant_Of (Name : String; Objects : Driver.Json.Node; How : out Unbounded_String) return String is
+         Listed : constant Driver.Json.Node := Driver.Json.Lookup (M_Doc, Names_Node, Name);
+         Pick   : Unbounded_String;
+         Picks  : Natural := 0;
+      begin
+         if Driver.Json."/=" (Listed, Driver.Json.No_Node) then
+            How := To_Unbounded_String ("listed");
+            return Driver.Json.Text (M_Doc, Listed);
+         end if;
+         How := To_Unbounded_String ("auto");
+         for K in 1 .. Driver.Json.Count (Q_Doc, Objects) loop
+            declare
+               Object : constant String := Driver.Json.Text (Q_Doc, Driver.Json.Element (Q_Doc, Objects, K));
+               Words  : constant Driver.Json.Node := Driver.Json.Lookup (M_Doc, Words_Node, Object);
+               Holds  : Boolean := False;
+            begin
+               if Driver.Json."/=" (Words, Driver.Json.No_Node) then
+                  for W in 1 .. Driver.Json.Count (M_Doc, Words) loop
+                     Holds := Holds
+                       or else Has_Letters (Name, Driver.Json.Text (M_Doc, Driver.Json.Element (M_Doc, Words, W)));
+                  end loop;
+               end if;
+               if Holds then
+                  Picks := Picks + 1;
+                  Pick := To_Unbounded_String (Object);
+               end if;
+            end;
+         end loop;
+         return (if Picks = 1 then To_String (Pick) else "?");
+      end Meant_Of;
+
+      procedure Score (Q : Driver.Json.Node; Id : String; Rep : Natural; Board : String;
+                       P : Driver.Brain.Programs.Program) is
+         Objects : constant Driver.Json.Node := Driver.Json.Lookup (Q_Doc, Q, "objects");
+         Count   : constant Natural := Driver.Json.Count (Q_Doc, Driver.Json.Lookup (Q_Doc, Q, "eyes"));
+         View    : constant Driver.Observations.Camera_Id := View_Of (Q_Doc, Q);
+         Target  : constant String := Driver.Json.Text (Q_Doc, Driver.Json.Lookup (Q_Doc, Q, "target"));
+         Scene   : constant String := Driver.Json.Text (Q_Doc, Driver.Json.Lookup (Q_Doc, Q, "scene"));
+         S       : Cached_Eyes;
+         Table   : Driver.Brain.Names.Table;
+         Glue    : constant Driver.Brain.Keyboard.Word_Vectors.Vector :=
+           Driver.Brain.Keyboard.Name_Words (Keys (Board, Count));
+         Names   : constant Driver.Brain.Keyboard.Word_Vectors.Vector := Driver.Brain.Wants.Names_Of (P);
+         Bound   : Driver.Brain.Wants.Binding_Maps.Map;
+
+         package Step_Lists is new Ada.Containers.Indefinite_Ordered_Maps (String, Step_Vectors.Vector,
+                                                                          "<", Step_Vectors."=");
+         Steps_Of : Step_Lists.Map;
+
+         function Object_Index (Object : String) return Natural is
+         begin
+            for K in 1 .. Driver.Json.Count (Q_Doc, Objects) loop
+               if Driver.Json.Text (Q_Doc, Driver.Json.Element (Q_Doc, Objects, K)) = Object then
+                  return K;
+               end if;
+            end loop;
+            return 0;
+         end Object_Index;
+      begin
+         S.Prefix := To_Unbounded_String (Id & "|" & Driver.Log.Image (Rep) & "|");
+         S.Objects := Driver.Json.Count (Q_Doc, Objects);
+         for E in 1 .. Count loop
+            declare
+               Eye : constant Driver.Observations.Camera_Id := Driver.Observations.Camera_Id (E);
+            begin
+               S.Pictures.Append (Eye_File (Q_Doc, Q, "eyes", Eye));
+               S.Labels.Append (Labels_Of (Eye_File (Q_Doc, Q, "labels", Eye)));
+               S.Shown.Append (All_Counts (S.Labels.Last_Element));
+            end;
+         end loop;
+         for N of Names loop
+            declare
+               B : Driver.Brain.Names.Binding;
+            begin
+               S.Steps.Clear;
+               Driver.Brain.Names.Bind (Table, S, View, N, Glue, B);
+               Bound.Include (N, B);
+               Steps_Of.Include (N, S.Steps);
+            end;
+         end loop;
+         for N of Names loop
+            declare
+               B       : Driver.Brain.Names.Binding := Bound.Element (N);
+               How     : Unbounded_String;
+               Meant   : constant String := Meant_Of (N, Objects, How);
+               K       : constant Natural := Object_Index (Meant);
+               Got     : Natural := 0;   --  the object bound, if any
+               Bound_T : Unbounded_String;
+               Visible : Boolean := False;   --  some eye shows the meant object
+               In_View : Boolean := False;
+               Right   : Boolean;
+               Cause   : Unbounded_String;
+               Trace   : Unbounded_String;
+               Steps   : constant Step_Vectors.Vector := Steps_Of (N);
+            begin
+               Driver.Brain.Names.Bind_Again (Table, Glue, N, B);
+               if B.Kind = Driver.Brain.Names.To_Thing and then Natural (B.Thing) <= S.Objects then
+                  Got := Natural (B.Thing);
+                  Bound_T := To_Unbounded_String (Driver.Json.Text (Q_Doc, Driver.Json.Element (Q_Doc, Objects, Got)));
+               elsif B.Kind = Driver.Brain.Names.To_Thing then
+                  Bound_T := To_Unbounded_String ("nothing in particular");
+               else
+                  Bound_T := To_Unbounded_String ("unbound");
+               end if;
+               if K > 0 then
+                  for E in 1 .. Count loop
+                     Visible := Visible or else S.Shown (Driver.Observations.Camera_Id (E)) (K) > 0;
+                  end loop;
+                  In_View := S.Shown (View) (K) > 0;
+               end if;
+               Right := (if K > 0 then (if Visible then Got = K else B.Kind = Driver.Brain.Names.Unbound)
+                         elsif Meant = "none" then B.Kind = Driver.Brain.Names.Unbound
+                         else False);
+               --  Why it went wrong: the name, the eye's box, the segmenting, or the binder's own rule.
+               if not Right then
+                  if Meant = "?" then
+                     Cause := To_Unbounded_String ("wording: the name points at no one object");
+                  elsif Meant = "none" then
+                     Cause := To_Unbounded_String ("wording: the name points at nothing in the scene");
+                  elsif K = 0 then
+                     Cause := To_Unbounded_String ("scoring: unknown object " & Meant);
+                  elsif Steps.Is_Empty then
+                     Cause := To_Unbounded_String ("binder: no eye was asked (" & To_String (B.Account) & ")");
+                  else
+                     --  The binder ends at its last step: a patch it took as a
+                     --  thing or as me, or the last eye that could not point it out.
+                     declare
+                        Last     : constant Step := Steps.Last_Element;
+                        Boxed_On : constant Natural := Most_Object (Last.In_Box);
+                     begin
+                        if (for some St of Steps => St.Answer = Driver.Brain.Names.No_Answer) then
+                           Cause := To_Unbounded_String ("service: an eye could not be asked");
+                        elsif Last.Identified and then Last.Found /= Driver.Brain.Names.No_Patch then
+                           if Boxed_On /= K then
+                              Cause := To_Unbounded_String
+                                ("box: eye" & Last.Eye'Image & " boxed "
+                                 & (if Boxed_On = 0 then "no object"
+                                    else Driver.Json.Text (Q_Doc, Driver.Json.Element (Q_Doc, Objects, Boxed_On))));
+                           elsif Last.Found = Driver.Brain.Names.Part_Of_Me then
+                              Cause := To_Unbounded_String ("segmentation: the patch is mostly me");
+                           elsif Got = 0 then
+                              Cause := To_Unbounded_String ("segmentation: the patch lies on no object");
+                           else
+                              Cause := To_Unbounded_String ("segmentation: the patch lies on another thing");
+                           end if;
+                        elsif (for some St of Steps => St.Identified and then Most_Object (St.In_Box) = K) then
+                           Cause := To_Unbounded_String ("segmentation: no patch where an eye boxed it");
+                        else
+                           Cause := To_Unbounded_String ("box: no eye pointed it out");
+                        end if;
+                     end;
+                  end if;
+               end if;
+               for St of Steps loop
+                  Append (Trace, (if Length (Trace) > 0 then "," else "")
+                          & "{""eye"":" & Driver.Log.Image (Natural (St.Eye)) & ",""answer"":"
+                          & Driver.Json.Quote (Pointing_Text (St.Answer))
+                          & ",""in_box"":" & Counts_Text (St.In_Box)
+                          & (if St.Identified
+                             then ",""found"":" & Driver.Json.Quote
+                                    (case St.Found is
+                                        when Driver.Brain.Names.A_Thing    => "a thing",
+                                        when Driver.Brain.Names.Part_Of_Me => "part of me",
+                                        when Driver.Brain.Names.No_Patch   => "no patch")
+                                  & ",""pixels"":" & Driver.Log.Image (St.Pixels)
+                                  & ",""patch_label"":" & Driver.Log.Image (St.Patch_Label)
+                                  & ",""on_me"":" & Driver.Log.Image (St.On_Me)
+                             else "")
+                          & "}");
+               end loop;
+               --  Every eye's own answer, asked by the binder or not: how many
+               --  pixels of the meant object it shows, and what its box is on.
+               declare
+                  Every : Unbounded_String;
+               begin
+                  for E in 1 .. Count loop
+                     declare
+                        Eye : constant Driver.Observations.Camera_Id := Driver.Observations.Camera_Id (E);
+                        Key : constant String := To_String (S.Prefix) & N & "|" & Driver.Log.Image (E);
+                        Has : constant Boolean := Wheres.Contains (Key);
+                        A   : constant Driver.Brain.Names.Pointing :=
+                          (if Has then Wheres (Key).Answer else Driver.Brain.Names.No_Answer);
+                        On  : constant Natural :=
+                          (if A = Driver.Brain.Names.Boxed then Most_Object (Counts_In (S.Labels (Eye), Wheres (Key).Where))
+                           else 0);
+                     begin
+                        Append (Every, (if E > 1 then "," else "") & "{""eye"":" & Driver.Log.Image (E)
+                                & ",""answer"":" & Driver.Json.Quote (Pointing_Text (A))
+                                & ",""shows"":" & Driver.Log.Image (if K > 0 then S.Shown (Eye) (K) else 0)
+                                & ",""box_on"":" & Driver.Json.Quote
+                                  (if On = 0 then "" else Driver.Json.Text (Q_Doc, Driver.Json.Element (Q_Doc, Objects, On)))
+                                & "}");
+                     end;
+                  end loop;
+                  Append (Trace, "],""eyes"":[" & To_String (Every));
+               end;
+               Total := Total + 1;
+               Right_Count := Right_Count + (if Right then 1 else 0);
+               Ada.Text_IO.Put_Line
+                 (Out_F, "{""id"":" & Driver.Json.Quote (Id) & ",""scene"":" & Driver.Json.Quote (Scene)
+                  & ",""rep"":" & Driver.Log.Image (Rep) & ",""view"":" & Driver.Log.Image (Natural (View))
+                  & ",""target"":" & Driver.Json.Quote (Target) & ",""name"":" & Driver.Json.Quote (N)
+                  & ",""meant"":" & Driver.Json.Quote (Meant) & ",""meant_how"":" & Driver.Json.Quote (To_String (How))
+                  & ",""visible"":" & (if Visible then "true" else "false")
+                  & ",""in_view"":" & (if In_View then "true" else "false")
+                  & ",""bound"":" & Driver.Json.Quote (To_String (Bound_T))
+                  & ",""right"":" & (if Right then "true" else "false")
+                  & ",""cause"":" & Driver.Json.Quote (To_String (Cause))
+                  & ",""account"":" & Driver.Json.Quote (To_String (B.Account))
+                  & ",""steps"":[" & To_String (Trace) & "]}");
+            end;
+         end loop;
+      end Score;
+   begin
+      Driver.Json.Parse (Slurp (Argument (2)), Q_Doc, Ok, Why);
+      if Ok then
+         Driver.Json.Parse (Slurp (Argument (6)), M_Doc, Ok, Why);
+      end if;
+      if not Ok then
+         Ada.Text_IO.Put_Line ("bind-score: " & To_String (Why));
+         return;
+      end if;
+      Names_Node := Driver.Json.Lookup (M_Doc, Driver.Json.Root (M_Doc), "names");
+      Words_Node := Driver.Json.Lookup (M_Doc, Driver.Json.Root (M_Doc), "words");
+      --  The eyes' answers and the patches, as the run left them.
+      Ada.Text_IO.Open (In_F, Ada.Text_IO.In_File, Argument (4));
+      while not Ada.Text_IO.End_Of_File (In_F) loop
+         Driver.Json.Parse (Ada.Text_IO.Get_Line (In_F), L_Doc, Ok, Why);
+         if Ok then
+            declare
+               Root : constant Driver.Json.Node := Driver.Json.Root (L_Doc);
+               A    : constant String := Driver.Json.Text (L_Doc, Driver.Json.Lookup (L_Doc, Root, "answer"));
+            begin
+               Wheres.Include
+                 (Driver.Json.Text (L_Doc, Driver.Json.Lookup (L_Doc, Root, "id")) & "|"
+                  & Driver.Log.Image (Natural (Driver.Json.Number (L_Doc, Driver.Json.Lookup (L_Doc, Root, "rep")))) & "|"
+                  & Driver.Json.Text (L_Doc, Driver.Json.Lookup (L_Doc, Root, "name")) & "|"
+                  & Driver.Log.Image (Natural (Driver.Json.Number (L_Doc, Driver.Json.Lookup (L_Doc, Root, "eye")))),
+                  (Answer => (if A = "boxed" then Driver.Brain.Names.Boxed
+                              elsif A = "not_here" then Driver.Brain.Names.Not_Here
+                              else Driver.Brain.Names.No_Answer),
+                   Where  => Box_Of (L_Doc, Driver.Json.Lookup (L_Doc, Root, "box"))));
+            end;
+         end if;
+      end loop;
+      Ada.Text_IO.Close (In_F);
+      Ada.Text_IO.Open (In_F, Ada.Text_IO.In_File, Argument (5));
+      while not Ada.Text_IO.End_Of_File (In_F) loop
+         Driver.Json.Parse (Ada.Text_IO.Get_Line (In_F), L_Doc, Ok, Why);
+         if Ok then
+            declare
+               Root   : constant Driver.Json.Node := Driver.Json.Root (L_Doc);
+               Labels : constant Driver.Json.Node := Driver.Json.Lookup (L_Doc, Root, "labels");
+               E      : Patch_Entry;
+            begin
+               E.Ok := Driver.Json.Is_True (L_Doc, Driver.Json.Lookup (L_Doc, Root, "ok"));
+               E.Pixels := Natural (Driver.Json.Number (L_Doc, Driver.Json.Lookup (L_Doc, Root, "pixels")));
+               for J in 1 .. Driver.Json.Count (L_Doc, Labels) loop
+                  declare
+                     Pair : constant Driver.Json.Node := Driver.Json.Element (L_Doc, Labels, J);
+                  begin
+                     E.Counts (Natural (Driver.Json.Number (L_Doc, Driver.Json.Element (L_Doc, Pair, 1)))) :=
+                       Natural (Driver.Json.Number (L_Doc, Driver.Json.Element (L_Doc, Pair, 2)));
+                  end;
+               end loop;
+               Patches.Include (Driver.Json.Text (L_Doc, Driver.Json.Lookup (L_Doc, Root, "key")), E);
+            end;
+         end if;
+      end loop;
+      Ada.Text_IO.Close (In_F);
+      Ada.Text_IO.Create (Out_F, Ada.Text_IO.Out_File, Argument (7));
+      Over_Answers (Q_Doc, Argument (3), Score'Access);
+      Ada.Text_IO.Close (Out_F);
+      Ada.Text_IO.Put_Line ("bound right:" & Right_Count'Image & " of" & Total'Image & " names");
+   end Bind_Score_Run;
+
    procedure Where_Run is
       Picture : constant Driver.Images.Image := Read_Ppm (Argument (3));
    begin
@@ -997,6 +1800,12 @@ begin
       Over_Questions (Ask_Truncation'Access);
    elsif Argument_Count >= 7 and then Argument (1) = "bindings" then
       Bindings_Run;
+   elsif Argument_Count = 5 and then Argument (1) = "where-all" then
+      Where_All_Run;
+   elsif Argument_Count = 5 and then Argument (1) = "patches" then
+      Patches_Run;
+   elsif Argument_Count = 7 and then Argument (1) = "bind-score" then
+      Bind_Score_Run;
    elsif Argument_Count >= 5 and then Argument (1) = "names" then
       Names_Run;
    elsif Argument_Count >= 6 and then Argument (1) = "stream" then
