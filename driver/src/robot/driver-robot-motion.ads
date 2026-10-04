@@ -140,7 +140,7 @@ package Driver.Robot.Motion is
       Answered   : Real := 0.0;        --  the smallest amount at which its reading first followed, either way; 0 when never
       Levels     : Sense_Counts := [others => 0];    --  how many levels each way was asked
       At_End     : Sense_Flags := [others => False];  --  the way stopped because the other one answered while it delivered nothing
-      Dead       : Boolean := False;   --  it answered neither way up to where every other channel of the body did
+      Dead       : Boolean := False;   --  it answered neither way up to twice where every other channel of the body did
       Last       : Step_Report;        --  the last step's report
    end record;
 
@@ -164,9 +164,10 @@ package Driver.Robot.Motion is
    --  succeed, so both ways go on doubling while neither answers. Bound is
    --  where every other channel of the body has answered (the largest
    --  amount at which another channel first followed; Real'Last when none
-   --  did): a channel that has answered neither way when both have been
-   --  asked at least that much is dead or disconnected, and the probe stops.
-   --  The body returns to the hold.
+   --  did): a channel that has answered neither way when the next level
+   --  each way would pass twice that is dead or disconnected for this boot,
+   --  and the probe stops. A deadband wider than every other channel needed
+   --  is pushed through up to there. The body returns to the hold.
 
    procedure Gather_Rest (M : in out Model; Probes : Natural);
    --  Holds the body still for as long as one more still beat shortens the
@@ -185,11 +186,15 @@ package Driver.Robot.Motion is
 
    function Plan_Reach (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan;
    --  A joint path from the arm's configuration at O to the goal, solved
-   --  along the way so it never jumps between solution branches.
+   --  along the way so it never jumps between solution branches. The path
+   --  is the fitted model's, within the readings the arm has shown or beyond
+   --  them: a joint's end on the way is met when the path is followed, and
+   --  the step that meets it ends Blocked or Short.
 
    function Status (P : Plan) return Plan_Status;
    function Why (P : Plan) return String;
-   --  For Unreachable: which limit, joint or distance stopped it.
+   --  For Unreachable: how far the model leaves the goal; for Unmeasured:
+   --  what is not measured yet.
 
    procedure Follow (M : in out Model; P : Plan; Report : out Step_Report)
      with Pre => Status (P) = Planned;

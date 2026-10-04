@@ -92,16 +92,16 @@ private package Driver.Robot.Kinematics is
       Start         : Real_Array;
       Goal          : Rigid;
       Position_Only : Boolean;
-      Low, High     : Real_Array;
       Q             : out Real_Array;
       Position_Off  : out Real;
       Turn_Off      : out Real)
-     with Pre => Start'Length = Low'Length and then Low'Length = High'Length and then Q'Length = Start'Length;
-   --  The readings, within Low .. High, that bring the arm's eye (in its
-   --  reference frame) nearest Goal, by damped least squares from Start on
-   --  the position (model units) and the turn (radians) left, until a step
-   --  lowers what is left by less than the unchanged fraction of it; how far
-   --  the eye remains from Goal.
+     with Pre => Q'Length = Start'Length;
+   --  The readings that bring the arm's eye (in its reference frame) nearest
+   --  Goal by the fitted model, within the readings the arm has shown or
+   --  beyond them, by damped least squares from Start on the position (model
+   --  units) and the turn (radians) left, until a step lowers what is left
+   --  by less than the unchanged fraction of it; how far the eye remains
+   --  from Goal.
 
    function Angle_Sigma (M : Model; A : Arm_Id) return Real;
    --  The angle one pixel of the fit's measured noise subtends at the arm's

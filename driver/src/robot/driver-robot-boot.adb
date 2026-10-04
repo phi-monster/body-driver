@@ -179,9 +179,9 @@ package body Driver.Robot.Boot is
       --  Finds how far each channel of the group must move for an eye to see
       --  it, both ways from the amount at which the whole body was first seen
       --  (Motion.Probe_Both_Ways: a way at its end stops where the other one
-      --  answered; a channel that answers neither way where every other one
-      --  did is dead), then pushes every channel both ways by that much
-      --  (Push_Both_Ways).
+      --  answered; a channel that answers neither way up to twice where
+      --  every other one did is dead for this boot), then pushes every
+      --  channel both ways by that much (Push_Both_Ways).
       procedure Recognize (G : Group_Id; Size : Positive; From : Real) is
          use type Driver.Robot.Motion.Sense;
          Amount : Real_Array (1 .. Size) := [others => 0.0];
@@ -214,8 +214,9 @@ package body Driver.Robot.Boot is
                                    elsif P.Dead
                                    then " answers neither way up to "
                                         & Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))
-                                        & " reading units, where every other channel of the body had answered: dead or"
-                                        & " disconnected; it is not probed further"
+                                        & " reading units, past which the next level would pass twice what every other"
+                                        & " channel of the body needed: dead or disconnected for this boot; it is not"
+                                        & " probed further"
                                    else " moves nothing any eye sees, up to where it stops following"));
             end;
          end loop;
