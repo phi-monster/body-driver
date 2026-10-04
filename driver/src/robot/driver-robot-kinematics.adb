@@ -1046,7 +1046,6 @@ package body Driver.Robot.Kinematics is
       Start         : Real_Array;
       Goal          : Rigid;
       Position_Only : Boolean;
-      Low, High     : Real_Array;
       Q             : out Real_Array;
       Position_Off  : out Real;
       Turn_Off      : out Real)
@@ -1057,15 +1056,6 @@ package body Driver.Robot.Kinematics is
       Rows : constant Positive := (if Position_Only then 3 else 6);
       X    : Real_Array (1 .. N) := Start;
       Lambda : Real := Real'Model_Epsilon;
-
-      function Clamp (V : Real_Array) return Real_Array is
-         R : Real_Array (1 .. N) := V;
-      begin
-         for J in 1 .. N loop
-            R (J) := Real'Max (Low (Low'First + J - 1), Real'Min (High (High'First + J - 1), V (V'First + J - 1)));
-         end loop;
-         return R;
-      end Clamp;
 
       function Residual (V : Real_Array) return Real_Vector is
          T : constant Rigid := Eye_In_Reference (M, A, V);
@@ -1083,7 +1073,6 @@ package body Driver.Robot.Kinematics is
 
       R0 : Real_Vector (1 .. Rows);
    begin
-      X := Clamp (X);
       R0 := Residual (X);
       loop
          declare
@@ -1126,7 +1115,6 @@ package body Driver.Robot.Kinematics is
                            for P in 1 .. N loop
                               Xn (P) := X (P) + Step (P);
                            end loop;
-                           Xn := Clamp (Xn);
                            Moves := (for some P in 1 .. N => Xn (P) /= X (P));
                            if Moves then
                               declare

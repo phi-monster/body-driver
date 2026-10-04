@@ -1880,9 +1880,11 @@ package body Driver.Robot.Tests is
    --  the upward way stops there, never asked more than that first level.
    --  A deadband is two-sided: small asks fail both ways, a larger one
    --  succeeds, and the channel is found answering, not called dead or at
-   --  an end. A disconnected channel answers neither way: once both ways
-   --  have been asked as much as every other channel of the body needed, it
-   --  is called dead and asked no more.
+   --  an end, also when it is wider than every other channel of the body
+   --  needed (it is pushed through, up to twice that). A disconnected
+   --  channel answers neither way: once the next level each way would pass
+   --  twice what every other channel needed, it is called dead and asked
+   --  no more.
    procedure Probe_Limits_And_Deadbands is
       use type Driver.Robot.Motion.Sense;
       package Mo renames Driver.Robot.Motion;
@@ -1912,13 +1914,21 @@ package body Driver.Robot.Tests is
       Check (not R.At_End (Mo.Increasing) and then not R.At_End (Mo.Decreasing),
              "a channel with a deadband is called at an end");
 
+      --  Every other channel has answered by 4e-5 (level 3): the deadband of
+      --  5e-5 is wider, and yields at level 4, 8e-5, twice that.
+      Probe_Idle_Both_Ways (Deadband, 4.0e-5, R, Up, Down, Finished);
+      Check (Finished, "the probe of a channel with a deadband wider than the others needed did not finish");
+      Check (not R.Dead and then R.Answered = 8.0e-5,
+             "a deadband of 5e-5, where every other channel answered by 4e-5, is not pushed through to 8e-5:"
+             & " answered at" & R.Answered'Image & (if R.Dead then ", called dead" else ""));
+
       --  Every other channel has answered by 4e-5 (level 3).
       Probe_Idle_Both_Ways (Disconnected, 4.0e-5, R, Up, Down, Finished);
       Check (Finished, "the probe of a disconnected channel did not finish");
-      Check (R.Dead and then R.Levels (Mo.Increasing) = 3 and then R.Levels (Mo.Decreasing) = 3,
-             "a channel that answers neither way is not called dead once both ways were asked 4e-5: levels"
-             & R.Levels (Mo.Increasing)'Image & R.Levels (Mo.Decreasing)'Image);
-      Check (Up <= 4.0e-5 and then Down <= 4.0e-5,
+      Check (R.Dead and then R.Levels (Mo.Increasing) = 4 and then R.Levels (Mo.Decreasing) = 4,
+             "a channel that answers neither way is not called dead once both ways were asked 8e-5, twice what"
+             & " the others needed: levels" & R.Levels (Mo.Increasing)'Image & R.Levels (Mo.Decreasing)'Image);
+      Check (Up <= 8.0e-5 and then Down <= 8.0e-5,
              "the dead channel was asked" & Up'Image & " up and" & Down'Image & " down");
    end Probe_Limits_And_Deadbands;
 
@@ -2163,7 +2173,7 @@ package body Driver.Robot.Tests is
       M.Graph.Arms.Append (1);
       M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => 1));
       Goal := Fit.Eye_At (Truth, Goal_Q);
-      Driver.Robot.Kinematics.Solve_Pose (M, 1, Zero, Goal, False, [1 .. 6 => -1.0], [1 .. 6 => 1.0], Q, Position_Off, Turn_Off);
+      Driver.Robot.Kinematics.Solve_Pose (M, 1, Zero, Goal, False, Q, Position_Off, Turn_Off);
       Check (Position_Off < 1.0e-9 and then Turn_Off < 1.0e-9,
              "a reachable pose is missed by" & Position_Off'Image & " and" & Turn_Off'Image & " rad");
       declare
@@ -2171,10 +2181,6 @@ package body Driver.Robot.Tests is
       begin
          Check (abs (Got.Translation - Goal.Translation) < 1.0e-9, "the readings found do not put the eye at the goal");
       end;
-      --  The same goal with the readings held within a tenth of a radian.
-      Driver.Robot.Kinematics.Solve_Pose (M, 1, Zero, Goal, False, [1 .. 6 => -0.1], [1 .. 6 => 0.1], Q, Position_Off, Turn_Off);
-      Check (Position_Off > 1.0e-3 or else Turn_Off > 1.0e-3, "a pose beyond the readings' range is reached");
-      Check ((for all X of Q => abs X <= 0.1), "the readings found leave their range");
    end Reach_A_Pose;
 
    --  A fit belongs to an arm only while the graph has its group as that arm,
@@ -2787,6 +2793,144 @@ package body Driver.Robot.Tests is
       end;
    end Plan_On_A_Reloaded_Body;
 
+   --  ── A plan beyond the travel ──
+   --
+   --  The measured body's arm has shown at most a quarter radian each way;
+   --  the goal here needs every joint well past that. The body is the one
+   --  its file brings back, as a boot that reloads it runs (the noise, the
+   --  lock-in and the kinematics stand). The plan is the fitted model's, and
+   --  Follow takes the arm there on a rig whose group reads its targets
+   --  exactly, one beat later. On the rig whose first joint ends at End_At,
+   --  inside the path, the step that meets the end is Blocked or Short, and
+   --  Follow stops there.
+
+   Beyond_Goal : constant Real_Array (1 .. 6) := [0.45, -0.4, 0.5, 0.35, 0.4, -0.45];
+
+   procedure Follow_Beyond_The_Travel
+     (End_At   : Real;
+      Planned  : out Boolean;
+      Report   : out Driver.Robot.Motion.Step_Report;
+      Reached  : out Real_Array;
+      Finished : out Boolean)
+   is
+      Measured, M : Model;
+      O   : Observation;
+      Ok  : Boolean;
+      Why : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      Measured_Body (Measured);
+      Driver.Robot.Body_File.Read (M, Driver.Robot.Body_File.Text (Measured), Ok, Why);
+      Check (Ok, "the body file was not read: " & Ada.Strings.Unbounded.To_String (Why));
+      O.Readings.Append (Real_Array'(1 .. 6 => 0.0));
+      declare
+         use type Driver.Robot.Motion.Plan_Status;
+         Goal : constant Driver.Robot.Motion.Pose_Goal :=
+           (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Beyond_Goal), Position_Only => False);
+         P    : constant Driver.Robot.Motion.Plan := Driver.Robot.Motion.Plan_Reach (M, 1, O, Goal);
+         Done : Boolean := False with Atomic;
+         Got  : Driver.Robot.Motion.Step_Report;
+
+         task Decider;
+         task body Decider is
+         begin
+            if Driver.Robot.Motion.Status (P) = Driver.Robot.Motion.Planned then
+               Driver.Robot.Motion.Follow (M, P, Got);
+            end if;
+            Done := True;
+         exception
+            when others =>
+               Driver.Beats.Release;
+               Done := True;
+         end Decider;
+
+         Now  : Real_Array (1 .. 6) := [others => 0.0];
+         Sent : Driver.Commands.Command;
+      begin
+         Planned := Driver.Robot.Motion.Status (P) = Driver.Robot.Motion.Planned;
+         begin
+            for B in 0 .. 5_000 loop
+               exit when Done;
+               declare
+                  Ob      : Observation;
+                  Took    : Boolean := False;
+                  Pending : Driver.Commands.Command;
+               begin
+                  Ob.Beat := Driver.Clock.Beat (B);
+                  Ob.Readings.Append (Now);
+                  Ob.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+                  if B = 0 then
+                     Driver.Commands.Set_Target (Sent, 1, Now);
+                  end if;
+                  Observe (M, Ob, Sent);
+                  loop
+                     Driver.Beats.Offer (Ob.Beat, Ob, Sent, Took);
+                     exit when Took or else Done;
+                     delay 0.0;
+                  end loop;
+                  exit when not Took;
+                  Driver.Beats.Await (Pending);
+                  if Driver.Commands.Has_Target (Pending, 1) then
+                     Driver.Commands.Set_Target (Sent, 1, Driver.Commands.Target (Pending, 1));
+                  end if;
+                  Now := Driver.Commands.Target (Sent, 1);
+                  Now (1) := Real'Min (Now (1), End_At);
+               end;
+            end loop;
+         exception
+            when others =>
+               abort Decider;
+               raise;
+         end;
+         if not Done then
+            abort Decider;
+         end if;
+         Finished := Done;
+         Report := Got;
+         Reached := Now;
+      end;
+   end Follow_Beyond_The_Travel;
+
+   procedure Plan_And_Follow_Beyond_The_Travel is
+      use type Driver.Robot.Motion.Step_Outcome;
+      M        : Model;
+      Planned  : Boolean;
+      Finished : Boolean;
+      R        : Driver.Robot.Motion.Step_Report;
+      Reached  : Real_Array (1 .. 6);
+   begin
+      Measured_Body (M);
+      Follow_Beyond_The_Travel (Real'Last, Planned, R, Reached, Finished);
+      Check (Planned, "a goal past the readings the arm has shown is not planned");
+      Check (Finished, "following the plan past the travel did not finish");
+      if Planned and then Finished then
+         Check (R.Outcome = Driver.Robot.Motion.Reached,
+                "the plan past the travel was not followed to its end: " & Ada.Strings.Unbounded.To_String (R.Detail));
+         declare
+            Goal  : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Beyond_Goal);
+            Got   : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Reached);
+            Sigma : constant Real := Driver.Robot.Kinematics.Angle_Sigma (M, 1);
+            Off   : constant Real := abs (Got.Translation - Goal.Translation);
+            Turn  : constant Real := Driver.Numerics.Angle (Transpose (Got.Rotation) * Goal.Rotation);
+         begin
+            Check (Off <= Driver.Conventions.Z * Sigma and then Turn <= Driver.Conventions.Z * Sigma,
+                   "the arm followed its plan to an eye" & Off'Image & " model units and" & Turn'Image
+                   & " rad from the goal");
+         end;
+         Check ((for some C in 1 .. 6 => Reached (C) > M.Groups (1).High_Seen (C - 1)
+                                         or else Reached (C) < M.Groups (1).Low_Seen (C - 1)),
+                "the arm reached the goal without leaving the readings it had shown");
+      end if;
+      --  The first joint ends at 0.33, past its travel (0.21) and short of the
+      --  goal's 0.45.
+      Follow_Beyond_The_Travel (0.33, Planned, R, Reached, Finished);
+      Check (Planned and then Finished, "the plan past the travel was not made or not followed on the rig with an end");
+      if Planned and then Finished then
+         Check (R.Outcome /= Driver.Robot.Motion.Reached,
+                "a joint whose end lies inside the path is not met as Blocked or Short: "
+                & Ada.Strings.Unbounded.To_String (R.Detail));
+      end if;
+   end Plan_And_Follow_Beyond_The_Travel;
+
    procedure Kinematics_Of_A_Synthetic_Arm is
    begin
       Synthetic_Sweep (1.0, Expect_Fit => True);
@@ -2814,12 +2958,16 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
                              & "stack, as the decider's does", Estimate_In_A_Task'Access);
       Driver.Tests.Register ("robot.probe.limits", "a channel at its limit one way is asked ever further that way though "
-                             & "it answered the other way, a deadband is not found, or a channel that answers neither way "
-                             & "is asked past where every other channel answered", Probe_Limits_And_Deadbands'Access);
+                             & "it answered the other way, a deadband is not found or not pushed through up to twice what "
+                             & "every other channel needed, or a channel that answers neither way is asked past that",
+                             Probe_Limits_And_Deadbands'Access);
       Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
-      Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found, or are "
-                             & "found beyond the range the arm moved through", Reach_A_Pose'Access);
+      Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found",
+                             Reach_A_Pose'Access);
+      Driver.Tests.Register ("robot.plan.beyond", "a goal past the readings the arm has shown is not planned, its plan "
+                             & "is not followed there, or a joint's end on the way is not met as Blocked or Short",
+                             Plan_And_Follow_Beyond_The_Travel'Access);
       Driver.Tests.Register ("robot.kinematics.stale", "the fit of a group that stopped being an arm, or of an eye it no "
                              & "longer carries, is still taken for the arm's", Stale_Fit_Is_No_Arms'Access);
       Driver.Tests.Register ("robot.kinematics.shared", "the fit's focal length or eye pose is off by more than Z of "

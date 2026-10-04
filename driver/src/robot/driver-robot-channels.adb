@@ -414,14 +414,6 @@ package body Driver.Robot.Channels is
       end;
    end Measure;
 
-   function Lowest (M : Model; G : Group_Id; Channel : Positive) return Real is
-     (if G <= M.Groups.Last_Index and then Channel <= Natural (M.Groups (G).Low_Seen.Length)
-      then M.Groups (G).Low_Seen (Channel - 1) else Real'Last);
-
-   function Highest (M : Model; G : Group_Id; Channel : Positive) return Real is
-     (if G <= M.Groups.Last_Index and then Channel <= Natural (M.Groups (G).High_Seen.Length)
-      then M.Groups (G).High_Seen (Channel - 1) else Real'First);
-
    function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean is
       Rest    : Real_Array := D;
       Watched : Natural := 0;   --  channels an eye watches, their steps below what it sees

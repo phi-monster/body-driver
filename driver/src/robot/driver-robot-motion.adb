@@ -640,10 +640,12 @@ package body Driver.Robot.Motion is
                      Report.At_End (S) := True;
                   end if;
                end loop;
-               --  Neither way answered when both were asked as much as every
-               --  other channel of the body needed: dead or disconnected.
+               --  Neither way answered, and the next level each way would pass
+               --  twice what every other channel of the body needed: dead or
+               --  disconnected for this boot. A deadband wider than the others
+               --  needed is pushed through up to there.
                if not Delivered (Increasing) and then not Delivered (Decreasing)
-                 and then Report.Levels (Increasing) = Report.Levels (Decreasing) and then Offset >= Bound
+                 and then Report.Levels (Increasing) = Report.Levels (Decreasing) and then Offset > Bound
                then
                   Report.Dead := True;
                   exit;
@@ -722,9 +724,9 @@ package body Driver.Robot.Motion is
             return Refused (Unmeasured, "the arm is not measured into the world yet");
          end if;
          declare
-            --  The joints' range: the readings the arm has moved through, where
-            --  it was free; beyond them nothing is known.
-            Low, High : Real_Array (1 .. Size);
+            --  The path is the fitted model's, within the readings the arm has
+            --  moved through or beyond them: a joint's end is met where it is,
+            --  as the step that meets it ends Blocked or Short.
             Sigma : constant Real := Kinematics.Angle_Sigma (M, A);
             Start : constant Real_Array (1 .. Size) := O.Readings.Element (G);
             From  : constant Rigid := Tool.Pose;
@@ -748,7 +750,7 @@ package body Driver.Robot.Motion is
                Position_Off, Turn_Off : Real;
             begin
                Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only and then B_Of = 1.0,
-                                      Low, High, Next, Position_Off, Turn_Off);
+                                      Next, Position_Off, Turn_Off);
                if not Driver.Uncertain.Significant (Position_Off, Sigma)
                  and then not Driver.Uncertain.Significant (Turn_Off, Sigma)
                then
@@ -768,16 +770,12 @@ package body Driver.Robot.Motion is
 
             Q : Real_Array (1 .. Size) := Start;
          begin
-            for C in 1 .. Size loop
-               Low (C) := Real'Min (Channels.Lowest (M, G, C), Start (C));
-               High (C) := Real'Max (Channels.Highest (M, G, C), Start (C));
-            end loop;
             if Sigma = Real'Last then
                return Refused (Unmeasured, "the arm's fit has no uncertainty");
             end if;
             Reach (0.0, 1.0, Q, 0);
             if Failed then
-               return Refused (Unreachable, "within the readings the arm has moved through, the goal stays"
+               return Refused (Unreachable, "the arm's fitted model leaves the goal"
                                & Real'Image (Worst_Position) & " model units and" & Real'Image (Worst_Turn)
                                & " rad away");
             end if;
