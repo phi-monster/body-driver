@@ -17,20 +17,24 @@ driver-action-contact-search.adb	(if Natural (T.Length) >= 2 and then abs (T (2)
 driver-action-contact-search.adb	(if Pin.Any_Angle then Steps_For (Lever (Pin.Pad_Index, E.Depth)) else 1);	1	math	a pin fixed at its own turn is one placement
 driver-action-contact-search.adb	Ahead : constant Vec3 := (L.Thickness / 2.0) * Facing;	2.0	math	the face is half a thickness ahead of the lobe's centre line
 driver-action-contact-search.adb	Apart : constant Gate := Vector_Gate (3);	3	structure	points of space have three coordinates
-driver-action-contact-search.adb	B : constant Box := Box_Of (P, R, X, Before (P.Closer), 0.0);	0.0	math	no extra length: the box as the lobe is
 driver-action-contact-search.adb	F : constant Vec3 := Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face - Mid;	0.0	math	no extra length: the box as the lobe is
 driver-action-contact-search.adb	Facing => Facing, Half_Width => L.Width / 2.0,	2.0	math	half of the measured width
 driver-action-contact-search.adb	Mid := Mid + Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face / Real (N_Pads);	0.0	math	no extra length: the box as the lobe is
 driver-action-contact-search.adb	Most : constant Real := Real'Min (Friction.High, 1.0 / Physics.Least_Distinct (Resolution));	1.0	math	the friction whose angle is as far from a right angle as the least distinct one is from none: tan (pi/2 - a) = 1 / tan a
 driver-action-contact-search.adb	Next : Positive := 1;	1	structure	the first position in the order
 driver-action-contact-search.adb	Next := 1;	1	structure	each friction level walks the order from its first position
+driver-action-contact-search.adb	Pi / 2.0 - Resolution))));	2.0	math	a friction angle lies below a right angle, the most the normals can tell from it one resolution below
 driver-action-contact-search.adb	Psi : constant Real := 2.0 * Pi * Real (Step) / Real (Steps);	2.0	math	equal steps of a full circle, two pi
+driver-action-contact-search.adb	R : constant Mat3 := Exp ((2.0 * Pi / Real (Count)) * E.Along);	2.0	math	equal rotations of a full circle, two pi
+driver-action-contact-search.adb	Reach := Real'Max (Reach, Far - Box_Of (P, R, X, Before (P.Closer), 0.0).Face * Back);	0.0	math	no extra length: the box as the lobe is
 driver-action-contact-search.adb	Reference := Real'Min (Most, 2.0 * Reference);	2.0	numerics	doubling search: the friction needed is reached within a factor two in a number of levels logarithmic in it
 driver-action-contact-search.adb	Result := (if Count >= 2 then Touching else On_Air);	2	math	a closing set needs at least two touches; one touch alone is a single touch
+driver-action-contact-search.adb	Sample : Positive := 1;	1	structure	placeholder sample of a meeting slot, overwritten before use
 driver-action-contact-search.adb	Steps : constant Positive := Steps_For (Lever (K, 0.0));	0.0	math	no extra reach beyond the faces' centres
 driver-action-contact-search.adb	for C in 1 .. 3 loop	3	structure	the three coordinates of a point
 driver-action-contact-search.adb	for C in 1 .. 3 loop	3	structure	the three coordinates of a point
 driver-action-contact-search.adb	for C in 1 .. 3 loop	3	structure	the three coordinates of a point
+driver-action-contact-search.adb	for Count in reverse 2 .. N loop	2	math	a hand repeats under a rotation only if at least two make a circle; one is no symmetry
 driver-action-contact-search.adb	for F in 0 .. 1 loop	1	structure	the two ends of a closing path: open and closed
 driver-action-contact-search.adb	for G in 0 .. 1 loop	1	structure	the two ends of a closing path: open and closed
 driver-action-contact-search.adb	for I in 0 .. 1 loop	1	structure	a box corner is on the face or a thickness behind it
@@ -38,10 +42,12 @@ driver-action-contact-search.adb	for J in -1 .. 1 loop	1	structure	the two sides
 driver-action-contact-search.adb	for J in -1 .. 1 loop	1	structure	the two sides of a face (zero, the middle, is skipped)
 driver-action-contact-search.adb	for K in 0 .. 1 loop	1	structure	a box corner is at the lobe's end or its far end
 driver-action-contact-search.adb	if Natural (E.Pads.Length) < 2 then	2	math	closing on something needs at least two lobes
+driver-action-contact-search.adb	if Natural (E.Pads.Length) >= 2 and then abs E.Along > 0.0 and then Tip_Sd < Real'Last then	2	math	a turn can take a pad onto another only when there are at least two
 driver-action-contact-search.adb	if Physics.Need (None, Thing.Base, Motion, Thing.Centre.Mean, U, 0.0).Why = Physics.Footing_In_Way then	0.0	math	whether a motion goes into the surface does not depend on friction
-driver-action-contact-search.adb	if Sq >= 0.0 and then Sq <= 1.0 and then Sq < S then	1.0	math	a closer's fraction runs from zero (open) to one (closed on nothing)
+driver-action-contact-search.adb	if Sq >= 0.0 and then Sq <= 1.0 and then (S = Real'Last or else (Sq - S) * Speed <= Res) then	1.0	math	a closer's fraction runs from open, zero, to closed, one
 driver-action-contact-search.adb	subtype Closer_Index is Positive range 1 .. Positive'Max (1, N_Closers);	1	structure	indexes start at one; an arm with no closer still gets one unused slot
 driver-action-contact-search.adb	type Touch_Set_Array is array (1 .. 4) of Touch_Vectors.Vector;	4	structure	two tilt axes, each turned both ways
+driver-action-contact-search.ads	Repeats : Positive := 1;	1	math	a hand with no symmetry looks the same only after one whole rotation
 driver-action-contact-simplex.adb	Size := 1.0;	1.0	math	an all-zero row stays zero under any scale; one leaves it as it is
 driver-action-contact-simplex.adb	T (I, N + I) := 1.0;	1.0	structure	the artificial variable of row I enters with coefficient one (identity block of phase one)
 driver-action-contact-wrench.adb	A (R + 3, J) := G (R + 3) / Length;	3	structure	moment rows follow the three force rows of a wrench
@@ -49,12 +55,13 @@ driver-action-contact-wrench.adb	A (R + 3, J) := G (R + 3) / Length;	3	structure
 driver-action-contact-wrench.adb	A : Real_Matrix (1 .. 6, 1 .. Cols);	6	structure	a wrench has six components, three of force and three of moment
 driver-action-contact-wrench.adb	Column (G, 0.0);	0.0	math	the surface's forces cost the body nothing
 driver-action-contact-wrench.adb	Column (G, 1.0);	1.0	math	each body generator carries one unit of normal force, so its cost is one
+driver-action-contact-wrench.adb	Edge_Cos : constant Edge_Table := [for K in Edge_Table'Range => Cos (2.0 * Pi * Real (K) / Real (Edges))];	2.0	math	equal steps of a full circle, two pi
+driver-action-contact-wrench.adb	Edge_Sin : constant Edge_Table := [for K in Edge_Table'Range => Sin (2.0 * Pi * Real (K) / Real (Edges))];	2.0	math	equal steps of a full circle, two pi
 driver-action-contact-wrench.adb	H : Flat_Array (1 .. 2 * P'Length + 1) := [others => (X => 0.0, Y => 0.0, Index => 1)];	1	structure	placeholder index of unused hull slots, overwritten before use
 driver-action-contact-wrench.adb	H : Flat_Array (1 .. 2 * P'Length + 1) := [others => (X => 0.0, Y => 0.0, Index => 1)];	2	structure	the monotone chain holds at most both chains of every point plus the closing one
 driver-action-contact-wrench.adb	High : Real := (if Below < No_Way then Arctan (Below) else Pi / 2.0);	2.0	math	a friction angle lies below a right angle
 driver-action-contact-wrench.adb	Length := (if Count > 0 and then Length > 0.0 then Length / Real (Count) else 1.0);	1.0	math	any positive moment scale leaves the solution unchanged; one is the identity
 driver-action-contact-wrench.adb	Mid : constant Real := (Low + High) / 2.0;	2.0	math	bisection takes the midpoint
-driver-action-contact-wrench.adb	Theta : constant Real := 2.0 * Pi * Real (K) / Real (Edges);	2.0	math	a full turn is two pi
 driver-action-contact-wrench.adb	for R in 1 .. 3 loop	3	structure	the three force rows (the moment rows follow them)
 driver-action-contact-wrench.adb	if H'Length < 3 then	3	math	a hull of fewer than three vertices spans no area
 driver-action-contact-wrench.adb	if P'Length < 3 then	3	math	fewer than three points are their own hull

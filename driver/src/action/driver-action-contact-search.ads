@@ -47,6 +47,8 @@ package Driver.Action.Contact.Search is
 
    package Real_Vectors is new Ada.Containers.Vectors (Positive, Real);
 
+   package Pad_Numbers is new Ada.Containers.Vectors (Positive, Positive);
+
    type Closer_Info is record
       Hand : Hand_Id;
       Now  : Real := 0.0;   --  its fraction at this beat
@@ -67,10 +69,20 @@ package Driver.Action.Contact.Search is
       Band    : Real := 0.0;             --  how far behind the lobes' ends a face's touch is set
       Closes  : Boolean := False;        --  some closer brings faces together
       Why_Not : Unbounded_String;        --  why it cannot close, when it cannot
+      Repeats : Positive := 1;           --  the hand looks the same after this many rotations by Repeat
+      Repeat  : Rigid := Identity;       --  in the tool frame: one of them
+      First   : Pad_Numbers.Vector;      --  for each pad, the first pad of those Repeat takes it to
    end record;
    --  A pad's points are where its face touches: Band behind the end of the
    --  lobe, the arm's resolution and Z of its placement sigma, so that the
    --  touch stays on the face wherever within its uncertainty the arm stops.
+   --
+   --  The symmetry is measured: the largest number of equal turns about the
+   --  hand's axis through the middle of its closed faces that takes every
+   --  pad onto a pad of the same closer, open and closed faces alike within
+   --  their measurement. A symmetric hand makes the same contact sets from
+   --  every pad of an orbit, so each set is found from one of them; which of
+   --  the symmetric tool poses reaches it is settled when it is made.
 
    function Effector_Of (S : Snapshot; A : Arm_Id) return Effector
      with Pre => Has_Arm (S, A);
@@ -128,6 +140,7 @@ package Driver.Action.Contact.Search is
       Up        : Vec3;
       Friction  : Friction_Bounds;
       Reachable : not null access function (Tool : Rigid) return Boolean;
+      Can_Travel : not null access function (Tool : Rigid; Closers : Real_Vectors.Vector) return Boolean;
       Best      : out Candidate;
       Found     : out Boolean;
       Tried     : out Account;
@@ -136,5 +149,11 @@ package Driver.Action.Contact.Search is
    --  The best contact set of E on the thing for Motion. Beside are the
    --  measured surfaces of everything else near it. Touch_Only leaves out
    --  the sets that close on the thing, for a want to touch it, not hold it.
+   --
+   --  Reachable says whether the arm can take its tool to a pose. Can_Travel
+   --  says whether the arm's travel can bring its body to a pose, its closers
+   --  at the fractions given, by its own measure of clearance: the pose where
+   --  the last straight stretch begins is reached by that travel, so a
+   --  candidate whose pose there it cannot reach cannot be made.
 
 end Driver.Action.Contact.Search;
