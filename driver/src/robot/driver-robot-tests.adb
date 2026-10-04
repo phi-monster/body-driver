@@ -10,6 +10,8 @@ with Driver.Instrument;
 with Driver.Observations;
 with Driver.Beats;
 with Driver.Log;
+with Ada.Strings.Fixed;
+with Driver.Robot.Body_File;
 with Driver.Robot.Boot;
 with Driver.Robot.Kinematics;
 with Driver.Robot.Lockin;
@@ -2204,7 +2206,10 @@ package body Driver.Robot.Tests is
    --  twentieth of what one keyframe's match can: the fit must judge the
    --  keyframes by the match, or no joint has a keyframe of its own (the
    --  replay of A10, its lock-in steps grown finer, fitted no arm 2).
-   procedure Kinematics_With_An_Offset_Reference is
+   --  Builds an arm of six joints, its eye's lock-in, its graph, and its
+   --  kinematics fitted from synthetic matches of a sweep whose reference
+   --  keyframe lies Offset rad off the sweep's base on joint 3.
+   procedure Build_Fitted_Arm (M : in out Model; Offset : Real) is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N       : constant := 6;
       Levels  : constant Real_Array := [0.05, -0.05, 0.1, -0.1, 0.2, -0.2];
@@ -2212,7 +2217,6 @@ package body Driver.Robot.Tests is
       Columns : constant := 16;
       Rows    : constant := 12;
       Noise   : constant := 0.1;        --  the matcher's, pixels per coordinate
-      Offset  : constant := 3.0e-5;     --  the reference's joint 3 below the sweep's base
       Table   : constant Vec3 := [0.0, -0.6, -0.8];
       Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
       Truth   : Fit.Joint_Array (1 .. N);
@@ -2222,7 +2226,6 @@ package body Driver.Robot.Tests is
         [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
       Base    : constant Real_Array (1 .. N) := [others => 0.0];
       Ref     : Real_Array (1 .. N) := Base;
-      M       : Model;
       R       : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
       Rng     : Generator;
       Cells   : constant := 4;
@@ -2344,14 +2347,173 @@ package body Driver.Robot.Tests is
       end loop;
       M.Kinematics.Append (R);
       Driver.Robot.Kinematics.Refit (M);
+   end Build_Fitted_Arm;
+
+   procedure Kinematics_With_An_Offset_Reference is
+      M : Model;
+   begin
+      Build_Fitted_Arm (M, 3.0e-5);
       Check (Driver.Robot.Kinematics.Fitted (M, 1),
              "the arm whose reference lay 3e-5 rad off its sweep's base is not fitted: "
              & Ada.Strings.Unbounded.To_String (M.Kinematics (1).Result.Why));
       if Driver.Robot.Kinematics.Fitted (M, 1) then
-         Check (abs (M.Kinematics (1).Result.Lens.Fx - Lens.Fx) < Lens.Fx * Noise / 40.0,
+         Check (abs (M.Kinematics (1).Result.Lens.Fx - 400.0) < 1.0,
                 "its focal length came out" & M.Kinematics (1).Result.Lens.Fx'Image);
       end if;
    end Kinematics_With_An_Offset_Reference;
+
+   --  A body as a boot leaves it: the fitted arm, and the rest of what the
+   --  boot measures, set to values it could have measured.
+   procedure Measured_Body (M : in out Model) is
+   begin
+      Build_Fitted_Arm (M, 0.0);
+      for C in 1 .. 6 loop
+         M.Noise.Append (1.0e-6 * Real (C) / 3.0);
+         M.Noise_Freedom.Append (100 + C);
+         M.Groups (1).Low_Seen.Append (-0.2 - 0.01 * Real (C));
+         M.Groups (1).High_Seen.Append (0.2 + 0.01 * Real (C));
+      end loop;
+      M.Groups (1).Delay_Beats := 2;
+      M.Groups (1).Delay_Known := True;
+      M.Groups (1).Free_Shortfalls.Append (0.0125);
+      M.Groups (1).Free_Shortfalls.Append (1.0 / 3.0);
+      M.Lags.Append (1);
+      M.Lag_Known.Append (True);
+      M.Graph.Roles.Append (Arm);
+      M.Graph.Arm_Of.Append (1);
+      M.Graph.Breach.Append (0);
+      M.Eyes (1).Rest_Factor := 1.0 + 1.0 / 7.0;
+      M.Eyes (1).Rest_Counts_Known := True;
+      M.Eyes (1).Rest_Count_Max := 3;
+      M.Eyes (1).Rest_Count_Beats := 41;
+      for Cell in 1 .. 4 loop
+         M.Eyes (1).Textured.Append (Cell /= 2);
+      end loop;
+   end Measured_Body;
+
+   function Replaced (S, From, To : String) return String is
+      At_From : constant Natural := Ada.Strings.Fixed.Index (S, From);
+   begin
+      return (if At_From = 0 then S else S (S'First .. At_From - 1) & To & S (At_From + From'Length .. S'Last));
+   end Replaced;
+
+   --  Written and read back, the body is the one that was written: every
+   --  number to the bit, and the file the reloaded body writes is the same.
+   procedure Body_File_Round_Trip is
+      M, Back : Model;
+      Ok      : Boolean;
+      Why     : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      Measured_Body (M);
+      Check (Driver.Robot.Kinematics.Fitted (M, 1), "the body to write has no fitted arm");
+      declare
+         Written : constant String := Driver.Robot.Body_File.Text (M);
+      begin
+         Driver.Robot.Body_File.Read (Back, Written, Ok, Why);
+         Check (Ok, "the body file was not read: " & Ada.Strings.Unbounded.To_String (Why));
+         for Q in Stored loop
+            Check (Reloaded (Back, Q), Q'Image & " was not reloaded");
+         end loop;
+         Check (Driver.Robot.Body_File.Text (Back) = Written, "the reloaded body writes another file");
+         Check (Driver.Robot.Kinematics.Fitted (Back, 1), "the reloaded arm is not fitted");
+         declare
+            Q    : constant Real_Array (1 .. 6) := [0.1, -0.05, 0.08, 0.05, 0.1, -0.1];
+            Was  : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q);
+            Is_Now : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (Back, 1, Q);
+            T1, P1, T2, P2 : Mat3;
+         begin
+            Driver.Robot.Kinematics.Pose_Covariance (M, 1, Q, T1, P1);
+            Driver.Robot.Kinematics.Pose_Covariance (Back, 1, Q, T2, P2);
+            Check (Was.Rotation = Is_Now.Rotation and then Was.Translation = Is_Now.Translation
+                   and then T1 = T2 and then P1 = P2,
+                   "the reloaded arm puts its eye elsewhere, or less certainly");
+            for C in 1 .. 6 loop
+               Check (Visible_Step (Back, 1, C) = Visible_Step (M, 1, C)
+                      and then Driver.Robot.Kinematics.Keyframe_Step (Back, 1, C)
+                               = Driver.Robot.Kinematics.Keyframe_Step (M, 1, C)
+                      and then Reading_Noise (Back, 1, C) = Reading_Noise (M, 1, C),
+                      "channel" & C'Image & "'s steps or noise changed in the file");
+            end loop;
+         end;
+      end;
+   end Body_File_Round_Trip;
+
+   --  A quantity measured by another method than the code's is measured
+   --  again, with what rests on it; the rest stands, and the estimates leave
+   --  it as reloaded.
+   procedure Body_File_Method_Change is
+      M       : Model;
+      Ok      : Boolean;
+      Why     : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      Measured_Body (M);
+      declare
+         Written : constant String := Driver.Robot.Body_File.Text (M);
+         Kin     : constant String := """kinematics"": {""method"": "
+           & Driver.Log.Image (Driver.Robot.Body_File.Kinematics_Method);
+         Gra     : constant String := """graph"": {""method"": " & Driver.Log.Image (Driver.Robot.Body_File.Graph_Method);
+      begin
+         declare
+            Back : Model;
+         begin
+            Driver.Robot.Body_File.Read (Back, Replaced (Written, Kin, """kinematics"": {""method"": 0"), Ok, Why);
+            Check (Ok, "the body file was not read: " & Ada.Strings.Unbounded.To_String (Why));
+            Check (not Reloaded (Back, Stored_Kinematics) and then Back.Kinematics.Is_Empty,
+                   "kinematics of another method were reloaded");
+            for Q in Stored_Noise .. Stored_Graph loop
+               Check (Reloaded (Back, Q), Q'Image & " was not reloaded with only the kinematics' method changed");
+            end loop;
+            declare
+               Noise_Was : constant Real_Vectors.Vector := Back.Noise;
+            begin
+               Estimate_Now (Back);
+               Check (Real_Vectors."=" (Back.Noise, Noise_Was), "a reloaded noise was measured again");
+               Check (Role (Back, 1) = Arm and then Eye_Mount (Back, 1).Kind = Arm_Carried,
+                      "a reloaded graph was derived again");
+            end;
+         end;
+         declare
+            Back : Model;
+         begin
+            Driver.Robot.Body_File.Read (Back, Replaced (Written, Gra, """graph"": {""method"": 0"), Ok, Why);
+            Check (Ok, "the body file was not read: " & Ada.Strings.Unbounded.To_String (Why));
+            Check (not Reloaded (Back, Stored_Graph) and then not Reloaded (Back, Stored_Kinematics),
+                   "a graph of another method, or the kinematics on it, were reloaded");
+            for Q in Stored_Noise .. Stored_Responses loop
+               Check (Reloaded (Back, Q), Q'Image & " was not reloaded with only the graph's method changed");
+            end loop;
+         end;
+      end;
+   end Body_File_Method_Change;
+
+   --  The arm reaches a pose within its travel on a body reloaded from a
+   --  file, with no stream behind it and no instrument.
+   procedure Plan_On_A_Reloaded_Body is
+      M, Back : Model;
+      Ok      : Boolean;
+      Why     : Ada.Strings.Unbounded.Unbounded_String;
+      O       : Observation;
+      Q_Goal  : constant Real_Array (1 .. 6) := [0.1, -0.05, 0.08, 0.05, 0.1, -0.1];
+   begin
+      Measured_Body (M);
+      O.Readings.Append (Real_Array'(1 .. 6 => 0.0));
+      declare
+         Goal : constant Driver.Robot.Motion.Pose_Goal :=
+           (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q_Goal), Position_Only => False);
+         use type Driver.Robot.Motion.Plan_Status;
+      begin
+         Check (Driver.Robot.Motion.Status (Driver.Robot.Motion.Plan_Reach (Back, 1, O, Goal))
+                /= Driver.Robot.Motion.Planned, "a body that measured nothing plans a reach");
+         Driver.Robot.Body_File.Read (Back, Driver.Robot.Body_File.Text (M), Ok, Why);
+         Check (Ok, "the body file was not read: " & Ada.Strings.Unbounded.To_String (Why));
+         declare
+            P : constant Driver.Robot.Motion.Plan := Driver.Robot.Motion.Plan_Reach (Back, 1, O, Goal);
+         begin
+            Check (Driver.Robot.Motion.Status (P) = Driver.Robot.Motion.Planned,
+                   "the reloaded body cannot reach a pose within its travel: " & Driver.Robot.Motion.Why (P));
+         end;
+      end;
+   end Plan_On_A_Reloaded_Body;
 
    procedure Kinematics_Of_A_Synthetic_Arm is
    begin
@@ -2390,6 +2552,12 @@ package body Driver.Robot.Tests is
                              & "longer carries, is still taken for the arm's", Stale_Fit_Is_No_Arms'Access);
       Driver.Tests.Register ("robot.kinematics.shared", "the fit's focal length or eye pose is off by more than Z of "
                              & "its own sigmas when every keyframe's points share an error", Kinematics_With_Shared_Errors'Access);
+      Driver.Tests.Register ("robot.body.file", "a body written to its file and read back is not the body that was "
+                             & "written", Body_File_Round_Trip'Access);
+      Driver.Tests.Register ("robot.body.method", "a quantity measured by another method is reloaded, or the "
+                             & "quantities of unchanged methods are measured again", Body_File_Method_Change'Access);
+      Driver.Tests.Register ("robot.body.plan", "a body reloaded from its file cannot plan a reach without a "
+                             & "stream or an instrument", Plan_On_A_Reloaded_Body'Access);
       Driver.Tests.Register ("robot.kinematics.offset", "an arm whose reference keyframe lies off its sweep's base by "
                              & "less than a keyframe's match can tell is not fitted", Kinematics_With_An_Offset_Reference'Access);
       Driver.Tests.Register ("robot.kinematics.small", "a sweep too small to determine the lens and the joints is "

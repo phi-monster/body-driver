@@ -365,6 +365,9 @@ begin
    Line (Core, "replayed" & Natural'Image (Beat) & " beats," & Natural'Image (Commanded_Beats)
          & " actions," & Natural'Image (Episodes) & " episode resets");
    if Length (Body_File) > 0 then
+      --  The live boot saves after a final estimate; without one here the
+      --  body would miss what the last beats added (the final keyframes).
+      Driver.Robot.Estimate_Now (Robot);
       Driver.Robot.Boot.Save (Robot, Hands, To_String (Body_File));
    end if;
    if Length (Estimates) > 0 then

@@ -51,6 +51,11 @@ private package Driver.Robot.Channels is
    --  The degrees of freedom the channel's noise rests on (0: known or exact).
    --  Every channel of the group has its noise measured.
 
+   function Lowest (M : Model; G : Group_Id; Channel : Positive) return Real;
+   function Highest (M : Model; G : Group_Id; Channel : Positive) return Real;
+   --  The lowest and highest reading the channel has shown (in this stream
+   --  or one reloaded from a body file); Real'Last and Real'First before any.
+
    function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean
      with Pre => D'First = 1 and then D'Length = Group_Size (M, G);
    --  A change D of the group's readings, one value per channel, is motion:

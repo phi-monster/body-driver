@@ -769,16 +769,8 @@ package body Driver.Robot.Motion is
             Q : Real_Array (1 .. Size) := Start;
          begin
             for C in 1 .. Size loop
-               Low (C) := Real'Last;
-               High (C) := Real'First;
-               for B in 0 .. M.Beats - 1 loop
-                  if Channels.Has_Reading (M, G, B) then
-                     Low (C) := Real'Min (Low (C), Channels.Reading (M, G, B, C));
-                     High (C) := Real'Max (High (C), Channels.Reading (M, G, B, C));
-                  end if;
-               end loop;
-               Low (C) := Real'Min (Low (C), Start (C));
-               High (C) := Real'Max (High (C), Start (C));
+               Low (C) := Real'Min (Channels.Lowest (M, G, C), Start (C));
+               High (C) := Real'Max (Channels.Highest (M, G, C), Start (C));
             end loop;
             if Sigma = Real'Last then
                return Refused (Unmeasured, "the arm's fit has no uncertainty");
