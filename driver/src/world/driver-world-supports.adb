@@ -513,22 +513,30 @@ package body Driver.World.Supports is
                end if;
             end loop;
             declare
-               D    : constant Vec3 := Points (Lowest).Mean - P.Centre;
-               A    : constant Real := D * P.Tangent_1;
-               B    : constant Real := D * P.Tangent_2;
                H    : constant Estimate := Driver.Geometry.Height (P, Points (Lowest));
                --  From along the normal to along Up.
                Lean : constant Real := P.Normal * Up.Unit_Vector;
                Up_H : constant Estimate := (Value => H.Value / Lean, Sigma => H.Sigma / Lean,
                                             Degrees_Of_Freedom => H.Degrees_Of_Freedom);
+               function Over (X : Vec3) return Boolean is
+                  D : constant Vec3 := X - P.Centre;
+                  A : constant Real := D * P.Tangent_1;
+                  B : constant Real := D * P.Tangent_2;
+               begin
+                  return A >= S.Low_1 and then A <= S.High_1 and then B >= S.Low_2 and then B <= S.High_2;
+               end Over;
+               --  Over the surface's reach, along its normal.
             begin
                --  The support is the one the thing is surely closest above: of
-               --  those its lowest point is over and not below, the one with the
-               --  least height the point can surely be above it. A plane far from
-               --  its own points, uncertain there by its tilt, may lie closer in
-               --  its mean and still say little.
+               --  those it is over and its lowest point is not below, the one
+               --  with the least height that point can surely be above it. A
+               --  plane far from its own points, uncertain there by its tilt, may
+               --  lie closer in its mean and still say little. The thing is over
+               --  a surface when some of its points are over the surface's reach:
+               --  the surface's own points end where the thing hides it, so the
+               --  thing's lowest point, on its rim, may lie beyond them.
                if not Its_Own_Face (S)
-                 and then A >= S.Low_1 and then A <= S.High_1 and then B >= S.Low_2 and then B <= S.High_2
+                 and then (for some I in Points'Range => Over (Points (I).Mean))
                  and then not (H.Value < 0.0
                                and then Significant (Scalar_Gate (H.Degrees_Of_Freedom, Tests => Points'Length),
                                                      H.Value, H.Sigma))
@@ -540,8 +548,9 @@ package body Driver.World.Supports is
          end;
       end loop;
       --  Its lowest point on the support within their uncertainties: the eyes
-      --  see it touch. Above it: they see no lower, and what they do not see
-      --  may reach down to the support.
+      --  see no gap. Above it: they see no lower, and what they do not see
+      --  may reach down to the support. Either way the contact itself is
+      --  hidden by the support, and the height is a bound.
       Best.Touching := Best.Index /= 0
         and then not (Best.Height.Value > 0.0
                       and then Significant (Scalar_Gate (Best.Height.Degrees_Of_Freedom, Tests => Points'Length),

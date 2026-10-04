@@ -37,7 +37,7 @@ package Driver.World.Offline is
    function Centre (B : Bench; T : Thing_Id) return Point_Estimate;
    function Resting_On (B : Bench; T : Thing_Id) return Surface_Id'Base;
    function Height_Above_Support (B : Bench; T : Thing_Id) return Estimate;
-   function Bottom_Seen (B : Bench; T : Thing_Id) return Boolean;
+   function No_Gap_Seen (B : Bench; T : Thing_Id) return Boolean;
 
    function Surface_Count (B : Bench) return Natural;
    function Surface_Of (B : Bench; F : Surface_Id) return Driver.World.Supports.Surface;

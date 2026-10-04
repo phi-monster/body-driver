@@ -66,7 +66,7 @@ private package Driver.World.Estimates is
 
    function Resting_On (S : State; T : Thing_Id) return Surface_Id'Base;
    function Height_Above_Support (S : State; T : Thing_Id) return Estimate;
-   function Bottom_Seen (S : State; T : Thing_Id) return Boolean;
+   function No_Gap_Seen (S : State; T : Thing_Id) return Boolean;
    --  As Driver.World's: no support and Unknown before one is found.
 
    procedure Adopt (S : in out State; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id);
@@ -111,6 +111,7 @@ private
    package Image_Holders is new Ada.Containers.Indefinite_Holders (Driver.Images.Image, Driver.Images."=");
    package Observation_Holders is new Ada.Containers.Indefinite_Holders (Observation, Driver.Observations."=");
    package Request_Holders is new Ada.Containers.Indefinite_Holders (String);
+   package Point_Vectors is new Ada.Containers.Vectors (Positive, Point_Estimate);
 
    --  A thing in one eye: its track, and the instrument's request out for it.
    type Slot is record
@@ -120,6 +121,8 @@ private
       Out_Now : Boolean := False;
       Ticket  : Driver.Services.Ticket;
       Points  : Point_Holders.Holder;   --  a match request's points
+      Outline : Point_Vectors.Vector;   --  a pointed region, carried out to the depth of what is seen of
+                                        --  the thing; kept while the eye looks for it again
    end record;
 
    package Slot_Vectors is new Ada.Containers.Vectors (Eye_Id, Slot);
@@ -155,13 +158,17 @@ private
    end record;
 
    package Start_Vectors is new Ada.Containers.Vectors (Positive, Start);
-   package Point_Vectors is new Ada.Containers.Vectors (Positive, Point_Estimate);
 
-   --  What one pair of eyes last saw of a thing, and the observation it was
-   --  seen at (without its images): the eyes as they were then.
+   --  What one pair of eyes saw of a thing at one instant, the matcher's
+   --  error then (pixels, and the degrees of freedom it rests on), and the
+   --  observation it was seen at (without its images): the eyes as they were
+   --  then. A pair keeps its latest answer, and the last one before it that
+   --  saw the thing from another view.
    type Pair_Seen is record
       From, Into : Eye_Id;
       Kept       : Driver.World.Pairs.Match_Vectors.Vector;
+      Error      : Real := Real'Last;
+      Freedom    : Natural := 0;
       Then_Seen  : Observation_Holders.Holder;
    end record;
 
@@ -179,13 +186,20 @@ private
       Has_Points : Boolean := False;
       Friction  : Friction_Bounds;
       Touches   : Point_Vectors.Vector;
-      Outline   : Point_Vectors.Vector;   --  its regions where it was pointed at, carried out to
-                                          --  the depth of what is seen of it
       Under     : Driver.World.Supports.Support;   --  its support, worked out again when its
       Under_Due : Boolean := True;                 --  points or the surfaces change
    end record;
 
    package Thing_Vectors is new Ada.Containers.Vectors (Thing_Id, Thing_Record);
+
+   procedure Keep_View
+     (R         : in out Thing_Record;
+      Answer    : Pair_Seen;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class);
+   --  A pair's answer that placed points of the thing, stored: it replaces
+   --  the pair's latest when it saw the thing from the same view, else the
+   --  latest becomes the earlier view, and an earlier one before it goes.
 
    package Place_Vectors is new Ada.Containers.Vectors (Place_Id, Point_Estimate);
 

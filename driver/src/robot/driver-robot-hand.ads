@@ -85,4 +85,51 @@ private
 
    overriding procedure Finalize (H : in out Hands);
 
+   procedure Sweep_Way
+     (Way      : Real;
+      Step     : Real;
+      Push     : not null access procedure (Offset : Real; Followed : out Boolean);
+      Extends  : not null access function return Boolean;
+      Pushes   : out Natural;
+      Answered : out Boolean)
+     with Pre => Way /= 0.0 and then Step > 0.0;
+   --  One way of a closer channel's sweep: pushed Way by Step, then by twice
+   --  as much each time, from where the sweep began, for as long as each push
+   --  shows the eye something the last end did not (Extends) and the
+   --  channel's reading follows it (Push says whether the body judged it
+   --  moved along the ask). The first push it does not follow is the
+   --  channel's end this way, and the doubling stops there: a controller that
+   --  does not clamp takes a command past the end as full effort. Pushes
+   --  counts the pushes; Answered, whether the first one followed.
+
+   type Descent_Steps is record
+      Fast  : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
+      Band  : Natural := 0;   --  within that band, each the larger of the sigma and Least
+      Crept : Natural := 0;   --  by Least, nothing predicting the contact
+   end record;
+
+   function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Crept);
+
+   procedure Descend
+     (Gap   : not null access function return Estimate;
+      Least : Real;
+      Lower : not null access procedure (By : Real; Reached : out Boolean);
+      Steps : out Descent_Steps)
+     with Pre => Least > 0.0;
+   --  A press's descent: each step lowers the tool By, until one does not
+   --  reach (Lower says so: the arm met something, or cannot go there). Gap is
+   --  the tip's height above the contact predicted under it, with its sigma,
+   --  Unknown when nothing predicts it. With a prediction, the steps double
+   --  from Least for as long as each ends Z sigma or more above the predicted
+   --  contact, the last cut to end there; within that band each step is the
+   --  larger of the sigma and Least, so the tip meets the surface at most
+   --  that far short of a step's end: the overshoot the prediction already
+   --  admits. Without one, every step is Least, the smallest move of the tool
+   --  that tells from its noise: nothing says where the surface is.
+
+   function Sweepable (H : Hands; M : Model; G : Group_Id) return Boolean;
+   --  The group is a closer by the body's roles now, and the hand watches it
+   --  in an eye its arm, as the body has it now, carries: the only groups
+   --  swept as closers.
+
 end Driver.Robot.Hand;

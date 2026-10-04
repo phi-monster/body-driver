@@ -149,10 +149,45 @@ package body Driver.Robot.Hand is
 
    procedure Find_Pairs (D : in out Hand_Data; M : Model; O : Observation);
    --  Every closer group with the eyes it moves a patch in, its own arm's
-   --  eyes among them, once the body has measured them.
+   --  eyes among them, once the body has measured them; by the body's roles
+   --  as they are now, which the boot re-reads: a pair whose group is no
+   --  longer a closer, or no longer of that arm, goes, and so does a hand
+   --  found from it.
+
+   function Still_A_Pair (P : Pair; M : Model) return Boolean is
+     (Role (M, P.Group) = Closer and then Closer_Arm (M, P.Group) = P.Arm
+      and then (if P.Own then Eye_Mount (M, P.Eye).Kind = Arm_Carried and then Eye_Mount (M, P.Eye).Arm = P.Arm
+                else Response (M, P.Group, P.Eye) = Patch));
 
    procedure Find_Pairs (D : in out Hand_Data; M : Model; O : Observation) is
    begin
+      declare
+         I : Positive := 1;
+      begin
+         while I <= Natural (D.Pairs.Length) loop
+            if Still_A_Pair (D.Pairs (I), M) then
+               I := I + 1;
+            else
+               Driver.Log.Line (Driver.Log.Robot, "hand: group" & D.Pairs (I).Group'Image & " is no longer a closer"
+                                & " of arm" & D.Pairs (I).Arm'Image & " watched in eye" & D.Pairs (I).Eye'Image
+                                & "; its sweep there is dropped");
+               D.Pairs.Delete (I);
+            end if;
+         end loop;
+      end;
+      declare
+         I : Hand_Id := 1;
+      begin
+         while I <= D.Found.Last_Index loop
+            if Role (M, D.Found (I).Group) = Closer and then Closer_Arm (M, D.Found (I).Group) = D.Found (I).Arm then
+               I := I + 1;
+            else
+               Driver.Log.Line (Driver.Log.Robot, "hand: group" & D.Found (I).Group'Image & " is no longer a closer"
+                                & " of arm" & D.Found (I).Arm'Image & "; the hand found from it is dropped");
+               D.Found.Delete (I);
+            end if;
+         end loop;
+      end;
       for G in 1 .. Group_Id'Base (Group_Count (M)) loop
          if Role (M, G) = Closer and then Closer_Arm (M, G) > 0 and then Driver.Observations.Has_Reading (O, G) then
             for E in 1 .. Eye_Id'Base (Eye_Count (M)) loop
@@ -451,6 +486,73 @@ package body Driver.Robot.Hand is
          end;
       end loop;
    end Observe;
+
+   procedure Sweep_Way
+     (Way      : Real;
+      Step     : Real;
+      Push     : not null access procedure (Offset : Real; Followed : out Boolean);
+      Extends  : not null access function return Boolean;
+      Pushes   : out Natural;
+      Answered : out Boolean)
+   is
+      Offset   : Real := Step;
+      Followed : Boolean;
+   begin
+      Pushes := 0;
+      Answered := False;
+      loop
+         Push (Way * Offset, Followed);
+         Pushes := Pushes + 1;
+         if Pushes = 1 then
+            Answered := Followed;
+         end if;
+         exit when not Followed or else not Extends.all;
+         Offset := 2.0 * Offset;
+      end loop;
+   end Sweep_Way;
+
+   procedure Descend
+     (Gap   : not null access function return Estimate;
+      Least : Real;
+      Lower : not null access procedure (By : Real; Reached : out Boolean);
+      Steps : out Descent_Steps)
+   is
+      Fast    : Real := Least;   --  the next step of the fast part, doubling
+      Reached : Boolean;
+   begin
+      Steps := (others => 0);
+      loop
+         declare
+            G  : constant Estimate := Gap.all;
+            By : Real := Least;
+         begin
+            if Known (G) then
+               declare
+                  --  How far the tip may go before it is within Z sigma of the
+                  --  predicted contact.
+                  Room : constant Real := G.Value - Threshold (Scalar_Gate (G.Degrees_Of_Freedom)) * G.Sigma;
+               begin
+                  if Room >= Least then
+                     By := Real'Min (Fast, Room);
+                     Fast := 2.0 * Fast;
+                     Steps.Fast := Steps.Fast + 1;
+                  else
+                     By := Real'Max (G.Sigma, Least);
+                     Steps.Band := Steps.Band + 1;
+                  end if;
+               end;
+            else
+               Steps.Crept := Steps.Crept + 1;
+            end if;
+            Lower (By, Reached);
+            exit when not Reached;
+         end;
+      end loop;
+   end Descend;
+
+   function Sweepable (H : Hands; M : Model; G : Group_Id) return Boolean is
+     (H.Data /= null
+      and then (for some P of H.Data.Pairs => P.Group = G and then P.Own and then Still_A_Pair (P, M)));
 
    procedure Measure (H : in out Hands; M : in out Model) is separate;
    --  The decider (driver-robot-hand-measure.adb).
