@@ -763,9 +763,12 @@ driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbo
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	if Natural (Lobes.Length) >= 2 then	2	structure	lobes close towards one another when there are two or more
-driver-robot-hand-measure.adb	By := 2.0 * By;	2.0	numerics	a search for an unknown distance grows its step geometrically, doubling
+driver-robot-hand-measure.adb	& Driver.Log.Image (By, 4));	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Least, 4) & ""));	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	Lean : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;	4.0	math	half-way between away from the other lobes and across from them
 driver-robot-hand-measure.adb	Tilt := 2.0 * Tilt;	2.0	numerics	a search for an unknown size grows geometrically, doubling
+driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Value, 4) & "" & Driver.Log.Image (First.Sigma, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Value, 4) & "" & Driver.Log.Image (First.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then Driver.Robot.Hand.Aims.Spread (Sight, [1 => R.Lobes (Lobe).Sights (Other_End).Ray.Direction.Unit_Vector])	1	structure	the one other line of sight of a lone lobe
 driver-robot-hand-measure.adb	while Tilt < Ada.Numerics.Pi / 2.0 loop	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
 driver-robot-hand-presses.adb	- U * (Step.Covariance * U)) / 2.0);	2.0	math	the mean of the variance about the two axes across the move
@@ -819,6 +822,7 @@ driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P
 driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
+driver-robot-hand.adb	Fast := 2.0 * Fast;	2.0	math	the descent doubles its step until the band
 driver-robot-hand.adb	I : Hand_Id := 1;	1	structure	the first hand
 driver-robot-hand.adb	I : Positive := 1;	1	structure	the first pair
 driver-robot-hand.adb	Offset := 2.0 * Offset;	2.0	math	the sweep doubles its step
