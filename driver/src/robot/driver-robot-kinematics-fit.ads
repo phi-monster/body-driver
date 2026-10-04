@@ -136,6 +136,8 @@ package Driver.Robot.Kinematics.Fit is
       Covariance : Real_Lists.Vector;  --  of the parameters above, row by row; empty when not determined
       Depths     : Real_Lists.Vector;  --  per track, the depth of its point along its reference line of
                                        --  sight as the track refinement found it; 0 where it has none
+      Depth_Sigmas : Real_Lists.Vector;   --  per track, how uncertain the logarithm of that depth is, the
+                                          --  other parameters held; Real'Last where it has none
    end record;
 
    procedure Fit
@@ -148,106 +150,146 @@ package Driver.Robot.Kinematics.Fit is
       Report     : out Fit_Report)
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length;
 
-   type Track_Point is record
-      Known : Boolean := False;   --  triangulated in front of the reference eye
-      X     : Vec3 := [0.0, 0.0, 0.0];
+   ---------------------------------------------------------------------------
+   --  Consensus. A plane holds only some of a view's points, and a dense
+   --  matcher answers points the other eye does not show: the estimates
+   --  below first find the model the agreeing points share, from samples of
+   --  as few points as fix it, then refine it on those points alone. The
+   --  samples are drawn by a repeatable generator, and there are as many as
+   --  make the chance that none was all of agreeing points at most Z's
+   --  two-sided tail.
+
+   function Consensus_Samples (Minimal : Positive; Fraction : Real) return Positive
+     with Pre => Fraction > 0.0 and then Fraction <= 1.0;
+   --  How many samples of Minimal points that takes when that Fraction of the
+   --  points agree.
+
+   type Flag_Array is array (Positive range <>) of Boolean;
+
+   --  A track as the reference eye has it: on the line of sight H (H (3) = 1)
+   --  through its reference pixel, at Depth along it (0 when it has none),
+   --  the logarithm of the depth uncertain by Sigma.
+   type Sight_Point is record
+      H     : Vec3 := [0.0, 0.0, 1.0];
+      Depth : Real := 0.0;
+      Sigma : Real := Real'Last;
    end record;
 
-   type Track_Point_Array is array (Positive range <>) of Track_Point;
+   type Sight_Point_Array is array (Positive range <>) of Sight_Point;
 
-   procedure Track_Points
-     (Changes   : Driver.Numerics.Arrays.Real_Matrix;
-      Sightings : Sighting_Array;
-      Joints    : Joint_Array;
-      L         : Lens;
-      Points    : out Track_Point_Array)
-     with Pre => Changes'Length (2) = Joints'Length;
-   --  Every track's point in the reference eye's frame, indexed by track: on
-   --  its reference line of sight, at the depth least squares over the
-   --  keyframes it was followed into gives it.
-
-   procedure Table
-     (Changes      : Driver.Numerics.Arrays.Real_Matrix;
-      Sightings    : Sighting_Array;
-      Joints       : Joint_Array;
-      L            : Lens;
-      Normal       : out Vec3;
-      Offset       : out Real;
-      Offset_Sigma : out Real;
-      Sigma        : out Real;
-      Found        : out Boolean)
-     with Pre => Changes'Length (2) = Joints'Length;
-   --  The plane most of the tracked points lie on, in the reference eye's
-   --  frame: every track triangulated from its keyframes, the plane's normal
-   --  the direction whose median distance of the points from their median
-   --  offset is least (over the same lattice of directions the fit searches),
-   --  then refined by Huber-weighted least squares at the measured spread.
-   --  Normal points to the side of the reference eye, and the plane holds the
-   --  points X with Normal * X = Offset, so the eye at the origin is -Offset
-   --  from it (Offset_Sigma its uncertainty along Normal); Sigma is the
-   --  normal's angular uncertainty.
-
-   --  One point in two frames.
-   type Point_Pair is record
-      From, To : Vec3 := [0.0, 0.0, 0.0];
+   --  A plane as the reference eye sees it: the line of sight H meets it at
+   --  depth 1 / (A * H). It holds the points X with Normal * X = Offset, the
+   --  normal -A / |A| towards the eye and the offset -1 / |A|.
+   type Sight_Plane is record
+      Found      : Boolean := False;
+      A          : Vec3 := [0.0, 0.0, 0.0];
+      Covariance : Mat3 := [others => [others => 0.0]];   --  of A
+      Points     : Natural := 0;                           --  how many points lie on it
    end record;
 
-   type Point_Pair_Array is array (Positive range <>) of Point_Pair;
+   procedure Dominant_Plane (Points : Sight_Point_Array; Plane : out Sight_Plane; On : out Flag_Array)
+     with Pre => On'First = Points'First and then On'Last = Points'Last;
+   --  The plane most of the points lie on, each point judged by its own
+   --  uncertainty: by consensus over samples of three, each scored by the
+   --  squares of every point's residual in units of its sigma, none counted
+   --  past Z squared; then by weighted least squares on the inverse depths of
+   --  the points that lie on it (On), re-chosen at the residuals' own spread
+   --  until the choice settles. Covariance is the sandwich over those points.
 
-   procedure Similarity
-     (Pairs       : Point_Pair_Array;
-      Rotation    : out Mat3;
-      Translation : out Vec3;
-      Scale       : out Real;
-      Scale_Sigma : out Real;
-      Spread      : out Real;
-      Used        : out Natural;
-      Found       : out Boolean);
-   --  To = Scale * Rotation * From + Translation: the closed form for the
-   --  weighted pairs (Umeyama's), then Huber weights on the residuals at
-   --  their measured spread (Spread, per coordinate), the pairs that fit
-   --  re-chosen until the choice settles. Scale_Sigma is the scale's
-   --  uncertainty: the spread over the points' own spread about their centre.
+   procedure Refit_Plane (Points : Sight_Point_Array; On : Flag_Array; Plane : out Sight_Plane)
+     with Pre => On'First = Points'First and then On'Last = Points'Last;
+   --  The weighted least squares of Dominant_Plane over the points On, the
+   --  choice held.
 
-   --  A point of the reference eye's frame and where another eye sees it.
+   function Plane_Normal (P : Sight_Plane) return Vec3;
+   function Plane_Offset (P : Sight_Plane) return Real;
+   function Plane_Offset_Sigma (P : Sight_Plane) return Real;
+   --  Along the normal, at the eye.
+   function Plane_Tilt_Sigma (P : Sight_Plane) return Real;
+   --  The normal's angular uncertainty, along the direction it is least sure of.
+
+   procedure Plane_Axes (P : Sight_Plane; Normal, E1, E2 : out Vec3);
+   --  The plane's normal and two directions along it, right-handed with it.
+
+   function On_Plane (P : Sight_Plane; H : Vec3) return Vec3;
+   --  Where the line of sight H meets the plane.
+
+   ---------------------------------------------------------------------------
+   --  Linking two frames through an eye that sees one plane in both: each
+   --  frame's points on the plane, in that plane's own coordinates (along its
+   --  axes, Plane_Axes), and where the eye sees them.
+
+   type Plane_Point is record
+      X, Y : Real := 0.0;
+      U, V : Real := 0.0;
+   end record;
+
+   type Plane_Point_Array is array (Positive range <>) of Plane_Point;
+
+   procedure Plane_Homography
+     (Points : Plane_Point_Array;
+      H      : out Mat3;
+      Fits   : out Flag_Array;
+      Sigma  : out Real;
+      Found  : out Boolean)
+     with Pre => Fits'First = Points'First and then Fits'Last = Points'Last;
+   --  The homography that takes the plane's coordinates to where the eye sees
+   --  them (exact for an eye without distortion, or for coordinates already
+   --  freed of it): by the least median of the residuals over samples of
+   --  four (the direct linear transform of each, on coordinates centred and
+   --  scaled), so up to half the points may be anything; then by robust least
+   --  squares on the points that fit (Fits), re-chosen at their own noise
+   --  until the choice settles. Sigma is their noise.
+
+   package Flag_Lists is new Ada.Containers.Vectors (Positive, Boolean);
+
+   --  The similarity S that takes the second frame's plane coordinates to
+   --  the first's: x -> Scale Rot (Turn) x + Shift.
+   type Plane_Link is record
+      Found      : Boolean := False;
+      Consistent : Boolean := False;   --  one homography explains both frames' points
+      Scale, Turn, Shift_X, Shift_Y : Real := 0.0;
+      Covariance : Real_Lists.Vector;  --  4 x 4, row by row: log Scale, Turn, Shift_X, Shift_Y
+      H          : Mat3 := [others => [others => 0.0]];   --  the first frame's homography into the eye
+      Sigma      : Real := Real'Last;  --  the joint fit's noise
+      Apart      : Real := Real'Last;  --  the larger of the two homographies' own noise
+      Beyond     : Natural := 0;       --  coordinates of the joint fit further than Z of that
+      First_Fits, Second_Fits : Flag_Lists.Vector;   --  the points each homography kept
+      Used       : Natural := 0;       --  of both
+   end record;
+
+   procedure Plane_Chain (First, Second : Plane_Point_Array; Link : out Plane_Link);
+   --  One homography H of the first frame's plane into the eye explains both
+   --  sets: H (x) for the first's points, H (S (x)) for the second's. From
+   --  each set's own homography (Plane_Homography) and the similarity nearest
+   --  the map between them, both by robust least squares on the points the two
+   --  homographies kept. Consistent is False when more of that joint fit's
+   --  residual coordinates lie beyond Z of the two homographies' own noise
+   --  than chance at Z's tail explains: then the two are no views of one
+   --  plane through one eye. Covariance is the sandwich over the points.
+
+   procedure Plane_Chain_Again (First, Second : Plane_Point_Array; Link : in out Plane_Link)
+     with Pre => Natural (Link.First_Fits.Length) = First'Length
+                 and then Natural (Link.Second_Fits.Length) = Second'Length;
+   --  The joint fit of Plane_Chain alone, from Link and on the points it
+   --  kept: how the similarity moves with its inputs.
+
+   procedure Chain_Placement
+     (First_Plane, Second_Plane : Sight_Plane;
+      Link      : Plane_Link;
+      Placement : out Rigid;
+      Scale     : out Real);
+   --  The second frame in the first, X_first = Placement * (Scale * X_second),
+   --  from each frame's plane and the similarity between their coordinates:
+   --  the turn takes the second plane's axes to the first's turned by Turn,
+   --  and the plane's offsets give the shift along the normal.
+
+   --  A point of a frame and where an eye sees it.
    type Correspondence is record
       X    : Vec3 := [0.0, 0.0, 0.0];
       U, V : Real := 0.0;
    end record;
 
    type Correspondence_Array is array (Positive range <>) of Correspondence;
-
-   procedure Resect_Pose
-     (Points     : Correspondence_Array;
-      L          : Lens;
-      Initial    : Rigid;
-      Placement  : out Rigid;
-      Covariance : out Real_Lists.Vector;
-      Sigma      : out Real;
-      Used       : out Natural;
-      Found      : out Boolean);
-   --  Where an eye of known lens stands among points of known position it
-   --  sees. Placement maps the eye's frame into the points' (its rotation
-   --  holds the eye's axes, its translation the eye's centre), from Initial
-   --  by robust least squares on the reprojection, the points that fit
-   --  re-chosen until the choice settles. Covariance (6 x 6, row by row) is
-   --  that of Placement's turn (the rotation vector in the points' frame that
-   --  takes it to the truth) and of its centre: the sandwich over the points.
-   --  Sigma is the pixel noise of the points that fit.
-
-   procedure Resect
-     (Points        : Correspondence_Array;
-      Width, Height : Positive;
-      Pose          : out Rigid;
-      L             : out Lens;
-      Sigma         : out Real;
-      Found         : out Boolean);
-   --  Another eye's lens and where it stands, from points of known position
-   --  it sees: Pose maps the points' frame into the eye's (X_eye = Pose * X).
-   --  The direct linear transform of the projection matrix, factored into the
-   --  lens and the pose, then everything (the lens with its two radial terms)
-   --  by robust least squares on the reprojection, the points that fit
-   --  re-chosen until the choice no longer changes. Sigma is the measured
-   --  pixel noise; Found is False when the points cannot determine it.
 
 end Driver.Robot.Kinematics.Fit;
