@@ -26,6 +26,7 @@
 --  attached: the robot's own pixels that did not move, or the image border
 --  it comes in from. A lobe attached to neither has no tip in that eye.
 
+with Ada.Containers.Indefinite_Holders;
 with Ada.Containers.Vectors;
 with Driver.Images;
 
@@ -59,6 +60,15 @@ package Driver.Robot.Hand.Lobes is
    --  The pixels whose match lands significantly away from them and comes
    --  back to them within the round trip's noise.
 
+   type Move is record
+      From : Pixel;   --  a pixel of the lobe in one view
+      To   : Pixel;   --  where the matcher put it in the other
+   end record;
+
+   type Move_Array is array (Positive range <>) of Move;
+
+   package Move_Holders is new Ada.Containers.Indefinite_Holders (Move_Array);
+
    type Lobe is record
       Here, There         : Mask;            --  its pixels in the first view and in the other
       Count_Here          : Natural := 0;
@@ -68,7 +78,15 @@ package Driver.Robot.Hand.Lobes is
       Tip_Here, Tip_There : Pixel;
       Tip_Known_Here      : Boolean := False;
       Tip_Known_There     : Boolean := False;
+      Moves_Here          : Move_Holders.Holder;   --  every pixel of Here, with where it went in the other view
+      Moves_There         : Move_Holders.Holder;   --  every pixel of There, with where it came from
+      Tip_Move_Here       : Natural := 0;          --  the tip's own among them, 0 when it has none
+      Tip_Move_There      : Natural := 0;
+      Bordered_Here       : Boolean := False;      --  some pixel of it lies on the image's border
+      Bordered_There      : Boolean := False;
    end record;
+   --  The moves are the evidence for the lobe's shape (Driver.Robot.Hand.Shape):
+   --  a pixel of the lobe and the same point of it in the other view.
 
    package Lobe_Vectors is new Ada.Containers.Vectors (Positive, Lobe);
 

@@ -234,7 +234,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  (Tips.Tip, Tips.Surface): its height above that plane along Up, its
    --  sigma the plane's there with the tip's and the tool pose's. Before that
    --  nothing predicts it (a lobe's tip rides with its eye, so no view of the
-   --  surface tells how far below the tip it is) and the descent creeps.
+   --  surface tells how far below the tip it is) and the descent doubles
+   --  until blocked.
    --  False when the arm cannot reach it or the body does not say where down is.
    function Press_Once (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening; Along : Vec3) return Boolean is
       Above  : Rigid;
@@ -357,8 +358,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
                           & (if Known (First)
                              then ", " & Driver.Log.Image (First.Value, 4) & " +- " & Driver.Log.Image (First.Sigma, 4)
                                   & " above the surface the presses so far fixed"
-                             else ", nothing yet predicting the surface below its tip: by "
-                                  & Driver.Log.Image (Least, 4) & " a step until blocked"));
+                             else ", nothing yet predicting the surface below its tip: doubling from "
+                                  & Driver.Log.Image (Least, 4) & " until blocked"));
       end;
       Driver.Robot.Hand.Descend (Gap'Access, Least, Lower'Access, Steps);
       --  One line a press, for the boot's account of where its time went:
@@ -367,8 +368,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
                        & (if Which = Open then "open" else "closed") & ":"
                        & Natural'Image (Driver.Robot.Hand.Total (Steps)) & " pushes,"
                        & Steps.Fast'Image & " fast and" & Steps.Band'Image
-                       & " within Z sigma of the contact its presses predict," & Steps.Crept'Image
-                       & " crept by " & Driver.Log.Image (Least, 4) & " with nothing predicting it; "
+                       & " within Z sigma of the contact its presses predict," & Steps.Blind'Image
+                       & " doubling from " & Driver.Log.Image (Least, 4) & " with nothing predicting it; "
                        & (if Unplanned then "then it cannot press lower: " & Driver.Robot.Motion.Why (Plan)
                           else "blocked, the last push by " & Driver.Log.Image (By, 4)));
       if Unplanned then
