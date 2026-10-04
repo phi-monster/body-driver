@@ -12,6 +12,7 @@ with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
+with Driver.Robot.Lockin;
 
 package body Driver.Robot.Kinematics is
 
@@ -311,6 +312,22 @@ package body Driver.Robot.Kinematics is
    function Match_Noise (M : Model; A : Arm_Id) return Real is
      (if Index_Of (M, A) > 0 then Round_Trip_Sigma (M.Kinematics (Index_Of (M, A))) else 0.0);
 
+   function Keyframe_Step (M : Model; A : Arm_Id; Channel : Positive) return Real is
+      E : constant Eye_Id'Base := Eye_Of (M, A);
+   begin
+      if E = 0 then
+         return 0.0;
+      end if;
+      declare
+         Per_Unit : constant Real := Lockin.Shift (M, E, Arm_Group (M, A), Channel);
+         --  The larger of the cells' displacement noise and the matcher's: a
+         --  keyframe is judged by the matcher, its view by the cells.
+         Noise    : constant Real := Real'Max (Lockin.Cell_Noise (M, E), Match_Noise (M, A));
+      begin
+         return (if Per_Unit > 0.0 and then Noise < Real'Last then Driver.Conventions.Z * Noise / Per_Unit else 0.0);
+      end;
+   end Keyframe_Step;
+
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean is
    begin
       if Index_Of (M, A) = 0 then
@@ -360,11 +377,7 @@ package body Driver.Robot.Kinematics is
                      end loop;
                   end loop;
                   for C in 1 .. N loop
-                     declare
-                        V : constant Estimate := Visible_Step (M, R.Group, C);
-                     begin
-                        Visible (C) := (if Known (V) then V.Value else 0.0);
-                     end;
+                     Visible (C) := Keyframe_Step (M, R.Arm, C);
                   end loop;
                   declare
                      function Round_Trip (S : Match_Set; I : Natural) return Boolean is

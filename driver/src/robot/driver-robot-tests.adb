@@ -2197,6 +2197,162 @@ package body Driver.Robot.Tests is
       Check (not M.Kinematics (1).Result.Fitted, "the refit keeps the fit of a group that is no arm");
    end Stale_Fit_Is_No_Arms;
 
+   --  A10's arm 2: its reference keyframe came from a push of the
+   --  recognition rounds, 3e-5 rad down on one joint, so every keyframe of
+   --  its sweep differs from the reference in that joint too. That is ten
+   --  times the step the eye's lock-in can tell over many beats, and a
+   --  twentieth of what one keyframe's match can: the fit must judge the
+   --  keyframes by the match, or no joint has a keyframe of its own (the
+   --  replay of A10, its lock-in steps grown finer, fitted no arm 2).
+   procedure Kinematics_With_An_Offset_Reference is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      N       : constant := 6;
+      Levels  : constant Real_Array := [0.05, -0.05, 0.1, -0.1, 0.2, -0.2];
+      Rows_H  : constant := 7;          --  the Hadamard keyframes
+      Columns : constant := 16;
+      Rows    : constant := 12;
+      Noise   : constant := 0.1;        --  the matcher's, pixels per coordinate
+      Offset  : constant := 3.0e-5;     --  the reference's joint 3 below the sweep's base
+      Table   : constant Vec3 := [0.0, -0.6, -0.8];
+      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Truth   : Fit.Joint_Array (1 .. N);
+      Axes    : constant array (1 .. N) of Vec3 :=
+        [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
+      Points  : constant array (1 .. N) of Vec3 :=
+        [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
+      Base    : constant Real_Array (1 .. N) := [others => 0.0];
+      Ref     : Real_Array (1 .. N) := Base;
+      M       : Model;
+      R       : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
+      Rng     : Generator;
+      Cells   : constant := 4;
+
+      procedure Add_Frame (Readings : Real_Array) is
+         K : Keyframe;
+      begin
+         K.Beat := Natural (R.Frames.Length) + 1;
+         for X of Readings loop
+            K.Readings.Append (X);
+         end loop;
+         R.Frames.Append (K);
+         if Natural (R.Frames.Length) > 1 then
+            declare
+               D   : Real_Array (1 .. N);
+               T   : Rigid;
+               Set : Match_Set;
+            begin
+               for J in 1 .. N loop
+                  D (J) := Readings (J) - Ref (J);
+               end loop;
+               T := Inverse (Fit.Eye_At (Truth, D));
+               Set.Frame := Natural (R.Frames.Length);
+               for I in 0 .. Natural (R.Query_U.Length) - 1 loop
+                  declare
+                     H     : constant Vec3 := Fit.Ray (Lens, R.Query_U (I), R.Query_V (I));
+                     X     : constant Vec3 := (-1.0 / Real'(Unit (Table) * H)) * H;
+                     U, V  : Real;
+                     Ahead : Boolean;
+                  begin
+                     Fit.Project (Lens, T * X, U, V, Ahead);
+                     Set.To_U.Append (U + Noise * Gaussian (Rng));
+                     Set.To_V.Append (V + Noise * Gaussian (Rng));
+                     Set.Back_U.Append (R.Query_U (I) + Noise * Gaussian (Rng));
+                     Set.Back_V.Append (R.Query_V (I) + Noise * Gaussian (Rng));
+                     Set.Found.Append (Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0);
+                  end;
+               end loop;
+               R.Matches.Append (Set);
+            end;
+         end if;
+      end Add_Frame;
+   begin
+      for J in 1 .. N loop
+         declare
+            W : constant Vec3 := Unit (Axes (J));
+         begin
+            Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => 1.0, Slide => False);
+         end;
+      end loop;
+      --  The body: one arm of six channels carrying one eye, whose lock-in,
+      --  like any over many beats, sees steps far finer than a keyframe's
+      --  match: 1.3e-8 rad against 6.5e-4.
+      M.Groups.Append (Group_Stream'(Size => N, Commandable => True, others => <>));
+      declare
+         S : Eye_Stream;
+      begin
+         S.Grid := (Width => 640, Height => 480, Columns => 2, Rows => 2);
+         for C in 1 .. N loop
+            S.Kept_Groups.Append (1);
+            S.Kept_Channels.Append (C);
+         end loop;
+         for Cell in 1 .. Cells loop
+            S.Noise.Append (Noise);
+            for C in 1 .. N loop
+               S.Gains.Append (1.0e16);
+               S.Gain_Variances.Append (1.0);
+               S.Shifts.Append (400.0);
+            end loop;
+         end loop;
+         M.Eyes.Append (S);
+      end;
+      M.Graph.Effects.Append (Eye_Effect'(Verdict => Whole, Responding => Cells, Textured => Cells, others => <>));
+      M.Graph.Arms.Append (1);
+      M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => 1));
+      for Gy in 1 .. Rows loop
+         for Gx in 1 .. Columns loop
+            R.Query_U.Append ((Real (Gx) - 0.5) * 640.0 / Real (Columns));
+            R.Query_V.Append ((Real (Gy) - 0.5) * 480.0 / Real (Rows));
+         end loop;
+      end loop;
+      --  The reference off the base, its still twin, then the sweep from the
+      --  base: every joint at every level, and the Hadamard rows.
+      Ref (3) := -Offset;
+      Add_Frame (Ref);
+      Add_Frame (Ref);
+      for J in 1 .. N loop
+         for L of Levels loop
+            declare
+               Q : Real_Array := Base;
+            begin
+               Q (J) := L;
+               Add_Frame (Q);
+            end;
+         end loop;
+      end loop;
+      for Row in 1 .. Rows_H loop
+         declare
+            Q : Real_Array := Base;
+         begin
+            for J in 1 .. N loop
+               declare
+                  Bits : Natural := 0;
+                  A    : Natural := Row;
+                  C    : Natural := J;
+               begin
+                  while A > 0 and then C > 0 loop
+                     if A mod 2 = 1 and then C mod 2 = 1 then
+                        Bits := Bits + 1;
+                     end if;
+                     A := A / 2;
+                     C := C / 2;
+                  end loop;
+                  Q (J) := (if Bits mod 2 = 0 then 0.05 else -0.05);
+               end;
+            end loop;
+            Add_Frame (Q);
+         end;
+      end loop;
+      M.Kinematics.Append (R);
+      Driver.Robot.Kinematics.Refit (M);
+      Check (Driver.Robot.Kinematics.Fitted (M, 1),
+             "the arm whose reference lay 3e-5 rad off its sweep's base is not fitted: "
+             & Ada.Strings.Unbounded.To_String (M.Kinematics (1).Result.Why));
+      if Driver.Robot.Kinematics.Fitted (M, 1) then
+         Check (abs (M.Kinematics (1).Result.Lens.Fx - Lens.Fx) < Lens.Fx * Noise / 40.0,
+                "its focal length came out" & M.Kinematics (1).Result.Lens.Fx'Image);
+      end if;
+   end Kinematics_With_An_Offset_Reference;
+
    procedure Kinematics_Of_A_Synthetic_Arm is
    begin
       Synthetic_Sweep (1.0, Expect_Fit => True);
@@ -2234,6 +2390,8 @@ package body Driver.Robot.Tests is
                              & "longer carries, is still taken for the arm's", Stale_Fit_Is_No_Arms'Access);
       Driver.Tests.Register ("robot.kinematics.shared", "the fit's focal length or eye pose is off by more than Z of "
                              & "its own sigmas when every keyframe's points share an error", Kinematics_With_Shared_Errors'Access);
+      Driver.Tests.Register ("robot.kinematics.offset", "an arm whose reference keyframe lies off its sweep's base by "
+                             & "less than a keyframe's match can tell is not fitted", Kinematics_With_An_Offset_Reference'Access);
       Driver.Tests.Register ("robot.kinematics.small", "a sweep too small to determine the lens and the joints is "
                              & "reported fitted", Kinematics_Of_A_Small_Sweep'Access);
       Driver.Tests.Register ("robot.kinematics", "the arm's axes, the eye's lens or the eye's pose at a new pose come "

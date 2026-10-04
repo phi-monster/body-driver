@@ -130,21 +130,7 @@ package body Driver.Robot.Motion is
    end Step;
 
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
-   begin
-      for E in 1 .. Eye_Count (M) loop
-         if Eye_Mount (M, Eye_Id (E)).Kind = Arm_Carried and then Eye_Mount (M, Eye_Id (E)).Arm = A then
-            declare
-               Per_Unit : constant Real := Lockin.Shift (M, Eye_Id (E), Arm_Group (M, A), Channel);
-               --  The larger of the cells' displacement noise and the matcher's:
-               --  a keyframe is judged by the matcher, its view by the cells.
-               Noise    : constant Real := Real'Max (Lockin.Cell_Noise (M, Eye_Id (E)), Kinematics.Match_Noise (M, A));
-            begin
-               return (if Per_Unit > 0.0 and then Noise < Real'Last then Driver.Conventions.Z * Noise / Per_Unit else 0.0);
-            end;
-         end if;
-      end loop;
-      return 0.0;
-   end Sweep_Start;
+     (Kinematics.Keyframe_Step (M, A, Channel));
 
    procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id) is
       B    : Driver.Clock.Beat;

@@ -36,6 +36,17 @@ private package Driver.Robot.Kinematics is
    --  second keyframe is a still twin of its reference, taken at the same
    --  pose, so the matcher's own error is known before any move.
 
+   function Keyframe_Step (M : Model; A : Arm_Id; Channel : Positive) return Real;
+   --  The smallest change of the arm's channel that moves the view of the eye
+   --  it carries by more than a keyframe's match can tell: Z times the larger
+   --  of the eye's cell displacement noise and the matcher's (Match_Noise),
+   --  over the pixels its view moves per reading unit (Lockin.Shift); 0 while
+   --  either is unmeasured. The sweep starts from it, and the fit judges by it
+   --  which joints a keyframe moved: a lock-in sees far smaller steps over
+   --  many beats than one pair of keyframes shows (A10's arm 2: its reference
+   --  keyframe, taken in a push of the recognition rounds, lay 3e-5 rad off
+   --  the sweep's base, ten times the lock-in's step, a twentieth of this).
+
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean;
    --  The arm's still twin was taken and its match answered or refused, or
    --  the instrument can never answer: Match_Noise will not change before
