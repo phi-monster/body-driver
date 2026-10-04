@@ -8,10 +8,6 @@ package body Driver.Robot.Hand.Lobes is
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Images;
 
-   Mad_Efficiency : constant := 0.367_5;
-   --  The asymptotic efficiency of the median absolute deviation for Gaussian
-   --  data: its scale is worth that share of as many degrees of freedom.
-
    package Natural_Vectors is new Ada.Containers.Vectors (Natural, Natural);
 
    --  Everything sized by pixels or components lives on the heap: the
@@ -306,6 +302,46 @@ package body Driver.Robot.Hand.Lobes is
       return M;
    end Seeds;
 
+   package Move_Vectors is new Ada.Containers.Vectors (Positive, Move);
+
+   function To_Array (V : Move_Vectors.Vector) return Move_Array is
+   begin
+      --  Built where it is returned, off the stack: a lobe has as many moves as pixels.
+      return Result : Move_Array (1 .. Natural (V.Length)) do
+         for I in Result'Range loop
+            Result (I) := V (I);
+         end loop;
+      end return;
+   end To_Array;
+
+   function Index_Of (V : Move_Vectors.Vector; From : Pixel) return Natural is
+   begin
+      for I in V.First_Index .. V.Last_Index loop
+         if V (I).From = From then
+            return I;
+         end if;
+      end loop;
+      return 0;
+   end Index_Of;
+   --  Both are pixel centres, so equal ones are the same pixel.
+
+   function On_Border (M : Mask) return Boolean is
+      W : constant Natural := Width (M);
+      H : constant Natural := Height (M);
+   begin
+      for C in 0 .. W - 1 loop
+         if Contains (M, C, 0) or else Contains (M, C, H - 1) then
+            return True;
+         end if;
+      end loop;
+      for R in 0 .. H - 1 loop
+         if Contains (M, 0, R) or else Contains (M, W - 1, R) then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end On_Border;
+
    function Seeded_Components (M, Seeds : Mask) return Labels is
       --  The components of M that hold a seed, numbered from one; the others
       --  are not moving parts and get label zero.
@@ -471,9 +507,12 @@ package body Driver.Robot.Hand.Lobes is
                      if (if Split_Here then Group_A (Part) = G else Group_B (Part) = G) then
                         declare
                            L : Lobe;
+                           Ahead, Behind : Move_Vectors.Vector;
                         begin
                            L.Here := Create (Width, Height);
                            L.There := Create (Width, Height);
+                           --  A pixel of a moving component moved by the single
+                           --  test and came back: its match is where it went.
                            for C of Forward loop
                               declare
                                  Column, Row : Natural;
@@ -485,6 +524,7 @@ package body Driver.Robot.Hand.Lobes is
                                    and then Pixel_Of (C.From, Width, Height, Column, Row)
                                  then
                                     Include (L.Here, Column, Row);
+                                    Ahead.Append (Move'(From => C.From, To => C.To));
                                  end if;
                               end;
                            end loop;
@@ -499,6 +539,7 @@ package body Driver.Robot.Hand.Lobes is
                                    and then Pixel_Of (C.From, Width, Height, Column, Row)
                                  then
                                     Include (L.There, Column, Row);
+                                    Behind.Append (Move'(From => C.From, To => C.To));
                                  end if;
                               end;
                            end loop;
@@ -507,6 +548,12 @@ package body Driver.Robot.Hand.Lobes is
                            if L.Count_Here > 0 and then L.Count_There > 0 then
                               Tip_Of (L.Here, Seeds_Here, Attached, L.Tip_Here, L.Tip_Known_Here);
                               Tip_Of (L.There, Seeds_There, Attached, L.Tip_There, L.Tip_Known_There);
+                              L.Moves_Here := Move_Holders.To_Holder (To_Array (Ahead));
+                              L.Moves_There := Move_Holders.To_Holder (To_Array (Behind));
+                              L.Tip_Move_Here := (if L.Tip_Known_Here then Index_Of (Ahead, L.Tip_Here) else 0);
+                              L.Tip_Move_There := (if L.Tip_Known_There then Index_Of (Behind, L.Tip_There) else 0);
+                              L.Bordered_Here := On_Border (L.Here);
+                              L.Bordered_There := On_Border (L.There);
                               Result.Append (L);
                            end if;
                         end;

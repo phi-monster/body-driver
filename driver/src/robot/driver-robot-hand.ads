@@ -69,10 +69,42 @@ package Driver.Robot.Hand is
    function Tip_Sight (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Ray_Estimate;
    --  The line of sight to that tip, in the tool frame: the tip lies on it.
 
+   --  The hand's sizes (Driver.Robot.Hand.Shape): from the surface of each
+   --  lobe its own eye sees, fixed by the two views of the closer's sweep
+   --  and scaled by the tips the presses measure at both openings. Each is
+   --  at least what is seen of it: a side of a lobe facing away from its eye,
+   --  or a part hidden or outside the picture, is not in it. Unknown until
+   --  measured; the log (Describe) says why.
+
+   function Lobe_Width (H : Hands; Id : Hand_Id; Lobe : Positive) return Estimate;
+   --  How wide the lobe is across its closing direction (from its open tip
+   --  toward its closed one) and across the hand's axis.
+
+   function Lobe_Thickness (H : Hands; Id : Hand_Id; Lobe : Positive) return Estimate;
+   --  How thick it is along its closing direction.
+
+   function Lobe_Face (H : Hands; Id : Hand_Id; Lobe : Positive) return Estimate;
+   --  How far ahead of its tip along its closing direction it reaches: where
+   --  its face meets what it closes on.
+
+   function Grip_Depth (H : Hands; Id : Hand_Id) return Estimate;
+   --  How far back from the lobes' tips along the hand's axis their moving
+   --  parts reach: how far a thing may go in between them before it meets
+   --  them where they begin, from the middle of the tips at the open opening.
+   --  Known when every lobe is measured.
+
+   function Grip_Axis (H : Hands; Id : Hand_Id) return Direction_Estimate;
+   --  The way the lobes point, in the tool frame: from the middle of their
+   --  points toward their tips. A thing goes into the hand against it.
+
    function Describe (H : Hands) return String;
    --  The hands found so far, one line each, for the log.
 
 private
+
+   Mad_Efficiency : constant := 0.367_5;
+   --  The asymptotic efficiency of the median absolute deviation for Gaussian
+   --  data: a scale from it is worth that share of as many degrees of freedom.
 
    type Hand_Data;
    --  Completed in the body: the hand's measurements use its child packages.
@@ -138,10 +170,10 @@ private
    type Descent_Steps is record
       Fast  : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
       Band  : Natural := 0;   --  within that band, each the larger of the sigma and Least
-      Crept : Natural := 0;   --  by Least, nothing predicting the contact
+      Blind : Natural := 0;   --  doubling, nothing predicting the contact
    end record;
 
-   function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Crept);
+   function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Blind);
 
    procedure Descend
      (Gap   : not null access function return Estimate;
@@ -157,8 +189,12 @@ private
    --  contact, the last cut to end there; within that band each step is the
    --  larger of the sigma and Least, so the tip meets the surface at most
    --  that far short of a step's end: the overshoot the prediction already
-   --  admits. Without one, every step is Least, the smallest move of the tool
-   --  that tells from its noise: nothing says where the surface is.
+   --  admits, and less force and less sinking in where the tip is read.
+   --  Without one the steps double from Least until one is not reached, the
+   --  overshoot as it comes (the owner's rule, 10-05: the most aggressive
+   --  choice everywhere; creeping by Least took A11's first presses into the
+   --  thousands of pushes). Least is the smallest move of the tool that tells
+   --  from its noise.
 
    function Sweepable (H : Hands; M : Model; G : Group_Id) return Boolean;
    --  The group is a closer by the body's roles now, and the hand watches it
