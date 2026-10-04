@@ -124,7 +124,9 @@ driver-action-grids.adb	for DJ in -1 .. 1 loop	1	structure	the cube itself and i
 driver-action-grids.adb	for DJ in -1 .. 1 loop	1	structure	the cube itself and its neighbours on either side
 driver-action-grids.adb	for DK in -1 .. 1 loop	1	structure	the cube itself and its neighbours on either side
 driver-action-grids.adb	for DK in -1 .. 1 loop	1	structure	the cube itself and its neighbours on either side
+driver-action-plants-live.adb	(if Known (R.Delivered) and then R.Delivered.Value < 1.0	1.0	math	the whole step delivered is a fraction of one
 driver-action-plants-live.adb	R.Beats := 1;	1	structure	an order that moves nothing lets exactly one beat pass
+driver-action-plants-live.adb	if N < 2 then	2	math	a nearest neighbour needs at least two samples
 driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end

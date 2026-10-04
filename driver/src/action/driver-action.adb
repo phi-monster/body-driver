@@ -81,8 +81,8 @@ package body Driver.Action is
          return No ("refused is what I answer, not something to wait for", "until stuck");
       elsif not (for some E in Ending => W.Until_Endings (E)) then
          return No ("it says nothing to end on", "until settled");
-      elsif not (for some A of S.Arms => Known (A.Step) and then Known (A.Rate)) then
-         return No ("I have not measured how my arms answer a command yet, so I cannot plan a step");
+      elsif not (for some A of S.Arms => Known (A.Step) and then Known (A.Turn_Step)) then
+         return No ("I have not measured how finely my arms place their tools yet, so I cannot plan a step");
       end if;
       case W.Kind is
          when Change =>
