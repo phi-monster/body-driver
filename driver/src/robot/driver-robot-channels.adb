@@ -46,6 +46,24 @@ package body Driver.Robot.Channels is
                for V of O.Readings.Element (G) loop
                   S.Values.Append (V);
                end loop;
+               --  The readings the channels have moved through.
+               if Natural (S.Low_Seen.Length) /= S.Size or else Natural (S.High_Seen.Length) /= S.Size then
+                  S.Low_Seen.Clear;
+                  S.High_Seen.Clear;
+                  for V of O.Readings.Element (G) loop
+                     S.Low_Seen.Append (V);
+                     S.High_Seen.Append (V);
+                  end loop;
+               else
+                  for C in 0 .. S.Size - 1 loop
+                     declare
+                        V : constant Real := O.Readings.Element (G) (O.Readings.Element (G)'First + C);
+                     begin
+                        S.Low_Seen.Replace_Element (C, Real'Min (S.Low_Seen (C), V));
+                        S.High_Seen.Replace_Element (C, Real'Max (S.High_Seen (C), V));
+                     end;
+                  end loop;
+               end if;
             else
                S.Values.Append (0.0, Ada.Containers.Count_Type (S.Size));
             end if;
@@ -324,6 +342,12 @@ package body Driver.Robot.Channels is
          S.Pushed.Clear;
          Beats := Natural'Max (Beats, Natural (S.Present.Length));
       end loop;
+      --  A noise reloaded from a body file stands; the pushes are marked
+      --  against it.
+      if M.From_File (Stored_Noise) then
+         Measure_Pushes (M);
+         return;
+      end if;
       --  The noise is measured at rest, and rest is where no push is under
       --  way, which takes the noise to find: the two are measured in turn
       --  until the pushes found no longer change. The first round takes every
@@ -389,6 +413,14 @@ package body Driver.Robot.Channels is
          end loop;
       end;
    end Measure;
+
+   function Lowest (M : Model; G : Group_Id; Channel : Positive) return Real is
+     (if G <= M.Groups.Last_Index and then Channel <= Natural (M.Groups (G).Low_Seen.Length)
+      then M.Groups (G).Low_Seen (Channel - 1) else Real'Last);
+
+   function Highest (M : Model; G : Group_Id; Channel : Positive) return Real is
+     (if G <= M.Groups.Last_Index and then Channel <= Natural (M.Groups (G).High_Seen.Length)
+      then M.Groups (G).High_Seen (Channel - 1) else Real'First);
 
    function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean is
       Rest    : Real_Array := D;

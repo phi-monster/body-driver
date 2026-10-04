@@ -1,9 +1,12 @@
 with Ada.Containers;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
+with Ada.Directories;
+with Ada.Text_IO;
 with Driver.Clock;
 with Driver.Conventions;
 with Driver.Log;
+with Driver.Robot.Body_File;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Graph;
@@ -160,6 +163,10 @@ package body Driver.Robot is
       end loop;
    end Observe_Eyes;
 
+   --  What came from a body file stands: it is not measured again in this
+   --  session (Load_Body). The channels still mark the pushes, with the
+   --  noise as reloaded; the pictures' luma noise belongs to the scene and
+   --  is always measured.
    procedure Estimate_Now (M : in out Model) is
       Start : constant Duration := Driver.Clock.Seconds;
    begin
@@ -169,11 +176,19 @@ package body Driver.Robot is
             Stillness.Measure_Luma_Noise (S);
          end if;
       end loop;
-      Lag.Measure (M);
-      Lockin.Measure_Rest_Noise (M);
-      Lockin.Measure (M);
-      Graph.Derive (M);
-      Kinematics.Refit (M);
+      if not M.From_File (Stored_Lags) then
+         Lag.Measure (M);
+      end if;
+      if not M.From_File (Stored_Responses) then
+         Lockin.Measure_Rest_Noise (M);
+         Lockin.Measure (M);
+      end if;
+      if not M.From_File (Stored_Graph) then
+         Graph.Derive (M);
+      end if;
+      if not M.From_File (Stored_Kinematics) then
+         Kinematics.Refit (M);
+      end if;
       M.Graph_Evidence := M.Beats;
       Driver.Log.Line (Driver.Log.Robot, "estimated from" & M.Beats'Image & " beats in"
                        & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
@@ -184,7 +199,9 @@ package body Driver.Robot is
       Channels.Append (M, O, Sent);
       Steps.Track (M, M.Beats);
       Observe_Eyes (M, O);
-      Kinematics.Observe (M, O);
+      if not M.From_File (Stored_Kinematics) then
+         Kinematics.Observe (M, O);
+      end if;
       M.Beats := M.Beats + 1;
       --  The estimates are redone whenever the evidence behind them has
       --  doubled: a logarithmic number of times over any stream.
@@ -196,6 +213,37 @@ package body Driver.Robot is
    --  Booted once the kinematics of every arm that carries an eye are
    --  fitted, and of one at least: a function of the evidence, so a replay
    --  finds the boot where the run did.
+   procedure Load_Body
+     (M    : in out Model;
+      Path : String;
+      Ok   : out Boolean;
+      Why  : out Ada.Strings.Unbounded.Unbounded_String)
+   is
+      use Ada.Strings.Unbounded;
+   begin
+      Ok := False;
+      if not Ada.Directories.Exists (Path) then
+         Why := To_Unbounded_String ("there is no body file " & Path);
+         return;
+      end if;
+      declare
+         F    : Ada.Text_IO.File_Type;
+         Text : Unbounded_String;
+      begin
+         Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+         while not Ada.Text_IO.End_Of_File (F) loop
+            Append (Text, Ada.Text_IO.Get_Line (F) & ASCII.LF);
+         end loop;
+         Ada.Text_IO.Close (F);
+         Body_File.Read (M, To_String (Text), Ok, Why);
+      exception
+         when Ada.Text_IO.Name_Error | Ada.Text_IO.Use_Error | Ada.Text_IO.Data_Error =>
+            Why := To_Unbounded_String ("the body file " & Path & " cannot be read");
+      end;
+   end Load_Body;
+
+   function Reloaded (M : Model; Q : Stored) return Boolean is (M.From_File (Q));
+
    function Booted (M : Model) return Boolean is
       Any : Boolean := False;
    begin
