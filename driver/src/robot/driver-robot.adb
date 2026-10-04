@@ -316,10 +316,20 @@ package body Driver.Robot is
       end if;
       declare
          P : constant Pose_Estimate := With_Fit_Uncertainty (M, A, T, O.Readings.Element (Arm_Group (M, A)));
+         D : constant Vec3 := Driver.Numerics.Arrays."*" (T.Rotation, Kinematics.Ray_In_Eye (M, A, Px.U, Px.V));
+         S : constant Mat3 := P.Rotation_Covariance;
+         --  The pose's turn moves the line by its part across the line: per
+         --  axis across it, half of what the turn's variance leaves off it.
+         Across : constant Real :=
+           (if S (1, 1) < Real'Last and then S (2, 2) < Real'Last and then S (3, 3) < Real'Last
+            then Real'Max (0.0, (S (1, 1) + S (2, 2) + S (3, 3) - Driver.Numerics.Arrays."*" (D, Driver.Numerics.Arrays."*" (S, D))) / 2.0)
+            else Real'Last);
       begin
          return (Origin    => (Mean => T.Translation, Covariance => P.Position_Covariance),
-                 Direction => (Unit_Vector => Driver.Numerics.Arrays."*" (T.Rotation, Kinematics.Ray_In_Eye (M, A, Px.U, Px.V)),
-                               Sigma       => Sqrt (2.0) * Kinematics.Angle_Sigma (M, A)));
+                 Direction => (Unit_Vector => D,
+                               Sigma       => (if Across < Real'Last
+                                               then Sqrt (Kinematics.Angle_Sigma (M, A) ** 2 + Across)
+                                               else Real'Last)));
       end;
    end Ray;
 

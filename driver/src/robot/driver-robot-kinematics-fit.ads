@@ -75,10 +75,16 @@ package Driver.Robot.Kinematics.Fit is
    --  Two unit directions across W that make a right-handed frame with it.
 
    --  The fit reports the covariance of these parameters, in this order: the
-   --  lens (the logarithms of Fx and Fy, Cx, Cy, K1, K2), then per joint the
-   --  tilt of its axis along the two directions across it (Across), the
-   --  point on it nearest the reference eye moved along the same two, and
-   --  its reading scale.
+   --  lens (Lens_Terms: the logarithms of Fx and Fy, Cx, Cy, K1, K2), then per
+   --  joint its Joint_Terms: the tilt of its axis along the two directions
+   --  across it (Across), the point on it nearest the reference eye moved
+   --  along the same two, and its reading scale.
+   Lens_Terms : constant := 6;
+   type Joint_Term is (Tilt_1, Tilt_2, Point_1, Point_2, Scale);
+   Joint_Terms : constant := Joint_Term'Pos (Joint_Term'Last) + 1;
+   function Terms (Joints : Natural) return Natural is (Lens_Terms + Joint_Terms * Joints);
+   function Term_Of (Joint : Positive; T : Joint_Term) return Positive is
+     (Lens_Terms + Joint_Terms * (Joint - 1) + Joint_Term'Pos (T) + 1);
 
    procedure Pose_Covariance
      (Joints      : Joint_Array;
@@ -87,10 +93,12 @@ package Driver.Robot.Kinematics.Fit is
       Turn, Place : out Mat3)
      with Pre => Change'Length = Joints'Length;
    --  What the fit's uncertainty leaves the eye at readings Q0 + Change
-   --  (Eye_At) uncertain by: the covariance of its turn (as a rotation
-   --  vector) and of its place, from the joints' parameters, each moved by
-   --  its standard deviation either way. Turn and Place are Real'Last on
-   --  the diagonal when the covariance is not the fit's of these joints.
+   --  (Eye_At) uncertain by: the covariance of its turn (the rotation vector
+   --  that takes it to the truth, in the reference frame, as
+   --  Driver.Uncertain has it) and of its place, from the joints'
+   --  parameters, each moved by its standard deviation either way. Turn and
+   --  Place are Real'Last on the diagonal when the covariance is not the
+   --  fit's of these joints.
 
    --  A point the reference keyframe shows at (U0, V0), seen again at (U, V)
    --  in keyframe Frame (2 or more; the reference is 1).

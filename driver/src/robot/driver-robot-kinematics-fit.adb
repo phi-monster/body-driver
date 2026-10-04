@@ -1906,11 +1906,15 @@ package body Driver.Robot.Kinematics.Fit is
          if Sum > 0.0 and then not Report.Covariance.Is_Empty then
             declare
                F       : constant Real := 1.0 / Sqrt (Sum / Real (Frames));
-               Reduced : constant Natural := 6 + 5 * N;
-               function Length (P : Positive) return Boolean is
-                 (P > 6 and then ((P - 7) mod 5 in 2 .. 3
-                                  or else ((P - 7) mod 5 = 4 and then Joints (Joints'First + (P - 7) / 5).Slide)));
+               Reduced : constant Natural := Terms (N);
+               --  The terms that are lengths: the points, and a slide's scale.
+               Length  : array (1 .. Reduced) of Boolean := [others => False];
             begin
+               for J in 1 .. N loop
+                  Length (Term_Of (J, Point_1)) := True;
+                  Length (Term_Of (J, Point_2)) := True;
+                  Length (Term_Of (J, Scale)) := Joints (Joints'First + J - 1).Slide;
+               end loop;
                for P in 1 .. Reduced loop
                   for Q in 1 .. Reduced loop
                      declare
@@ -1939,12 +1943,15 @@ package body Driver.Robot.Kinematics.Fit is
       Covariance  : Real_Lists.Vector;
       Turn, Place : out Mat3)
    is
-      N        : constant Natural := Joints'Length;
-      Reduced  : constant Natural := 6 + 5 * N;
-      Unknown  : constant Mat3 := [[Real'Last, 0.0, 0.0], [0.0, Real'Last, 0.0], [0.0, 0.0, Real'Last]];
+      N       : constant Natural := Joints'Length;
+      Reduced : constant Natural := Terms (N);
+      Unknown : constant Mat3 := [[Real'Last, 0.0, 0.0], [0.0, Real'Last, 0.0], [0.0, 0.0, Real'Last]];
       function V (P, Q : Positive) return Real is (Covariance (Covariance.First_Index + (P - 1) * Reduced + Q - 1));
-      --  Per joint parameter, how the eye's turn and place move per unit of it.
-      Dturn, Dplace : array (1 .. 5 * N) of Vec3 := [others => [0.0, 0.0, 0.0]];
+      --  How the eye's turn and place move per unit of each joint term.
+      type Derivative is record
+         Turn, Place : Vec3 := [0.0, 0.0, 0.0];
+      end record;
+      D : array (1 .. N, Joint_Term) of Derivative;
    begin
       Turn := Unknown;
       Place := Unknown;
@@ -1952,9 +1959,9 @@ package body Driver.Robot.Kinematics.Fit is
          return;
       end if;
       for J in 1 .. N loop
-         for K in 1 .. 5 loop
+         for T in Joint_Term loop
             declare
-               P     : constant Positive := 6 + 5 * (J - 1) + K;
+               P     : constant Positive := Term_Of (J, T);
                Sigma : constant Real := (if V (P, P) > 0.0 then Sqrt (V (P, P)) else 0.0);
             begin
                if Sigma > 0.0 then
@@ -1964,22 +1971,23 @@ package body Driver.Robot.Kinematics.Fit is
                         A      : Joint renames Jx (Jx'First + J - 1);
                         E1, E2 : Vec3;
                      begin
-                        Perp (Joints (Joints'First + J - 1).W, E1, E2);
-                        case K is
-                           when 1 => A.W := Unit (A.W + H * E1);
-                           when 2 => A.W := Unit (A.W + H * E2);
-                           when 3 => A.P := A.P + H * E1;
-                           when 4 => A.P := A.P + H * E2;
-                           when others => A.C := A.C + H;
+                        Perp (A.W, E1, E2);
+                        case T is
+                           when Tilt_1  => A.W := Unit (A.W + H * E1);
+                           when Tilt_2  => A.W := Unit (A.W + H * E2);
+                           when Point_1 => A.P := A.P + H * E1;
+                           when Point_2 => A.P := A.P + H * E2;
+                           when Scale   => A.C := A.C + H;
                         end case;
                         return Eye_At (Jx, Change);
                      end Moved;
-                     Up   : constant Rigid := Moved (Sigma);
-                     Down : constant Rigid := Moved (-Sigma);
+                     Up    : constant Rigid := Moved (Sigma);
+                     Down  : constant Rigid := Moved (-Sigma);
+                     Width : constant Real := Sigma + Sigma;
                   begin
-                     Dturn (5 * (J - 1) + K) :=
-                       (1.0 / (2.0 * Sigma)) * Driver.Numerics.Log (Transpose (Down.Rotation) * Up.Rotation);
-                     Dplace (5 * (J - 1) + K) := (1.0 / (2.0 * Sigma)) * (Up.Translation - Down.Translation);
+                     --  Central differences, the turn taken in the reference frame.
+                     D (J, T).Turn := (1.0 / Width) * Driver.Numerics.Log (Up.Rotation * Transpose (Down.Rotation));
+                     D (J, T).Place := (1.0 / Width) * (Up.Translation - Down.Translation);
                   end;
                end if;
             end;
@@ -1987,18 +1995,18 @@ package body Driver.Robot.Kinematics.Fit is
       end loop;
       Turn := [others => [others => 0.0]];
       Place := [others => [others => 0.0]];
-      for A in 1 .. 5 * N loop
-         for B in 1 .. 5 * N loop
-            declare
-               C : constant Real := V (6 + A, 6 + B);
-            begin
-               for R in 1 .. 3 loop
-                  for S in 1 .. 3 loop
-                     Turn (R, S) := Turn (R, S) + Dturn (A) (R) * C * Dturn (B) (S);
-                     Place (R, S) := Place (R, S) + Dplace (A) (R) * C * Dplace (B) (S);
-                  end loop;
+      for J in 1 .. N loop
+         for T in Joint_Term loop
+            for K in 1 .. N loop
+               for U in Joint_Term loop
+                  declare
+                     C : constant Real := V (Term_Of (J, T), Term_Of (K, U));
+                  begin
+                     Turn := Turn + C * Driver.Numerics.Outer (D (J, T).Turn, D (K, U).Turn);
+                     Place := Place + C * Driver.Numerics.Outer (D (J, T).Place, D (K, U).Place);
+                  end;
                end loop;
-            end;
+            end loop;
          end loop;
       end loop;
    end Pose_Covariance;

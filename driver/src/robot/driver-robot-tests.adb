@@ -2088,6 +2088,11 @@ package body Driver.Robot.Tests is
                Turned : constant Real := Driver.Numerics.Angle (Transpose (Got.Rotation) * Want.Rotation);
             begin
                Fit.Pose_Covariance (Joints, Test, Report.Covariance, Turn, Place);
+               --  The fit's covariance covers every joint it was given: the
+               --  pose's uncertainty is known.
+               Check (Turn (1, 1) < Real'Last and then Place (1, 1) < Real'Last,
+                      "the fit's covariance does not cover its joints:" & Report.Covariance.Length'Image & " entries for"
+                      & N'Image & " joints");
                Check (Off <= Driver.Conventions.Z * Sqrt (Place (1, 1) + Place (2, 2) + Place (3, 3)),
                       "the eye at a new pose is off by" & Off'Image & " model units, its sigma"
                       & Real'Image (Sqrt (Place (1, 1) + Place (2, 2) + Place (3, 3))));
