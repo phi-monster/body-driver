@@ -416,6 +416,25 @@ private
       Matches   : Natural := 0;           --  keyframes with matches behind it
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
+      --  The table its eye saw, in its reference frame: the points X with
+      --  Table_Normal * X = Table_Offset (Kinematics.Fit.Table).
+      Table_Found  : Boolean := False;
+      Table_Normal : Vec3 := [0.0, 0.0, 0.0];
+      Table_Offset, Table_Offset_Sigma, Table_Sigma : Real := Real'Last;
+      --  Every track's point in its reference frame, three numbers each,
+      --  where Track_Known holds (Kinematics.Fit.Track_Points).
+      Tracks      : Real_Vectors.Vector;
+      Track_Known : Flag_Vectors.Vector;
+      --  Where its reference frame is in the world (Kinematics.In_World):
+      --  X_world = Placement * (Scale * X). The world is the first arm's
+      --  reference frame, so that arm is placed as it is.
+      Placed       : Boolean := False;
+      Placement    : Driver.Numerics.Rigid := Driver.Numerics.Identity;
+      Scale        : Real := 1.0;
+      Scale_Sigma  : Real := 0.0;
+      Placement_Covariance : Real_Vectors.Vector;   --  6 x 6, row by row: its turn (world frame), its centre
+      Placed_Px    : Real := 0.0;                  --  the resection's pixel noise
+      Placed_Points : Natural := 0;                --  the points that placed it
    end record;
 
    type Arm_Evidence is record
@@ -427,6 +446,14 @@ private
       Pending  : Pending_Vectors.Vector;
       Matches  : Match_Set_Vectors.Vector;
       Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
+      --  The first arm's reference view matched into this arm's, its query
+      --  points into this arm's reference image (Kinematics.Observe), and of
+      --  which reference of which group it was asked.
+      World_Pending   : Pending_Vectors.Vector;
+      World_Matches   : Match_Set_Vectors.Vector;
+      World_Asked     : Boolean := False;
+      World_Group     : Group_Id'Base := 0;
+      World_Reference : Natural := 0;
       Result   : Arm_Fit;
    end record;
 

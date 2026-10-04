@@ -278,28 +278,37 @@ package body Driver.Robot is
 
    --  The world: the frame of the first arm's eye at its reference keyframe,
    --  until the arms are measured into one frame.
-   function In_World (M : Model; A : Arm_Id) return Boolean is (A = 1 and then Kinematics.Fitted (M, A));
-
-   --  The arm's eye at O in the world, known when the arm is in the world and
-   --  O carries its readings.
+   --  The arm's eye at O in the world, known when the arm is placed in it
+   --  (Kinematics.In_World: the first arm's reference frame is the world)
+   --  and O carries its readings.
    procedure Arm_Eye (M : Model; A : Arm_Id; O : Observation; T : out Rigid; Known_Pose : out Boolean) is
-      G : constant Group_Id := Arm_Group (M, A);
+      G         : constant Group_Id := Arm_Group (M, A);
+      Placement : Rigid;
+      Scale     : Real;
    begin
       T := Identity;
-      Known_Pose := In_World (M, A) and then G <= O.Readings.Last_Index
+      Kinematics.In_World (M, A, Placement, Scale, Known_Pose);
+      Known_Pose := Known_Pose and then G <= O.Readings.Last_Index
                     and then O.Readings.Element (G)'Length = Group_Size (M, G);
       if Known_Pose then
-         T := Kinematics.Eye_In_Reference (M, A, O.Readings.Element (G));
+         declare
+            use Driver.Numerics.Arrays;
+            E : constant Rigid := Kinematics.Eye_In_Reference (M, A, O.Readings.Element (G));
+         begin
+            T := (Rotation    => Placement.Rotation * E.Rotation,
+                  Translation => Placement.Rotation * (Scale * E.Translation) + Placement.Translation);
+         end;
       end if;
    end Arm_Eye;
 
-   --  A pose with the uncertainty of the fit that gave it: the covariance
-   --  of the fit's parameters, clustered by keyframe, carried to the eye at
-   --  the readings it was made at (Kinematics.Pose_Covariance).
+   --  A pose with the uncertainty of the fit that gave it: the covariance of
+   --  the fit's parameters, clustered by keyframe, carried to the eye at the
+   --  readings it was made at, and into the world with its arm's placement
+   --  (Kinematics.World_Pose_Covariance).
    function With_Fit_Uncertainty (M : Model; A : Arm_Id; T : Rigid; Readings : Real_Array) return Pose_Estimate is
       Turn, Place : Mat3;
    begin
-      Kinematics.Pose_Covariance (M, A, Readings, Turn, Place);
+      Kinematics.World_Pose_Covariance (M, A, Readings, Turn, Place);
       return (Pose => T, Position_Covariance => Place, Rotation_Covariance => Turn);
    end With_Fit_Uncertainty;
 
