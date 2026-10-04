@@ -4,35 +4,41 @@ package body Driver.Brain.Live.Tests is
 
    use Driver.Tests;
 
-   procedure Point_On_It is
-      Ok : Boolean;
-      --  A ring around an empty middle, away from the picture's corner: the
-      --  centroid is off the patch, and so is the origin.
-      Ring : Driver.Images.Mask := Driver.Images.Create (7, 7);
+   procedure What_Most_Pixels_Are is
+      --  A 10 by 10 patch, as the instrument gives it for a thing under a
+      --  finger: the finger covers the patch's middle, 2 by 2 pixels of it.
+      Patch  : Driver.Images.Mask := Driver.Images.Create (12, 12);
+      Finger : Driver.Images.Mask := Driver.Images.Create (12, 12);
+      Arm    : Driver.Images.Mask := Driver.Images.Create (12, 12);
+      Edge   : Driver.Images.Mask := Driver.Images.Create (12, 12);
    begin
-      for I in 1 .. 5 loop
-         Driver.Images.Include (Ring, I, 1);
-         Driver.Images.Include (Ring, I, 5);
-         Driver.Images.Include (Ring, 1, I);
-         Driver.Images.Include (Ring, 5, I);
+      for R in 1 .. 10 loop
+         for C in 1 .. 10 loop
+            Driver.Images.Include (Patch, C, R);
+            --  The arm over six of the patch's ten rows; the edge over five.
+            if R <= 6 then
+               Driver.Images.Include (Arm, C, R);
+            end if;
+            if R <= 5 then
+               Driver.Images.Include (Edge, C, R);
+            end if;
+         end loop;
       end loop;
-      declare
-         P : constant Driver.Images.Pixel := Own_Point (Ring, Ok);
-      begin
-         Check (Ok and then Driver.Images.Contains (Ring, Natural (Real'Floor (P.U)), Natural (Real'Floor (P.V))),
-                "the point of a ring lies on the ring, not in its empty middle");
-      end;
-      declare
-         Unused : constant Driver.Images.Pixel := Own_Point (Driver.Images.Create (3, 3), Ok);
-         pragma Unreferenced (Unused);
-      begin
-         Check (not Ok, "an empty patch has no point");
-      end;
-   end Point_On_It;
+      for R in 5 .. 6 loop
+         for C in 5 .. 6 loop
+            Driver.Images.Include (Finger, C, R);
+         end loop;
+      end loop;
+      Check (not Mostly (Finger, Patch), "a thing whose middle a finger covers is not the body");
+      Check (Mostly (Arm, Patch), "a patch six tenths on the body is mostly the body");
+      Check (not Mostly (Edge, Patch), "half of a patch is not most of it");
+      Check (not Mostly (Arm, Driver.Images.Create (12, 12)), "an empty patch is mostly nothing");
+   end What_Most_Pixels_Are;
 
    procedure Register is
    begin
-      Register ("brain.live.point", "the point that stands for a patch lies off it", Point_On_It'Access);
+      Register ("brain.live.mostly", "a patch is taken for what one point of it is, not what most of it is",
+                What_Most_Pixels_Are'Access);
    end Register;
 
 end Driver.Brain.Live.Tests;

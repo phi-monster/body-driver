@@ -39,9 +39,33 @@ package body Driver.Action.Contact.Simplex is
          Basis (Row) := Col;
       end Pivot;
 
+      --  The row that leaves when column Enter enters: among rows with the
+      --  least ratio, the one whose basic column is lowest; 0 when no row
+      --  bounds it. Step is that least ratio.
+      procedure Ratio_Test (Enter : Positive; Leave : out Natural; Step : out Real) is
+      begin
+         Leave := 0;
+         Step := Real'Last;
+         for I in 1 .. M loop
+            if T (I, Enter) > Zero then
+               declare
+                  Ratio : constant Real := T (I, W) / T (I, Enter);
+               begin
+                  if Leave = 0 or else Ratio < Step or else (Ratio = Step and then Basis (I) < Basis (Leave)) then
+                     Step := Ratio;
+                     Leave := I;
+                  end if;
+               end;
+            end if;
+         end loop;
+      end Ratio_Test;
+
       --  Pivots until no column below Allowed improves the objective (row 0).
-      --  Bland's rule: the lowest improving column enters, and among rows with
-      --  the least ratio the one whose basic column is lowest leaves.
+      --  The column that improves it most per unit enters (Dantzig's rule)
+      --  whenever its step moves the solution; when that step is zero, the
+      --  pivot is chosen by Bland's rule instead: the lowest improving column
+      --  enters. Every pivot of a cycle leaves the objective as it is, so all
+      --  of them would be Bland's, and Bland's rule never cycles.
       procedure Run (Allowed : Positive; Bounded : out Boolean) is
       begin
          Bounded := True;
@@ -49,29 +73,24 @@ package body Driver.Action.Contact.Simplex is
             declare
                Enter : Natural := 0;
                Leave : Natural := 0;
-               Best  : Real := Real'Last;
+               Step  : Real;
             begin
                for J in 1 .. Allowed loop
-                  if T (0, J) < -Zero then
+                  if T (0, J) < -Zero and then (Enter = 0 or else T (0, J) < T (0, Enter)) then
                      Enter := J;
-                     exit;
                   end if;
                end loop;
                exit when Enter = 0;
-               for I in 1 .. M loop
-                  if T (I, Enter) > Zero then
-                     declare
-                        Ratio : constant Real := T (I, W) / T (I, Enter);
-                     begin
-                        if Leave = 0 or else Ratio < Best
-                          or else (Ratio = Best and then Basis (I) < Basis (Leave))
-                        then
-                           Best := Ratio;
-                           Leave := I;
-                        end if;
-                     end;
-                  end if;
-               end loop;
+               Ratio_Test (Enter, Leave, Step);
+               if Leave /= 0 and then Step <= Zero then
+                  for J in 1 .. Allowed loop
+                     if T (0, J) < -Zero then
+                        Enter := J;
+                        exit;
+                     end if;
+                  end loop;
+                  Ratio_Test (Enter, Leave, Step);
+               end if;
                if Leave = 0 then
                   Bounded := False;
                   return;

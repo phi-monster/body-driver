@@ -163,6 +163,19 @@ package body Driver.Action.Execution is
       Look (P, X);
    end Set_Closer;
 
+   --  The finest spacing of any thing's samples: what the body's points are
+   --  laid at; Real'Last when no thing has samples.
+   function Finest_Pitch (S : Snapshot) return Real is
+      Spacing : Real := Real'Last;
+   begin
+      for T of S.Things loop
+         if T.Pitch > 0.0 then
+            Spacing := Real'Min (Spacing, T.Pitch);
+         end if;
+      end loop;
+      return Spacing;
+   end Finest_Pitch;
+
    --  The measured parts of the arm that can meet something, in the world
    --  with the tool at Tool: the lobes' faces and backs back to the depth of
    --  the hand, their ends, and the arm's own surface.
@@ -258,15 +271,10 @@ package body Driver.Action.Execution is
    function Clear_Way (S : Snapshot; E : Search.Effector; From, To : Rigid; Held : Thing_Id'Base; Near : Grids.Grid)
      return Boolean
    is
-      Spacing : Real := Real'Last;
+      Spacing : constant Real := Finest_Pitch (S);
       Lever   : Real := 0.0;
       Carried : Contact.Point_Vectors.Vector;
    begin
-      for T of S.Things loop
-         if T.Pitch > 0.0 then
-            Spacing := Real'Min (Spacing, T.Pitch);
-         end if;
-      end loop;
       if Spacing = Real'Last then
          return True;
       end if;
@@ -313,6 +321,28 @@ package body Driver.Action.Execution is
       end;
       return True;
    end Clear_Way;
+
+   --  Whether the arm's travel can bring its body to Tool, its closers at
+   --  Fractions: there it keeps the clearance travel keeps from the surfaces
+   --  and from every thing, or comes no nearer than it is now.
+   function Free_At (S : Snapshot; A : Arm_Id; Near : Grids.Grid; Tool : Rigid;
+                     Fractions : Search.Real_Vectors.Vector) return Boolean
+   is
+      E       : Search.Effector := Search.Effector_Of (S, A);
+      Spacing : constant Real := Finest_Pitch (S);
+   begin
+      if Spacing = Real'Last then
+         return True;
+      end if;
+      for K in 1 .. Natural'Min (Natural (E.Closers.Length), Natural (Fractions.Length)) loop
+         E.Closers (K).Now := Fractions (K);
+      end loop;
+      declare
+         Gap : constant Real := Least_Gap (S, Near, Body_Points (E, Tool, Spacing), E.Sigma);
+      begin
+         return Gap >= 0.0 or else Gap >= Least_Gap (S, Near, Body_Points (E, E.Tool, Spacing), E.Sigma);
+      end;
+   end Free_At;
 
    --  Takes the arm to Goal by the lowest clear way: straight when that is
    --  clear, else over the top, raised by its own reach doubled until the
@@ -491,14 +521,19 @@ package body Driver.Action.Execution is
                   declare
                      E     : constant Search.Effector := Search.Effector_Of (X.S, A.Id);
                      Arm_Id_Now : constant Arm_Id := A.Id;
+                     --  What the travel there keeps clear of: everything.
+                     Near  : constant Grids.Grid := Obstacles (X.S, E.Sigma, 0, 0);
                      function Can_Reach (Tool : Rigid) return Boolean is
                        (P.Reach ((Arm => Arm_Id_Now, Tool => Tool, Position_Only => False)).Status = Reachable);
+                     function Can_Be_Free (Tool : Rigid; Fractions : Search.Real_Vectors.Vector) return Boolean is
+                       (Free_At (X.S, Arm_Id_Now, Near, Tool, Fractions));
                      C     : Search.Candidate;
                      Found : Boolean;
                      Acc   : Search.Account;
                   begin
                      Search.Find (Search.Shape_Of (X.S, T), Beside_Of (X.S, T), E, Motion, Gravity (X.S),
-                                  Thing (X.S, T).Friction, Can_Reach'Access, C, Found, Acc, Touch_Only);
+                                  Thing (X.S, T).Friction, Can_Reach'Access, Can_Be_Free'Access, C, Found, Acc,
+                                  Touch_Only);
                      if Found and then C.Force < Force then
                         Best := C;
                         Force := C.Force;
@@ -599,13 +634,8 @@ package body Driver.Action.Execution is
       end if;
       declare
          E       : constant Search.Effector := Search.Effector_Of (S, A);
-         Spacing : Real := Real'Last;
+         Spacing : constant Real := Finest_Pitch (S);
       begin
-         for O of S.Things loop
-            if O.Pitch > 0.0 then
-               Spacing := Real'Min (Spacing, O.Pitch);
-            end if;
-         end loop;
          return Body_Points (E, E.Tool, (if Spacing = Real'Last then Arm (S, A).Step.Value else Spacing));
       end;
    end Moving_Points;
@@ -674,15 +704,22 @@ package body Driver.Action.Execution is
                      declare
                         B        : constant Real := Z * Sqrt (Sigma ** 2 + O.Sigma ** 2);
                         Reach_Of : constant Real := O.Pitch / 2.0 + B;
+                        Behind   : constant Real := B / Sqrt (VV);   --  how far behind is still at it, in the noise
                      begin
+                        --  As for a surface: a sample passed by less than the noise
+                        --  of the two, whose surface the motion goes into, is met
+                        --  now, not ignored.
                         for Q of O.Samples loop
                            declare
                               D     : constant Vec3 := Q.Point - Q0;
                               Along : constant Real := Real'(D * V) / VV;
                            begin
-                              if Along > 0.0 and then Along < Ahead and then abs (D - Along * V) <= Reach_Of then
-                                 Ahead := Along;
-                                 Band := B / Sqrt (VV);
+                              if (Along > 0.0 or else (Along > -Behind and then Real'(V * Q.Normal) < 0.0))
+                                and then Real'Max (0.0, Along) < Ahead
+                                and then abs (D - Along * V) <= Reach_Of
+                              then
+                                 Ahead := Real'Max (0.0, Along);
+                                 Band := Behind;
                               end if;
                            end;
                         end loop;
@@ -745,17 +782,21 @@ package body Driver.Action.Execution is
    --  monitor names an ending. The subject is the thing T, held or touched
    --  as G says, or when T is 0 the arm's own touching parts. A relation
    --  that ends in contact (Arrive_By_Touch) goes on past where the geometry
-   --  says it holds, by the arm's smallest step, until the touch is felt.
+   --  says it holds, by the arm's smallest step, until the touch is felt:
+   --  the arm is stopped where the contact is, or the thing Felt, which the
+   --  subject is coming in to, gives way and is seen to move.
    procedure Carry (P : in out Plant'Class; X : in out State; T : Thing_Id'Base; G : Grip;
                     Next_Goal : not null access function (S : Snapshot) return Goals.Answer;
                     Wanted : Ending_Set; Max_Steps : Natural; Final : out Ending;
-                    Arrive_By_Touch : Boolean := False)
+                    Arrive_By_Touch : Boolean := False; Felt : Thing_Id'Base := 0)
    is
       Watch     : Monitor.Watch := Monitor.Start;
       Start     : constant Point_Estimate :=
         (if T /= 0 then Thing (X.S, T).Centre else Effector_Item (X.S, G.Arm).Centre);
       Up0       : constant Vec3 := (if T /= 0 then Goals.Up_Of (X.S, T) else Gravity (X.S));
       Supported : constant Boolean := T /= 0 and then Thing (X.S, T).Support /= 0;
+      --  A thing that was moving already says nothing by moving on.
+      Felt_Still : constant Boolean := Felt /= 0 and then Has_Thing (X.S, Felt) and then not Thing (X.S, Felt).Moving;
    begin
       loop
          declare
@@ -850,6 +891,10 @@ package body Driver.Action.Execution is
             begin
                F.Blocked := F.Commanded and then Res.Outcome = Blocked and then Delivered < Ahead - Band;
                F.Touch := F.Commanded and then Res.Outcome = Blocked and then not F.Blocked;
+               if F.Commanded and then Felt_Still and then Has_Thing (X.S, Felt) and then Thing (X.S, Felt).Moving then
+                  F.Touch := True;
+                  F.Blocked := False;
+               end if;
                if F.Commanded and then Res.Outcome = Refused then
                   F.Blocked := True;
                   Say (X, "the arm refused the step: " & To_String (Res.Why));
@@ -1262,7 +1307,8 @@ package body Driver.Action.Execution is
                                  Motion => Contact.Slide (Unit (In_Way)), Gap => Unknown);
                            begin
                               Carry (P, X, 0, Grip_Of_Arm (X.S, A, Closing => False), Toward_Touch'Access,
-                                     W.Until_Endings, W.Max_Steps, Final, Arrive_By_Touch => True);
+                                     W.Until_Endings, W.Max_Steps, Final, Arrive_By_Touch => True,
+                                     Felt => C.Object.Thing);
                            end;
                         end;
                      else

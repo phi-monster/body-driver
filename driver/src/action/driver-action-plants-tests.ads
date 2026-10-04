@@ -48,6 +48,7 @@ package Driver.Action.Plants.Tests is
       Moved_Q  : Real := 0.0;        --  how far it has moved along its joint, as the eyes saw it
       Points   : Sample_Vectors.Vector;   --  its whole surface, in its own frame
       Bound    : Real := 0.0;        --  no point of it is farther than this from its centre
+      Seen     : Rigid := Identity;  --  where it was at the last look
    end record;
 
    package Thing_Vectors is new Ada.Containers.Vectors (Positive, Sim_Thing);

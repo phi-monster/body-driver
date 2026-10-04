@@ -723,6 +723,7 @@ package body Driver.Action.Plants.Tests is
       if not Fixed then
          Drop (W, Natural (W.Things.Length));
       end if;
+      W.Things (Natural (W.Things.Length)).Seen := W.Things (Natural (W.Things.Length)).Pose;
    end Add_Thing;
 
    procedure Set_Joint (W : in out World; T : Thing_Id; J : Sim_Joint) is
@@ -805,7 +806,10 @@ package body Driver.Action.Plants.Tests is
          begin
             X.Best_Eye := 1;
             X.Held_By := T.Held_By;
-            X.Moving := W.Moved and then (abs T.Drift > 0.0 or else T.Held_By /= 0);
+            --  Moved since the last look, by more than the eyes' noise.
+            X.Moving := Significant (abs (T.Pose.Translation - T.Seen.Translation)
+                                     + Radius_Of (W, I) * Angle (Transpose (T.Seen.Rotation) * T.Pose.Rotation), Sigma);
+            W.Things (I).Seen := T.Pose;
             X.Height := (Value => (if U = 0 then Lowest_Of (W, I) elsif U > 0 then Lowest_Of (W, I) - Highest_Of (W, U)
                                    else Lowest_Of (W, I)),
                          Sigma => Sigma, Degrees_Of_Freedom => 0);

@@ -88,6 +88,31 @@ package Driver.Robot is
    function Booted (M : Model) return Boolean;
    --  The kinematics of every arm that carries an eye are measured.
 
+   --  What a body file holds (docs/body-file.md), quantity by quantity:
+   --  the readings' noise, the readings each channel has moved through, the
+   --  step responses, the image lags, what each
+   --  group's push does to each eye (the lock-in), the body's graph (roles,
+   --  arms, mounts) and the kinematics with their lenses.
+   type Stored is
+     (Stored_Noise, Stored_Travel, Stored_Steps, Stored_Lags, Stored_Responses, Stored_Graph, Stored_Kinematics);
+
+   procedure Load_Body
+     (M   : in out Model;
+      Path : String;
+      Ok   : out Boolean;
+      Why  : out Ada.Strings.Unbounded.Unbounded_String);
+   --  Reloads from a body file every quantity whose method version is the
+   --  code's and whose inputs were reloaded too; the others stay to be
+   --  measured again. A model with no groups yet takes the file's; one that
+   --  has them must match the file's key, or nothing is reloaded. Ok is
+   --  False when the file cannot be read or is not a body file of this
+   --  body; Why says what was reloaded and what is to be measured again.
+
+   function Reloaded (M : Model; Q : Stored) return Boolean;
+   --  Q came from a body file and stands: the estimators do not measure it
+   --  again in this session (the travel and the step responses go on
+   --  accumulating from it).
+
    function Role (M : Model; G : Group_Id) return Group_Role;
 
    function Arm_Count (M : Model) return Natural;
@@ -203,6 +228,8 @@ private
 
 
 
+   type Stored_Flags is array (Stored) of Boolean;
+
    package Real_Vectors is new Ada.Containers.Vectors (Natural, Real);
    package Flag_Vectors is new Ada.Containers.Vectors (Natural, Boolean);
    type Luma_Access is access Real_Array;
@@ -244,6 +271,7 @@ private
       Episodes    : Episode_Vectors.Vector;   --  every push and how it went (Driver.Robot.Steps)
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
       Free_Shortfalls : Real_Vectors.Vector;   --  of every push that moved freely, in order
+      Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
    end record;
 
    package Group_Stream_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Stream);
@@ -388,6 +416,25 @@ private
       Matches   : Natural := 0;           --  keyframes with matches behind it
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
+      --  The table its eye saw, in its reference frame: the points X with
+      --  Table_Normal * X = Table_Offset (Kinematics.Fit.Table).
+      Table_Found  : Boolean := False;
+      Table_Normal : Vec3 := [0.0, 0.0, 0.0];
+      Table_Offset, Table_Offset_Sigma, Table_Sigma : Real := Real'Last;
+      --  Every track's point in its reference frame, three numbers each,
+      --  where Track_Known holds (Kinematics.Fit.Track_Points).
+      Tracks      : Real_Vectors.Vector;
+      Track_Known : Flag_Vectors.Vector;
+      --  Where its reference frame is in the world (Kinematics.In_World):
+      --  X_world = Placement * (Scale * X). The world is the first arm's
+      --  reference frame, so that arm is placed as it is.
+      Placed       : Boolean := False;
+      Placement    : Driver.Numerics.Rigid := Driver.Numerics.Identity;
+      Scale        : Real := 1.0;
+      Scale_Sigma  : Real := 0.0;
+      Placement_Covariance : Real_Vectors.Vector;   --  6 x 6, row by row: its turn (world frame), its centre
+      Placed_Px    : Real := 0.0;                  --  the resection's pixel noise
+      Placed_Points : Natural := 0;                --  the points that placed it
    end record;
 
    type Arm_Evidence is record
@@ -399,6 +446,14 @@ private
       Pending  : Pending_Vectors.Vector;
       Matches  : Match_Set_Vectors.Vector;
       Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
+      --  The first arm's reference view matched into this arm's, its query
+      --  points into this arm's reference image (Kinematics.Observe), and of
+      --  which reference of which group it was asked.
+      World_Pending   : Pending_Vectors.Vector;
+      World_Matches   : Match_Set_Vectors.Vector;
+      World_Asked     : Boolean := False;
+      World_Group     : Group_Id'Base := 0;
+      World_Reference : Natural := 0;
       Result   : Arm_Fit;
    end record;
 
@@ -418,6 +473,7 @@ private
       Kinematics     : Arm_Evidence_Vectors.Vector;   --  per arm with an eye
       Table_Up       : Direction_Estimate;          --  the table's normal towards the eyes, in the world
       Is_Booted      : Boolean := False;
+      From_File      : Stored_Flags := [others => False];   --  reloaded, so not measured again (Load_Body)
       Report         : Ada.Strings.Unbounded.Unbounded_String;   --  what the last estimate found, for Describe
    end record;
 
