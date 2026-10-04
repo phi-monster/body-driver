@@ -922,6 +922,7 @@ driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / 
 driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Driver.Log.Image (E.Sigma, 4) else "");	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Driver.Log.Image (E.Sigma, 4) else "");	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	Fast := 2.0 * Fast;	2.0	math	the descent doubles its step until the band
+driver-robot-hand.adb	Fast := 2.0 * Fast;	2.0	math	with nothing predicting the contact the descent doubles its step until it is blocked
 driver-robot-hand.adb	I : Hand_Id := 1;	1	structure	the first hand
 driver-robot-hand.adb	I : Positive := 1;	1	structure	the first pair
 driver-robot-hand.adb	Offset := 2.0 * Offset;	2.0	math	the sweep doubles its step

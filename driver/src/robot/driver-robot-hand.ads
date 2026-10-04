@@ -170,10 +170,10 @@ private
    type Descent_Steps is record
       Fast  : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
       Band  : Natural := 0;   --  within that band, each the larger of the sigma and Least
-      Crept : Natural := 0;   --  by Least, nothing predicting the contact
+      Blind : Natural := 0;   --  doubling, nothing predicting the contact
    end record;
 
-   function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Crept);
+   function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Blind);
 
    procedure Descend
      (Gap   : not null access function return Estimate;
@@ -189,8 +189,12 @@ private
    --  contact, the last cut to end there; within that band each step is the
    --  larger of the sigma and Least, so the tip meets the surface at most
    --  that far short of a step's end: the overshoot the prediction already
-   --  admits. Without one, every step is Least, the smallest move of the tool
-   --  that tells from its noise: nothing says where the surface is.
+   --  admits, and less force and less sinking in where the tip is read.
+   --  Without one the steps double from Least until one is not reached, the
+   --  overshoot as it comes (the owner's rule, 10-05: the most aggressive
+   --  choice everywhere; creeping by Least took A11's first presses into the
+   --  thousands of pushes). Least is the smallest move of the tool that tells
+   --  from its noise.
 
    function Sweepable (H : Hands; M : Model; G : Group_Id) return Boolean;
    --  The group is a closer by the body's roles now, and the hand watches it

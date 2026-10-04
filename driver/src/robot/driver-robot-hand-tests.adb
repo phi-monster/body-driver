@@ -85,7 +85,9 @@ package body Driver.Robot.Hand.Tests is
       --      at contact is at most the larger of the two, within about as many
       --      steps as doubling from Least takes to cover the descent, and the
       --      band's twice Z;
-      --  (b) nothing predicting it: at most Least;
+      --  (b) nothing predicting it: fast, doubling from Least, and blocked by
+      --      the step that meets the surface, about a doubling's number of
+      --      steps (the owner's rule, 10-05: the most aggressive choice);
       --  (c) predicted 3 Z sigma too low, as when an obstacle the eyes did not
       --      see lies under the tip: the fast part meets it, and its overshoot
       --      is that step's, past the bound: the known failure, stated here;
@@ -130,16 +132,22 @@ package body Driver.Robot.Hand.Tests is
       Check (Over <= Bound, "(a) the press overshot the predicted contact by" & Over'Image & ", past" & Bound'Image);
       Check (Total (Steps) <= Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (0.2 / Least, 2.0)))
                               + 2 * Natural (Real'Ceiling (Z)) + 1
-             and then Steps.Crept = 0 and then Steps.Fast > 0 and then Steps.Band > 0,
-             "(a) the press took" & Steps.Fast'Image & " fast," & Steps.Band'Image & " banded and" & Steps.Crept'Image
-             & " crept steps");
+             and then Steps.Blind = 0 and then Steps.Fast > 0 and then Steps.Band > 0,
+             "(a) the press took" & Steps.Fast'Image & " fast," & Steps.Band'Image & " banded and" & Steps.Blind'Image
+             & " blind steps");
       Check (abs Tip <= Bound, "(d) the tip read at contact lies" & Real'Image (abs Tip) & " from the surface");
       Predict := False;
       Press (0.2);
-      Check (Over <= Least, "(b) with nothing predicting the surface the press overshot it by" & Over'Image);
-      Check (Steps.Fast = 0 and then Steps.Band = 0 and then Total (Steps) >= Natural (Real'Floor (0.2 / Least)),
-             "(b) with nothing predicting the surface the press took" & Steps.Fast'Image & " fast and" & Steps.Band'Image
-             & " banded steps of" & Natural'Image (Total (Steps)));
+      --  Doubling from Least, the step that meets the surface is the first
+      --  whose sum passes the descent: some 2^k Least past it at most.
+      Check (Over > 0.0 and then Over <= Last_Step,
+             "(b) with nothing predicting the surface the press was not blocked by its step, overshooting by"
+             & Over'Image);
+      Check (Steps.Fast = 0 and then Steps.Band = 0 and then Steps.Blind = Total (Steps)
+             and then Total (Steps) <= Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log
+                                                                 (0.2 / Least + 1.0, 2.0))),
+             "(b) with nothing predicting the surface the press took" & Steps.Fast'Image & " fast," & Steps.Band'Image
+             & " banded and" & Steps.Blind'Image & " blind steps, not a doubling's worth");
       Predicted := -3.0 * Z * Sigma;
       Predict := True;
       Press (0.2);
@@ -195,8 +203,8 @@ package body Driver.Robot.Hand.Tests is
                              Unmeasured_Body'Access);
       Driver.Tests.Register ("hand.measure.end", "a closer at an end of its travel is asked ever further past it",
                              Upper_End'Access);
-      Driver.Tests.Register ("hand.measure.press", "a press overshoots the contact by more than its prediction admits",
-                             Press_Overshoot'Access);
+      Driver.Tests.Register ("hand.measure.press", "a press overshoots the contact by more than its prediction admits, "
+                             & "or creeps when nothing predicts it", Press_Overshoot'Access);
       Driver.Tests.Register ("hand.measure.roles", "a group the body re-read as an arm is swept as a closer",
                              Roles_Re_Read'Access);
       Driver.Robot.Hand.Frames.Tests.Register;

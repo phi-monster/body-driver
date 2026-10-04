@@ -654,42 +654,50 @@ package body Driver.Robot.Hand.Shape.Tests is
       end;
    end Bent_Tip;
 
+   --  What the task of In_A_Task shares with the test, kept at the library
+   --  level: the task refers to nothing on the test's stack.
+   Task_Rig     : Rig;
+   Task_Done    : Boolean := False with Atomic;
+   Task_Fitted  : Natural := 0;
+   Task_Failure : Unbounded_String;
+   Task_Took    : Duration := 0.0;
+
    procedure In_A_Task is
       --  The fit runs in the estimators, which also run in the decider's
       --  task with GNAT's default stack: a VGA eye that each lobe fills
       --  tens of thousands of pixels of.
-      R        : Rig := Parallel;
-      Done     : Boolean := False with Atomic;
-      Fitted_N : Natural := 0;
-      Failure  : Unbounded_String;
-      Took     : Duration := 0.0;
    begin
-      R.Width := 640;
-      R.Height := 480;
-      R.Focal := 500.0;
+      Task_Rig := Parallel;
+      Task_Rig.Width := 640;
+      Task_Rig.Height := 480;
+      Task_Rig.Focal := 500.0;
+      Task_Done := False;
+      Task_Fitted := 0;
+      Task_Failure := Null_Unbounded_String;
       declare
          task Decider;
          task body Decider is
             Start : constant Ada.Calendar.Time := Ada.Calendar.Clock;
-            O     : constant Outcome := Run (R, Seed => 3);
+            O     : constant Outcome := Run (Task_Rig, Seed => 3);
             use type Ada.Calendar.Time;
          begin
-            Took := Ada.Calendar.Clock - Start;
+            Task_Took := Ada.Calendar.Clock - Start;
             for L in 1 .. O.Found loop
-               Fitted_N := Fitted_N + Boolean'Pos (Fitted (O.Shapes (L)));
+               Task_Fitted := Task_Fitted + Boolean'Pos (Fitted (O.Shapes (L)));
             end loop;
-            Done := True;
+            Task_Done := True;
          exception
             when E : others =>
-               Failure := To_Unbounded_String (Ada.Exceptions.Exception_Information (E));
+               Task_Failure := To_Unbounded_String (Ada.Exceptions.Exception_Information (E));
          end Decider;
       begin
          null;
       end;
-      Check (Done, "the shape's fit failed in a task with the default stack: " & To_String (Failure));
-      Check (not Done or else Fitted_N = 2, "two lobes in a VGA eye gave" & Fitted_N'Image & " fitted shapes");
+      Check (Task_Done, "the shape's fit failed in a task with the default stack: " & To_String (Task_Failure));
+      Check (not Task_Done or else Task_Fitted = 2,
+             "two lobes in a VGA eye gave" & Task_Fitted'Image & " fitted shapes");
       Driver.Log.Line (Driver.Log.Robot, "hand.shape.task: the rig and two VGA lobes' shapes took"
-                       & Duration'Image (Took) & " s");
+                       & Duration'Image (Task_Took) & " s");
    end In_A_Task;
 
    procedure Register is

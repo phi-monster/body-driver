@@ -681,7 +681,11 @@ package body Driver.Robot.Hand is
                   end if;
                end;
             else
-               Steps.Crept := Steps.Crept + 1;
+               --  Nothing predicts the contact: doubling until a step is
+               --  not reached, the overshoot as it comes.
+               By := Fast;
+               Fast := 2.0 * Fast;
+               Steps.Blind := Steps.Blind + 1;
             end if;
             Lower (By, Reached);
             exit when not Reached;
