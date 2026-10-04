@@ -47,7 +47,8 @@ package body Driver.Robot.Hand.Sweep is
          High_From => High.From,
          Changed   => Change_Holders.To_Holder (Changed),
          Lobes     => Driver.Robot.Hand.Lobes.Lobe_Vectors.Empty_Vector,
-         Closing   => Driver.Robot.Hand.Lobes.Undecided);
+         Closing   => Driver.Robot.Hand.Lobes.Undecided,
+         Noise     => <>);
       S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
    end Renew;
 
@@ -213,6 +214,7 @@ package body Driver.Robot.Hand.Sweep is
             Per_Channel : Channel_Array := S.Per_Channel.Element;
          begin
             Per_Channel (Channel).Lobes := Found;
+            Per_Channel (Channel).Noise := Noise;
             Per_Channel (Channel).Closing := Driver.Robot.Hand.Lobes.Direction (Found, Attached_Still, Noise);
             Per_Channel (Channel).Status := (if Found.Is_Empty then Nothing_Moves else Measured);
             S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
@@ -231,5 +233,8 @@ package body Driver.Robot.Hand.Sweep is
 
    function Closing_Known (S : State; Channel : Positive) return Boolean is
      (S.Per_Channel.Constant_Reference.Element (Channel).Closing /= Driver.Robot.Hand.Lobes.Undecided);
+
+   function Noise_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Matcher_Noise is
+     (S.Per_Channel.Constant_Reference.Element (Channel).Noise);
 
 end Driver.Robot.Hand.Sweep;

@@ -6,7 +6,9 @@ with Ada.Unchecked_Deallocation;
 with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot.Hand.Frames;
+with Driver.Robot.Hand.Lobes;
 with Driver.Robot.Hand.Presses;
+with Driver.Robot.Hand.Shape;
 with Driver.Robot.Hand.Sweep;
 with Driver.Robot.Hand.Tips;
 with Driver.Robot.Hand.Views;
@@ -61,6 +63,8 @@ package body Driver.Robot.Hand is
    type Lobe_Record is record
       Channel : Positive;
       Sights  : Sight_Array;
+      Shape   : Driver.Robot.Hand.Shape.Lobe_Shape;   --  its surface as its own eye saw it, up to scale
+      Size    : Driver.Robot.Hand.Shape.Lobe_Size;    --  what the presses so far make of it
    end record;
 
    package Lobe_Record_Vectors is new Ada.Containers.Vectors (Positive, Lobe_Record);
@@ -75,6 +79,9 @@ package body Driver.Robot.Hand is
       Lobes    : Lobe_Record_Vectors.Vector;
       Watch    : Driver.Robot.Hand.Presses.Watcher;   --  the arm's presses, from the stream
       Book     : Driver.Robot.Hand.Tips.Book;         --  the presses kept and the tips they measure
+      Depth    : Estimate;
+      Axis     : Direction_Estimate;
+      Unsized  : Unbounded_String;                    --  what of its sizes is not measured, and why
    end record;
 
    package Hand_Vectors is new Ada.Containers.Vectors (Hand_Id, Hand_Record);
@@ -262,6 +269,114 @@ package body Driver.Robot.Hand is
       end loop;
    end Ask;
 
+   function Shape_Of
+     (M           : Model;
+      Eye         : Eye_Id;
+      L           : Driver.Robot.Hand.Lobes.Lobe;
+      Open_View   : Driver.Robot.Hand.Views.View;
+      Closed_High : Boolean;
+      Noise       : Driver.Robot.Hand.Lobes.Matcher_Noise) return Driver.Robot.Hand.Shape.Lobe_Shape;
+   --  A lobe's shape from every pixel of it at the open end and where the
+   --  matcher put it at the closed end, and from its closed tip and where
+   --  that matched back to: their lines of sight taken into the tool frame
+   --  through the eye's mount as it was when the open end was seen.
+
+   function Shape_Of
+     (M           : Model;
+      Eye         : Eye_Id;
+      L           : Driver.Robot.Hand.Lobes.Lobe;
+      Open_View   : Driver.Robot.Hand.Views.View;
+      Closed_High : Boolean;
+      Noise       : Driver.Robot.Hand.Lobes.Matcher_Noise) return Driver.Robot.Hand.Shape.Lobe_Shape
+   is
+      package Shapes renames Driver.Robot.Hand.Shape;
+      package Lobes renames Driver.Robot.Hand.Lobes;
+      Mount    : constant Pose_Estimate := Eye_In_Tool (M, Eye, Open_View.Seen);
+      Opened   : constant Lobes.Move_Holders.Holder := (if Closed_High then L.Moves_Here else L.Moves_There);
+      Shut     : constant Lobes.Move_Holders.Holder := (if Closed_High then L.Moves_There else L.Moves_Here);
+      Open_Tip : constant Natural := (if Closed_High then L.Tip_Move_Here else L.Tip_Move_There);
+      Shut_Tip : constant Natural := (if Closed_High then L.Tip_Move_There else L.Tip_Move_Here);
+      Bordered : constant Boolean := (if Closed_High then L.Bordered_Here else L.Bordered_There);
+
+      function Line (Px : Driver.Images.Pixel) return Vec3 is
+        (Mount.Pose.Rotation * Eye_Ray (M, Eye, Px).Direction.Unit_Vector);
+   begin
+      if Mount.Position_Covariance (1, 1) = Real'Last then
+         return Shapes.Unfitted ("its eye's mount was not measured when it was swept");
+      elsif not Known (Noise.Displacement) then
+         return Shapes.Unfitted ("the matcher's own noise between its ends is not known");
+      elsif Open_Tip = 0 or else Shut_Tip = 0 or else Opened.Is_Empty or else Shut.Is_Empty then
+         return Shapes.Unfitted ("its tip is not seen at both ends");
+      elsif Eye_Ray (M, Eye, Opened.Constant_Reference.Element (Open_Tip).From).Direction.Sigma = Real'Last then
+         return Shapes.Unfitted ("its eye's lens was not measured when it was swept");
+      end if;
+      declare
+         Moves : Lobes.Move_Array renames Opened.Constant_Reference.Element.all;
+         --  Sized by pixels: a function result, off the stack.
+         Seen  : constant Shapes.Sighting_Array :=
+           Shapes.From_Moves (Moves, Shut.Constant_Reference.Element (Shut_Tip), Line'Access, Noise.Displacement.Sigma);
+      begin
+         return Shapes.Fit (Mount.Pose.Translation, Seen, Open_Tip - Moves'First + 1, Seen'Last, Bordered);
+      end;
+   end Shape_Of;
+
+   function Sizes_Text (R : Hand_Record) return String;
+   --  The hand's sizes as measured so far, for the log.
+
+   function Sizes_Text (R : Hand_Record) return String is
+      Text : Unbounded_String;
+      function Image (E : Estimate) return String is
+        (if Known (E) then Driver.Log.Image (E.Value, 4) & " +- " & Driver.Log.Image (E.Sigma, 4) else "unmeasured");
+   begin
+      for L in R.Lobes.First_Index .. R.Lobes.Last_Index loop
+         Append (Text, "lobe" & L'Image & " width " & Image (R.Lobes (L).Size.Width)
+                 & ", thickness " & Image (R.Lobes (L).Size.Thickness)
+                 & ", face " & Image (R.Lobes (L).Size.Face) & " ahead of its tip"
+                 & (if Driver.Robot.Hand.Shape.Fitted (R.Lobes (L).Shape)
+                    then " (" & Natural'Image (Driver.Robot.Hand.Shape.Kept (R.Lobes (L).Shape)) & " points, scatter "
+                         & Driver.Log.Image (Driver.Robot.Hand.Shape.Scatter (R.Lobes (L).Shape), 3) & ")"
+                    else "")
+                 & "; ");
+      end loop;
+      Append (Text, "depth " & Image (R.Depth));
+      if Length (R.Unsized) > 0 then
+         Append (Text, "; " & To_String (R.Unsized));
+      end if;
+      return To_String (Text);
+   end Sizes_Text;
+
+   procedure Size_Up (R : in out Hand_Record; Id : Hand_Id);
+   --  The hand's sizes again, from its lobes' shapes and the tips its
+   --  presses measure now.
+
+   procedure Size_Up (R : in out Hand_Record; Id : Hand_Id) is
+      package Shapes renames Driver.Robot.Hand.Shape;
+      N      : constant Natural := Natural (R.Lobes.Length);
+      Fits   : Shapes.Lobe_Shape_Array (1 .. N);
+      Tipped : Shapes.Tip_Array (1 .. N, Opening);
+   begin
+      if N = 0 then
+         return;
+      end if;
+      for L in 1 .. N loop
+         Fits (L) := R.Lobes (L).Shape;
+         for O in Opening loop
+            Tipped (L, O) := Driver.Robot.Hand.Tips.Tip (R.Book, L, O);
+         end loop;
+      end loop;
+      declare
+         Sized : constant Shapes.Hand_Size := Shapes.Measure (Fits, Tipped);
+      begin
+         for L in 1 .. N loop
+            R.Lobes (L).Size := Sized.Sizes (L);
+         end loop;
+         R.Depth := Sized.Depth;
+         R.Axis := Sized.Axis;
+         R.Unsized := Sized.Why;
+      end;
+      Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & " sizes: " & Sizes_Text (R));
+   end Size_Up;
+
    procedure Rebuild (D : in out Hand_Data; P : Pair; M : Model);
    --  The hand of a closer group from what its own eye measured: every
    --  measured channel's lobes with their tips at both openings.
@@ -288,7 +403,10 @@ package body Driver.Robot.Hand is
                      Made.Lobes.Append
                        (Lobe_Record'(Channel => C,
                                      Sights  => [Open         => (if Closed_High then At_Low else At_High),
-                                                 Closed_Empty => (if Closed_High then At_High else At_Low)]));
+                                                 Closed_Empty => (if Closed_High then At_High else At_Low)],
+                                     Shape   => Shape_Of (M, P.Eye, L, (if Closed_High then Low else High), Closed_High,
+                                                          Sweeps.Noise_Of (P.Sweep, C)),
+                                     Size    => <>));
                   end;
                end loop;
                --  The group's readings at each opening: this channel at its end,
@@ -332,12 +450,14 @@ package body Driver.Robot.Hand is
                Made.Watch := D.Found (Id).Watch;
                Made.Book := D.Found (Id).Book;
                Driver.Robot.Hand.Tips.Set_Sights (Made.Book, Table);
+               Size_Up (Made, Id);
                D.Found.Replace_Element (Id, Made);
                return;
             end if;
          end loop;
          Driver.Robot.Hand.Tips.Set_Sights (Made.Book, Table);
       end;
+      Size_Up (Made, D.Found.Last_Index + 1);
       D.Found.Append (Made);
    end Rebuild;
 
@@ -454,6 +574,7 @@ package body Driver.Robot.Hand is
          Driver.Robot.Hand.Tips.Add (R.Book, Press, Which);
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": a press at the " & Opening'Image (Which)
                           & " opening, " & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image & " kept");
+         Size_Up (R, Id);
       else
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image
                           & ": a press with the closer at neither measured opening is not used");
@@ -592,6 +713,19 @@ package body Driver.Robot.Hand is
    function Closer_Reading (H : Hands; Id : Hand_Id; At_Opening : Opening) return Real_Array is
      (Found (H, Id).Readings (At_Opening).Element);
 
+   function Lobe_Width (H : Hands; Id : Hand_Id; Lobe : Positive) return Estimate is
+     (Found (H, Id).Lobes (Lobe).Size.Width);
+
+   function Lobe_Thickness (H : Hands; Id : Hand_Id; Lobe : Positive) return Estimate is
+     (Found (H, Id).Lobes (Lobe).Size.Thickness);
+
+   function Lobe_Face (H : Hands; Id : Hand_Id; Lobe : Positive) return Estimate is
+     (Found (H, Id).Lobes (Lobe).Size.Face);
+
+   function Grip_Depth (H : Hands; Id : Hand_Id) return Estimate is (Found (H, Id).Depth);
+
+   function Grip_Axis (H : Hands; Id : Hand_Id) return Direction_Estimate is (Found (H, Id).Axis);
+
    --  Where along its line of sight a tip is comes only from presses, and
    --  none is measured yet: these report an unknown estimate.
 
@@ -682,7 +816,7 @@ package body Driver.Robot.Hand is
                Append (Text, " channel" & L.Channel'Image & " tip open " & Image (L.Sights (Open).Pixel)
                        & " closed " & Image (L.Sights (Closed_Empty).Pixel) & ";");
             end loop;
-            Append (Text, ASCII.LF);
+            Append (Text, " sizes: " & Sizes_Text (R) & ASCII.LF);
          end;
       end loop;
       return To_String (Text);

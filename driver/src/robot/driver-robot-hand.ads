@@ -69,10 +69,42 @@ package Driver.Robot.Hand is
    function Tip_Sight (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Ray_Estimate;
    --  The line of sight to that tip, in the tool frame: the tip lies on it.
 
+   --  The hand's sizes (Driver.Robot.Hand.Shape): from the surface of each
+   --  lobe its own eye sees, fixed by the two views of the closer's sweep
+   --  and scaled by the tips the presses measure at both openings. Each is
+   --  at least what is seen of it: a side of a lobe facing away from its eye,
+   --  or a part hidden or outside the picture, is not in it. Unknown until
+   --  measured; the log (Describe) says why.
+
+   function Lobe_Width (H : Hands; Id : Hand_Id; Lobe : Positive) return Estimate;
+   --  How wide the lobe is across its closing direction (from its open tip
+   --  toward its closed one) and across the hand's axis.
+
+   function Lobe_Thickness (H : Hands; Id : Hand_Id; Lobe : Positive) return Estimate;
+   --  How thick it is along its closing direction.
+
+   function Lobe_Face (H : Hands; Id : Hand_Id; Lobe : Positive) return Estimate;
+   --  How far ahead of its tip along its closing direction it reaches: where
+   --  its face meets what it closes on.
+
+   function Grip_Depth (H : Hands; Id : Hand_Id) return Estimate;
+   --  How far back from the lobes' tips along the hand's axis their moving
+   --  parts reach: how far a thing may go in between them before it meets
+   --  them where they begin, from the middle of the tips at the open opening.
+   --  Known when every lobe is measured.
+
+   function Grip_Axis (H : Hands; Id : Hand_Id) return Direction_Estimate;
+   --  The way the lobes point, in the tool frame: from the middle of their
+   --  points toward their tips. A thing goes into the hand against it.
+
    function Describe (H : Hands) return String;
    --  The hands found so far, one line each, for the log.
 
 private
+
+   Mad_Efficiency : constant := 0.367_5;
+   --  The asymptotic efficiency of the median absolute deviation for Gaussian
+   --  data: a scale from it is worth that share of as many degrees of freedom.
 
    type Hand_Data;
    --  Completed in the body: the hand's measurements use its child packages.

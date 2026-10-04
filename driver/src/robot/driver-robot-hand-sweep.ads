@@ -105,6 +105,11 @@ package Driver.Robot.Hand.Sweep is
      with Pre => Status (S, Channel) = Measured;
    --  The lobes come significantly closer at one end than at the other.
 
+   function Noise_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Matcher_Noise
+     with Pre => Status (S, Channel) = Measured;
+   --  The matcher's own noise between this channel's ends, from the pixels
+   --  that did not change: what the lobes' moves are judged against.
+
 private
 
    package Change_Holders is new Ada.Containers.Indefinite_Holders (Driver.Images.Mask, Driver.Images."=");
@@ -116,6 +121,7 @@ private
       Changed     : Change_Holders.Holder;
       Lobes       : Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector;
       Closing     : Driver.Robot.Hand.Lobes.Closing := Driver.Robot.Hand.Lobes.Undecided;
+      Noise       : Driver.Robot.Hand.Lobes.Matcher_Noise;
    end record;
 
    type Channel_Array is array (Positive range <>) of Channel_State;
