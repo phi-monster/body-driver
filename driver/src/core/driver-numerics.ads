@@ -44,7 +44,9 @@ package Driver.Numerics with Pure is
    --  standard Eigensystem does not accept.
 
    function Orthonormalize (R : Mat3) return Mat3;
-   --  The rotation nearest to R in the Frobenius norm.
+   --  The rotation nearest to R in the Frobenius norm (Kabsch's, with the
+   --  determinant's sign kept): unique when R has rank two or more, so it
+   --  also turns a cross-covariance of points in a plane into their rotation.
 
    type Quaternion is record
       W, X, Y, Z : Real := 0.0;

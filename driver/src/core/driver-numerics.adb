@@ -71,16 +71,22 @@ package body Driver.Numerics is
    end Symmetric_Eigensystem;
 
    function Orthonormalize (R : Mat3) return Mat3 is
-      --  Polar decomposition through the symmetric square root of R^T R.
-      Values   : Vec3;
-      Vectors  : Mat3;
-      Inv_Sqrt : Mat3 := [others => [others => 0.0]];
+      --  For R = U S V^T the nearest rotation is U diag (1, 1, det (U V^T)) V^T.
+      --  V comes from the eigensystem of R^T R, in descending order; the first
+      --  two left vectors from R V, the third as their cross product, which
+      --  also holds when R has rank two (points in a plane: R v3 is zero).
+      --  With u3 = u1 x u2, det (U V^T) times u3 v3^T is det (V) u3 v3^T
+      --  whichever sign the true third left vector has.
+      Values : Vec3;
+      V      : Mat3;
+      U1, U2 : Vec3;
+      function Column (J : Positive) return Vec3 is ([V (1, J), V (2, J), V (3, J)]);
    begin
-      Symmetric_Eigensystem (Transpose (R) * R, Values, Vectors);
-      for I in 1 .. 3 loop
-         Inv_Sqrt (I, I) := 1.0 / Sqrt (Values (I));
-      end loop;
-      return R * (Vectors * Inv_Sqrt * Transpose (Vectors));
+      Symmetric_Eigensystem (Transpose (R) * R, Values, V);
+      U1 := Unit (R * Column (1));
+      U2 := R * Column (2);
+      U2 := Unit (U2 - Real'(U2 * U1) * U1);
+      return Outer (U1, Column (1)) + Outer (U2, Column (2)) + Determinant (V) * Outer (Cross (U1, U2), Column (3));
    end Orthonormalize;
 
    function To_Matrix (Q : Quaternion) return Mat3 is

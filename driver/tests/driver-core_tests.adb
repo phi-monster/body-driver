@@ -40,6 +40,59 @@ package body Driver.Core_Tests is
       return M;
    end Max_Abs;
 
+   procedure Nearest_Rotation is
+      --  Orthonormalize must give the rotation nearest to its argument: from a
+      --  near-rotation, from the cross-covariance of points in a plane (rank
+      --  two, where the polar factor breaks down), and from a matrix with a
+      --  negative determinant (where the polar factor is a reflection).
+      R0 : constant Mat3 := Exp ([0.3, -0.2, 0.5]);
+
+      function Rotation_Error (A, B : Mat3) return Real is (Angle (Transpose (A) * B));
+
+      function Largest_Entry (M : Mat3) return Real is
+         L : Real := 0.0;
+      begin
+         for E of M loop
+            L := Real'Max (L, abs E);
+         end loop;
+         return L;
+      end Largest_Entry;
+
+      procedure Check_Rotation (R : Mat3; What : String) is
+      begin
+         Check (Largest_Entry (Transpose (R) * R - Identity3) < 1.0e-12 and then abs (Determinant (R) - 1.0) < 1.0e-12,
+                What & ": not a rotation");
+      end Check_Rotation;
+   begin
+      declare
+         Near : constant Mat3 := R0 + [[1.0e-4, -2.0e-4, 0.0], [3.0e-4, 0.0, -1.0e-4], [0.0, 2.0e-4, 1.0e-4]];
+         R    : constant Mat3 := Orthonormalize (Near);
+      begin
+         Check_Rotation (R, "near-rotation");
+         Check (Rotation_Error (R, R0) < 1.0e-3, "a near-rotation lands far from its rotation");
+      end;
+      declare
+         --  Points in the plane z = 0 and their images: H = sum q p^T has rank two.
+         P : constant array (1 .. 4) of Vec3 := [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [-1.5, 0.5, 0.0], [0.3, -1.0, 0.0]];
+         H : Mat3 := [others => [others => 0.0]];
+         R : Mat3;
+      begin
+         for Point of P loop
+            H := H + Outer (R0 * Point, Point);
+         end loop;
+         R := Orthonormalize (H);
+         Check_Rotation (R, "planar points");
+         Check (Rotation_Error (R, R0) < 1.0e-9, "points in a plane give another rotation");
+      end;
+      declare
+         Flipped : constant Mat3 := R0 * [[3.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, -1.0]];
+         R       : constant Mat3 := Orthonormalize (Flipped);
+      begin
+         Check_Rotation (R, "negative determinant");
+         Check (Rotation_Error (R, R0) < 1.0e-9, "a negative determinant gives another rotation");
+      end;
+   end Nearest_Rotation;
+
    procedure Rotation_Round_Trip is
       Samples : constant array (Positive range <>) of Vec3 :=
         [[0.3, -0.2, 0.9], [1.0e-9, 0.0, 0.0], [0.0, Pi - 1.0e-6, 0.0], [Pi, 0.0, 0.0],
@@ -731,6 +784,8 @@ package body Driver.Core_Tests is
    procedure Register is
    begin
       Driver.Tests.Register ("core.rotation", "Exp and Log disagree near 0 or pi", Rotation_Round_Trip'Access);
+      Driver.Tests.Register ("core.nearest_rotation", "Orthonormalize misses the nearest rotation for planar or reflected input",
+                             Nearest_Rotation'Access);
       Driver.Tests.Register ("core.quaternion", "quaternion conversion loses a rotation", Quaternion_Round_Trip'Access);
       Driver.Tests.Register ("core.rigid", "a rigid inverse does not undo the transform", Rigid_Inverse'Access);
       Driver.Tests.Register ("core.least_squares", "QR least squares wrong or blind to rank loss",
