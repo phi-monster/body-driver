@@ -100,7 +100,7 @@ package body Driver.Robot.Hand.Tests is
       Predicted : Real := 0.0;
       Predict   : Boolean := True;
       Last_Step : Real := 0.0;
-      Steps     : Natural;
+      Steps     : Descent_Steps;
       procedure Lower (By : Real; Reached : out Boolean) is
          Target : constant Real := Tip - By;
       begin
@@ -127,12 +127,18 @@ package body Driver.Robot.Hand.Tests is
       Predict := True;
       Press (0.2);
       Check (Over <= Bound, "(a) the press overshot the predicted contact by" & Over'Image & ", past" & Bound'Image);
-      Check (Steps <= Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (0.2 / Least, 2.0))) + 2 * Natural (Real'Ceiling (Z)) + 1,
-             "(a) the press took" & Steps'Image & " steps");
+      Check (Total (Steps) <= Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (0.2 / Least, 2.0)))
+                              + 2 * Natural (Real'Ceiling (Z)) + 1
+             and then Steps.Crept = 0 and then Steps.Fast > 0 and then Steps.Band > 0,
+             "(a) the press took" & Steps.Fast'Image & " fast," & Steps.Band'Image & " banded and" & Steps.Crept'Image
+             & " crept steps");
       Check (abs Tip <= Bound, "(d) the tip read at contact lies" & Real'Image (abs Tip) & " from the surface");
       Predict := False;
       Press (0.2);
       Check (Over <= Least, "(b) with nothing predicting the surface the press overshot it by" & Over'Image);
+      Check (Steps.Fast = 0 and then Steps.Band = 0 and then Total (Steps) >= Natural (Real'Floor (0.2 / Least)),
+             "(b) with nothing predicting the surface the press took" & Steps.Fast'Image & " fast and" & Steps.Band'Image
+             & " banded steps of" & Natural'Image (Total (Steps)));
       Predicted := -3.0 * Z * Sigma;
       Predict := True;
       Press (0.2);

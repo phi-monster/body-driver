@@ -298,7 +298,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Hold_Beat (Read_Gap'Access);
          return Result;
       end Gap;
-      Steps : Natural;
+      Steps : Driver.Robot.Hand.Descent_Steps;
 
       procedure Read_Arm (O : Observation) is
       begin
@@ -334,12 +334,19 @@ procedure Measure (H : in out Hands; M : in out Model) is
                                   & Driver.Log.Image (Least, 4) & " a step until blocked"));
       end;
       Driver.Robot.Hand.Descend (Gap'Access, Least, Lower'Access, Steps);
+      --  One line a press, for the boot's account of where its time went:
+      --  how many pushes, and why each was as long as it was.
+      Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": press of lobe" & Lobe'Image & " at "
+                       & (if Which = Open then "open" else "closed") & ":"
+                       & Natural'Image (Driver.Robot.Hand.Total (Steps)) & " pushes,"
+                       & Steps.Fast'Image & " fast and" & Steps.Band'Image
+                       & " within Z sigma of the contact its presses predict," & Steps.Crept'Image
+                       & " crept by " & Driver.Log.Image (Least, 4) & " with nothing predicting it; "
+                       & (if Unplanned then "then it cannot press lower: " & Driver.Robot.Motion.Why (Plan)
+                          else "blocked, the last push by " & Driver.Log.Image (By, 4)));
       if Unplanned then
-         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": cannot press lower: " & Driver.Robot.Motion.Why (Plan));
          return False;
       end if;
-      Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": blocked after" & Steps'Image & " steps, the last by "
-                       & Driver.Log.Image (By, 4));
       --  Let go: the arm held where the block left it, so the hand rests.
       Hold_Beat (Read_Arm'Access);
       Move_Group (Arm_Is, Arm_Now.Element);
