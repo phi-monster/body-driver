@@ -102,11 +102,19 @@ private
    --  does not clamp takes a command past the end as full effort. Pushes
    --  counts the pushes; Answered, whether the first one followed.
 
+   type Descent_Steps is record
+      Fast  : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
+      Band  : Natural := 0;   --  within that band, each the larger of the sigma and Least
+      Crept : Natural := 0;   --  by Least, nothing predicting the contact
+   end record;
+
+   function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Crept);
+
    procedure Descend
      (Gap   : not null access function return Estimate;
       Least : Real;
       Lower : not null access procedure (By : Real; Reached : out Boolean);
-      Steps : out Natural)
+      Steps : out Descent_Steps)
      with Pre => Least > 0.0;
    --  A press's descent: each step lowers the tool By, until one does not
    --  reach (Lower says so: the arm met something, or cannot go there). Gap is

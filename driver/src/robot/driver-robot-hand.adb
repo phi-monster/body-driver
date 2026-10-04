@@ -515,12 +515,12 @@ package body Driver.Robot.Hand is
      (Gap   : not null access function return Estimate;
       Least : Real;
       Lower : not null access procedure (By : Real; Reached : out Boolean);
-      Steps : out Natural)
+      Steps : out Descent_Steps)
    is
       Fast    : Real := Least;   --  the next step of the fast part, doubling
       Reached : Boolean;
    begin
-      Steps := 0;
+      Steps := (others => 0);
       loop
          declare
             G  : constant Estimate := Gap.all;
@@ -535,13 +535,16 @@ package body Driver.Robot.Hand is
                   if Room >= Least then
                      By := Real'Min (Fast, Room);
                      Fast := 2.0 * Fast;
+                     Steps.Fast := Steps.Fast + 1;
                   else
                      By := Real'Max (G.Sigma, Least);
+                     Steps.Band := Steps.Band + 1;
                   end if;
                end;
+            else
+               Steps.Crept := Steps.Crept + 1;
             end if;
             Lower (By, Reached);
-            Steps := Steps + 1;
             exit when not Reached;
          end;
       end loop;
