@@ -2,12 +2,14 @@ with Driver.Bytes;
 with Driver.Commands;
 with Driver.Robot;
 with Driver.Robot.Hand;
+with Driver.Recording;
 with Driver.Tests;
 with Driver.World.Pairs.Tests;
 with Driver.World.Regions.Tests;
 with Driver.World.Estimates.Tests;
 with Driver.World.Supports.Tests;
 with Driver.World.Tracking.Tests;
+with GNAT.OS_Lib;
 
 package body Driver.World.Tests is
 
@@ -88,10 +90,94 @@ package body Driver.World.Tests is
       Check (Thing_Count (S) = 0 and then Place_Count (S) = 0, "a new episode kept the things or the places");
    end Adopted_And_Remembered;
 
+   --  Every write a decider makes goes into the recording once, where it is
+   --  made, and the recorded writes applied to a fresh scene give back the
+   --  same things, place, friction and touch, to the bit.
+   procedure Writes_In_The_Recording is
+      use type Driver.Recording.Record_Kind;
+      use type GNAT.OS_Lib.File_Descriptor;
+      use type GNAT.OS_Lib.String_Access;
+      M            : Driver.Robot.Model;
+      Live, Again  : Scene;
+      O            : Observation;
+      First, Other : Thing_Id;
+      Home         : Place_Id;
+      Touch        : constant Point_Estimate :=
+        (Mean => [0.4, -0.1, 1.0 / 3.0], Covariance => [[1.0e-6, 2.0e-7, 0.0], [2.0e-7, 3.0e-6, 0.0], [0.0, 0.0, 5.0e-6]]);
+      FD           : GNAT.OS_Lib.File_Descriptor;
+      Name         : GNAT.OS_Lib.String_Access;
+      Writes       : Natural := 0;
+      Applied      : Boolean := True;
+      Gone         : Boolean;
+   begin
+      O.Images.Append (Driver.Images.Create (40, 30, [1 .. 3600 => Driver.Bytes.Byte'Last]));
+      O.Beat := 1;
+      GNAT.OS_Lib.Create_Temp_File (FD, Name);
+      Check (FD /= GNAT.OS_Lib.Invalid_FD, "no scratch file for the recording");
+      GNAT.OS_Lib.Close (FD);
+      if Name = null then
+         return;
+      end if;
+      Driver.Recording.Start_Shared (Name.all);
+      Adopt (Live, M, 1, O, Square (5, 5), First);
+      Adopt (Live, M, 1, O, Square (25, 15), Other);
+      Remember (Live, (Mean => [0.1, 0.2, 1.0 / 7.0], Covariance => [others => [others => 0.0]]), Home);
+      Learn_Friction (Live, First, (Low => 0.2, High => 1.0 / 3.0));
+      Touched (Live, Other, Touch);
+      Driver.Recording.Stop_Shared;
+      declare
+         R       : Driver.Recording.Reader;
+         Opened  : Boolean;
+         More    : Boolean := True;
+         Kind    : Driver.Recording.Record_Kind;
+         Ns      : Long_Long_Integer;
+         Payload : Driver.Bytes.Buffer;
+         procedure Apply (Data : Driver.Bytes.Byte_Array) is
+            Ok : Boolean;
+         begin
+            Replay_Write (Again, M, O, Data, Ok);
+            Applied := Applied and then Ok;
+         end Apply;
+      begin
+         Driver.Recording.Open (R, Name.all, Opened);
+         Check (Opened, "the recording cannot be opened");
+         while Opened and then More loop
+            Driver.Recording.Next (R, Kind, Ns, Payload, More);
+            if More and then Kind = Driver.Recording.World_Written then
+               Writes := Writes + 1;
+               Payload.Query (Apply'Access);
+            end if;
+         end loop;
+         if Opened then
+            Driver.Recording.Close (R);
+         end if;
+      end;
+      Check (Writes = 5, "five writes are in the recording" & Writes'Image & " times");
+      Check (Applied, "a recorded write could not be applied");
+      Check (Thing_Count (Again) = Thing_Count (Live) and then Place_Count (Again) = Place_Count (Live),
+             "the recorded writes made other things or places");
+      for T in First .. Other loop
+         for Row in 0 .. 29 loop
+            for Column in 0 .. 39 loop
+               Check (Driver.Images.Contains (Region_In (Again, T, 1), Column, Row)
+                        = Driver.Images.Contains (Region_In (Live, T, 1), Column, Row),
+                      "a recorded thing came back with other pixels");
+            end loop;
+         end loop;
+      end loop;
+      Check (Where (Again, Home) = Where (Live, Home), "a remembered place came back other than it was");
+      Check (Friction (Again, First) = Friction (Live, First), "a learned friction came back other than it was");
+      Check (Samples (Again, Other) = Samples (Live, Other), "a touch came back other than it was");
+      GNAT.OS_Lib.Delete_File (Name.all, Gone);
+      GNAT.OS_Lib.Free (Name);
+   end Writes_In_The_Recording;
+
    procedure Register is
    begin
       Driver.Tests.Register ("world.scene.adopt", "things are not kept by their pixels, or an episode forgets nothing",
                              Adopted_And_Remembered'Access);
+      Driver.Tests.Register ("world.scene.recorded", "a decider's write into the world is not in the recording once, or "
+                             & "applied from it gives another scene", Writes_In_The_Recording'Access);
       Driver.World.Regions.Tests.Register;
       Driver.World.Pairs.Tests.Register;
       Driver.World.Supports.Tests.Register;

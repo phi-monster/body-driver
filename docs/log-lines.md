@@ -43,6 +43,13 @@ instruction: present
 
 ## robot
 
+The boot's body file (`--body`, [`body-file.md`](body-file.md)):
+
+| line | meaning |
+|---|---|
+| `boot: the body is kept in <file> after <stage>` | the body measured so far was written to the file, after recognizing the groups and after sweeping the arms; the line `the body as measured:` and its table follow the hands, the last write |
+| `the body file <file> cannot be written` | a write failed; the boot goes on |
+
 The hand (measured at boot):
 
 | line | meaning |

@@ -17,8 +17,12 @@ body_driver --listen 9080                     # measure from zero and keep nothi
 ```
 
 With `--body`, the boot reloads the file when it exists and writes what it
-measures back into the same file as it measures. Delete the file to measure
-from zero again.
+measures back into the same file as it measures: after recognizing the groups,
+after sweeping the arms, and when the hands are measured. A run that fails
+later keeps what it had measured, and the next boot reloads it. A write
+replaces the file whole (it goes to `body.dat.part` first), so a run killed
+in the middle of a write leaves the file the stage before wrote. Delete the
+file to measure from zero again.
 
 ## 2. What a reload does
 
@@ -34,6 +38,10 @@ that measured it.
 - What is reloaded stands for the session: the boot skips the stages that
   measured it, and the estimators do not measure it again. The readings'
   travel and the step responses go on growing from what was reloaded.
+- For that reason the kinematics are reloaded only when every arm that carries
+  an eye is fitted in them. A file written while the arms were being swept
+  holds the fits there were and the arms that had none; its recognition
+  stands, and the next boot sweeps all the arms again.
 - Quantities are never patched by hand, and a stored number is never taken
   over a measurement that disagrees with it.
 

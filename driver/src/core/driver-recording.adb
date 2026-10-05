@@ -13,7 +13,7 @@ package body Driver.Recording is
 
    Codes : constant array (Record_Kind) of Character :=
      [Robot_Message => 'R', Driver_Message => 'D', Robot_Text => 'r', Driver_Text => 'd',
-      Connection => 'C', Service_Request => 'S', Service_Reply => 'T', File_Read => 'F'];
+      Connection => 'C', Service_Request => 'S', Service_Reply => 'T', File_Read => 'F', Estimates_Asked => 'E', World_Written => 'W'];
 
    type Byte_Array_Access is access Byte_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Byte_Array, Byte_Array_Access);
@@ -183,5 +183,14 @@ package body Driver.Recording is
       Close (Shared);
       Lock.Release;
    end Stop_Shared;
+
+   function Shared_Started return Boolean is
+      Open : Boolean;
+   begin
+      Lock.Seize;
+      Open := Is_Open (Shared);
+      Lock.Release;
+      return Open;
+   end Shared_Started;
 
 end Driver.Recording;

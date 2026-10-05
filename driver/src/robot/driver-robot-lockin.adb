@@ -26,6 +26,12 @@ package body Driver.Robot.Lockin is
    type Flag_Grid is array (Positive range <>, Driver.Observations.Group_Id range <>) of Boolean;
    type Flag_Grid_Access is access Flag_Grid;
    procedure Free is new Ada.Unchecked_Deallocation (Flag_Grid, Flag_Grid_Access);
+   type Real_Grid is array (Positive range <>, Driver.Observations.Group_Id range <>) of Real;
+   type Real_Grid_Access is access Real_Grid;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Grid, Real_Grid_Access);
+   type Natural_Grid is array (Positive range <>, Driver.Observations.Group_Id range <>) of Natural;
+   type Natural_Grid_Access is access Natural_Grid;
+   procedure Free is new Ada.Unchecked_Deallocation (Natural_Grid, Natural_Grid_Access);
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
@@ -54,6 +60,114 @@ package body Driver.Robot.Lockin is
          Free (Values);
       end return;
    end Median_Shift;
+
+   --  How many of an eye's textured cells show group G's motion, at least and
+   --  at most, which is what a whole image moving takes (Measure): the cells
+   --  whose displacement follows the group, and the cells too noisy to tell by
+   --  themselves in the share that they show it together.
+   --
+   --  A silent cell says nothing against the whole image moving when its own
+   --  noise would not let it show the motion. The cells that did respond
+   --  measure the motion's energy, the squared displacement the group caused
+   --  summed over the regression's rows: a cell's Wald statistic less its
+   --  degrees of freedom, times its variance, estimates it without bias. A
+   --  cell can tell a motion of the median of those energies when the
+   --  statistic it would have, less Z of that statistic's own spread, reaches
+   --  the critical value of its test; the energy over its variance that takes
+   --  is Needed. Whether a cell can tell depends on its noise alone, not on
+   --  whether it responded, so the weighted mean of the energies of all the
+   --  cells that cannot is unbiased. As a share of the median, it Z standard
+   --  errors below is the least share of those cells that show the motion, and
+   --  Z standard errors above the most. A picture that moves only where it is
+   --  best measured gains nothing by this, however many cells are too noisy to
+   --  tell: together they show no energy.
+   procedure Cells_Showing
+     (G          : Group_Id;
+      Textured   : Flags;
+      Responding : Flag_Grid;
+      Energy     : Real_Grid;
+      Dof        : Natural_Grid;
+      Noise      : Real_Vectors.Vector;
+      Least, Most : out Natural)
+   is
+      Z        : constant Real := Driver.Conventions.Z;
+      Tail     : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Z);
+      Count    : Natural := 0;
+      Largest  : Natural := 0;
+      Energies : Real_Access := new Real_Array (1 .. Textured'Length);
+
+      --  The energy over the variance at which a statistic of that many degrees
+      --  of freedom, which is a non-central chi-square of mean K + Lambda and
+      --  variance 2 (K + 2 Lambda) for Lambda that ratio, clears the critical
+      --  value Q of its test by Z of its spread: the root of
+      --  (K + Lambda - Q) ** 2 = Z ** 2 * 2 (K + 2 Lambda) above Q - K.
+      function Needed_For (Freedom : Positive) return Real is
+         K : constant Real := Real (Freedom);
+         Q : constant Real := Driver.Distributions.Chi_Square_Quantile (Tail, Freedom);
+      begin
+         return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);
+      end Needed_For;
+   begin
+      for Cell in Textured'Range loop
+         if Textured (Cell) then
+            Largest := Natural'Max (Largest, Dof (Cell, G));
+            if Responding (Cell, G) then
+               Count := Count + 1;
+               Energies (Count) := Energy (Cell, G);
+            end if;
+         end if;
+      end loop;
+      Least := Count;
+      Most := Count;
+      if Count > 0 and then Largest > 0 then
+         declare
+            Typical   : constant Real := Driver.Stats.Median (Energies (1 .. Count));
+            Needed    : Real_Array (1 .. Largest) := [others => 0.0];   --  by degrees of freedom, found when first asked
+            Able      : Natural := 0;   --  cells that could tell and responded
+            Too_Noisy : Natural := 0;   --  cells that could not tell
+            Weights, Weighted : Real := 0.0;
+         begin
+            for Cell in Textured'Range loop
+               if Textured (Cell) and then Dof (Cell, G) > 0 and then Typical > 0.0 then
+                  declare
+                     Freedom : constant Positive := Dof (Cell, G);
+                     Var     : constant Real := Noise (Cell - 1) ** 2;
+                  begin
+                     if Needed (Freedom) = 0.0 then
+                        Needed (Freedom) := Needed_For (Freedom);
+                     end if;
+                     if Needed (Freedom) * Var <= Typical then
+                        if Responding (Cell, G) then
+                           Able := Able + 1;
+                        end if;
+                     else
+                        declare
+                           --  The variance of the cell's energy: Var ** 2 times that of its statistic.
+                           Weight : constant Real := 1.0 / (2.0 * Real (Freedom) * Var ** 2 + 4.0 * Var * Typical);
+                        begin
+                           Too_Noisy := Too_Noisy + 1;
+                           Weights := Weights + Weight;
+                           Weighted := Weighted + Weight * Energy (Cell, G);
+                        end;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            if Too_Noisy > 0 then
+               declare
+                  Mean  : constant Real := Weighted / Weights;
+                  Sigma : constant Real := 1.0 / Sqrt (Weights);
+                  Low   : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));
+                  High  : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean + Z * Sigma) / Typical));
+               begin
+                  Least := Natural'Max (Count, Able + Natural (Real'Floor (Low * Real (Too_Noisy))));
+                  Most := Natural'Max (Count, Able + Natural (Real'Ceiling (High * Real (Too_Noisy))));
+               end;
+            end if;
+         end;
+      end if;
+      Free (Energies);
+   end Cells_Showing;
 
    procedure Measure (M : in out Model) is
       Groups : constant Natural := Natural (M.Groups.Length);
@@ -170,6 +284,12 @@ package body Driver.Robot.Lockin is
                         X : Matrix_Access := new Real_Matrix (1 .. Rows, 1 .. Kept + 1);
                         Responding : Flag_Grid_Access :=
                           new Flag_Grid'[1 .. N => [M.Groups.First_Index .. M.Groups.Last_Index => False]];
+                        --  What each cell's block of each group's columns measured: the energy of the
+                        --  motion it saw (Cells_Showing) and the degrees of freedom of that test.
+                        Energy : Real_Grid_Access :=
+                          new Real_Grid'[1 .. N => [M.Groups.First_Index .. M.Groups.Last_Index => 0.0]];
+                        Dof : Natural_Grid_Access :=
+                          new Natural_Grid'[1 .. N => [M.Groups.First_Index .. M.Groups.Last_Index => 0]];
                         Textured : Flags_Access := new Flags'[1 .. N => False];
                         --  One cell: its displacements regressed on the pushes, over
                         --  the beats where the cell resolved one, and for every
@@ -223,6 +343,10 @@ package body Driver.Robot.Lockin is
                                             Ku + Kv > 0
                                             and then Driver.Distributions.Chi_Square_Deviate (Su + Sv, Ku + Kv)
                                                        > Driver.Conventions.Z;
+                                          --  A statistic exceeds its degrees of freedom by the
+                                          --  motion's energy over the variance, on average.
+                                          Energy (Cell, G) := (Su - Real (Ku)) * Fu.Scale ** 2 + (Sv - Real (Kv)) * Fv.Scale ** 2;
+                                          Dof (Cell, G) := Ku + Kv;
                                        end;
                                     end if;
                                  end;
@@ -325,19 +449,24 @@ package body Driver.Robot.Lockin is
                                     end loop;
                                     declare
                                        F    : constant Real := Real (Count) / Real (T);
+                                       --  The cells that show the motion, at least and at most:
+                                       --  those that respond, and the share of the cells too noisy
+                                       --  to tell that show it together.
+                                       Least, Most : Natural;
                                        --  An eye mostly sees the world: a whole image moves when
                                        --  a significant majority of what can move does.
                                        Half : constant Real := 0.5;
                                     begin
+                                       Cells_Showing (G, Textured.all, Responding.all, Energy.all, Dof.all, S.Noise, Least, Most);
                                        Effect.Responding := Count;
                                        Effect.Textured := T;
                                        Effect.Fraction :=
                                          (Value => F, Sigma => Sqrt (F * (1.0 - F) / Real (T)), Degrees_Of_Freedom => 0);
                                        if not Regression.Count_Significant (Count, T, P0) then
                                           Effect.Verdict := Nothing;
-                                       elsif Regression.Count_Significant (Count, T, Half) then
+                                       elsif Regression.Count_Significant (Least, T, Half) then
                                           Effect.Verdict := Whole;
-                                       elsif Regression.Count_Significant (T - Count, T, Half) then
+                                       elsif Regression.Count_Significant (T - Most, T, Half) then
                                           Effect.Verdict := Patch;
                                        else
                                           Effect.Verdict := Undecided;
@@ -350,6 +479,8 @@ package body Driver.Robot.Lockin is
                         end;
                         Free (X);
                         Free (Responding);
+                        Free (Energy);
+                        Free (Dof);
                         Free (Textured);
                      end;
                   end if;

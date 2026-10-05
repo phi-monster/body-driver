@@ -17,12 +17,14 @@
 --  be trusted.
 --
 --  Everything comes from the recorded stream: images, the body's measured
---  geometry and the instrument's replies (Driver.Instrument, asked by the
---  estimators and read on later beats). Until a quantity is measured it is
---  reported unknown.
+--  geometry, the instrument's replies (Driver.Instrument, asked by the
+--  estimators and read on later beats), and the deciders' writes (Adopt,
+--  Remember, Touched, Learn_Friction), recorded where they are made
+--  (Replay_Write). Until a quantity is measured it is reported unknown.
 --
 --  Ownership: path B.
 
+with Driver.Bytes;
 with Driver.Commands;
 with Driver.Geometry;
 with Driver.Images;
@@ -146,6 +148,18 @@ package Driver.World is
    --  Narrows what is known by what an outcome showed.
 
    function Friction (S : Scene; T : Thing_Id) return Friction_Bounds;
+
+   procedure Replay_Write
+     (S    : in out Scene;
+      M    : Driver.Robot.Model;
+      O    : Observation;
+      Data : Driver.Bytes.Byte_Array;
+      Ok   : out Boolean);
+   --  Applies a write as the run made it. A decider's Adopt, Remember, Touched
+   --  and Learn_Friction go into the recording (Driver.Recording, kind W)
+   --  inside the decider's window, their reals exact; a replay applies each
+   --  here at the same point, O the observation of that beat. Ok is False
+   --  for a record this code cannot read.
 
    function Predicted (S : Scene; T : Thing_Id; Beats : Natural) return Point_Estimate;
    --  Where its centre will be that many beats after the latest, from its
