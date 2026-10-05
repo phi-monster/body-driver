@@ -1334,6 +1334,7 @@ driver-robot-kinematics-fit.adb	return Real_Matrix'(1 .. 3 => [1 .. Terms => 0.0
 driver-robot-kinematics-fit.adb	return Sigma / (2.0 * Sqrt (Real (Count)) * F);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	return Sqrt (Sum / Real (Natural'Max (1, Changes'Length (1))));	1	numerics	a count that divides is at least one
 driver-robot-kinematics-fit.adb	return [X, Y, 1.0];	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
+driver-robot-kinematics-fit.ads	(Decrease > 0.5 * Driver.Conventions.Unchanged_Fraction ** 2);	0.5	statistics	a step of m standard errors along an axis of the information lowers the cost, half the chi square, by m squared over two at most
 driver-robot-kinematics-fit.ads	C : Real := 1.0;	1.0	structure	a joint turns one radian per reading unit until fitted
 driver-robot-kinematics-fit.ads	Chain_Terms : constant := 8 + Link_Terms;	8	structure	a homography's eight free entries
 driver-robot-kinematics-fit.ads	Frame : Positive := 2;	2	structure	indexes start at one

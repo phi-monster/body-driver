@@ -4202,6 +4202,29 @@ package body Driver.Robot.Tests is
       Synthetic_Sweep (1.0, Expect_Fit => True, Frame_Error => 0.15, Track_Error => 0.35, Local_Error => 0.20);
    end Kinematics_With_Spreading_Errors;
 
+   --  The final refinement takes a step when it moves some combination of the
+   --  parameters by more than Unchanged_Fraction of its standard error,
+   --  whatever the cost: stopped by a hundredth of the cost, A10's and A11's
+   --  fits (a cost of some 20,000, a hundredth of it 200) stood several
+   --  standard errors short on the axes the data barely determine, the focal
+   --  length against the distortion (a step of 3 standard errors lowers the
+   --  cost by 4.5 at most), and A11's second arm's focal lengths moved by half
+   --  a pixel, 1.5 of their sigmas, once they were let run on.
+   procedure Refinement_Takes_Steps_That_Move_The_Fit is
+      Fraction : constant Real := Driver.Conventions.Unchanged_Fraction;
+      package Fit renames Driver.Robot.Kinematics.Fit;
+   begin
+      --  Moving m standard errors along an axis lowers the cost by m squared over two at most.
+      Check (Fit.Moves_The_Fit (0.5 * (2.0 * Fraction) ** 2),
+             "a step of two Unchanged_Fractions of a standard error is not taken");
+      Check (not Fit.Moves_The_Fit (0.5 * (0.5 * Fraction) ** 2),
+             "a step of half an Unchanged_Fraction of a standard error is taken");
+      Check (Fit.Moves_The_Fit (4.5),
+             "a step of 3 standard errors along a weak axis is not taken for it is a small part of the cost");
+      Check (not Fit.Moves_The_Fit (0.0) and then not Fit.Moves_The_Fit (-1.0),
+             "a step that does not lower the cost is taken");
+   end Refinement_Takes_Steps_That_Move_The_Fit;
+
    procedure Register is
    begin
       Driver.Robot.Kinematics.Errors.Tests.Register;
@@ -4228,6 +4251,10 @@ package body Driver.Robot.Tests is
                              & "sigmas when the matcher's errors are smooth fields over the picture, a point's in "
                              & "all its keyframes and a keyframe's own, and a shift of each keyframe",
                              Kinematics_With_Spreading_Errors'Access);
+      Driver.Tests.Register ("robot.kinematics.resolution", "the final refinement stops while a step still moves a "
+                             & "combination of the parameters by more than Unchanged_Fraction of its standard error, "
+                             & "because the step is a small part of the cost",
+                             Refinement_Takes_Steps_That_Move_The_Fit'Access);
       Driver.Tests.Register ("robot.kinematics.pending", "a joint whose widest keyframes have no sightings yet (their "
                              & "matches have not come back) raises in the search of its axis, or leaves the arm "
                              & "unfitted", Kinematics_With_Matches_Pending'Access);

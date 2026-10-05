@@ -1,6 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
-with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Numerics.Dense;
 with Driver.Robot.Kinematics.Errors;
@@ -589,7 +588,6 @@ package body Driver.Robot.Kinematics.Fit is
                   Sigma : Real;
                   Lambda : Real := Real'Model_Epsilon;
                   Cost0 : Real;
-
                   function Cost (R : Real_Array) return Real is
                      C : Real := 0.0;
                   begin
@@ -735,7 +733,7 @@ package body Driver.Robot.Kinematics.Fit is
                                           Cn : constant Real := Cost (Rn.all);
                                        begin
                                           if Cn < Cost0 then
-                                             Improved := Cost0 - Cn > Driver.Conventions.Unchanged_Fraction * Cost0;
+                                             Improved := Moves_The_Fit (Cost0 - Cn);
                                              X := Xn;
                                              Depth.all := Dn.all;
                                              R0.all := Rn.all;
