@@ -663,8 +663,11 @@ package body Driver.Robot.Kinematics is
                               end if;
                            end loop;
                         end loop;
+                        --  The unit of length is the first fit's (Fit's Unit_Frames): a
+                        --  keyframe taken after it refines every term, and moves none of
+                        --  the lengths the world was measured in.
                         Fit.Fit (Changes.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width, M.Eyes (R.Eye).Grid.Height,
-                                 Joints, Lens, Report);
+                                 R.Result.Unit_Frames, Joints, Lens, Report);
                         --  The table its eye sees, away from it towards the eye,
                         --  and its tracks' points: Up is the first arm's (the world
                         --  is that eye's reference frame), and the points place the
@@ -715,6 +718,8 @@ package body Driver.Robot.Kinematics is
                         end if;
                         Free (Seen);
                         Result.Fitted := Report.Fitted;
+                        Result.Unit_Frames :=
+                          (if R.Result.Unit_Frames > 0 then R.Result.Unit_Frames elsif Report.Fitted then Frames else 0);
                         Result.Matches := Natural (R.Matches.Length);
                         Result.Used := Report.Used;
                         Result.Median_Px := Report.Median_Px;
@@ -758,10 +763,11 @@ package body Driver.Robot.Kinematics is
    procedure Place (M : in out Model) is
       W : constant Natural := Index_Of (M, 1);
 
-      --  How well the arm's fit unit is known against its depths (Fit.Unit_Sigma).
+      --  How well the arm's fit unit is known against its depths (Fit.Unit_Sigma):
+      --  the unit's keyframes, the first fit's.
       function Unit_Sigma_Of (R : Arm_Evidence) return Real is
          N      : constant Natural := Natural (R.Result.Joints.Length);
-         Frames : constant Natural := Natural (R.Frames.Length);
+         Frames : constant Natural := R.Result.Unit_Frames;
       begin
          if N = 0 or else Frames = 0 or else Natural (R.Result.Reference.Length) /= N then
             return Real'Last;

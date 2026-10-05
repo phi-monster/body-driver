@@ -461,6 +461,12 @@ private
       Used      : Natural := 0;           --  sightings in the last fit
       Median_Px, Sigma_Px : Real := 0.0;
       Matches   : Natural := 0;           --  keyframes with matches behind it
+      --  How many of the arm's first keyframes define its unit of length: the
+      --  eye's positions over them have a root mean square of one
+      --  (Kinematics.Fit). Those of its first fit, kept as that set: a
+      --  keyframe taken later refines every term and moves no length. 0 until
+      --  the arm is fitted.
+      Unit_Frames : Natural := 0;
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
       --  The table its eye saw, in its reference frame (Table_In_Arm): the
