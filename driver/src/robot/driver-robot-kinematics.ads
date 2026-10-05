@@ -88,8 +88,8 @@ private package Driver.Robot.Kinematics is
    --  centre, its scale) added; Real'Last on the diagonal until it is placed.
 
    procedure Pose_Covariance (M : Model; A : Arm_Id; Readings : Real_Array; Turn, Place : out Mat3);
-   --  What the fit's own uncertainty (clustered by keyframe) leaves the
-   --  arm's eye at those readings uncertain by, in the reference frame:
+   --  What the fit's own uncertainty (the covariance of the matcher's errors read from
+   --  its residuals, Errors) leaves the arm's eye at those readings uncertain by, in the reference frame:
    --  the covariance of its turn (a rotation vector) and of its place
    --  (model units); Real'Last on the diagonal until the arm is fitted.
 
