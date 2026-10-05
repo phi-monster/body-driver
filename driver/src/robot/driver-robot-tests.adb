@@ -2517,6 +2517,8 @@ package body Driver.Robot.Tests is
       Wrist_Sees    : Boolean := True;
       Unseen_Wrist  : Boolean := False;   --  the second eye answers the first arm's points it does not show
       Unseen_Head   : Boolean := True;    --  the head answers the points it does not show
+      Head_Noise    : Real := 0.1;        --  how far the head's answers err, pixels per coordinate
+      Head_Moved    : Rigid := Driver.Numerics.Identity;   --  how far it moved before the second arm's reference
    end record;
 
    procedure Build_Two_Arms (M : in out Model; Scene : Rig_Scene) is
@@ -2544,7 +2546,7 @@ package body Driver.Robot.Tests is
       --  Seen_From maps From_Arm's reference frame into; Unseen: what it
       --  answers for those it does not show.
       procedure Match (Seen_From : Rigid; Frame : Positive; Eye : Natural; Into : in out Match_Set_Vectors.Vector;
-                       From_Arm : Positive; Unseen : Boolean) is
+                       From_Arm : Positive; Unseen : Boolean; Error : Real := Noise) is
          Set : Match_Set;
       begin
          Set.Frame := Frame;
@@ -2565,10 +2567,10 @@ package body Driver.Robot.Tests is
                   Fit.Project (Rig_Lens, Seen_From.Rotation * Fit.Ray (Rig_Lens, U0, V0), U, V, Ahead);
                   Shown := Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0;
                end if;
-               Set.To_U.Append (U + Noise * Gaussian (Rng));
-               Set.To_V.Append (V + Noise * Gaussian (Rng));
-               Set.Back_U.Append (U0 + Noise * Gaussian (Rng));
-               Set.Back_V.Append (V0 + Noise * Gaussian (Rng));
+               Set.To_U.Append (U + Error * Gaussian (Rng));
+               Set.To_V.Append (V + Error * Gaussian (Rng));
+               Set.Back_U.Append (U0 + Error * Gaussian (Rng));
+               Set.Back_V.Append (V0 + Error * Gaussian (Rng));
                Set.Found.Append (Shown);
             end;
          end loop;
@@ -2651,7 +2653,8 @@ package body Driver.Robot.Tests is
       --  Each arm's reference matched into the head.
       if Scene.Head then
          for A in 1 .. 2 loop
-            Match (Inverse (Scene.Head_Pose) * Placed (A), 1, 3, Arms (A).Eye_Matches, A, Scene.Unseen_Head);
+            Match (Inverse ((if A = 2 then Scene.Head_Moved else Driver.Numerics.Identity) * Scene.Head_Pose) * Placed (A),
+                   1, 3, Arms (A).Eye_Matches, A, Scene.Unseen_Head, Scene.Head_Noise);
          end loop;
       end if;
       M.Kinematics.Append (Arms (1));
@@ -2798,14 +2801,15 @@ package body Driver.Robot.Tests is
                           Head_Pose    => Head_Pose,
                           Wrist_Sees   => False,
                           Unseen_Wrist => Unseen_Wrist,
-                          Unseen_Head  => True));
+                          Unseen_Head  => True,
+                          others       => <>));
       --  What the scene is: the wrist views share no point, and the head does
       --  not show every table point of either arm.
       declare
          Truly : Model;
       begin
          Build_Two_Arms (Truly, (Second => Far_Second, With_Boxes => True, Head => True, Head_Pose => Head_Pose,
-                                 Wrist_Sees => False, Unseen_Wrist => False, Unseen_Head => False));
+                                 Wrist_Sees => False, Unseen_Wrist => False, Unseen_Head => False, others => <>));
          Check (Shown (Truly.Kinematics (2).World_Matches.First_Element) = 0,
                 "the rig's wrist views share" & Shown (Truly.Kinematics (2).World_Matches.First_Element)'Image & " points");
          for A in 1 .. 2 loop
@@ -2857,6 +2861,37 @@ package body Driver.Robot.Tests is
       Head_Scene (M, Unseen_Wrist => True);
       Check_Placement (M, Far_Second, 3, "through the head, the wrist answering what it does not show");
    end Place_Despite_False_Wrist_Matches;
+
+   --  The head's answers five times as precise as the arms' own matches: the
+   --  arms' lenses and tables, measured from their own sweeps, now err by
+   --  more than the head's view of them does. Placed through the head, within
+   --  its sigma: the link holds each arm's lens and table to its own
+   --  uncertainty, not to its estimate exactly.
+   procedure Place_Through_A_Precise_Head is
+      M : Model;
+   begin
+      Build_Two_Arms (M, (Second => Far_Second, With_Boxes => True, Head => True, Head_Pose => Head_Pose,
+                          Wrist_Sees => False, Head_Noise => 0.02, others => <>));
+      Check_Placement (M, Far_Second, 3, "through a precise head");
+   end Place_Through_A_Precise_Head;
+
+   --  The head turned by a fiftieth of a radian and moved by a twentieth of a
+   --  unit between the two arms' reference beats: its two views are no views
+   --  of one plane through one eye, and the second arm is not placed.
+   procedure Moved_Head_Places_Nothing is
+      M : Model;
+      Placement : Rigid;
+      Scale : Real;
+      Known : Boolean;
+   begin
+      Build_Two_Arms (M, (Second => Far_Second, With_Boxes => True, Head => True, Head_Pose => Head_Pose,
+                          Wrist_Sees => False,
+                          Head_Moved => (Rotation => Driver.Numerics.Exp ([0.02, 0.0, 0.0]), Translation => [0.0, 0.05, 0.0]),
+                          others => <>));
+      Driver.Robot.Kinematics.In_World (M, 2, Placement, Scale, Known);
+      Check (not Known, "the second arm is placed through a head that moved between the two arms' views, off by"
+             & Real'Image (abs (Placement.Translation - (1.0 / Unit_Of (M, 1)) * Far_Second.Translation)) & " units");
+   end Moved_Head_Places_Nothing;
 
    --  Boxes on the table, more than half of each arm's view: each arm's
    --  table is still the plane its table points lie on, none of the boxes'
@@ -3263,6 +3298,11 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.world.false", "answers for points the second eye does not show, as from the first "
                              & "eye's centre, place the second arm there instead of through the fixed eye",
                              Place_Despite_False_Wrist_Matches'Access);
+      Driver.Tests.Register ("robot.world.precise", "a head more precise than the arms' own fits does not place the "
+                             & "second arm within its sigma: the arms' lenses and tables are taken as exact",
+                             Place_Through_A_Precise_Head'Access);
+      Driver.Tests.Register ("robot.world.moved", "a head that moved between the two arms' views places the second arm",
+                             Moved_Head_Places_Nothing'Access);
       Driver.Tests.Register ("robot.kinematics.table", "with boxes on more than half of a view, an arm's table takes in "
                              & "box points or its normal is off by more than Z of its sigma", Table_Among_Boxes'Access);
       Driver.Tests.Register ("robot.kinematics.offset", "an arm whose reference keyframe lies off its sweep's base by "

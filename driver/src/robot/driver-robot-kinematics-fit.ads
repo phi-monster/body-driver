@@ -138,6 +138,9 @@ package Driver.Robot.Kinematics.Fit is
                                        --  sight as the track refinement found it; 0 where it has none
       Depth_Sigmas : Real_Lists.Vector;   --  per track, how uncertain the logarithm of that depth is, the
                                           --  other parameters held; Real'Last where it has none
+      Depth_Gains  : Real_Lists.Vector;   --  per track, row by row, how the logarithm of its depth moves
+                                          --  with each term of Covariance (the others' depths at their
+                                          --  best): the share of its uncertainty every depth has in common
    end record;
 
    procedure Fit
@@ -201,6 +204,21 @@ package Driver.Robot.Kinematics.Fit is
    --  The weighted least squares of Dominant_Plane over the points On, the
    --  choice held.
 
+   function Plane_Covariance
+     (Points     : Sight_Point_Array;
+      On         : Flag_Array;
+      Plane      : Sight_Plane;
+      Gains      : Real_Lists.Vector;
+      Covariance : Real_Lists.Vector) return Mat3
+     with Pre => On'First = Points'First and then On'Last = Points'Last;
+   --  The covariance of Plane's A (Refit_Plane over the points On): its own
+   --  (the points' scatter about it) and what the fit's uncertainty moves
+   --  every depth by together, which no scatter shows: point I's log depth
+   --  moves by the I-th row of Gains (Fit_Report.Depth_Gains) times the
+   --  change of the fit's terms, carried with their covariance
+   --  (Fit_Report.Covariance) through the weighted least squares. Plane's own
+   --  when Gains and Covariance do not fit together.
+
    function Plane_Normal (P : Sight_Plane) return Vec3;
    function Plane_Offset (P : Sight_Plane) return Real;
    function Plane_Offset_Sigma (P : Sight_Plane) return Real;
@@ -215,10 +233,9 @@ package Driver.Robot.Kinematics.Fit is
    --  Where the line of sight H meets the plane.
 
    ---------------------------------------------------------------------------
-   --  Linking two frames through an eye that sees one plane in both: each
-   --  frame's points on the plane, in that plane's own coordinates (along its
-   --  axes, Plane_Axes), and where the eye sees them.
+   --  Linking two frames through an eye that sees one plane in both.
 
+   --  A point on a plane, in the plane's coordinates, and where an eye sees it.
    type Plane_Point is record
       X, Y : Real := 0.0;
       U, V : Real := 0.0;
@@ -234,62 +251,102 @@ package Driver.Robot.Kinematics.Fit is
       Found  : out Boolean)
      with Pre => Fits'First = Points'First and then Fits'Last = Points'Last;
    --  The homography that takes the plane's coordinates to where the eye sees
-   --  them (exact for an eye without distortion, or for coordinates already
-   --  freed of it): by the least median of the residuals over samples of
-   --  four (the direct linear transform of each, on coordinates centred and
-   --  scaled), so up to half the points may be anything; then by robust least
-   --  squares on the points that fit (Fits), re-chosen at their own noise
-   --  until the choice settles. Sigma is their noise.
+   --  them (exact for an eye without distortion): by the least median of the
+   --  residuals over samples of four (the direct linear transform of each, on
+   --  coordinates centred and scaled), so up to half the points may be
+   --  anything; then by robust least squares on the points that fit (Fits),
+   --  re-chosen at their own noise until the choice settles. Sigma is their
+   --  noise.
+
+   --  One frame's side of a link: its eye's lens and that lens's covariance,
+   --  the tracks on its plane, and where the linking eye answered them.
+   type Table_Track is record
+      U0, V0 : Real := 0.0;          --  the track's reference pixel
+      Depth  : Real := 0.0;          --  along its reference line of sight
+      Sigma  : Real := Real'Last;    --  of the logarithm of the depth
+   end record;
+
+   package Track_Lists is new Ada.Containers.Vectors (Positive, Table_Track);
+
+   type Eye_Answer is record
+      Track : Positive := 1;         --  which of the side's tracks
+      U, V  : Real := 0.0;           --  where the linking eye sees it
+   end record;
+
+   package Answer_Lists is new Ada.Containers.Vectors (Positive, Eye_Answer);
+
+   type Chain_Side is record
+      L                : Lens;
+      Lens_Covariance  : Real_Lists.Vector;    --  Lens_Terms x Lens_Terms, row by row (the fit's)
+      Plane_Covariance : Mat3 := [others => [others => 0.0]];   --  of its plane's A beyond its lens's
+                                                                  --  lines of sight (Plane_Covariance)
+      Tracks           : Track_Lists.Vector;    --  the tracks on its plane
+      Answers          : Answer_Lists.Vector;
+   end record;
+
+   function Side_Plane (S : Chain_Side; L : Lens) return Sight_Plane;
+   --  The side's plane through its tracks seen through lens L, their depths
+   --  held (Refit_Plane over all of them).
 
    package Flag_Lists is new Ada.Containers.Vectors (Positive, Boolean);
 
-   --  The similarity S that takes the second frame's plane coordinates to
-   --  the first's: x -> Scale Rot (Turn) x + Shift.
+   --  The joint parameters of a link, in this order: the first plane's
+   --  homography into the eye (its eight free entries), the similarity that
+   --  takes the second plane's coordinates to the first's (log scale, turn,
+   --  two shifts), then per side its lens (Lens_Terms) and how far the eye's
+   --  view moves its plane from the one its tracks give (three).
+   Similarity_Terms : constant := 4;
+   Side_Terms       : constant := Lens_Terms + 3;
+   Link_Terms       : constant := Similarity_Terms + 2 * Side_Terms;   --  what the placement rests on
+   Chain_Terms      : constant := 8 + Link_Terms;
+
    type Plane_Link is record
       Found      : Boolean := False;
-      Consistent : Boolean := False;   --  one homography explains both frames' points
-      Scale, Turn, Shift_X, Shift_Y : Real := 0.0;
-      Covariance : Real_Lists.Vector;  --  4 x 4, row by row: log Scale, Turn, Shift_X, Shift_Y
-      H          : Mat3 := [others => [others => 0.0]];   --  the first frame's homography into the eye
-      Sigma      : Real := Real'Last;  --  the joint fit's noise
-      Apart      : Real := Real'Last;  --  the larger of the two homographies' own noise
-      Beyond     : Natural := 0;       --  coordinates of the joint fit further than Z of that
-      First_Fits, Second_Fits : Flag_Lists.Vector;   --  the points each homography kept
-      Used       : Natural := 0;       --  of both
+      Consistent : Boolean := False;   --  one homography explains both sides' points
+      X          : Real_Lists.Vector;  --  the joint solution, Chain_Terms
+      Covariance : Real_Lists.Vector;  --  of X's last Link_Terms, row by row
+      Sigma      : Real := Real'Last;  --  the noise the sides' own homographies leave their answers, pooled
+      Joint      : Real := Real'Last;  --  the joint fit's, its answers' residuals only, in the first side's units
+      F          : Real := 0.0;        --  the test of the four constraints one homography adds
+      First_Fits, Second_Fits : Flag_Lists.Vector;   --  per answer: its side's homography kept it
+      Used       : Natural := 0;       --  answers of both sides kept
    end record;
 
-   procedure Plane_Chain (First, Second : Plane_Point_Array; Link : out Plane_Link);
-   --  One homography H of the first frame's plane into the eye explains both
-   --  sets: H (x) for the first's points, H (S (x)) for the second's. From
-   --  each set's own homography (Plane_Homography) and the similarity nearest
-   --  the map between them, both by robust least squares on the points the two
-   --  homographies kept. Consistent is False when more of that joint fit's
-   --  residual coordinates lie beyond Z of the two homographies' own noise
-   --  than chance at Z's tail explains: then the two are no views of one
-   --  plane through one eye. Covariance is the sandwich over the points.
-
-   procedure Plane_Chain_Again (First, Second : Plane_Point_Array; Link : in out Plane_Link)
-     with Pre => Natural (Link.First_Fits.Length) = First'Length
-                 and then Natural (Link.Second_Fits.Length) = Second'Length;
-   --  The joint fit of Plane_Chain alone, from Link and on the points it
-   --  kept: how the similarity moves with its inputs.
+   procedure Plane_Chain (First, Second : Chain_Side; Second_Eye : Boolean; Link : out Plane_Link);
+   --  The similarity S that takes the second side's plane coordinates to the
+   --  first's (x a track's coordinates on its own side's plane: where its line
+   --  of sight through its lens meets the plane, along the plane's axes), from
+   --  an eye's view of both. An eye whose lens is unknown answered both sides'
+   --  tracks: one homography H of the first plane into it explains both, H (x)
+   --  for the first's answers and H (S (x)) for the second's. With
+   --  Second_Eye, the second side's own eye answered the first side's tracks,
+   --  and its lens explains them: S^-1 (x) back on the second plane, seen
+   --  through the second lens. Each side's lens and plane are its own frame's
+   --  estimates, held to them by their covariances: the eye's view moves them
+   --  only as far as their uncertainty lets, so that their errors are not
+   --  taken for the link's. From the homography of each side's answers
+   --  (Plane_Homography, at the estimates) and the similarity nearest the map
+   --  they give, then all of it by robust least squares on the answers those
+   --  homographies kept, each in units of its side's own noise. Consistent is
+   --  False when the joint fit leaves more than a free homography for each
+   --  side's answers does, by more than Z's tail allows (the extra sum of
+   --  squares of the four constraints, F (4, 2 n - 8 per homography)): then
+   --  the two sides are no views of one plane through one eye. Covariance is
+   --  the sandwich over the answers with the estimates' own.
 
    procedure Chain_Placement
-     (First_Plane, Second_Plane : Sight_Plane;
-      Link      : Plane_Link;
-      Placement : out Rigid;
-      Scale     : out Real);
-   --  The second frame in the first, X_first = Placement * (Scale * X_second),
-   --  from each frame's plane and the similarity between their coordinates:
-   --  the turn takes the second plane's axes to the first's turned by Turn,
-   --  and the plane's offsets give the shift along the normal.
-
-   --  A point of a frame and where an eye sees it.
-   type Correspondence is record
-      X    : Vec3 := [0.0, 0.0, 0.0];
-      U, V : Real := 0.0;
-   end record;
-
-   type Correspondence_Array is array (Positive range <>) of Correspondence;
+     (First, Second : Chain_Side;
+      Link          : Plane_Link;
+      Placement     : out Rigid;
+      Scale         : out Real;
+      Covariance    : out Real_Lists.Vector)
+     with Pre => Natural (Link.X.Length) = Chain_Terms;
+   --  The second frame in the first, X_first = Placement * (Scale * X_second):
+   --  the turn takes the second plane's axes to the first's turned by the
+   --  similarity's turn, the shift follows the similarity's along the first
+   --  plane and the planes' offsets across it, each plane and lens as the
+   --  link left them. Covariance (7 x 7, row by row) is that of the turn (a
+   --  rotation vector in the first frame), the centre and the log of the
+   --  scale, carried from the link's.
 
 end Driver.Robot.Kinematics.Fit;
