@@ -5,6 +5,7 @@ with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with Driver.Instrument;
 with Driver.Log;
+with Driver.Robot.Channels;
 with Driver.Robot.Hand.Frames;
 with Driver.Robot.Hand.Lobes;
 with Driver.Robot.Hand.Presses;
@@ -12,6 +13,7 @@ with Driver.Robot.Hand.Shape;
 with Driver.Robot.Hand.Sweep;
 with Driver.Robot.Hand.Tips;
 with Driver.Robot.Hand.Views;
+with Driver.Robot.Stillness;
 with Driver.Services;
 
 package body Driver.Robot.Hand is
@@ -133,20 +135,38 @@ package body Driver.Robot.Hand is
       end;
    end Rest_Of;
 
-   function Rest_Noise (M : Model; O : Observation; G : Group_Id) return Real_Array is
-      R : Real_Array (1 .. Rest_Of (O, G)'Length);
+   function Rest_Moved (M : Model; G : Group_Id; Before, After : Real_Array) return Boolean is
+      --  Every other group's readings, as Rest_Of lays them out, through the
+      --  body's own one test of motion: a channel an eye watches moves only
+      --  by a step that eye can see. Laid out otherwise, something came or
+      --  went: that is a change.
       K : Natural := 0;
    begin
-      for Other in O.Readings.First_Index .. O.Readings.Last_Index loop
+      if Before'Length /= After'Length then
+         return True;
+      end if;
+      for Other in 1 .. Group_Id'Base (Group_Count (M)) loop
          if Other /= G then
-            for C in 1 .. O.Readings.Element (Other)'Length loop
-               K := K + 1;
-               R (K) := Reading_Noise (M, Other, C);
-            end loop;
+            declare
+               N : constant Natural := Group_Size (M, Other);
+            begin
+               if K + N > Before'Length then
+                  return True;
+               end if;
+               declare
+                  D : constant Real_Array (1 .. N) :=
+                    [for C in 1 .. N => After (After'First + K + C - 1) - Before (Before'First + K + C - 1)];
+               begin
+                  if Driver.Robot.Channels.Visible (M, Other, D) then
+                     return True;
+                  end if;
+               end;
+               K := K + N;
+            end;
          end if;
       end loop;
-      return R;
-   end Rest_Noise;
+      return K /= Before'Length;
+   end Rest_Moved;
 
    function All_Read (O : Observation) return Boolean is
      (for all G in O.Readings.First_Index .. O.Readings.Last_Index => Driver.Observations.Has_Reading (O, G));
@@ -219,7 +239,7 @@ package body Driver.Robot.Hand is
                             Arm      => Arm,
                             Own      => Own,
                             Sweep    => Sweeps.Start (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)),
-                                                      Channels, Noise, Rest_Noise (M, O, G)),
+                                                      Channels, Noise),
                             Requests => Request_Holders.To_Holder ([1 .. Channels => (others => <>)])));
                         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " on arm" & Arm'Image
                                          & " is watched in eye" & E'Image & (if Own then ", its own" else ""));
@@ -235,9 +255,18 @@ package body Driver.Robot.Hand is
 
    procedure Feed (P : in out Pair; M : Model; O : Observation) is
       Complete : constant Boolean := All_Read (O) and then Driver.Observations.Has_Image (O, P.Eye);
+      function Moved (Before, After : Real_Array) return Boolean is (Rest_Moved (M, P.Group, Before, After));
    begin
-      Sweeps.Observe (P.Sweep, O, Still => Still (M) and then Complete,
-                      Closer => O.Readings (P.Group), Rest => Rest_Of (O, P.Group), Image => O.Images (P.Eye));
+      --  A view of the pair's eye needs that eye's picture to have stopped
+      --  changing (the one stop rule, Driver.Robot.Stillness): its validity
+      --  is its eye's, not the far arm's. Whether the rest of the body moved
+      --  between two of its readings is the body's one test of motion
+      --  (Rest_Moved), not the views' own: by its readings' noise alone, A12's
+      --  arms, creeping 1.2e-12 rad a beat for an hour, moved at every beat,
+      --  every beat started the view again, and none ever had two frames.
+      Sweeps.Observe (P.Sweep, O, Still => Driver.Robot.Stillness.Eye_Settled (M, P.Eye) and then Complete,
+                      Closer => O.Readings (P.Group), Rest => Rest_Of (O, P.Group), Image => O.Images (P.Eye),
+                      Rest_Moved => Moved'Access);
    end Feed;
 
    procedure Ask (P : in out Pair; M : Model; O : Observation);
@@ -609,14 +638,17 @@ package body Driver.Robot.Hand is
    end Observe;
 
    procedure Sweep_Way
-     (Way      : Real;
-      Step     : Real;
-      Seen_By  : Real;
-      Push     : not null access procedure (Offset : Real; Followed : out Boolean);
-      Shows    : not null access function return Showing;
-      Pushes   : out Natural;
-      Unseen   : out Natural;
-      Answered : out Boolean)
+     (Way          : Real;
+      Step         : Real;
+      Seen_By      : Real;
+      Wait_At_Most : Positive;
+      Push         : not null access procedure (Offset : Real; Followed : out Boolean);
+      Shows        : not null access function return Showing;
+      Pushes       : out Natural;
+      Unseen       : out Natural;
+      Longest_Wait : out Natural;
+      Formed       : out Boolean;
+      Answered     : out Boolean)
    is
       Offset   : Real := Step;
       Followed : Boolean;
@@ -625,6 +657,8 @@ package body Driver.Robot.Hand is
    begin
       Pushes := 0;
       Unseen := 0;
+      Longest_Wait := 0;
+      Formed := True;
       Answered := False;
       loop
          Push (Way * Offset, Followed);
@@ -633,11 +667,22 @@ package body Driver.Robot.Hand is
             Answered := Followed;
          end if;
          exit when not Followed;
-         --  Each asking is a beat later; the view forms once the body rests.
-         loop
-            Seen := Shows.all;
-            exit when Seen /= Not_Yet;
-         end loop;
+         --  Each asking is a beat later; the view forms once the eye rests,
+         --  within as long as the caller measured that to take.
+         declare
+            Asked : Natural := 0;
+         begin
+            loop
+               Seen := Shows.all;
+               Asked := Asked + 1;
+               exit when Seen /= Not_Yet or else Asked >= Wait_At_Most;
+            end loop;
+            Longest_Wait := Natural'Max (Longest_Wait, Asked);
+         end;
+         if Seen = Not_Yet then
+            Formed := False;
+            exit;
+         end if;
          if Seen = Something_New then
             Shown := True;
          else

@@ -12,12 +12,54 @@ package body Driver.Robot.Hand.Views.Tests is
    function At_Beat (B : Driver.Clock.Beat) return Observation is ((Beat => B, others => <>));
    --  The tracker reads only the beat; its readings and image are passed beside it.
 
+   function Exact (Before, After : Real_Array) return Boolean is (Before /= After);
+   --  The rest of a body whose readings repeat exactly moved when they changed.
+
+   --  A12's far arm: its reading's noise at rest 2.4e-16, the smallest step
+   --  of it its eye sees 1e-6, and, uncommanded, it creeps 1.2e-12 a beat.
+   --  By its noise alone that creep is motion; by the body's one test of
+   --  motion (Driver.Robot.Channels.Visible, which the hand passes), a watched
+   --  channel moves only by a step its eye can see, and it is not.
+   Arm_Noise : constant Real := 2.4e-16;
+   Arm_Seen  : constant Real := 1.0e-6;
+   Arm_Creep : constant Real := 1.2e-12;
+
+   function By_Noise (Before, After : Real_Array) return Boolean is
+     (for some I in Before'Range => Significant (After (I) - Before (I), Arm_Noise));
+
+   function By_Eye (Before, After : Real_Array) return Boolean is
+     (for some I in Before'Range => abs (After (I) - Before (I)) >= Arm_Seen);
+
+   procedure Creeping_Arm is
+      --  The closer pushed once and the eye still, as A12 after its first
+      --  push, the far arm creeping all the while: by its noise the arm
+      --  moved every beat and no view ever had two frames; by what an eye
+      --  can see, the view forms at its second frame and holds.
+      By_Noise_T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0]);
+      By_Eye_T   : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0]);
+      Arm        : Real := 0.0;
+      Formed_By_Noise, Formed_By_Eye : Natural := 0;
+   begin
+      for B in 0 .. 49 loop
+         Arm := Arm + Arm_Creep;
+         Observe (By_Noise_T, At_Beat (Driver.Clock.Beat (B)), True, [1 => 0.99998], [1 => Arm], Grey (10),
+                  By_Noise'Access);
+         Observe (By_Eye_T, At_Beat (Driver.Clock.Beat (B)), True, [1 => 0.99998], [1 => Arm], Grey (10),
+                  By_Eye'Access);
+         Formed_By_Noise := Formed_By_Noise + Boolean'Pos (Gathered (By_Noise_T));
+         Formed_By_Eye := Formed_By_Eye + Boolean'Pos (Gathered (By_Eye_T));
+      end loop;
+      Check (Formed_By_Noise = 0, "the creep by the noise alone let a view form: the stand-in for A12 is wrong");
+      Check (Formed_By_Eye = 49, "a view of a still eye did not form at its second frame and hold while a far arm"
+             & " crept by what no eye sees: it was formed" & Formed_By_Eye'Image & " of 49 beats");
+   end Creeping_Arm;
+
    procedure Ends_Of_A_Sweep is
-      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0], Rest_Noise => [0.0, 0.0]);
+      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0]);
       B : Driver.Clock.Beat := 0;
       procedure Beat (Still : Boolean; Closer : Real; Level : Natural; Arm : Real := 0.0) is
       begin
-         Observe (T, At_Beat (B), Still, [1 => Closer], [Arm, 0.0], Grey (Level));
+         Observe (T, At_Beat (B), Still, [1 => Closer], [Arm, 0.0], Grey (Level), Exact'Access);
          B := B + 1;
       end Beat;
    begin
@@ -48,26 +90,26 @@ package body Driver.Robot.Hand.Views.Tests is
    end Ends_Of_A_Sweep;
 
    procedure Single_Frames_Are_Not_Ends is
-      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
+      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0]);
    begin
-      Observe (T, At_Beat (0), True, [1 => 1.0], [1 => 0.0], Grey (10));
-      Observe (T, At_Beat (1), False, [1 => 0.5], [1 => 0.0], Grey (20));
-      Observe (T, At_Beat (2), True, [1 => 0.0], [1 => 0.0], Grey (30));
-      Observe (T, At_Beat (3), False, [1 => 0.5], [1 => 0.0], Grey (20));
+      Observe (T, At_Beat (0), True, [1 => 1.0], [1 => 0.0], Grey (10), Exact'Access);
+      Observe (T, At_Beat (1), False, [1 => 0.5], [1 => 0.0], Grey (20), Exact'Access);
+      Observe (T, At_Beat (2), True, [1 => 0.0], [1 => 0.0], Grey (30), Exact'Access);
+      Observe (T, At_Beat (3), False, [1 => 0.5], [1 => 0.0], Grey (20), Exact'Access);
       Check (not Has_Ends (T, 1), "views of one frame were taken as ends");
    end Single_Frames_Are_Not_Ends;
 
    procedure Noise_Hides_A_Small_Step is
       --  A reading noise of 0.1: steps of 0.05 are the same view, 1.0 is not.
-      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.1], Rest_Noise => [1 => 0.0]);
+      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.1]);
    begin
-      Observe (T, At_Beat (0), True, [1 => 1.0], [1 => 0.0], Grey (10));
-      Observe (T, At_Beat (1), True, [1 => 1.05], [1 => 0.0], Grey (10));
-      Observe (T, At_Beat (2), True, [1 => 0.95], [1 => 0.0], Grey (10));
-      Observe (T, At_Beat (3), False, [1 => 0.5], [1 => 0.0], Grey (20));
-      Observe (T, At_Beat (4), True, [1 => 0.0], [1 => 0.0], Grey (30));
-      Observe (T, At_Beat (5), True, [1 => 0.02], [1 => 0.0], Grey (30));
-      Observe (T, At_Beat (6), False, [1 => 0.5], [1 => 0.0], Grey (20));
+      Observe (T, At_Beat (0), True, [1 => 1.0], [1 => 0.0], Grey (10), Exact'Access);
+      Observe (T, At_Beat (1), True, [1 => 1.05], [1 => 0.0], Grey (10), Exact'Access);
+      Observe (T, At_Beat (2), True, [1 => 0.95], [1 => 0.0], Grey (10), Exact'Access);
+      Observe (T, At_Beat (3), False, [1 => 0.5], [1 => 0.0], Grey (20), Exact'Access);
+      Observe (T, At_Beat (4), True, [1 => 0.0], [1 => 0.0], Grey (30), Exact'Access);
+      Observe (T, At_Beat (5), True, [1 => 0.02], [1 => 0.0], Grey (30), Exact'Access);
+      Observe (T, At_Beat (6), False, [1 => 0.5], [1 => 0.0], Grey (20), Exact'Access);
       Check (Has_Ends (T, 1), "noisy readings broke one still view into many");
       if Has_Ends (T, 1) then
          Check (Driver.Pixels.Frames (High_End (T, 1).Frames) = 3, "the noisy open view lost frames");
@@ -78,24 +120,24 @@ package body Driver.Robot.Hand.Views.Tests is
       --  A closer whose reading echoes its command, commanded past its travel:
       --  the reading goes on to -0.5 but the fingers stopped at 0.0. A channel
       --  that moves nothing the eye sees has no travel at all.
-      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
-      Idle : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
+      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0]);
+      Idle : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0]);
       B : Driver.Clock.Beat := 0;
       procedure Hold (Reading : Real; Level : Natural) is
       begin
          for I in 1 .. 2 loop
-            Observe (T, At_Beat (B), True, [1 => Reading], [1 => 0.0], Grey (Level));
-            Observe (Idle, At_Beat (B), True, [1 => Reading], [1 => 0.0], Grey (10));
+            Observe (T, At_Beat (B), True, [1 => Reading], [1 => 0.0], Grey (Level), Exact'Access);
+            Observe (Idle, At_Beat (B), True, [1 => Reading], [1 => 0.0], Grey (10), Exact'Access);
             B := B + 1;
          end loop;
-         Observe (T, At_Beat (B), False, [1 => Reading], [1 => 0.0], Grey (Level));
-         Observe (Idle, At_Beat (B), False, [1 => Reading], [1 => 0.0], Grey (10));
+         Observe (T, At_Beat (B), False, [1 => Reading], [1 => 0.0], Grey (Level), Exact'Access);
+         Observe (Idle, At_Beat (B), False, [1 => Reading], [1 => 0.0], Grey (10), Exact'Access);
          B := B + 1;
       end Hold;
       procedure Still_At (Reading : Real; Level : Natural) is
       begin
          for I in 1 .. 2 loop
-            Observe (T, At_Beat (B), True, [1 => Reading], [1 => 0.0], Grey (Level));
+            Observe (T, At_Beat (B), True, [1 => Reading], [1 => 0.0], Grey (Level), Exact'Access);
             B := B + 1;
          end loop;
       end Still_At;
@@ -104,10 +146,10 @@ package body Driver.Robot.Hand.Views.Tests is
       Hold (0.5, 30);
       --  While a view is gathered, a sweep asks whether it extends the travel.
       Still_At (0.0, 50);
-      Check (Would_Extend (T, 1), "a view that shows the fingers further is not taken to extend the travel");
+      Check (Would_Extend (T, 1, Exact'Access), "a view that shows the fingers further is not taken to extend the travel");
       Hold (0.0, 50);
       Still_At (-0.5, 50);
-      Check (not Would_Extend (T, 1), "a view past the travel is taken to extend it");
+      Check (not Would_Extend (T, 1, Exact'Access), "a view past the travel is taken to extend it");
       Hold (-0.5, 50);
       Check (Has_Ends (T, 1) and then Reading (Low_End (T, 1), 1) = 0.0 and then Reading (High_End (T, 1), 1) = 1.0,
              "a command past the travel moved the end");
@@ -124,6 +166,8 @@ package body Driver.Robot.Hand.Views.Tests is
       Driver.Tests.Register ("hand.views.frames", "views too short to measure their own noise are taken as ends",
                              Single_Frames_Are_Not_Ends'Access);
       Driver.Tests.Register ("hand.views.noise", "reading noise splits one still view", Noise_Hides_A_Small_Step'Access);
+      Driver.Tests.Register ("hand.views.creep", "a far arm creeping by what no eye sees keeps a still eye's view from "
+                             & "forming (A12)", Creeping_Arm'Access);
    end Register;
 
 end Driver.Robot.Hand.Views.Tests;

@@ -32,25 +32,28 @@ package Driver.Robot.Hand.Sweep is
 
    type State is private;
 
-   function Start (Width, Height : Positive; Channels : Positive; Closer_Noise, Rest_Noise : Real_Array) return State
+   function Start (Width, Height : Positive; Channels : Positive; Closer_Noise : Real_Array) return State
      with Pre => Closer_Noise'Length = Channels;
-   --  Rest_Noise: the reading noise of every other group, in the order the
-   --  readings are passed to Observe.
 
    procedure Observe
-     (S      : in out State;
-      Seen   : Observation;
-      Still  : Boolean;
-      Closer : Real_Array;
-      Rest   : Real_Array;
-      Image  : Driver.Images.Image);
-   --  One beat: the closer's readings, every other group's, and the eye's image.
+     (S          : in out State;
+      Seen       : Observation;
+      Still      : Boolean;
+      Closer     : Real_Array;
+      Rest       : Real_Array;
+      Image      : Driver.Images.Image;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean);
+   --  One beat: the closer's readings, every other group's, the eye's image,
+   --  and the body's own test of whether the rest of it moved (Views).
 
    function Channels (S : State) return Positive;
 
    function Status (S : State; Channel : Positive) return Progress;
 
-   function Would_Extend (S : State; Channel : Positive) return Boolean;
+   function Would_Extend
+     (S          : State;
+      Channel    : Positive;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean) return Boolean;
    --  The view being gathered would extend the channel's travel (Views).
 
    function Gathered (S : State) return Boolean;

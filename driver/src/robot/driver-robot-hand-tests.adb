@@ -58,13 +58,13 @@ package body Driver.Robot.Hand.Tests is
          Reading := To;
       end Push;
       function Shows return Showing is (Something_New);
-      Down_Pushes, Up_Pushes, Unseen : Natural := 0;
-      Down_Answered, Up_Answered : Boolean := False;
+      Down_Pushes, Up_Pushes, Unseen, Longest : Natural := 0;
+      Down_Answered, Up_Answered, Formed : Boolean := False;
    begin
-      Sweep_Way (-1.0, 0.1, 0.1, Push'Access, Shows'Access, Down_Pushes, Unseen, Down_Answered);
+      Sweep_Way (-1.0, 0.1, 0.1, 1, Push'Access, Shows'Access, Down_Pushes, Unseen, Longest, Formed, Down_Answered);
       Reading := 1.0;
       Asked := 0;
-      Sweep_Way (1.0, 0.1, 0.1, Push'Access, Shows'Access, Up_Pushes, Unseen, Up_Answered);
+      Sweep_Way (1.0, 0.1, 0.1, 1, Push'Access, Shows'Access, Up_Pushes, Unseen, Longest, Formed, Up_Answered);
       Check (Down_Answered and then Down_Pushes = 6,
              "down from its upper end the closer was pushed" & Down_Pushes'Image & " times, not to its lower end"
              & " (0.9, 0.8, 0.6, 0.2, 0 and once more)");
@@ -74,6 +74,42 @@ package body Driver.Robot.Hand.Tests is
       when Runaway =>
          Check (False, "a closer at its upper end was asked ever further up while its reading stayed there");
    end Upper_End;
+
+   procedure Views_Never_Form is
+      --  A12: the push is followed, and its view never forms (the body never
+      --  came to rest within its readings' noise), so Shows says Not_Yet at
+      --  every asking. The way ends after the askings the caller measured a
+      --  view to need, unformed, with nothing more pushed. Without that end
+      --  it asked for an hour; a float's worth of askings stands for that.
+      Asked   : Natural := 0;
+      Pushed  : Natural := 0;
+      Runaway : exception;
+      procedure Push (Offset : Real; Followed : out Boolean) is
+         pragma Unreferenced (Offset);
+      begin
+         Pushed := Pushed + 1;
+         Followed := True;
+      end Push;
+      function Shows return Showing is
+      begin
+         Asked := Asked + 1;
+         if Asked > 10 * Real'Machine_Mantissa then
+            raise Runaway;
+         end if;
+         return Not_Yet;
+      end Shows;
+      Pushes, Unseen, Longest : Natural := 0;
+      Formed, Answered        : Boolean := True;
+      Measured                : constant Positive := 7;
+   begin
+      Sweep_Way (-1.0, 1.0e-5, 1.0e-2, Measured, Push'Access, Shows'Access, Pushes, Unseen, Longest, Formed, Answered);
+      Check (not Formed and then Pushes = 1 and then Pushed = 1 and then Asked = Measured and then Longest = Measured,
+             "a push whose view never forms ended its way after" & Asked'Image & " askings and" & Pushed'Image
+             & " pushes, not after the" & Measured'Image & " a view was measured to take, unformed");
+   exception
+      when Runaway =>
+         Check (False, "a push whose view never forms is waited for without end, as A12's was for an hour");
+   end Views_Never_Form;
 
    procedure Press_Overshoot is
       --  A tip pressed onto a stiff surface by a stiff position controller,
@@ -203,6 +239,8 @@ package body Driver.Robot.Hand.Tests is
                              Unmeasured_Body'Access);
       Driver.Tests.Register ("hand.measure.end", "a closer at an end of its travel is asked ever further past it",
                              Upper_End'Access);
+      Driver.Tests.Register ("hand.measure.unformed", "a push whose view never forms is waited for without end (A12)",
+                             Views_Never_Form'Access);
       Driver.Tests.Register ("hand.measure.press", "a press overshoots the contact by more than its prediction admits, "
                              & "or creeps when nothing predicts it", Press_Overshoot'Access);
       Driver.Tests.Register ("hand.measure.roles", "a group the body re-read as an arm is swept as a closer",

@@ -17,6 +17,9 @@ package body Driver.Robot.Hand.Sweep.Tests is
    function At_Beat (B : Driver.Clock.Beat) return Observation is ((Beat => B, others => <>));
    --  The sweep reads only the beat; its readings and image are passed beside it.
 
+   function Exact (Before, After : Real_Array) return Boolean is (Before /= After);
+   --  The rest of a body whose readings repeat exactly moved when they changed.
+
    --  Two dark fingers enter from the bottom border; at closer reading R
    --  (1 open, 0 closed) each has moved (1 - R) * 45 columns inwards. A view
    --  Scale times as wide and high shows the same, Scale times as large.
@@ -87,18 +90,18 @@ package body Driver.Robot.Hand.Sweep.Tests is
    end Answers;
 
    procedure Two_Fingers_Swept is
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
       B : Driver.Clock.Beat := 0;
       procedure Hold (R : Real; Frames : Positive) is
       begin
          for I in 1 .. Frames loop
-            Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame (R));
+            Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame (R), Exact'Access);
             B := B + 1;
          end loop;
       end Hold;
       procedure Move (R : Real) is
       begin
-         Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame (R));
+         Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame (R), Exact'Access);
          B := B + 1;
       end Move;
    begin
@@ -146,8 +149,7 @@ package body Driver.Robot.Hand.Sweep.Tests is
       Readings : constant Real_Array := [1.0, 0.7, 0.5, 0.2, 0.0];
       type Frame_Array is array (Readings'Range) of Driver.Images.Image;
       Frames   : constant Frame_Array := [for I in Readings'Range => Frame (Readings (I), Scale)];
-      S        : State := Start (Scale * W, Scale * H, Channels => 1, Closer_Noise => [1 => 0.0],
-                                 Rest_Noise => [1 => 0.0]);
+      S        : State := Start (Scale * W, Scale * H, Channels => 1, Closer_Noise => [1 => 0.0]);
       Done     : Boolean := False with Atomic;
       Asked_At : Natural := 0;
       Found    : Natural := 0;
@@ -170,13 +172,13 @@ package body Driver.Robot.Hand.Sweep.Tests is
             procedure Hold (R : Real; Count : Positive) is
             begin
                for I in 1 .. Count loop
-                  Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame_At (R));
+                  Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame_At (R), Exact'Access);
                   B := B + 1;
                end loop;
             end Hold;
             procedure Move (R : Real) is
             begin
-               Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame_At (R));
+               Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame_At (R), Exact'Access);
                B := B + 1;
             end Move;
          begin
@@ -248,8 +250,13 @@ package body Driver.Robot.Hand.Sweep.Tests is
       Low, High   : Real := 0.0;
    end record;
 
+   --  A11's arm settling after each push, by A11's test of motion then: its
+   --  noise alone, every beat of it a move.
+   function Arm_Moved (Before, After : Real_Array) return Boolean is
+     (for some I in Before'Range => Significant (After (I) - Before (I), Sqrt (2.0) * Rest_Noise));
+
    function Swept (Step, Pixel : Real; Echo, Once : Boolean) return Sweep_Outcome is
-      S       : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => Rest_Noise]);
+      S       : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
       B       : Driver.Clock.Beat := 0;
       Reading : Real := 1.0;
       Left    : Natural := 0;      --  beats of the arm's settling still to come
@@ -258,7 +265,7 @@ package body Driver.Robot.Hand.Sweep.Tests is
       procedure Beat_On (Still : Boolean) is
          Arm : constant Real := (if Left > 0 then Disturbance * 0.1 ** (Settling - Left) else 0.0);
       begin
-         Observe (S, At_Beat (B), Still, [1 => Reading], [1 => Arm], Shown_At (Reading));
+         Observe (S, At_Beat (B), Still, [1 => Reading], [1 => Arm], Shown_At (Reading), Arm_Moved'Access);
          B := B + 1;
          Left := (if Left > 0 then Left - 1 else 0);
       end Beat_On;
@@ -284,20 +291,23 @@ package body Driver.Robot.Hand.Sweep.Tests is
          if not Gathered (S) and then not Once then
             return Driver.Robot.Hand.Not_Yet;
          end if;
-         return (if Gathered (S) and then Would_Extend (S, 1) then Driver.Robot.Hand.Something_New
+         return (if Gathered (S) and then Would_Extend (S, 1, Arm_Moved'Access) then Driver.Robot.Hand.Something_New
                  else Driver.Robot.Hand.Nothing_New);
       end Shows;
-      Answered : Boolean;
-      Unseen   : Natural;
-      Back     : Boolean;
+      Answered, Formed : Boolean;
+      Unseen, Longest  : Natural;
+      Back             : Boolean;
+      --  Long enough for the arm to settle and two frames after.
+      Wait : constant Positive := Settling + 3;
    begin
       for I in 1 .. 3 loop
          Beat_On (Still => True);
       end loop;
-      Driver.Robot.Hand.Sweep_Way (-1.0, Step, Pixel, Push'Access, Shows'Access, Result.Down, Result.Unseen_Down,
-                                   Answered);
+      Driver.Robot.Hand.Sweep_Way (-1.0, Step, Pixel, Wait, Push'Access, Shows'Access, Result.Down,
+                                   Result.Unseen_Down, Longest, Formed, Answered);
       Go_To (1.0, Back);
-      Driver.Robot.Hand.Sweep_Way (1.0, Step, Pixel, Push'Access, Shows'Access, Result.Up, Unseen, Answered);
+      Driver.Robot.Hand.Sweep_Way (1.0, Step, Pixel, Wait, Push'Access, Shows'Access, Result.Up, Unseen, Longest,
+                                   Formed, Answered);
       Go_To (1.0, Back);
       for I in 1 .. Settling + 3 loop
          Beat_On (Still => True);
@@ -339,35 +349,35 @@ package body Driver.Robot.Hand.Sweep.Tests is
 
    procedure Nothing_Seen is
       --  A channel whose push changes nothing this eye sees.
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
    begin
       for I in 1 .. 3 loop
-         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 1.0], [1 => 0.0], Frame (1.0));
+         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 1.0], [1 => 0.0], Frame (1.0), Exact'Access);
       end loop;
-      Observe (S, At_Beat (4), False, [1 => 0.5], [1 => 0.0], Frame (1.0));
+      Observe (S, At_Beat (4), False, [1 => 0.5], [1 => 0.0], Frame (1.0), Exact'Access);
       for I in 5 .. 7 loop
-         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 0.0], [1 => 0.0], Frame (1.0));
+         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 0.0], [1 => 0.0], Frame (1.0), Exact'Access);
       end loop;
-      Observe (S, At_Beat (8), False, [1 => 0.5], [1 => 0.0], Frame (1.0));
+      Observe (S, At_Beat (8), False, [1 => 0.5], [1 => 0.0], Frame (1.0), Exact'Access);
       Check (Status (S, 1) = Nothing_Moves and then not Wants_Correspondences (S, 1),
              "a push that changes nothing asked the matcher");
    end Nothing_Seen;
 
    procedure Refused (Lasting : Boolean) is
       --  A sweep asked, refused, and swept again with new ends.
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
       B : Driver.Clock.Beat := 0;
       Rest_At : Real := 0.0;   --  the rest of the body, which the boot moves between sweeps
       procedure Hold (R : Real; Frames : Positive) is
       begin
          for I in 1 .. Frames loop
-            Observe (S, At_Beat (B), True, [1 => R], [1 => Rest_At], Frame (R));
+            Observe (S, At_Beat (B), True, [1 => R], [1 => Rest_At], Frame (R), Exact'Access);
             B := B + 1;
          end loop;
       end Hold;
       procedure Move (R : Real) is
       begin
-         Observe (S, At_Beat (B), False, [1 => R], [1 => Rest_At], Frame (R));
+         Observe (S, At_Beat (B), False, [1 => R], [1 => Rest_At], Frame (R), Exact'Access);
          B := B + 1;
       end Move;
       procedure Sweep is

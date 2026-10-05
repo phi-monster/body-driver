@@ -35,20 +35,36 @@ package Driver.Robot.Hand.Views is
 
    type Tracker is private;
 
-   function Start (Width, Height : Positive; Closer_Noise, Rest_Noise : Real_Array) return Tracker;
-   --  The noises are each reading's standard deviation at rest (path A
-   --  measures them); a zero noise means the reading repeats exactly.
+   function Start (Width, Height : Positive; Closer_Noise : Real_Array) return Tracker;
+   --  The closer's noises are each reading's standard deviation at rest
+   --  (path A measures them); a zero noise means the reading repeats
+   --  exactly. Its pushes part the views, so its readings are taken as
+   --  exactly as their noise allows.
+   --
+   --  Whether the rest of the body moved between two of its readings is the
+   --  body's own one test of motion (Driver.Robot.Channels.Visible: a
+   --  channel an eye watches moves only by a step that eye can see), which
+   --  the caller gives as Rest_Moved. The views once tested it themselves,
+   --  against the readings' noise alone: A12's arms crept by 1.2e-12 rad a
+   --  beat against a noise of 2.4e-16, a millionth of what their eyes see,
+   --  so every beat started the view again, none ever had two frames, and
+   --  the sweep waited for one for an hour.
 
    procedure Observe
-     (T      : in out Tracker;
-      Seen   : Observation;
-      Still  : Boolean;
-      Closer : Real_Array;
-      Rest   : Real_Array;
-      Image  : Driver.Images.Image);
-   --  One beat of the eye. Frames count only while the body is still.
+     (T          : in out Tracker;
+      Seen       : Observation;
+      Still      : Boolean;
+      Closer     : Real_Array;
+      Rest       : Real_Array;
+      Image      : Driver.Images.Image;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean);
+   --  One beat of the eye. Frames count only while Still: the eye's picture
+   --  has stopped changing.
 
-   function Would_Extend (T : Tracker; Channel : Positive) return Boolean;
+   function Would_Extend
+     (T          : Tracker;
+      Channel    : Positive;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean) return Boolean;
    --  The view being gathered, were it to end now, would extend one of the
    --  channel's ends: what a sweep asks before it pushes further.
 
@@ -96,7 +112,6 @@ private
    type Tracker is record
       Width, Height : Natural := 0;
       Closer_Noise  : Noise_Holders.Holder;
-      Rest_Noise    : Noise_Holders.Holder;
       Current       : View_Holders.Holder;   --  the view being gathered
       Ends          : End_Holders.Holder;    --  per channel
    end record;
