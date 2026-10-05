@@ -12,6 +12,12 @@
 --  brain); the reply carries the decider's command, or Hold when the decider
 --  is busy. A disconnected robot may reconnect on the same port; nothing
 --  measured is lost.
+--
+--  A failure the driver cannot go on from (an exception in the main loop or
+--  the boot) is written to the log whole and ends the program with a failure
+--  status, the recording closed: the tasks still waiting (the decider, the
+--  service workers) would otherwise keep it alive, holding the robot with
+--  nothing more in the log.
 
 with Ada.Command_Line;
 with Ada.Exceptions;
@@ -34,6 +40,7 @@ with Driver.Robot.Hand;
 with Driver.Services;
 with Driver.Wire;
 with Driver.World;
+with GNAT.OS_Lib;
 
 procedure Body_Driver is
 
@@ -69,6 +76,13 @@ procedure Body_Driver is
       end if;
    end Configure;
 
+   procedure Fail (What : String; E : Ada.Exceptions.Exception_Occurrence) is
+   begin
+      Line (Core, What & ": " & Ada.Exceptions.Exception_Information (E));
+      Driver.Recording.Stop_Shared;
+      GNAT.OS_Lib.OS_Exit (Integer (Ada.Command_Line.Failure));
+   end Fail;
+
    --  The task sentence of the current episode, handed to the decider once.
    --  An idle decider takes no beats, so the main loop holds on its own.
    protected Tasks is
@@ -103,7 +117,8 @@ procedure Body_Driver is
 
    --  A task that ends on an exception ends silently, and the robot would hold
    --  for good with nothing in the log: every failure is written out whole. A
-   --  failed episode does not take the later ones with it.
+   --  failed episode does not take the later ones with it; a failed boot ends
+   --  the program (Fail).
    task body Decider is
       Ok          : Boolean;
       Instruction : Unbounded_String;
@@ -133,8 +148,7 @@ procedure Body_Driver is
       end if;
    exception
       when E : others =>
-         Driver.Beats.Release;
-         Line (Core, "the boot failed; holding still: " & Ada.Exceptions.Exception_Information (E));
+         Fail ("the boot failed", E);
    end Decider;
 
    Connection : Driver.Wire.Connection;
@@ -245,4 +259,7 @@ begin
          Line (Core, "the robot disconnected; waiting for it on the same port");
       end if;
    end loop;
+exception
+   when E : others =>
+      Fail ("the driver failed", E);
 end Body_Driver;
