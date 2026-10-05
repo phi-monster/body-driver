@@ -13,10 +13,10 @@ package body Driver.Robot.Hand.Sweep is
    procedure Free is new Ada.Unchecked_Deallocation
      (Driver.Robot.Hand.Lobes.Correspondence_Array, Correspondences_Access);
 
-   function Start (Width, Height : Positive; Channels : Positive; Closer_Noise, Rest_Noise : Real_Array) return State is
+   function Start (Width, Height : Positive; Channels : Positive; Closer_Noise : Real_Array) return State is
      ((Width       => Width,
        Height      => Height,
-       Views       => Driver.Robot.Hand.Views.Start (Width, Height, Closer_Noise, Rest_Noise),
+       Views       => Driver.Robot.Hand.Views.Start (Width, Height, Closer_Noise),
        Per_Channel => Channel_Holders.To_Holder ([1 .. Channels => (others => <>)]),
        Never       => Why_Holders.Empty_Holder));
 
@@ -55,15 +55,16 @@ package body Driver.Robot.Hand.Sweep is
    procedure Set_Status (S : in out State; Channel : Positive; To : Progress);
 
    procedure Observe
-     (S      : in out State;
-      Seen   : Observation;
-      Still  : Boolean;
-      Closer : Real_Array;
-      Rest   : Real_Array;
-      Image  : Driver.Images.Image)
+     (S          : in out State;
+      Seen       : Observation;
+      Still      : Boolean;
+      Closer     : Real_Array;
+      Rest       : Real_Array;
+      Image      : Driver.Images.Image;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean)
    is
    begin
-      Driver.Robot.Hand.Views.Observe (S.Views, Seen, Still, Closer, Rest, Image);
+      Driver.Robot.Hand.Views.Observe (S.Views, Seen, Still, Closer, Rest, Image, Rest_Moved);
       --  With an instrument that can never answer, new ends change nothing.
       if S.Never.Is_Empty then
          for C in 1 .. Channels (S) loop
@@ -79,8 +80,11 @@ package body Driver.Robot.Hand.Sweep is
    function Status (S : State; Channel : Positive) return Progress is
      (S.Per_Channel.Constant_Reference.Element (Channel).Status);
 
-   function Would_Extend (S : State; Channel : Positive) return Boolean is
-     (Driver.Robot.Hand.Views.Would_Extend (S.Views, Channel));
+   function Would_Extend
+     (S          : State;
+      Channel    : Positive;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean) return Boolean
+   is (Driver.Robot.Hand.Views.Would_Extend (S.Views, Channel, Rest_Moved));
 
    function Gathered (S : State) return Boolean is (Driver.Robot.Hand.Views.Gathered (S.Views));
 

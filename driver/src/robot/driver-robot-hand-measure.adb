@@ -92,16 +92,24 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Move_Channel (G, Channel, To, Followed);
    end Move_Channel;
 
+   --  How long a push's view took to form, the longest of every push this
+   --  decider made: a view waits at most that long. Before any view formed,
+   --  as many beats as the stream had when the sweep began: no wait is longer
+   --  than all the waiting so far (Driver.Robot.Steps waits so).
+   Longest_Formed : Natural := 0;
+
    procedure Sweep_Channel (G : Group_Id; C : Positive) is
       Start : Real := 0.0;
       Step  : Estimate;
       Pixel : Real := 0.0;   --  the push that moves the own eye's view by a pixel
       Never : Ada.Strings.Unbounded.Unbounded_String;
       Still_A_Closer : Boolean := False;
+      Began : Natural := 0;   --  the beats the stream had when the sweep began
       procedure Read_Start (O : Observation) is
          R : constant Real_Array := O.Readings.Element (G);
          P : constant Natural := Own_Pair (G);
       begin
+         Began := Natural (O.Beat);
          Start := R (R'First + C - 1);
          Step := Visible_Step (M, G, C);
          Pixel := (if P > 0 then Seen_By (Driver.Robot.Lockin.Shift (M, H.Data.Pairs (P).Eye, G, C)) else 0.0);
@@ -155,12 +163,14 @@ procedure Measure (H : in out Hands; M : in out Model) is
             procedure Read_Shows (O : Observation) is
                pragma Unreferenced (O);
                P : constant Natural := Own_Pair (G);
+               function Moved (Before, After : Real_Array) return Boolean is (Rest_Moved (M, G, Before, After));
             begin
                Gone := P = 0 or else not Sweepable (H, M, G);
                if Gone then
                   Result := Driver.Robot.Hand.Nothing_New;
                elsif Sweeps.Gathered (H.Data.Pairs (P).Sweep) then
-                  Result := (if Sweeps.Would_Extend (H.Data.Pairs (P).Sweep, C) then Driver.Robot.Hand.Something_New
+                  Result := (if Sweeps.Would_Extend (H.Data.Pairs (P).Sweep, C, Moved'Access)
+                             then Driver.Robot.Hand.Something_New
                              else Driver.Robot.Hand.Nothing_New);
                end if;
             end Read_Shows;
@@ -168,25 +178,43 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Hold_Beat (Read_Shows'Access);
             return Result;
          end Shows;
+         Unformed : Boolean := False;   --  some push's view did not form in time
       begin
          for Way of Real_Array'[-1.0, 1.0] loop
+            exit when Unformed;
             declare
-               Pushes, Unseen : Natural;
-               Answered       : Boolean;
+               Pushes, Unseen, Longest : Natural;
+               Formed, Answered        : Boolean;
+               Wait_At_Most            : constant Positive :=
+                 Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began));
             begin
-               Driver.Robot.Hand.Sweep_Way (Way, Step.Value, Pixel, Push'Access, Shows'Access, Pushes, Unseen,
-                                            Answered);
+               Driver.Robot.Hand.Sweep_Way (Way, Step.Value, Pixel, Wait_At_Most, Push'Access, Shows'Access, Pushes,
+                                            Unseen, Longest, Formed, Answered);
                Answered_Ways := Answered_Ways + Boolean'Pos (Answered);
+               if Formed then
+                  Longest_Formed := Natural'Max (Longest_Formed, Longest);
+               end if;
+               Unformed := not Formed;
                Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
                                 & (if Way < 0.0 then " down" else " up") & ":" & Pushes'Image & " pushes,"
                                 & Unseen'Image & " of them before its views showed it anything; "
-                                & (if Answered then "following from the first" else "at its end there"));
+                                & (if not Formed
+                                   then "the view after its last push did not form within" & Wait_At_Most'Image
+                                        & " beats, as long as " & (if Longest_Formed > 0 then "any view took before"
+                                                                  else "the stream had run before the sweep")
+                                   elsif Answered then "following from the first" else "at its end there"));
             end;
             Move_Channel (G, C, Start);
          end loop;
          if Gone then
             Driver.Log.Line (Driver.Log.Robot, "hand: group" & G'Image & " is no longer a closer the hand watches;"
                              & " its sweep of channel" & C'Image & " ends");
+            return;
+         end if;
+         if Unformed then
+            Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
+                             & " not swept: its own eye's views did not form (the eye's picture did not stop"
+                             & " changing, or the rest of the body kept moving by what an eye can see)");
             return;
          end if;
          if Answered_Ways = 0 then

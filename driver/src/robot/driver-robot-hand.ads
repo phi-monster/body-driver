@@ -123,14 +123,17 @@ private
    --  or whether it shows the eye something its last end did not.
 
    procedure Sweep_Way
-     (Way      : Real;
-      Step     : Real;
-      Seen_By  : Real;
-      Push     : not null access procedure (Offset : Real; Followed : out Boolean);
-      Shows    : not null access function return Showing;
-      Pushes   : out Natural;
-      Unseen   : out Natural;
-      Answered : out Boolean)
+     (Way          : Real;
+      Step         : Real;
+      Seen_By      : Real;
+      Wait_At_Most : Positive;
+      Push         : not null access procedure (Offset : Real; Followed : out Boolean);
+      Shows        : not null access function return Showing;
+      Pushes       : out Natural;
+      Unseen       : out Natural;
+      Longest_Wait : out Natural;
+      Formed       : out Boolean;
+      Answered     : out Boolean)
      with Pre => Way /= 0.0 and then Step > 0.0 and then Seen_By >= 0.0;
    --  One way of a closer channel's sweep: pushed Way by Step, then by twice
    --  as much each time, from where the sweep began, for as long as the
@@ -141,11 +144,14 @@ private
    --  clamp takes a command past the end as full effort.
    --
    --  After each push Shows is asked again, a beat later each time, for as
-   --  long as it cannot say: the push's view forms only once the body has
-   --  come to rest from it, as long as that takes (Driver.Robot.Motion.Settle
-   --  waits the same way). A11 asked it once, two beats after each push,
-   --  while the arm was still settling and its view a frame old: nothing
-   --  new, whatever the push.
+   --  long as it cannot say: the push's view forms only once the eye's
+   --  picture has come to rest from it. A11 asked it once, two beats after
+   --  each push, while its view was a frame old: nothing new, whatever the
+   --  push. It is asked at most Wait_At_Most times (the caller measures how
+   --  long a view takes to form); when the view has not formed by then,
+   --  Formed is False and the way ends there, nothing more pushed: A12's
+   --  views never formed, and its sweep waited for them for an hour.
+   --  Longest_Wait is the most askings any push of this way needed.
    --
    --  Step is the smallest push any eye can see the channel make at all
    --  (Visible_Step): the lock-in's, which tells it from many beats of

@@ -5,17 +5,17 @@ package body Driver.Robot.Hand.Views is
    use Ada.Numerics.Long_Elementary_Functions;
    use type Driver.Clock.Beat;
 
-   function Start (Width, Height : Positive; Closer_Noise, Rest_Noise : Real_Array) return Tracker is
+   function Start (Width, Height : Positive; Closer_Noise : Real_Array) return Tracker is
      ((Width        => Width,
        Height       => Height,
        Closer_Noise => Noise_Holders.To_Holder (Closer_Noise),
-       Rest_Noise    => Noise_Holders.To_Holder (Rest_Noise),
        Current      => View_Holders.Empty_Holder,
        Ends         => End_Holders.To_Holder ([Closer_Noise'Range => (others => <>)])));
 
    function Moved (A, B, Noise : Real_Array; Except : Natural := 0) return Boolean;
-   --  Some reading other than the one numbered Except differs significantly:
-   --  each reading carries its noise, so their difference carries it twice over.
+   --  Some closer reading other than the one numbered Except differs
+   --  significantly: each reading carries its noise, so their difference
+   --  carries it twice over.
 
    function Moved (A, B, Noise : Real_Array; Except : Natural := 0) return Boolean is
    begin
@@ -35,9 +35,14 @@ package body Driver.Robot.Hand.Views is
    function Reading (V : View; Channel : Positive) return Real is
      (V.Closer.Element (V.Closer.Element'First + Channel - 1));
 
-   function Comparable (T : Tracker; A, B : View; Channel : Positive) return Boolean is
+   function Comparable
+     (T          : Tracker;
+      A, B       : View;
+      Channel    : Positive;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean) return Boolean
+   is
      (not Moved (A.Closer.Element, B.Closer.Element, T.Closer_Noise.Element, Except => Channel)
-      and then not Moved (A.Rest.Element, B.Rest.Element, T.Rest_Noise.Element));
+      and then not Rest_Moved (A.Rest.Element, B.Rest.Element));
    --  The same background and the same other channels: only this channel differs.
 
    function Shows_More (Before, V : View) return Boolean is
@@ -46,13 +51,20 @@ package body Driver.Robot.Hand.Views is
    --  The eye sees something change between the two views; two frames each
    --  let the pixels say how much they vary on their own.
 
-   procedure Consider (T : in out Tracker; V : View);
+   procedure Consider
+     (T          : in out Tracker;
+      V          : View;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean);
    --  A finished view becomes an end of each channel's travel it extends: at
    --  a reading beyond the end's, and showing something the end's view does
    --  not. A command past the channel's travel moves its reading on (a
    --  reading that echoes the command does) but nothing the eye sees.
 
-   procedure Consider (T : in out Tracker; V : View) is
+   procedure Consider
+     (T          : in out Tracker;
+      V          : View;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean)
+   is
       Ends : End_Array := T.Ends.Element;
    begin
       for C in Ends'Range loop
@@ -61,7 +73,7 @@ package body Driver.Robot.Hand.Views is
             P     : End_Pair renames Ends (C);
          begin
             if P.Low.Is_Empty
-              or else (Driver.Pixels.Frames (V.Frames) >= 2 and then not Comparable (T, P.Low.Element, V, C))
+              or else (Driver.Pixels.Frames (V.Frames) >= 2 and then not Comparable (T, P.Low.Element, V, C, Rest_Moved))
             then
                --  The first view of this channel, or the background changed:
                --  the old ends cannot be compared with what comes now. A view
@@ -109,43 +121,58 @@ package body Driver.Robot.Hand.Views is
       T.Ends := End_Holders.To_Holder (Ends);
    end Consider;
 
-   procedure Close_Current (T : in out Tracker);
+   procedure Close_Current
+     (T          : in out Tracker;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean);
 
-   procedure Close_Current (T : in out Tracker) is
+   procedure Close_Current
+     (T          : in out Tracker;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean)
+   is
    begin
       if not T.Current.Is_Empty then
-         Consider (T, T.Current.Element);
+         Consider (T, T.Current.Element, Rest_Moved);
          T.Current := View_Holders.Empty_Holder;
       end if;
    end Close_Current;
 
-   function Readings_Moved (T : Tracker; Closer, Rest : Real_Array) return Boolean;
+   function Readings_Moved
+     (T          : Tracker;
+      Closer     : Real_Array;
+      Rest       : Real_Array;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean) return Boolean;
    --  The view being gathered was taken at other readings.
 
-   function Readings_Moved (T : Tracker; Closer, Rest : Real_Array) return Boolean is
+   function Readings_Moved
+     (T          : Tracker;
+      Closer     : Real_Array;
+      Rest       : Real_Array;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean) return Boolean
+   is
       Now : constant View_Holders.Constant_Reference_Type := T.Current.Constant_Reference;
    begin
       return Moved (Now.Element.Closer.Element, Closer, T.Closer_Noise.Element)
-        or else Moved (Now.Element.Rest.Element, Rest, T.Rest_Noise.Element);
+        or else Rest_Moved (Now.Element.Rest.Element, Rest);
    end Readings_Moved;
 
    procedure Observe
-     (T      : in out Tracker;
-      Seen   : Observation;
-      Still  : Boolean;
-      Closer : Real_Array;
-      Rest   : Real_Array;
-      Image  : Driver.Images.Image)
+     (T          : in out Tracker;
+      Seen       : Observation;
+      Still      : Boolean;
+      Closer     : Real_Array;
+      Rest       : Real_Array;
+      Image      : Driver.Images.Image;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean)
    is
    begin
       if not Still or else Driver.Images.Is_Empty (Image) or else Driver.Images.Width (Image) /= T.Width
         or else Driver.Images.Height (Image) /= T.Height
       then
-         Close_Current (T);
+         Close_Current (T, Rest_Moved);
          return;
       end if;
-      if not T.Current.Is_Empty and then Readings_Moved (T, Closer, Rest) then
-         Close_Current (T);
+      if not T.Current.Is_Empty and then Readings_Moved (T, Closer, Rest, Rest_Moved) then
+         Close_Current (T, Rest_Moved);
       end if;
       if T.Current.Is_Empty then
          T.Current := View_Holders.To_Holder
@@ -166,7 +193,11 @@ package body Driver.Robot.Hand.Views is
       end;
    end Observe;
 
-   function Would_Extend (T : Tracker; Channel : Positive) return Boolean is
+   function Would_Extend
+     (T          : Tracker;
+      Channel    : Positive;
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean) return Boolean
+   is
       Ends : constant End_Holders.Constant_Reference_Type := T.Ends.Constant_Reference;
    begin
       if T.Current.Is_Empty or else Channel > Ends.Element'Last then
@@ -177,7 +208,7 @@ package body Driver.Robot.Hand.Views is
          P     : End_Pair renames Ends.Element (Channel);
          Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1);
       begin
-         if P.Low.Is_Empty or else not Comparable (T, P.Low.Element, V.Element.all, Channel) then
+         if P.Low.Is_Empty or else not Comparable (T, P.Low.Element, V.Element.all, Channel, Rest_Moved) then
             return True;
          end if;
          declare

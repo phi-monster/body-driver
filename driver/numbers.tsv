@@ -794,6 +794,7 @@ driver-robot-hand-measure.adb	& Driver.Log.Image (Least, 4) & ""));	4	format	dig
 driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Image (Step.Value, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Image (Step.Value, 4)	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	Lean : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;	4.0	math	half-way between away from the other lobes and across from them
+driver-robot-hand-measure.adb	Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began));	1	structure	at least one asking: a view is asked for once it is pushed
 driver-robot-hand-measure.adb	Tilt := 2.0 * Tilt;	2.0	numerics	a search for an unknown size grows geometrically, doubling
 driver-robot-hand-measure.adb	else "" & Driver.Log.Image (By, 4)));	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Value, 4) & "" & Driver.Log.Image (First.Sigma, 4)	4	format	digits printed in a log line or a message
@@ -914,7 +915,7 @@ driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise
 driver-robot-hand-views.adb	Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-robot-hand-views.adb	and then Significant (A (I) - B (B'First + I - A'First), Sqrt (2.0) * Noise (Noise'First + I - A'First))	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-robot-hand-views.adb	if Driver.Pixels.Frames (V.Frames) >= 2 then	2	statistics	a pixel's own variance needs two frames
-driver-robot-hand-views.adb	or else (Driver.Pixels.Frames (V.Frames) >= 2 and then not Comparable (T, P.Low.Element, V, C))	2	statistics	a pixel's own variance needs two frames
+driver-robot-hand-views.adb	or else (Driver.Pixels.Frames (V.Frames) >= 2 and then not Comparable (T, P.Low.Element, V, C, Rest_Moved))	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand.adb	& Driver.Log.Image (Driver.Robot.Hand.Shape.Scatter (R.Lobes (L).Shape), 3) & ""	3	format	digits printed in a log line or a message
