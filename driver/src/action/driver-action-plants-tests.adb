@@ -864,6 +864,54 @@ package body Driver.Action.Plants.Tests is
       return (Status => Reachable, Why => Null_Unbounded_String);
    end Reach;
 
+   procedure Put_Tool (W : in out World; Arm : Arm_Id; Pose : Rigid; Blocked : out Boolean) is
+      A     : constant Positive := Arm_Index (W, Arm);
+      From  : constant Rigid := W.Arms (A).Tool;
+      Shift : constant Real := abs (Pose.Translation - From.Translation);
+      Turn  : constant Real := Angle (Transpose (From.Rotation) * Pose.Rotation);
+      Reach_Of_Body : Real := 0.0;
+   begin
+      Blocked := False;
+      for P of Body_Points (W, A) loop
+         Reach_Of_Body := Real'Max (Reach_Of_Body, abs P);
+      end loop;
+      if Held_By_Arm (W, A) /= 0 then
+         Reach_Of_Body := Reach_Of_Body + Radius_Of (W, Held_By_Arm (W, A))
+           + abs (Centre_Of (W, Held_By_Arm (W, A)) - From.Translation);
+      end if;
+      declare
+         Pieces : constant Positive :=
+           Positive'Max (1, Natural (Real'Ceiling ((Shift + Turn * Reach_Of_Body) / (W.Pitch / 2.0))));
+      begin
+         for I in 1 .. Pieces loop
+            Try_Pose (W, A, Between (From, Pose, Real (I) / Real (Pieces)), Blocked);
+            exit when Blocked;
+            W.Moved := True;
+         end loop;
+      end;
+   end Put_Tool;
+
+   procedure Tick (W : in out World) is
+   begin
+      Advance (W);
+   end Tick;
+
+   procedure Set_Closer (W : in out World; Hand : Hand_Id; Fraction : Real) is
+      H : constant Positive := Hand_Index (W, Hand);
+   begin
+      W.Hands (H).Due := W.Beat + W.Arms (Arm_Index (W, W.Hands (H).Arm)).Lag;
+      W.Hands (H).Next_Goal := Fraction;
+   end Set_Closer;
+
+   function Closer_Done (W : World; Hand : Hand_Id) return Boolean is
+      H : constant Sim_Hand := W.Hands (Hand_Index (W, Hand));
+   begin
+      return H.Due <= W.Beat and then H.Next_Goal = H.Goal
+        and then (H.Stopped or else abs (H.Goal - H.Fraction) <= 1.0e-9);
+   end Closer_Done;
+
+   function Closer_Stopped (W : World; Hand : Hand_Id) return Boolean is (W.Hands (Hand_Index (W, Hand)).Stopped);
+
    overriding procedure Move (W : in out World; O : Order; R : out Report) is
       Rejected : array (1 .. Natural (W.Arms.Length)) of Boolean := [others => False];
       Beats   : Natural := 0;
@@ -964,5 +1012,11 @@ package body Driver.Action.Plants.Tests is
    begin
       return Q (3) > 0.0 and then Arctan (Sqrt (Q (1) ** 2 + Q (2) ** 2), Q (3)) <= Half_View;
    end In_View;
+
+   overriding procedure Within (W : in out World; During : not null access procedure) is
+      pragma Unreferenced (W);
+   begin
+      During.all;
+   end Within;
 
 end Driver.Action.Plants.Tests;
