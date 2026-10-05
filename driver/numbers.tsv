@@ -628,6 +628,9 @@ driver-observations.ads	Key_Separator : constant Character := Character'Val (31)
 driver-pixels.adb	(if Frames > 1 then Sum / Real (Frames - 1) else 0.0);	1	statistics	a sample variance needs two frames
 driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	1.0	math	the variance of a uniform step of one level is 1/12
 driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	12.0	math	the variance of a uniform step of one level is 1/12
+driver-pixels.adb	Quarter : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.75);	0.75	math	the lower quarter of a Gaussian's absolute values lies below the value whose two-sided tail is three quarters
+driver-pixels.adb	Result.Trusted := 2 * Changed < Pixels;	2	math	fewer than half the pixels changed: the median finds the typical difference only while the unchanged pixels are the majority
+driver-pixels.adb	Spread := Real'Max (Floor, (if Kept > 1 then Sqrt (Driver.Stats.Variance (Seen)) else 0.0));	1	statistics	a standard deviation needs two pixels
 driver-protocol.adb	Pairs : Natural := 3;	3	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
 driver-protocol.adb	Put_Array_Header (Reply, 1);	1	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
 driver-protocol.adb	Put_Map_Header (Reply, 1);	1	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
@@ -913,14 +916,14 @@ driver-robot-hand-touch.adb	Without : Real := 1.0 / Scale;	1.0	statistics	the ot
 driver-robot-hand-touch.adb	if Chosen (I) and then Significant (Deleted (I), 1.0, Dof_Of (I))	1.0	math	a residual already in units of its own sigma
 driver-robot-hand-touch.adb	if Dof > 1 and then (Chi - Res (R) ** 2 / Free) / Real (Dof - 1) > Without then	1	statistics	leaving a press out leaves one degree of freedom less
 driver-robot-hand-touch.adb	then Moved (Prior (F).Plane, Correction (Plane_Unknowns * F - 2), Correction (Plane_Unknowns * F - 1),	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
-driver-robot-hand-views.adb	(Driver.Pixels.Frames (V.Frames) >= 2 and then Driver.Pixels.Frames (Before.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
-driver-robot-hand-views.adb	(Driver.Pixels.Frames (V.Frames) >= 2 and then Driver.Pixels.Frames (Before.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	(not T.Current.Is_Empty and then Driver.Pixels.Frames (T.Current.Constant_Reference.Element.Frames) >= 2);	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + C - 1);	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1);	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1);	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-robot-hand-views.adb	Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-robot-hand-views.adb	and then Significant (A (I) - B (B'First + I - A'First), Sqrt (2.0) * Noise (Noise'First + I - A'First))	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-hand-views.adb	if Driver.Pixels.Frames (V.Frames) < 2 or else Driver.Pixels.Frames (Before.Frames) < 2 then	2	structure	a view of two frames: the first alone cannot show that the body held still
+driver-robot-hand-views.adb	if Driver.Pixels.Frames (V.Frames) < 2 or else Driver.Pixels.Frames (Before.Frames) < 2 then	2	structure	a view of two frames: the first alone cannot show that the body held still
 driver-robot-hand-views.adb	if Driver.Pixels.Frames (V.Frames) >= 2 then	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	or else (Driver.Pixels.Frames (V.Frames) >= 2 and then not Comparable (T, P.Low.Element, V, C, Rest_Moved))	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames

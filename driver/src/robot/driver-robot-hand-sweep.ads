@@ -22,12 +22,14 @@ private with Ada.Containers.Indefinite_Holders;
 
 package Driver.Robot.Hand.Sweep is
 
-   type Progress is (Waiting, Requested, Unanswered, Unanswerable, Nothing_Moves, Measured);
+   type Progress is (Waiting, Requested, Unanswered, Unanswerable, Nothing_Moves, Everything_Moves, Measured);
    --  Waiting        the channel's two ends have not both been seen still
    --  Requested      the correspondences between its ends are being asked for
    --  Unanswered     the instrument could not answer for these ends
    --  Unanswerable   the instrument said it never can (no address): nothing is asked again
    --  Nothing_Moves  nothing in this eye moves between its ends
+   --  Everything_Moves  half of this eye's picture or more changes between its ends: what moved
+   --                    cannot be told from what did not (Driver.Pixels.Compare)
    --  Measured       its lobes are found
 
    type State is private;

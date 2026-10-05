@@ -37,8 +37,8 @@ and the estimators find what it did in the stream.
 A channel is seen at the two ends of its travel while everything else holds
 still: the readings of every other group must not change between the two
 views, or the background moves and the comparison means nothing. Each view
-gathers frames while the body is still; two frames at least, so every pixel
-has its own measured variance (with the floor 1/12 of an 8-bit level).
+gathers frames while the body is still; two frames at least, since the first
+alone cannot show that the body held still.
 
 The instrument's matcher gives, for every pixel of the box the change covers,
 where it went in the other view and where that point matches back to, both
@@ -46,6 +46,32 @@ ways round. Pixels whose intensity did not change measure the matcher's own
 noise (robust spread, degrees of freedom from the median absolute deviation's
 efficiency). A pixel moves when its displacement passes the two-dimensional
 gate and its round trip does not.
+
+**Lesson: two views of one scene differ a little everywhere.** A14's ends
+differed by one to three levels at most pixels (the median absolute
+difference was 2.0 levels in the wrist eye and 1.0 in the head's: the
+renderer's lighting moves with the fingers) while the frames within a view
+agreed to the quantization, and the test of each pixel's difference against
+the frames' own variance (Welch) called 262 474 of 307 200 pixels changed in
+the wrist eye (85 %) and 258 310 in the head's. The fingers' own swept area
+was a third of the one picture and 1.5 % of the other. Three things followed:
+the matcher's noise was measured on the 15 % quietest pixels, so its sigma
+came out 0.067 px and any textured spot off by 0.4 px was a moving lobe (20
+lobes, none on a finger); "the eye sees something new" was true of any two
+views; and the query box was the whole picture, 307 200 points both ways,
+sixteen times for each eye. `Driver.Pixels.Compare` takes the null from the
+difference itself: its median is the typical difference (a lighting shift of
+the whole view is no change), its spread is found from the nearer half of the
+pixels and then from the pixels within the gate of that spread until no more
+drop out, never below the quantization of two means, and every pixel is one
+test of a family of as many as the view has pixels. It assumes that most of
+the view does not change, and says so when half of it or more does (no pixel
+marked, and the sweep's channel is `Everything_Moves`). On the A14 ends, one
+frame each, it marks 89 148 pixels (29.0 %) in the wrist eye, beyond 16.3
+levels of a spread of 2.8, the solid union of both fingers' two positions;
+4 705 (1.5 %) in the head's. A trusted answer is one consistent with the
+assumption: a view most of which changed in one way is not told from a view
+whose smaller part did.
 
 **Lesson: a lobe needs a seed that passes the family gate.** With about 19 000
 pixels tested per view at the single rate, dozens of still pixels pass by

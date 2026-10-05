@@ -39,14 +39,16 @@ package body Driver.Robot.Hand.Sweep is
    procedure Renew (S : in out State; Channel : Positive) is
       Low     : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.Low_End (S.Views, Channel);
       High    : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.High_End (S.Views, Channel);
-      Changed : constant Mask := Driver.Pixels.Changed (Low.Frames, High.Frames);
+      Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Low.Frames, High.Frames);
       Per_Channel : Channel_Array := S.Per_Channel.Element;
    begin
       Per_Channel (Channel) :=
-        (Status    => (if Count (Changed) = 0 then Nothing_Moves else Waiting),
+        (Status    => (if not Compared.Trusted then Everything_Moves
+                       elsif Count (Compared.Changed) = 0 then Nothing_Moves
+                       else Waiting),
          Low_From  => Low.From,
          High_From => High.From,
-         Changed   => Change_Holders.To_Holder (Changed),
+         Changed   => Change_Holders.To_Holder (Compared.Changed),
          Lobes     => Driver.Robot.Hand.Lobes.Lobe_Vectors.Empty_Vector,
          Closing   => Driver.Robot.Hand.Lobes.Undecided,
          Change    => Unknown,
@@ -260,6 +262,8 @@ package body Driver.Robot.Hand.Sweep is
             return "the instrument can never answer (" & Refusal (S) & ")";
          when Nothing_Moves =>
             return "nothing in this eye moves between its ends";
+         when Everything_Moves =>
+            return "half of this eye's picture or more changes between its ends, so what moved cannot be told from what did not";
          when Measured =>
             return Natural'Image (Natural (Here.Lobes.Length)) & " lobes, "
               & (if Here.Closing = Driver.Robot.Hand.Lobes.Towards_There then "closed at the high reading"
