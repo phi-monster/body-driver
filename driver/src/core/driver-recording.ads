@@ -6,7 +6,8 @@
 --
 --  Kinds: R robot to driver, D driver to robot (binary messages), r and d the
 --  same for text messages, C a new robot connection, S a service request,
---  T a service reply and F a file the driver read. A service record starts
+--  T a service reply, F a file the driver read and E a decider's call for
+--  the estimates at once (Driver.Robot.Estimate_Now, no payload). A service record starts
 --  with a line naming the call: the service, its call number (which pairs a
 --  reply with its request) and, for a call an estimator submitted, "beat"
 --  and the beat it was submitted at. A request goes on with the path, LF,
@@ -23,7 +24,7 @@ package Driver.Recording is
 
    type Record_Kind is
      (Robot_Message, Driver_Message, Robot_Text, Driver_Text, Connection, Service_Request, Service_Reply,
-      File_Read);
+      File_Read, Estimates_Asked);
 
    type Reader is limited private;
 

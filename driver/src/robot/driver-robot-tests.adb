@@ -3358,6 +3358,66 @@ package body Driver.Robot.Tests is
       GNAT.OS_Lib.Free (Recording_Name);
    end Body_File_In_The_Recording;
 
+   --  A decider's Estimate_Now goes into the recording once per call; the
+   --  recomputations Observe makes as the evidence doubles do not, since a
+   --  replay makes those itself.
+   procedure Estimate_In_The_Recording is
+      use type Driver.Recording.Record_Kind;
+      use type GNAT.OS_Lib.File_Descriptor;
+      use type GNAT.OS_Lib.String_Access;
+      M     : Model;
+      O     : Observation;
+      FD    : GNAT.OS_Lib.File_Descriptor;
+      Name  : GNAT.OS_Lib.String_Access;
+      Found : Natural := 0;
+      Gone  : Boolean;
+   begin
+      GNAT.OS_Lib.Create_Temp_File (FD, Name);
+      Check (FD /= GNAT.OS_Lib.Invalid_FD, "no scratch file for the recording");
+      GNAT.OS_Lib.Close (FD);
+      if Name = null then
+         return;
+      end if;
+      Driver.Recording.Start_Shared (Name.all);
+      --  Eight beats: Observe recomputes at beats 1, 2, 4 and 8 on its own.
+      for B in 0 .. 7 loop
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => 0.0));
+         Observe (M, O, Driver.Commands.Hold);
+      end loop;
+      Estimate_Now (M);
+      Estimate_Now (M);
+      Driver.Recording.Stop_Shared;
+      declare
+         R       : Driver.Recording.Reader;
+         Opened  : Boolean;
+         More    : Boolean := True;
+         Kind    : Driver.Recording.Record_Kind;
+         Ns      : Long_Long_Integer;
+         Payload : Driver.Bytes.Buffer;
+      begin
+         Driver.Recording.Open (R, Name.all, Opened);
+         Check (Opened, "the recording cannot be opened");
+         while Opened and then More loop
+            Driver.Recording.Next (R, Kind, Ns, Payload, More);
+            if More and then Kind = Driver.Recording.Estimates_Asked then
+               Found := Found + 1;
+            end if;
+         end loop;
+         if Opened then
+            Driver.Recording.Close (R);
+         end if;
+      end;
+      Check (Found = 2, "two calls of Estimate_Now after eight observed beats are in the recording"
+             & Found'Image & " times, not twice");
+      GNAT.OS_Lib.Delete_File (Name.all, Gone);
+      GNAT.OS_Lib.Free (Name);
+   end Estimate_In_The_Recording;
+
    --  A quantity measured by another method than the code's is measured
    --  again, with what rests on it; the rest stands, and the estimates leave
    --  it as reloaded.
@@ -3841,6 +3901,8 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.body.recorded", "a body file the driver reads is not in the recording once, "
                              & "where it was read, or its recorded text reloads another body",
                              Body_File_In_The_Recording'Access);
+      Driver.Tests.Register ("robot.estimate.recorded", "a decider's Estimate_Now is not in the recording once per "
+                             & "call, or Observe's own recomputations are", Estimate_In_The_Recording'Access);
       Driver.Tests.Register ("robot.world.place", "a second arm whose eye sees the first arm's table is placed in the "
                              & "wrong spot, turn or scale, beyond its own sigma, or not through its own eye",
                              Place_A_Second_Arm'Access);

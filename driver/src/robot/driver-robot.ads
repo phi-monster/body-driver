@@ -84,7 +84,9 @@ package Driver.Robot is
    procedure Estimate_Now (M : in out Model);
    --  Recomputes the heavier estimates from everything observed so far.
    --  Deciders call it between Driver.Beats.Next and Send; it can take
-   --  seconds, during which the robot holds.
+   --  seconds, during which the robot holds. The call goes into the
+   --  recording (Driver.Recording, kind E), so a replay recomputes where
+   --  the run did.
 
    function Booted (M : Model) return Boolean;
    --  The kinematics of every arm that carries an eye are measured.

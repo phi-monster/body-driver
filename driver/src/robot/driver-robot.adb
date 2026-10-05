@@ -169,7 +169,7 @@ package body Driver.Robot is
    --  session (Load_Body). The channels still mark the pushes, with the
    --  noise as reloaded; the pictures' luma noise belongs to the scene and
    --  is always measured.
-   procedure Estimate_Now (M : in out Model) is
+   procedure Recompute (M : in out Model) is
       Start : constant Duration := Driver.Clock.Seconds;
    begin
       Channels.Measure (M);
@@ -194,6 +194,16 @@ package body Driver.Robot is
       M.Graph_Evidence := M.Beats;
       Driver.Log.Line (Driver.Log.Robot, "estimated from" & M.Beats'Image & " beats in"
                        & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
+   end Recompute;
+
+   --  A decider's call goes into the recording (kind E) inside its window,
+   --  after the beat's observation and before its reply, so a replay
+   --  recomputes at the same point; Observe's own recomputations are not
+   --  recorded, since a replay makes them itself.
+   procedure Estimate_Now (M : in out Model) is
+   begin
+      Driver.Recording.Write_Shared (Driver.Recording.Estimates_Asked, Driver.Bytes.To_Bytes (""));
+      Recompute (M);
    end Estimate_Now;
 
    procedure Observe (M : in out Model; O : Observation; Sent : Driver.Commands.Command) is
@@ -208,7 +218,7 @@ package body Driver.Robot is
       --  The estimates are redone whenever the evidence behind them has
       --  doubled: a logarithmic number of times over any stream.
       if M.Beats >= 2 * M.Graph_Evidence then
-         Estimate_Now (M);
+         Recompute (M);
       end if;
    end Observe;
 

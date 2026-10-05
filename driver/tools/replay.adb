@@ -9,7 +9,9 @@
 --  written to the body file. A body file the run read is in the recording
 --  (Driver.Recording, kind F), and the body is reloaded from that text where
 --  the run read it, so a run that booted from a body file replays as it ran,
---  even after the run rewrote the file. With --estimates, every beat after boot writes
+--  even after the run rewrote the file. Every estimate a decider
+--  asked for at once is in the recording too (kind E) and is made at the
+--  same point. With --estimates, every beat after boot writes
 --  one JSON line with each arm's tool pose and each eye's pose (row-major 4 x 4,
 --  world frame); two last lines hold, for each eye, the lines of sight of a
 --  grid of pixels in the eye's own frame, and each hand's tips in its tool
@@ -381,6 +383,7 @@ begin
          when Driver.Recording.Service_Request => Payload.Query (Service_Request'Access);
          when Driver.Recording.Service_Reply   => Payload.Query (Service_Reply'Access);
          when Driver.Recording.File_Read       => Payload.Query (File_Read'Access);
+         when Driver.Recording.Estimates_Asked => Driver.Robot.Estimate_Now (Robot);
          when others                          => null;
       end case;
    end loop;
