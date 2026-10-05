@@ -65,6 +65,13 @@ The hand (measured at boot):
 | `hand: closer group <g> channel <c> seen at both ends in eye <e>; asking where <n> pixels went` | the closing was seen open and shut; the instrument is asked to match pixels between the two |
 | `hand: the instrument did not answer for closer group <g> channel <c>: <why>` | that channel's sweep is not used |
 | `hand: closer group <g> channel <c> has no visible step measured; not swept` | the channel's response is unmeasured, so it is not swept |
+| `hand: closer group <g> of arm <a> is not swept: no eye on its arm watches it, so no hand is made of it` | a closer of the body that no arm-carried eye sees move |
+| `hand: closer group <g> channel <c> in eye <e>: <n> lobes, closed at the high reading` (or `at the low reading`, or `closing direction not significant: their distances changed by <v> +- <s> pixels between the ends`, or `closing direction not known: there is nothing to compare their distances with`) | what the channel's sweep found in that eye |
+| `hand: no hand was found, so nothing is pressed; below, what became of each closer` | no closer gave a hand; the lines of `hand: measured` say what became of each |
+| `hand <n>: lobe <l> at <opening> is not pressed: its tip is not seen in the hand's eye at this opening` | the lobe has no tip pixel at that opening |
+| `hand <n> is not pressed: its closer group is no longer a closer of its arm` | the body re-read its roles |
+| `hand <n>: lobe <l> at <opening> pressed once, straight, and not tilted: no other line of sight of the hand is known to tilt away from` | a lone lobe: no tilt to try |
+| `hand <n>: lobe <l> at <opening> tilted one way (the other):<k> presses, then <why>` | how far the tilts went on that side: to a right angle, until a press could not be made, or until the latest did not agree with the others |
 | `hand <n>: a press at the <opening> opening, <k> kept; it agrees with the others` (or `does not agree`) | a fingertip press on a surface was recorded, and whether the fit of all the presses so far keeps it |
 | `hand <n>: its arm was fitted again; the <k> presses kept take their poses from the new fit` | the arm's table moved, so every press kept took its pose again from the arm's readings it kept |
 | `hand <n>: a press with the closer at neither measured opening is not used` | the hand was neither at its measured open nor at its shut opening |
@@ -72,7 +79,7 @@ The hand (measured at boot):
 | `hand <n>: press of lobe <l> at <opening>: <k> pushes, <f> fast and <b> within Z sigma of the contact its presses predict, <d> doubling from <x> with nothing predicting it; blocked, the last push by <y> after lowering <t>` | how the press went down, in the arm's unit |
 | `hand <n>: up, the arm's pose or the eye's mount is unmeasured; no press` | a press cannot be aimed yet: the arm is not fitted, or its eye saw no table |
 | `hand <n>: cannot aim a press: <why>` / `hand <n>: cannot press lower: <why>` | the motion planner refused the press |
-| `hand: measured` | what was measured about every hand, one line each |
+| `hand: measured` | what was measured about every hand, one line each; for each closer an eye watches that gave no hand: `closer group <g> on arm <a> in eye <e>, its own: no hand; channel <c>: <account>;` (or `not its own, no hand is made of it;`), where the account says where the channel's sweep stands: its ends not both seen still, nothing yet asked of the instrument, its answer not come, the instrument could not (or can never) answer, nothing in the eye moves between its ends, half of the eye's picture or more changes between them (what moved cannot be told from what did not), or the lobes found (as above) |
 
 ## brain
 

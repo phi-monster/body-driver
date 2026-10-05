@@ -408,7 +408,13 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Agreed := Driver.Robot.Hand.Tips.Latest_Agrees (H.Data.Found (Id).Book);
          end Read_Agreed;
       begin
-         if not Press_Once (Id, R, Lobe, Which, Sight) or else Scale <= 0.0 then
+         if not Press_Once (Id, R, Lobe, Which, Sight) then
+            return;
+         end if;
+         if Scale <= 0.0 then
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image & " at "
+                             & (if Which = Open then "open" else "closed") & " pressed once, straight, and not tilted:"
+                             & " no other line of sight of the hand is known to tilt away from");
             return;
          end if;
          --  Leaning to either side of away, half-way to across.
@@ -416,13 +422,27 @@ procedure Measure (H : in out Hands; M : in out Model) is
             declare
                Lean : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;
                Tilt : Real := Scale;
+               Made : Natural := 0;
+               Why  : Ada.Strings.Unbounded.Unbounded_String :=
+                 Ada.Strings.Unbounded.To_Unbounded_String ("tilted to a right angle");
             begin
                while Tilt < Ada.Numerics.Pi / 2.0 loop
-                  exit when not Press_Once (Id, R, Lobe, Which, Driver.Robot.Hand.Aims.Tilted (Sight, Lean, Tilt));
+                  if not Press_Once (Id, R, Lobe, Which, Driver.Robot.Hand.Aims.Tilted (Sight, Lean, Tilt)) then
+                     Why := Ada.Strings.Unbounded.To_Unbounded_String ("a press could not be made");
+                     exit;
+                  end if;
+                  Made := Made + 1;
                   Hold_Beat (Read_Agreed'Access);
-                  exit when not Agreed;
+                  if not Agreed then
+                     Why := Ada.Strings.Unbounded.To_Unbounded_String ("the latest does not agree with the others");
+                     exit;
+                  end if;
                   Tilt := 2.0 * Tilt;
                end loop;
+               Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image & " at "
+                                & (if Which = Open then "open" else "closed") & " tilted "
+                                & (if Side < 0.0 then "one way" else "the other") & ":" & Made'Image
+                                & " presses, then " & Ada.Strings.Unbounded.To_String (Why));
             end;
          end loop;
       end;
@@ -458,12 +478,16 @@ begin
    for G in 1 .. Group_Id'Base (Count) loop
       declare
          Now      : Boolean := False;
+         Is_One   : Boolean := False;   --  the body takes it for a closer
+         Of_Arm   : Arm_Id'Base := 0;
          Channels : Natural := 0;
          procedure Read_Group (O : Observation) is
             pragma Unreferenced (O);
             P : constant Natural := Own_Pair (G);
          begin
             Now := Sweepable (H, M, G);
+            Is_One := Role (M, G) = Closer;
+            Of_Arm := Closer_Arm (M, G);
             Channels := (if P > 0 then Sweeps.Channels (H.Data.Pairs (P).Sweep) else 0);
          end Read_Group;
       begin
@@ -472,12 +496,18 @@ begin
             for C in 1 .. Channels loop
                Sweep_Channel (G, C);
             end loop;
+         elsif Is_One then
+            Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " of arm" & Of_Arm'Image
+                             & " is not swept: no eye on its arm watches it, so no hand is made of it");
          end if;
       end;
    end loop;
    --  Press every lobe of every hand found, at both openings: a hand whose
    --  group the body no longer takes for a closer of its arm is gone by then.
    Hold_Beat (Read_Hands'Access);
+   if Count = 0 then
+      Driver.Log.Line (Driver.Log.Robot, "hand: no hand was found, so nothing is pressed; below, what became of each closer");
+   end if;
    for Id in 1 .. Hand_Id'Base (Count) loop
       for Which in Opening loop
          declare
@@ -500,8 +530,15 @@ begin
                for L in 1 .. Natural (R.Lobes.Length) loop
                   if R.Lobes (L).Sights (Which).Known then
                      Press_Lobe (Id, R, L, Which);
+                  else
+                     Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & L'Image & " at "
+                                      & (if Which = Open then "open" else "closed")
+                                      & " is not pressed: its tip is not seen in the hand's eye at this opening");
                   end if;
                end loop;
+            elsif Which = Open then
+               Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & " is not pressed: its closer group is no longer"
+                                & " a closer of its arm");
             end if;
          end;
       end loop;

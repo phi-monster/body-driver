@@ -45,11 +45,23 @@ package body Driver.Robot.Hand.Views is
       and then not Rest_Moved (A.Rest.Element, B.Rest.Element));
    --  The same background and the same other channels: only this channel differs.
 
+   function Shows_More (Before, V : View) return Boolean;
+   --  The eye sees something change between the two views, beyond what the
+   --  pixels that did not change show of their own (Driver.Pixels.Compare); a
+   --  view that most of the eye saw change shows more than the eye saw before.
+   --  Two frames each: the first alone cannot show that the body held still.
+
    function Shows_More (Before, V : View) return Boolean is
-     (Driver.Pixels.Frames (V.Frames) >= 2 and then Driver.Pixels.Frames (Before.Frames) >= 2
-      and then Driver.Images.Count (Driver.Pixels.Changed (Before.Frames, V.Frames)) > 0);
-   --  The eye sees something change between the two views; two frames each
-   --  let the pixels say how much they vary on their own.
+   begin
+      if Driver.Pixels.Frames (V.Frames) < 2 or else Driver.Pixels.Frames (Before.Frames) < 2 then
+         return False;
+      end if;
+      declare
+         Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Before.Frames, V.Frames);
+      begin
+         return not Compared.Trusted or else Driver.Images.Count (Compared.Changed) > 0;
+      end;
+   end Shows_More;
 
    procedure Consider
      (T          : in out Tracker;
@@ -253,7 +265,7 @@ package body Driver.Robot.Hand.Views is
          Low  : constant View_Holders.Constant_Reference_Type := Ends.Element (Channel).Low.Constant_Reference;
          High : constant View_Holders.Constant_Reference_Type := Ends.Element (Channel).High.Constant_Reference;
       begin
-         --  Two frames each let the pixels say how much they vary on their own.
+         --  Two frames each: the first alone cannot show that the body held still.
          return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2
            and then Significant (Reading (High.Element.all, Channel) - Reading (Low.Element.all, Channel),
                                  Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1));

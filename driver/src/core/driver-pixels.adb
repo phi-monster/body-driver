@@ -1,5 +1,7 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
+with Driver.Distributions;
+with Driver.Stats;
 with Driver.Uncertain;
 
 package body Driver.Pixels is
@@ -90,43 +92,109 @@ package body Driver.Pixels is
       end loop;
    end Variances;
 
-   function Mean_Estimate (V : View; Means : Real_Array; K : Positive) return Driver.Uncertain.Estimate is
-      Sample : constant Real := Sample_Variance (V, K);
+   function Started_Spread (Difference : Real_Array; Centre : Real) return Real is
+      --  The spread the pixels near the typical difference show: the lower
+      --  quarter of their distances from it, by the median of the nearer half
+      --  of the distances. The median distance itself (the usual median
+      --  absolute deviation) is the farthest a Gaussian's pixels reach among
+      --  their nearer half, so it is carried off by any change as large as the
+      --  rest of the view; the lower quarter is still among the unchanged
+      --  pixels when they are no more than the nearer half of what is left.
+      --  What a Gaussian's lower quarter of absolute values reaches, in
+      --  sigmas, is that of the Gaussian whose two-sided tail beyond it is
+      --  three quarters.
+      Quarter  : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.75);
+      Away     : Real_Array_Access := new Real_Array (Difference'Range);
+      Nearer   : Real_Array_Access := new Real_Array (Difference'Range);
+      Count    : Natural := 0;
+      Middle   : Real;
+      Result   : Real;
    begin
-      --  A variance at the floor is known; one above it rests on the frames less one.
-      return (Value              => Means (K),
-              Sigma              => Sqrt (Floored (Sample) / Real (V.Count)),
-              Degrees_Of_Freedom => (if Sample > Quantization then V.Count - 1 else 0));
-   end Mean_Estimate;
-
-   function Changed (A, B : View) return Driver.Images.Mask is
-      Result : Driver.Images.Mask := Driver.Images.Create (A.Width, A.Height);
-      --  The thresholds are worked out once, up to the two views' degrees of
-      --  freedom together. Welch can give more when one variance sits at the
-      --  known floor; the threshold for fewer degrees is the larger one, so
-      --  taking it there only makes the test stricter.
-      Most   : constant Natural := (A.Count - 1) + (B.Count - 1);
-      Gates  : array (0 .. Most) of Driver.Uncertain.Gate;
-      Ar     : constant Real_Holders.Constant_Reference_Type := A.Means.Constant_Reference;
-      Br     : constant Real_Holders.Constant_Reference_Type := B.Means.Constant_Reference;
-   begin
-      for D in Gates'Range loop
-         Gates (D) := Driver.Uncertain.Scalar_Gate (D);
+      for K in Difference'Range loop
+         Away (K) := abs (Difference (K) - Centre);
       end loop;
-      for Row in 0 .. A.Height - 1 loop
-         for Column in 0 .. A.Width - 1 loop
-            declare
-               K : constant Positive := Row * A.Width + Column + 1;
-               D : constant Driver.Uncertain.Estimate :=
-                 Driver.Uncertain.Difference (Mean_Estimate (A, Ar.Element.all, K), Mean_Estimate (B, Br.Element.all, K));
-            begin
-               if Driver.Uncertain.Significant (Gates (Natural'Min (Most, D.Degrees_Of_Freedom)), D.Value, D.Sigma) then
-                  Driver.Images.Include (Result, Column, Row);
-               end if;
-            end;
+      Middle := Driver.Stats.Median (Away.all);
+      --  The distances below the median one: an exact render has many equal
+      --  ones, and those at the median itself are the nearer half only when
+      --  none are below it.
+      for V of Away.all loop
+         if V < Middle then
+            Count := Count + 1;
+            Nearer (Nearer'First + Count - 1) := V;
+         end if;
+      end loop;
+      if Count = 0 then
+         for V of Away.all loop
+            if V <= Middle then
+               Count := Count + 1;
+               Nearer (Nearer'First + Count - 1) := V;
+            end if;
          end loop;
-      end loop;
+      end if;
+      Result := Driver.Stats.Median (Nearer (Nearer'First .. Nearer'First + Count - 1)) / Quarter;
+      Free (Away);
+      Free (Nearer);
       return Result;
-   end Changed;
+   end Started_Spread;
+
+   function Compare (A, B : View) return Comparison is
+      Pixels : constant Positive := A.Width * A.Height;
+      --  The least spread of a difference of two means: each is known no
+      --  better than the quantization of its frames.
+      Floor    : constant Real := Sqrt (Quantization / Real (A.Count) + Quantization / Real (B.Count));
+      --  Every pixel is one test of a family of as many as there are pixels.
+      Multiple : constant Real := Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate (Tests => Pixels));
+      Ar       : constant Real_Holders.Constant_Reference_Type := A.Means.Constant_Reference;
+      Br       : constant Real_Holders.Constant_Reference_Type := B.Means.Constant_Reference;
+      --  A frame's worth of reals lives on the heap, not on a task's stack.
+      Difference : Real_Array_Access := new Real_Array (1 .. Pixels);
+      Centre   : Real;
+      Spread   : Real;
+      Kept     : Natural := Pixels + 1;   --  how many pixels the last pass kept; no pass keeps more
+      Result   : Comparison;
+      Changed  : Natural := 0;
+   begin
+      for K in Difference'Range loop
+         Difference (K) := Br.Element (K) - Ar.Element (K);
+      end loop;
+      Centre := Driver.Stats.Median (Difference.all);
+      Spread := Real'Max (Floor, Started_Spread (Difference.all, Centre));
+      --  Each pass keeps the pixels within the gate of the spread so far and
+      --  takes their mean and standard deviation as the typical difference and
+      --  the spread of the pixels that did not change. Keeping fewer and fewer
+      --  pixels, it ends when a pass keeps no fewer than the one before.
+      loop
+         declare
+            Seen : Driver.Stats.Accumulator;
+         begin
+            for D of Difference.all loop
+               if abs (D - Centre) <= Multiple * Spread then
+                  Driver.Stats.Add (Seen, D);
+               end if;
+            end loop;
+            exit when Driver.Stats.Count (Seen) = 0 or else Driver.Stats.Count (Seen) >= Kept;
+            Kept := Driver.Stats.Count (Seen);
+            Centre := Driver.Stats.Mean (Seen);
+            Spread := Real'Max (Floor, (if Kept > 1 then Sqrt (Driver.Stats.Variance (Seen)) else 0.0));
+         end;
+      end loop;
+      Result.Spread := Spread;
+      Result.Beyond := Multiple * Spread;
+      Result.Changed := Driver.Images.Create (A.Width, A.Height);
+      for K in Difference'Range loop
+         if abs (Difference (K) - Centre) > Result.Beyond then
+            Changed := Changed + 1;
+            Driver.Images.Include (Result.Changed, (K - 1) mod A.Width, (K - 1) / A.Width);
+         end if;
+      end loop;
+      Free (Difference);
+      --  The typical difference is the median's to find only while the pixels
+      --  that did not change are the majority.
+      Result.Trusted := 2 * Changed < Pixels;
+      if not Result.Trusted then
+         Result.Changed := Driver.Images.Create (A.Width, A.Height);
+      end if;
+      return Result;
+   end Compare;
 
 end Driver.Pixels;

@@ -1,4 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings.Fixed;
 with Driver.Bytes;
 with Driver.Clock;
 with Driver.Commands;
@@ -234,10 +235,56 @@ package body Driver.Robot.Hand.Tests is
       Check (not Sweepable (H, M, 2), "a group the body re-read as an arm is taken for a closer again");
    end Roles_Re_Read;
 
+   procedure Unswept_Closer_Says_Why is
+      --  A closer the hand watches in its arm's own eye and has swept nothing
+      --  of makes no hand; the hands' account (what the boot logs after it
+      --  has pressed, or not) says so, with why, for the closer and its
+      --  channel, not nothing: A14's hand phase ended on "measured" and
+      --  nothing else, and no one could tell a hand that was not found from
+      --  a press that was not made.
+      M    : Driver.Robot.Model;
+      H    : Hands;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      function Mentions (Text, Part : String) return Boolean is (Ada.Strings.Fixed.Index (Text, Part) > 0);
+   begin
+      O.Beat := 1;
+      O.Readings.Append (Real_Array'[0.1, 0.2, 0.3]);
+      O.Readings.Append (Real_Array'[1 => 0.04]);
+      O.Images.Append (Driver.Images.Create (4, 3, [1 .. 36 => Driver.Bytes.Byte'First]));
+      O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+      O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+      O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+      Driver.Commands.Set_Target (Sent, 1, [0.1, 0.2, 0.3]);
+      Driver.Commands.Set_Target (Sent, 2, [0.04]);
+      Driver.Robot.Observe (M, O, Sent);
+      M.Graph.Roles.Clear;
+      M.Graph.Roles.Append (Arm);
+      M.Graph.Roles.Append (Closer);
+      M.Graph.Arm_Of.Clear;
+      M.Graph.Arm_Of.Append (1);
+      M.Graph.Arm_Of.Append (1);
+      M.Graph.Arms.Clear;
+      M.Graph.Arms.Append (1);
+      M.Graph.Mounts.Clear;
+      M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => 1));
+      Observe (H, M, O, Sent);
+      Check (Hand_Count (H) = 0, "a hand was found of a closer nothing was swept of");
+      declare
+         Account : constant String := Describe (H);
+      begin
+         Check (Mentions (Account, "closer group 2") and then Mentions (Account, "its own: no hand")
+                and then Mentions (Account, "channel 1: its two ends were not both seen still"),
+                "the account of a closer that was not swept does not say so: """ & Account & """");
+      end;
+   end Unswept_Closer_Says_Why;
+
    procedure Register is
    begin
       Driver.Tests.Register ("hand.unmeasured", "an unmeasured body makes the hand fail or invent a hand",
                              Unmeasured_Body'Access);
+      Driver.Tests.Register ("hand.measure.account", "a closer no hand is made of ends the measurement without a "
+                             & "word of why", Unswept_Closer_Says_Why'Access);
       Driver.Tests.Register ("hand.measure.end", "a closer at an end of its travel is asked ever further past it",
                              Upper_End'Access);
       Driver.Tests.Register ("hand.measure.unformed", "a push whose view never forms is waited for without end (A12)",

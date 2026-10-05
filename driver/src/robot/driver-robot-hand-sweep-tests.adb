@@ -1,5 +1,6 @@
 with Ada.Exceptions;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Driver.Bytes;
 with Driver.Tests;
@@ -38,7 +39,19 @@ package body Driver.Robot.Hand.Sweep.Tests is
       return 0;
    end On_Finger;
 
-   function Frame (R : Real; Scale : Positive := 1) return Driver.Images.Image is
+   --  Light: the renderer's lighting moves with the fingers. At reading R every
+   --  pixel of the table is lit (1 - R) times one to three levels more, more
+   --  towards the right and by a level either way at each pixel. Fingers
+   --  False leaves the table alone with that lighting. Wide: two fifths of the
+   --  columns are lifted by forty levels (1 - R) and the next three tenths
+   --  lowered by as much, a change of far more than half the picture.
+   function Frame
+     (R       : Real;
+      Scale   : Positive := 1;
+      Light   : Boolean := False;
+      Fingers : Boolean := True;
+      Wide    : Boolean := False) return Driver.Images.Image
+   is
       Data : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset (3 * Scale * W * Scale * H));
    begin
       for Row in 0 .. Scale * H - 1 loop
@@ -47,8 +60,16 @@ package body Driver.Robot.Hand.Sweep.Tests is
                --  A textured table, so every background pixel has its own value.
                Table : constant Natural :=
                  Natural (128.0 + 60.0 * Sin (Real (C) * 0.37) * Cos (Real (Row) * 0.23) + Real ((C * 7 + Row * 13) mod 19));
+               Lit   : constant Real :=
+                 (if Light
+                  then (1.0 - R) * (1.0 + 2.0 * Real (C) / Real (Scale * W - 1) + Real ((C * 7 + Row * 13) mod 3) - 1.0)
+                  else 0.0)
+                 + (if Wide and then C < 4 * Scale * W / 10 then 40.0 * (1.0 - R)
+                    elsif Wide and then C < 7 * Scale * W / 10 then -40.0 * (1.0 - R)
+                    else 0.0);
                L : constant Driver.Bytes.Byte :=
-                 Driver.Bytes.Byte (if On_Finger (C, Row, R, Scale) > 0 then 20 else Table);
+                 Driver.Bytes.Byte (if Fingers and then On_Finger (C, Row, R, Scale) > 0 then 20
+                                    else Natural (Real'Max (0.0, Real'Min (255.0, Real'Rounding (Real (Table) + Lit)))));
                K : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Row * Scale * W + C));
             begin
                Data (K + 1) := L;
@@ -347,6 +368,167 @@ package body Driver.Robot.Hand.Sweep.Tests is
              & " past it, a pixel's push being" & Real'Image (Pixel));
    end Below_The_Views;
 
+   function Mentions (Text, Part : String) return Boolean is (Ada.Strings.Fixed.Index (Text, Part) > 0);
+
+   --  What the log says of a channel, at each stage of its sweep: the ends
+   --  not seen, asked and not answered, refused, measured and closed at one
+   --  end, and measured but not told which end is closed (with by how much
+   --  and against what the lobes' distances changed). A14's hand phase ended
+   --  on "closing direction not significant" and then nothing: no hand, no
+   --  press, and not a word on whether it was the sweep, the instrument or
+   --  the lobes.
+   procedure Account_Follows_The_Sweep is
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
+      B : Driver.Clock.Beat := 0;
+      procedure Hold (R : Real; Frames : Positive) is
+      begin
+         for I in 1 .. Frames loop
+            Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame (R), Exact'Access);
+            B := B + 1;
+         end loop;
+      end Hold;
+      procedure Move (R : Real) is
+      begin
+         Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame (R), Exact'Access);
+         B := B + 1;
+      end Move;
+      procedure Swept_Both_Ends is
+      begin
+         Hold (1.0, 3);
+         Move (0.5);
+         Hold (0.0, 3);
+         Move (0.5);
+         Hold (1.0, 2);
+         Move (1.0);
+      end Swept_Both_Ends;
+      procedure Answer_Both_Ways is
+         Points : constant Driver.Instrument.Point_Array := Query_Points (S, 1);
+         Low    : constant Real := Views.Reading (Low_End (S, 1), 1);
+         High   : constant Real := Views.Reading (High_End (S, 1), 1);
+      begin
+         Asked (S, 1);
+         Answer (S, 1, Points, Answers (Points, Low, High), Answers (Points, High, Low), Driver.Images.Create (W, H));
+      end Answer_Both_Ways;
+   begin
+      Hold (1.0, 3);
+      Check (Mentions (Account (S, 1), "not both seen still"), "a channel with one end says: " & Account (S, 1));
+      Move (0.5);
+      Hold (0.0, 3);
+      Move (0.5);
+      Hold (1.0, 2);
+      Move (1.0);
+      Check (Mentions (Account (S, 1), "nothing has been asked"), "a channel with both ends seen says: " & Account (S, 1));
+      Asked (S, 1);
+      Check (Mentions (Account (S, 1), "answer for its ends did not come"), "a channel asked says: " & Account (S, 1));
+      Refuse (S, 1, False, "the instrument went away");
+      Check (Mentions (Account (S, 1), "could not answer"), "a channel refused says: " & Account (S, 1));
+      S := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
+      Swept_Both_Ends;
+      Asked (S, 1);
+      Refuse (S, 1, True, "no address was given for the instrument service");
+      Check (Mentions (Account (S, 1), "can never answer (no address"), "a channel never to be answered says: " & Account (S, 1));
+      S := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
+      Swept_Both_Ends;
+      Answer_Both_Ways;
+      Check (Status (S, 1) = Measured and then Mentions (Account (S, 1), "2 lobes, closed at the low reading"),
+             "a channel measured says: " & Account (S, 1));
+      --  The same lobes with nothing to tell which end is closed: how far their distances changed, and the
+      --  sigma that was not enough.
+      declare
+         Per_Channel : Channel_Array := S.Per_Channel.Element;
+      begin
+         Per_Channel (1).Closing := Driver.Robot.Hand.Lobes.Undecided;
+         Per_Channel (1).Change := (Value => 3.0, Sigma => 40.0, Degrees_Of_Freedom => 0);
+         S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
+         Check (Mentions (Account (S, 1), "closing direction not significant")
+                and then Mentions (Account (S, 1), "changed by 3.00"),
+                "a channel whose lobes' distances did not tell says: " & Account (S, 1));
+         Per_Channel (1).Change := Unknown;
+         S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
+         Check (Mentions (Account (S, 1), "nothing to compare"), "a channel with nothing to compare says: " & Account (S, 1));
+      end;
+   end Account_Follows_The_Sweep;
+
+   --  The closer swept open, closed, open and its ends seen, in frames that
+   --  Light (and Wide) make: a procedure over the whole choreography so that
+   --  each test below says only what is in the picture.
+   procedure Sweep_With
+     (S       : in out State;
+      Light   : Boolean;
+      Fingers : Boolean;
+      Wide    : Boolean := False)
+   is
+      B : Driver.Clock.Beat := 0;
+      procedure Hold (R : Real; Frames : Positive) is
+      begin
+         for I in 1 .. Frames loop
+            Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame (R, 1, Light, Fingers, Wide), Exact'Access);
+            B := B + 1;
+         end loop;
+      end Hold;
+      procedure Move (R : Real) is
+      begin
+         Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame (R, 1, Light, Fingers, Wide), Exact'Access);
+         B := B + 1;
+      end Move;
+   begin
+      Hold (1.0, 3);
+      Move (0.7);
+      Hold (0.5, 2);
+      Move (0.2);
+      Hold (0.0, 3);
+      Move (0.5);
+      Hold (1.0, 2);
+      Move (1.0);
+   end Sweep_With;
+
+   procedure Lit_By_The_Fingers is
+      --  The renderer's lighting moves with the fingers: at the closed end
+      --  every pixel of the table is one to three levels brighter, a level
+      --  either way at each. That is not a change of anything. A14's two ends
+      --  differed so at 85 % of the pixels, the whole picture was asked of the
+      --  matcher, and the matcher's noise came from the quietest of them.
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
+   begin
+      Sweep_With (S, Light => True, Fingers => True);
+      Check (Wants_Correspondences (S, 1), "a sweep of two fingers in moving light did not ask for correspondences");
+      if Wants_Correspondences (S, 1) then
+         declare
+            Points : constant Driver.Instrument.Point_Array := Query_Points (S, 1);
+            Low    : constant Real := Views.Reading (Low_End (S, 1), 1);
+            High   : constant Real := Views.Reading (High_End (S, 1), 1);
+         begin
+            Check (Points'Length = (149 - 10 + 1) * (H - 40), "the query box is not the fingers' travel in moving light:"
+                   & Natural'Image (Points'Length) & " of" & Natural'Image (W * H) & " pixels");
+            Asked (S, 1);
+            Answer (S, 1, Points, Answers (Points, Low, High), Answers (Points, High, Low), Driver.Images.Create (W, H));
+         end;
+         Check (Status (S, 1) = Measured and then Natural (Lobes_Of (S, 1).Length) = 2
+                and then Closing_Known (S, 1) and then not Closed_End_Is_High (S, 1),
+                "two fingers in moving light were not two lobes closed at the low reading: " & Account (S, 1));
+      end if;
+   end Lit_By_The_Fingers;
+
+   procedure Only_The_Light_Moves is
+      --  Nothing but the lighting differs between the ends.
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
+   begin
+      Sweep_With (S, Light => True, Fingers => False);
+      Check (Status (S, 1) = Nothing_Moves and then not Wants_Correspondences (S, 1),
+             "lighting that moves with the closer, and nothing else, was sent to the matcher: " & Account (S, 1));
+   end Only_The_Light_Moves;
+
+   procedure More_Than_Half_Moves is
+      --  Seven tenths of the picture change between the ends, in two ways:
+      --  what moved cannot be told from what did not.
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
+   begin
+      Sweep_With (S, Light => False, Fingers => False, Wide => True);
+      Check (Status (S, 1) = Everything_Moves and then not Wants_Correspondences (S, 1)
+             and then Mentions (Account (S, 1), "half of this eye's picture"),
+             "a picture changed over most of it was not said to be: " & Account (S, 1));
+   end More_Than_Half_Moves;
+
    procedure Nothing_Seen is
       --  A channel whose push changes nothing this eye sees.
       S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
@@ -432,6 +614,14 @@ package body Driver.Robot.Hand.Sweep.Tests is
                              & "decider's does", Swept_In_A_Task'Access);
       Driver.Tests.Register ("hand.sweep.nothing", "a push that changes nothing in the eye is sent to the matcher",
                              Nothing_Seen'Access);
+      Driver.Tests.Register ("hand.sweep.lighting", "lighting that moves with the fingers is a change of the whole picture",
+                             Lit_By_The_Fingers'Access);
+      Driver.Tests.Register ("hand.sweep.lightonly", "a push that changes only the lighting is sent to the matcher",
+                             Only_The_Light_Moves'Access);
+      Driver.Tests.Register ("hand.sweep.crowded", "a picture changed over most of it is taken for a measurement",
+                             More_Than_Half_Moves'Access);
+      Driver.Tests.Register ("hand.sweep.account", "a channel's sweep ends, at any stage, without a word of what became "
+                             & "of it", Account_Follows_The_Sweep'Access);
       Driver.Tests.Register ("hand.sweep.blind", "a sweep from a step its views cannot see stops at its first push "
                              & "with no ends (A11), or pushes unseen without bound", Below_The_Views'Access);
    end Register;

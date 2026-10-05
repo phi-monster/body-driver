@@ -70,7 +70,7 @@ package Driver.Robot.Hand.Views is
 
    function Gathered (T : Tracker) return Boolean;
    --  A view is being gathered and has the two frames a view is judged by
-   --  (its pixels say how much they vary on their own): Would_Extend says
+   --  (the first alone cannot show that the body held still): Would_Extend says
    --  something of it. Right after a push the body is still coming to rest,
    --  and every reading that moves against its own noise starts the view
    --  again: on A11 the arm's readings moved by 4e-10 after a closer push,
