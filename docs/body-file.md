@@ -76,7 +76,11 @@ Per arm, `kinematics.arms` holds:
 
 - `joints`, `lens` and `covariance`: the fit of the arm and of the eye it
   carries, in the eye's frame at the arm's reference readings (`reference`):
-  the arm's own frame, in the arm's own unit.
+  the arm's own frame, in the arm's own unit. The unit is the first fit's:
+  the root mean square of the eye's positions over the keyframes of that fit.
+  A keyframe taken later refines every term in that unit and moves no
+  length, and a reloaded arm is not fitted again, so what is stored stays in
+  the unit it was stored in.
 - `table`: the plane most of the arm's tracked points lie on, each point
   judged by its own depth uncertainty, in the arm's own frame, with its whole
   uncertainty: its points' scatter about it, what the fit moves every depth

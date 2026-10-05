@@ -15,7 +15,9 @@
 --  so a point X of the reference frame is seen by the eye at Q at
 --  Inverse (T (Q)) * X. Images fix lengths only up to one factor; the fit
 --  fixes it by making the root mean square of the eye positions over the
---  keyframes one model unit.
+--  unit's keyframes one model unit: all the keyframes of an arm's first fit,
+--  and afterwards those of the first fit (Fit's Unit_Frames), so that a
+--  keyframe taken later refines every term and moves no length.
 --
 --  The stages, as the legacy driver had them:
 --  1. every joint alone, from the keyframes where only it moved (the others
@@ -93,9 +95,9 @@ package Driver.Robot.Kinematics.Fit is
       Covariance : Real_Lists.Vector) return Real
      with Pre => Changes'Length (2) = Joints'Length;
    --  How uncertain the fit's unit is against its own depths, relative: the
-   --  unit is the root mean square of the eye positions over the keyframes
-   --  (Changes, one keyframe a row), and the fit's covariance holds the
-   --  joints' lengths against its depths; each joint term is moved by its
+   --  unit is the root mean square of the eye positions over the unit's
+   --  keyframes (Changes, one keyframe a row), and the fit's covariance holds
+   --  the joints' lengths against its depths; each joint term is moved by its
    --  standard deviation either way. Real'Last when the covariance is not
    --  the fit's of these joints.
 
@@ -149,10 +151,12 @@ package Driver.Robot.Kinematics.Fit is
       Visible    : Real_Array;         --  per joint, the reading change its eye can just see (0: unknown)
       Sightings  : Sighting_Array;
       Width, Height : Positive;
+      Unit_Frames : Natural;           --  how many of the first keyframes define the unit of length (0: all of them)
       Joints     : out Joint_Array;
       L          : out Lens;
       Report     : out Fit_Report)
-     with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length;
+     with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length
+                 and then Unit_Frames <= Changes'Length (1);
 
    ---------------------------------------------------------------------------
    --  Consensus. A plane holds only some of a view's points, and a dense
