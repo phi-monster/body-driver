@@ -284,11 +284,13 @@ package body Driver.Robot.Hand.Tips is
    procedure Set_Frame
      (B       : in out Book;
       Surface : Driver.Geometry.Plane_Estimate;
-      Pose_Of : not null access function (Arm : Real_Array) return Pose_Estimate)
+      Pose_Of : not null access function (Arm : Real_Array) return Pose_Estimate;
+      Moved   : out Boolean)
    is
       use type Driver.Geometry.Plane_Estimate;
    begin
-      if Surface = B.Table then
+      Moved := Surface /= B.Table;
+      if not Moved then
          return;
       end if;
       B.Table := Surface;

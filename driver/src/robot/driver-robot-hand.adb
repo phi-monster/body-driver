@@ -629,6 +629,7 @@ package body Driver.Robot.Hand is
       Is_Still   : Boolean)
    is
       Found : Boolean;
+      Moved : Boolean;
       Press : Driver.Robot.Hand.Presses.Event;
       Which : Opening;
 
@@ -640,7 +641,10 @@ package body Driver.Robot.Hand is
          return Tool_In_Arm (M, R.Arm, Then_Read);
       end Pose_Of;
    begin
-      Driver.Robot.Hand.Tips.Set_Frame (R.Book, Table_In_Arm (M, R.Arm), Pose_Of'Access);
+      Driver.Robot.Hand.Tips.Set_Frame (R.Book, Table_In_Arm (M, R.Arm), Pose_Of'Access, Moved);
+      if Moved and then Driver.Robot.Hand.Tips.Pressed (R.Book) > 0 then
+         Size_Up (R, Id);
+      end if;
       if not Driver.Observations.Has_Reading (O, R.Group) then
          return;
       end if;

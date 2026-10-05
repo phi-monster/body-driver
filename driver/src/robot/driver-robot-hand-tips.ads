@@ -45,7 +45,8 @@ package Driver.Robot.Hand.Tips is
    procedure Set_Frame
      (B       : in out Book;
       Surface : Driver.Geometry.Plane_Estimate;
-      Pose_Of : not null access function (Arm : Real_Array) return Pose_Estimate);
+      Pose_Of : not null access function (Arm : Real_Array) return Pose_Estimate;
+      Moved   : out Boolean);
    --  The frame the presses are in, as the arm's fit makes it now. Surface is
    --  the surface they are made on as measured before them, in that frame: the
    --  prior they fit it from; not Known (Driver.Geometry.Known) when nothing
@@ -53,8 +54,8 @@ package Driver.Robot.Hand.Tips is
    --  in that frame at given readings of the arm. A surface other than the
    --  last given means the arm was fitted again, and with it its frame and
    --  its unit moved: every press kept takes the pose its readings have now,
-   --  and all are fitted again. A press made when the arm's pose was not known
-   --  keeps the pose it has.
+   --  and all are fitted again (Moved). A press made when the arm's pose was
+   --  not known keeps the pose it has.
 
    procedure Add (B : in out Book; Press : Driver.Robot.Hand.Presses.Event; At_Opening : Opening);
    --  A press made with the closer at that opening.

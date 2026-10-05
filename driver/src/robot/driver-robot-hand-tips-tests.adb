@@ -166,11 +166,13 @@ package body Driver.Robot.Hand.Tips.Tests is
          declare
             B     : Book;
             Taken : Natural := 0;
+            Moved : Boolean;
          begin
             Ada.Numerics.Float_Random.Reset (Gen, 17);
             Set_Sights (B, Sights);
             if Prior then
-               Set_Frame (B, Table, No_Pose'Access);
+               Set_Frame (B, Table, No_Pose'Access, Moved);
+               Check (Moved, "a table seen for the first time left the presses as they were");
             end if;
             for K in 0 .. 11 loop
                declare
@@ -210,9 +212,11 @@ package body Driver.Robot.Hand.Tips.Tests is
                   Before : constant Point_Estimate := Tip (B, 1, Open);
                begin
                   Higher.Centre := [0.0, 0.0, 3.0e-4];
-                  Set_Frame (B, Higher, No_Pose'Access);
-                  Check (Known (Tip (B, 1, Open)) and then Tip (B, 1, Open).Mean /= Before.Mean,
+                  Set_Frame (B, Higher, No_Pose'Access, Moved);
+                  Check (Moved and then Known (Tip (B, 1, Open)) and then Tip (B, 1, Open).Mean /= Before.Mean,
                          "a table other than the one the presses were fitted with left the tip where it was");
+                  Set_Frame (B, Higher, No_Pose'Access, Moved);
+                  Check (not Moved, "the table the presses were fitted with moved them");
                end;
             end if;
          end;
