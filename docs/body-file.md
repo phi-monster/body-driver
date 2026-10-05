@@ -40,6 +40,9 @@ that measured it.
 `driver/bin/replay RECORDING --body FILE` writes the body measured from a
 recording, so its estimates can be scored against the truth of the run
 (`driver/bin/score`).
+A run that reloaded a body file replays as it ran: the driver records the
+text it reloaded (`Driver.Recording`, kind F), and replay reloads that text
+where the run read it, even after the run rewrote the file.
 
 ## 3. Do not edit it
 
