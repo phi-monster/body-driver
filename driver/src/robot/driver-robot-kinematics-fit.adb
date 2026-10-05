@@ -314,6 +314,57 @@ package body Driver.Robot.Kinematics.Fit is
    end Robust_Fit;
 
    ---------------------------------------------------------------------------
+   --  The covariance of an estimate from the spread of its gradient. The
+   --  spread is a sum and difference of clusters' (Fit's two-way clustering),
+   --  which need not be positive semi-definite, and a covariance must be. Its
+   --  negative eigenvalues are set to zero (Cameron, Gelbach and Miller) in
+   --  the frame where the inverse normal equations are the identity, the
+   --  estimate's own units: a unit chosen for a term (a pixel, a radian, a
+   --  length of the fit) then does not move what the clip takes away.
+
+   procedure Sandwich
+     (Inverse, Meat : Driver.Numerics.Arrays.Real_Matrix;
+      Covariance    : out Driver.Numerics.Arrays.Real_Matrix;
+      Ok            : out Boolean)
+   is
+      N       : constant Natural := Inverse'Length (1);
+      Factor  : Real_Matrix (1 .. N, 1 .. N);
+      Values  : Real_Vector (1 .. N);
+      Vectors : Real_Matrix (1 .. N, 1 .. N);
+   begin
+      Covariance := [others => [others => 0.0]];
+      Driver.Numerics.Dense.Cholesky (Inverse, Factor, Ok);
+      if not Ok then
+         return;
+      end if;
+      declare
+         --  The spread in the frame where the inverse is the identity.
+         Whitened : constant Real_Matrix := Transpose (Factor) * Meat * Factor;
+      begin
+         Eigensystem (0.5 * (Whitened + Transpose (Whitened)), Values, Vectors);
+      end;
+      for E in 1 .. N loop
+         Values (E) := Real'Max (0.0, Values (E));
+      end loop;
+      declare
+         Kept : Real_Matrix (1 .. N, 1 .. N) := [others => [others => 0.0]];
+      begin
+         for P in 1 .. N loop
+            for Q in 1 .. N loop
+               for E in 1 .. N loop
+                  Kept (P, Q) := Kept (P, Q) + Vectors (P, E) * Values (E) * Vectors (Q, E);
+               end loop;
+            end loop;
+         end loop;
+         declare
+            Product : constant Real_Matrix := Factor * Kept * Transpose (Factor);
+         begin
+            Covariance := 0.5 * (Product + Transpose (Product));   --  symmetric to the last bit
+         end;
+      end;
+   end Sandwich;
+
+   ---------------------------------------------------------------------------
    --  Stage 5: the tracks seen from many keyframes. Every followed point has a
    --  depth along its reference ray, and every sighting must land where the
    --  model puts that point: the reprojection residuals, two per sighting,
@@ -730,20 +781,48 @@ package body Driver.Robot.Kinematics.Fit is
                                  Determined := Pd;
                                  Variance := [others => Real'Last];
                                  Report.Covariance.Clear;
-                                 --  The covariance clustered by keyframe: the inverse
-                                 --  normal equations around the spread of every
-                                 --  keyframe's own share of the gradient (each
-                                 --  residual's, the depths eliminated). A keyframe's
-                                 --  matches err together (its rendering, its view),
-                                 --  which sightings taken as independent hide: A9's
-                                 --  focal length and reading scales came out 10 to 20
-                                 --  of those sigmas off the truth.
+                                 --  The covariance clustered two ways (Cameron, Gelbach
+                                 --  and Miller): the inverse normal equations around the
+                                 --  spread of every keyframe's own share of the gradient
+                                 --  (each residual's, the depths eliminated), plus every
+                                 --  track's, less every sighting's, which both hold. A
+                                 --  keyframe's matches err together (its rendering, its
+                                 --  view), and so do a track's in every keyframe (where
+                                 --  the matcher finds its point), which sightings taken
+                                 --  as independent hide: A9's focal length and reading
+                                 --  scales came out 10 to 20 of the keyframes' sigmas
+                                 --  off the truth, and A11's lenses, its tracks repeating
+                                 --  an error as large as one sighting's, 6.6 and 9.5.
                                  if Pd then
                                     declare
                                        Inv   : Grid_Access := new Real_Matrix (1 .. Reduced, 1 .. Reduced);
-                                       Share : Grid_Access := new Real_Matrix'[1 .. Frames => [1 .. Reduced => 0.0]];
-                                       Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
-                                       Clusters : Natural := 0;
+                                       --  What every keyframe and every track holds of the gradient,
+                                       --  and the sum of the outer products of what each cluster of
+                                       --  the three kinds (keyframes, tracks, sightings) holds.
+                                       Frame_Share : Grid_Access := new Real_Matrix'[1 .. Frames => [1 .. Reduced => 0.0]];
+                                       Track_Share : Grid_Access := new Real_Matrix'[1 .. Tracks => [1 .. Reduced => 0.0]];
+                                       One_Sight   : Real_Vector (1 .. Reduced) := [others => 0.0];
+                                       Frame_Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
+                                       Track_Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
+                                       Sight_Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
+                                       Frame_Clusters, Track_Clusters, Sight_Clusters : Natural := 0;
+
+                                       --  Adds what one cluster holds to the spread of its kind; a
+                                       --  cluster that holds nothing is none.
+                                       procedure Add (Held : Real_Vector; To : in out Real_Matrix; Counted : in out Natural) is
+                                       begin
+                                          if (for some P in Held'Range => Held (P) /= 0.0) then
+                                             Counted := Counted + 1;
+                                             for P in 1 .. Reduced loop
+                                                for Q in 1 .. Reduced loop
+                                                   To (P, Q) := To (P, Q) + Held (Held'First + P - 1) * Held (Held'First + Q - 1);
+                                                end loop;
+                                             end loop;
+                                          end if;
+                                       end Add;
+
+                                       function Row (G : Real_Matrix; K : Positive) return Real_Vector is
+                                         ([for P in 1 .. Reduced => G (K, P)]);
                                     begin
                                        for P in 1 .. Reduced loop
                                           declare
@@ -777,43 +856,60 @@ package body Driver.Robot.Kinematics.Fit is
                                                       if Sg.Track /= Anchor and then C (Sg.Track) > 0.0 then
                                                          Jr := Jr - Br (P, Sg.Track) / C (Sg.Track) * Jd (I);
                                                       end if;
-                                                      Share (Sg.Frame, P) := Share (Sg.Frame, P) + Psi * Jr;
+                                                      Frame_Share (Sg.Frame, P) := Frame_Share (Sg.Frame, P) + Psi * Jr;
+                                                      Track_Share (Sg.Track, P) := Track_Share (Sg.Track, P) + Psi * Jr;
+                                                      One_Sight (P) := One_Sight (P) + Psi * Jr;
                                                    end;
                                                 end loop;
+                                             end if;
+                                             --  A sighting's two residuals, across and down, are one
+                                             --  cluster: where a keyframe's and a track's meet.
+                                             if I mod 2 = 0 then
+                                                Add (One_Sight, Sight_Spread.all, Sight_Clusters);
+                                                One_Sight := [others => 0.0];
                                              end if;
                                           end;
                                        end loop;
                                        for F in 1 .. Frames loop
-                                          if (for some P in 1 .. Reduced => Share (F, P) /= 0.0) then
-                                             Clusters := Clusters + 1;
-                                             for P in 1 .. Reduced loop
-                                                for Q in 1 .. Reduced loop
-                                                   Spread (P, Q) := Spread (P, Q) + Share (F, P) * Share (F, Q);
-                                                end loop;
-                                             end loop;
-                                          end if;
+                                          Add (Row (Frame_Share.all, F), Frame_Spread.all, Frame_Clusters);
                                        end loop;
-                                       --  Too few keyframes to tell how theirs spread: not
-                                       --  determined.
-                                       if Clusters > 1 then
+                                       for T in 1 .. Tracks loop
+                                          Add (Row (Track_Share.all, T), Track_Spread.all, Track_Clusters);
+                                       end loop;
+                                       --  Too few keyframes or tracks to tell how theirs spread:
+                                       --  not determined.
+                                       if Frame_Clusters > 1 and then Track_Clusters > 1 and then Sight_Clusters > 1 then
                                           declare
-                                             --  The spread of a mean over the clusters, unbiased.
-                                             Small : constant Real := Real (Clusters) / Real (Clusters - 1);
-                                             V     : constant Real_Matrix := Inv.all * Spread.all * Inv.all;
+                                             --  Each kind's spread of a mean over its clusters, unbiased.
+                                             function Small (Count : Natural) return Real is
+                                               (Real (Count) / Real (Count - 1));
+                                             Meat : constant Real_Matrix :=
+                                               Small (Frame_Clusters) * Frame_Spread.all + Small (Track_Clusters) * Track_Spread.all
+                                               - Small (Sight_Clusters) * Sight_Spread.all;
+                                             V    : Real_Matrix (1 .. Reduced, 1 .. Reduced);
+                                             Ok   : Boolean;
                                           begin
-                                             for P in 1 .. Reduced loop
-                                                Variance (P) := Small * V (P, P);
-                                                for Q in 1 .. Reduced loop
-                                                   Report.Covariance.Append (Small * V (P, Q));
+                                             Sandwich (Inv.all, Meat, V, Ok);
+                                             if Ok then
+                                                for P in 1 .. Reduced loop
+                                                   Variance (P) := V (P, P);
+                                                   for Q in 1 .. Reduced loop
+                                                      Report.Covariance.Append (V (P, Q));
+                                                   end loop;
                                                 end loop;
-                                             end loop;
+                                             else
+                                                Determined := False;
+                                             end if;
                                           end;
                                        else
                                           Determined := False;
                                        end if;
                                        Free (Inv);
-                                       Free (Share);
-                                       Free (Spread);
+                                       Free (Frame_Share);
+                                       Free (Track_Share);
+                                       Free (Frame_Spread);
+                                       Free (Track_Spread);
+                                       Free (Sight_Spread);
                                     end;
                                  end if;
                                  --  How each track's log depth moves with the reduced

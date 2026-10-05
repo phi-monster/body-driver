@@ -10,6 +10,7 @@ with Driver.Instrument;
 with Driver.Observations;
 with Driver.Beats;
 with Driver.Log;
+with Driver.Numerics.Dense;
 with Ada.Strings.Fixed;
 with Driver.Robot.Body_File;
 with Driver.Robot.Boot;
@@ -1968,10 +1969,51 @@ package body Driver.Robot.Tests is
    --  signs are the rows of a Sylvester-Hadamard matrix; a 16 x 12 grid of the
    --  reference view is followed into every keyframe with 0.2 pixels of noise.
 
+   --  How far a fitted lens lies from the true one in units of the fit's own
+   --  covariance of it: the chi square of its Lens_Terms terms (the logarithms
+   --  of the focal lengths, the principal point, the two distortion terms).
+   --  Real'Last when the covariance is not that of a fit or is not positive
+   --  definite.
+   function Lens_Chi_Square
+     (Found, Truth : Driver.Robot.Kinematics.Fit.Lens;
+      Covariance   : Driver.Robot.Kinematics.Fit.Real_Lists.Vector) return Real
+   is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      Terms : constant Natural := Natural (Sqrt (Real (Natural (Covariance.Length))));
+      Error : constant Real_Vector (1 .. Fit.Lens_Terms) :=
+        [Ada.Numerics.Long_Elementary_Functions.Log (Found.Fx / Truth.Fx),
+         Ada.Numerics.Long_Elementary_Functions.Log (Found.Fy / Truth.Fy),
+         Found.Cx - Truth.Cx, Found.Cy - Truth.Cy, Found.K1 - Truth.K1, Found.K2 - Truth.K2];
+      V, L  : Real_Matrix (1 .. Fit.Lens_Terms, 1 .. Fit.Lens_Terms) := [others => [others => 0.0]];
+      Ok    : Boolean;
+   begin
+      if Terms < Fit.Lens_Terms or else Terms * Terms /= Natural (Covariance.Length) then
+         return Real'Last;
+      end if;
+      for P in 1 .. Fit.Lens_Terms loop
+         for Q in 1 .. Fit.Lens_Terms loop
+            V (P, Q) := Covariance (Covariance.First_Index + (P - 1) * Terms + Q - 1);
+         end loop;
+      end loop;
+      Driver.Numerics.Dense.Cholesky (V, L, Ok);
+      if not Ok then
+         return Real'Last;
+      end if;
+      declare
+         X : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (L, Error);
+      begin
+         return Error * X;
+      end;
+   end Lens_Chi_Square;
+
    --  Frame_Error is the spread of an error shared by every point of a
-   --  keyframe (its rendering, its view), each keyframe's drawn at random:
-   --  the fit's reported uncertainty must still cover its errors.
-   procedure Synthetic_Sweep (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0) is
+   --  keyframe (its rendering, its view), each keyframe's drawn at random;
+   --  Track_Error the spread of an error shared by one point's sightings in
+   --  every keyframe (where the matcher finds it), each point's drawn at
+   --  random: the fit's reported uncertainty must still cover its errors.
+   procedure Synthetic_Sweep
+     (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0; Track_Error : Real := 0.0)
+   is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N       : constant := 6;
       Levels  : constant Real_Array := [0.05 * Scale, -0.05 * Scale, 0.1 * Scale, -0.1 * Scale, 0.2 * Scale, -0.2 * Scale];
@@ -1988,7 +2030,15 @@ package body Driver.Robot.Tests is
       type Sighting_Access is access Fit.Sighting_Array;
       All_Seen : constant Sighting_Access := new Fit.Sighting_Array (1 .. (Frames - 1) * Columns * Rows);
       Seen     : Natural := 0;
+      --  Each point's own error, from a generator of its own so that the
+      --  other errors are drawn as they are without it.
+      Track_Rng        : Generator := (State => 7);
+      Track_U, Track_V : array (1 .. Columns * Rows) of Real;
    begin
+      for T in Track_U'Range loop
+         Track_U (T) := Track_Error * Gaussian (Track_Rng);
+         Track_V (T) := Track_Error * Gaussian (Track_Rng);
+      end loop;
       declare
          Axes   : constant array (1 .. N) of Vec3 :=
            [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
@@ -2052,8 +2102,8 @@ package body Driver.Robot.Tests is
                      Ahead : Boolean;
                   begin
                      Fit.Project (Lens, T * X, U, V, Ahead);
-                     U := U + Noise * Gaussian (Rng) + Shared_U;
-                     V := V + Noise * Gaussian (Rng) + Shared_V;
+                     U := U + Noise * Gaussian (Rng) + Shared_U + Track_U ((Gy - 1) * Columns + Gx);
+                     V := V + Noise * Gaussian (Rng) + Shared_V + Track_V ((Gy - 1) * Columns + Gx);
                      if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
                         Seen := Seen + 1;
                         All_Seen (Seen) := (Frame => F, Track => (Gy - 1) * Columns + Gx, U0 => U0, V0 => V0, U => U, V => V);
@@ -2084,6 +2134,18 @@ package body Driver.Robot.Tests is
          Check (abs (Found.Fx - Lens.Fx) <= Driver.Conventions.Z * Report.Focal_Sigma,
                 "the focal length is off by" & Real'Image (Found.Fx - Lens.Fx) & " px, its sigma"
                 & Report.Focal_Sigma'Image);
+         --  The whole lens, its terms together: a chi square as rare as Z.
+         declare
+            Chi : constant Real := Lens_Chi_Square (Found, Lens, Report.Covariance);
+         begin
+            Check (Driver.Distributions.Chi_Square_Deviate (Chi, Fit.Lens_Terms) <= Driver.Conventions.Z,
+                   "the lens is off by a chi square of" & Real'Image (Chi) & " on" & Fit.Lens_Terms'Image
+                   & " terms: focal" & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy) & ", centre"
+                   & Real'Image (Found.Cx) & "," & Real'Image (Found.Cy) & ", distortion" & Real'Image (Found.K1)
+                   & "," & Real'Image (Found.K2));
+            Driver.Log.Line (Driver.Log.Robot, "kinematics test lens: chi square" & Real'Image (Chi) & " on"
+                             & Fit.Lens_Terms'Image & " terms");
+         end;
          if Frame_Error = 0.0 then
             Check_Close (Found.Fx, Lens.Fx, Lens.Fx * Noise / 40.0, "the focal length across");
             Check_Close (Found.Fy, Lens.Fy, Lens.Fy * Noise / 40.0, "the focal length down");
@@ -3584,6 +3646,18 @@ package body Driver.Robot.Tests is
       Synthetic_Sweep (1.0, Expect_Fit => True, Frame_Error => 0.3);
    end Kinematics_With_Shared_Errors;
 
+   --  The same arm, every point carrying an error of its own of 0.1 pixels in
+   --  all its keyframes (where the matcher finds it is the same in every
+   --  view), as A11's tracks did, each a tenth of a pixel off the truth
+   --  though one sighting errs by a tenth: the keyframes count a point's
+   --  sightings as independent, and the fit's lens comes out many of its
+   --  sigmas off; clustered by point as well, its own uncertainty covers its
+   --  errors.
+   procedure Kinematics_With_Errors_Of_Their_Own is
+   begin
+      Synthetic_Sweep (1.0, Expect_Fit => True, Track_Error => 0.1);
+   end Kinematics_With_Errors_Of_Their_Own;
+
    procedure Register is
    begin
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
@@ -3605,6 +3679,9 @@ package body Driver.Robot.Tests is
                              & "longer carries, is still taken for the arm's", Stale_Fit_Is_No_Arms'Access);
       Driver.Tests.Register ("robot.kinematics.shared", "the fit's focal length or eye pose is off by more than Z of "
                              & "its own sigmas when every keyframe's points share an error", Kinematics_With_Shared_Errors'Access);
+      Driver.Tests.Register ("robot.kinematics.tracks", "the fit's lens or eye pose is off by more than Z of its own "
+                             & "sigmas when every point carries an error of its own in all its keyframes",
+                             Kinematics_With_Errors_Of_Their_Own'Access);
       Driver.Tests.Register ("robot.body.file", "a body written to its file and read back is not the body that was "
                              & "written", Body_File_Round_Trip'Access);
       Driver.Tests.Register ("robot.body.method", "a quantity measured by another method is reloaded, or the "

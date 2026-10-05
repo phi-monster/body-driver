@@ -134,7 +134,8 @@ package Driver.Robot.Kinematics.Fit is
       Flipped    : Boolean := False;   --  every translation changed sign to put the points in front
       Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
       Focal_Sigma : Real := Real'Last; --  the uncertainty of the focal length across
-      Covariance : Real_Lists.Vector;  --  of the parameters above, row by row; empty when not determined
+      Covariance : Real_Lists.Vector;  --  of the parameters above, row by row, clustered by keyframe and by track
+                                       --  (Fit); empty when not determined
       Depths     : Real_Lists.Vector;  --  per track, the depth of its point along its reference line of
                                        --  sight as the track refinement found it; 0 where it has none
       Depth_Sigmas : Real_Lists.Vector;   --  per track, how uncertain the logarithm of that depth is, the
@@ -153,6 +154,27 @@ package Driver.Robot.Kinematics.Fit is
       L          : out Lens;
       Report     : out Fit_Report)
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length;
+   --  The covariance is clustered two ways (Cameron, Gelbach and Miller): the
+   --  inverse normal equations around the spread of what every keyframe holds
+   --  of the gradient, plus that of every track, less that of every sighting,
+   --  which both hold. The matches of a keyframe err together (its rendering,
+   --  its view) and so do the matches of a track in every keyframe (where
+   --  the matcher finds its point): sightings counted as independent, or
+   --  clustered by keyframe alone, hide the second and come out far too sure.
+
+   procedure Sandwich
+     (Inverse, Meat : Driver.Numerics.Arrays.Real_Matrix;
+      Covariance    : out Driver.Numerics.Arrays.Real_Matrix;
+      Ok            : out Boolean)
+     with Pre => Inverse'Length (1) = Inverse'Length (2) and then Meat'Length (1) = Inverse'Length (1)
+                 and then Meat'Length (2) = Inverse'Length (1) and then Covariance'Length (1) = Inverse'Length (1)
+                 and then Covariance'Length (2) = Inverse'Length (1);
+   --  Inverse * Meat * Inverse, the covariance of an estimate whose normal
+   --  equations Inverse inverts and whose gradient spreads as Meat, made
+   --  positive semi-definite: a sum and difference of spreads (Fit) need not
+   --  be, and its negative eigenvalues are set to zero in the frame where
+   --  Inverse is the identity, so that the units of the terms do not matter.
+   --  Ok is False, and Covariance zero, when Inverse is not positive definite.
 
    ---------------------------------------------------------------------------
    --  Consensus. A plane holds only some of a view's points, and a dense
