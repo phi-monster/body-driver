@@ -1,5 +1,6 @@
 with Ada.Exceptions;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Bytes;
 with Driver.Clock;
 with Driver.Commands;
@@ -10,8 +11,10 @@ with Driver.Instrument;
 with Driver.Observations;
 with Driver.Beats;
 with Driver.Log;
+with Driver.Numerics.Dense;
 with Ada.Strings.Fixed;
 with Driver.Robot.Body_File;
+with Driver.Robot.Kinematics.Errors.Tests;
 with Driver.Recording;
 with Ada.Text_IO;
 with GNAT.OS_Lib;
@@ -2129,14 +2132,102 @@ package body Driver.Robot.Tests is
    --  signs are the rows of a Sylvester-Hadamard matrix; a 16 x 12 grid of the
    --  reference view is followed into every keyframe with 0.2 pixels of noise.
 
+   --  How far a fitted lens lies from the true one in units of the fit's own
+   --  covariance of it: the chi square of its Lens_Terms terms (the logarithms
+   --  of the focal lengths, the principal point, the two distortion terms).
+   --  Real'Last when the covariance is not that of a fit or is not positive
+   --  definite.
+   function Lens_Chi_Square
+     (Found, Truth : Driver.Robot.Kinematics.Fit.Lens;
+      Covariance   : Driver.Robot.Kinematics.Fit.Real_Lists.Vector) return Real
+   is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      Terms : constant Natural := Natural (Sqrt (Real (Natural (Covariance.Length))));
+      Error : constant Real_Vector (1 .. Fit.Lens_Terms) :=
+        [Ada.Numerics.Long_Elementary_Functions.Log (Found.Fx / Truth.Fx),
+         Ada.Numerics.Long_Elementary_Functions.Log (Found.Fy / Truth.Fy),
+         Found.Cx - Truth.Cx, Found.Cy - Truth.Cy, Found.K1 - Truth.K1, Found.K2 - Truth.K2];
+      V, L  : Real_Matrix (1 .. Fit.Lens_Terms, 1 .. Fit.Lens_Terms) := [others => [others => 0.0]];
+      Ok    : Boolean;
+   begin
+      if Terms < Fit.Lens_Terms or else Terms * Terms /= Natural (Covariance.Length) then
+         return Real'Last;
+      end if;
+      for P in 1 .. Fit.Lens_Terms loop
+         for Q in 1 .. Fit.Lens_Terms loop
+            V (P, Q) := Covariance (Covariance.First_Index + (P - 1) * Terms + Q - 1);
+         end loop;
+      end loop;
+      Driver.Numerics.Dense.Cholesky (V, L, Ok);
+      if not Ok then
+         return Real'Last;
+      end if;
+      declare
+         X : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (L, Error);
+      begin
+         return Error * X;
+      end;
+   end Lens_Chi_Square;
+
+   type Factor_Access is access Real_Matrix;
+
+   --  The Cholesky factor of the covariance exp (-d / Range_Px) of the errors
+   --  of points on a grid of Columns x Rows over a picture of 640 x 480
+   --  pixels, one in the middle of each cell: a draw of correlated errors is
+   --  the factor times independent ones.
+   function Field_Factor (Columns, Rows : Positive; Range_Px : Real) return Factor_Access is
+      N      : constant Positive := Columns * Rows;
+      Cov    : Factor_Access := new Real_Matrix (1 .. N, 1 .. N);
+      Result : constant Factor_Access := new Real_Matrix (1 .. N, 1 .. N);
+      Ok     : Boolean;
+      procedure Free is new Ada.Unchecked_Deallocation (Real_Matrix, Factor_Access);
+   begin
+      for A in 1 .. N loop
+         for B in 1 .. N loop
+            declare
+               Du : constant Real := Real ((A - 1) mod Columns - (B - 1) mod Columns) * 640.0 / Real (Columns);
+               Dv : constant Real := Real ((A - 1) / Columns - (B - 1) / Columns) * 480.0 / Real (Rows);
+            begin
+               Cov (A, B) := Exp (-Sqrt (Du ** 2 + Dv ** 2) / Range_Px) + (if A = B then 1.0e-9 else 0.0);
+            end;
+         end loop;
+      end loop;
+      Driver.Numerics.Dense.Cholesky (Cov.all, Result.all, Ok);
+      Check (Ok, "the covariance of a field of errors over the picture is not positive definite");
+      Free (Cov);
+      return Result;
+   end Field_Factor;
+
+   --  Field = Spread times the factor times independent normal draws.
+   procedure Draw_Field (G : in out Generator; Factor : Real_Matrix; Spread : Real; Field : out Real_Array) is
+      Z : Real_Array (1 .. Factor'Length (1));
+   begin
+      for A in Z'Range loop
+         Z (A) := Gaussian (G);
+      end loop;
+      for A in Z'Range loop
+         Field (A) := 0.0;
+         for B in 1 .. A loop
+            Field (A) := Field (A) + Factor (A, B) * Z (B);
+         end loop;
+         Field (A) := Spread * Field (A);
+      end loop;
+   end Draw_Field;
+
    --  Frame_Error is the spread of an error shared by every point of a
-   --  keyframe (its rendering, its view), each keyframe's drawn at random:
-   --  the fit's reported uncertainty must still cover its errors. Pending:
-   --  the matches of joint 1's widest keyframes, both ways, have not come
-   --  back (a boot refits between a keyframe and its answer): they have no
-   --  sightings yet.
+   --  keyframe (its rendering, its view), each keyframe's drawn at random;
+   --  Track_Error the spread of an error shared by one point's sightings in
+   --  every keyframe (where the matcher finds it), drawn at random as a smooth
+   --  field over the picture, near points alike (the covariance of two points
+   --  falls as exp (-d / 120 px)); Local_Error the spread of a smooth field of
+   --  a keyframe's own (exp (-d / 70 px)), drawn for every keyframe: the fit's
+   --  reported uncertainty must still cover its errors.
+   --  Pending: the matches of joint 1's widest keyframes, both ways, have not
+   --  come back (a boot refits between a keyframe and its answer): they have
+   --  no sightings yet.
    procedure Synthetic_Sweep
-     (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0; Pending : Boolean := False)
+     (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0; Track_Error : Real := 0.0;
+      Local_Error : Real := 0.0; Pending : Boolean := False)
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N       : constant := 6;
@@ -2154,7 +2245,23 @@ package body Driver.Robot.Tests is
       type Sighting_Access is access Fit.Sighting_Array;
       All_Seen : constant Sighting_Access := new Fit.Sighting_Array (1 .. (Frames - 1) * Columns * Rows);
       Seen     : Natural := 0;
+      --  The smooth fields, from generators of their own so that the other
+      --  errors are drawn as they are without them.
+      Track_Rng        : Generator := (State => 7);
+      Local_Rng        : Generator := (State => 11);
+      Track_U, Track_V : Real_Array (1 .. Columns * Rows) := [others => 0.0];
+      Local_U, Local_V : Real_Array (1 .. Columns * Rows) := [others => 0.0];
+      Track_Factor     : Factor_Access;
+      Local_Factor     : Factor_Access;
    begin
+      if Track_Error > 0.0 then
+         Track_Factor := Field_Factor (Columns, Rows, 120.0);
+         Draw_Field (Track_Rng, Track_Factor.all, Track_Error, Track_U);
+         Draw_Field (Track_Rng, Track_Factor.all, Track_Error, Track_V);
+      end if;
+      if Local_Error > 0.0 then
+         Local_Factor := Field_Factor (Columns, Rows, 70.0);
+      end if;
       declare
          Axes   : constant array (1 .. N) of Vec3 :=
            [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
@@ -2205,28 +2312,33 @@ package body Driver.Robot.Tests is
                Shared_U : constant Real := Frame_Error * Gaussian (Rng);
                Shared_V : constant Real := Frame_Error * Gaussian (Rng);
             begin
-            for Gy in 1 .. Rows loop
-               for Gx in 1 .. Columns loop
-                  declare
-                     U0 : constant Real := (Real (Gx) - 0.5) * 640.0 / Real (Columns);
-                     V0 : constant Real := (Real (Gy) - 0.5) * 480.0 / Real (Rows);
-                     --  The table: the plane one unit from the eye along its normal.
-                     H     : constant Vec3 := Fit.Ray (Lens, U0, V0);
-                     Depth : constant Real := -1.0 / Real'(Unit (Table) * H);
-                     X  : constant Vec3 := Depth * H;
-                     U, V : Real;
-                     Ahead : Boolean;
-                  begin
-                     Fit.Project (Lens, T * X, U, V, Ahead);
-                     U := U + Noise * Gaussian (Rng) + Shared_U;
-                     V := V + Noise * Gaussian (Rng) + Shared_V;
-                     if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
-                        Seen := Seen + 1;
-                        All_Seen (Seen) := (Frame => F, Track => (Gy - 1) * Columns + Gx, U0 => U0, V0 => V0, U => U, V => V);
-                     end if;
-                  end;
+               if Local_Error > 0.0 then
+                  Draw_Field (Local_Rng, Local_Factor.all, Local_Error, Local_U);
+                  Draw_Field (Local_Rng, Local_Factor.all, Local_Error, Local_V);
+               end if;
+               for Gy in 1 .. Rows loop
+                  for Gx in 1 .. Columns loop
+                     declare
+                        K  : constant Positive := (Gy - 1) * Columns + Gx;
+                        U0 : constant Real := (Real (Gx) - 0.5) * 640.0 / Real (Columns);
+                        V0 : constant Real := (Real (Gy) - 0.5) * 480.0 / Real (Rows);
+                        --  The table: the plane one unit from the eye along its normal.
+                        H     : constant Vec3 := Fit.Ray (Lens, U0, V0);
+                        Depth : constant Real := -1.0 / Real'(Unit (Table) * H);
+                        X  : constant Vec3 := Depth * H;
+                        U, V : Real;
+                        Ahead : Boolean;
+                     begin
+                        Fit.Project (Lens, T * X, U, V, Ahead);
+                        U := U + Noise * Gaussian (Rng) + Shared_U + Track_U (K) + Local_U (K);
+                        V := V + Noise * Gaussian (Rng) + Shared_V + Track_V (K) + Local_V (K);
+                        if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
+                           Seen := Seen + 1;
+                           All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V);
+                        end if;
+                     end;
+                  end loop;
                end loop;
-            end loop;
             end;
          end;
       end loop;
@@ -2273,6 +2385,18 @@ package body Driver.Robot.Tests is
          Check (abs (Found.Fx - Lens.Fx) <= Driver.Conventions.Z * Report.Focal_Sigma,
                 "the focal length is off by" & Real'Image (Found.Fx - Lens.Fx) & " px, its sigma"
                 & Report.Focal_Sigma'Image);
+         --  The whole lens, its terms together: a chi square as rare as Z.
+         declare
+            Chi : constant Real := Lens_Chi_Square (Found, Lens, Report.Covariance);
+         begin
+            Check (Driver.Distributions.Chi_Square_Deviate (Chi, Fit.Lens_Terms) <= Driver.Conventions.Z,
+                   "the lens is off by a chi square of" & Real'Image (Chi) & " on" & Fit.Lens_Terms'Image
+                   & " terms: focal" & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy) & ", centre"
+                   & Real'Image (Found.Cx) & "," & Real'Image (Found.Cy) & ", distortion" & Real'Image (Found.K1)
+                   & "," & Real'Image (Found.K2));
+            Driver.Log.Line (Driver.Log.Robot, "kinematics test lens: chi square" & Real'Image (Chi) & " on"
+                             & Fit.Lens_Terms'Image & " terms");
+         end;
          if Frame_Error = 0.0 then
             Check_Close (Found.Fx, Lens.Fx, Lens.Fx * Noise / 40.0, "the focal length across");
             Check_Close (Found.Fy, Lens.Fy, Lens.Fy * Noise / 40.0, "the focal length down");
@@ -4066,8 +4190,44 @@ package body Driver.Robot.Tests is
       Synthetic_Sweep (1.0, Expect_Fit => True, Frame_Error => 0.3);
    end Kinematics_With_Shared_Errors;
 
+   --  The same arm with the errors A11's matcher left: a shift every point of a
+   --  keyframe has, an error every point has in all its keyframes (where the
+   --  matcher finds it is the same in every view; near points alike), and a
+   --  smooth error of each keyframe's own. Sightings counted as independent, or
+   --  clustered by keyframe, are far too sure of the lens (A11: chi squares of
+   --  94 and 51 on its six terms, Z's tail 21); the covariance read from the
+   --  residuals as a function of distance (Errors) covers its errors.
+   procedure Kinematics_With_Spreading_Errors is
+   begin
+      Synthetic_Sweep (1.0, Expect_Fit => True, Frame_Error => 0.15, Track_Error => 0.35, Local_Error => 0.20);
+   end Kinematics_With_Spreading_Errors;
+
+   --  The final refinement takes a step when it moves some combination of the
+   --  parameters by more than Unchanged_Fraction of its standard error,
+   --  whatever the cost: stopped by a hundredth of the cost, A10's and A11's
+   --  fits (a cost of some 20,000, a hundredth of it 200) stood several
+   --  standard errors short on the axes the data barely determine, the focal
+   --  length against the distortion (a step of 3 standard errors lowers the
+   --  cost by 4.5 at most), and A11's second arm's focal lengths moved by half
+   --  a pixel, 1.5 of their sigmas, once they were let run on.
+   procedure Refinement_Takes_Steps_That_Move_The_Fit is
+      Fraction : constant Real := Driver.Conventions.Unchanged_Fraction;
+      package Fit renames Driver.Robot.Kinematics.Fit;
+   begin
+      --  Moving m standard errors along an axis lowers the cost by m squared over two at most.
+      Check (Fit.Moves_The_Fit (0.5 * (2.0 * Fraction) ** 2),
+             "a step of two Unchanged_Fractions of a standard error is not taken");
+      Check (not Fit.Moves_The_Fit (0.5 * (0.5 * Fraction) ** 2),
+             "a step of half an Unchanged_Fraction of a standard error is taken");
+      Check (Fit.Moves_The_Fit (4.5),
+             "a step of 3 standard errors along a weak axis is not taken for it is a small part of the cost");
+      Check (not Fit.Moves_The_Fit (0.0) and then not Fit.Moves_The_Fit (-1.0),
+             "a step that does not lower the cost is taken");
+   end Refinement_Takes_Steps_That_Move_The_Fit;
+
    procedure Register is
    begin
+      Driver.Robot.Kinematics.Errors.Tests.Register;
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
                              & "stack, as the decider's does", Estimate_In_A_Task'Access);
       Driver.Tests.Register ("robot.probe.limits", "a channel at its limit one way is asked ever further that way though "
@@ -4087,12 +4247,20 @@ package body Driver.Robot.Tests is
                              & "longer carries, is still taken for the arm's", Stale_Fit_Is_No_Arms'Access);
       Driver.Tests.Register ("robot.kinematics.shared", "the fit's focal length or eye pose is off by more than Z of "
                              & "its own sigmas when every keyframe's points share an error", Kinematics_With_Shared_Errors'Access);
+      Driver.Tests.Register ("robot.kinematics.fields", "the fit's lens or eye pose is off by more than Z of its own "
+                             & "sigmas when the matcher's errors are smooth fields over the picture, a point's in "
+                             & "all its keyframes and a keyframe's own, and a shift of each keyframe",
+                             Kinematics_With_Spreading_Errors'Access);
+      Driver.Tests.Register ("robot.kinematics.resolution", "the final refinement stops while a step still moves a "
+                             & "combination of the parameters by more than Unchanged_Fraction of its standard error, "
+                             & "because the step is a small part of the cost",
+                             Refinement_Takes_Steps_That_Move_The_Fit'Access);
       Driver.Tests.Register ("robot.kinematics.pending", "a joint whose widest keyframes have no sightings yet (their "
                              & "matches have not come back) raises in the search of its axis, or leaves the arm "
                              & "unfitted", Kinematics_With_Matches_Pending'Access);
-      Driver.Tests.Register ("robot.kinematics.unit","a keyframe taken after the arm was fitted moves the lengths of its "
-                             & "frame (the unit follows every keyframe, not the first fit's), or the refit leaves it out",
-                             Unit_Holds_As_Keyframes_Arrive'Access);
+      Driver.Tests.Register ("robot.kinematics.unit", "a keyframe taken after the arm was fitted moves the lengths of "
+                             & "its frame (the unit follows every keyframe, not the first fit's), or the refit leaves "
+                             & "it out", Unit_Holds_As_Keyframes_Arrive'Access);
       Driver.Tests.Register ("robot.body.file", "a body written to its file and read back is not the body that was "
                              & "written", Body_File_Round_Trip'Access);
       Driver.Tests.Register ("robot.body.method", "a quantity measured by another method is reloaded, or the "

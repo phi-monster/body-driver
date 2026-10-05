@@ -78,7 +78,7 @@ measured from:
 model that has seen no robot takes the file's groups and eyes, so a measured
 body can be loaded and planned on with no robot connected.
 
-### The kinematics (method 4)
+### The kinematics (method 5)
 
 Per arm, `kinematics.arms` holds:
 
@@ -110,10 +110,26 @@ Per arm, `kinematics.arms` holds:
   arms' table points that eye's view tied together, and `px` the noise of
   that tie in the eye's units. The first arm stands as it is (`through` 0).
 
+Method 4's covariance of the fit counted the sightings of a keyframe as one
+share of the gradient and the keyframes as independent. The matcher's errors
+are not: a point errs alike in every keyframe (where the matcher finds it is
+the same in every view) and so do points near each other, the points of a
+keyframe err alike, nearer more, and a sighting has errors of its own. The
+covariance of method 5 reads from the fit's residuals how the errors of two
+sightings depend on each other, as a function of the distance between their
+points in the reference picture (separately for two sightings of one
+keyframe and of two keyframes, across, down and across with down; the fall
+with distance and the floor at zero are all that is assumed, an isotonic
+fit), and weights every pair of rows of the gradient by it (a spatial-kernel
+sandwich, Conley's), made positive semi-definite. The lens it gives is
+within Z's tail of the truth where method 4's sigmas were 3 to 4 times too
+small (A11: a chi square of 94 and 51 on the lens's six terms against the
+truth, 15 and 10 now, Z's tail 21). The stored `covariance` is that matrix.
+
 Method 3 kept only the table's normal, its offset and two scalar sigmas: a
 plane of measured covariance, which pressing a hand onto it needs, cannot be
 rebuilt from them. Method 2 placed the arm from its own eye's view of the
 first arm's points. When the two arms' eyes do not share a view, that is
 wrong: a dense matcher answers points an eye does not show, and those
 answers then read as an eye at the first eye's centre. A file of method 2
-or 3 is measured again.
+or 3 is measured again, and so is a file of method 4.

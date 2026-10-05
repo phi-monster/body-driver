@@ -50,6 +50,13 @@ The boot's body file (`--body`, [`body-file.md`](body-file.md)):
 | `boot: the body is kept in <file> after <stage>` | the body measured so far was written to the file, after recognizing the groups and after sweeping the arms; the line `the body as measured:` and its table follow the hands, the last write |
 | `the body file <file> cannot be written` | a write failed; the boot goes on |
 
+The kinematics (an arm's joints and the lens of the eye it carries, fitted from its keyframes):
+
+| line | meaning |
+|---|---|
+| `kinematics: arm <a> fitted from <k> sightings of <f> keyframes, <u> fit, median <m> px, noise <s> px; focal <fx> x <fy> px; errors, px: a sighting's own <e>, a point's in every keyframe <p> (half as alike at <h> px apart), a keyframe's added for its points <q>; the clip took <c>` | the fit of arm <a>, of <u> of the <k> sightings; the errors its residuals show, which its covariance rests on: a sighting's own, the part of it a point has in every keyframe (and the distance at which two points have half as much of it alike), what a keyframe adds for its points, and the share of the covariance's spread the clip to positive semi-definiteness took away (0 when none) |
+| `kinematics: arm <a> not fitted (stage <n>): <why>` | the sightings do not determine the arm; the last fit that held is kept |
+
 The hand (measured at boot):
 
 | line | meaning |
