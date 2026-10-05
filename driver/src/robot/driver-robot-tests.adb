@@ -596,13 +596,14 @@ package body Driver.Robot.Tests is
    --  beat to a lasting 4, far above the still frames' noise before the push.
    --  The picture has stopped once the flicker stops shrinking, though it
    --  never comes back to the noise it had at rest.
-   procedure Settle_After_A_Slow_Tail is
-      M      : Model;
+   --  The run of that picture, with a sixteen-pixel square in its corner that
+   --  flickers by 30 luma levels every beat from the first, at rest as after
+   --  the push, when Patch: the beat the body settled, and the last beat the
+   --  push's flicker shrank by more than a hundredth.
+   procedure Settle_Run (Patch : Boolean; M : in out Model; Settled_At, Decaying_Until : out Natural) is
       Width  : constant := 64;
       Height : constant := 48;
       Reading, Target : Real := 0.0;
-      Settled_At : Natural := 0;
-      Decaying_Until : Natural := 0;   --  the last beat the flicker shrank by more than a hundredth
 
       function Frame (Beat : Natural; Shift, Flicker : Real) return Driver.Images.Image is
          use type Driver.Bytes.Offset;
@@ -614,7 +615,9 @@ package body Driver.Robot.Tests is
                   L : Real := Texture (Real (X) + Shift, Real (Y));
                   K : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Y * Width + X) + 1);
                begin
-                  if (X * 7 + Y * 13) mod 10 = 0 then
+                  if Patch and then X < 16 and then Y < 16 then
+                     L := 128.0 + (if Beat mod 2 = 0 then 30.0 else -30.0);
+                  elsif (X * 7 + Y * 13) mod 10 = 0 then
                      L := L + (if (Beat + X) mod 2 = 0 then Flicker else -Flicker);
                   end if;
                   Data (K) := Driver.Bytes.Byte (Integer (Real'Max (0.0, Real'Min (255.0, L))));
@@ -626,6 +629,8 @@ package body Driver.Robot.Tests is
          return Driver.Images.Create (Width, Height, Data);
       end Frame;
    begin
+      Settled_At := 0;
+      Decaying_Until := 0;
       for B in 0 .. 199 loop
          declare
             O       : Observation;
@@ -654,11 +659,32 @@ package body Driver.Robot.Tests is
             end if;
          end;
       end loop;
+   end Settle_Run;
+
+   procedure Settle_After_A_Slow_Tail is
+      M : Model;
+      Settled_At, Decaying_Until : Natural;
+   begin
+      Settle_Run (False, M, Settled_At, Decaying_Until);
       Check (not M.Eyes (1).Is_Still, "the lasting flicker is still to the rest-noise test: the test shows nothing");
       Check (Settled_At > 0, "the body never settled while its eye's picture flickered at a lasting level");
       Check (Settled_At = 0 or else Settled_At > Decaying_Until,
              "the body settled at beat" & Settled_At'Image & " while the flicker still shrank, until" & Decaying_Until'Image);
    end Settle_After_A_Slow_Tail;
+
+   --  The same picture with a patch that flickers at rest, far more than the
+   --  push's own tail ever changes the picture: the body settles at the beat
+   --  it settles without the patch.
+   procedure Settle_Past_A_Patch_Flickering_At_Rest is
+      Plain, Patched : Model;
+      Plain_At, Patched_At, Decaying_Until : Natural;
+   begin
+      Settle_Run (False, Plain, Plain_At, Decaying_Until);
+      Settle_Run (True, Patched, Patched_At, Decaying_Until);
+      Check (Plain_At > 0 and then Patched_At = Plain_At,
+             "with a patch flickering at rest the body settled at beat" & Patched_At'Image & ", without it at"
+             & Plain_At'Image);
+   end Settle_Past_A_Patch_Flickering_At_Rest;
 
    --  The sweep starts each joint where its eye's view moves by what one cell
    --  of it tells: Z times the cells' displacement noise. The visible step,
@@ -3104,6 +3130,122 @@ package body Driver.Robot.Tests is
       end;
    end Plan_On_A_Reloaded_Body;
 
+   --  ── A reloaded body creeping below its visible step ──
+   --
+   --  A12: the body reloaded from its file, its readings' noise measured
+   --  while they were held to a few parts in 1e17 (2.4e-16), and the arm
+   --  creeping uncommanded by 1.2e-12 a beat, a ten-thousandth of the step its
+   --  eye can see (A12's was a millionth). Its eye shows the same picture every beat. The body is still:
+   --  every group by the one motion test (a channel an eye watches moves only
+   --  by a step it can see), Still holds, and Settle and Hold_For_Keyframe
+   --  end.
+   procedure Reloaded_Creep_Is_Still is
+      Measured, M : Model;
+      Ok   : Boolean;
+      Why  : Ada.Strings.Unbounded.Unbounded_String;
+      Done_Settle, Done_Hold : Boolean := False with Atomic;
+      Finished : Boolean := False with Atomic;
+      Still_Seen : Boolean := False;
+      Creep : constant Real := 1.2e-12;
+      Width  : constant := 640;
+      Height : constant := 480;
+
+      function Picture return Driver.Images.Image is
+         use type Driver.Bytes.Offset;
+         Data : Driver.Bytes.Byte_Array (1 .. 3 * Width * Height);
+      begin
+         for Y in 0 .. Height - 1 loop
+            for X in 0 .. Width - 1 loop
+               declare
+                  K : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Y * Width + X) + 1);
+               begin
+                  Data (K) := Driver.Bytes.Byte (Integer (Real'Max (0.0, Real'Min (255.0, Texture (Real (X), Real (Y))))));
+                  Data (K + 1) := Data (K);
+                  Data (K + 2) := Data (K);
+               end;
+            end loop;
+         end loop;
+         return Driver.Images.Create (Width, Height, Data);
+      end Picture;
+
+      Shown : constant Driver.Images.Image := Picture;
+   begin
+      Measured_Body (Measured);
+      for C in 1 .. 6 loop
+         Measured.Noise.Replace_Element (C - 1, 2.4e-16);
+      end loop;
+      Driver.Robot.Body_File.Read (M, Driver.Robot.Body_File.Text (Measured), Ok, Why);
+      Check (Ok, "the body file was not read: " & Ada.Strings.Unbounded.To_String (Why));
+      for C in 1 .. 6 loop
+         Check (Known (Visible_Step (M, 1, C)) and then Visible_Step (M, 1, C).Value > 1.0e3 * Creep,
+                "the reloaded arm's channel" & C'Image & " has no visible step a thousand times its creep");
+      end loop;
+      declare
+         task Decider;
+         task body Decider is
+            W : Natural;
+         begin
+            Driver.Robot.Motion.Settle (M, W);
+            Done_Settle := True;
+            Driver.Robot.Motion.Hold_For_Keyframe (M, 1);
+            Done_Hold := True;
+            Finished := True;
+         exception
+            when others =>
+               Driver.Beats.Release;
+               Finished := True;
+         end Decider;
+
+         Now  : Real_Array (1 .. 6) := [others => 0.0];
+         Sent : Driver.Commands.Command;
+      begin
+         begin
+            for B in 0 .. 60 loop
+               exit when Finished;
+               declare
+                  Ob      : Observation;
+                  Took    : Boolean := False;
+                  Pending : Driver.Commands.Command;
+               begin
+                  Ob.Beat := Driver.Clock.Beat (B);
+                  Ob.Images.Append (Shown);
+                  Ob.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+                  Ob.Readings.Append (Now);
+                  Ob.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+                  if B = 0 then
+                     Driver.Commands.Set_Target (Sent, 1, Now);
+                  end if;
+                  Observe (M, Ob, Sent);
+                  if B > 2 and then Stillness.All_Still (M) then
+                     Still_Seen := True;
+                  end if;
+                  loop
+                     Driver.Beats.Offer (Ob.Beat, Ob, Sent, Took);
+                     exit when Took or else Finished;
+                     delay 0.0;
+                  end loop;
+                  exit when not Took;
+                  Driver.Beats.Await (Pending);
+                  --  Uncommanded: the arm creeps whatever it is asked to hold.
+                  for X of Now loop
+                     X := X - Creep;
+                  end loop;
+               end;
+            end loop;
+         exception
+            when others =>
+               abort Decider;
+               raise;
+         end;
+         if not Finished then
+            abort Decider;
+         end if;
+      end;
+      Check (Still_Seen, "the reloaded body creeping a ten-thousandth of its visible step a beat is never still");
+      Check (Done_Settle, "Settle does not end on the reloaded body creeping below its visible step");
+      Check (Done_Hold, "Hold_For_Keyframe does not end on the reloaded body creeping below its visible step");
+   end Reloaded_Creep_Is_Still;
+
    --  ── A plan beyond the travel ──
    --
    --  The measured body's arm has shown at most a quarter radian each way;
@@ -3276,6 +3418,8 @@ package body Driver.Robot.Tests is
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
       Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found",
                              Reach_A_Pose'Access);
+      Driver.Tests.Register ("robot.still.reloaded", "a reloaded body creeping uncommanded below its visible step is "
+                             & "not still, or Settle or Hold_For_Keyframe does not end on it", Reloaded_Creep_Is_Still'Access);
       Driver.Tests.Register ("robot.plan.beyond", "a goal past the readings the arm has shown is not planned, its plan "
                              & "is not followed there, or a joint's end on the way is not met as Blocked or Short",
                              Plan_And_Follow_Beyond_The_Travel'Access);
@@ -3350,6 +3494,8 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.settle.tail", "a body never settles while its eye's picture keeps changing at a "
                              & "level above its noise at rest, or settles while that change still shrinks",
                              Settle_After_A_Slow_Tail'Access);
+      Driver.Tests.Register ("robot.settle.patch", "a patch of an eye's picture that flickers at rest moves the beat "
+                             & "the body settles at", Settle_Past_A_Patch_Flickering_At_Rest'Access);
       Driver.Tests.Register ("robot.keyframe.jitter", "an arm held away from rest whose reading jitters more than it did "
                              & "at rest gives no keyframe though its eye is still", Keyframe_Despite_Held_Jitter'Access);
       Driver.Tests.Register ("robot.roles.undecided", "a group some eye is still undecided about is called a closer or a "

@@ -45,7 +45,11 @@ private package Driver.Robot.Stillness is
 
    --  Whether an eye's picture has stopped changing, the one stop rule of the
    --  repository: this beat's change (the mean absolute luma change against
-   --  the beat before) no longer shrinks against the last beat's by more than
+   --  the beat before, each pixel's in units of its own noise at rest, its
+   --  luma deviation over the eye's noise view: a patch that changes while
+   --  the body rests weighs as little as it changes then, so it neither hides
+   --  nor holds up the rest of the picture's stop; not measured before the
+   --  eye is first judged) no longer shrinks against the last beat's by more than
    --  the unchanged fraction of it (Driver.Conventions.Unchanged_Fraction), or
    --  has fallen below that fraction of the largest change since the body
    --  began to move; and the change over two beats exceeds this beat's by no
