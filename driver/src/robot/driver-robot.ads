@@ -376,9 +376,11 @@ private
 
    package Keyframe_Vectors is new Ada.Containers.Vectors (Positive, Keyframe);
 
-   --  Where the reference keyframe's query points went in one keyframe.
+   --  Where the reference keyframe's query points went in one keyframe, or
+   --  in another eye's view.
    type Match_Set is record
       Frame    : Positive := 1;          --  the keyframe
+      Eye      : Natural := 0;           --  the other eye whose view it is; 0 for the arm's own keyframes
       To_U, To_V     : Real_Vectors.Vector;   --  per query point, where it went
       Back_U, Back_V : Real_Vectors.Vector;   --  and where that matched back to in the reference
       Found    : Flag_Vectors.Vector;    --  the instrument gave an answer
@@ -388,6 +390,9 @@ private
 
    type Pending_Match is record
       Frame  : Positive := 1;
+      Eye    : Natural := 0;           --  as Match_Set has it
+      Points : Natural;                --  how many query points were asked: the answer's size (no default,
+                                       --  so no request can leave it out)
       Ticket : Driver.Services.Ticket;
    end record;
 
@@ -417,14 +422,21 @@ private
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
       --  The table its eye saw, in its reference frame: the points X with
-      --  Table_Normal * X = Table_Offset (Kinematics.Fit.Table).
+      --  Table_Normal * X = Table_Offset, the plane most of its tracks lie on
+      --  (Kinematics.Fit.Dominant_Plane). Table_Sigma is the normal's angular
+      --  uncertainty, its points' and its lens's.
       Table_Found  : Boolean := False;
       Table_Normal : Vec3 := [0.0, 0.0, 0.0];
       Table_Offset, Table_Offset_Sigma, Table_Sigma : Real := Real'Last;
+      Table_A      : Vec3 := [0.0, 0.0, 0.0];                 --  the plane as its eye sees it (Fit.Sight_Plane)
+      Table_Covariance : Mat3 := [others => [others => 0.0]];  --  of Table_A, from its points
+      Table_On     : Flag_Vectors.Vector;                      --  per track: it lies on the table
       --  Every track's point in its reference frame, three numbers each,
-      --  where Track_Known holds (Kinematics.Fit.Track_Points).
-      Tracks      : Real_Vectors.Vector;
-      Track_Known : Flag_Vectors.Vector;
+      --  where Track_Known holds, at the depth the fit refined, its logarithm
+      --  uncertain by Track_Sigmas.
+      Tracks       : Real_Vectors.Vector;
+      Track_Known  : Flag_Vectors.Vector;
+      Track_Sigmas : Real_Vectors.Vector;
       --  Where its reference frame is in the world (Kinematics.In_World):
       --  X_world = Placement * (Scale * X). The world is the first arm's
       --  reference frame, so that arm is placed as it is.
@@ -433,8 +445,9 @@ private
       Scale        : Real := 1.0;
       Scale_Sigma  : Real := 0.0;
       Placement_Covariance : Real_Vectors.Vector;   --  6 x 6, row by row: its turn (world frame), its centre
-      Placed_Px    : Real := 0.0;                  --  the resection's pixel noise
+      Placed_Px    : Real := 0.0;                  --  the noise of the link that placed it, in its eye's units
       Placed_Points : Natural := 0;                --  the points that placed it
+      Placed_Through : Natural := 0;               --  the eye that saw both it and the first arm
    end record;
 
    type Arm_Evidence is record
@@ -454,6 +467,10 @@ private
       World_Asked     : Boolean := False;
       World_Group     : Group_Id'Base := 0;
       World_Reference : Natural := 0;
+      --  The reference's query points matched into every other eye's view at
+      --  the reference beat, one set per eye (Kinematics.Observe).
+      Eye_Pending     : Pending_Vectors.Vector;
+      Eye_Matches     : Match_Set_Vectors.Vector;
       Result   : Arm_Fit;
    end record;
 

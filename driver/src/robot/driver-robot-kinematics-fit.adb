@@ -201,11 +201,11 @@ package body Driver.Robot.Kinematics.Fit is
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real);
 
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real) is
-      type Real_Access is access Real_Array;
       type Matrix_Access is access Real_Matrix;
-      R0     : constant Real_Access := new Real_Array (1 .. Residuals);
-      Rn     : constant Real_Access := new Real_Array (1 .. Residuals);
-      J      : constant Matrix_Access := new Real_Matrix (1 .. Residuals, 1 .. Parameters);
+      procedure Free is new Ada.Unchecked_Deallocation (Real_Matrix, Matrix_Access);
+      R0     : Real_Access := new Real_Array (1 .. Residuals);
+      Rn     : Real_Access := new Real_Array (1 .. Residuals);
+      J      : Matrix_Access := new Real_Matrix (1 .. Residuals, 1 .. Parameters);
       Lambda : Real := Real'Model_Epsilon;
       Cost0  : Real;
 
@@ -308,6 +308,9 @@ package body Driver.Robot.Kinematics.Fit is
             exit when not Improved;
          end;
       end loop;
+      Free (R0);
+      Free (Rn);
+      Free (J);
    end Robust_Fit;
 
    ---------------------------------------------------------------------------
@@ -398,6 +401,9 @@ package body Driver.Robot.Kinematics.Fit is
       end if;
       declare
          Depth  : Real_Access := new Real_Array'(1 .. Tracks => 0.0);   --  the log of each track's depth
+         --  How uncertain each log depth is at the solution, the other
+         --  parameters held: the root of the inverse of its own information.
+         Depth_Sigma : Real_Access := new Real_Array'(1 .. Tracks => Real'Last);
          Has    : Flags_Access := new Flags'(1 .. Tracks => False);
          Inlier : Flags_Access := new Flags'(1 .. S => False);
          X      : Real_Array (1 .. Count);
@@ -654,6 +660,9 @@ package body Driver.Robot.Kinematics.Fit is
                         --  the plane across the axis), and every length scales
                         --  together (the depth of the track seen most is held).
                         if not Improved then
+                           for T in 1 .. Tracks loop
+                              Depth_Sigma (T) := (if C (T) > 0.0 then 1.0 / Sqrt (C (T)) else Real'Last);
+                           end loop;
                            declare
                               Reduced : constant Positive := 6 + 5 * N;
                               Tm  : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Reduced) :=
@@ -807,6 +816,17 @@ package body Driver.Robot.Kinematics.Fit is
                                        Free (Spread);
                                     end;
                                  end if;
+                                 --  How each track's log depth moves with the reduced
+                                 --  terms, the others' at their best: minus its row of
+                                 --  the cross information over its own (the held
+                                 --  track's does not move).
+                                 Report.Depth_Gains.Clear;
+                                 for T in 1 .. Tracks loop
+                                    for P in 1 .. Reduced loop
+                                       Report.Depth_Gains.Append
+                                         (if T /= Anchor and then C (T) > 0.0 then -Br (P, T) / C (T) else 0.0);
+                                    end loop;
+                                 end loop;
                                  Free (Br);
                               end;
                            end;
@@ -919,10 +939,13 @@ package body Driver.Robot.Kinematics.Fit is
             end loop;
          end if;
          Report.Depths.Clear;
+         Report.Depth_Sigmas.Clear;
          for T in 1 .. Tracks loop
             Report.Depths.Append ((if Has (T) then Exp (Depth (T)) else 0.0));
+            Report.Depth_Sigmas.Append ((if Has (T) then Depth_Sigma (T) else Real'Last));
          end loop;
          Free (Depth);
+         Free (Depth_Sigma);
          Free (Has);
          Free (Inlier);
       end;
@@ -2098,762 +2121,1331 @@ package body Driver.Robot.Kinematics.Fit is
       end loop;
    end Pose_Covariance;
 
-   procedure Track_Points
-     (Changes   : Driver.Numerics.Arrays.Real_Matrix;
-      Sightings : Sighting_Array;
-      Joints    : Joint_Array;
-      L         : Lens;
-      Points    : out Track_Point_Array)
-   is
-      N    : constant Natural := Joints'Length;
-      Num  : Real_Access := new Real_Array'(Points'Range => 0.0);
-      Den  : Real_Access := new Real_Array'(Points'Range => 0.0);
+   ---------------------------------------------------------------------------
+   --  Consensus
+
+   function Consensus_Samples (Minimal : Positive; Fraction : Real) return Positive is
+      Missed : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+      --  The chance that one sample is all of agreeing points.
+      All_In : constant Real := Fraction ** Minimal;
+      N      : Real;
    begin
-      Points := [others => <>];
-      for X of Sightings loop
-         if X.Track in Points'Range then
+      if All_In >= 1.0 then
+         return 1;
+      end if;
+      --  log (1 - p) is -p to working precision for p below the root of the
+      --  float's resolution.
+      N := Real'Ceiling (Ln (Missed) / (if All_In < Sqrt (Real'Model_Epsilon) then -All_In else Ln (1.0 - All_In)));
+      return (if N >= Real (Positive'Last) then Positive'Last else Positive (Real'Max (1.0, N)));
+   end Consensus_Samples;
+
+   --  A repeatable uniform generator: Park and Miller's minimal standard.
+   type Sampler is record
+      State : Long_Long_Integer := 1;
+   end record;
+
+   function Draw (S : in out Sampler; N : Positive) return Positive is
+   begin
+      S.State := (S.State * 48_271) mod 2_147_483_647;
+      return Positive (1 + S.State mod Long_Long_Integer (N));
+   end Draw;
+
+   --  Into'Length distinct numbers of 1 .. N.
+   procedure Pick (S : in out Sampler; N : Positive; Into : out Count_Array)
+     with Pre => Into'Length <= N
+   is
+   begin
+      Into := [others => 0];
+      for K in Into'Range loop
+         loop
+            Into (K) := Draw (S, N);
+            exit when (for all J in Into'First .. K - 1 => Into (J) /= Into (K));
+         end loop;
+      end loop;
+   end Pick;
+
+   ---------------------------------------------------------------------------
+   --  The dominant plane
+
+   function Plane_Normal (P : Sight_Plane) return Vec3 is
+     (if P.Found then (-1.0 / Sqrt (P.A * P.A)) * P.A else [0.0, 0.0, -1.0]);
+
+   function Plane_Offset (P : Sight_Plane) return Real is
+     (if P.Found then -1.0 / Sqrt (P.A * P.A) else 0.0);
+
+   function Plane_Offset_Sigma (P : Sight_Plane) return Real is
+      Length : constant Real := Sqrt (P.A * P.A);
+   begin
+      if not P.Found then
+         return Real'Last;
+      end if;
+      declare
+         N : constant Vec3 := (1.0 / Length) * P.A;
+      begin
+         return Sqrt (Real'Max (0.0, N * (P.Covariance * N))) / Length ** 2;
+      end;
+   end Plane_Offset_Sigma;
+
+   function Plane_Tilt_Sigma (P : Sight_Plane) return Real is
+      Length : constant Real := Sqrt (P.A * P.A);
+   begin
+      if not P.Found then
+         return Real'Last;
+      end if;
+      declare
+         N  : constant Vec3 := (1.0 / Length) * P.A;
+         Pr : constant Mat3 := Identity3 - Outer (N, N);
+         C  : constant Mat3 := (1.0 / Length ** 2) * (Pr * P.Covariance * Pr);
+         Values  : Vec3;
+         Vectors : Mat3;
+      begin
+         Symmetric_Eigensystem (C, Values, Vectors);
+         return Sqrt (Real'Max (0.0, Real'Max (Values (1), Real'Max (Values (2), Values (3)))));
+      end;
+   end Plane_Tilt_Sigma;
+
+   procedure Plane_Axes (P : Sight_Plane; Normal, E1, E2 : out Vec3) is
+   begin
+      Normal := Plane_Normal (P);
+      Perp (Normal, E1, E2);
+   end Plane_Axes;
+
+   function On_Plane (P : Sight_Plane; H : Vec3) return Vec3 is
+      Q : constant Real := P.A * H;
+   begin
+      return (if Q > 0.0 then (1.0 / Q) * H else [0.0, 0.0, 0.0]);
+   end On_Plane;
+
+   --  A point's inverse depth and its sigma.
+   function Inverse_Depth (P : Sight_Point) return Real is (1.0 / P.Depth);
+   function Inverse_Sigma (P : Sight_Point) return Real is (P.Sigma / P.Depth);
+
+   function Usable (P : Sight_Point) return Boolean is
+     (P.Depth > 0.0 and then P.Sigma > 0.0 and then P.Sigma < Real'Last);
+
+   --  The residual of a point's inverse depth from the plane A, in units of
+   --  its sigma.
+   function Standard_Residual (A : Vec3; P : Sight_Point) return Real is
+     ((Inverse_Depth (P) - A * P.H) / Inverse_Sigma (P));
+
+   procedure Refit_Plane (Points : Sight_Point_Array; On : Flag_Array; Plane : out Sight_Plane) is
+      M  : Mat3 := [others => [others => 0.0]];
+      B  : Vec3 := [0.0, 0.0, 0.0];
+      Count : Natural := 0;
+   begin
+      Plane := (others => <>);
+      for I in Points'Range loop
+         if On (I) and then Usable (Points (I)) then
             declare
-               D : Real_Array (1 .. N);
+               W : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;
             begin
-               for J in 1 .. N loop
-                  D (J) := Changes (Changes'First (1) + X.Frame - 1, Changes'First (2) + J - 1);
-               end loop;
-               declare
-                  T  : constant Rigid := Eye_At (Joints, D);
-                  H0 : constant Vec3 := Ray (L, X.U0, X.V0);
-                  Bv : constant Vec3 := T.Rotation * Ray (L, X.U, X.V);
-                  function Across (V : Vec3) return Vec3 is (V - (Dot (V, Bv) / Dot (Bv, Bv)) * Bv);
-               begin
-                  Points (X.Track).X := H0;
-                  Num (X.Track) := Num (X.Track) + Dot (Across (H0), Across (T.Translation));
-                  Den (X.Track) := Den (X.Track) + Dot (Across (H0), Across (H0));
-               end;
+               M := M + W * Outer (Points (I).H, Points (I).H);
+               B := B + (W * Inverse_Depth (Points (I))) * Points (I).H;
+               Count := Count + 1;
             end;
          end if;
       end loop;
-      for T in Points'Range loop
-         if Den (T) > 0.0 and then Num (T) / Den (T) > 0.0 then
-            Points (T) := (Known => True, X => (Num (T) / Den (T)) * Points (T).X);
-         else
-            Points (T) := (others => <>);
-         end if;
-      end loop;
-      Free (Num);
-      Free (Den);
-   end Track_Points;
-
-   procedure Table
-     (Changes      : Driver.Numerics.Arrays.Real_Matrix;
-      Sightings    : Sighting_Array;
-      Joints       : Joint_Array;
-      L            : Lens;
-      Normal       : out Vec3;
-      Offset       : out Real;
-      Offset_Sigma : out Real;
-      Sigma        : out Real;
-      Found        : out Boolean)
-   is
-      Tracks : Natural := 0;
-   begin
-      Normal := [0.0, 0.0, -1.0];
-      Offset := 0.0;
-      Offset_Sigma := Real'Last;
-      Sigma := Real'Last;
-      Found := False;
-      for X of Sightings loop
-         Tracks := Natural'Max (Tracks, X.Track);
-      end loop;
-      if Tracks < 3 then
+      if Count <= 3 or else Determinant (M) = 0.0 then
          return;
       end if;
       declare
-         type Vec3_Array is array (Positive range <>) of Vec3;
-         type Vec3_Access is access Vec3_Array;
-         procedure Free is new Ada.Unchecked_Deallocation (Vec3_Array, Vec3_Access);
-         type Track_Point_Access is access Track_Point_Array;
-         procedure Free is new Ada.Unchecked_Deallocation (Track_Point_Array, Track_Point_Access);
-         Placed   : Track_Point_Access := new Track_Point_Array (1 .. Tracks);
-         Points   : Vec3_Access := new Vec3_Array (1 .. Tracks);
-         Count    : Natural := 0;
+         Mi : constant Mat3 := Inverse (M);
+         A  : constant Vec3 := Mi * B;
+         --  The sandwich: the spread of every point's share of the gradient.
+         Spread : Mat3 := [others => [others => 0.0]];
       begin
-         --  Every track's point, on its reference ray.
-         Track_Points (Changes, Sightings, Joints, L, Placed.all);
-         for P of Placed.all loop
-            if P.Known then
-               Count := Count + 1;
-               Points (Count) := P.X;
+         for I in Points'Range loop
+            if On (I) and then Usable (Points (I)) then
+               declare
+                  W : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;
+                  R : constant Real := Inverse_Depth (Points (I)) - A * Points (I).H;
+               begin
+                  Spread := Spread + (W * W * R * R) * Outer (Points (I).H, Points (I).H);
+               end;
             end if;
          end loop;
-         Free (Placed);
-         if Count < 4 then
-            Free (Points);
+         Plane := (Found      => A * A > 0.0,
+                   A          => A,
+                   Covariance => (Real (Count) / Real (Count - 3)) * (Mi * Spread * Mi),
+                   Points     => Count);
+      end;
+   end Refit_Plane;
+
+   function Plane_Covariance
+     (Points     : Sight_Point_Array;
+      On         : Flag_Array;
+      Plane      : Sight_Plane;
+      Gains      : Real_Lists.Vector;
+      Covariance : Real_Lists.Vector) return Mat3
+   is
+      Terms : constant Natural := Natural (Sqrt (Real (Natural (Covariance.Length))));
+      Rows  : constant Natural := (if Terms > 0 then Natural (Gains.Length) / Terms else 0);
+   begin
+      if not Plane.Found or else Terms = 0 or else Terms * Terms /= Natural (Covariance.Length)
+        or else Rows * Terms /= Natural (Gains.Length)
+      then
+         return Plane.Covariance;
+      end if;
+      declare
+         M : Mat3 := [others => [others => 0.0]];
+         K : Real_Matrix (1 .. 3, 1 .. Terms) := [others => [others => 0.0]];
+         V : Real_Matrix (1 .. Terms, 1 .. Terms);
+      begin
+         for I in Points'Range loop
+            if On (I) and then Usable (Points (I)) then
+               declare
+                  W   : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;
+                  Row : constant Natural := I - Points'First;
+               begin
+                  M := M + W * Outer (Points (I).H, Points (I).H);
+                  --  An inverse depth moves by minus itself times its log depth's move.
+                  if Row < Rows then
+                     for P in 1 .. Terms loop
+                        declare
+                           G : constant Real := Gains (Gains.First_Index + Row * Terms + P - 1);
+                        begin
+                           for D in 1 .. 3 loop
+                              K (D, P) := K (D, P) - W * Inverse_Depth (Points (I)) * G * Points (I).H (D);
+                           end loop;
+                        end;
+                     end loop;
+                  end if;
+               end;
+            end if;
+         end loop;
+         if Determinant (M) = 0.0 then
+            return Plane.Covariance;
+         end if;
+         for P in 1 .. Terms loop
+            for Q in 1 .. Terms loop
+               V (P, Q) := Covariance (Covariance.First_Index + (P - 1) * Terms + Q - 1);
+            end loop;
+         end loop;
+         declare
+            Kf : constant Real_Matrix := Inverse (M) * K;
+         begin
+            return Plane.Covariance + Kf * V * Transpose (Kf);
+         end;
+      end;
+   end Plane_Covariance;
+
+   procedure Dominant_Plane (Points : Sight_Point_Array; Plane : out Sight_Plane; On : out Flag_Array) is
+      Minimal : constant := 3;
+      Index   : Count_Access := new Count_Array (1 .. Points'Length);
+      Valid   : Natural := 0;
+   begin
+      Plane := (others => <>);
+      On := [others => False];
+      for I in Points'Range loop
+         if Usable (Points (I)) then
+            Valid := Valid + 1;
+            Index (Valid) := I;
+         end if;
+      end loop;
+      if Valid <= Minimal then
+         Free (Index);
+         return;
+      end if;
+      declare
+         Sm      : Sampler;
+         Best    : Real := Real'Last;
+         Best_A  : Vec3 := [0.0, 0.0, 0.0];
+         Support : Natural := 0;
+         Needed  : Positive := Positive'Last;
+         Drawn   : Natural := 0;
+         Bound   : constant Real := Driver.Conventions.Z ** 2;
+      begin
+         --  Consensus: as many samples as the support found so far asks for.
+         while Drawn < Needed loop
+            Drawn := Drawn + 1;
+            declare
+               Pick3 : Count_Array (1 .. Minimal);
+               M     : Mat3;
+               Q     : Vec3;
+            begin
+               Pick (Sm, Valid, Pick3);
+               for R in 1 .. Minimal loop
+                  declare
+                     P : Sight_Point renames Points (Index (Pick3 (R)));
+                  begin
+                     for C in 1 .. 3 loop
+                        M (R, C) := P.H (C);
+                     end loop;
+                     Q (R) := Inverse_Depth (P);
+                  end;
+               end loop;
+               if Determinant (M) /= 0.0 then
+                  declare
+                     A     : constant Vec3 := Inverse (M) * Q;
+                     Cost  : Real := 0.0;
+                     Agree : Natural := 0;
+                  begin
+                     for K in 1 .. Valid loop
+                        declare
+                           Z2 : constant Real := Standard_Residual (A, Points (Index (K))) ** 2;
+                        begin
+                           Cost := Cost + Real'Min (Z2, Bound);
+                           if Z2 <= Bound then
+                              Agree := Agree + 1;
+                           end if;
+                        end;
+                     end loop;
+                     if Cost < Best then
+                        Best := Cost;
+                        Best_A := A;
+                        if Agree > Support then
+                           Support := Agree;
+                           Needed := Consensus_Samples (Minimal, Real (Support) / Real (Valid));
+                        end if;
+                     end if;
+                  end;
+               end if;
+            end;
+         end loop;
+         if Support <= Minimal then
+            Free (Index);
             return;
          end if;
+         --  From the consensus: the points within Z of their own sigma, the
+         --  plane through them by weighted least squares, the choice renewed
+         --  at the spread of their residuals until it settles.
+         for K in 1 .. Valid loop
+            On (Index (K)) := Standard_Residual (Best_A, Points (Index (K))) ** 2 <= Bound;
+         end loop;
          declare
-            Golden     : constant Real := (3.0 - Sqrt (5.0)) * Ada.Numerics.Pi;
-            Directions : constant Natural := 2562;
-            Best       : Real := Real'Last;
-            Offsets    : Real_Access := new Real_Array (1 .. Count);
-            Gaps       : Real_Access := new Real_Array (1 .. Count);
-            Center     : Vec3 := [0.0, 0.0, 0.0];
+            Changed : Natural := Natural'Last;
          begin
-            --  The direction whose points lie closest about their median.
-            for I in 1 .. Directions loop
+            loop
+               Refit_Plane (Points, On, Plane);
+               exit when not Plane.Found;
                declare
-                  Z  : constant Real := 1.0 - 2.0 * (Real (I) - 0.5) / Real (Directions);
-                  Rr : constant Real := Sqrt (Real'Max (0.0, 1.0 - Z * Z));
-                  Nv : constant Vec3 := [Rr * Cos (Golden * Real (I)), Rr * Sin (Golden * Real (I)), Z];
+                  Z_All  : Real_Access := new Real_Array (1 .. Valid);
+                  Count  : Natural := 0;
+                  Spread : Real;
+                  Now_Changed : Natural := 0;
                begin
-                  for K in 1 .. Count loop
-                     Offsets (K) := Dot (Nv, Points (K));
+                  for K in 1 .. Valid loop
+                     if On (Index (K)) then
+                        Count := Count + 1;
+                        Z_All (Count) := Standard_Residual (Plane.A, Points (Index (K)));
+                     end if;
                   end loop;
-                  declare
-                     C : constant Real := Driver.Stats.Median (Offsets.all);
-                  begin
-                     for K in 1 .. Count loop
-                        Gaps (K) := abs (Offsets (K) - C);
-                     end loop;
+                  Spread := Noise_Of (Z_All (1 .. Count));
+                  Free (Z_All);
+                  for K in 1 .. Valid loop
                      declare
-                        Score : constant Real := Driver.Stats.Median (Gaps.all);
+                        Fits : constant Boolean :=
+                          Spread > 0.0 and then not Driver.Uncertain.Significant
+                                                      (Standard_Residual (Plane.A, Points (Index (K))), Spread);
                      begin
-                        if Score < Best then
-                           Best := Score;
-                           Normal := Nv;
+                        if Fits /= On (Index (K)) then
+                           Now_Changed := Now_Changed + 1;
+                           On (Index (K)) := Fits;
                         end if;
                      end;
-                  end;
+                  end loop;
+                  exit when Now_Changed = 0 or else Now_Changed >= Changed;
+                  Changed := Now_Changed;
                end;
             end loop;
-            --  Huber-weighted least squares from there: the weighted centroid
-            --  and the least eigenvector of the weighted scatter, until the
-            --  normal turns by less than the unchanged fraction of its own
-            --  uncertainty.
-            loop
-               declare
-                  Spread : Real;
-                  W      : Real_Access := new Real_Array (1 .. Count);
-                  Sum_W  : Real := 0.0;
-                  Scatter : Mat3 := [others => [others => 0.0]];
-                  Values : Vec3;
-                  Vectors : Mat3;
-                  Next   : Vec3;
-               begin
-                  for K in 1 .. Count loop
-                     Offsets (K) := Dot (Normal, Points (K));
-                  end loop;
-                  declare
-                     C : constant Real := Driver.Stats.Median (Offsets.all);
-                  begin
-                     for K in 1 .. Count loop
-                        Gaps (K) := Offsets (K) - C;
-                     end loop;
-                  end;
-                  Spread := Noise_Of (Gaps.all);
-                  if Spread <= 0.0 then
-                     Free (W);
-                     exit;
-                  end if;
-                  Center := [0.0, 0.0, 0.0];
-                  for K in 1 .. Count loop
-                     W (K) := Huber (Gaps (K) / Spread);
-                     Sum_W := Sum_W + W (K);
-                     Center := Center + W (K) * Points (K);
-                  end loop;
-                  Center := (1.0 / Sum_W) * Center;
-                  for K in 1 .. Count loop
-                     declare
-                        D : constant Vec3 := Points (K) - Center;
-                     begin
-                        Scatter := Scatter + W (K) * Outer (D, D);
-                     end;
-                  end loop;
-                  Symmetric_Eigensystem (Scatter, Values, Vectors);
-                  Next := [Vectors (1, 3), Vectors (2, 3), Vectors (3, 3)];
-                  if Dot (Next, Normal) < 0.0 then
-                     Next := -Next;
-                  end if;
-                  --  The normal's uncertainty: the spread over the points'
-                  --  extent within the plane (the smaller in-plane eigenvalue);
-                  --  the offset's, the spread over the root of the weights.
-                  Sigma := (if Values (2) > 0.0 then Spread / Sqrt (Values (2)) else Real'Last);
-                  Offset_Sigma := Spread / Sqrt (Sum_W);
-                  declare
-                     Turn : constant Real := Arccos (Real'Min (1.0, Dot (Next, Normal)));
-                  begin
-                     Normal := Next;
-                     Free (W);
-                     exit when Turn <= Driver.Conventions.Unchanged_Fraction * Sigma;
-                  end;
-               end;
-            end loop;
-            --  Towards the reference eye, at the origin.
-            if Dot (Normal, -Center) < 0.0 then
-               Normal := -Normal;
+            if Plane.Found then
+               Refit_Plane (Points, On, Plane);
             end if;
-            Offset := Dot (Normal, Center);
-            Found := Sigma < Real'Last;
-            Free (Offsets);
-            Free (Gaps);
          end;
-         Free (Points);
       end;
-   end Table;
+      Free (Index);
+   end Dominant_Plane;
 
-   --  The rotation that best turns the From spread onto the To spread, from
-   --  S, the sum of To From^T over the centred pairs (Kabsch): its two largest
-   --  singular directions, and the third the cross product of each pair, so
-   --  that it is a rotation even when the points lie in a plane (S of rank
-   --  two). Turnable is False when the points lie on a line.
-   procedure Best_Rotation (S : Mat3; Rotation : out Mat3; Turnable : out Boolean) is
-      Values  : Vec3;
-      Vectors : Mat3;
-   begin
-      Symmetric_Eigensystem (Transpose (S) * S, Values, Vectors);
-      Turnable := Values (2) > 0.0;
-      Rotation := [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-      if Turnable then
-         declare
-            V1  : constant Vec3 := [Vectors (1, 1), Vectors (2, 1), Vectors (3, 1)];
-            V2  : constant Vec3 := [Vectors (1, 2), Vectors (2, 2), Vectors (3, 2)];
-            U1  : constant Vec3 := Unit (S * V1);
-            U2r : constant Vec3 := S * V2;
-            U2  : constant Vec3 := Unit (U2r - Dot (U2r, U1) * U1);
-         begin
-            Rotation := Outer (U1, V1) + Outer (U2, V2) + Outer (Cross (U1, U2), Cross (V1, V2));
-         end;
-      end if;
-   end Best_Rotation;
+   ---------------------------------------------------------------------------
+   --  A plane through an eye
 
-   procedure Similarity
-     (Pairs       : Point_Pair_Array;
-      Rotation    : out Mat3;
-      Translation : out Vec3;
-      Scale       : out Real;
-      Scale_Sigma : out Real;
-      Spread      : out Real;
-      Used        : out Natural;
-      Found       : out Boolean)
-   is
-      Turnable : Boolean := True;
-      N       : constant Natural := Pairs'Length;
-      Weight  : Real_Access := new Real_Array'(1 .. N => 1.0);
-      Inlier  : Flags_Access := new Flags'(1 .. N => True);
-      Changed : Natural := Natural'Last;
-      Spread_Of_From : Real := 0.0;
-      function Pr (I : Positive) return Point_Pair is (Pairs (Pairs'First + I - 1));
+   --  The median of the lengths of two-coordinate residuals of Gaussian noise
+   --  is sigma times the root of 2 ln 2.
+   Rayleigh_Median : constant Real := Sqrt (2.0 * Ln (2.0));
+
+   --  H applied to a plane point; Ahead is False on the line at infinity.
+   procedure Apply (H : Mat3; X, Y : Real; U, V : out Real; Ahead : out Boolean) is
+      W : constant Real := H (3, 1) * X + H (3, 2) * Y + H (3, 3);
    begin
-      Rotation := [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-      Translation := [0.0, 0.0, 0.0];
-      Scale := 1.0;
-      Scale_Sigma := Real'Last;
-      Spread := Real'Last;
-      Used := 0;
-      Found := False;
-      loop
-         --  The closed form over the weighted pairs that fit.
-         declare
-            Sw     : Real := 0.0;
-            Ca, Cb : Vec3 := [0.0, 0.0, 0.0];
-            S      : Mat3 := [others => [others => 0.0]];
-            Va, Sb : Real := 0.0;
-         begin
-            for I in 1 .. N loop
-               if Inlier (I) then
-                  Sw := Sw + Weight (I);
-                  Ca := Ca + Weight (I) * Pr (I).From;
-                  Cb := Cb + Weight (I) * Pr (I).To;
-               end if;
-            end loop;
-            exit when Sw <= 0.0;
-            Ca := (1.0 / Sw) * Ca;
-            Cb := (1.0 / Sw) * Cb;
-            for I in 1 .. N loop
-               if Inlier (I) then
-                  S := S + Weight (I) * Outer (Pr (I).To - Cb, Pr (I).From - Ca);
-                  Va := Va + Weight (I) * Dot (Pr (I).From - Ca, Pr (I).From - Ca);
-               end if;
-            end loop;
-            exit when Va <= 0.0;
-            Best_Rotation (S, Rotation, Turnable);
-            exit when not Turnable;
-            for I in 1 .. N loop
-               if Inlier (I) then
-                  Sb := Sb + Weight (I) * Dot (Pr (I).To - Cb, Rotation * (Pr (I).From - Ca));
-               end if;
-            end loop;
-            Scale := Sb / Va;
-            Translation := Cb - Scale * (Rotation * Ca);
-            Spread_Of_From := Va;
-         end;
-         --  The residuals of every pair, their spread, the weights and the
-         --  pairs that fit.
-         declare
-            R    : Real_Access := new Real_Array (1 .. 3 * N);
-            Now_Changed : Natural := 0;
-         begin
-            for I in 1 .. N loop
-               declare
-                  D : constant Vec3 := Pr (I).To - (Scale * (Rotation * Pr (I).From) + Translation);
-               begin
-                  R (3 * I - 2) := D (1);
-                  R (3 * I - 1) := D (2);
-                  R (3 * I) := D (3);
-               end;
-            end loop;
-            Spread := Noise_Of (R.all);
-            Used := 0;
-            for I in 1 .. N loop
-               declare
-                  Fits : constant Boolean := Spread > 0.0
-                    and then (for all K in 0 .. 2 => not Driver.Uncertain.Significant (R (3 * I - K), Spread));
-                  Length : constant Real := Sqrt (R (3 * I - 2) ** 2 + R (3 * I - 1) ** 2 + R (3 * I) ** 2);
-               begin
-                  if Fits /= Inlier (I) then
-                     Now_Changed := Now_Changed + 1;
-                     Inlier (I) := Fits;
-                  end if;
-                  Weight (I) := (if Spread > 0.0 then Huber (Length / Spread) else 1.0);
-                  if Fits then
-                     Used := Used + 1;
-                  end if;
-               end;
-            end loop;
-            Free (R);
-            exit when Used < 3 or else Now_Changed >= Changed or else (Now_Changed = 0 and then Changed /= Natural'Last);
-            Changed := Now_Changed;
-         end;
+      Ahead := W /= 0.0;
+      U := (if Ahead then (H (1, 1) * X + H (1, 2) * Y + H (1, 3)) / W else 0.0);
+      V := (if Ahead then (H (2, 1) * X + H (2, 2) * Y + H (2, 3)) / W else 0.0);
+   end Apply;
+
+   function Residual_Length (H : Mat3; P : Plane_Point) return Real is
+      U, V  : Real;
+      Ahead : Boolean;
+   begin
+      Apply (H, P.X, P.Y, U, V, Ahead);
+      return (if Ahead then Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2) else Real'Last);
+   end Residual_Length;
+
+   --  The eight free entries of a homography whose last entry is one.
+   function Homography_Of (X : Real_Array) return Mat3 is
+     ([[X (X'First), X (X'First + 1), X (X'First + 2)],
+       [X (X'First + 3), X (X'First + 4), X (X'First + 5)],
+       [X (X'First + 6), X (X'First + 7), 1.0]]);
+
+   function Entries_Of (H : Mat3) return Real_Array is
+     ([H (1, 1), H (1, 2), H (1, 3), H (2, 1), H (2, 2), H (2, 3), H (3, 1), H (3, 2)]);
+
+   --  The homography through the points Use_It selects, by the direct linear
+   --  transform on coordinates centred and scaled to unit spread (Hartley's
+   --  conditioning), with its last entry made one.
+   function Linear_Homography (Points : Plane_Point_Array; Use_It : Flag_Array) return Mat3 is
+      Cx, Cy, Cu, Cv, Sxy, Suv : Real := 0.0;
+      N : Natural := 0;
+   begin
+      for I in Points'Range loop
+         if Use_It (I) then
+            N := N + 1;
+            Cx := Cx + Points (I).X;
+            Cy := Cy + Points (I).Y;
+            Cu := Cu + Points (I).U;
+            Cv := Cv + Points (I).V;
+         end if;
       end loop;
-      Scale_Sigma := (if Spread_Of_From > 0.0 and then Spread < Real'Last then Spread / Sqrt (Spread_Of_From) else Real'Last);
-      Found := Turnable and then Used >= 3 and then Scale > 0.0 and then Spread < Real'Last;
-      Free (Weight);
-      Free (Inlier);
-   end Similarity;
-
-   procedure Resect_Pose
-     (Points     : Correspondence_Array;
-      L          : Lens;
-      Initial    : Rigid;
-      Placement  : out Rigid;
-      Covariance : out Real_Lists.Vector;
-      Sigma      : out Real;
-      Used       : out Natural;
-      Found      : out Boolean)
-   is
-      N      : constant Natural := Points'Length;
-      Inlier : Flags_Access := new Flags'(1 .. N => True);
-      Base_R : Mat3 := Initial.Rotation;
-      X      : Real_Array (1 .. 6) := [0.0, 0.0, 0.0, Initial.Translation (1), Initial.Translation (2), Initial.Translation (3)];
-      Changed : Natural := Natural'Last;
-
-      function Pt (I : Positive) return Correspondence is (Points (Points'First + I - 1));
-
-      --  The eye's axes turned by Xv (1 .. 3) in the points' frame, its centre Xv (4 .. 6).
-      procedure Residual (Xv : Real_Array; I : Positive; Du, Dv : out Real) is
-         R  : constant Mat3 := Driver.Numerics.Exp ([Xv (Xv'First), Xv (Xv'First + 1), Xv (Xv'First + 2)]) * Base_R;
-         C  : constant Vec3 := [Xv (Xv'First + 3), Xv (Xv'First + 4), Xv (Xv'First + 5)];
-         U, V : Real;
-         Ahead : Boolean;
+      Cx := Cx / Real (N);
+      Cy := Cy / Real (N);
+      Cu := Cu / Real (N);
+      Cv := Cv / Real (N);
+      for I in Points'Range loop
+         if Use_It (I) then
+            Sxy := Sxy + Sqrt ((Points (I).X - Cx) ** 2 + (Points (I).Y - Cy) ** 2);
+            Suv := Suv + Sqrt ((Points (I).U - Cu) ** 2 + (Points (I).V - Cv) ** 2);
+         end if;
+      end loop;
+      Sxy := (if Sxy > 0.0 then Real (N) / Sxy else 1.0);
+      Suv := (if Suv > 0.0 then Real (N) / Suv else 1.0);
+      declare
+         A       : Real_Matrix (1 .. 9, 1 .. 9) := [others => [others => 0.0]];
+         Values  : Real_Vector (1 .. 9);
+         Vectors : Real_Matrix (1 .. 9, 1 .. 9);
+         Least   : Positive := 1;
+         Hn      : Mat3;
       begin
-         Project (L, Transpose (R) * (Pt (I).X - C), U, V, Ahead);
-         Du := U - Pt (I).U;
-         Dv := V - Pt (I).V;
-      end Residual;
-   begin
-      Placement := Initial;
-      Covariance.Clear;
-      Sigma := Real'Last;
-      Used := 0;
-      Found := False;
-      loop
-         declare
-            All_R : Real_Access := new Real_Array (1 .. 2 * N);
-            Now_Changed : Natural := 0;
-            S     : Real;
-         begin
-            for I in 1 .. N loop
-               Residual (X, I, All_R (2 * I - 1), All_R (2 * I));
-            end loop;
-            S := Noise_Of (All_R.all);
-            Used := 0;
-            for I in 1 .. N loop
+         for I in Points'Range loop
+            if Use_It (I) then
                declare
-                  Fits : constant Boolean := S > 0.0
-                    and then not Driver.Uncertain.Significant (All_R (2 * I - 1), S)
-                    and then not Driver.Uncertain.Significant (All_R (2 * I), S);
+                  X  : constant Real := (Points (I).X - Cx) * Sxy;
+                  Y  : constant Real := (Points (I).Y - Cy) * Sxy;
+                  U  : constant Real := (Points (I).U - Cu) * Suv;
+                  V  : constant Real := (Points (I).V - Cv) * Suv;
+                  R1 : constant Real_Vector (1 .. 9) := [X, Y, 1.0, 0.0, 0.0, 0.0, -U * X, -U * Y, -U];
+                  R2 : constant Real_Vector (1 .. 9) := [0.0, 0.0, 0.0, X, Y, 1.0, -V * X, -V * Y, -V];
                begin
-                  if Fits /= Inlier (I) then
-                     Now_Changed := Now_Changed + 1;
-                     Inlier (I) := Fits;
-                  end if;
-                  if Fits then
-                     Used := Used + 1;
-                  end if;
-               end;
-            end loop;
-            Sigma := S;
-            Free (All_R);
-            exit when Used < 3 or else Now_Changed >= Changed or else (Now_Changed = 0 and then Changed /= Natural'Last);
-            Changed := Now_Changed;
-            declare
-               Index : Count_Access := new Count_Array (1 .. Used);
-               K     : Natural := 0;
-
-               procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
-               begin
-                  for J in 1 .. Used loop
-                     Residual (Xv, Index (J), R (R'First + 2 * J - 2), R (R'First + 2 * J - 1));
+                  for P in 1 .. 9 loop
+                     for Q in 1 .. 9 loop
+                        A (P, Q) := A (P, Q) + R1 (P) * R1 (Q) + R2 (P) * R2 (Q);
+                     end loop;
                   end loop;
-               end Evaluate;
-
-               procedure Solve is new Robust_Fit (6, 2 * Used, Evaluate);
-            begin
-               for I in 1 .. N loop
-                  if Inlier (I) then
-                     K := K + 1;
-                     Index (K) := I;
-                  end if;
-               end loop;
-               Solve (X, S);
-               Free (Index);
-               Base_R := Driver.Numerics.Exp ([X (1), X (2), X (3)]) * Base_R;
-               X (1 .. 3) := [0.0, 0.0, 0.0];
-            end;
-         end;
-      end loop;
-      Placement := (Rotation => Base_R, Translation => [X (4), X (5), X (6)]);
-      Found := Used >= 3 and then Sigma < Real'Last;
-      --  The sandwich over the points that fit: the inverse normal equations
-      --  around the spread of every point's share of the gradient.
-      if Found then
-         declare
-            A, B : Real_Matrix (1 .. 6, 1 .. 6) := [others => [others => 0.0]];
-            Points_Used : Natural := 0;
-         begin
-            for I in 1 .. N loop
-               if Inlier (I) then
-                  declare
-                     R0 : Real_Array (1 .. 2);
-                     J  : Real_Matrix (1 .. 2, 1 .. 6);
-                     G  : Real_Vector (1 .. 6) := [others => 0.0];
-                  begin
-                     Residual (X, I, R0 (1), R0 (2));
-                     for P in 1 .. 6 loop
-                        declare
-                           Xp : Real_Array := X;
-                           H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));
-                           Rn : Real_Array (1 .. 2);
-                        begin
-                           Xp (P) := Xp (P) + H;
-                           Residual (Xp, I, Rn (1), Rn (2));
-                           J (1, P) := (Rn (1) - R0 (1)) / H;
-                           J (2, P) := (Rn (2) - R0 (2)) / H;
-                        end;
-                     end loop;
-                     for K in 1 .. 2 loop
-                        declare
-                           W   : constant Real := Huber (R0 (K) / Sigma) / Sigma ** 2;
-                        begin
-                           for P in 1 .. 6 loop
-                              G (P) := G (P) + W * R0 (K) * J (K, P);
-                              for Q in 1 .. 6 loop
-                                 A (P, Q) := A (P, Q) + W * J (K, P) * J (K, Q);
-                              end loop;
-                           end loop;
-                        end;
-                     end loop;
-                     for P in 1 .. 6 loop
-                        for Q in 1 .. 6 loop
-                           B (P, Q) := B (P, Q) + G (P) * G (Q);
-                        end loop;
-                     end loop;
-                     Points_Used := Points_Used + 1;
-                  end;
-               end if;
-            end loop;
-            declare
-               Lf : Real_Matrix (1 .. 6, 1 .. 6);
-               Pd : Boolean;
-            begin
-               Driver.Numerics.Dense.Cholesky (A, Lf, Pd);
-               Found := Pd and then Points_Used > 1;
-               if Found then
-                  declare
-                     Inv : Real_Matrix (1 .. 6, 1 .. 6);
-                  begin
-                     for P in 1 .. 6 loop
-                        declare
-                           E : Real_Vector (1 .. 6) := [others => 0.0];
-                        begin
-                           E (P) := 1.0;
-                           declare
-                              Column : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, E);
-                           begin
-                              for Q in 1 .. 6 loop
-                                 Inv (Q, P) := Column (Q);
-                              end loop;
-                           end;
-                        end;
-                     end loop;
-                     declare
-                        Small : constant Real := Real (Points_Used) / Real (Points_Used - 1);
-                        V     : constant Real_Matrix := Inv * B * Inv;
-                     begin
-                        for P in 1 .. 6 loop
-                           for Q in 1 .. 6 loop
-                              Covariance.Append (Small * V (P, Q));
-                           end loop;
-                        end loop;
-                     end;
-                  end;
-               end if;
-            end;
-         end;
-      end if;
-      Free (Inlier);
-   end Resect_Pose;
-
-   procedure Resect
-     (Points        : Correspondence_Array;
-      Width, Height : Positive;
-      Pose          : out Rigid;
-      L             : out Lens;
-      Sigma         : out Real;
-      Found         : out Boolean)
-   is
-      N      : constant Natural := Points'Length;
-      Inlier : Flags_Access := new Flags'(1 .. N => True);
-      Weight : Real_Access := new Real_Array'(1 .. N => 1.0);
-      P_Mat  : Real_Matrix (1 .. 3, 1 .. 4) := [others => [others => 0.0]];
-
-      function Pt (I : Positive) return Correspondence is (Points (Points'First + I - 1));
-
-      --  The weighted direct linear transform: the projection matrix as the
-      --  least eigenvector of the conditioned equations, the points and the
-      --  pixels first centred and scaled to unit spread.
-      procedure Linear is
-         Cx, Cy : Real := 0.0;
-         C3     : Vec3 := [0.0, 0.0, 0.0];
-         Sp, Sx : Real := 0.0;
-         Sw     : Real := 0.0;
-      begin
-         for I in 1 .. N loop
-            if Inlier (I) then
-               Sw := Sw + Weight (I);
-               Cx := Cx + Weight (I) * Pt (I).U;
-               Cy := Cy + Weight (I) * Pt (I).V;
-               C3 := C3 + Weight (I) * Pt (I).X;
+               end;
             end if;
          end loop;
-         Cx := Cx / Sw;
-         Cy := Cy / Sw;
-         C3 := (1.0 / Sw) * C3;
-         for I in 1 .. N loop
-            if Inlier (I) then
-               Sp := Sp + Weight (I) * ((Pt (I).U - Cx) ** 2 + (Pt (I).V - Cy) ** 2);
-               Sx := Sx + Weight (I) * Dot (Pt (I).X - C3, Pt (I).X - C3);
+         Eigensystem (A, Values, Vectors);
+         for K in 2 .. 9 loop
+            if Values (K) < Values (Least) then
+               Least := K;
             end if;
          end loop;
-         Sp := Sqrt (Sp / Sw);
-         Sx := Sqrt (Sx / Sw);
-         declare
-            A : Real_Matrix (1 .. 12, 1 .. 12) := [others => [others => 0.0]];
-            Values  : Real_Vector (1 .. 12);
-            Vectors : Real_Matrix (1 .. 12, 1 .. 12);
-         begin
-            for I in 1 .. N loop
-               if Inlier (I) then
-                  declare
-                     Xn : constant Vec3 := (1.0 / Sx) * (Pt (I).X - C3);
-                     Xh : constant Real_Vector (1 .. 4) := [Xn (1), Xn (2), Xn (3), 1.0];
-                     Un : constant Real := (Pt (I).U - Cx) / Sp;
-                     Vn : constant Real := (Pt (I).V - Cy) / Sp;
-                     R1, R2 : Real_Vector (1 .. 12) := [others => 0.0];
-                  begin
-                     for K in 1 .. 4 loop
-                        R1 (K) := Xh (K);
-                        R1 (8 + K) := -Un * Xh (K);
-                        R2 (4 + K) := Xh (K);
-                        R2 (8 + K) := -Vn * Xh (K);
-                     end loop;
-                     for P in 1 .. 12 loop
-                        for Q in P .. 12 loop
-                           A (P, Q) := A (P, Q) + Weight (I) * (R1 (P) * R1 (Q) + R2 (P) * R2 (Q));
-                        end loop;
-                     end loop;
-                  end;
-               end if;
-            end loop;
-            for P in 1 .. 12 loop
-               for Q in P + 1 .. 12 loop
-                  A (Q, P) := A (P, Q);
-               end loop;
-            end loop;
-            Eigensystem (A, Values, Vectors);
-            declare
-               Least : Positive := 1;
-               Pn    : Real_Matrix (1 .. 3, 1 .. 4);
-               --  Undo the conditioning: P = Tp^-1 Pn Tx.
-               Tp_Inv : constant Real_Matrix (1 .. 3, 1 .. 3) := [[Sp, 0.0, Cx], [0.0, Sp, Cy], [0.0, 0.0, 1.0]];
-               Tx     : constant Real_Matrix (1 .. 4, 1 .. 4) :=
-                 [[1.0 / Sx, 0.0, 0.0, -C3 (1) / Sx], [0.0, 1.0 / Sx, 0.0, -C3 (2) / Sx],
-                  [0.0, 0.0, 1.0 / Sx, -C3 (3) / Sx], [0.0, 0.0, 0.0, 1.0]];
-            begin
-               for K in 2 .. 12 loop
-                  if Values (K) < Values (Least) then
-                     Least := K;
-                  end if;
-               end loop;
-               for R in 1 .. 3 loop
-                  for C in 1 .. 4 loop
-                     Pn (R, C) := Vectors (4 * (R - 1) + C, Least);
-                  end loop;
-               end loop;
-               P_Mat := Tp_Inv * Pn * Tx;
-            end;
-         end;
-      end Linear;
-
-      --  P = K [R | t]: K from the upper Cholesky factor of M M^T (through the
-      --  exchange of rows and columns), R = K^-1 M, t = K^-1 p4.
-      procedure Factor (K_Out : out Mat3; R_Out : out Mat3; T_Out : out Vec3) is
-         Mm : Mat3;
-         P4 : Vec3;
-      begin
          for R in 1 .. 3 loop
             for C in 1 .. 3 loop
-               Mm (R, C) := P_Mat (R, C);
+               Hn (R, C) := Vectors (3 * (R - 1) + C, Least);
             end loop;
-            P4 (R) := P_Mat (R, 4);
          end loop;
-         --  The scale\x27s sign: the points lie in front, so the depth row of the
-         --  first point projects positive.
-         if Mm (3, 1) * Pt (1).X (1) + Mm (3, 2) * Pt (1).X (2) + Mm (3, 3) * Pt (1).X (3) + P4 (3) < 0.0 then
-            Mm := -Mm;
-            P4 := -P4;
-         end if;
+         --  Undo the conditioning: H = Tuv^-1 Hn Txy.
          declare
-            Aa : constant Mat3 := Mm * Transpose (Mm);
-            J  : constant Mat3 := [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
-            Lf : Real_Matrix (1 .. 3, 1 .. 3);
-            Pd : Boolean;
+            Tuv_Inv : constant Mat3 := [[1.0 / Suv, 0.0, Cu], [0.0, 1.0 / Suv, Cv], [0.0, 0.0, 1.0]];
+            Txy     : constant Mat3 := [[Sxy, 0.0, -Cx * Sxy], [0.0, Sxy, -Cy * Sxy], [0.0, 0.0, 1.0]];
+            H       : constant Mat3 := Tuv_Inv * Hn * Txy;
          begin
-            Driver.Numerics.Dense.Cholesky (J * Aa * J, Lf, Pd);
-            K_Out := J * Lf * J;
-            if K_Out (3, 3) /= 0.0 then
-               K_Out := (1.0 / K_Out (3, 3)) * K_Out;
-            end if;
-            declare
-               K_Inv : constant Mat3 := Inverse (K_Out);
-               S     : constant Real := 1.0 / Sqrt (abs Determinant (K_Inv * Mm)) ** (1.0 / 3.0);
-            begin
-               R_Out := Driver.Numerics.Orthonormalize (S * (K_Inv * Mm));
-               T_Out := S * (K_Inv * P4);
-            end;
+            return (if H (3, 3) /= 0.0 then (1.0 / H (3, 3)) * H else H);
          end;
-      end Factor;
+      end;
+   end Linear_Homography;
 
-      K0 : Mat3;
-      R0 : Mat3;
-      T0 : Vec3;
+   --  The homography (its eight free entries, X) by robust least squares at
+   --  Sigma on the points Fits selects; Sigma becomes their noise. Not
+   --  inlined: inlined into its caller (GNAT 16.1 at -O2), the nested
+   --  Evaluate reads past the frame its up-level variables are given, which
+   --  AddressSanitizer reports.
+   procedure Refine_Homography
+     (Points : Plane_Point_Array;
+      Fits   : Flag_Array;
+      X      : in out Real_Array;
+      Sigma  : in out Real)
+     with No_Inline
+   is
+      Used  : Natural := 0;
+      Index : Count_Access;
    begin
-      Pose := Identity;
-      L := (Fx | Fy => 1.0, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, others => 0.0);
+      for I in Points'Range loop
+         if Fits (I) then
+            Used := Used + 1;
+         end if;
+      end loop;
+      Index := new Count_Array (1 .. Used);
+      declare
+         K : Natural := 0;
+      begin
+         for I in Points'Range loop
+            if Fits (I) then
+               K := K + 1;
+               Index (K) := I;
+            end if;
+         end loop;
+      end;
+      declare
+         procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
+            Hv : constant Mat3 := Homography_Of (Xv);
+         begin
+            for J in 1 .. Used loop
+               declare
+                  P     : Plane_Point renames Points (Index (J));
+                  U, V  : Real;
+                  Ahead : Boolean;
+               begin
+                  Apply (Hv, P.X, P.Y, U, V, Ahead);
+                  R (R'First + 2 * J - 2) := (if Ahead then U - P.U else Real'Last);
+                  R (R'First + 2 * J - 1) := (if Ahead then V - P.V else Real'Last);
+               end;
+            end loop;
+         end Evaluate;
+
+         procedure Solve is new Robust_Fit (8, 2 * Used, Evaluate);
+         R : Real_Access := new Real_Array (1 .. 2 * Used);
+      begin
+         Solve (X, Sigma);
+         Evaluate (X, R.all);
+         Sigma := Noise_Of (R.all);
+         Free (R);
+      end;
+      Free (Index);
+   end Refine_Homography;
+
+   procedure Plane_Homography
+     (Points : Plane_Point_Array;
+      H      : out Mat3;
+      Fits   : out Flag_Array;
+      Sigma  : out Real;
+      Found  : out Boolean)
+   is
+      N       : constant Natural := Points'Length;
+      Minimal : constant := 4;
+      Best    : Real := Real'Last;
+   begin
+      H := Identity3;
+      Fits := [others => False];
       Sigma := Real'Last;
       Found := False;
-      if N < 7 then
+      if N <= Minimal then
          return;
       end if;
-      Linear;
-      Factor (K0, R0, T0);
-      if K0 (1, 1) <= 0.0 or else K0 (2, 2) <= 0.0 then
-         return;
-      end if;
-      --  Everything by robust least squares: the turn (a small rotation on
-      --  the linear one), the place, then log Fx, log Fy, Cx, Cy, K1, K2.
+      --  Consensus: the least median, so up to half the points may be
+      --  anything at all.
       declare
-         Base_R : Mat3 := R0;
-         X      : Real_Array (1 .. 12) :=
-           [0.0, 0.0, 0.0, T0 (1), T0 (2), T0 (3), Ln (K0 (1, 1)), Ln (K0 (2, 2)), K0 (1, 3), K0 (2, 3), 0.0, 0.0];
+         Lengths : Real_Access := new Real_Array (1 .. N);
+         Sm      : Sampler;
+      begin
+         for Sample in 1 .. Consensus_Samples (Minimal, 0.5) loop
+            declare
+               Index  : Count_Array (1 .. Minimal);
+               Use_It : Flag_Array (Points'Range) := [others => False];
+               Hs     : Mat3;
+            begin
+               Pick (Sm, N, Index);
+               for K of Index loop
+                  Use_It (Points'First + K - 1) := True;
+               end loop;
+               Hs := Linear_Homography (Points, Use_It);
+               for I in 1 .. N loop
+                  Lengths (I) := Residual_Length (Hs, Points (Points'First + I - 1));
+               end loop;
+               declare
+                  Median : constant Real := Driver.Stats.Median (Lengths.all);
+               begin
+                  if Median < Best then
+                     Best := Median;
+                     H := Hs;
+                  end if;
+               end;
+            end;
+         end loop;
+         Free (Lengths);
+      end;
+      if Best = 0.0 or else Best = Real'Last then
+         return;
+      end if;
+      --  From the consensus: the points within Z of its noise, the homography
+      --  by robust least squares on them, the choice renewed at the noise of
+      --  the points that fit until it settles.
+      Sigma := Best / Rayleigh_Median;
+      declare
+         X       : Real_Array (1 .. 8) := Entries_Of (H);
          Changed : Natural := Natural'Last;
-
-         function Lens_Of (Xv : Real_Array) return Lens is
-           ((Fx => Exp (Xv (7)), Fy => Exp (Xv (8)), Cx => Xv (9), Cy => Xv (10), K1 => Xv (11), K2 => Xv (12)));
-
-         function Pose_Of (Xv : Real_Array) return Rigid is
-           ((Rotation => Driver.Numerics.Exp ([Xv (1), Xv (2), Xv (3)]) * Base_R, Translation => [Xv (4), Xv (5), Xv (6)]));
-
-         procedure Residual (Xv : Real_Array; I : Positive; Du, Dv : out Real) is
-            Lx : constant Lens := Lens_Of (Xv);
-            U, V : Real;
-            Ahead : Boolean;
-         begin
-            Project (Lx, Pose_Of (Xv) * Pt (I).X, U, V, Ahead);
-            Du := U - Pt (I).U;
-            Dv := V - Pt (I).V;
-         end Residual;
+         Used    : Natural;
       begin
          loop
             declare
-               All_R : Real_Access := new Real_Array (1 .. 2 * N);
-               Used  : Natural := 0;
+               Hx          : constant Mat3 := Homography_Of (X);
                Now_Changed : Natural := 0;
-               S     : Real;
             begin
-               for I in 1 .. N loop
-                  Residual (X, I, All_R (2 * I - 1), All_R (2 * I));
-               end loop;
-               S := Noise_Of (All_R.all);
-               for I in 1 .. N loop
+               Used := 0;
+               for I in Points'Range loop
                   declare
-                     Fits : constant Boolean := S > 0.0
-                       and then not Driver.Uncertain.Significant (All_R (2 * I - 1), S)
-                       and then not Driver.Uncertain.Significant (All_R (2 * I), S);
+                     U, V  : Real;
+                     Ahead : Boolean;
+                     Fit   : Boolean;
                   begin
-                     if Fits /= Inlier (I) then
+                     Apply (Hx, Points (I).X, Points (I).Y, U, V, Ahead);
+                     Fit := Ahead and then not Driver.Uncertain.Significant (U - Points (I).U, Sigma)
+                       and then not Driver.Uncertain.Significant (V - Points (I).V, Sigma);
+                     if Fit /= Fits (I) then
                         Now_Changed := Now_Changed + 1;
-                        Inlier (I) := Fits;
+                        Fits (I) := Fit;
                      end if;
-                     if Fits then
+                     if Fit then
                         Used := Used + 1;
                      end if;
                   end;
                end loop;
-               Sigma := S;
-               Free (All_R);
-               exit when Used < 7 or else Now_Changed >= Changed or else (Now_Changed = 0 and then Changed /= Natural'Last);
+               exit when Used <= Minimal or else Now_Changed = 0 or else Now_Changed >= Changed;
                Changed := Now_Changed;
-               declare
-                  Index : Count_Access := new Count_Array (1 .. Used);
-                  K     : Natural := 0;
-
-                  procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
-                  begin
-                     for J in 1 .. Used loop
-                        Residual (Xv, Index (J), R (R'First + 2 * J - 2), R (R'First + 2 * J - 1));
-                     end loop;
-                  end Evaluate;
-
-                  procedure Solve is new Robust_Fit (12, 2 * Used, Evaluate);
-               begin
-                  for I in 1 .. N loop
-                     if Inlier (I) then
-                        K := K + 1;
-                        Index (K) := I;
-                     end if;
-                  end loop;
-                  Solve (X, S);
-                  Free (Index);
-                  Base_R := Pose_Of (X).Rotation;
-                  X (1 .. 3) := [0.0, 0.0, 0.0];
-               end;
+               Refine_Homography (Points, Fits, X, Sigma);
+               exit when Sigma <= 0.0;
             end;
          end loop;
-         Pose := Pose_Of (X);
-         L := Lens_Of (X);
-         Found := Sigma < Real'Last and then L.Fx > 0.0 and then L.Fy > 0.0;
+         H := Homography_Of (X);
+         Found := Used > Minimal and then Sigma > 0.0 and then Sigma < Real'Last;
       end;
-      Free (Inlier);
-      Free (Weight);
-   end Resect;
+   end Plane_Homography;
+
+   ---------------------------------------------------------------------------
+   --  The joint fit of a link
+
+   function Lens_Terms_Of (L : Lens) return Real_Array is ([Ln (L.Fx), Ln (L.Fy), L.Cx, L.Cy, L.K1, L.K2]);
+
+   function Lens_Of_Terms (T : Real_Array) return Lens is
+     ((Fx => Exp (T (T'First)), Fy => Exp (T (T'First + 1)), Cx => T (T'First + 2), Cy => T (T'First + 3),
+       K1 => T (T'First + 4), K2 => T (T'First + 5)));
+
+   --  A whitening of a covariance C: W with W C W^T the identity (W = L^-1
+   --  for C = L L^T), so that |W d| is the change d in standard deviations.
+   --  The diagonal is first raised by the float's resolution of its largest
+   --  entry, so that a term known exactly is held, not lost. All zero when C
+   --  is no covariance: then nothing is held.
+   function Whitening (C : Real_Matrix) return Real_Matrix is
+      N   : constant Natural := C'Length (1);
+      Cf  : Real_Matrix (1 .. N, 1 .. N);
+      Lf  : Real_Matrix (1 .. N, 1 .. N);
+      W   : Real_Matrix (1 .. N, 1 .. N) := [others => [others => 0.0]];
+      Top : Real := 0.0;
+      Pd  : Boolean;
+   begin
+      for P in 1 .. N loop
+         for Q in 1 .. N loop
+            Cf (P, Q) := C (C'First (1) + P - 1, C'First (2) + Q - 1);
+         end loop;
+         Top := Real'Max (Top, abs Cf (P, P));
+      end loop;
+      for P in 1 .. N loop
+         Cf (P, P) := Cf (P, P) + Real'Model_Epsilon * Real'Max (Top, Real'Model_Small);
+      end loop;
+      Driver.Numerics.Dense.Cholesky (Cf, Lf, Pd);
+      if not Pd then
+         return W;
+      end if;
+      --  L^-1 column by column, by forward substitution.
+      for K in 1 .. N loop
+         declare
+            Z : Real_Vector (1 .. N) := [others => 0.0];
+         begin
+            for R in 1 .. N loop
+               declare
+                  S : Real := (if R = K then 1.0 else 0.0);
+               begin
+                  for Q in 1 .. R - 1 loop
+                     S := S - Lf (R, Q) * Z (Q);
+                  end loop;
+                  Z (R) := S / Lf (R, R);
+               end;
+            end loop;
+            for R in 1 .. N loop
+               W (R, K) := Z (R);
+            end loop;
+         end;
+      end loop;
+      return W;
+   end Whitening;
+
+   type Vec3_Array is array (Positive range <>) of Vec3;
+
+   --  One side as the joint fit uses it: its tracks and kept answers, its
+   --  estimates (lens terms, plane) and how they are held.
+   type Side_Data (Tracks, Answers : Natural) is record
+      U0, V0, Depth, Sigma : Real_Array (1 .. Tracks);
+      Track      : Count_Array (1 .. Answers);   --  per answer, its track
+      U, V       : Real_Array (1 .. Answers);
+      Terms0     : Real_Array (1 .. Lens_Terms);
+      W_Lens     : Real_Matrix (1 .. Lens_Terms, 1 .. Lens_Terms);
+      Plane0     : Sight_Plane;                  --  through the tracks, at the estimated lens
+      W_Plane    : Mat3;
+      E1_0, E2_0 : Vec3;                         --  its axes at the estimates
+      Rays       : Vec3_Array (1 .. Tracks);     --  work: the tracks' lines of sight
+      Sights     : Sight_Point_Array (1 .. Tracks);
+      All_On     : Flag_Array (1 .. Tracks);
+   end record;
+
+   type Side_Access is access Side_Data;
+   procedure Free is new Ada.Unchecked_Deallocation (Side_Data, Side_Access);
+
+   function Prepare (S : Chain_Side) return Side_Access is
+      D : constant Side_Access :=
+        new Side_Data (Tracks => Natural (S.Tracks.Length), Answers => Natural (S.Answers.Length));
+      Normal : Vec3;
+   begin
+      for T in 1 .. D.Tracks loop
+         declare
+            Tr : constant Table_Track := S.Tracks (S.Tracks.First_Index + T - 1);
+         begin
+            D.U0 (T) := Tr.U0;
+            D.V0 (T) := Tr.V0;
+            D.Depth (T) := Tr.Depth;
+            D.Sigma (T) := Tr.Sigma;
+         end;
+      end loop;
+      D.All_On := [others => True];
+      for A in 1 .. D.Answers loop
+         declare
+            An : constant Eye_Answer := S.Answers (S.Answers.First_Index + A - 1);
+         begin
+            D.Track (A) := An.Track;
+            D.U (A) := An.U;
+            D.V (A) := An.V;
+         end;
+      end loop;
+      D.Terms0 := Lens_Terms_Of (S.L);
+      declare
+         C : Real_Matrix (1 .. Lens_Terms, 1 .. Lens_Terms) := [others => [others => 0.0]];
+      begin
+         if Natural (S.Lens_Covariance.Length) = Lens_Terms * Lens_Terms then
+            for P in 1 .. Lens_Terms loop
+               for Q in 1 .. Lens_Terms loop
+                  C (P, Q) := S.Lens_Covariance (S.Lens_Covariance.First_Index + (P - 1) * Lens_Terms + Q - 1);
+               end loop;
+            end loop;
+         end if;
+         D.W_Lens := Whitening (C);
+      end;
+      D.Plane0 := Side_Plane (S, S.L);
+      D.W_Plane := Whitening (S.Plane_Covariance);
+      Plane_Axes (D.Plane0, Normal, D.E1_0, D.E2_0);
+      return D;
+   end Prepare;
+
+   function Side_Plane (S : Chain_Side; L : Lens) return Sight_Plane is
+      N      : constant Natural := Natural (S.Tracks.Length);
+      Sights : Sight_Point_Array (1 .. N);
+      On     : constant Flag_Array (1 .. N) := [others => True];
+      P      : Sight_Plane;
+   begin
+      for T in 1 .. N loop
+         declare
+            Tr : constant Table_Track := S.Tracks (S.Tracks.First_Index + T - 1);
+         begin
+            Sights (T) := (H => Ray (L, Tr.U0, Tr.V0), Depth => Tr.Depth, Sigma => Tr.Sigma);
+         end;
+      end loop;
+      Refit_Plane (Sights, On, P);
+      return P;
+   end Side_Plane;
+
+   --  The side's plane and axes with its lens terms T and its plane moved by
+   --  Move: the tracks' lines of sight through that lens (D.Rays), the plane
+   --  through them with their depths held, moved; its axes those at the
+   --  estimates turned onto it.
+   procedure Side_State (D : in out Side_Data; T : Real_Array; Move : Vec3; P : out Sight_Plane; E1, E2 : out Vec3) is
+      L : constant Lens := Lens_Of_Terms (T);
+   begin
+      for K in 1 .. D.Tracks loop
+         D.Rays (K) := Ray (L, D.U0 (K), D.V0 (K));
+         D.Sights (K) := (H => D.Rays (K), Depth => D.Depth (K), Sigma => D.Sigma (K));
+      end loop;
+      Refit_Plane (D.Sights, D.All_On, P);
+      P.A := P.A + Move;
+      declare
+         N    : constant Vec3 := Plane_Normal (P);
+         Flat : constant Vec3 := D.E1_0 - Real'(D.E1_0 * N) * N;
+      begin
+         E1 := (if abs Flat > 0.0 then Unit (Flat) else D.E1_0);
+         E2 := Cross (N, E1);
+      end;
+   end Side_State;
+
+   --  Where the line of sight H meets plane P, along the axes E1, E2.
+   procedure Coordinates (P : Sight_Plane; E1, E2 : Vec3; H : Vec3; X, Y : out Real) is
+      Q : constant Vec3 := On_Plane (P, H);
+   begin
+      X := Q * E1;
+      Y := Q * E2;
+   end Coordinates;
+
+   --  The positions of the joint parameters.
+   S_First    : constant := 9;                          --  log scale, turn, two shifts
+   Side_First : constant array (1 .. 2) of Positive := [S_First + Similarity_Terms,
+                                                        S_First + Similarity_Terms + Side_Terms];
+
+   function Terms_Of (Xv : Real_Array; Side : Positive) return Real_Array is
+     (Xv (Xv'First + Side_First (Side) - 1 .. Xv'First + Side_First (Side) + Lens_Terms - 2));
+
+   function Move_Of (Xv : Real_Array; Side : Positive) return Vec3 is
+     ([Xv (Xv'First + Side_First (Side) + Lens_Terms - 1), Xv (Xv'First + Side_First (Side) + Lens_Terms),
+       Xv (Xv'First + Side_First (Side) + Lens_Terms + 1)]);
+
+   --  The similarity of the joint parameters applied to (X, Y).
+   procedure Similar (Xv : Real_Array; X, Y : in out Real) is
+      Sc : constant Real := Exp (Xv (Xv'First + S_First - 1));
+      Th : constant Real := Xv (Xv'First + S_First);
+      Px : constant Real := X;
+   begin
+      X := Sc * (Cos (Th) * Px - Sin (Th) * Y) + Xv (Xv'First + S_First + 1);
+      Y := Sc * (Sin (Th) * Px + Cos (Th) * Y) + Xv (Xv'First + S_First + 2);
+   end Similar;
+
+   --  The similarity's inverse applied to (X, Y): the first plane's
+   --  coordinates to the second's.
+   procedure Unsimilar (Xv : Real_Array; X, Y : in out Real) is
+      Sc : constant Real := Exp (Xv (Xv'First + S_First - 1));
+      Th : constant Real := Xv (Xv'First + S_First);
+      Dx : constant Real := X - Xv (Xv'First + S_First + 1);
+      Dy : constant Real := Y - Xv (Xv'First + S_First + 2);
+   begin
+      X := (Cos (Th) * Dx + Sin (Th) * Dy) / Sc;
+      Y := (-Sin (Th) * Dx + Cos (Th) * Dy) / Sc;
+   end Unsimilar;
+
+   --  Every residual of the joint fit at Xv, each in units of its own noise:
+   --  the first side's kept answers (across and down), then the second's
+   --  unless Second_Eye, then how far each side's lens and plane moved, in
+   --  standard deviations. With Second_Eye the first side's answers are where
+   --  the second side's own eye sees its points: through the similarity back
+   --  onto the second plane, then through the second lens; otherwise the
+   --  first plane's homography takes each side's coordinates (the second's
+   --  through the similarity) into the eye.
+   procedure Chain_Residuals
+     (D1, D2           : in out Side_Data;
+      Kept1, Kept2     : Flag_Array;
+      Second_Eye       : Boolean;
+      Sigma_1, Sigma_2 : Real;
+      Xv               : Real_Array;
+      R                : out Real_Array)
+   is
+      H  : constant Mat3 := Homography_Of (Xv (Xv'First .. Xv'First + 7));
+      K  : Natural := R'First - 1;
+      P1, P2 : Sight_Plane;
+      A1, B1, A2, B2 : Vec3;
+
+      procedure Put (U, V : Real; Ahead : Boolean; Obs_U, Obs_V, Sigma : Real) is
+      begin
+         R (K + 1) := (if Ahead then (U - Obs_U) / Sigma else Real'Last);
+         R (K + 2) := (if Ahead then (V - Obs_V) / Sigma else Real'Last);
+         K := K + 2;
+      end Put;
+
+      procedure Hold (D : Side_Data; Which : Positive) is
+         Dt : Real_Vector (1 .. Lens_Terms);
+         T  : constant Real_Array := Terms_Of (Xv, Which);
+         Wl : Real_Vector (1 .. Lens_Terms);
+         Wp : Vec3;
+      begin
+         for P in 1 .. Lens_Terms loop
+            Dt (P) := T (T'First + P - 1) - D.Terms0 (P);
+         end loop;
+         Wl := D.W_Lens * Dt;
+         Wp := D.W_Plane * Move_Of (Xv, Which);
+         for P in 1 .. Lens_Terms loop
+            R (K + P) := Wl (P);
+         end loop;
+         for P in 1 .. 3 loop
+            R (K + Lens_Terms + P) := Wp (P);
+         end loop;
+         K := K + Side_Terms;
+      end Hold;
+   begin
+      Side_State (D1, Terms_Of (Xv, 1), Move_Of (Xv, 1), P1, A1, B1);
+      Side_State (D2, Terms_Of (Xv, 2), Move_Of (Xv, 2), P2, A2, B2);
+      for A in 1 .. D1.Answers loop
+         if Kept1 (A) then
+            declare
+               X, Y, U, V : Real;
+               Ahead : Boolean;
+            begin
+               Coordinates (P1, A1, B1, D1.Rays (D1.Track (A)), X, Y);
+               if Second_Eye then
+                  Unsimilar (Xv, X, Y);
+                  Project (Lens_Of_Terms (Terms_Of (Xv, 2)),
+                           X * A2 + Y * B2 + Plane_Offset (P2) * Plane_Normal (P2), U, V, Ahead);
+               else
+                  Apply (H, X, Y, U, V, Ahead);
+               end if;
+               Put (U, V, Ahead, D1.U (A), D1.V (A), Sigma_1);
+            end;
+         end if;
+      end loop;
+      if not Second_Eye then
+         for A in 1 .. D2.Answers loop
+            if Kept2 (A) then
+               declare
+                  X, Y, U, V : Real;
+                  Ahead : Boolean;
+               begin
+                  Coordinates (P2, A2, B2, D2.Rays (D2.Track (A)), X, Y);
+                  Similar (Xv, X, Y);
+                  Apply (H, X, Y, U, V, Ahead);
+                  Put (U, V, Ahead, D2.U (A), D2.V (A), Sigma_2);
+               end;
+            end if;
+         end loop;
+      end if;
+      Hold (D1, 1);
+      Hold (D2, 2);
+   end Chain_Residuals;
+
+   --  The similarity nearest a map of the plane (Umeyama's closed form in two
+   --  dimensions) from its point pairs: To = Scale Rot (Turn) From + Shift.
+   procedure Similarity_2D
+     (From_X, From_Y, To_X, To_Y : Real_Array;
+      Scale, Turn, Shift_X, Shift_Y : out Real;
+      Found : out Boolean)
+     with Pre => From_Y'Length = From_X'Length and then To_X'Length = From_X'Length
+                 and then To_Y'Length = From_X'Length
+   is
+      N : constant Natural := From_X'Length;
+      Mx, My, Nx, Ny, A, B, Q : Real := 0.0;
+   begin
+      Scale := 1.0;
+      Turn := 0.0;
+      Shift_X := 0.0;
+      Shift_Y := 0.0;
+      Found := False;
+      if N < 2 then
+         return;
+      end if;
+      for I in 0 .. N - 1 loop
+         Mx := Mx + From_X (From_X'First + I);
+         My := My + From_Y (From_Y'First + I);
+         Nx := Nx + To_X (To_X'First + I);
+         Ny := Ny + To_Y (To_Y'First + I);
+      end loop;
+      Mx := Mx / Real (N);
+      My := My / Real (N);
+      Nx := Nx / Real (N);
+      Ny := Ny / Real (N);
+      for I in 0 .. N - 1 loop
+         declare
+            Fx : constant Real := From_X (From_X'First + I) - Mx;
+            Fy : constant Real := From_Y (From_Y'First + I) - My;
+            Gx : constant Real := To_X (To_X'First + I) - Nx;
+            Gy : constant Real := To_Y (To_Y'First + I) - Ny;
+         begin
+            A := A + Fx * Gx + Fy * Gy;
+            B := B + Fx * Gy - Fy * Gx;
+            Q := Q + Fx ** 2 + Fy ** 2;
+         end;
+      end loop;
+      if Q <= 0.0 or else (A = 0.0 and then B = 0.0) then
+         return;
+      end if;
+      Scale := Sqrt (A * A + B * B) / Q;
+      Turn := Arctan (B, A);
+      Shift_X := Nx - Scale * (Cos (Turn) * Mx - Sin (Turn) * My);
+      Shift_Y := Ny - Scale * (Sin (Turn) * Mx + Cos (Turn) * My);
+      Found := True;
+   end Similarity_2D;
+
+   procedure Plane_Chain (First, Second : Chain_Side; Second_Eye : Boolean; Link : out Plane_Link) is
+      D1 : Side_Access := Prepare (First);
+      D2 : Side_Access := Prepare (Second);
+      C1 : Plane_Point_Array (1 .. D1.Answers);
+      C2 : Plane_Point_Array (1 .. D2.Answers);
+      H1, H2 : Mat3 := Identity3;
+      F1 : Flag_Array (1 .. D1.Answers) := [others => False];
+      F2 : Flag_Array (1 .. D2.Answers) := [others => False];
+      S1, S2 : Real := Real'Last;
+      Ok1, Ok2 : Boolean := False;
+      Kept1, Kept2 : Natural := 0;
+      --  The free terms of what each side's answers are tested against: a
+      --  homography each.
+      Apart_Terms : constant Positive := (if Second_Eye then 8 else 16);
+      Free_First  : constant Positive := (if Second_Eye then S_First else 1);
+      P0_1, P0_2  : Sight_Plane;
+      A1, B1, A2, B2 : Vec3;
+
+      procedure Release is
+      begin
+         Free (D1);
+         Free (D2);
+      end Release;
+   begin
+      Link := (others => <>);
+      if not (D1.Plane0.Found and then D2.Plane0.Found) then
+         Release;
+         return;
+      end if;
+      --  Each side's coordinates at its estimates, and the homography of each
+      --  side that has answers.
+      Side_State (D1.all, D1.Terms0, [0.0, 0.0, 0.0], P0_1, A1, B1);
+      Side_State (D2.all, D2.Terms0, [0.0, 0.0, 0.0], P0_2, A2, B2);
+      for A in 1 .. D1.Answers loop
+         Coordinates (P0_1, A1, B1, D1.Rays (D1.Track (A)), C1 (A).X, C1 (A).Y);
+         C1 (A).U := D1.U (A);
+         C1 (A).V := D1.V (A);
+      end loop;
+      for A in 1 .. D2.Answers loop
+         Coordinates (P0_2, A2, B2, D2.Rays (D2.Track (A)), C2 (A).X, C2 (A).Y);
+         C2 (A).U := D2.U (A);
+         C2 (A).V := D2.V (A);
+      end loop;
+      Plane_Homography (C1, H1, F1, S1, Ok1);
+      if not Second_Eye then
+         Plane_Homography (C2, H2, F2, S2, Ok2);
+      end if;
+      if not Ok1 or else (not Second_Eye and then not Ok2) then
+         Release;
+         return;
+      end if;
+      for A in 1 .. D1.Answers loop
+         Link.First_Fits.Append (F1 (A));
+         if F1 (A) then
+            Kept1 := Kept1 + 1;
+         end if;
+      end loop;
+      for A in 1 .. D2.Answers loop
+         Link.Second_Fits.Append (F2 (A));
+         if F2 (A) then
+            Kept2 := Kept2 + 1;
+         end if;
+      end loop;
+      Link.Used := Kept1 + Kept2;
+      if 2 * Link.Used <= Apart_Terms then
+         Release;
+         return;
+      end if;
+      --  Each side's own noise, the homography's residuals over its kept
+      --  answers at its degrees of freedom.
+      declare
+         function Noise (C : Plane_Point_Array; F : Flag_Array; H : Mat3; Kept : Natural) return Real is
+            Sum : Real := 0.0;
+         begin
+            for A in C'Range loop
+               if F (A) then
+                  Sum := Sum + Residual_Length (H, C (A)) ** 2;
+               end if;
+            end loop;
+            return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);
+         end Noise;
+      begin
+         S1 := Noise (C1, F1, H1, Kept1);
+         S2 := (if Second_Eye then 1.0 else Noise (C2, F2, H2, Kept2));
+      end;
+      if S1 = Real'Last or else S2 = Real'Last then
+         Release;
+         return;
+      end if;
+      Link.Sigma := (if Second_Eye then S1 else Sqrt ((S1 ** 2 * Real (2 * Kept1 - 8) + S2 ** 2 * Real (2 * Kept2 - 8))
+                                                       / Real (2 * Link.Used - 16)));
+      declare
+         X     : Real_Array (1 .. Chain_Terms) := [others => 0.0];
+         Rows  : constant Positive := 2 * Link.Used + 2 * Side_Terms;
+         Terms : constant Positive := Chain_Terms - Free_First + 1;
+         Scale, Turn, Shift_X, Shift_Y : Real;
+         Started : Boolean;
+      begin
+         --  The start: pairs of each answer's coordinates on the second plane
+         --  and on the first, and the similarity nearest them. Through the
+         --  eye's two homographies for the second side's answers; through the
+         --  second lens back onto the second plane for the first side's in
+         --  the second side's own eye.
+         declare
+            Pairs : constant Natural := (if Second_Eye then Kept1 else Kept2);
+            Fx, Fy, Tx, Ty : Real_Array (1 .. Natural'Max (1, Pairs)) := [others => 0.0];
+            K : Natural := 0;
+         begin
+            if Second_Eye then
+               for A in C1'Range loop
+                  if F1 (A) then
+                     declare
+                        Q : constant Vec3 := On_Plane (P0_2, Ray (Second.L, C1 (A).U, C1 (A).V));
+                     begin
+                        K := K + 1;
+                        Fx (K) := Q * A2;
+                        Fy (K) := Q * B2;
+                        Tx (K) := C1 (A).X;
+                        Ty (K) := C1 (A).Y;
+                     end;
+                  end if;
+               end loop;
+            else
+               declare
+                  G : constant Mat3 := Inverse (H1) * H2;
+                  Ahead : Boolean;
+               begin
+                  for A in C2'Range loop
+                     if F2 (A) then
+                        K := K + 1;
+                        Fx (K) := C2 (A).X;
+                        Fy (K) := C2 (A).Y;
+                        Apply (G, C2 (A).X, C2 (A).Y, Tx (K), Ty (K), Ahead);
+                     end if;
+                  end loop;
+               end;
+            end if;
+            Similarity_2D (Fx (1 .. K), Fy (1 .. K), Tx (1 .. K), Ty (1 .. K), Scale, Turn, Shift_X, Shift_Y, Started);
+         end;
+         if not Started then
+            Release;
+            return;
+         end if;
+         X (1 .. 8) := Entries_Of (H1);
+         X (S_First .. S_First + 3) := [Ln (Scale), Turn, Shift_X, Shift_Y];
+         X (Side_First (1) .. Side_First (1) + Lens_Terms - 1) := D1.Terms0;
+         X (Side_First (2) .. Side_First (2) + Lens_Terms - 1) := D2.Terms0;
+         --  Everything at once: the terms from Free_First on (the homography's
+         --  too when an eye of unknown lens is the link).
+         declare
+            procedure Evaluate (Xf : Real_Array; R : out Real_Array) is
+               Xv : Real_Array := X;
+            begin
+               Xv (Free_First .. Chain_Terms) := Xf;
+               Chain_Residuals (D1.all, D2.all, F1, F2, Second_Eye, S1, S2, Xv, R);
+            end Evaluate;
+
+            procedure Solve is new Robust_Fit (Terms, Rows, Evaluate);
+            Xf  : Real_Array (1 .. Terms) := X (Free_First .. Chain_Terms);
+            R   : Real_Access := new Real_Array (1 .. Rows);
+            Cost, Rss : Real := 0.0;
+         begin
+            Solve (Xf, 1.0);
+            X (Free_First .. Chain_Terms) := Xf;
+            Evaluate (Xf, R.all);
+            for I in 1 .. Rows loop
+               Cost := Cost + R (I) ** 2;
+               if I <= 2 * Link.Used then
+                  Rss := Rss + R (I) ** 2;
+               end if;
+            end loop;
+            if Cost < Real'Last then
+               --  The joint fit's own noise, in the units of the first side.
+               Link.Joint := S1 * Sqrt (Rss / Real (2 * Link.Used - (Apart_Terms - 4)));
+               --  The four constraints the link adds to a free homography of
+               --  each side that has answers, by the extra sum of squares
+               --  (with what the holds cost), every residual in units of its
+               --  side's own noise.
+               Link.F := (Cost - Real (2 * Link.Used - Apart_Terms)) / 4.0;
+               Link.Consistent := Link.F <= 0.0
+                 or else Driver.Distributions.F_Upper_Tail (Link.F, 4, 2 * Link.Used - Apart_Terms)
+                         >= Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+               for V of X loop
+                  Link.X.Append (V);
+               end loop;
+               --  The sandwich: the inverse information around the spread of
+               --  every answer's share of the gradient, with the holds' own
+               --  information (their estimates' uncertainty).
+               declare
+                  J  : Grid_Access := new Real_Matrix (1 .. Rows, 1 .. Terms);
+                  Rn : Real_Access := new Real_Array (1 .. Rows);
+                  A, Bm, Prior : Grid_Access := new Real_Matrix'[1 .. Terms => [1 .. Terms => 0.0]];
+               begin
+                  for P in 1 .. Terms loop
+                     declare
+                        Xp : Real_Array := Xf;
+                        Hd : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Xf (P));
+                     begin
+                        Xp (P) := Xp (P) + Hd;
+                        Evaluate (Xp, Rn.all);
+                        for I in 1 .. Rows loop
+                           J (I, P) := (Rn (I) - R (I)) / Hd;
+                        end loop;
+                     end;
+                  end loop;
+                  for Answer in 1 .. Link.Used loop
+                     declare
+                        G : Real_Vector (1 .. Terms) := [others => 0.0];
+                     begin
+                        for I in 2 * Answer - 1 .. 2 * Answer loop
+                           declare
+                              W : constant Real := Huber (R (I));
+                           begin
+                              for P in 1 .. Terms loop
+                                 if J (I, P) /= 0.0 then
+                                    G (P) := G (P) + W * R (I) * J (I, P);
+                                    for Q in 1 .. Terms loop
+                                       A (P, Q) := A (P, Q) + W * J (I, P) * J (I, Q);
+                                    end loop;
+                                 end if;
+                              end loop;
+                           end;
+                        end loop;
+                        for P in 1 .. Terms loop
+                           for Q in 1 .. Terms loop
+                              Bm (P, Q) := Bm (P, Q) + G (P) * G (Q);
+                           end loop;
+                        end loop;
+                     end;
+                  end loop;
+                  for I in 2 * Link.Used + 1 .. Rows loop
+                     for P in 1 .. Terms loop
+                        if J (I, P) /= 0.0 then
+                           for Q in 1 .. Terms loop
+                              Prior (P, Q) := Prior (P, Q) + J (I, P) * J (I, Q);
+                           end loop;
+                        end if;
+                     end loop;
+                  end loop;
+                  declare
+                     Total : constant Real_Matrix := A.all + Prior.all;
+                     Lf    : Real_Matrix (1 .. Terms, 1 .. Terms);
+                     Pd    : Boolean;
+                  begin
+                     Driver.Numerics.Dense.Cholesky (Total, Lf, Pd);
+                     if Pd then
+                        declare
+                           Inv   : Grid_Access := new Real_Matrix (1 .. Terms, 1 .. Terms);
+                           Small : constant Real := Real (Link.Used) / Real (Link.Used - 1);
+                        begin
+                           for P in 1 .. Terms loop
+                              declare
+                                 E : Real_Vector (1 .. Terms) := [others => 0.0];
+                              begin
+                                 E (P) := 1.0;
+                                 declare
+                                    Column : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, E);
+                                 begin
+                                    for Q in 1 .. Terms loop
+                                       Inv (Q, P) := Column (Q);
+                                    end loop;
+                                 end;
+                              end;
+                           end loop;
+                           declare
+                              V : constant Real_Matrix := Inv.all * (Small * Bm.all + Prior.all) * Inv.all;
+                              Offset : constant Natural := S_First - Free_First;
+                           begin
+                              for P in 1 .. Link_Terms loop
+                                 for Q in 1 .. Link_Terms loop
+                                    Link.Covariance.Append (V (Offset + P, Offset + Q));
+                                 end loop;
+                              end loop;
+                           end;
+                           Free (Inv);
+                           Link.Found := True;
+                        end;
+                     end if;
+                  end;
+                  Free (J);
+                  Free (Rn);
+                  Free (A);
+                  Free (Bm);
+                  Free (Prior);
+               end;
+            end if;
+            Free (R);
+         end;
+      end;
+      Release;
+   end Plane_Chain;
+
+   procedure Chain_Placement
+     (First, Second : Chain_Side;
+      Link          : Plane_Link;
+      Placement     : out Rigid;
+      Scale         : out Real;
+      Covariance    : out Real_Lists.Vector)
+   is
+      D1 : Side_Access := Prepare (First);
+      D2 : Side_Access := Prepare (Second);
+      X  : Real_Array (1 .. Chain_Terms);
+
+      procedure Place_At (Xv : Real_Array; P : out Rigid; S : out Real) is
+         P1, P2 : Sight_Plane;
+         A1, B1, A2, B2 : Vec3;
+      begin
+         Side_State (D1.all, Terms_Of (Xv, 1), Move_Of (Xv, 1), P1, A1, B1);
+         Side_State (D2.all, Terms_Of (Xv, 2), Move_Of (Xv, 2), P2, A2, B2);
+         declare
+            N1 : constant Vec3 := Plane_Normal (P1);
+            N2 : constant Vec3 := Plane_Normal (P2);
+            Th : constant Real := Xv (S_First + 1);
+            Rz : constant Mat3 := [[Cos (Th), -Sin (Th), 0.0], [Sin (Th), Cos (Th), 0.0], [0.0, 0.0, 1.0]];
+            Ba : constant Mat3 := [[A1 (1), B1 (1), N1 (1)], [A1 (2), B1 (2), N1 (2)], [A1 (3), B1 (3), N1 (3)]];
+            Bb : constant Mat3 := [[A2 (1), B2 (1), N2 (1)], [A2 (2), B2 (2), N2 (2)], [A2 (3), B2 (3), N2 (3)]];
+         begin
+            S := Exp (Xv (S_First));
+            P := (Rotation    => Ba * Rz * Transpose (Bb),
+                  Translation => Xv (S_First + 2) * A1 + Xv (S_First + 3) * B1
+                                 + (Plane_Offset (P1) - S * Plane_Offset (P2)) * N1);
+         end;
+      end Place_At;
+
+      --  The turn (first frame), the centre and the log scale of B against A.
+      function Change (A, B : Rigid; Scale_A, Scale_B : Real) return Real_Vector is
+         Turn  : constant Vec3 := Driver.Numerics.Log (B.Rotation * Transpose (A.Rotation));
+         Shift : constant Vec3 := B.Translation - A.Translation;
+      begin
+         return [Turn (1), Turn (2), Turn (3), Shift (1), Shift (2), Shift (3), Ln (Scale_B / Scale_A)];
+      end Change;
+
+      Outputs : constant := 7;
+      J : Real_Matrix (1 .. Outputs, 1 .. Link_Terms) := [others => [others => 0.0]];
+      V : Real_Matrix (1 .. Link_Terms, 1 .. Link_Terms);
+   begin
+      for P in 1 .. Chain_Terms loop
+         X (P) := Link.X (Link.X.First_Index + P - 1);
+      end loop;
+      Place_At (X, Placement, Scale);
+      Covariance.Clear;
+      if Natural (Link.Covariance.Length) = Link_Terms * Link_Terms then
+         for P in 1 .. Link_Terms loop
+            for Q in 1 .. Link_Terms loop
+               V (P, Q) := Link.Covariance (Link.Covariance.First_Index + (P - 1) * Link_Terms + Q - 1);
+            end loop;
+         end loop;
+         --  Each term moved by its standard deviation either way.
+         for P in 1 .. Link_Terms loop
+            if V (P, P) > 0.0 then
+               declare
+                  Step : constant Real := Sqrt (V (P, P));
+                  Ends : array (1 .. 2) of Real_Vector (1 .. Outputs);
+               begin
+                  for E in 1 .. 2 loop
+                     declare
+                        Xv : Real_Array := X;
+                        Pv : Rigid;
+                        Sv : Real;
+                     begin
+                        Xv (S_First + P - 1) := X (S_First + P - 1) + (if E = 1 then -Step else Step);
+                        Place_At (Xv, Pv, Sv);
+                        Ends (E) := Change (Placement, Pv, Scale, Sv);
+                     end;
+                  end loop;
+                  for O in 1 .. Outputs loop
+                     J (O, P) := (Ends (2) (O) - Ends (1) (O)) / (2.0 * Step);
+                  end loop;
+               end;
+            end if;
+         end loop;
+         declare
+            C : constant Real_Matrix := J * V * Transpose (J);
+         begin
+            for P in 1 .. Outputs loop
+               for Q in 1 .. Outputs loop
+                  Covariance.Append (C (P, Q));
+               end loop;
+            end loop;
+         end;
+      end if;
+      Free (D1);
+      Free (D2);
+   end Chain_Placement;
 
 end Driver.Robot.Kinematics.Fit;

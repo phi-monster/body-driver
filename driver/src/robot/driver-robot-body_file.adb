@@ -207,7 +207,8 @@ package body Driver.Robot.Body_File is
                  & ", ""centre"": " & Three (F.Placement.Translation)
                  & ", ""scale"": " & Num (F.Scale) & ", ""scale_sigma"": " & Num (F.Scale_Sigma)
                  & ", ""covariance"": " & Reals (F.Placement_Covariance)
-                 & ", ""px"": " & Num (F.Placed_Px) & ", ""points"": " & Int (F.Placed_Points) & "}}");
+                 & ", ""px"": " & Num (F.Placed_Px) & ", ""points"": " & Int (F.Placed_Points)
+                 & ", ""through"": " & Int (F.Placed_Through) & "}}");
          end;
       end loop;
       Add ("]}}" & LF);
@@ -565,6 +566,7 @@ package body Driver.Robot.Body_File is
                         R.Result.Placement_Covariance := Reals_Of (Field (P, "covariance"));
                         R.Result.Placed_Px := Value (Field (P, "px"));
                         R.Result.Placed_Points := Natural'Max (0, Whole (P, "points"));
+                        R.Result.Placed_Through := Natural'Max (0, Whole (P, "through"));
                      end;
                      M.Kinematics.Append (R);
                   end;

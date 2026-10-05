@@ -1,3 +1,4 @@
+with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -140,13 +141,17 @@ package body Driver.Robot.Stillness is
 
    function Eye_Still (M : Model; E : Eye_Id) return Boolean is (M.Eyes (E).Is_Still);
 
-   function Mean_Change (A, B : Real_Array) return Real
-     with Pre => A'Length = B'Length and then A'Length > 0
+   --  The mean change of A against B, each pixel's in units of its noise at
+   --  rest (Variance: its luma variance over the eye's noise view, which
+   --  Driver.Pixels never takes below the 8-bit quantization).
+   function Mean_Change (A, B, Variance : Real_Array) return Real
+     with Pre => A'Length = B'Length and then A'Length = Variance'Length and then A'Length > 0
    is
       Sum : Real := 0.0;
    begin
       for I in A'Range loop
-         Sum := Sum + abs (A (I) - B (I - A'First + B'First));
+         Sum := Sum + abs (A (I) - B (I - A'First + B'First))
+                      / Ada.Numerics.Long_Elementary_Functions.Sqrt (Variance (I - A'First + Variance'First));
       end loop;
       return Sum / Real (A'Length);
    end Mean_Change;
@@ -156,12 +161,15 @@ package body Driver.Robot.Stillness is
    begin
       S.Change_1 := -1.0;
       S.Change_2 := -1.0;
+      --  The pixels' noise at rest is what the eye's last judgment read of its
+      --  noise view (Judge_Eye): none before the eye is judged.
       if S.Current /= null and then S.Previous /= null and then S.Has_Previous
         and then S.Current'Length = S.Previous'Length and then S.Current'Length > 0
+        and then S.Has_Judged and then S.Variances /= null and then S.Variances'Length = S.Current'Length
       then
-         S.Change_1 := Mean_Change (S.Current.all, S.Previous.all);
+         S.Change_1 := Mean_Change (S.Current.all, S.Previous.all, S.Variances.all);
          if S.Before /= null and then S.Has_Before and then S.Before'Length = S.Current'Length then
-            S.Change_2 := Mean_Change (S.Current.all, S.Before.all);
+            S.Change_2 := Mean_Change (S.Current.all, S.Before.all, S.Variances.all);
          end if;
       end if;
       if Began_Moving then
