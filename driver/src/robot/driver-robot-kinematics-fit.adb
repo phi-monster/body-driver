@@ -3,6 +3,7 @@ with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Numerics.Dense;
+with Driver.Robot.Kinematics.Errors;
 with Driver.Stats;
 with Driver.Uncertain;
 
@@ -24,14 +25,13 @@ package body Driver.Robot.Kinematics.Fit is
    type Count_Array is array (Positive range <>) of Natural;
    type Count_Access is access Count_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Count_Array, Count_Access);
+   type Natural_Access is access Natural_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Natural_Array, Natural_Access);
    type Grid_Access is access Real_Matrix;
    procedure Free is new Ada.Unchecked_Deallocation (Real_Matrix, Grid_Access);
    type Flag_Grid is array (Positive range <>, Positive range <>) of Boolean;
    type Flag_Grid_Access is access Flag_Grid;
    procedure Free is new Ada.Unchecked_Deallocation (Flag_Grid, Flag_Grid_Access);
-   type Count_Grid is array (Positive range <>, Positive range <>) of Natural;
-   type Count_Grid_Access is access Count_Grid;
-   procedure Free is new Ada.Unchecked_Deallocation (Count_Grid, Count_Grid_Access);
 
    ---------------------------------------------------------------------------
    --  Geometry
@@ -318,9 +318,9 @@ package body Driver.Robot.Kinematics.Fit is
 
    ---------------------------------------------------------------------------
    --  The covariance of an estimate from the spread of its gradient. The
-   --  spread is a sum and difference of clusters' (Fit's two-way clustering),
-   --  which need not be positive semi-definite, and a covariance must be. Its
-   --  negative eigenvalues are set to zero (Cameron, Gelbach and Miller) in
+   --  spread, summed from covariances estimated pair by pair (Errors), need
+   --  not be positive semi-definite, and a covariance must be. Its negative
+   --  eigenvalues are set to zero (Cameron, Gelbach and Miller) in
    --  the frame where the inverse normal equations are the identity, the
    --  estimate's own units: a unit chosen for a term (a pixel, a radian, a
    --  length of the fit) then does not move what the clip takes away.
@@ -328,6 +328,7 @@ package body Driver.Robot.Kinematics.Fit is
    procedure Sandwich
      (Inverse, Meat : Driver.Numerics.Arrays.Real_Matrix;
       Covariance    : out Driver.Numerics.Arrays.Real_Matrix;
+      Clipped       : out Real;
       Ok            : out Boolean)
    is
       N       : constant Natural := Inverse'Length (1);
@@ -336,6 +337,7 @@ package body Driver.Robot.Kinematics.Fit is
       Vectors : Real_Matrix (1 .. N, 1 .. N);
    begin
       Covariance := [others => [others => 0.0]];
+      Clipped := 0.0;
       Driver.Numerics.Dense.Cholesky (Inverse, Factor, Ok);
       if not Ok then
          return;
@@ -346,9 +348,18 @@ package body Driver.Robot.Kinematics.Fit is
       begin
          Eigensystem (0.5 * (Whitened + Transpose (Whitened)), Values, Vectors);
       end;
-      for E in 1 .. N loop
-         Values (E) := Real'Max (0.0, Values (E));
-      end loop;
+      declare
+         Taken, All_Of : Real := 0.0;
+      begin
+         for E in 1 .. N loop
+            All_Of := All_Of + abs Values (E);
+            if Values (E) < 0.0 then
+               Taken := Taken - Values (E);
+               Values (E) := 0.0;
+            end if;
+         end loop;
+         Clipped := (if All_Of > 0.0 then Taken / All_Of else 0.0);
+      end;
       declare
          Kept : Real_Matrix (1 .. N, 1 .. N) := [others => [others => 0.0]];
       begin
@@ -367,66 +378,19 @@ package body Driver.Robot.Kinematics.Fit is
       end;
    end Sandwich;
 
-   procedure Spatial_Blocks
-     (U, V    : Real_Array;
-      Present : Flag_Array;
-      Terms   : Positive;
-      Block   : out Block_Array;
-      Count   : out Natural;
-      Side    : out Real)
-   is
-      Low_U, Low_V   : Real := Real'Last;
-      High_U, High_V : Real := -Real'Last;
-      Points         : Natural := 0;
-
-      --  The squares of side S that hold a point, numbered from 1 in the order
-      --  of the points.
-      procedure Divide (S : Real; Number : out Natural) is
-         Columns : constant Positive := Natural (Real'Floor ((High_U - Low_U) / S)) + 1;
-         Rows    : constant Positive := Natural (Real'Floor ((High_V - Low_V) / S)) + 1;
-         Label   : Count_Grid_Access := new Count_Grid'[1 .. Columns => [1 .. Rows => 0]];
-      begin
-         Number := 0;
-         for I in U'Range loop
-            if Present (I) then
-               declare
-                  X : constant Positive := Natural (Real'Floor ((U (I) - Low_U) / S)) + 1;
-                  Y : constant Positive := Natural (Real'Floor ((V (I) - Low_V) / S)) + 1;
-               begin
-                  if Label (X, Y) = 0 then
-                     Number := Number + 1;
-                     Label (X, Y) := Number;
-                  end if;
-                  Block (I) := Label (X, Y);
-               end;
-            end if;
-         end loop;
-         Free (Label);
-      end Divide;
+   --  What the covariance rests on, in pixels (the root of the mean of the two
+   --  components' variances).
+   function Summary_Of (Kinds : Errors.Model; Clipped : Real) return Error_Summary is
+      function Level (E : Errors.Entries) return Real is
+        (Sqrt (Real'Max (0.0, E (Errors.Both_Across) + E (Errors.Both_Down)) / 2.0));
    begin
-      Block := [others => 0];
-      Count := 0;
-      Side := 1.0;
-      for I in U'Range loop
-         if Present (I) then
-            Points := Points + 1;
-            Low_U := Real'Min (Low_U, U (I));
-            Low_V := Real'Min (Low_V, V (I));
-            High_U := Real'Max (High_U, U (I));
-            High_V := Real'Max (High_V, V (I));
-         end if;
-      end loop;
-      if Points = 0 then
-         return;
-      end if;
-      --  From one square holding them all down to a pixel's side.
-      Side := Real'Ceiling (Real'Max (High_U - Low_U, High_V - Low_V)) + 1.0;
-      loop
-         Divide (Side, Count);
-         exit when Count > Terms or else Side <= 1.0;
-         Side := Side - 1.0;
-      end loop;
-   end Spatial_Blocks;
+      return (Measured         => True,
+              Alone            => Level (Errors.Alone (Kinds)),
+              Persistent       => Level (Errors.Same_Track (Kinds)),
+              Persistent_Half  => Errors.Half_Distance_Persistent (Kinds),
+              Keyframe         => Level (Errors.Added_By_Keyframe (Kinds)),
+              Clipped          => Clipped);
+   end Summary_Of;
 
    ---------------------------------------------------------------------------
    --  Stage 5: the tracks seen from many keyframes. Every followed point has a
@@ -528,6 +492,30 @@ package body Driver.Robot.Kinematics.Fit is
          --  (2) and its reading scale (1).
          Variance   : Real_Array (1 .. 6 + 5 * N) := [others => Real'Last];
          Determined : Boolean := False;
+
+         --  What the covariance of the last pass is made of: the gradient of
+         --  every sighting (its row) and its error, the inverse normal
+         --  equations, and where the sighting is (its keyframe, its point, the
+         --  point's reference pixel).
+         type Pass_Evidence is record
+            Ready               : Boolean := False;
+            Inv, Rows           : Grid_Access;
+            Error, Ref_U, Ref_V : Real_Access;
+            In_Frame, Of_Track  : Natural_Access;
+         end record;
+         Last_Pass : Pass_Evidence;
+
+         procedure Release (E : in out Pass_Evidence) is
+         begin
+            Free (E.Inv);
+            Free (E.Rows);
+            Free (E.Error);
+            Free (E.Ref_U);
+            Free (E.Ref_V);
+            Free (E.In_Frame);
+            Free (E.Of_Track);
+            E.Ready := False;
+         end Release;
 
          --  The reprojection residuals of the chosen sightings (2 each).
          procedure Residuals (Xv : Real_Array; Dv : Real_Array; Index : Real_Access; R : out Real_Array) is
@@ -845,55 +833,41 @@ package body Driver.Robot.Kinematics.Fit is
                                  Determined := Pd;
                                  Variance := [others => Real'Last];
                                  Report.Covariance.Clear;
-                                 --  The covariance clustered two ways (Cameron, Gelbach
-                                 --  and Miller): the inverse normal equations around the
-                                 --  spread of every keyframe's own share of the gradient
-                                 --  (each residual's, the depths eliminated), plus every
-                                 --  block's of tracks, less every cell's where a keyframe
-                                 --  and a block meet, which both hold. A keyframe's matches
-                                 --  err together (its rendering, its view), and so do the
-                                 --  matches of tracks near each other in every keyframe
-                                 --  (the matcher errs by where its point is, alike in all
-                                 --  its views), which sightings taken as independent hide:
-                                 --  A9's focal length and reading scales came out 10 to 20
-                                 --  of the keyframes' sigmas off the truth, and A11's lenses
-                                 --  6.6 and 9.5 (Spatial_Blocks).
+                                 --  The covariance of the estimate: the inverse normal
+                                 --  equations around the spread of the gradient, which
+                                 --  weights every pair of residual rows by the covariance
+                                 --  of their errors. How the matcher's errors depend on
+                                 --  each other is read from the residuals themselves, as
+                                 --  a function of the distance between their points
+                                 --  (Errors): a point errs alike in every keyframe and so
+                                 --  do points near each other, and the points of a
+                                 --  keyframe err alike. Sightings taken as independent
+                                 --  hide it: A9's focal length and reading scales came
+                                 --  out 10 to 20 of the keyframes' sigmas off the truth,
+                                 --  and A11's lenses 20 to 40 chi squares on six terms
+                                 --  clustered by keyframe. Only the last pass's is wanted
+                                 --  and it costs more than the pass: what it is made of
+                                 --  is kept, and the passes end before it is made.
+                                 Release (Last_Pass);
+                                 Report.Covariance.Clear;
                                  if Pd then
+                                    Last_Pass.Ready := True;
+                                    Last_Pass.Inv := new Real_Matrix (1 .. Reduced, 1 .. Reduced);
+                                    Last_Pass.Rows := new Real_Matrix'[1 .. 2 * Used => [1 .. Reduced => 0.0]];
+                                    Last_Pass.Error := new Real_Array'(1 .. 2 * Used => 0.0);
+                                    Last_Pass.In_Frame := new Natural_Array'(1 .. Used => 1);
+                                    Last_Pass.Of_Track := new Natural_Array'(1 .. Used => 1);
+                                    Last_Pass.Ref_U := new Real_Array'(1 .. Used => 0.0);
+                                    Last_Pass.Ref_V := new Real_Array'(1 .. Used => 0.0);
                                     declare
-                                       Inv   : Grid_Access := new Real_Matrix (1 .. Reduced, 1 .. Reduced);
-                                       --  The tracks' reference pixels, and the squares of the image
-                                       --  they fall in.
-                                       Present          : Flag_Array (1 .. Tracks) := [others => False];
-                                       Track_U, Track_V : Real_Array (1 .. Tracks) := [others => 0.0];
-                                       Block            : Block_Array (1 .. Tracks);
-                                       Blocks           : Natural;
-                                       Side             : Real;
-                                       --  What every keyframe, every block and every cell (a keyframe
-                                       --  and a block) holds of the gradient, and the sum of the outer
-                                       --  products of what each cluster of the three kinds holds.
-                                       Frame_Share : Grid_Access := new Real_Matrix'[1 .. Frames => [1 .. Reduced => 0.0]];
-                                       Block_Share, Cell_Share : Grid_Access;
-                                       Frame_Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
-                                       Block_Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
-                                       Cell_Spread  : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
-                                       Frame_Clusters, Block_Clusters, Cell_Clusters : Natural := 0;
-
-                                       --  Adds what one cluster holds to the spread of its kind; a
-                                       --  cluster that holds nothing is none.
-                                       procedure Add (Held : Real_Vector; To : in out Real_Matrix; Counted : in out Natural) is
-                                       begin
-                                          if (for some P in Held'Range => Held (P) /= 0.0) then
-                                             Counted := Counted + 1;
-                                             for P in 1 .. Reduced loop
-                                                for Q in 1 .. Reduced loop
-                                                   To (P, Q) := To (P, Q) + Held (Held'First + P - 1) * Held (Held'First + Q - 1);
-                                                end loop;
-                                             end loop;
-                                          end if;
-                                       end Add;
-
-                                       function Row (G : Real_Matrix; K : Positive) return Real_Vector is
-                                         ([for P in 1 .. Reduced => G (K, P)]);
+                                       --  Every sighting's gradient (the reduced terms, the depths
+                                       --  eliminated) in units of the noise, and its error as the
+                                       --  score sees it: clipped at Z of the noise.
+                                       Inv      : Real_Matrix renames Last_Pass.Inv.all;
+                                       Rows     : Real_Matrix renames Last_Pass.Rows.all;
+                                       Error    : Real_Array renames Last_Pass.Error.all;
+                                       In_Frame : Natural_Array renames Last_Pass.In_Frame.all;
+                                       Of_Track : Natural_Array renames Last_Pass.Of_Track.all;
                                     begin
                                        for P in 1 .. Reduced loop
                                           declare
@@ -913,87 +887,34 @@ package body Driver.Robot.Kinematics.Fit is
                                           declare
                                              Sg : Sighting renames Sight (Sight'First + Natural (Index (K)) - 1);
                                           begin
-                                             Present (Sg.Track) := True;
-                                             Track_U (Sg.Track) := Sg.U0;
-                                             Track_V (Sg.Track) := Sg.V0;
+                                             In_Frame (K) := Sg.Frame;
+                                             Of_Track (K) := Sg.Track;
+                                             Last_Pass.Ref_U (K) := Sg.U0;
+                                             Last_Pass.Ref_V (K) := Sg.V0;
                                           end;
                                        end loop;
-                                       Spatial_Blocks (Track_U, Track_V, Present, Reduced, Block, Blocks, Side);
-                                       Report.Blocks := Blocks;
-                                       Report.Block_Side := Side;
-                                       Block_Share := new Real_Matrix'[1 .. Blocks => [1 .. Reduced => 0.0]];
-                                       Cell_Share := new Real_Matrix'[1 .. Frames * Blocks => [1 .. Reduced => 0.0]];
                                        for I in 1 .. 2 * Used loop
                                           declare
-                                             Sg  : Sighting renames Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1);
-                                             Psi : constant Real := Huber (R0 (I) / Sigma) / Sigma ** 2 * R0 (I);
-                                             Cell : constant Positive := (Sg.Frame - 1) * Blocks + Block (Sg.Track);
+                                             T : constant Positive := Of_Track ((I + 1) / 2);
                                           begin
-                                             if Psi /= 0.0 then
-                                                for P in 1 .. Reduced loop
-                                                   declare
-                                                      Jr : Real := 0.0;
-                                                   begin
-                                                      for Q in 1 .. Count loop
-                                                         if Tm (Q, P) /= 0.0 then
-                                                            Jr := Jr + Tm (Q, P) * Jp (I, Q);
-                                                         end if;
-                                                      end loop;
-                                                      if Sg.Track /= Anchor and then C (Sg.Track) > 0.0 then
-                                                         Jr := Jr - Br (P, Sg.Track) / C (Sg.Track) * Jd (I);
+                                             Error (I) := Huber (R0 (I) / Sigma) * R0 (I);
+                                             for P in 1 .. Reduced loop
+                                                declare
+                                                   Jr : Real := 0.0;
+                                                begin
+                                                   for Q in 1 .. Count loop
+                                                      if Tm (Q, P) /= 0.0 then
+                                                         Jr := Jr + Tm (Q, P) * Jp (I, Q);
                                                       end if;
-                                                      Frame_Share (Sg.Frame, P) := Frame_Share (Sg.Frame, P) + Psi * Jr;
-                                                      Block_Share (Block (Sg.Track), P) := Block_Share (Block (Sg.Track), P) + Psi * Jr;
-                                                      Cell_Share (Cell, P) := Cell_Share (Cell, P) + Psi * Jr;
-                                                   end;
-                                                end loop;
-                                             end if;
-                                          end;
-                                       end loop;
-                                       for F in 1 .. Frames loop
-                                          Add (Row (Frame_Share.all, F), Frame_Spread.all, Frame_Clusters);
-                                       end loop;
-                                       for B in 1 .. Blocks loop
-                                          Add (Row (Block_Share.all, B), Block_Spread.all, Block_Clusters);
-                                       end loop;
-                                       for C in 1 .. Frames * Blocks loop
-                                          Add (Row (Cell_Share.all, C), Cell_Spread.all, Cell_Clusters);
-                                       end loop;
-                                       --  Too few keyframes or blocks to tell how theirs spread:
-                                       --  not determined.
-                                       if Frame_Clusters > 1 and then Block_Clusters > 1 and then Cell_Clusters > 1 then
-                                          declare
-                                             --  Each kind's spread of a mean over its clusters, unbiased.
-                                             function Small (Count : Natural) return Real is
-                                               (Real (Count) / Real (Count - 1));
-                                             Meat : constant Real_Matrix :=
-                                               Small (Frame_Clusters) * Frame_Spread.all + Small (Block_Clusters) * Block_Spread.all
-                                               - Small (Cell_Clusters) * Cell_Spread.all;
-                                             V    : Real_Matrix (1 .. Reduced, 1 .. Reduced);
-                                             Ok   : Boolean;
-                                          begin
-                                             Sandwich (Inv.all, Meat, V, Ok);
-                                             if Ok then
-                                                for P in 1 .. Reduced loop
-                                                   Variance (P) := V (P, P);
-                                                   for Q in 1 .. Reduced loop
-                                                      Report.Covariance.Append (V (P, Q));
                                                    end loop;
-                                                end loop;
-                                             else
-                                                Determined := False;
-                                             end if;
+                                                   if T /= Anchor and then C (T) > 0.0 then
+                                                      Jr := Jr - Br (P, T) / C (T) * Jd (I);
+                                                   end if;
+                                                   Rows (I, P) := Jr / Sigma ** 2;
+                                                end;
+                                             end loop;
                                           end;
-                                       else
-                                          Determined := False;
-                                       end if;
-                                       Free (Inv);
-                                       Free (Frame_Share);
-                                       Free (Block_Share);
-                                       Free (Cell_Share);
-                                       Free (Frame_Spread);
-                                       Free (Block_Spread);
-                                       Free (Cell_Spread);
+                                       end loop;
                                     end;
                                  end if;
                                  --  How each track's log depth moves with the reduced
@@ -1079,6 +1000,45 @@ package body Driver.Robot.Kinematics.Fit is
                Changed := Now_Changed;
             end;
          end loop;
+         --  The covariance of the last pass's estimate, from what the pass
+         --  kept. Too few keyframes or points, or no point seen twice, to tell
+         --  how the errors depend on each other: not determined.
+         if Last_Pass.Ready then
+            declare
+               Reduced : constant Positive := Variance'Length;
+               Kinds   : Errors.Model;
+            begin
+               Errors.Measure (Last_Pass.In_Frame.all, Last_Pass.Of_Track.all, Last_Pass.Ref_U.all,
+                               Last_Pass.Ref_V.all, Last_Pass.Error.all, Kinds);
+               if Errors.Measured (Kinds) then
+                  declare
+                     Meat    : Real_Matrix (1 .. Reduced, 1 .. Reduced);
+                     V       : Real_Matrix (1 .. Reduced, 1 .. Reduced);
+                     Clipped : Real;
+                     Ok      : Boolean;
+                  begin
+                     Errors.Meat (Kinds, Last_Pass.In_Frame.all, Last_Pass.Of_Track.all, Last_Pass.Ref_U.all,
+                                  Last_Pass.Ref_V.all, Last_Pass.Rows.all, Meat);
+                     Sandwich (Last_Pass.Inv.all, Meat, V, Clipped, Ok);
+                     if Ok then
+                        for P in 1 .. Reduced loop
+                           Variance (P) := V (P, P);
+                           for Q in 1 .. Reduced loop
+                              Report.Covariance.Append (V (P, Q));
+                           end loop;
+                        end loop;
+                        Report.Errors := Summary_Of (Kinds, Clipped);
+                     else
+                        Determined := False;
+                     end if;
+                  end;
+               else
+                  Determined := False;
+               end if;
+               Errors.Free (Kinds);
+            end;
+            Release (Last_Pass);
+         end if;
          L := Lens_Of (X);
          Joints := Joints_Of (X);
          --  Fitted only when the sightings determine every parameter that has a

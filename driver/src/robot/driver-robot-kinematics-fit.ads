@@ -126,6 +126,21 @@ package Driver.Robot.Kinematics.Fit is
 
    type Sighting_Array is array (Positive range <>) of Sighting;
 
+   --  The errors of the sightings as the residuals of a fit show them (Errors), in
+   --  pixels, across and down together: a sighting's own, the part of it a point
+   --  has in every keyframe (and the distance in pixels at which that has fallen
+   --  to half between points), and what a keyframe adds for its points; and how much of the covariance's spread the clip to
+   --  positive semi-definiteness took away (its negative eigenvalues over all, 0
+   --  when it took none).
+   type Error_Summary is record
+      Measured         : Boolean := False;
+      Alone            : Real := 0.0;
+      Persistent       : Real := 0.0;
+      Persistent_Half  : Real := 0.0;
+      Keyframe         : Real := 0.0;
+      Clipped          : Real := 0.0;
+   end record;
+
    type Fit_Report is record
       Fitted     : Boolean := False;
       Stage      : Natural := 0;       --  the last stage reached
@@ -136,10 +151,9 @@ package Driver.Robot.Kinematics.Fit is
       Flipped    : Boolean := False;   --  every translation changed sign to put the points in front
       Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
       Focal_Sigma : Real := Real'Last; --  the uncertainty of the focal length across
-      Covariance : Real_Lists.Vector;  --  of the parameters above, row by row, clustered by keyframe and by
-                                       --  squares of the image (Fit); empty when not determined
-      Blocks     : Natural := 0;       --  the squares of the image the tracks were clustered in (Spatial_Blocks)
-      Block_Side : Real := 0.0;        --  and their side, pixels
+      Covariance : Real_Lists.Vector;  --  of the parameters above, row by row, from the errors the residuals
+                                       --  show (Errors); empty when not determined
+      Errors     : Error_Summary;      --  what the covariance rests on
       Depths     : Real_Lists.Vector;  --  per track, the depth of its point along its reference line of
                                        --  sight as the track refinement found it; 0 where it has none
       Depth_Sigmas : Real_Lists.Vector;   --  per track, how uncertain the logarithm of that depth is, the
@@ -160,29 +174,32 @@ package Driver.Robot.Kinematics.Fit is
       Report     : out Fit_Report)
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length
                  and then Unit_Frames <= Changes'Length (1);
-   --  The covariance is clustered two ways (Cameron, Gelbach and Miller): the
-   --  inverse normal equations around the spread of what every keyframe holds
-   --  of the gradient, plus that of every square of the image the tracks fall
-   --  in (Spatial_Blocks), less that of every keyframe and square together,
-   --  which both hold. The matches of a keyframe err together (its rendering,
-   --  its view) and so do the matches of tracks near each other in every
-   --  keyframe (the matcher errs by where its point is): sightings counted as
-   --  independent, or clustered by keyframe alone, hide the second and come
+   --  The covariance is the inverse normal equations around the spread of the
+   --  gradient (Conley's sandwich), made positive semi-definite (Sandwich). The
+   --  spread weights every pair of residual rows by the covariance of their
+   --  errors, read from the residuals as a function of the distance between
+   --  their points (Errors): a point errs alike in every keyframe, so do points
+   --  near each other, and the points of a keyframe err alike. Sightings counted
+   --  as independent, or clustered by keyframe, hide the first two and come
    --  out far too sure.
 
    procedure Sandwich
      (Inverse, Meat : Driver.Numerics.Arrays.Real_Matrix;
       Covariance    : out Driver.Numerics.Arrays.Real_Matrix;
+      Clipped       : out Real;
       Ok            : out Boolean)
      with Pre => Inverse'Length (1) = Inverse'Length (2) and then Meat'Length (1) = Inverse'Length (1)
                  and then Meat'Length (2) = Inverse'Length (1) and then Covariance'Length (1) = Inverse'Length (1)
                  and then Covariance'Length (2) = Inverse'Length (1);
    --  Inverse * Meat * Inverse, the covariance of an estimate whose normal
    --  equations Inverse inverts and whose gradient spreads as Meat, made
-   --  positive semi-definite: a sum and difference of spreads (Fit) need not
+   --  positive semi-definite: a spread of estimated covariances (Fit) need not
    --  be, and its negative eigenvalues are set to zero in the frame where
-   --  Inverse is the identity, so that the units of the terms do not matter.
-   --  Ok is False, and Covariance zero, when Inverse is not positive definite.
+   --  Inverse is the identity, so that the units of the terms do not matter
+   --  (Cameron, Gelbach and Miller). Clipped is what that took away: the
+   --  negative eigenvalues over the sum of all, in size; 0 when the spread
+   --  was positive semi-definite. Ok is False, and Covariance zero, when
+   --  Inverse is not positive definite.
 
    ---------------------------------------------------------------------------
    --  Consensus. A plane holds only some of a view's points, and a dense
@@ -199,28 +216,6 @@ package Driver.Robot.Kinematics.Fit is
    --  points agree.
 
    type Flag_Array is array (Positive range <>) of Boolean;
-
-   type Block_Array is array (Positive range <>) of Natural;
-
-   procedure Spatial_Blocks
-     (U, V    : Real_Array;
-      Present : Flag_Array;
-      Terms   : Positive;
-      Block   : out Block_Array;
-      Count   : out Natural;
-      Side    : out Real)
-     with Pre => U'First = V'First and then U'Last = V'Last and then Present'First = U'First
-                 and then Present'Last = U'Last and then Block'First = U'First and then Block'Last = U'Last;
-   --  The Present points (pixels U, V of the tracks' reference pixels) divided
-   --  into squares of one Side, the largest that leaves them in more squares
-   --  than the fit has Terms (or each point alone, a pixel's side, when they
-   --  are not that many). Block numbers the squares they occupy from 1, 0 for a
-   --  point not Present; Count is how many. Tracks near each other err alike
-   --  in every keyframe (A11: a correlation of 0.6 and 0.8 under 25 pixels
-   --  between the errors of two tracks, gone by 100 to 200), so they are no
-   --  independent clusters; squares wider than that range would be, and the
-   --  wider they are the more of the error they hold together. A spread of
-   --  fewer clusters than terms is a matrix of lower rank than the terms.
 
    --  A track as the reference eye has it: on the line of sight H (H (3) = 1)
    --  through its reference pixel, at Depth along it (0 when it has none),

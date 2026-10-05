@@ -747,6 +747,15 @@ package body Driver.Robot.Kinematics is
                                    & Report.Used'Image & " fit, median " & Driver.Log.Image (Report.Median_Px, 3)
                                    & " px, noise " & Driver.Log.Image (Report.Sigma_Px, 3) & " px; focal "
                                    & Driver.Log.Image (Lens.Fx, 2) & " x " & Driver.Log.Image (Lens.Fy, 2) & " px"
+                                   & (if Report.Errors.Measured
+                                      then "; errors, px: a sighting's own "
+                                           & Driver.Log.Image (Report.Errors.Alone, 3) & ", a point's in every keyframe "
+                                           & Driver.Log.Image (Report.Errors.Persistent, 3) & " (half as alike at "
+                                           & Driver.Log.Image (Report.Errors.Persistent_Half, 0)
+                                           & " px apart), a keyframe's added for its points "
+                                           & Driver.Log.Image (Report.Errors.Keyframe, 3) & "; the clip took "
+                                           & Driver.Log.Image (Report.Errors.Clipped, 3)
+                                      else "")
                               else "not fitted (stage" & Report.Stage'Image & "): "
                                    & Ada.Strings.Unbounded.To_String (Report.Why)));
                      end;
