@@ -643,6 +643,8 @@ package body Driver.Robot.Hand is
    begin
       Driver.Robot.Hand.Tips.Set_Frame (R.Book, Table_In_Arm (M, R.Arm), Pose_Of'Access, Moved);
       if Moved and then Driver.Robot.Hand.Tips.Pressed (R.Book) > 0 then
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": its arm was fitted again; the"
+                          & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image & " presses kept take their poses from the new fit");
          Size_Up (R, Id);
       end if;
       if not Driver.Observations.Has_Reading (O, R.Group) then
@@ -657,7 +659,9 @@ package body Driver.Robot.Hand is
       if Opening_Of (R, M, Press.Closer.Element, Which) then
          Driver.Robot.Hand.Tips.Add (R.Book, Press, Which);
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": a press at the " & Opening'Image (Which)
-                          & " opening, " & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image & " kept");
+                          & " opening, " & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image & " kept; it "
+                          & (if Driver.Robot.Hand.Tips.Latest_Agrees (R.Book) then "agrees" else "does not agree")
+                          & " with the others");
          Size_Up (R, Id);
       else
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image

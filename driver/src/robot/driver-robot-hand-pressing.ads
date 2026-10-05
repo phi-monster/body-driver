@@ -27,6 +27,7 @@ package Driver.Robot.Hand.Pressing is
    type Aimed is record
       Ok    : Boolean := False;   --  the arm's pose, its table and the eye's mount are measured
       Above : Rigid := Driver.Numerics.Identity;   --  the tool aimed, arm frame
+      Turn  : Real := 0.0;        --  how far the aim turns the tool, radians
       Into  : Vec3 := Zero3;      --  down: into the table, unit, arm frame
       Least : Real := Real'Last;  --  the smallest move of the tool that tells from its noise
       Plan  : Driver.Robot.Motion.Plan;   --  from the tool as at O to Above; unset unless Ok

@@ -388,6 +388,10 @@ package body Driver.Robot.Hand.Pressing.Tests is
                    "the aimed tool does not point the lobe's line of sight down, the arm standing " & How'Image);
             Check (abs (Got.Above.Translation - Tool.Translation) < 1.0e-9,
                    "the aimed tool left its eye, the arm standing " & How'Image);
+            Check (Got.Turn > 0.0
+                   and then abs (Got.Turn - Angle (Transpose (Tool.Rotation) * Got.Above.Rotation)) < 1.0e-12,
+                   "the aim says it turns the tool by" & Got.Turn'Image & " rad, not as far as it turns it, the arm "
+                   & "standing " & How'Image);
             Check (Motion.Status (Got.Plan) = Motion.Planned,
                    "the aim is not planned with the arm standing " & How'Image & ": " & Motion.Why (Got.Plan));
             if Motion.Status (Got.Plan) = Motion.Planned then

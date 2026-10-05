@@ -285,6 +285,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end Read_Aim;
 
       By : Real := 0.0;
+      Descended : Real := 0.0;   --  how far the pushes that were reached have lowered the tool
       procedure Read_Lower (O : Observation) is
       begin
          Plan := Driver.Robot.Hand.Pressing.Lowered (M, R.Arm, O, Aimed.Into, By);
@@ -302,6 +303,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
          end if;
          Driver.Robot.Motion.Follow (M, Plan, Report);
          Reached := Report.Outcome = Driver.Robot.Motion.Reached;
+         if Reached then
+            Descended := Descended + Step;
+         end if;
       end Lower;
 
       function Gap return Estimate is
@@ -343,7 +347,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
          First : constant Estimate := Gap;
       begin
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": pressing lobe" & Lobe'Image & " at "
-                          & (if Which = Open then "open" else "closed")
+                          & (if Which = Open then "open" else "closed") & ", aimed by turning the hand "
+                          & Driver.Log.Image (Aimed.Turn, 4) & " rad"
                           & (if Known (First)
                              then ", " & Driver.Log.Image (First.Value, 4) & " +- " & Driver.Log.Image (First.Sigma, 4)
                                   & " above the surface the presses so far fixed"
@@ -360,7 +365,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
                        & " within Z sigma of the contact its presses predict," & Steps.Blind'Image
                        & " doubling from " & Driver.Log.Image (Aimed.Least, 4) & " with nothing predicting it; "
                        & (if Unplanned then "then it cannot press lower: " & Driver.Robot.Motion.Why (Plan)
-                          else "blocked, the last push by " & Driver.Log.Image (By, 4)));
+                          else "blocked, the last push by " & Driver.Log.Image (By, 4) & " after lowering "
+                               & Driver.Log.Image (Descended, 4)));
       if Unplanned then
          return False;
       end if;

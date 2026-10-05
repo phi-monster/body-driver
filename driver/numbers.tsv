@@ -794,12 +794,14 @@ driver-robot-hand-lobes.adb	if Natural (Lobes.Length) >= 2 then	2	structure	lobe
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Aimed.Least, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& (if Pixel > 0.0 then Driver.Log.Image (Pixel, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Aimed.Least, 4) & ""));	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Aimed.Turn, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Descended, 4)));	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Image (Step.Value, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Image (Step.Value, 4)	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	Lean : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;	4.0	math	half-way between away from the other lobes and across from them
 driver-robot-hand-measure.adb	Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began));	1	structure	at least one asking: a view is asked for once it is pushed
 driver-robot-hand-measure.adb	Tilt := 2.0 * Tilt;	2.0	numerics	a search for an unknown size grows geometrically, doubling
-driver-robot-hand-measure.adb	else "" & Driver.Log.Image (By, 4)));	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	else "" & Driver.Log.Image (By, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Value, 4) & "" & Driver.Log.Image (First.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Value, 4) & "" & Driver.Log.Image (First.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then Driver.Robot.Hand.Aims.Spread (Sight, [1 => R.Lobes (Lobe).Sights (Other_End).Ray.Direction.Unit_Vector])	1	structure	the one other line of sight of a lone lobe

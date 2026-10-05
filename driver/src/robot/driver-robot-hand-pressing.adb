@@ -24,6 +24,7 @@ package body Driver.Robot.Hand.Pressing is
         * Sqrt (Real'Max (Values (1), Real'Max (Values (2), Values (3))));
       Result.Above := Driver.Robot.Hand.Aims.Turned_About
         (Tool.Pose, Eye_In_Tool (M, Eye, O).Pose.Translation, Along, Result.Into);
+      Result.Turn := Angle (Transpose (Tool.Pose.Rotation) * Result.Above.Rotation);
       Result.Plan := Driver.Robot.Motion.Plan_Reach_In_Arm (M, Arm, O, (Pose => Result.Above, Position_Only => False));
    end Aim;
 

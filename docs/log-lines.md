@@ -51,9 +51,12 @@ The hand (measured at boot):
 | `hand: closer group <g> channel <c> seen at both ends in eye <e>; asking where <n> pixels went` | the closing was seen open and shut; the instrument is asked to match pixels between the two |
 | `hand: the instrument did not answer for closer group <g> channel <c>: <why>` | that channel's sweep is not used |
 | `hand: closer group <g> channel <c> has no visible step measured; not swept` | the channel's response is unmeasured, so it is not swept |
-| `hand <n>: a press at the <opening> opening, <k> kept` | a fingertip press on a surface was recorded |
+| `hand <n>: a press at the <opening> opening, <k> kept; it agrees with the others` (or `does not agree`) | a fingertip press on a surface was recorded, and whether the fit of all the presses so far keeps it |
+| `hand <n>: its arm was fitted again; the <k> presses kept take their poses from the new fit` | the arm's table moved, so every press kept took its pose again from the arm's readings it kept |
 | `hand <n>: a press with the closer at neither measured opening is not used` | the hand was neither at its measured open nor at its shut opening |
-| `hand <n>: up, the arm's pose or the eye's mount is unmeasured; no press` | a press cannot be aimed yet |
+| `hand <n>: pressing lobe <l> at <opening>, aimed by turning the hand <a> rad, <h> +- <s> above the surface the presses so far fixed` (or `nothing yet predicting the surface below its tip: doubling from <x> until blocked`) | a press begins, in the arm's own frame and unit: how far the hand turned to point the lobe down, and the tip's predicted height above the table, or none |
+| `hand <n>: press of lobe <l> at <opening>: <k> pushes, <f> fast and <b> within Z sigma of the contact its presses predict, <d> doubling from <x> with nothing predicting it; blocked, the last push by <y> after lowering <t>` | how the press went down, in the arm's unit |
+| `hand <n>: up, the arm's pose or the eye's mount is unmeasured; no press` | a press cannot be aimed yet: the arm is not fitted, or its eye saw no table |
 | `hand <n>: cannot aim a press: <why>` / `hand <n>: cannot press lower: <why>` | the motion planner refused the press |
 | `hand: measured` | what was measured about every hand, one line each |
 
