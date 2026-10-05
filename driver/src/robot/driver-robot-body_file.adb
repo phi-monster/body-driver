@@ -1,6 +1,7 @@
 with Ada.Characters.Handling;
 with Ada.Containers;
 with Ada.Text_IO;
+with GNAT.OS_Lib;
 with Driver.Json;
 with Driver.Log;
 with Driver.Robot.Flow;
@@ -216,12 +217,13 @@ package body Driver.Robot.Body_File is
    end Text;
 
    procedure Write (M : Model; Path : String; Ok : out Boolean) is
-      F : Ada.Text_IO.File_Type;
+      Part : constant String := Path & ".part";
+      F    : Ada.Text_IO.File_Type;
    begin
-      Ada.Text_IO.Create (F, Ada.Text_IO.Out_File, Path);
+      Ada.Text_IO.Create (F, Ada.Text_IO.Out_File, Part);
       Ada.Text_IO.Put (F, Text (M));
       Ada.Text_IO.Close (F);
-      Ok := True;
+      GNAT.OS_Lib.Rename_File (Part, Path, Ok);
    exception
       when Ada.Text_IO.Name_Error | Ada.Text_IO.Use_Error =>
          Ok := False;
@@ -575,7 +577,32 @@ package body Driver.Robot.Body_File is
                      M.Kinematics.Append (R);
                   end;
                end loop;
-               Restored (Stored_Kinematics) := True;
+               --  What is reloaded stands and is not measured again, so the fits
+               --  are kept only when every arm that carries an eye is fitted in
+               --  them: a boot that failed during the arms' sweeps wrote the arms
+               --  it had, and an arm left unfitted here would never be swept.
+               declare
+                  All_Fitted : Boolean := True;
+               begin
+                  for E in M.Graph.Mounts.First_Index .. M.Graph.Mounts.Last_Index loop
+                     if M.Graph.Mounts (E).Kind = Arm_Carried then
+                        declare
+                           Found : Boolean := False;
+                        begin
+                           for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+                              Found := Found or else (M.Kinematics (K).Arm = M.Graph.Mounts (E).Arm
+                                                      and then M.Kinematics (K).Result.Fitted);
+                           end loop;
+                           All_Fitted := All_Fitted and then Found;
+                        end;
+                     end if;
+                  end loop;
+                  if All_Fitted then
+                     Restored (Stored_Kinematics) := True;
+                  else
+                     M.Kinematics.Clear;
+                  end if;
+               end;
             end if;
          end;
       end;

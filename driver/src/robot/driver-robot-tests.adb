@@ -1447,8 +1447,13 @@ package body Driver.Robot.Tests is
    --  move of 0.01, a twentieth of a pixel, and the more the longer the move).
    procedure Boot_On_Rig
      (M : in out Model; Settling : Boolean; Done, Ok : out Boolean; Beats : out Natural; Still_Poses : out Natural;
-      Arm_2_Poses : out Natural; Eye_2_Noise : Real := 0.0; Eye_2_Lag : Positive := 1)
+      Arm_2_Poses : out Natural; Eye_2_Noise : Real := 0.0; Eye_2_Lag : Positive := 1;
+      File : String := ""; Stop_Once_Kept : Boolean := False)
    is
+      --  File is the body file the boot is given. With Stop_Once_Kept, the main
+      --  loop stops answering a few beats after the file first exists, as if
+      --  the boot had died there, and the decider is aborted.
+      Since_Kept : Natural := 0;
       --  What each beat showed, for an eye that lags more than one beat.
       History   : array (0 .. Eye_2_Lag - 1) of Rig_State;
       Noise_Rng : Generator;
@@ -1467,7 +1472,7 @@ package body Driver.Robot.Tests is
       task body Decider is
          Fine : Boolean;
       begin
-         Boot.Run (M, H, "", Fine);
+         Boot.Run (M, H, File, Fine);
          Fine_Run := Fine;
          Finished := True;
       exception
@@ -1489,7 +1494,10 @@ package body Driver.Robot.Tests is
       Arm_2_Poses := 0;
       begin
       for B in 0 .. Bound loop
-         exit when Finished;
+         if Stop_Once_Kept and then GNAT.OS_Lib.Is_Regular_File (File) then
+            Since_Kept := Since_Kept + 1;
+         end if;
+         exit when Finished or else Since_Kept > 20;
          declare
             O       : Observation;
             Took    : Boolean := False;
@@ -1761,6 +1769,47 @@ package body Driver.Robot.Tests is
       Check (Poses < Every, "arm 1 was held for a keyframe at every one of its" & Every'Image & " levels (" & Poses'Image
              & " poses)");
    end Boot_With_Settling_Views;
+
+   --  A boot keeps what it measured when it fails later. The rig's boot is
+   --  stopped a few beats after its body file first exists, as if it had died
+   --  there, in the sweeps that follow the recognition: the file holds the
+   --  body recognized by then, and a model that reloads it has the groups'
+   --  roles and the eyes' mounts without measuring them again. (A boot that
+   --  writes its file only when it ends never gets here: it finishes.)
+   procedure Boot_Keeps_What_It_Measured is
+      M, Back : Model;
+      Done, Ok : Boolean;
+      Beats, Poses, Poses_2 : Natural;
+      FD    : GNAT.OS_Lib.File_Descriptor;
+      Name  : GNAT.OS_Lib.String_Access;
+      Gone  : Boolean;
+      Why   : Ada.Strings.Unbounded.Unbounded_String;
+      use type GNAT.OS_Lib.File_Descriptor;
+   begin
+      GNAT.OS_Lib.Create_Temp_File (FD, Name);
+      Check (FD /= GNAT.OS_Lib.Invalid_FD, "no scratch file for the body file");
+      if FD = GNAT.OS_Lib.Invalid_FD then
+         return;
+      end if;
+      GNAT.OS_Lib.Close (FD);
+      GNAT.OS_Lib.Delete_File (Name.all, Gone);   --  the boot finds no body file to reload
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, File => Name.all, Stop_Once_Kept => True);
+      Check (not Done, "the boot finished before a body file was left to stop it at");
+      Check (GNAT.OS_Lib.Is_Regular_File (Name.all),
+             "a boot that died during the arms' sweeps left no body file, though it had recognized the body");
+      if GNAT.OS_Lib.Is_Regular_File (Name.all) then
+         Load_Body (Back, Name.all, Ok, Why);
+         Check (Ok, "the body file was not loaded: " & Ada.Strings.Unbounded.To_String (Why));
+         Check (Reloaded (Back, Stored_Graph), "the recognized body was not reloaded");
+         Check (Role (Back, 1) = Arm and then Role (Back, 2) = Arm and then Role (Back, 4) = Part,
+                "the reloaded body has other roles than the boot recognized: " & Role (Back, 1)'Image & ", "
+                & Role (Back, 2)'Image & ", " & Role (Back, 4)'Image);
+         Check (Eye_Mount (Back, 1) = Eye_Mount (M, 1) and then Eye_Mount (Back, 2) = Eye_Mount (M, 2),
+                "the reloaded body mounts its eyes elsewhere");
+         GNAT.OS_Lib.Delete_File (Name.all, Gone);
+      end if;
+      Check (not GNAT.OS_Lib.Is_Regular_File (Name.all & ".part"), "a write left its half behind");
+   end Boot_Keeps_What_It_Measured;
 
    --  A probe of a joint read exactly (noise 1e-13) whose reading settles a
    --  hair off its target, the more the further it goes (by the square of the
@@ -3575,6 +3624,49 @@ package body Driver.Robot.Tests is
       end;
    end Body_File_Method_Change;
 
+   --  What is reloaded stands and is not measured again, so the kinematics are
+   --  reloaded only when every arm that carries an eye is fitted in them. A
+   --  file written while the arms were being swept holds the fits there were
+   --  and an arm without one; reloaded whole, that arm would be left unswept
+   --  and unfitted for the session. The rest of that file stands. Written to
+   --  a file, the body replaces the file whole.
+   procedure Body_File_Unfinished_Sweeps is
+      M, Back, Whole_Back : Model;
+      Ok      : Boolean;
+      Why     : Ada.Strings.Unbounded.Unbounded_String;
+      FD      : GNAT.OS_Lib.File_Descriptor;
+      Name    : GNAT.OS_Lib.String_Access;
+      Gone    : Boolean;
+      use type GNAT.OS_Lib.File_Descriptor;
+   begin
+      Measured_Body (M);
+      declare
+         Written  : constant String := Driver.Robot.Body_File.Text (M);
+         Unfitted : constant String := Replaced (Written, """fitted"": true", """fitted"": false");
+      begin
+         Check (Unfitted /= Written, "the file does not say that the arm is fitted");
+         Driver.Robot.Body_File.Read (Back, Unfitted, Ok, Why);
+         Check (Ok, "the body file was not read: " & Ada.Strings.Unbounded.To_String (Why));
+         Check (not Reloaded (Back, Stored_Kinematics) and then not Driver.Robot.Kinematics.Fitted (Back, 1),
+                "the kinematics of an arm that carries an eye and has no fit in the file were reloaded");
+         for Q in Stored_Noise .. Stored_Graph loop
+            Check (Reloaded (Back, Q), Q'Image & " was not reloaded beside an arm without a fit");
+         end loop;
+         Driver.Robot.Body_File.Read (Whole_Back, Written, Ok, Why);
+         Check (Reloaded (Whole_Back, Stored_Kinematics) and then Driver.Robot.Kinematics.Fitted (Whole_Back, 1),
+                "the kinematics of a fitted arm were not reloaded");
+      end;
+      GNAT.OS_Lib.Create_Temp_File (FD, Name);
+      Check (FD /= GNAT.OS_Lib.Invalid_FD, "no scratch file for the body file");
+      if FD /= GNAT.OS_Lib.Invalid_FD then
+         GNAT.OS_Lib.Close (FD);
+         Driver.Robot.Body_File.Write (M, Name.all, Ok);
+         Check (Ok, "the body file was not written");
+         Check (not GNAT.OS_Lib.Is_Regular_File (Name.all & ".part"), "a write left its half behind");
+         GNAT.OS_Lib.Delete_File (Name.all, Gone);
+      end if;
+   end Body_File_Unfinished_Sweeps;
+
    --  The arm reaches a pose within its travel on a body reloaded from a
    --  file, with no stream behind it and no instrument.
    procedure Plan_On_A_Reloaded_Body is
@@ -4005,6 +4097,9 @@ package body Driver.Robot.Tests is
                              & "written", Body_File_Round_Trip'Access);
       Driver.Tests.Register ("robot.body.method", "a quantity measured by another method is reloaded, or the "
                              & "quantities of unchanged methods are measured again", Body_File_Method_Change'Access);
+      Driver.Tests.Register ("robot.body.unfinished", "the kinematics of a file written while an arm that carries an "
+                             & "eye had no fit are reloaded as final, leaving that arm unswept, or a write "
+                             & "leaves half a file", Body_File_Unfinished_Sweeps'Access);
       Driver.Tests.Register ("robot.body.plan", "a body reloaded from its file cannot plan a reach without a "
                              & "stream or an instrument", Plan_On_A_Reloaded_Body'Access);
       Driver.Tests.Register ("robot.body.recorded", "a body file the driver reads is not in the recording once, "
@@ -4048,6 +4143,8 @@ package body Driver.Robot.Tests is
                              & "was first read is never swept with it", Boot_With_A_Late_Mount'Access);
       Driver.Tests.Register ("robot.boot.settling", "a sweep level whose eye's picture keeps changing for beats after "
                              & "the arm stopped gives no keyframe", Boot_With_Settling_Views'Access);
+      Driver.Tests.Register ("robot.boot.keeps", "a boot that fails after recognizing the body leaves no body file to "
+                             & "reload it from", Boot_Keeps_What_It_Measured'Access);
       Driver.Tests.Register ("robot.sweep.twin", "an arm at rest takes no still twin of its reference, or its sweep "
                              & "starts where the view moves less than the matcher errs", Twin_Before_The_Sweep'Access);
       Driver.Tests.Register ("robot.sweep.start", "a joint's sweep starts below where one cell of its eye tells the "
