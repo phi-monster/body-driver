@@ -69,6 +69,26 @@ package body Driver.Robot.Boot is
          Estimate_Now (M);
       end Estimate;
 
+      --  What the body has measured goes to its file after each stage that
+      --  completes, not once at the end: a boot that fails later has kept it,
+      --  and the next one reloads it (docs/body-file.md). Without a file,
+      --  nothing is kept.
+      procedure Keep (Stage : String) is
+         Written : Boolean := True;
+         procedure Write is
+         begin
+            Driver.Robot.Body_File.Write (M, Body_File, Written);
+         end Write;
+      begin
+         if Body_File'Length > 0 then
+            Driver.Beats.Within_A_Beat (Write'Access);
+            Driver.Log.Line
+              (Driver.Log.Robot,
+               (if Written then "boot: the body is kept in " & Body_File & " after " & Stage
+                else "the body file " & Body_File & " cannot be written"));
+         end if;
+      end Keep;
+
       --  What the group holds now (Motion.Hold_Of): moves are taken from here.
       function Holds_Of (G : Group_Id; Size : Natural) return Real_Array is
          Result : Real_Array (1 .. Size) := [others => 0.0];
@@ -612,8 +632,12 @@ package body Driver.Robot.Boot is
             end;
          end if;
          Driver.Beats.Within_A_Beat (Read_Body'Access);
+         if not Recognized_Before then
+            Keep ("recognizing the groups");
+         end if;
          if not Fitted_Before then
             Sweep_Every_Arm;
+            Keep ("sweeping the arms");
          end if;
       end;
       Driver.Robot.Hand.Measure (H, M);

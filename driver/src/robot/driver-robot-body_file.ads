@@ -27,7 +27,10 @@ private package Driver.Robot.Body_File is
    --  The whole file.
 
    procedure Write (M : Model; Path : String; Ok : out Boolean);
-   --  Writes Text to Path; Ok is False when the file cannot be written.
+   --  Writes Text to Path; Ok is False when the file cannot be written. The
+   --  text goes to Path & ".part" first and replaces Path whole: the boot
+   --  writes the file after each stage, and a run killed in the middle of a
+   --  write must leave the last stage's file, not half of the next one.
 
    procedure Read
      (M    : in out Model;
