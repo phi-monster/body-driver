@@ -29,6 +29,9 @@ package body Driver.Robot.Kinematics.Fit is
    type Flag_Grid is array (Positive range <>, Positive range <>) of Boolean;
    type Flag_Grid_Access is access Flag_Grid;
    procedure Free is new Ada.Unchecked_Deallocation (Flag_Grid, Flag_Grid_Access);
+   type Count_Grid is array (Positive range <>, Positive range <>) of Natural;
+   type Count_Grid_Access is access Count_Grid;
+   procedure Free is new Ada.Unchecked_Deallocation (Count_Grid, Count_Grid_Access);
 
    ---------------------------------------------------------------------------
    --  Geometry
@@ -312,6 +315,118 @@ package body Driver.Robot.Kinematics.Fit is
       Free (Rn);
       Free (J);
    end Robust_Fit;
+
+   ---------------------------------------------------------------------------
+   --  The covariance of an estimate from the spread of its gradient. The
+   --  spread is a sum and difference of clusters' (Fit's two-way clustering),
+   --  which need not be positive semi-definite, and a covariance must be. Its
+   --  negative eigenvalues are set to zero (Cameron, Gelbach and Miller) in
+   --  the frame where the inverse normal equations are the identity, the
+   --  estimate's own units: a unit chosen for a term (a pixel, a radian, a
+   --  length of the fit) then does not move what the clip takes away.
+
+   procedure Sandwich
+     (Inverse, Meat : Driver.Numerics.Arrays.Real_Matrix;
+      Covariance    : out Driver.Numerics.Arrays.Real_Matrix;
+      Ok            : out Boolean)
+   is
+      N       : constant Natural := Inverse'Length (1);
+      Factor  : Real_Matrix (1 .. N, 1 .. N);
+      Values  : Real_Vector (1 .. N);
+      Vectors : Real_Matrix (1 .. N, 1 .. N);
+   begin
+      Covariance := [others => [others => 0.0]];
+      Driver.Numerics.Dense.Cholesky (Inverse, Factor, Ok);
+      if not Ok then
+         return;
+      end if;
+      declare
+         --  The spread in the frame where the inverse is the identity.
+         Whitened : constant Real_Matrix := Transpose (Factor) * Meat * Factor;
+      begin
+         Eigensystem (0.5 * (Whitened + Transpose (Whitened)), Values, Vectors);
+      end;
+      for E in 1 .. N loop
+         Values (E) := Real'Max (0.0, Values (E));
+      end loop;
+      declare
+         Kept : Real_Matrix (1 .. N, 1 .. N) := [others => [others => 0.0]];
+      begin
+         for P in 1 .. N loop
+            for Q in 1 .. N loop
+               for E in 1 .. N loop
+                  Kept (P, Q) := Kept (P, Q) + Vectors (P, E) * Values (E) * Vectors (Q, E);
+               end loop;
+            end loop;
+         end loop;
+         declare
+            Product : constant Real_Matrix := Factor * Kept * Transpose (Factor);
+         begin
+            Covariance := 0.5 * (Product + Transpose (Product));   --  symmetric to the last bit
+         end;
+      end;
+   end Sandwich;
+
+   procedure Spatial_Blocks
+     (U, V    : Real_Array;
+      Present : Flag_Array;
+      Terms   : Positive;
+      Block   : out Block_Array;
+      Count   : out Natural;
+      Side    : out Real)
+   is
+      Low_U, Low_V   : Real := Real'Last;
+      High_U, High_V : Real := -Real'Last;
+      Points         : Natural := 0;
+
+      --  The squares of side S that hold a point, numbered from 1 in the order
+      --  of the points.
+      procedure Divide (S : Real; Number : out Natural) is
+         Columns : constant Positive := Natural (Real'Floor ((High_U - Low_U) / S)) + 1;
+         Rows    : constant Positive := Natural (Real'Floor ((High_V - Low_V) / S)) + 1;
+         Label   : Count_Grid_Access := new Count_Grid'[1 .. Columns => [1 .. Rows => 0]];
+      begin
+         Number := 0;
+         for I in U'Range loop
+            if Present (I) then
+               declare
+                  X : constant Positive := Natural (Real'Floor ((U (I) - Low_U) / S)) + 1;
+                  Y : constant Positive := Natural (Real'Floor ((V (I) - Low_V) / S)) + 1;
+               begin
+                  if Label (X, Y) = 0 then
+                     Number := Number + 1;
+                     Label (X, Y) := Number;
+                  end if;
+                  Block (I) := Label (X, Y);
+               end;
+            end if;
+         end loop;
+         Free (Label);
+      end Divide;
+   begin
+      Block := [others => 0];
+      Count := 0;
+      Side := 1.0;
+      for I in U'Range loop
+         if Present (I) then
+            Points := Points + 1;
+            Low_U := Real'Min (Low_U, U (I));
+            Low_V := Real'Min (Low_V, V (I));
+            High_U := Real'Max (High_U, U (I));
+            High_V := Real'Max (High_V, V (I));
+         end if;
+      end loop;
+      if Points = 0 then
+         return;
+      end if;
+      --  From one square holding them all down to a pixel's side.
+      Side := Real'Ceiling (Real'Max (High_U - Low_U, High_V - Low_V)) + 1.0;
+      loop
+         Divide (Side, Count);
+         exit when Count > Terms or else Side <= 1.0;
+         Side := Side - 1.0;
+      end loop;
+   end Spatial_Blocks;
 
    ---------------------------------------------------------------------------
    --  Stage 5: the tracks seen from many keyframes. Every followed point has a
@@ -730,20 +845,55 @@ package body Driver.Robot.Kinematics.Fit is
                                  Determined := Pd;
                                  Variance := [others => Real'Last];
                                  Report.Covariance.Clear;
-                                 --  The covariance clustered by keyframe: the inverse
-                                 --  normal equations around the spread of every
-                                 --  keyframe's own share of the gradient (each
-                                 --  residual's, the depths eliminated). A keyframe's
-                                 --  matches err together (its rendering, its view),
-                                 --  which sightings taken as independent hide: A9's
-                                 --  focal length and reading scales came out 10 to 20
-                                 --  of those sigmas off the truth.
+                                 --  The covariance clustered two ways (Cameron, Gelbach
+                                 --  and Miller): the inverse normal equations around the
+                                 --  spread of every keyframe's own share of the gradient
+                                 --  (each residual's, the depths eliminated), plus every
+                                 --  block's of tracks, less every cell's where a keyframe
+                                 --  and a block meet, which both hold. A keyframe's matches
+                                 --  err together (its rendering, its view), and so do the
+                                 --  matches of tracks near each other in every keyframe
+                                 --  (the matcher errs by where its point is, alike in all
+                                 --  its views), which sightings taken as independent hide:
+                                 --  A9's focal length and reading scales came out 10 to 20
+                                 --  of the keyframes' sigmas off the truth, and A11's lenses
+                                 --  6.6 and 9.5 (Spatial_Blocks).
                                  if Pd then
                                     declare
                                        Inv   : Grid_Access := new Real_Matrix (1 .. Reduced, 1 .. Reduced);
-                                       Share : Grid_Access := new Real_Matrix'[1 .. Frames => [1 .. Reduced => 0.0]];
-                                       Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
-                                       Clusters : Natural := 0;
+                                       --  The tracks' reference pixels, and the squares of the image
+                                       --  they fall in.
+                                       Present          : Flag_Array (1 .. Tracks) := [others => False];
+                                       Track_U, Track_V : Real_Array (1 .. Tracks) := [others => 0.0];
+                                       Block            : Block_Array (1 .. Tracks);
+                                       Blocks           : Natural;
+                                       Side             : Real;
+                                       --  What every keyframe, every block and every cell (a keyframe
+                                       --  and a block) holds of the gradient, and the sum of the outer
+                                       --  products of what each cluster of the three kinds holds.
+                                       Frame_Share : Grid_Access := new Real_Matrix'[1 .. Frames => [1 .. Reduced => 0.0]];
+                                       Block_Share, Cell_Share : Grid_Access;
+                                       Frame_Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
+                                       Block_Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
+                                       Cell_Spread  : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
+                                       Frame_Clusters, Block_Clusters, Cell_Clusters : Natural := 0;
+
+                                       --  Adds what one cluster holds to the spread of its kind; a
+                                       --  cluster that holds nothing is none.
+                                       procedure Add (Held : Real_Vector; To : in out Real_Matrix; Counted : in out Natural) is
+                                       begin
+                                          if (for some P in Held'Range => Held (P) /= 0.0) then
+                                             Counted := Counted + 1;
+                                             for P in 1 .. Reduced loop
+                                                for Q in 1 .. Reduced loop
+                                                   To (P, Q) := To (P, Q) + Held (Held'First + P - 1) * Held (Held'First + Q - 1);
+                                                end loop;
+                                             end loop;
+                                          end if;
+                                       end Add;
+
+                                       function Row (G : Real_Matrix; K : Positive) return Real_Vector is
+                                         ([for P in 1 .. Reduced => G (K, P)]);
                                     begin
                                        for P in 1 .. Reduced loop
                                           declare
@@ -759,10 +909,25 @@ package body Driver.Robot.Kinematics.Fit is
                                              end;
                                           end;
                                        end loop;
+                                       for K in 1 .. Used loop
+                                          declare
+                                             Sg : Sighting renames Sight (Sight'First + Natural (Index (K)) - 1);
+                                          begin
+                                             Present (Sg.Track) := True;
+                                             Track_U (Sg.Track) := Sg.U0;
+                                             Track_V (Sg.Track) := Sg.V0;
+                                          end;
+                                       end loop;
+                                       Spatial_Blocks (Track_U, Track_V, Present, Reduced, Block, Blocks, Side);
+                                       Report.Blocks := Blocks;
+                                       Report.Block_Side := Side;
+                                       Block_Share := new Real_Matrix'[1 .. Blocks => [1 .. Reduced => 0.0]];
+                                       Cell_Share := new Real_Matrix'[1 .. Frames * Blocks => [1 .. Reduced => 0.0]];
                                        for I in 1 .. 2 * Used loop
                                           declare
                                              Sg  : Sighting renames Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1);
                                              Psi : constant Real := Huber (R0 (I) / Sigma) / Sigma ** 2 * R0 (I);
+                                             Cell : constant Positive := (Sg.Frame - 1) * Blocks + Block (Sg.Track);
                                           begin
                                              if Psi /= 0.0 then
                                                 for P in 1 .. Reduced loop
@@ -777,43 +942,58 @@ package body Driver.Robot.Kinematics.Fit is
                                                       if Sg.Track /= Anchor and then C (Sg.Track) > 0.0 then
                                                          Jr := Jr - Br (P, Sg.Track) / C (Sg.Track) * Jd (I);
                                                       end if;
-                                                      Share (Sg.Frame, P) := Share (Sg.Frame, P) + Psi * Jr;
+                                                      Frame_Share (Sg.Frame, P) := Frame_Share (Sg.Frame, P) + Psi * Jr;
+                                                      Block_Share (Block (Sg.Track), P) := Block_Share (Block (Sg.Track), P) + Psi * Jr;
+                                                      Cell_Share (Cell, P) := Cell_Share (Cell, P) + Psi * Jr;
                                                    end;
                                                 end loop;
                                              end if;
                                           end;
                                        end loop;
                                        for F in 1 .. Frames loop
-                                          if (for some P in 1 .. Reduced => Share (F, P) /= 0.0) then
-                                             Clusters := Clusters + 1;
-                                             for P in 1 .. Reduced loop
-                                                for Q in 1 .. Reduced loop
-                                                   Spread (P, Q) := Spread (P, Q) + Share (F, P) * Share (F, Q);
-                                                end loop;
-                                             end loop;
-                                          end if;
+                                          Add (Row (Frame_Share.all, F), Frame_Spread.all, Frame_Clusters);
                                        end loop;
-                                       --  Too few keyframes to tell how theirs spread: not
-                                       --  determined.
-                                       if Clusters > 1 then
+                                       for B in 1 .. Blocks loop
+                                          Add (Row (Block_Share.all, B), Block_Spread.all, Block_Clusters);
+                                       end loop;
+                                       for C in 1 .. Frames * Blocks loop
+                                          Add (Row (Cell_Share.all, C), Cell_Spread.all, Cell_Clusters);
+                                       end loop;
+                                       --  Too few keyframes or blocks to tell how theirs spread:
+                                       --  not determined.
+                                       if Frame_Clusters > 1 and then Block_Clusters > 1 and then Cell_Clusters > 1 then
                                           declare
-                                             --  The spread of a mean over the clusters, unbiased.
-                                             Small : constant Real := Real (Clusters) / Real (Clusters - 1);
-                                             V     : constant Real_Matrix := Inv.all * Spread.all * Inv.all;
+                                             --  Each kind's spread of a mean over its clusters, unbiased.
+                                             function Small (Count : Natural) return Real is
+                                               (Real (Count) / Real (Count - 1));
+                                             Meat : constant Real_Matrix :=
+                                               Small (Frame_Clusters) * Frame_Spread.all + Small (Block_Clusters) * Block_Spread.all
+                                               - Small (Cell_Clusters) * Cell_Spread.all;
+                                             V    : Real_Matrix (1 .. Reduced, 1 .. Reduced);
+                                             Ok   : Boolean;
                                           begin
-                                             for P in 1 .. Reduced loop
-                                                Variance (P) := Small * V (P, P);
-                                                for Q in 1 .. Reduced loop
-                                                   Report.Covariance.Append (Small * V (P, Q));
+                                             Sandwich (Inv.all, Meat, V, Ok);
+                                             if Ok then
+                                                for P in 1 .. Reduced loop
+                                                   Variance (P) := V (P, P);
+                                                   for Q in 1 .. Reduced loop
+                                                      Report.Covariance.Append (V (P, Q));
+                                                   end loop;
                                                 end loop;
-                                             end loop;
+                                             else
+                                                Determined := False;
+                                             end if;
                                           end;
                                        else
                                           Determined := False;
                                        end if;
                                        Free (Inv);
-                                       Free (Share);
-                                       Free (Spread);
+                                       Free (Frame_Share);
+                                       Free (Block_Share);
+                                       Free (Cell_Share);
+                                       Free (Frame_Spread);
+                                       Free (Block_Spread);
+                                       Free (Cell_Spread);
                                     end;
                                  end if;
                                  --  How each track's log depth moves with the reduced

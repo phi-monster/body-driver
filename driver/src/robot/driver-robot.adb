@@ -327,7 +327,7 @@ package body Driver.Robot is
    end Arm_Eye;
 
    --  A pose with the uncertainty of the fit that gave it: the covariance of
-   --  the fit's parameters, clustered by keyframe, carried to the eye at the
+   --  the fit's parameters, clustered by keyframe and by square of the image, carried to the eye at the
    --  readings it was made at, and into the world with its arm's placement
    --  (Kinematics.World_Pose_Covariance).
    function With_Fit_Uncertainty (M : Model; A : Arm_Id; T : Rigid; Readings : Real_Array) return Pose_Estimate is
