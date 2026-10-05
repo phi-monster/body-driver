@@ -12,6 +12,9 @@ with Driver.Beats;
 with Driver.Log;
 with Ada.Strings.Fixed;
 with Driver.Robot.Body_File;
+with Driver.Recording;
+with Ada.Text_IO;
+with GNAT.OS_Lib;
 with Driver.Robot.Boot;
 with Driver.Robot.Kinematics;
 with Driver.Robot.Lockin;
@@ -3231,6 +3234,82 @@ package body Driver.Robot.Tests is
       end;
    end Body_File_Round_Trip;
 
+   --  A body file the driver reads goes into the recording where it was
+   --  read, once, and the recorded text reloads the body the file gave.
+   procedure Body_File_In_The_Recording is
+      use type Driver.Recording.Record_Kind;
+      use type GNAT.OS_Lib.File_Descriptor;
+      use type GNAT.OS_Lib.String_Access;
+      M, Live, Again : Model;
+      Ok    : Boolean;
+      Why   : Ada.Strings.Unbounded.Unbounded_String;
+      FD    : GNAT.OS_Lib.File_Descriptor;
+      File_Name, Recording_Name : GNAT.OS_Lib.String_Access;
+      Found : Natural := 0;
+      Gone  : Boolean;
+   begin
+      Measured_Body (M);
+      GNAT.OS_Lib.Create_Temp_File (FD, File_Name);
+      Check (FD /= GNAT.OS_Lib.Invalid_FD, "no scratch file for the body file");
+      GNAT.OS_Lib.Close (FD);
+      GNAT.OS_Lib.Create_Temp_File (FD, Recording_Name);
+      Check (FD /= GNAT.OS_Lib.Invalid_FD, "no scratch file for the recording");
+      GNAT.OS_Lib.Close (FD);
+      if File_Name = null or else Recording_Name = null then
+         return;
+      end if;
+      declare
+         F : Ada.Text_IO.File_Type;
+      begin
+         Ada.Text_IO.Open (F, Ada.Text_IO.Out_File, File_Name.all);
+         Ada.Text_IO.Put (F, Driver.Robot.Body_File.Text (M));
+         Ada.Text_IO.Close (F);
+      end;
+      Driver.Recording.Start_Shared (Recording_Name.all);
+      Load_Body (Live, File_Name.all, Ok, Why);
+      Driver.Recording.Stop_Shared;
+      Check (Ok, "the body file was not loaded: " & Ada.Strings.Unbounded.To_String (Why));
+      declare
+         R       : Driver.Recording.Reader;
+         Opened  : Boolean;
+         More    : Boolean := True;
+         Kind    : Driver.Recording.Record_Kind;
+         Ns      : Long_Long_Integer;
+         Payload : Driver.Bytes.Buffer;
+         Head    : constant String := "body " & File_Name.all & ASCII.LF;
+         procedure Reload_Recorded (Data : Driver.Bytes.Byte_Array) is
+            Text : constant String := Driver.Bytes.To_String (Data);
+         begin
+            Found := Found + 1;
+            if Text'Length < Head'Length or else Text (Text'First .. Text'First + Head'Length - 1) /= Head then
+               Check (False, "the file record does not name the body file it holds");
+               return;
+            end if;
+            Load_Body_Text (Again, Text (Text'First + Head'Length .. Text'Last), Ok, Why);
+            Check (Ok, "the recorded text does not reload: " & Ada.Strings.Unbounded.To_String (Why));
+            Check (Driver.Robot.Body_File.Text (Again) = Driver.Robot.Body_File.Text (Live),
+                   "the recorded text reloads another body than the file did");
+         end Reload_Recorded;
+      begin
+         Driver.Recording.Open (R, Recording_Name.all, Opened);
+         Check (Opened, "the recording cannot be opened");
+         while Opened and then More loop
+            Driver.Recording.Next (R, Kind, Ns, Payload, More);
+            if More and then Kind = Driver.Recording.File_Read then
+               Payload.Query (Reload_Recorded'Access);
+            end if;
+         end loop;
+         if Opened then
+            Driver.Recording.Close (R);
+         end if;
+      end;
+      Check (Found = 1, "the body file read is in the recording" & Found'Image & " times, not once");
+      GNAT.OS_Lib.Delete_File (File_Name.all, Gone);
+      GNAT.OS_Lib.Delete_File (Recording_Name.all, Gone);
+      GNAT.OS_Lib.Free (File_Name);
+      GNAT.OS_Lib.Free (Recording_Name);
+   end Body_File_In_The_Recording;
+
    --  A quantity measured by another method than the code's is measured
    --  again, with what rests on it; the rest stands, and the estimates leave
    --  it as reloaded.
@@ -3611,6 +3690,9 @@ package body Driver.Robot.Tests is
                              & "quantities of unchanged methods are measured again", Body_File_Method_Change'Access);
       Driver.Tests.Register ("robot.body.plan", "a body reloaded from its file cannot plan a reach without a "
                              & "stream or an instrument", Plan_On_A_Reloaded_Body'Access);
+      Driver.Tests.Register ("robot.body.recorded", "a body file the driver reads is not in the recording once, "
+                             & "where it was read, or its recorded text reloads another body",
+                             Body_File_In_The_Recording'Access);
       Driver.Tests.Register ("robot.world.place", "a second arm whose eye sees the first arm's table is placed in the "
                              & "wrong spot, turn or scale, beyond its own sigma, or not through its own eye",
                              Place_A_Second_Arm'Access);

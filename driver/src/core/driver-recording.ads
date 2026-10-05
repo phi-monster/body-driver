@@ -5,12 +5,16 @@
 --    record   kind (one byte) | nanoseconds (u64 LE) | length (u32 LE) | payload
 --
 --  Kinds: R robot to driver, D driver to robot (binary messages), r and d the
---  same for text messages, C a new robot connection, S a service request and
---  T a service reply. A service record starts with a line naming the call:
---  the service, its call number (which pairs a reply with its request) and,
---  for a call an estimator submitted, "beat" and the beat it was submitted
---  at. A request goes on with the path, LF, and the body; a reply with "ok"
---  or what went wrong, LF, and the body.
+--  same for text messages, C a new robot connection, S a service request,
+--  T a service reply and F a file the driver read. A service record starts
+--  with a line naming the call: the service, its call number (which pairs a
+--  reply with its request) and, for a call an estimator submitted, "beat"
+--  and the beat it was submitted at. A request goes on with the path, LF,
+--  and the body; a reply with "ok" or what went wrong, LF, and the body. A
+--  file record starts with a line naming the file: what it is ("body", the
+--  body file Driver.Robot.Load_Body reads), a space and its path; then LF
+--  and the text read, so a replay is given the file as the run read it, at
+--  the point the run read it, even after the run rewrote the file.
 
 with Ada.Streams.Stream_IO;
 with Driver.Bytes;
@@ -18,7 +22,8 @@ with Driver.Bytes;
 package Driver.Recording is
 
    type Record_Kind is
-     (Robot_Message, Driver_Message, Robot_Text, Driver_Text, Connection, Service_Request, Service_Reply);
+     (Robot_Message, Driver_Message, Robot_Text, Driver_Text, Connection, Service_Request, Service_Reply,
+      File_Read);
 
    type Reader is limited private;
 
