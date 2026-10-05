@@ -1973,8 +1973,13 @@ package body Driver.Robot.Tests is
 
    --  Frame_Error is the spread of an error shared by every point of a
    --  keyframe (its rendering, its view), each keyframe's drawn at random:
-   --  the fit's reported uncertainty must still cover its errors.
-   procedure Synthetic_Sweep (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0) is
+   --  the fit's reported uncertainty must still cover its errors. Pending:
+   --  the matches of joint 1's widest keyframes, both ways, have not come
+   --  back (a boot refits between a keyframe and its answer): they have no
+   --  sightings yet.
+   procedure Synthetic_Sweep
+     (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0; Pending : Boolean := False)
+   is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N       : constant := 6;
       Levels  : constant Real_Array := [0.05 * Scale, -0.05 * Scale, 0.1 * Scale, -0.1 * Scale, 0.2 * Scale, -0.2 * Scale];
@@ -2067,6 +2072,29 @@ package body Driver.Robot.Tests is
             end;
          end;
       end loop;
+      if Pending then
+         declare
+            Up, Down : Positive := 2;
+            Kept     : Natural := 0;
+         begin
+            --  Joint 1's keyframes are the first of the sweep.
+            for F in 2 .. 1 + Levels'Length loop
+               if Changes (F, 1) > Changes (Up, 1) then
+                  Up := F;
+               end if;
+               if Changes (F, 1) < Changes (Down, 1) then
+                  Down := F;
+               end if;
+            end loop;
+            for I in 1 .. Seen loop
+               if All_Seen (I).Frame /= Up and then All_Seen (I).Frame /= Down then
+                  Kept := Kept + 1;
+                  All_Seen (Kept) := All_Seen (I);
+               end if;
+            end loop;
+            Seen := Kept;
+         end;
+      end if;
       declare
          Joints : Fit.Joint_Array (1 .. N);
          Found  : Fit.Lens;
@@ -3750,6 +3778,16 @@ package body Driver.Robot.Tests is
       Synthetic_Sweep (1.0, Expect_Fit => True);
    end Kinematics_Of_A_Synthetic_Arm;
 
+   --  A boot refits whenever the evidence has doubled, which can fall between
+   --  a keyframe and its matches' return. The widest keyframes of a joint
+   --  with no sightings yet are no widest ones: the search scores the widest
+   --  that have some (the first boot of A13 died with a range check in the
+   --  standard error of an empty median, the arm unfitted).
+   procedure Kinematics_With_Matches_Pending is
+   begin
+      Synthetic_Sweep (1.0, Expect_Fit => True, Pending => True);
+   end Kinematics_With_Matches_Pending;
+
    --  The same arm swept a five-hundredth as far: the image moves by less
    --  than its noise, and the fit must say it cannot tell.
    procedure Kinematics_Of_A_Small_Sweep is
@@ -3788,7 +3826,10 @@ package body Driver.Robot.Tests is
                              & "longer carries, is still taken for the arm's", Stale_Fit_Is_No_Arms'Access);
       Driver.Tests.Register ("robot.kinematics.shared", "the fit's focal length or eye pose is off by more than Z of "
                              & "its own sigmas when every keyframe's points share an error", Kinematics_With_Shared_Errors'Access);
-      Driver.Tests.Register ("robot.kinematics.unit", "a keyframe taken after the arm was fitted moves the lengths of its "
+      Driver.Tests.Register ("robot.kinematics.pending", "a joint whose widest keyframes have no sightings yet (their "
+                             & "matches have not come back) raises in the search of its axis, or leaves the arm "
+                             & "unfitted", Kinematics_With_Matches_Pending'Access);
+      Driver.Tests.Register ("robot.kinematics.unit","a keyframe taken after the arm was fitted moves the lengths of its "
                              & "frame (the unit follows every keyframe, not the first fit's), or the refit leaves it out",
                              Unit_Holds_As_Keyframes_Arrive'Access);
       Driver.Tests.Register ("robot.body.file", "a body written to its file and read back is not the body that was "

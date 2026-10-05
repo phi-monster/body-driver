@@ -1101,6 +1101,11 @@ package body Driver.Robot.Kinematics.Fit is
          Up_Frame, Down_Frame : array (1 .. N) of Natural := [others => 0];
          Grid_Counts : array (1 .. N) of Natural := [others => 0];
 
+         --  How many sightings each keyframe has: one whose matches have not
+         --  come back yet (the newest, widest keyframe of a boot's refit) has
+         --  none, and is no widest one.
+         Seen_In : array (1 .. Frames) of Natural := [others => 0];
+
          function Widest (Frame : Positive) return Boolean is
            (Single (Frame) > 0
             and then (Frame = Up_Frame (Single (Frame)) or else Frame = Down_Frame (Single (Frame))));
@@ -1309,11 +1314,14 @@ package body Driver.Robot.Kinematics.Fit is
          A, B, X1, X2 : Real;
          BA, BB, B1, B2 : Best_Array;
       begin
+         for X of Sight loop
+            Seen_In (X.Frame) := Seen_In (X.Frame) + 1;
+         end loop;
          for Frame in 2 .. Frames loop
             declare
                J : constant Natural := Single (Frame);
             begin
-               if J > 0 then
+               if J > 0 and then Seen_In (Frame) > 0 then
                   if Change (Frame, J) > 0.0
                     and then (Up_Frame (J) = 0 or else Change (Frame, J) > Change (Up_Frame (J), J))
                   then
