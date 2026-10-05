@@ -11,11 +11,19 @@
 --
 --  A group whose push moves the whole image of an eye carries that eye;
 --  one that moves a patch is seen by it. Whole means a significant majority
---  of the cells that can show a displacement respond (an eye mostly sees
+--  of the cells that can show a displacement show it (an eye mostly sees
 --  the world, not the body parts that ride with it); a patch is a
---  significant minority; anything in between is undecided. That a group
---  moves anything at all is itself tested: the responding cells must
---  outnumber the false alarms the per-cell test makes on its own.
+--  significant minority; anything in between is undecided. A cell shows it
+--  when it responds, or, when its own noise is too much for it to tell a motion
+--  as large as the responding cells show, in the share that the cells like it
+--  show it together. So a view partly too faint for its cells to tell a push
+--  is still moved whole by it; a patch of the best-measured cells is not made
+--  the whole picture by the faint cells around it, which together show
+--  nothing; and a push too small for the faint cells to show it even together
+--  leaves the verdict undecided, since the share is known only within its
+--  error. That a group moves anything at all is itself tested: the
+--  responding cells must outnumber the false alarms the per-cell test makes
+--  on its own.
 
 private package Driver.Robot.Lockin is
 

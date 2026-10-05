@@ -454,6 +454,115 @@ package body Driver.Robot.Tests is
       Check (Role (M, 3) = Closer, "once the eye decided nothing moved, the group is " & Role (M, 3)'Image);
    end Undecided_Eye_Leaves_Group_Unclassified;
 
+   --  A group that carries an eye moves the whole of its picture, though much
+   --  of the picture is so faintly textured that its cells cannot tell pushes
+   --  as small as the first ones from their own noise (a live x5's right arm,
+   --  A14: 218 of the 525 cells of the eye it carries responded, and the eye
+   --  was called a patch of the group's, so the arm was never swept). The
+   --  cells that cannot tell are no evidence against the whole picture moving;
+   --  together they show it. The same picture with only the well-textured
+   --  quarter moving is a patch, however faint the rest: there the faint
+   --  cells together show nothing. And when the pushes are too small for even
+   --  the faint cells together to show the motion, the well-textured quarter
+   --  cannot say a patch from the whole: the verdict is undecided, so the boot
+   --  pushes harder, rather than a patch.
+   procedure Carried_Eye_Partly_Textureless is
+      W       : constant := 256;
+      H       : constant := 192;
+      Strong  : constant := 48;      --  columns, from the left, with the texture the rig's eyes have
+      Faint   : constant := 0.02;    --  the texture of the others, as a share of that
+      Pushes  : constant := 14;
+      Push    : constant := 0.006;   --  reading units, a shift of the picture of 0.024 pixels
+      Weaker  : constant := 0.0025;  --  the same pushes, 2.4 times smaller
+
+      function Frame (Shown : Real; Faint_Moves : Boolean) return Driver.Images.Image is
+         use type Driver.Bytes.Offset;
+         Data : Driver.Bytes.Byte_Array (1 .. 3 * W * H);
+      begin
+         for Y in 0 .. H - 1 loop
+            for X in 0 .. W - 1 loop
+               declare
+                  Moved : constant Real := (if X < Strong or else Faint_Moves then Px_Per_Unit * Shown else 0.0);
+                  Rich  : constant Real := Texture (Real (X) + Moved, Real (Y));
+                  L     : constant Real := (if X < Strong then Rich else 128.0 + Faint * (Rich - 128.0));
+                  V     : constant Driver.Bytes.Byte := Driver.Bytes.Byte (Integer (Real'Max (0.0, Real'Min (255.0, L))));
+                  K     : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Y * W + X) + 1);
+               begin
+                  Data (K) := V;
+                  Data (K + 1) := V;
+                  Data (K + 2) := V;
+               end;
+            end loop;
+         end loop;
+         return Driver.Images.Create (W, H, Data);
+      end Frame;
+
+      --  The group is pushed away and back Pushes times, holding three beats
+      --  each way; its picture shows the reading of the beat before.
+      procedure Run (M : in out Model; Faint_Moves : Boolean; By : Real) is
+         Reading, Shown : Real := 0.0;
+         Beat : Natural := 0;
+
+         procedure Step (Target : Real) is
+            O    : Observation;
+            Sent : Driver.Commands.Command;
+         begin
+            Shown := Reading;
+            Reading := Target;
+            Driver.Commands.Set_Target (Sent, 1, [Target]);
+            O.Beat := Driver.Clock.Beat (Beat);
+            O.Images.Append (Frame (Shown, Faint_Moves));
+            O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+            O.Readings.Append (Real_Array'(1 => Reading));
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+            Observe (M, O, Sent);
+            Beat := Beat + 1;
+         end Step;
+      begin
+         for B in 1 .. 5 loop
+            Step (0.0);
+         end loop;
+         for P in 1 .. Pushes loop
+            for B in 1 .. 3 loop
+               Step (By);
+            end loop;
+            for B in 1 .. 3 loop
+               Step (0.0);
+            end loop;
+         end loop;
+         Estimate_Now (M);
+      end Run;
+
+      Carried, Patched, Weak : Model;
+   begin
+      Run (Carried, Faint_Moves => True, By => Push);
+      declare
+         F : constant Eye_Effect := Driver.Robot.Graph.Effect (Carried, 1, 1);
+      begin
+         Check (F.Responding * 2 < F.Textured,
+                "fewer than half of the cells tell the push, or the picture does not show the weakness:"
+                & F.Responding'Image & " of" & F.Textured'Image);
+         Check (F.Verdict = Whole, "an eye that moves whole, its faint cells too noisy to tell, is" & F.Verdict'Image
+                & " with" & F.Responding'Image & " of" & F.Textured'Image & " cells responding");
+      end;
+      Run (Patched, Faint_Moves => False, By => Push);
+      declare
+         F : constant Eye_Effect := Driver.Robot.Graph.Effect (Patched, 1, 1);
+      begin
+         Check (F.Verdict = Patch, "a picture whose well-textured quarter alone moves is" & F.Verdict'Image
+                & " with" & F.Responding'Image & " of" & F.Textured'Image & " cells responding");
+      end;
+      Run (Weak, Faint_Moves => True, By => Weaker);
+      declare
+         F : constant Eye_Effect := Driver.Robot.Graph.Effect (Weak, 1, 1);
+      begin
+         Check (F.Verdict = Undecided,
+                "an eye that moves whole under pushes too small for the faint cells to show it together, which the "
+                & "well-textured quarter cannot tell from a patch, is" & F.Verdict'Image & " with" & F.Responding'Image
+                & " of" & F.Textured'Image & " cells responding");
+      end;
+   end Carried_Eye_Partly_Textureless;
+
    --  A group only ever pushed together with another is not classified:
    --  what the eyes saw cannot be told from what its partner did.
    procedure Unprobed_Group_Stays_Unclassified is
@@ -3975,6 +4084,10 @@ package body Driver.Robot.Tests is
                              & "at rest gives no keyframe though its eye is still", Keyframe_Despite_Held_Jitter'Access);
       Driver.Tests.Register ("robot.roles.undecided", "a group some eye is still undecided about is called a closer or a "
                              & "part, though that eye may ride on it", Undecided_Eye_Leaves_Group_Unclassified'Access);
+      Driver.Tests.Register ("robot.roles.noisy", "an eye that a group carries is called a patch of it because part of its "
+                             & "picture is too faintly textured for its cells to tell the group's push, or a patch "
+                             & "among well-textured cells is called the whole picture",
+                             Carried_Eye_Partly_Textureless'Access);
       Driver.Tests.Register ("robot.unprobed", "a group never pushed on its own is given a role from what moved "
                              & "with it", Unprobed_Group_Stays_Unclassified'Access);
       Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "
