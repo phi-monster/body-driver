@@ -38,9 +38,6 @@ package body Driver.Robot.Hand.Pressing is
           Position_Only => False));
    end Lowered;
 
-   function Back (M : Model; Arm : Arm_Id; O : Observation; Above : Rigid) return Driver.Robot.Motion.Plan is
-     (Driver.Robot.Motion.Plan_Reach_In_Arm (M, Arm, O, (Pose => Above, Position_Only => False)));
-
    function Gap
      (M       : Model;
       Arm     : Arm_Id;

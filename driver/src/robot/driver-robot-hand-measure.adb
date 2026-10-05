@@ -266,14 +266,18 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  way down, its sigma the plane's there with the tip's and the tool
    --  pose's. Before that nothing predicts it (a lobe's tip rides with its
    --  eye, so no view of the surface tells how far below the tip it is) and
-   --  the descent doubles until blocked.
+   --  the descent doubles until blocked. The way back is to the arm's readings
+   --  the descent began from, not to a pose: the arm is fitted again as it
+   --  moves, and a pose of the arm's frame kept through a press would be in a
+   --  frame that has moved.
    --  False when the arm cannot reach it or the body does not say where down is.
    function Press_Once (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening; Along : Vec3) return Boolean is
       Aimed  : Driver.Robot.Hand.Pressing.Aimed;
       Plan   : Driver.Robot.Motion.Plan;
       Report : Driver.Robot.Motion.Step_Report;
       Arm_Is : Group_Id;
-      Arm_Now : Driver.Robot.Hand.Views.Reading_Holders.Holder;
+      Arm_Now : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  the arm's readings at the last Read_Arm
+      Aim_At  : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  and where the descent began
 
       procedure Read_Aim (O : Observation) is
       begin
@@ -320,11 +324,6 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Arm_Is := Arm_Group (M, R.Arm);
          Arm_Now := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (O.Readings.Element (Arm_Is));
       end Read_Arm;
-
-      procedure Read_Back (O : Observation) is
-      begin
-         Plan := Driver.Robot.Hand.Pressing.Back (M, R.Arm, O, Aimed.Above);
-      end Read_Back;
    begin
       Hold_Beat (Read_Aim'Access);
       if not Aimed.Ok then
@@ -338,6 +337,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
          return False;
       end if;
       Driver.Robot.Motion.Follow (M, Plan, Report);
+      Hold_Beat (Read_Arm'Access);
+      Aim_At := Arm_Now;
       declare
          First : constant Estimate := Gap;
       begin
@@ -363,13 +364,11 @@ procedure Measure (H : in out Hands; M : in out Model) is
       if Unplanned then
          return False;
       end if;
-      --  Let go: the arm held where the block left it, so the hand rests.
+      --  Let go: the arm held where the block left it, so the hand rests; then
+      --  back to where the descent began.
       Hold_Beat (Read_Arm'Access);
       Move_Group (Arm_Is, Arm_Now.Element);
-      Hold_Beat (Read_Back'Access);
-      if Driver.Robot.Motion.Status (Plan) = Driver.Robot.Motion.Planned then
-         Driver.Robot.Motion.Follow (M, Plan, Report);
-      end if;
+      Move_Group (Arm_Is, Aim_At.Element);
       return True;
    end Press_Once;
 

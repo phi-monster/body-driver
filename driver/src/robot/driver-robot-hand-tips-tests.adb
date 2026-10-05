@@ -67,6 +67,7 @@ package body Driver.Robot.Hand.Tips.Tests is
                                                      Translation => T + Pose_Sigma * [Gaussian, Gaussian, Gaussian]),
                              Position_Covariance => (Pose_Sigma ** 2) * Identity3,
                              Rotation_Covariance => (Turn_Sigma ** 2) * Identity3),
+                Arm      => <>,
                 Approach => (Unit_Vector => Transpose (R) * Down, Sigma => Turn_Sigma),
                 Closer   => Driver.Robot.Hand.Presses.Reading_Holders.To_Holder ([1 => (if O = Open then 1.0 else 0.0)]),
                 Beat     => 0);
@@ -142,6 +143,14 @@ package body Driver.Robot.Hand.Tips.Tests is
       Pressed_At_Both_Openings (Mislead => False);
    end Both_Openings;
 
+   function No_Pose (Arm : Real_Array) return Pose_Estimate is
+      pragma Unreferenced (Arm);
+      Never_Measured : Pose_Estimate;
+   begin
+      return Never_Measured;
+   end No_Pose;
+   --  The presses of these tests keep no arm readings: their poses stay.
+
    --  The table z = 0 as the arm's own eye saw it before any press, its
    --  height known to a fifth of a millimetre and its tilt to a ten-thousandth.
    --  Three presses of one lobe, each from another orientation: a lobe's tip
@@ -161,7 +170,7 @@ package body Driver.Robot.Hand.Tips.Tests is
             Ada.Numerics.Float_Random.Reset (Gen, 17);
             Set_Sights (B, Sights);
             if Prior then
-               Set_Surface (B, Table);
+               Set_Frame (B, Table, No_Pose'Access);
             end if;
             for K in 0 .. 11 loop
                declare
@@ -201,7 +210,7 @@ package body Driver.Robot.Hand.Tips.Tests is
                   Before : constant Point_Estimate := Tip (B, 1, Open);
                begin
                   Higher.Centre := [0.0, 0.0, 3.0e-4];
-                  Set_Surface (B, Higher);
+                  Set_Frame (B, Higher, No_Pose'Access);
                   Check (Known (Tip (B, 1, Open)) and then Tip (B, 1, Open).Mean /= Before.Mean,
                          "a table other than the one the presses were fitted with left the tip where it was");
                end;

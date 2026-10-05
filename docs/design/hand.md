@@ -115,6 +115,19 @@ a tip 0.078 from where the placement puts it. Only `Tip`, `Tip_Now` and
 `Grip_Centre` go to the world, through the placement and the arm's unit
 (`Frames.Into_World`).
 
+**Lesson: the arm's frame moves while the hand presses.** A body that did not
+reload its kinematics goes on taking a keyframe at every pose the arm rests in
+that no keyframe was taken at, and fits the arm again: the arm's unit (the root
+mean square of its eye's positions over its keyframes) and with it every
+length in its frame move with each fit. A press kept as a pose of the frame it
+was made in would disagree with the table of the frame the arm has later. So a
+press keeps the arm's readings its pose came from (`Presses.Event.Arm`), and
+when the table the arm gives is not the one the presses were fitted with, all
+take their poses again from their readings (`Tips.Set_Frame`); a unit grown by
+a tenth moved the tips 12 sigma when it did not. A press never carries a pose
+from one beat to the next either: its way back is to the readings its descent
+began from.
+
 Each press goes to the lobe that leads into the surface: before anything is
 fitted, the lobe whose line of sight lies closest to the way the tool was
 pressing; once the surface is fitted, the lobe whose fitted tip is foremost

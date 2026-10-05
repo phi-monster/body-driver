@@ -35,7 +35,7 @@ package body Driver.Robot.Hand.Presses.Tests is
    begin
       for B in Stream'Range loop
          Observe (W, Driver.Clock.Beat (B), Stream (B).Blocked, Stream (B).Still, Pose_At (Stream (B).Height),
-                  [1 => 0.04], Found, Press);
+                  [1 => Stream (B).Height], [1 => 0.04], Found, Press);
          if Found then
             Count := Count + 1;
             Got := Press;
@@ -49,6 +49,7 @@ package body Driver.Robot.Hand.Presses.Tests is
          Check (Got.Approach.Sigma < Real'Last and then Got.Approach.Unit_Vector (1) > 0.999,
                 "the press direction is not the way the tool moved");
          Check (Got.Closer.Element (1) = 0.04, "the closer readings at the press were not kept");
+         Check (Got.Arm.Element (1) = 0.099, "the arm's readings at the press were not kept");
       end if;
    end One_Press;
 
@@ -57,9 +58,9 @@ package body Driver.Robot.Hand.Presses.Tests is
       Found : Boolean;
       Press : Event;
    begin
-      Observe (W, 1, False, True, Pose_At (0.1), [1 => 0.0], Found, Press);
-      Observe (W, 2, True, True, Pose_At (0.1), [1 => 0.0], Found, Press);
-      Observe (W, 3, False, True, Pose_At (0.1), [1 => 0.0], Found, Press);
+      Observe (W, 1, False, True, Pose_At (0.1), [1 => 0.1], [1 => 0.0], Found, Press);
+      Observe (W, 2, True, True, Pose_At (0.1), [1 => 0.1], [1 => 0.0], Found, Press);
+      Observe (W, 3, False, True, Pose_At (0.1), [1 => 0.1], [1 => 0.0], Found, Press);
       Check (Found and then Press.Approach.Sigma = Real'Last, "a block without a move was given a direction");
    end Unmoved_Press_Has_No_Direction;
 

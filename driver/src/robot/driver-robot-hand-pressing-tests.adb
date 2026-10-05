@@ -353,11 +353,11 @@ package body Driver.Robot.Hand.Pressing.Tests is
       end loop;
    end Tips_Free_Of_Placement;
 
-   --  Aimed, lowered and lifted back in the arm's own frame: the way down is
-   --  into the table its own eye saw (not the first arm's), the plans exist
-   --  with the arm not placed, and arrive where they were aimed; the same
-   --  readings whatever the placement. How far the tip is above the table is
-   --  the same, the tool and the table in one frame.
+   --  Aimed and lowered in the arm's own frame: the way down is into the table
+   --  its own eye saw (not the first arm's), the plans exist with the arm not
+   --  placed, and arrive where they were aimed; the same readings whatever the
+   --  placement. How far the tip is above the table is the same, the tool and
+   --  the table in one frame.
    procedure Press_Planned_In_The_Arms_Frame is
       Idle      : constant Real_Array (1 .. Joint_Count) := [others => 0.0];
       Here      : constant Real_Array (1 .. Joint_Count) := [0.01, -0.02, 0.0, 0.05, -0.04, 0.03];
@@ -416,9 +416,6 @@ package body Driver.Robot.Hand.Pressing.Tests is
                         end if;
                      end;
                   end if;
-                  Plan := Back (M, 2, Observed (3, Idle, Ends, 0.0), Got.Above);
-                  Check (Motion.Status (Plan) = Motion.Planned,
-                         "the way back is not planned, the arm standing " & How'Image);
                end;
             end if;
             Gap_Is := Gap (M, 2, O, Tip, Table_Of (2), Got.Into);
@@ -454,6 +451,64 @@ package body Driver.Robot.Hand.Pressing.Tests is
          Check (not Got.Ok, "a press is aimed by an arm that is not fitted");
       end;
    end Press_Planned_In_The_Arms_Frame;
+
+   --  The arm is fitted again as it moves, and its frame and unit move with
+   --  the fit: here the unit grows by a tenth between the presses (the same
+   --  arm, its slides' readings making 1.1 of what they made, its table 1.1
+   --  away). The presses made in the old unit were kept with the arm's
+   --  readings and take their poses in the new one, so the hand comes out as
+   --  the same hand in the new unit, each tip within Z of its sigma. Kept as
+   --  poses they disagree with the table by a tenth of its distance, and the
+   --  tips come out 12 sigma off.
+   procedure Presses_Follow_The_Arm_Fitted_Again is
+      Z     : constant Real := Threshold (Vector_Gate (3));
+      Grown : constant Real := 1.1;
+      Idle  : constant Real_Array (1 .. Joint_Count) := [others => 0.0];
+      Here  : constant Real_Array (1 .. Joint_Count) := [0.01, -0.02, 0.0, 0.05, -0.04, 0.03];
+      M     : Model;
+      H     : Hands;
+      Made, Early : Natural;
+      Worst : Real := 0.0;   --  the most any tip is off the new unit's, in units of its own sigma
+      Wide  : Real := 0.0;   --  the widest tip's sigma
+   begin
+      Build (M, Unplaced);
+      Give_Hand (H, 2);
+      Press_Everything (H, M, 2, Made, Early);
+      for J in 1 .. 3 loop
+         M.Kinematics (2).Result.Joints (J).C := Grown;
+      end loop;
+      M.Kinematics (2).Result.Table.Centre := Grown * M.Kinematics (2).Result.Table.Centre;
+      M.Kinematics (2).Result.Table.Offset_Sigma := Grown * M.Kinematics (2).Result.Table.Offset_Sigma;
+      --  The next beat of the arm, still: the hand sees the table is not the one it was fitted with.
+      Press_Beat (H, 1, M, Observed (1, Idle, Here, 1.0), Is_Blocked => False, Is_Still => True);
+      for L in 1 .. 2 loop
+         for W in Opening loop
+            declare
+               T    : constant Point_Estimate := Tip_In_Tool (H, 1, L, W);
+               What : constant String := "lobe" & L'Image & " at " & W'Image;
+            begin
+               Check (Known (T), What & " has no tip once the arm is fitted again");
+               if Known (T) then
+                  Worst := Real'Max (Worst, Mahalanobis (T, Grown * Tips_True (L, W)));
+                  Wide := Real'Max (Wide, Sqrt (Trace (T.Covariance)));
+                  Check (Mahalanobis (T, Grown * Tips_True (L, W)) <= Z,
+                         What & " is" & Real'Image (abs (T.Mean - Grown * Tips_True (L, W)))
+                         & " off the tip in the new unit, which is"
+                         & Real'Image (Mahalanobis (T, Grown * Tips_True (L, W))) & " of its sigma");
+                  --  Within its sigma means something: the sigma is finer than the unit's change,
+                  --  and the tip is not the old unit's.
+                  Check (Z * Sqrt (Trace (T.Covariance)) < (Grown - 1.0) * abs Tips_True (L, W),
+                         What & " is measured only to" & Real'Image (Sqrt (Trace (T.Covariance))));
+                  Check (Mahalanobis (T, Tips_True (L, W)) > Z, What & " is still the tip in the old unit");
+               end if;
+            end;
+         end loop;
+      end loop;
+      Check (Made >= 40 and then Early > 0, "the hand was not pressed before the arm was fitted again");
+      Driver.Log.Line (Driver.Log.Robot, "refit test:" & Made'Image & " presses, then the unit grown by" & Real'Image (Grown - 1.0)
+                       & "; the tips off the new unit's by at most" & Real'Image (Worst) & " of their own sigma (Z"
+                       & Real'Image (Z) & "), the widest sigma" & Real'Image (Wide));
+   end Presses_Follow_The_Arm_Fitted_Again;
 
    --  The tip in the world, of the second arm placed: the placement turns it
    --  and its unit scales the tip's offset from the tool as it scales the
@@ -503,6 +558,9 @@ package body Driver.Robot.Hand.Pressing.Tests is
       Driver.Tests.Register ("hand.pressing.plan",
                              "a press is aimed down into another arm's table, or planned in the world where an arm "
                              & "not placed in it cannot", Press_Planned_In_The_Arms_Frame'Access);
+      Driver.Tests.Register ("hand.pressing.refit",
+                             "presses kept as poses of an arm's frame stay in it when the arm is fitted again and its "
+                             & "unit moves", Presses_Follow_The_Arm_Fitted_Again'Access);
       Driver.Tests.Register ("hand.pressing.world",
                              "a tip is taken into the world without the arm's unit, or known of an arm not placed "
                              & "there", Tip_Taken_Into_The_World'Access);

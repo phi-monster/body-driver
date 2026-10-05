@@ -616,7 +616,9 @@ package body Driver.Robot.Hand is
    --  one its fit gives the tool pose (Tool_In_Arm) and the table its eye saw
    --  (Table_In_Arm) in: they need neither where the arm stands in the world
    --  nor the arm's unit, and the surface the presses fit is that table
-   --  corrected by them.
+   --  corrected by them. The arm is fitted again as it moves, and its frame
+   --  and unit with it: when its table is not the one the presses were fitted
+   --  with, they take their poses again from the arm's readings they kept.
 
    procedure Watch
      (R          : in out Hand_Record;
@@ -629,13 +631,22 @@ package body Driver.Robot.Hand is
       Found : Boolean;
       Press : Driver.Robot.Hand.Presses.Event;
       Which : Opening;
+
+      function Pose_Of (Arm : Real_Array) return Pose_Estimate is
+         Then_Read : Observation;
+      begin
+         Then_Read.Readings := O.Readings;
+         Then_Read.Readings.Replace_Element (Arm_Group (M, R.Arm), Arm);
+         return Tool_In_Arm (M, R.Arm, Then_Read);
+      end Pose_Of;
    begin
-      Driver.Robot.Hand.Tips.Set_Surface (R.Book, Table_In_Arm (M, R.Arm));
+      Driver.Robot.Hand.Tips.Set_Frame (R.Book, Table_In_Arm (M, R.Arm), Pose_Of'Access);
       if not Driver.Observations.Has_Reading (O, R.Group) then
          return;
       end if;
       Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked, Is_Still, Tool_In_Arm (M, R.Arm, O),
-                                         O.Readings.Element (R.Group), Found, Press);
+                                         O.Readings.Element (Arm_Group (M, R.Arm)), O.Readings.Element (R.Group),
+                                         Found, Press);
       if not Found then
          return;
       end if;

@@ -281,14 +281,35 @@ package body Driver.Robot.Hand.Tips is
       Settle (B);
    end Set_Sights;
 
-   procedure Set_Surface (B : in out Book; Surface : Driver.Geometry.Plane_Estimate) is
+   procedure Set_Frame
+     (B       : in out Book;
+      Surface : Driver.Geometry.Plane_Estimate;
+      Pose_Of : not null access function (Arm : Real_Array) return Pose_Estimate)
+   is
       use type Driver.Geometry.Plane_Estimate;
    begin
-      if Surface /= B.Table then
-         B.Table := Surface;
-         Settle (B);
+      if Surface = B.Table then
+         return;
       end if;
-   end Set_Surface;
+      B.Table := Surface;
+      for I in B.Kept.First_Index .. B.Kept.Last_Index loop
+         declare
+            K : Kept := B.Kept (I);
+         begin
+            if not K.Event.Arm.Is_Empty then
+               declare
+                  Pose : constant Pose_Estimate := Pose_Of (K.Event.Arm.Element);
+               begin
+                  if Pose.Position_Covariance (1, 1) < Real'Last and then Pose.Rotation_Covariance (1, 1) < Real'Last then
+                     K.Event.Tool := Pose;
+                     B.Kept.Replace_Element (I, K);
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      Settle (B);
+   end Set_Frame;
 
    procedure Add (B : in out Book; Press : Driver.Robot.Hand.Presses.Event; At_Opening : Opening) is
    begin

@@ -7,7 +7,9 @@
 --  the way the tool moved from where it last stood still before the block,
 --  in the tool's frame at the block. Any driver's run gives the same
 --  presses, since only the stream decides them. The poses are in the frame
---  they are given in, which for a hand is its arm's own.
+--  they are given in, which for a hand is its arm's own; a press keeps the
+--  arm's readings too, which the pose is a function of, since an arm's frame
+--  and unit are what its fit makes them and move when it is fitted again.
 
 with Ada.Containers.Indefinite_Holders;
 with Driver.Clock;
@@ -18,6 +20,7 @@ package Driver.Robot.Hand.Presses is
 
    type Event is record
       Tool     : Pose_Estimate;              --  at rest after the block, in the arm's own frame
+      Arm      : Reading_Holders.Holder;     --  the arm's readings then
       Approach : Direction_Estimate;         --  tool frame; unknown when the tool had not moved
       Closer   : Reading_Holders.Holder;     --  the closer group's readings then
       Beat     : Driver.Clock.Beat := 0;
@@ -31,10 +34,12 @@ package Driver.Robot.Hand.Presses is
       Blocked : Boolean;
       Still   : Boolean;
       Tool    : Pose_Estimate;
+      Arm     : Real_Array;
       Closer  : Real_Array;
       Found   : out Boolean;
       Press   : out Event);
-   --  One beat of one arm. Found is True at the beat a press ends.
+   --  One beat of one arm, Arm its readings. Found is True at the beat a
+   --  press ends.
 
 private
 

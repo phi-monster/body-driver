@@ -11,6 +11,11 @@
 --  A frame mixed in (the tool in the world with the arm's own up, say) would
 --  turn the press by the whole placement.
 --
+--  The arm goes on being fitted as it moves, and its frame and unit with it:
+--  what is read here is read at one beat and used at that beat, and nothing
+--  of a pose is carried from one beat to the next (the way back of a press is
+--  to the readings it began from, not to a pose).
+--
 --  Plain geometry on what the body measured; the decider that moves the arm
 --  is Driver.Robot.Hand.Measure. Read inside a held beat, as it does.
 
@@ -35,9 +40,6 @@ package Driver.Robot.Hand.Pressing is
    function Lowered
      (M : Model; Arm : Arm_Id; O : Observation; Into : Vec3; By : Real) return Driver.Robot.Motion.Plan;
    --  A plan to the tool as at O moved By along Into.
-
-   function Back (M : Model; Arm : Arm_Id; O : Observation; Above : Rigid) return Driver.Robot.Motion.Plan;
-   --  A plan from the tool as at O to the pose it was aimed at.
 
    function Gap
      (M       : Model;
