@@ -67,6 +67,10 @@ private package Driver.Robot.Kinematics is
 
    function Fitted (M : Model; A : Arm_Id) return Boolean;
 
+   function Table (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate;
+   --  The table the arm's eye saw, in its reference frame, as the fit that
+   --  holds found it (Refit); unknown until then.
+
    procedure In_World (M : Model; A : Arm_Id; Placement : out Rigid; Scale : out Real; Known : out Boolean);
    --  The arm's reference frame in the world: X_world = Placement * (Scale *
    --  X). The world is the first arm's reference frame (identity, scale
@@ -74,6 +78,9 @@ private package Driver.Robot.Kinematics is
    --  tracked points, matched into the arm's reference view, are where its
    --  eye stood among them (a resection with the arm's own lens), and the
    --  points both arms tracked give the scale of its lengths.
+
+   function Scale_In_World (M : Model; A : Arm_Id) return Estimate;
+   --  In_World's Scale with its sigma; Unknown until the arm is placed.
 
    procedure World_Pose_Covariance (M : Model; A : Arm_Id; Readings : Real_Array; Turn, Place : out Mat3);
    --  Pose_Covariance carried into the world: the arm's own, turned and
