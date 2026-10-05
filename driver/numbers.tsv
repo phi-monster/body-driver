@@ -666,7 +666,7 @@ driver-robot-body_file.adb	function Whole (N : Node) return Integer is (if Is_Nu
 driver-robot-body_file.ads	Graph_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Kinematics_Method : constant := 4;	4	structure	the kinematics method version: each arm's table stored with its whole covariance in the arm's own frame
 driver-robot-body_file.ads	Lag_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
-driver-robot-body_file.ads	Lockin_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
+driver-robot-body_file.ads	Lockin_Method : constant := 3;	3	format	the third version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Noise_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Steps_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
@@ -1339,6 +1339,8 @@ driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Di
 driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));	2	math	the chi-square median with two degrees of freedom
 driver-robot-lockin.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	structure	a displacement has two components
 driver-robot-lockin.adb	Half : constant Real := 0.5;	0.5	math	a majority is more than half: a whole image moves when a significant majority of its cells do
+driver-robot-lockin.adb	High : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean + Z * Sigma) / Typical));	1.0	math	a share of the cells is at most all of them
+driver-robot-lockin.adb	Low : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));	1.0	math	a share of the cells is at most all of them
 driver-robot-lockin.adb	S.Gain_Variances.Append (0.0);	0.0	math	a cell that does not respond adds no gain
 driver-robot-lockin.adb	S.Gain_Variances.Append (0.0, Ada.Containers.Count_Type (Kept));	0.0	math	a cell that cannot show a displacement adds no gain
 driver-robot-lockin.adb	S.Gain_Variances.Append (4.0 * (Gu * Bu ** 2 + Gv * Bv ** 2));	4.0	math	the variance of a squared estimate b^2 with variance g is 4 g b^2 to first order
@@ -1348,9 +1350,17 @@ driver-robot-lockin.adb	S.Noise.Append (Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 
 driver-robot-lockin.adb	S.Rest_Counts_Known := Rest > 1;	1	statistics	a spread takes two samples
 driver-robot-lockin.adb	S.Shifts.Append (0.0);	0.0	math	a cell that does not respond moves no pixels
 driver-robot-lockin.adb	S.Shifts.Append (0.0, Ada.Containers.Count_Type (Kept));	0.0	math	a cell that cannot show a displacement moves no pixels
+driver-robot-lockin.adb	Sigma : constant Real := 1.0 / Sqrt (Weights);	1.0	math	the standard error of a mean weighted by inverse variances is one over the root of the weights' sum
+driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Freedom) * Var ** 2 + 4.0 * Var * Typical);	1.0	math	the weight of an estimate is the inverse of its variance
+driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Freedom) * Var ** 2 + 4.0 * Var * Typical);	2.0	math	the variance of a chi-square statistic is twice its degrees of freedom
+driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Freedom) * Var ** 2 + 4.0 * Var * Typical);	4.0	math	the variance of a non-central chi-square statistic adds four times its non-centrality
 driver-robot-lockin.adb	X (R, 1) := 1.0;	1.0	math	the intercept column of a regression
 driver-robot-lockin.adb	if All_Columns = 0 or else M.Beats < 2 then	2	structure	a displacement needs two frames
 driver-robot-lockin.adb	if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 then	1	structure	the beat before the one an image shows must exist
+driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: its linear term, twice Z squared
+driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, twice Z squared times (2 Q - K)
+driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: twice the critical value in 2 Q - K
+driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	4.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, four Z to the fourth
 driver-robot-lockin.adb	return Pushes <= 1;	1	structure	a row is a reference only while at most one group is pushed
 driver-robot-motion.adb	& Driver.Log.Image (E.Delivered.Value, 3) & "" & Driver.Log.Image (E.Length, 4)	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (E.Delivered.Value, 3) & "" & Driver.Log.Image (E.Length, 4)	4	format	digits printed in a log line or a message
