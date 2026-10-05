@@ -136,8 +136,10 @@ package Driver.Robot.Kinematics.Fit is
       Flipped    : Boolean := False;   --  every translation changed sign to put the points in front
       Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
       Focal_Sigma : Real := Real'Last; --  the uncertainty of the focal length across
-      Covariance : Real_Lists.Vector;  --  of the parameters above, row by row, clustered by keyframe and by track
-                                       --  (Fit); empty when not determined
+      Covariance : Real_Lists.Vector;  --  of the parameters above, row by row, clustered by keyframe and by
+                                       --  squares of the image (Fit); empty when not determined
+      Blocks     : Natural := 0;       --  the squares of the image the tracks were clustered in (Spatial_Blocks)
+      Block_Side : Real := 0.0;        --  and their side, pixels
       Depths     : Real_Lists.Vector;  --  per track, the depth of its point along its reference line of
                                        --  sight as the track refinement found it; 0 where it has none
       Depth_Sigmas : Real_Lists.Vector;   --  per track, how uncertain the logarithm of that depth is, the
@@ -160,11 +162,13 @@ package Driver.Robot.Kinematics.Fit is
                  and then Unit_Frames <= Changes'Length (1);
    --  The covariance is clustered two ways (Cameron, Gelbach and Miller): the
    --  inverse normal equations around the spread of what every keyframe holds
-   --  of the gradient, plus that of every track, less that of every sighting,
+   --  of the gradient, plus that of every square of the image the tracks fall
+   --  in (Spatial_Blocks), less that of every keyframe and square together,
    --  which both hold. The matches of a keyframe err together (its rendering,
-   --  its view) and so do the matches of a track in every keyframe (where
-   --  the matcher finds its point): sightings counted as independent, or
-   --  clustered by keyframe alone, hide the second and come out far too sure.
+   --  its view) and so do the matches of tracks near each other in every
+   --  keyframe (the matcher errs by where its point is): sightings counted as
+   --  independent, or clustered by keyframe alone, hide the second and come
+   --  out far too sure.
 
    procedure Sandwich
      (Inverse, Meat : Driver.Numerics.Arrays.Real_Matrix;
@@ -195,6 +199,28 @@ package Driver.Robot.Kinematics.Fit is
    --  points agree.
 
    type Flag_Array is array (Positive range <>) of Boolean;
+
+   type Block_Array is array (Positive range <>) of Natural;
+
+   procedure Spatial_Blocks
+     (U, V    : Real_Array;
+      Present : Flag_Array;
+      Terms   : Positive;
+      Block   : out Block_Array;
+      Count   : out Natural;
+      Side    : out Real)
+     with Pre => U'First = V'First and then U'Last = V'Last and then Present'First = U'First
+                 and then Present'Last = U'Last and then Block'First = U'First and then Block'Last = U'Last;
+   --  The Present points (pixels U, V of the tracks' reference pixels) divided
+   --  into squares of one Side, the largest that leaves them in more squares
+   --  than the fit has Terms (or each point alone, a pixel's side, when they
+   --  are not that many). Block numbers the squares they occupy from 1, 0 for a
+   --  point not Present; Count is how many. Tracks near each other err alike
+   --  in every keyframe (A11: a correlation of 0.6 and 0.8 under 25 pixels
+   --  between the errors of two tracks, gone by 100 to 200), so they are no
+   --  independent clusters; squares wider than that range would be, and the
+   --  wider they are the more of the error they hold together. A spread of
+   --  fewer clusters than terms is a matrix of lower rank than the terms.
 
    --  A track as the reference eye has it: on the line of sight H (H (3) = 1)
    --  through its reference pixel, at Depth along it (0 when it has none),

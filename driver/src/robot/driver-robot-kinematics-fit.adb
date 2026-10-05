@@ -29,6 +29,9 @@ package body Driver.Robot.Kinematics.Fit is
    type Flag_Grid is array (Positive range <>, Positive range <>) of Boolean;
    type Flag_Grid_Access is access Flag_Grid;
    procedure Free is new Ada.Unchecked_Deallocation (Flag_Grid, Flag_Grid_Access);
+   type Count_Grid is array (Positive range <>, Positive range <>) of Natural;
+   type Count_Grid_Access is access Count_Grid;
+   procedure Free is new Ada.Unchecked_Deallocation (Count_Grid, Count_Grid_Access);
 
    ---------------------------------------------------------------------------
    --  Geometry
@@ -363,6 +366,67 @@ package body Driver.Robot.Kinematics.Fit is
          end;
       end;
    end Sandwich;
+
+   procedure Spatial_Blocks
+     (U, V    : Real_Array;
+      Present : Flag_Array;
+      Terms   : Positive;
+      Block   : out Block_Array;
+      Count   : out Natural;
+      Side    : out Real)
+   is
+      Low_U, Low_V   : Real := Real'Last;
+      High_U, High_V : Real := -Real'Last;
+      Points         : Natural := 0;
+
+      --  The squares of side S that hold a point, numbered from 1 in the order
+      --  of the points.
+      procedure Divide (S : Real; Number : out Natural) is
+         Columns : constant Positive := Natural (Real'Floor ((High_U - Low_U) / S)) + 1;
+         Rows    : constant Positive := Natural (Real'Floor ((High_V - Low_V) / S)) + 1;
+         Label   : Count_Grid_Access := new Count_Grid'[1 .. Columns => [1 .. Rows => 0]];
+      begin
+         Number := 0;
+         for I in U'Range loop
+            if Present (I) then
+               declare
+                  X : constant Positive := Natural (Real'Floor ((U (I) - Low_U) / S)) + 1;
+                  Y : constant Positive := Natural (Real'Floor ((V (I) - Low_V) / S)) + 1;
+               begin
+                  if Label (X, Y) = 0 then
+                     Number := Number + 1;
+                     Label (X, Y) := Number;
+                  end if;
+                  Block (I) := Label (X, Y);
+               end;
+            end if;
+         end loop;
+         Free (Label);
+      end Divide;
+   begin
+      Block := [others => 0];
+      Count := 0;
+      Side := 1.0;
+      for I in U'Range loop
+         if Present (I) then
+            Points := Points + 1;
+            Low_U := Real'Min (Low_U, U (I));
+            Low_V := Real'Min (Low_V, V (I));
+            High_U := Real'Max (High_U, U (I));
+            High_V := Real'Max (High_V, V (I));
+         end if;
+      end loop;
+      if Points = 0 then
+         return;
+      end if;
+      --  From one square holding them all down to a pixel's side.
+      Side := Real'Ceiling (Real'Max (High_U - Low_U, High_V - Low_V)) + 1.0;
+      loop
+         Divide (Side, Count);
+         exit when Count > Terms or else Side <= 1.0;
+         Side := Side - 1.0;
+      end loop;
+   end Spatial_Blocks;
 
    ---------------------------------------------------------------------------
    --  Stage 5: the tracks seen from many keyframes. Every followed point has a
@@ -785,27 +849,34 @@ package body Driver.Robot.Kinematics.Fit is
                                  --  and Miller): the inverse normal equations around the
                                  --  spread of every keyframe's own share of the gradient
                                  --  (each residual's, the depths eliminated), plus every
-                                 --  track's, less every sighting's, which both hold. A
-                                 --  keyframe's matches err together (its rendering, its
-                                 --  view), and so do a track's in every keyframe (where
-                                 --  the matcher finds its point), which sightings taken
-                                 --  as independent hide: A9's focal length and reading
-                                 --  scales came out 10 to 20 of the keyframes' sigmas
-                                 --  off the truth, and A11's lenses, its tracks repeating
-                                 --  an error as large as one sighting's, 6.6 and 9.5.
+                                 --  block's of tracks, less every cell's where a keyframe
+                                 --  and a block meet, which both hold. A keyframe's matches
+                                 --  err together (its rendering, its view), and so do the
+                                 --  matches of tracks near each other in every keyframe
+                                 --  (the matcher errs by where its point is, alike in all
+                                 --  its views), which sightings taken as independent hide:
+                                 --  A9's focal length and reading scales came out 10 to 20
+                                 --  of the keyframes' sigmas off the truth, and A11's lenses
+                                 --  6.6 and 9.5 (Spatial_Blocks).
                                  if Pd then
                                     declare
                                        Inv   : Grid_Access := new Real_Matrix (1 .. Reduced, 1 .. Reduced);
-                                       --  What every keyframe and every track holds of the gradient,
-                                       --  and the sum of the outer products of what each cluster of
-                                       --  the three kinds (keyframes, tracks, sightings) holds.
+                                       --  The tracks' reference pixels, and the squares of the image
+                                       --  they fall in.
+                                       Present          : Flag_Array (1 .. Tracks) := [others => False];
+                                       Track_U, Track_V : Real_Array (1 .. Tracks) := [others => 0.0];
+                                       Block            : Block_Array (1 .. Tracks);
+                                       Blocks           : Natural;
+                                       Side             : Real;
+                                       --  What every keyframe, every block and every cell (a keyframe
+                                       --  and a block) holds of the gradient, and the sum of the outer
+                                       --  products of what each cluster of the three kinds holds.
                                        Frame_Share : Grid_Access := new Real_Matrix'[1 .. Frames => [1 .. Reduced => 0.0]];
-                                       Track_Share : Grid_Access := new Real_Matrix'[1 .. Tracks => [1 .. Reduced => 0.0]];
-                                       One_Sight   : Real_Vector (1 .. Reduced) := [others => 0.0];
+                                       Block_Share, Cell_Share : Grid_Access;
                                        Frame_Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
-                                       Track_Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
-                                       Sight_Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
-                                       Frame_Clusters, Track_Clusters, Sight_Clusters : Natural := 0;
+                                       Block_Spread : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
+                                       Cell_Spread  : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Reduced => 0.0]];
+                                       Frame_Clusters, Block_Clusters, Cell_Clusters : Natural := 0;
 
                                        --  Adds what one cluster holds to the spread of its kind; a
                                        --  cluster that holds nothing is none.
@@ -838,10 +909,25 @@ package body Driver.Robot.Kinematics.Fit is
                                              end;
                                           end;
                                        end loop;
+                                       for K in 1 .. Used loop
+                                          declare
+                                             Sg : Sighting renames Sight (Sight'First + Natural (Index (K)) - 1);
+                                          begin
+                                             Present (Sg.Track) := True;
+                                             Track_U (Sg.Track) := Sg.U0;
+                                             Track_V (Sg.Track) := Sg.V0;
+                                          end;
+                                       end loop;
+                                       Spatial_Blocks (Track_U, Track_V, Present, Reduced, Block, Blocks, Side);
+                                       Report.Blocks := Blocks;
+                                       Report.Block_Side := Side;
+                                       Block_Share := new Real_Matrix'[1 .. Blocks => [1 .. Reduced => 0.0]];
+                                       Cell_Share := new Real_Matrix'[1 .. Frames * Blocks => [1 .. Reduced => 0.0]];
                                        for I in 1 .. 2 * Used loop
                                           declare
                                              Sg  : Sighting renames Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1);
                                              Psi : constant Real := Huber (R0 (I) / Sigma) / Sigma ** 2 * R0 (I);
+                                             Cell : constant Positive := (Sg.Frame - 1) * Blocks + Block (Sg.Track);
                                           begin
                                              if Psi /= 0.0 then
                                                 for P in 1 .. Reduced loop
@@ -857,35 +943,32 @@ package body Driver.Robot.Kinematics.Fit is
                                                          Jr := Jr - Br (P, Sg.Track) / C (Sg.Track) * Jd (I);
                                                       end if;
                                                       Frame_Share (Sg.Frame, P) := Frame_Share (Sg.Frame, P) + Psi * Jr;
-                                                      Track_Share (Sg.Track, P) := Track_Share (Sg.Track, P) + Psi * Jr;
-                                                      One_Sight (P) := One_Sight (P) + Psi * Jr;
+                                                      Block_Share (Block (Sg.Track), P) := Block_Share (Block (Sg.Track), P) + Psi * Jr;
+                                                      Cell_Share (Cell, P) := Cell_Share (Cell, P) + Psi * Jr;
                                                    end;
                                                 end loop;
-                                             end if;
-                                             --  A sighting's two residuals, across and down, are one
-                                             --  cluster: where a keyframe's and a track's meet.
-                                             if I mod 2 = 0 then
-                                                Add (One_Sight, Sight_Spread.all, Sight_Clusters);
-                                                One_Sight := [others => 0.0];
                                              end if;
                                           end;
                                        end loop;
                                        for F in 1 .. Frames loop
                                           Add (Row (Frame_Share.all, F), Frame_Spread.all, Frame_Clusters);
                                        end loop;
-                                       for T in 1 .. Tracks loop
-                                          Add (Row (Track_Share.all, T), Track_Spread.all, Track_Clusters);
+                                       for B in 1 .. Blocks loop
+                                          Add (Row (Block_Share.all, B), Block_Spread.all, Block_Clusters);
                                        end loop;
-                                       --  Too few keyframes or tracks to tell how theirs spread:
+                                       for C in 1 .. Frames * Blocks loop
+                                          Add (Row (Cell_Share.all, C), Cell_Spread.all, Cell_Clusters);
+                                       end loop;
+                                       --  Too few keyframes or blocks to tell how theirs spread:
                                        --  not determined.
-                                       if Frame_Clusters > 1 and then Track_Clusters > 1 and then Sight_Clusters > 1 then
+                                       if Frame_Clusters > 1 and then Block_Clusters > 1 and then Cell_Clusters > 1 then
                                           declare
                                              --  Each kind's spread of a mean over its clusters, unbiased.
                                              function Small (Count : Natural) return Real is
                                                (Real (Count) / Real (Count - 1));
                                              Meat : constant Real_Matrix :=
-                                               Small (Frame_Clusters) * Frame_Spread.all + Small (Track_Clusters) * Track_Spread.all
-                                               - Small (Sight_Clusters) * Sight_Spread.all;
+                                               Small (Frame_Clusters) * Frame_Spread.all + Small (Block_Clusters) * Block_Spread.all
+                                               - Small (Cell_Clusters) * Cell_Spread.all;
                                              V    : Real_Matrix (1 .. Reduced, 1 .. Reduced);
                                              Ok   : Boolean;
                                           begin
@@ -906,10 +989,11 @@ package body Driver.Robot.Kinematics.Fit is
                                        end if;
                                        Free (Inv);
                                        Free (Frame_Share);
-                                       Free (Track_Share);
+                                       Free (Block_Share);
+                                       Free (Cell_Share);
                                        Free (Frame_Spread);
-                                       Free (Track_Spread);
-                                       Free (Sight_Spread);
+                                       Free (Block_Spread);
+                                       Free (Cell_Spread);
                                     end;
                                  end if;
                                  --  How each track's log depth moves with the reduced
