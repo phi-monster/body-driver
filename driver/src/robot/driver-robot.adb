@@ -390,7 +390,8 @@ package body Driver.Robot is
       end;
    end Ray;
 
-   function Up (M : Model) return Direction_Estimate is (M.Table_Up);
+   --  The world is the first arm's frame.
+   function Up (M : Model) return Direction_Estimate is (Up_In_Arm (M, 1));
 
    --  The tool frame of an arm is the frame of the eye it carries: what the
    --  driver measures of a hand it measures through that eye.
@@ -403,6 +404,50 @@ package body Driver.Robot is
       end loop;
       return (others => <>);
    end Tool_Pose;
+
+   function Tool_In_Arm (M : Model; A : Arm_Id; O : Observation) return Pose_Estimate is
+   begin
+      if Natural (A) > Arm_Count (M) or else not Kinematics.Fitted (M, A) then
+         return (others => <>);
+      end if;
+      declare
+         G : constant Group_Id := Arm_Group (M, A);
+      begin
+         if G > O.Readings.Last_Index or else O.Readings.Element (G)'Length /= Group_Size (M, G) then
+            return (others => <>);
+         end if;
+         declare
+            Readings : constant Real_Array := O.Readings.Element (G);
+            Turn, Place : Mat3;
+         begin
+            Kinematics.Pose_Covariance (M, A, Readings, Turn, Place);
+            return (Pose                => Kinematics.Eye_In_Reference (M, A, Readings),
+                    Position_Covariance => Place,
+                    Rotation_Covariance => Turn);
+         end;
+      end;
+   end Tool_In_Arm;
+
+   function Table_In_Arm (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate is
+     (if Natural (A) <= Arm_Count (M) then Kinematics.Table (M, A) else (others => <>));
+
+   function Up_In_Arm (M : Model; A : Arm_Id) return Direction_Estimate is
+      P : constant Driver.Geometry.Plane_Estimate := Table_In_Arm (M, A);
+   begin
+      if not Driver.Geometry.Known (P) then
+         return (others => <>);
+      end if;
+      declare
+         --  The larger eigenvalue of the tilt's covariance.
+         Mean   : constant Real := (P.Tilt_11 + P.Tilt_22) / 2.0;
+         Spread : constant Real := Sqrt (((P.Tilt_11 - P.Tilt_22) / 2.0) ** 2 + P.Tilt_12 ** 2);
+      begin
+         return (Unit_Vector => P.Normal, Sigma => Sqrt (Mean + Spread));
+      end;
+   end Up_In_Arm;
+
+   function Arm_Unit (M : Model; A : Arm_Id) return Estimate is
+     (if Natural (A) <= Arm_Count (M) then Kinematics.Scale_In_World (M, A) else Unknown);
 
    function Eye_In_Tool (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is
       pragma Unreferenced (O);

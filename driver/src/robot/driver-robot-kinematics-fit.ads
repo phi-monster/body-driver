@@ -39,6 +39,7 @@
 
 with Ada.Containers.Vectors;
 with Ada.Strings.Unbounded;
+with Driver.Geometry;
 with Driver.Numerics;
 
 package Driver.Robot.Kinematics.Fit is
@@ -188,6 +189,7 @@ package Driver.Robot.Kinematics.Fit is
       A          : Vec3 := [0.0, 0.0, 0.0];
       Covariance : Mat3 := [others => [others => 0.0]];   --  of A
       Points     : Natural := 0;                           --  how many points lie on it
+      Scatter    : Real := Real'Last;                      --  their residuals' chi square per degree of freedom
    end record;
 
    procedure Dominant_Plane (Points : Sight_Point_Array; Plane : out Sight_Plane; On : out Flag_Array)
@@ -204,6 +206,20 @@ package Driver.Robot.Kinematics.Fit is
    --  The weighted least squares of Dominant_Plane over the points On, the
    --  choice held.
 
+   function Plane_Response
+     (Points : Sight_Point_Array;
+      On     : Flag_Array;
+      Gains  : Real_Lists.Vector;
+      Terms  : Natural) return Driver.Numerics.Arrays.Real_Matrix
+     with Pre  => On'First = Points'First and then On'Last = Points'Last,
+          Post => Plane_Response'Result'Length (1) = 3 and then Plane_Response'Result'Length (2) = Terms;
+   --  How the A of Refit_Plane over the points On moves with the fit's
+   --  Terms through the depths alone, the lines of sight held: point I's log
+   --  depth moves by the I-th row of Gains (Fit_Report.Depth_Gains) times the
+   --  terms' change, carried through the weighted least squares. Three rows
+   --  by Terms columns; zero when Gains does not have Terms columns per point
+   --  or the points do not fix a plane.
+
    function Plane_Covariance
      (Points     : Sight_Point_Array;
       On         : Flag_Array;
@@ -211,13 +227,18 @@ package Driver.Robot.Kinematics.Fit is
       Gains      : Real_Lists.Vector;
       Covariance : Real_Lists.Vector) return Mat3
      with Pre => On'First = Points'First and then On'Last = Points'Last;
-   --  The covariance of Plane's A (Refit_Plane over the points On): its own
-   --  (the points' scatter about it) and what the fit's uncertainty moves
-   --  every depth by together, which no scatter shows: point I's log depth
-   --  moves by the I-th row of Gains (Fit_Report.Depth_Gains) times the
-   --  change of the fit's terms, carried with their covariance
-   --  (Fit_Report.Covariance) through the weighted least squares. Plane's own
+   --  The covariance of Plane's A (Refit_Plane over the points On), its
+   --  lines of sight held: its own (the points' scatter about it) and what
+   --  the fit's uncertainty moves every depth by together, which no scatter
+   --  shows (Plane_Response, carried with Fit_Report.Covariance). Plane's own
    --  when Gains and Covariance do not fit together.
+
+   function Plane_Estimate_Of (P : Sight_Plane; Covariance : Mat3) return Driver.Geometry.Plane_Estimate;
+   --  P, its A uncertain by Covariance, as Driver.Geometry has a plane: its
+   --  normal towards the eye, its centre the point of it whose height is
+   --  least uncertain (there its offset and its tilt are uncorrelated), the
+   --  offset's sigma there and the tilt's covariance, P's points and their
+   --  scatter. Unknown when P was not found.
 
    function Plane_Normal (P : Sight_Plane) return Vec3;
    function Plane_Offset (P : Sight_Plane) return Real;

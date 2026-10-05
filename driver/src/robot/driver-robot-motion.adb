@@ -704,11 +704,36 @@ package body Driver.Robot.Motion is
       end if;
    end Gather_Rest;
 
+   function Refused (State : Plan_Status; Why : String) return Plan is
+     ((State => State, Reason => To_Unbounded_String (Why), others => <>));
+
    function Plan_Reach (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan is
       use Driver.Numerics.Arrays;
+      Placement : Rigid;
+      Scale     : Real;
+      Known     : Boolean;
+   begin
+      if Natural (A) > Arm_Count (M) or else not Kinematics.Fitted (M, A) then
+         return Refused (Unmeasured, "the arm's kinematics are not measured yet");
+      end if;
+      Kinematics.In_World (M, A, Placement, Scale, Known);
+      if not Known then
+         return Refused (Unmeasured, "the arm is not measured into the world yet");
+      end if;
+      --  X_world = Placement * (Scale * X_arm).
+      declare
+         Back : constant Mat3 := Transpose (Placement.Rotation);
+      begin
+         return Plan_Reach_In_Arm
+           (M, A, O,
+            (Pose          => (Rotation    => Back * Goal.Pose.Rotation,
+                               Translation => (1.0 / Scale) * (Back * (Goal.Pose.Translation - Placement.Translation))),
+             Position_Only => Goal.Position_Only));
+      end;
+   end Plan_Reach;
 
-      function Refused (State : Plan_Status; Why : String) return Plan is
-        ((State => State, Reason => To_Unbounded_String (Why), others => <>));
+   function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan is
+      use Driver.Numerics.Arrays;
    begin
       if Natural (A) > Arm_Count (M) or else not Kinematics.Fitted (M, A) then
          return Refused (Unmeasured, "the arm's kinematics are not measured yet");
@@ -716,12 +741,9 @@ package body Driver.Robot.Motion is
       declare
          G    : constant Group_Id := Arm_Group (M, A);
          Size : constant Natural := Group_Size (M, G);
-         Tool : constant Pose_Estimate := Tool_Pose (M, A, O);
       begin
          if Size = 0 or else Natural (G) > Natural (O.Readings.Length) or else O.Readings.Element (G)'Length /= Size then
             return Refused (Unmeasured, "the arm's readings are missing at that beat");
-         elsif Tool.Position_Covariance (1, 1) = Real'Last then
-            return Refused (Unmeasured, "the arm is not measured into the world yet");
          end if;
          declare
             --  The path is the fitted model's, within the readings the arm has
@@ -729,7 +751,7 @@ package body Driver.Robot.Motion is
             --  as the step that meets it ends Blocked or Short.
             Sigma : constant Real := Kinematics.Angle_Sigma (M, A);
             Start : constant Real_Array (1 .. Size) := O.Readings.Element (G);
-            From  : constant Rigid := Tool.Pose;
+            From  : constant Rigid := Tool_In_Arm (M, A, O).Pose;
             Result : Plan := (State => Planned, Reason => Null_Unbounded_String, Group => G, others => <>);
             Failed : Boolean := False;
             Worst_Position, Worst_Turn : Real := 0.0;
@@ -782,10 +804,11 @@ package body Driver.Robot.Motion is
             return Result;
          end;
       end;
-   end Plan_Reach;
+   end Plan_Reach_In_Arm;
 
    function Status (P : Plan) return Plan_Status is (P.State);
    function Why (P : Plan) return String is (To_String (P.Reason));
+   function Last_Readings (P : Plan) return Real_Array is (P.Waypoints.Last_Element);
 
    procedure Follow (M : in out Model; P : Plan; Report : out Step_Report) is
    begin
