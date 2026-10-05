@@ -1,4 +1,4 @@
---  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT]
+--  replay RECORDING [--reload FILE] [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT]
 --
 --  Feeds a recording (Driver.Recording format, uncompressed; it is read once,
 --  forward, so "zstd -dc run.rec.zst | replay /dev/stdin ..." needs no copy on
@@ -6,7 +6,9 @@
 --  given to the robot, hand and world estimators together with the last
 --  command sent before it arrived (read back from the recorded replies), the
 --  command in effect while it was captured. At the end the measured body is
---  written to the body file. With --estimates, every beat after boot writes
+--  written to the body file. With --reload, the body starts from that file,
+--  reloaded after the first observation as a live boot reloads its --body,
+--  so a run that booted from a body file replays as it ran. With --estimates, every beat after boot writes
 --  one JSON line with each arm's tool pose and each eye's pose (row-major 4 x 4,
 --  world frame); two last lines hold, for each eye, the lines of sight of a
 --  grid of pixels in the eye's own frame, and each hand's tips in its tool
@@ -56,6 +58,8 @@ procedure Replay is
 
    Path      : Unbounded_String;
    Body_File : Unbounded_String;
+   Reload    : Unbounded_String;
+   Reloaded  : Boolean := False;
    Estimates : Unbounded_String;
    Out_File  : Ada.Text_IO.File_Type;
    Last_Obs  : Driver.Observations.Observation;
@@ -208,6 +212,17 @@ procedure Replay is
             Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), O);
             Driver.Services.Replay_Beat (Driver.Clock.Beat (Beat));
             Driver.Robot.Observe (Robot, O, Sent);
+            if Length (Reload) > 0 and then not Reloaded then
+               declare
+                  Ok  : Boolean;
+                  Why : Unbounded_String;
+               begin
+                  Driver.Robot.Load_Body (Robot, To_String (Reload), Ok, Why);
+                  Line (Core, (if Ok then "reloaded the body from " else "could not reload the body from ")
+                        & To_String (Reload) & (if Ok then "" else ": " & To_String (Why)));
+                  Reloaded := True;
+               end;
+            end if;
             Driver.Robot.Hand.Observe (Hands, Robot, O, Sent);
             Driver.World.Observe (Scene, Robot, Hands, O, Sent);
             if Length (Estimates) > 0 and then Driver.Robot.Booted (Robot) then
@@ -322,13 +337,16 @@ procedure Replay is
 
 begin
    if Argument_Count < 1 then
-      Line (Core, "usage: replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT]");
+      Line (Core, "usage: replay RECORDING [--reload FILE] [--body FILE] [--estimates FILE] [--inst HOST:PORT]"
+            & " [--eye HOST:PORT]");
       Set_Exit_Status (Failure);
       return;
    end if;
    Path := To_Unbounded_String (Argument (1));
    for I in 2 .. Argument_Count - 1 loop
-      if Argument (I) = "--body" then
+      if Argument (I) = "--reload" then
+         Reload := To_Unbounded_String (Argument (I + 1));
+      elsif Argument (I) = "--body" then
          Body_File := To_Unbounded_String (Argument (I + 1));
       elsif Argument (I) = "--estimates" then
          Estimates := To_Unbounded_String (Argument (I + 1));
