@@ -67,17 +67,24 @@ measured from:
 model that has seen no robot takes the file's groups and eyes, so a measured
 body can be loaded and planned on with no robot connected.
 
-### The kinematics (method 3)
+### The kinematics (method 4)
 
 Per arm, `kinematics.arms` holds:
 
 - `joints`, `lens` and `covariance`: the fit of the arm and of the eye it
-  carries, in the eye's frame at the arm's reference readings (`reference`).
+  carries, in the eye's frame at the arm's reference readings (`reference`):
+  the arm's own frame, in the arm's own unit.
 - `table`: the plane most of the arm's tracked points lie on, each point
-  judged by its own depth uncertainty. `normal` points towards the eye,
-  `offset` is the plane's signed distance along it (the eye is `-offset`
-  from it), and `sigma` is the normal's angular uncertainty, from the points
-  and from the lens. The first arm's table gives the world its up (`up`).
+  judged by its own depth uncertainty, in the arm's own frame, with its whole
+  uncertainty: its points' scatter about it, what the fit moves every depth
+  by together, and the lens's lines of sight. `normal` points towards the
+  eye and is the arm's up. `centre` is the point of the plane whose height is
+  least uncertain: there `offset_sigma` is its height's sigma along the
+  normal, uncorrelated with its tilt, whose covariance `tilt` gives (in
+  radians squared, towards `tangent` and towards the normal crossed with
+  `tangent`, and between the two). `points` is how many points it rests on,
+  `scatter` their residuals' chi square per degree of freedom. The first
+  arm's table gives the world its up.
 - `placed` and `placement`: where the arm's frame stands in the world, which
   is the first arm's frame: a point X of the arm's frame is at
   `rotation * (scale * X) + centre` there. `covariance` (6 x 6) is that of
@@ -88,7 +95,10 @@ Per arm, `kinematics.arms` holds:
   arms' table points that eye's view tied together, and `px` the noise of
   that tie in the eye's units. The first arm stands as it is (`through` 0).
 
-Method 2 placed the arm from its own eye's view of the first arm's points.
-When the two arms' eyes do not share a view, that is wrong: a dense matcher
-answers points an eye does not show, and those answers then read as an eye
-at the first eye's centre. A file of method 2 is measured again.
+Method 3 kept only the table's normal, its offset and two scalar sigmas: a
+plane of measured covariance, which pressing a hand onto it needs, cannot be
+rebuilt from them. Method 2 placed the arm from its own eye's view of the
+first arm's points. When the two arms' eyes do not share a view, that is
+wrong: a dense matcher answers points an eye does not show, and those
+answers then read as an eye at the first eye's centre. A file of method 2
+or 3 is measured again.

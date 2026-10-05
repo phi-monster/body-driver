@@ -34,6 +34,7 @@
 with Ada.Containers.Vectors;
 with Ada.Strings.Unbounded;
 with Driver.Commands;
+with Driver.Geometry;
 with Driver.Images;
 with Driver.Numerics;
 with Driver.Observations;
@@ -156,6 +157,37 @@ package Driver.Robot is
    --  between the last link and the eye), so a measurement made in the eye is
    --  taken into the tool frame without counting the arm's kinematics twice.
    --  Constant when the eye rides on the last link.
+
+   --  Each arm's own frame: the frame its eye had at its reference keyframe,
+   --  held by the arm's base, in the arm's own unit; its kinematics are
+   --  fitted there. What is measured of one arm and its hand alone (a
+   --  fingertip, the surface it pressed) is measured there, free of the
+   --  placement that takes the arm into the world: the world is the first
+   --  arm's frame, and every other arm stands in it at its placement,
+   --  X_world = Placement * (Arm_Unit * X_arm), which only what spans arms
+   --  needs.
+
+   function Tool_In_Arm (M : Model; A : Arm_Id; O : Observation) return Pose_Estimate;
+   --  The last link of the arm at the beat of O in the arm's own frame,
+   --  uncertain only by the arm's own fit; known once the arm is fitted,
+   --  placed in the world or not. Tool_Pose is this, placed.
+
+   function Up_In_Arm (M : Model; A : Arm_Id) return Direction_Estimate;
+   --  Away from gravity in the arm's own frame: the normal of the table its
+   --  eye saw (Table_In_Arm), its sigma the tilt's along the direction it is
+   --  least sure of. Up is the first arm's.
+
+   function Table_In_Arm (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate;
+   --  The table the arm's eye saw at its reference keyframe, in the arm's own
+   --  frame, its normal towards that eye: the plane most of the eye's tracked
+   --  points lie on, uncertain by their scatter about it, by what the fit
+   --  moves every depth by together, and by the lens's lines of sight. Not
+   --  Known until the arm is fitted and its table found.
+
+   function Arm_Unit (M : Model; A : Arm_Id) return Estimate;
+   --  The world length of the arm frame's unit: a length L measured in the
+   --  arm's frame is Arm_Unit * L in the world. One, exactly, for the first
+   --  arm; Unknown until the arm is placed.
 
    function Blocked (M : Model; A : Arm_Id; O : Observation) return Boolean;
    --  At the beat of O the arm was commanded further than it went, by a step
@@ -421,15 +453,12 @@ private
       Matches   : Natural := 0;           --  keyframes with matches behind it
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
-      --  The table its eye saw, in its reference frame: the points X with
-      --  Table_Normal * X = Table_Offset, the plane most of its tracks lie on
-      --  (Kinematics.Fit.Dominant_Plane). Table_Sigma is the normal's angular
-      --  uncertainty, its points' and its lens's.
-      Table_Found  : Boolean := False;
-      Table_Normal : Vec3 := [0.0, 0.0, 0.0];
-      Table_Offset, Table_Offset_Sigma, Table_Sigma : Real := Real'Last;
-      Table_A      : Vec3 := [0.0, 0.0, 0.0];                 --  the plane as its eye sees it (Fit.Sight_Plane)
-      Table_Covariance : Mat3 := [others => [others => 0.0]];  --  of Table_A, from its points
+      --  The table its eye saw, in its reference frame (Table_In_Arm): the
+      --  plane most of its tracks lie on (Kinematics.Fit.Dominant_Plane), with
+      --  its whole uncertainty.
+      Table        : Driver.Geometry.Plane_Estimate;
+      Table_A      : Vec3 := [0.0, 0.0, 0.0];                 --  the same plane as its eye sees it (Fit.Sight_Plane)
+      Table_Covariance : Mat3 := [others => [others => 0.0]];  --  of Table_A, its lens's lines of sight held
       Table_On     : Flag_Vectors.Vector;                      --  per track: it lies on the table
       --  Every track's point in its reference frame, three numbers each,
       --  where Track_Known holds, at the depth the fit refined, its logarithm
@@ -488,7 +517,6 @@ private
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph
       Kinematics     : Arm_Evidence_Vectors.Vector;   --  per arm with an eye
-      Table_Up       : Direction_Estimate;          --  the table's normal towards the eyes, in the world
       Is_Booted      : Boolean := False;
       From_File      : Stored_Flags := [others => False];   --  reloaded, so not measured again (Load_Body)
       Report         : Ada.Strings.Unbounded.Unbounded_String;   --  what the last estimate found, for Describe

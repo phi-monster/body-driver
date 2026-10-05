@@ -2252,7 +2252,8 @@ package body Driver.Robot.Kinematics.Fit is
          Mi : constant Mat3 := Inverse (M);
          A  : constant Vec3 := Mi * B;
          --  The sandwich: the spread of every point's share of the gradient.
-         Spread : Mat3 := [others => [others => 0.0]];
+         Spread  : Mat3 := [others => [others => 0.0]];
+         Squares : Real := 0.0;
       begin
          for I in Points'Range loop
             if On (I) and then Usable (Points (I)) then
@@ -2261,15 +2262,58 @@ package body Driver.Robot.Kinematics.Fit is
                   R : constant Real := Inverse_Depth (Points (I)) - A * Points (I).H;
                begin
                   Spread := Spread + (W * W * R * R) * Outer (Points (I).H, Points (I).H);
+                  Squares := Squares + W * R * R;
                end;
             end if;
          end loop;
          Plane := (Found      => A * A > 0.0,
                    A          => A,
                    Covariance => (Real (Count) / Real (Count - 3)) * (Mi * Spread * Mi),
-                   Points     => Count);
+                   Points     => Count,
+                   Scatter    => Squares / Real (Count - 3));
       end;
    end Refit_Plane;
+
+   function Plane_Response
+     (Points : Sight_Point_Array;
+      On     : Flag_Array;
+      Gains  : Real_Lists.Vector;
+      Terms  : Natural) return Real_Matrix
+   is
+      Rows : constant Natural := (if Terms > 0 then Natural (Gains.Length) / Terms else 0);
+      M    : Mat3 := [others => [others => 0.0]];
+      K    : Real_Matrix (1 .. 3, 1 .. Terms) := [others => [others => 0.0]];
+   begin
+      if Terms = 0 or else Rows * Terms /= Natural (Gains.Length) then
+         return K;
+      end if;
+      for I in Points'Range loop
+         if On (I) and then Usable (Points (I)) then
+            declare
+               W   : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;
+               Row : constant Natural := I - Points'First;
+            begin
+               M := M + W * Outer (Points (I).H, Points (I).H);
+               --  An inverse depth moves by minus itself times its log depth's move.
+               if Row < Rows then
+                  for P in 1 .. Terms loop
+                     declare
+                        G : constant Real := Gains (Gains.First_Index + Row * Terms + P - 1);
+                     begin
+                        for D in 1 .. 3 loop
+                           K (D, P) := K (D, P) - W * Inverse_Depth (Points (I)) * G * Points (I).H (D);
+                        end loop;
+                     end;
+                  end loop;
+               end if;
+            end;
+         end if;
+      end loop;
+      if Determinant (M) = 0.0 then
+         return Real_Matrix'(1 .. 3 => [1 .. Terms => 0.0]);
+      end if;
+      return Inverse (M) * K;
+   end Plane_Response;
 
    function Plane_Covariance
      (Points     : Sight_Point_Array;
@@ -2279,55 +2323,64 @@ package body Driver.Robot.Kinematics.Fit is
       Covariance : Real_Lists.Vector) return Mat3
    is
       Terms : constant Natural := Natural (Sqrt (Real (Natural (Covariance.Length))));
-      Rows  : constant Natural := (if Terms > 0 then Natural (Gains.Length) / Terms else 0);
    begin
       if not Plane.Found or else Terms = 0 or else Terms * Terms /= Natural (Covariance.Length)
-        or else Rows * Terms /= Natural (Gains.Length)
+        or else (Natural (Gains.Length) / Terms) * Terms /= Natural (Gains.Length)
       then
          return Plane.Covariance;
       end if;
       declare
-         M : Mat3 := [others => [others => 0.0]];
-         K : Real_Matrix (1 .. 3, 1 .. Terms) := [others => [others => 0.0]];
-         V : Real_Matrix (1 .. Terms, 1 .. Terms);
+         Kf : constant Real_Matrix := Plane_Response (Points, On, Gains, Terms);
+         V  : Real_Matrix (1 .. Terms, 1 .. Terms);
       begin
-         for I in Points'Range loop
-            if On (I) and then Usable (Points (I)) then
-               declare
-                  W   : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;
-                  Row : constant Natural := I - Points'First;
-               begin
-                  M := M + W * Outer (Points (I).H, Points (I).H);
-                  --  An inverse depth moves by minus itself times its log depth's move.
-                  if Row < Rows then
-                     for P in 1 .. Terms loop
-                        declare
-                           G : constant Real := Gains (Gains.First_Index + Row * Terms + P - 1);
-                        begin
-                           for D in 1 .. 3 loop
-                              K (D, P) := K (D, P) - W * Inverse_Depth (Points (I)) * G * Points (I).H (D);
-                           end loop;
-                        end;
-                     end loop;
-                  end if;
-               end;
-            end if;
-         end loop;
-         if Determinant (M) = 0.0 then
-            return Plane.Covariance;
-         end if;
          for P in 1 .. Terms loop
             for Q in 1 .. Terms loop
                V (P, Q) := Covariance (Covariance.First_Index + (P - 1) * Terms + Q - 1);
             end loop;
          end loop;
-         declare
-            Kf : constant Real_Matrix := Inverse (M) * K;
-         begin
-            return Plane.Covariance + Kf * V * Transpose (Kf);
-         end;
+         return Plane.Covariance + Kf * V * Transpose (Kf);
       end;
    end Plane_Covariance;
+
+   function Plane_Estimate_Of (P : Sight_Plane; Covariance : Mat3) return Driver.Geometry.Plane_Estimate is
+      Normal, E1, E2 : Vec3;
+   begin
+      if not P.Found then
+         return (others => <>);
+      end if;
+      Plane_Axes (P, Normal, E1, E2);
+      declare
+         --  A point X of the plane (A * X = 1) is (1 - A * X) / |A| high, so
+         --  its height moves by -(dA * X) / |A| and the normal by the part of
+         --  -dA / |A| along the plane.
+         Length  : constant Real := Sqrt (P.A * P.A);
+         Foot    : constant Vec3 := (1.0 / Length ** 2) * P.A;   --  the plane's point nearest the eye
+         S11     : constant Real := E1 * (Covariance * E1);
+         S12     : constant Real := E1 * (Covariance * E2);
+         S22     : constant Real := E2 * (Covariance * E2);
+         Cross_1 : constant Real := E1 * (Covariance * Foot);
+         Cross_2 : constant Real := E2 * (Covariance * Foot);
+         Det     : constant Real := S11 * S22 - S12 * S12;
+         --  The least uncertain height, at Foot + Along_1 E1 + Along_2 E2: the
+         --  change of X' Covariance X along the plane is zero there. With the
+         --  tilt known exactly, every point of the plane is as uncertain as
+         --  every other.
+         Along_1 : constant Real := (if Det > 0.0 then -(S22 * Cross_1 - S12 * Cross_2) / Det else 0.0);
+         Along_2 : constant Real := (if Det > 0.0 then -(S11 * Cross_2 - S12 * Cross_1) / Det else 0.0);
+         Centre  : constant Vec3 := Foot + Along_1 * E1 + Along_2 * E2;
+      begin
+         return (Centre       => Centre,
+                 Normal       => Normal,
+                 Tangent_1    => E1,
+                 Tangent_2    => E2,
+                 Offset_Sigma => Sqrt (Real'Max (0.0, Centre * (Covariance * Centre))) / Length,
+                 Tilt_11      => S11 / Length ** 2,
+                 Tilt_12      => S12 / Length ** 2,
+                 Tilt_22      => S22 / Length ** 2,
+                 Points       => P.Points,
+                 Scatter      => P.Scatter);
+      end;
+   end Plane_Estimate_Of;
 
    procedure Dominant_Plane (Points : Sight_Point_Array; Plane : out Sight_Plane; On : out Flag_Array) is
       Minimal : constant := 3;
