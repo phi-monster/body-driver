@@ -142,6 +142,74 @@ package body Driver.Robot.Hand.Tips.Tests is
       Pressed_At_Both_Openings (Mislead => False);
    end Both_Openings;
 
+   --  The table z = 0 as the arm's own eye saw it before any press, its
+   --  height known to a fifth of a millimetre and its tilt to a ten-thousandth.
+   --  Three presses of one lobe, each from another orientation: a lobe's tip
+   --  and the table under it are four unknowns, and three presses leave them
+   --  undetermined; with the table's prior the three presses fix the tip, and
+   --  the table they fix is the prior's, corrected.
+   procedure Table_Seen_Before is
+      Table : constant Driver.Geometry.Plane_Estimate :=
+        (Centre => Zero3, Normal => [0.0, 0.0, 1.0], Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
+         Offset_Sigma => 2.0e-4, Tilt_11 => 1.0e-8, Tilt_12 => 0.0, Tilt_22 => 1.0e-8, Points => 100, Scatter => 1.0);
+   begin
+      for Prior in Boolean loop
+         declare
+            B     : Book;
+            Taken : Natural := 0;
+         begin
+            Ada.Numerics.Float_Random.Reset (Gen, 17);
+            Set_Sights (B, Sights);
+            if Prior then
+               Set_Surface (B, Table);
+            end if;
+            for K in 0 .. 11 loop
+               declare
+                  Made  : Boolean;
+                  Press : Driver.Robot.Hand.Presses.Event;
+               begin
+                  Press_At (1, Open, 0.3 * Real (K mod 3), Ada.Numerics.Pi * Real (K mod 4) / 2.0, 0.4 + 0.02 * Real (K),
+                            0.1 + 0.03 + 0.01 * Real (K mod 5), Made, Press);
+                  if Made and then Taken < 3 then
+                     Add (B, Press, Open);
+                     Taken := Taken + 1;
+                  end if;
+               end;
+            end loop;
+            Check (Taken = 3, "the rig made only" & Taken'Image & " presses of the lobe");
+            if Prior then
+               declare
+                  T : constant Point_Estimate := Tip (B, 1, Open);
+                  D : constant Vec3 := T.Mean - Tips_True (1, Open);
+               begin
+                  Check (Known (T), "three presses on a table seen before gave no tip: kept" & Pressed (B)'Image
+                         & ", agreeing" & Agreeing (B, 1, Open)'Image);
+                  Check (Driver.Geometry.Known (Surface (B)), "three presses on a table seen before gave no surface");
+                  if Known (T) then
+                     Check (Sqrt (D * (Inverse (T.Covariance) * D)) <= Threshold (Vector_Gate (3)),
+                            "the tip from three presses on a table seen before is off by" & Real'Image (abs D)
+                            & " beyond its sigma");
+                  end if;
+               end;
+            else
+               Check (not Known (Tip (B, 1, Open)), "three presses on a table nothing measured gave a tip");
+            end if;
+            --  A table other than the one given refits the presses kept.
+            if Prior then
+               declare
+                  Higher : Driver.Geometry.Plane_Estimate := Table;
+                  Before : constant Point_Estimate := Tip (B, 1, Open);
+               begin
+                  Higher.Centre := [0.0, 0.0, 3.0e-4];
+                  Set_Surface (B, Higher);
+                  Check (Known (Tip (B, 1, Open)) and then Tip (B, 1, Open).Mean /= Before.Mean,
+                         "a table other than the one the presses were fitted with left the tip where it was");
+               end;
+            end if;
+         end;
+      end loop;
+   end Table_Seen_Before;
+
    procedure Directions_Unknown_Or_Misleading is
    begin
       Pressed_At_Both_Openings (Mislead => True);
@@ -155,6 +223,8 @@ package body Driver.Robot.Hand.Tips.Tests is
       Driver.Tests.Register ("hand.tips.reassign",
                              "a press whose approach is unknown or misleading stays with the wrong lobe or none",
                              Directions_Unknown_Or_Misleading'Access);
+      Driver.Tests.Register ("hand.tips.table", "a table the arm's own eye saw is not the prior of the presses on it, "
+                             & "or a change of it leaves the tips where they were", Table_Seen_Before'Access);
    end Register;
 
 end Driver.Robot.Hand.Tips.Tests;

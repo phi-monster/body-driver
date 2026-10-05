@@ -52,16 +52,6 @@ package body Driver.Robot.Hand is
 
    package Pair_Vectors is new Ada.Containers.Vectors (Positive, Pair);
 
-   --  A lobe's tip at one opening: its pixel in the own eye and its line of
-   --  sight in the tool frame.
-   type Sight is record
-      Known : Boolean := False;
-      Pixel : Driver.Images.Pixel;
-      Ray   : Ray_Estimate;
-   end record;
-
-   type Sight_Array is array (Opening) of Sight;
-
    type Lobe_Record is record
       Channel : Positive;
       Sights  : Sight_Array;
@@ -406,6 +396,35 @@ package body Driver.Robot.Hand is
       Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & " sizes: " & Sizes_Text (R));
    end Size_Up;
 
+   procedure Keep (D : in out Hand_Data; Made : in out Hand_Record);
+   --  The hand found from a closer group, among the hands. A hand measured
+   --  again keeps its presses; they are given to the new lobes by number, or
+   --  forgotten when the number changed.
+
+   procedure Keep (D : in out Hand_Data; Made : in out Hand_Record) is
+      Table : Driver.Robot.Hand.Tips.Sight_Table (1 .. Natural (Made.Lobes.Length));
+   begin
+      for L in Table'Range loop
+         for Which in Opening loop
+            Table (L) (Which) := (Known => Made.Lobes (L).Sights (Which).Known,
+                                  Ray   => Made.Lobes (L).Sights (Which).Ray);
+         end loop;
+      end loop;
+      for Id in D.Found.First_Index .. D.Found.Last_Index loop
+         if D.Found (Id).Group = Made.Group then
+            Made.Watch := D.Found (Id).Watch;
+            Made.Book := D.Found (Id).Book;
+            Driver.Robot.Hand.Tips.Set_Sights (Made.Book, Table);
+            Size_Up (Made, Id);
+            D.Found.Replace_Element (Id, Made);
+            return;
+         end if;
+      end loop;
+      Driver.Robot.Hand.Tips.Set_Sights (Made.Book, Table);
+      Size_Up (Made, D.Found.Last_Index + 1);
+      D.Found.Append (Made);
+   end Keep;
+
    procedure Rebuild (D : in out Hand_Data; P : Pair; M : Model);
    --  The hand of a closer group from what its own eye measured: every
    --  measured channel's lobes with their tips at both openings.
@@ -460,35 +479,38 @@ package body Driver.Robot.Hand is
             end;
          end if;
       end loop;
-      if Made.Lobes.Is_Empty then
-         return;
+      if not Made.Lobes.Is_Empty then
+         Keep (D, Made);
       end if;
-      declare
-         Table : Driver.Robot.Hand.Tips.Sight_Table (1 .. Natural (Made.Lobes.Length));
-      begin
-         for L in Table'Range loop
-            for Which in Opening loop
-               Table (L) (Which) := (Known => Made.Lobes (L).Sights (Which).Known,
-                                     Ray   => Made.Lobes (L).Sights (Which).Ray);
-            end loop;
-         end loop;
-         --  A hand measured again keeps its presses; they are given to the
-         --  new lobes by number, or forgotten when the number changed.
-         for Id in D.Found.First_Index .. D.Found.Last_Index loop
-            if D.Found (Id).Group = P.Group then
-               Made.Watch := D.Found (Id).Watch;
-               Made.Book := D.Found (Id).Book;
-               Driver.Robot.Hand.Tips.Set_Sights (Made.Book, Table);
-               Size_Up (Made, Id);
-               D.Found.Replace_Element (Id, Made);
-               return;
-            end if;
-         end loop;
-         Driver.Robot.Hand.Tips.Set_Sights (Made.Book, Table);
-      end;
-      Size_Up (Made, D.Found.Last_Index + 1);
-      D.Found.Append (Made);
    end Rebuild;
+
+   procedure Adopt
+     (H         : in out Hands;
+      Group     : Group_Id;
+      Arm       : Arm_Id;
+      Eye       : Eye_Id;
+      Open_At   : Real_Array;
+      Closed_At : Real_Array;
+      Lobes     : Sight_Rows)
+   is
+      Made : Hand_Record := (Group => Group, Arm => Arm, Eye => Eye, others => <>);
+   begin
+      if H.Data = null then
+         H.Data := new Hand_Data;
+      end if;
+      Made.Readings := [Open         => Driver.Robot.Hand.Views.Reading_Holders.To_Holder (Open_At),
+                        Closed_Empty => Driver.Robot.Hand.Views.Reading_Holders.To_Holder (Closed_At)];
+      for Row of Lobes loop
+         Made.Lobes.Append
+           (Lobe_Record'(Channel => 1,
+                         Sights  => Row,
+                         Shape   => Driver.Robot.Hand.Shape.Unfitted ("the hand was given, not swept"),
+                         Size    => <>));
+      end loop;
+      if not Made.Lobes.Is_Empty then
+         Keep (H.Data.all, Made);
+      end if;
+   end Adopt;
 
    procedure Collect (P : in out Pair; D : in out Hand_Data; M : Model);
    --  Reads the replies that are in and finds the lobes from them.
@@ -582,19 +604,37 @@ package body Driver.Robot.Hand is
       return False;
    end Opening_Of;
 
-   procedure Watch (R : in out Hand_Record; Id : Hand_Id; M : Model; O : Observation);
+   procedure Watch
+     (R          : in out Hand_Record;
+      Id         : Hand_Id;
+      M          : Model;
+      O          : Observation;
+      Is_Blocked : Boolean;
+      Is_Still   : Boolean);
    --  Follows the hand's arm for presses and keeps every press made at one
-   --  of the hand's openings.
+   --  of the hand's openings. Presses are found in the arm's own frame, the
+   --  one its fit gives the tool pose (Tool_In_Arm) and the table its eye saw
+   --  (Table_In_Arm) in: they need neither where the arm stands in the world
+   --  nor the arm's unit, and the surface the presses fit is that table
+   --  corrected by them.
 
-   procedure Watch (R : in out Hand_Record; Id : Hand_Id; M : Model; O : Observation) is
+   procedure Watch
+     (R          : in out Hand_Record;
+      Id         : Hand_Id;
+      M          : Model;
+      O          : Observation;
+      Is_Blocked : Boolean;
+      Is_Still   : Boolean)
+   is
       Found : Boolean;
       Press : Driver.Robot.Hand.Presses.Event;
       Which : Opening;
    begin
+      Driver.Robot.Hand.Tips.Set_Surface (R.Book, Table_In_Arm (M, R.Arm));
       if not Driver.Observations.Has_Reading (O, R.Group) then
          return;
       end if;
-      Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Blocked (M, R.Arm, O), Still (M), Tool_Pose (M, R.Arm, O),
+      Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked, Is_Still, Tool_In_Arm (M, R.Arm, O),
                                          O.Readings.Element (R.Group), Found, Press);
       if not Found then
          return;
@@ -609,6 +649,20 @@ package body Driver.Robot.Hand is
                           & ": a press with the closer at neither measured opening is not used");
       end if;
    end Watch;
+
+   procedure Press_Beat
+     (H          : in out Hands;
+      Id         : Hand_Id;
+      M          : Model;
+      O          : Observation;
+      Is_Blocked : Boolean;
+      Is_Still   : Boolean)
+   is
+      R : Hand_Record := H.Data.Found (Id);
+   begin
+      Watch (R, Id, M, O, Is_Blocked, Is_Still);
+      H.Data.Found.Replace_Element (Id, R);
+   end Press_Beat;
 
    procedure Observe (H : in out Hands; M : Model; O : Observation; Sent : Driver.Commands.Command) is
       pragma Unreferenced (Sent);
@@ -628,12 +682,7 @@ package body Driver.Robot.Hand is
          end;
       end loop;
       for Id in H.Data.Found.First_Index .. H.Data.Found.Last_Index loop
-         declare
-            R : Hand_Record := H.Data.Found (Id);
-         begin
-            Watch (R, Id, M, O);
-            H.Data.Found.Replace_Element (Id, R);
-         end;
+         Press_Beat (H, Id, M, O, Blocked (M, H.Data.Found (Id).Arm, O), Still (M));
       end loop;
    end Observe;
 
@@ -785,9 +834,14 @@ package body Driver.Robot.Hand is
      return Direction_Estimate is
      (Driver.Robot.Hand.Tips.Direction (Found (H, Id).Book, Lobe, At_Opening));
 
+   function In_World (H : Hands; M : Model; Id : Hand_Id; O : Observation; Tip : Point_Estimate) return Point_Estimate is
+     (Driver.Robot.Hand.Frames.Into_World
+        (Tool_Pose (M, Arm_Of (H, Id), O), Tool_In_Arm (M, Arm_Of (H, Id), O), Arm_Unit (M, Arm_Of (H, Id)), Tip));
+   --  A point of the hand's tool frame, which is in the arm's unit, in the world.
+
    function Tip (H : Hands; M : Model; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; O : Observation)
      return Point_Estimate is
-     (Driver.Robot.Hand.Frames.Into (Tool_Pose (M, Arm_Of (H, Id), O), Tip_In_Tool (H, Id, Lobe, At_Opening)));
+     (In_World (H, M, Id, O, Tip_In_Tool (H, Id, Lobe, At_Opening)));
 
    function Tip_Now_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate;
    --  The tip at the closer reading of O, on the straight path between the
@@ -818,7 +872,7 @@ package body Driver.Robot.Hand is
    end Tip_Now_In_Tool;
 
    function Tip_Now (H : Hands; M : Model; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate is
-     (Driver.Robot.Hand.Frames.Into (Tool_Pose (M, Arm_Of (H, Id), O), Tip_Now_In_Tool (H, Id, Lobe, O)));
+     (In_World (H, M, Id, O, Tip_Now_In_Tool (H, Id, Lobe, O)));
 
    function Grip_Centre (H : Hands; M : Model; Id : Hand_Id; O : Observation) return Point_Estimate is
       Sum   : Vec3 := Zero3;
@@ -830,7 +884,7 @@ package body Driver.Robot.Hand is
             T : constant Point_Estimate := Tip_Now_In_Tool (H, Id, L, O);
          begin
             if not Known (T) then
-               return Driver.Robot.Hand.Frames.Into (Tool_Pose (M, Arm_Of (H, Id), O), T);
+               return In_World (H, M, Id, O, T);
             end if;
             Sum := Sum + T.Mean;
             Total := Total + T.Covariance;
@@ -838,9 +892,7 @@ package body Driver.Robot.Hand is
       end loop;
       --  The lobes' tips at this opening, averaged; each tip was fitted from
       --  its own presses.
-      return Driver.Robot.Hand.Frames.Into
-        (Tool_Pose (M, Arm_Of (H, Id), O),
-         (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));
+      return In_World (H, M, Id, O, (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));
    end Grip_Centre;
 
    function Describe (H : Hands) return String is

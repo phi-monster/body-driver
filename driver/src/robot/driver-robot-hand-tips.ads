@@ -5,9 +5,16 @@
 --  the surface: before anything is fitted, the lobe whose line of sight lies
 --  closest to the direction the tool was pressing; once the surface is
 --  fitted, the lobe whose tip is foremost along its normal. All presses, on
---  one surface nothing measured before, are fitted together
---  (Driver.Robot.Hand.Touch), and given out again whenever the fit moves
---  the lobe that leads, so where a press goes rests on everything measured.
+--  one surface, are fitted together (Driver.Robot.Hand.Touch), and given out
+--  again whenever the fit moves the lobe that leads, so where a press goes
+--  rests on everything measured.
+--
+--  The presses' poses and the surface are in one frame, the arm's own
+--  (Driver.Robot.Tool_In_Arm): what a hand and its arm measure by pressing
+--  needs nothing of where the arm stands in the world. The surface is the
+--  table the arm's own eye saw (Driver.Robot.Table_In_Arm) when it saw one,
+--  so the first presses already predict their contact, and what the presses
+--  make of it otherwise.
 
 with Ada.Containers.Indefinite_Holders;
 with Ada.Containers.Vectors;
@@ -32,6 +39,12 @@ package Driver.Robot.Hand.Tips is
    --  The lobes' lines of sight; a change in the number of lobes forgets the
    --  presses, which were given to lobes by number.
 
+   procedure Set_Surface (B : in out Book; Surface : Driver.Geometry.Plane_Estimate);
+   --  The surface the presses are made on as measured before them, in the
+   --  frame of their poses: the prior the presses fit it from. Not Known
+   --  (Driver.Geometry.Known) when nothing measured it: the presses alone
+   --  find it. A surface other than the last given refits the presses kept.
+
    procedure Add (B : in out Book; Press : Driver.Robot.Hand.Presses.Event; At_Opening : Opening);
    --  A press made with the closer at that opening.
 
@@ -52,6 +65,8 @@ package Driver.Robot.Hand.Tips is
    --  The press kept last agrees with the others.
 
    function Surface (B : Book) return Driver.Geometry.Plane_Estimate;
+   --  The surface as the presses and the prior make it, in the frame of the
+   --  presses' poses; unknown until the presses fit it.
 
 private
 
@@ -70,6 +85,7 @@ private
    type Book is record
       Sights : Table_Holders.Holder;
       Kept   : Kept_Vectors.Vector;
+      Table  : Driver.Geometry.Plane_Estimate;   --  the prior surface, as Set_Surface was given it
       Fitted : Fit_Holders.Holder;
    end record;
 

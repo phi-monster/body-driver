@@ -6,7 +6,8 @@
 --  the push that drove it in has let go. The direction it was pressing is
 --  the way the tool moved from where it last stood still before the block,
 --  in the tool's frame at the block. Any driver's run gives the same
---  presses, since only the stream decides them.
+--  presses, since only the stream decides them. The poses are in the frame
+--  they are given in, which for a hand is its arm's own.
 
 with Ada.Containers.Indefinite_Holders;
 with Driver.Clock;
@@ -16,7 +17,7 @@ package Driver.Robot.Hand.Presses is
    package Reading_Holders is new Ada.Containers.Indefinite_Holders (Real_Array);
 
    type Event is record
-      Tool     : Pose_Estimate;              --  at rest after the block, world frame
+      Tool     : Pose_Estimate;              --  at rest after the block, in the arm's own frame
       Approach : Direction_Estimate;         --  tool frame; unknown when the tool had not moved
       Closer   : Reading_Holders.Holder;     --  the closer group's readings then
       Beat     : Driver.Clock.Beat := 0;

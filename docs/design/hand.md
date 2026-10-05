@@ -25,11 +25,12 @@ and the estimators find what it did in the stream.
 | `Hand.Views` | per channel, the still views at the two ends of its travel, with the rest of the body unchanged between them |
 | `Hand.Sweep` | per closer and eye, the correspondence request between the ends and the lobes from the reply, as plain data |
 | `Hand.Lobes` | the lobes from the matcher's correspondences, their masks and tips in the image, which end is closed |
-| `Hand.Frames` | points and lines of sight taken into the tool frame with their uncertainty |
+| `Hand.Frames` | points and lines of sight taken into the tool frame, and a tip into the world, with their uncertainty |
 | `Hand.Presses` | the presses an arm made, found in the stream |
 | `Hand.Touch` | tips and the surface pressed on, fitted together |
 | `Hand.Tips` | a hand's presses, each given to the lobe that touched, and the tips they measure |
 | `Hand.Aims` | the turn about the eye that aims a press |
+| `Hand.Pressing` | what one press asks of its arm, in the arm's own frame: the aim, the lowering, the way back, the tip's gap above the table |
 
 ## Lobes from two still views
 
@@ -98,6 +99,22 @@ hand rests on what it pressed. Reading it while the push still drives the hand
 in would be wrong: in the legacy driver's runs (V1B21) the finger sank 6.6 mm
 into the table while pushed and came back to 2.5 mm once the command stopped.
 
+**Lesson: a hand is measured in its arm's own frame.** The pose of a press is
+`Tool_In_Arm`, the table is `Table_In_Arm`, down is `Up_In_Arm`, and every move
+is planned with `Plan_Reach_In_Arm`: the frame of the arm's eye at its
+reference readings, in the arm's own unit. They need the arm's fit and
+nothing of where the arm stands in the world. Three things went wrong in the
+world's frame. An arm the body has not placed (A11's second arm failed the F
+test of its link) has no pose there, so it pressed nothing. An arm placed a
+little wrong turned every press by the placement's error, since down was the
+first arm's up. And a tip is in the arm's unit, which a placed arm's pose does
+not share (its place is in world lengths): fitted in the world's frame, on a
+rig whose arm has a unit of 1.4 world lengths, the widest tip sigma was 0.034
+arm units on tips 0.13 long, against 0.00043 in the arm's frame, and `Tip` put
+a tip 0.078 from where the placement puts it. Only `Tip`, `Tip_Now` and
+`Grip_Centre` go to the world, through the placement and the arm's unit
+(`Frames.Into_World`).
+
 Each press goes to the lobe that leads into the surface: before anything is
 fitted, the lobe whose line of sight lies closest to the way the tool was
 pressing; once the surface is fitted, the lobe whose fitted tip is foremost
@@ -124,8 +141,18 @@ presses from one orientation do. The fit reports that as an unknown it cannot
 fix. With tilts of 0, 0.3 and 0.6 rad at six places per lobe, contacts
 scattering 0.5 mm and the surface unknown, a tip's distance came out with a
 sigma of 2.4 mm, its errors calibrated (rms of error over sigma 1.21 against
-the t distribution's 1.18 for 7 degrees of freedom). A surface measured by the
-eyes would fix the offset directly; the hand, in layer 2, has none.
+the t distribution's 1.18 for 7 degrees of freedom). The table the arm's own
+eye saw fixes the offset directly: it is the surface's prior
+(`Tips.Set_Surface`), so a lobe's tip is fixed by two presses, not by the six
+an unknown table takes, and the first presses that follow predict their
+contact.
+
+**Lesson: the fit may not wait for the hand's other tips.** The start of the
+fit asked for as many presses as the hand has tips and surfaces, though a tip
+nobody pressed is pinned and costs no press. A hand of four tips (two lobes at
+two openings) could be fitted from its fifth press on, whatever the surface:
+the first lobe's presses all went blind, and `Latest_Agrees` (no fit, so no
+agreement) ended its tilts after one press a side.
 
 **Lesson: test the surface with a slope.** A table at right angles to the
 presses lets a wrong update of the surface's tilt pass unnoticed, since the
@@ -135,9 +162,11 @@ error in the tilt update at once.
 ## How the decider aims a press
 
 A press turns the hand about the eye, so the eye keeps its view, until the
-lobe's line of sight, tilted, points along gravity (path A's `Up`), then
-lowers the hand with doubling steps from the smallest move that tells from
-the arm's own noise until the arm is blocked, lets go, and lifts back. The
+lobe's line of sight, tilted, points into the table its arm's own eye saw
+(`Up_In_Arm`), then lowers the hand with doubling steps from the smallest move
+that tells from the arm's own noise until the arm is blocked, lets go, and
+lifts back. Once the presses so far fix the lobe's tip, the steps stop
+doubling Z sigma above the contact they predict and go on by that sigma. The
 first press is straight along the line of sight; then the line is tilted away
 from the other lobes, on either side, by doubling multiples of the angle to
 the nearest other lobe's line (a lone lobe: the angle it travels through

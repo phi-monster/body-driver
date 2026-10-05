@@ -31,7 +31,7 @@ package Driver.Robot.Hand.Touch is
 
    type Surface_Prior (Measured : Boolean := False) is record
       case Measured is
-         when True  => Plane : Geometry.Plane_Estimate;   --  world frame
+         when True  => Plane : Geometry.Plane_Estimate;   --  in the frame of the presses' poses
          when False => null;
       end case;
    end record;
@@ -39,7 +39,7 @@ package Driver.Robot.Hand.Touch is
    type Surface_Prior_Array is array (Positive range <>) of Surface_Prior;
 
    type Press is record
-      Tool    : Pose_Estimate;   --  the arm's last link, world frame, at rest after the block
+      Tool    : Pose_Estimate;   --  the arm's last link at rest after the block, in the surfaces' frame
       Sight   : Positive;        --  the tip that touched
       Surface : Positive;        --  what it touched
    end record;

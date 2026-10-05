@@ -26,6 +26,34 @@ package body Driver.Robot.Hand.Frames is
       end;
    end Into;
 
+   function Into_World
+     (Tool   : Pose_Estimate;
+      In_Arm : Pose_Estimate;
+      Unit   : Estimate;
+      Point  : Point_Estimate) return Point_Estimate
+   is
+      R    : constant Mat3 := Tool.Pose.Rotation;
+      Seen : constant Vec3 := R * Point.Mean;   --  the point's offset from the tool, in the world's axes, the arm's unit
+      Mean : constant Vec3 := Unit.Value * Seen + Tool.Pose.Translation;
+   begin
+      if not Known (Point) or else not Known (Unit) or else not Pose_Known (Tool) or else not Pose_Known (In_Arm) then
+         return (Mean => Mean, Covariance => [others => [others => Real'Last]]);
+      end if;
+      declare
+         Lever : constant Mat3 := Skew (Unit.Value * Seen);
+         --  The unit scales the tool's place in the world, which is its place
+         --  in the arm turned by the placement, and the offset alike: the
+         --  tool's covariance has the unit's share of the first, and the
+         --  second and what the two have in common are added.
+         Place : constant Vec3 := (R * Transpose (In_Arm.Pose.Rotation)) * In_Arm.Pose.Translation;
+      begin
+         return (Mean       => Mean,
+                 Covariance => Unit.Value ** 2 * (R * Point.Covariance * Transpose (R)) + Tool.Position_Covariance
+                               + Lever * Tool.Rotation_Covariance * Transpose (Lever)
+                               + Unit.Sigma ** 2 * (Outer (Seen, Seen) + Outer (Place, Seen) + Outer (Seen, Place)));
+      end;
+   end Into_World;
+
    function Into (Frame : Pose_Estimate; Line : Ray_Estimate) return Ray_Estimate is
       U    : constant Vec3 := Frame.Pose.Rotation * Line.Direction.Unit_Vector;
       Turn : constant Mat3 := Frame.Rotation_Covariance;

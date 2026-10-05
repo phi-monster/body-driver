@@ -791,9 +791,9 @@ driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbo
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	if Natural (Lobes.Length) >= 2 then	2	structure	lobes close towards one another when there are two or more
-driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Least, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Aimed.Least, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& (if Pixel > 0.0 then Driver.Log.Image (Pixel, 4) & ""	4	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	& Driver.Log.Image (Least, 4) & ""));	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Aimed.Least, 4) & ""));	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Image (Step.Value, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Image (Step.Value, 4)	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	Lean : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;	4.0	math	half-way between away from the other lobes and across from them
@@ -877,7 +877,7 @@ driver-robot-hand-shape.ads	subtype Mat5 is Driver.Numerics.Arrays.Real_Matrix (
 driver-robot-hand-sweep.adb	Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-sweep.adb	Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-sweep.adb	Still : Correspondences_Access := new Correspondence_Array (1 .. 2 * Still_Count);	2	structure	each unchanged pixel is matched both ways round
-driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => (Measured => False)]);	1	structure	a hand's presses are fitted on one surface
+driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);	1	structure	the presses of a hand are fitted on one surface
 driver-robot-hand-tips.adb	Presses (N) := (Tool => K.Event.Tool, Sight => Index_Of (T, K.Lobe, K.Opening), Surface => 1);	1	structure	a hand's presses are fitted on one surface
 driver-robot-hand-tips.adb	Spread := Spread + (Across * Across) / 2.0;	2.0	math	the mean of the squared angle about the two axes across the direction
 driver-robot-hand-touch.adb	A (R, J + F) := -1.0;	1.0	math	a higher surface lowers the height by as much
@@ -924,8 +924,7 @@ driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 
 driver-robot-hand.adb	& Driver.Log.Image (Driver.Robot.Hand.Shape.Scatter (R.Lobes (L).Shape), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message
-driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
-driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
+driver-robot-hand.adb	(Lobe_Record'(Channel => 1,	1	structure	a hand given to the tests has its lobes on the closer first channel
 driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Driver.Log.Image (E.Sigma, 4) else "");	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Driver.Log.Image (E.Sigma, 4) else "");	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	Fast := 2.0 * Fast;	2.0	math	the descent doubles its step until the band
@@ -935,6 +934,8 @@ driver-robot-hand.adb	I : Positive := 1;	1	structure	the first pair
 driver-robot-hand.adb	Offset := 2.0 * Offset;	2.0	math	the sweep doubles its step
 driver-robot-hand.adb	Sqrt (2.0) * Reading_Noise (M, R.Group, C)));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-robot-hand.adb	if Pushes = 1 then	1	structure	the first push says whether the way answered
+driver-robot-hand.adb	return In_World (H, M, Id, O, (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
+driver-robot-hand.adb	return In_World (H, M, Id, O, (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.ads	Mad_Efficiency : constant := 0.367_5;	0.367_5	statistics	asymptotic efficiency of the median absolute deviation for Gaussian data
 driver-robot-hand.ads	function Seen_By (Shift : Real) return Real is (if Shift /= 0.0 then 1.0 / abs Shift else 0.0);	1.0	math	one pixel, the image's own sampling step: a whole pixel's displacement of a textured patch changes its pixels by its own contrast
 driver-robot-kinematics-fit.adb	& "" & Real'Image (C) & "" & Real'Image (Sqrt (Variance (O + 5))));	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
