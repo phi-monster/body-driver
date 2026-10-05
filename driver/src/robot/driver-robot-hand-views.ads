@@ -25,7 +25,6 @@ package Driver.Robot.Hand.Views is
       Closer    : Reading_Holders.Holder;   --  the closer's readings while it was taken
       Rest      : Reading_Holders.Holder;   --  every other group's readings
       Frames    : Driver.Pixels.View;       --  per-pixel statistics of the frames
-      Last      : Driver.Images.Image;      --  the latest frame, for the matcher
       Seen      : Observation;              --  the observation of its first beat
       From, To  : Driver.Clock.Beat := 0;
    end record;
@@ -94,6 +93,12 @@ package Driver.Robot.Hand.Views is
    function High_Beat (T : Tracker; Channel : Positive) return Driver.Clock.Beat
      with Pre => Has_Ends (T, Channel);
    --  The beat each end's view began: which views they are, without copying them.
+
+   function Low_Closer (T : Tracker; Channel : Positive) return Real_Array
+     with Pre => Has_Ends (T, Channel);
+   function High_Closer (T : Tracker; Channel : Positive) return Real_Array
+     with Pre => Has_Ends (T, Channel);
+   --  The closer's readings while each end's view was taken, without copying the view.
 
 private
 

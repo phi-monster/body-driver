@@ -42,7 +42,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
    function Own_Pair (G : Group_Id) return Natural is
    begin
       for I in H.Data.Pairs.First_Index .. H.Data.Pairs.Last_Index loop
-         if H.Data.Pairs (I).Group = G and then H.Data.Pairs (I).Own then
+         if H.Data.Pairs (I).Group = G then
             return I;
          end if;
       end loop;
@@ -103,7 +103,6 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Start : Real := 0.0;
       Step  : Estimate;
       Pixel : Real := 0.0;   --  the push that moves the own eye's view by a pixel
-      Never : Ada.Strings.Unbounded.Unbounded_String;
       Still_A_Closer : Boolean := False;
       Began : Natural := 0;   --  the beats the stream had when the sweep began
       procedure Read_Start (O : Observation) is
@@ -114,8 +113,6 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Start := R (R'First + C - 1);
          Step := Visible_Step (M, G, C);
          Pixel := (if P > 0 then Seen_By (Driver.Robot.Lockin.Shift (M, H.Data.Pairs (P).Eye, G, C)) else 0.0);
-         Never := Ada.Strings.Unbounded.To_Unbounded_String
-           (if P > 0 then Sweeps.Refusal (H.Data.Pairs (P).Sweep) else "");
          Still_A_Closer := Sweepable (H, M, G);
       end Read_Start;
    begin
@@ -123,12 +120,6 @@ procedure Measure (H : in out Hands; M : in out Model) is
       if not Still_A_Closer then
          Driver.Log.Line (Driver.Log.Robot, "hand: group" & G'Image & " is no longer a closer the hand watches;"
                           & " channel" & C'Image & " not swept");
-         return;
-      end if;
-      if Ada.Strings.Unbounded.Length (Never) > 0 then
-         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
-                          & " not swept: the instrument can never answer ("
-                          & Ada.Strings.Unbounded.To_String (Never) & ")");
          return;
       end if;
       if not Known (Step) then
@@ -224,18 +215,15 @@ procedure Measure (H : in out Hands; M : in out Model) is
             return;
          end if;
       end;
-      --  The estimators ask the instrument once both ends are seen; wait for
-      --  its answer, then open the channel.
+      --  The estimators place the lobes once both ends are seen: open the
+      --  channel at the end they show open.
       declare
-         Pending    : Boolean := True;
          Open_At    : Real := Start;
          Known_Open : Boolean := False;
-         procedure Read_Pending (O : Observation) is
+         procedure Read_Open (O : Observation) is
             pragma Unreferenced (O);
             P : constant Natural := Own_Pair (G);
          begin
-            Pending := P > 0 and then (Sweeps.Status (H.Data.Pairs (P).Sweep, C) = Sweeps.Requested
-                                       or else Sweeps.Wants_Correspondences (H.Data.Pairs (P).Sweep, C));
             if P > 0 and then Sweeps.Status (H.Data.Pairs (P).Sweep, C) = Sweeps.Measured
               and then Sweeps.Closing_Known (H.Data.Pairs (P).Sweep, C)
             then
@@ -244,12 +232,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
                  ((if Sweeps.Closed_End_Is_High (H.Data.Pairs (P).Sweep, C)
                    then Sweeps.Low_End (H.Data.Pairs (P).Sweep, C) else Sweeps.High_End (H.Data.Pairs (P).Sweep, C)), C);
             end if;
-         end Read_Pending;
+         end Read_Open;
       begin
-         loop
-            Hold_Beat (Read_Pending'Access);
-            exit when not Pending;
-         end loop;
+         Hold_Beat (Read_Open'Access);
          if Known_Open then
             Move_Channel (G, C, Open_At);
          end if;

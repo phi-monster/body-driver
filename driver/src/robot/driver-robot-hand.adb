@@ -1,20 +1,16 @@
-with Ada.Containers.Indefinite_Holders;
 with Ada.Containers.Vectors;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
-with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Hand.Frames;
-with Driver.Robot.Hand.Lobes;
 with Driver.Robot.Hand.Presses;
 with Driver.Robot.Hand.Shape;
 with Driver.Robot.Hand.Sweep;
 with Driver.Robot.Hand.Tips;
 with Driver.Robot.Hand.Views;
 with Driver.Robot.Stillness;
-with Driver.Services;
 
 package body Driver.Robot.Hand is
 
@@ -26,28 +22,13 @@ package body Driver.Robot.Hand is
    use type Driver.Robot.Hand.Sweep.Progress;
 
    package Sweeps renames Driver.Robot.Hand.Sweep;
-   package Point_Holders is new Ada.Containers.Indefinite_Holders (Driver.Instrument.Point_Array, Driver.Instrument."=");
-
-   --  The correspondences asked for between one channel's two ends.
-   type Request is record
-      Out_Now  : Boolean := False;
-      Forward  : Driver.Services.Ticket;   --  low end to high end
-      Backward : Driver.Services.Ticket;   --  high end to low end
-      Points   : Point_Holders.Holder;
-      Attached : Driver.Images.Mask;       --  the robot's own pixels when it was asked
-   end record;
-
-   type Request_Array is array (Positive range <>) of Request;
-   package Request_Holders is new Ada.Containers.Indefinite_Holders (Request_Array);
 
    --  One closer group as one eye sees it.
    type Pair is record
       Group    : Group_Id;
       Eye      : Eye_Id;
       Arm      : Arm_Id;
-      Own      : Boolean := False;   --  the eye rides on the closer's arm
       Sweep    : Sweeps.State;
-      Requests : Request_Holders.Holder;
    end record;
 
    package Pair_Vectors is new Ada.Containers.Vectors (Positive, Pair);
@@ -84,11 +65,6 @@ package body Driver.Robot.Hand is
    end record;
 
    procedure Free is new Ada.Unchecked_Deallocation (Hand_Data, Hand_Data_Access);
-
-   --  The matcher's answers are sized by pixels and live on the heap: the
-   --  estimates also run in the decider's task, whose stack is small.
-   type Answers_Access is access Driver.Instrument.Answer_Array;
-   procedure Free is new Ada.Unchecked_Deallocation (Driver.Instrument.Answer_Array, Answers_Access);
 
    overriding procedure Finalize (H : in out Hands) is
    begin
@@ -165,16 +141,17 @@ package body Driver.Robot.Hand is
      (for some P of D.Pairs => P.Group = G and then P.Eye = E);
 
    procedure Find_Pairs (D : in out Hand_Data; M : Model; O : Observation);
-   --  Every closer group with the eyes it moves a patch in, its own arm's
-   --  eyes among them, once the body has measured them; by the body's roles
-   --  as they are now, which the boot re-reads: a pair whose group is no
-   --  longer a closer, or no longer of that arm, goes, and so does a hand
-   --  found from it.
+   --  Every closer group with the eyes on its own arm, once the body has
+   --  measured them; by the body's roles as they are now, which the boot
+   --  re-reads: a pair whose group is no longer a closer, or no longer of that
+   --  arm, goes, and so does a hand found from it. An eye that rides on
+   --  another arm or on nothing is not a pair: what the eye shows of the robot
+   --  itself as the arm moves (Driver.Robot.Hand.Selfsight) is the arm-carried
+   --  eye's.
 
    function Still_A_Pair (P : Pair; M : Model) return Boolean is
      (Role (M, P.Group) = Closer and then Closer_Arm (M, P.Group) = P.Arm
-      and then (if P.Own then Eye_Mount (M, P.Eye).Kind = Arm_Carried and then Eye_Mount (M, P.Eye).Arm = P.Arm
-                else Response (M, P.Group, P.Eye) = Patch));
+      and then Eye_Mount (M, P.Eye).Kind = Arm_Carried and then Eye_Mount (M, P.Eye).Arm = P.Arm);
 
    procedure Find_Pairs (D : in out Hand_Data; M : Model; O : Observation) is
    begin
@@ -213,9 +190,7 @@ package body Driver.Robot.Hand is
                   Mount_Of : constant Mount := Eye_Mount (M, E);
                   Own      : constant Boolean := Mount_Of.Kind = Arm_Carried and then Mount_Of.Arm = Arm;
                begin
-                  if (Own or else Response (M, G, E) = Patch) and then Driver.Observations.Has_Image (O, E)
-                    and then not Has_Pair (D, G, E)
-                  then
+                  if Own and then Driver.Observations.Has_Image (O, E) and then not Has_Pair (D, G, E) then
                      declare
                         Channels : constant Positive := O.Readings.Element (G)'Length;
                         Noise    : Real_Array (1 .. Channels);
@@ -224,15 +199,13 @@ package body Driver.Robot.Hand is
                            Noise (C) := Reading_Noise (M, G, C);
                         end loop;
                         D.Pairs.Append
-                          (Pair'(Group    => G,
-                            Eye      => E,
-                            Arm      => Arm,
-                            Own      => Own,
-                            Sweep    => Sweeps.Start (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)),
-                                                      Channels, Noise),
-                            Requests => Request_Holders.To_Holder ([1 .. Channels => (others => <>)])));
+                          (Pair'(Group => G,
+                            Eye   => E,
+                            Arm   => Arm,
+                            Sweep => Sweeps.Start (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)),
+                                                   Channels, Noise)));
                         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " on arm" & Arm'Image
-                                         & " is watched in eye" & E'Image & (if Own then ", its own" else ""));
+                                         & " is watched in eye" & E'Image & ", its own");
                      end;
                   end if;
                end;
@@ -258,86 +231,6 @@ package body Driver.Robot.Hand is
                       Closer => O.Readings (P.Group), Rest => Rest_Of (O, P.Group), Image => O.Images (P.Eye),
                       Rest_Moved => Moved'Access);
    end Feed;
-
-   procedure Ask (P : in out Pair; M : Model; O : Observation);
-   --  Asks the instrument for the correspondences between the ends of every
-   --  channel whose ends are new, both ways round with round trips.
-
-   procedure Ask (P : in out Pair; M : Model; O : Observation) is
-   begin
-      for C in 1 .. Sweeps.Channels (P.Sweep) loop
-         if Sweeps.Wants_Correspondences (P.Sweep, C) then
-            declare
-               Points : constant Driver.Instrument.Point_Array := Sweeps.Query_Points (P.Sweep, C);
-               Low    : constant Driver.Instrument.Source := (Stored => False, Image => Sweeps.Low_End (P.Sweep, C).Last);
-               High   : constant Driver.Instrument.Source := (Stored => False, Image => Sweeps.High_End (P.Sweep, C).Last);
-               Requests : Request_Array := P.Requests.Element;
-            begin
-               Requests (C) := (Out_Now  => True,
-                                Forward  => Driver.Instrument.Submit_Match (Low, High, Points, True, O.Beat),
-                                Backward => Driver.Instrument.Submit_Match (High, Low, Points, True, O.Beat),
-                                Points   => Point_Holders.To_Holder (Points),
-                                Attached => Self_Mask (M, P.Eye, O));
-               P.Requests := Request_Holders.To_Holder (Requests);
-               Sweeps.Asked (P.Sweep, C);
-               Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & P.Group'Image & " channel" & C'Image
-                                & " seen at both ends in eye" & P.Eye'Image & "; asking where"
-                                & Points'Length'Image & " pixels went");
-            end;
-         end if;
-      end loop;
-   end Ask;
-
-   function Shape_Of
-     (M           : Model;
-      Eye         : Eye_Id;
-      L           : Driver.Robot.Hand.Lobes.Lobe;
-      Open_View   : Driver.Robot.Hand.Views.View;
-      Closed_High : Boolean;
-      Noise       : Driver.Robot.Hand.Lobes.Matcher_Noise) return Driver.Robot.Hand.Shape.Lobe_Shape;
-   --  A lobe's shape from every pixel of it at the open end and where the
-   --  matcher put it at the closed end, and from its closed tip and where
-   --  that matched back to: their lines of sight taken into the tool frame
-   --  through the eye's mount as it was when the open end was seen.
-
-   function Shape_Of
-     (M           : Model;
-      Eye         : Eye_Id;
-      L           : Driver.Robot.Hand.Lobes.Lobe;
-      Open_View   : Driver.Robot.Hand.Views.View;
-      Closed_High : Boolean;
-      Noise       : Driver.Robot.Hand.Lobes.Matcher_Noise) return Driver.Robot.Hand.Shape.Lobe_Shape
-   is
-      package Shapes renames Driver.Robot.Hand.Shape;
-      package Lobes renames Driver.Robot.Hand.Lobes;
-      Mount    : constant Pose_Estimate := Eye_In_Tool (M, Eye, Open_View.Seen);
-      Opened   : constant Lobes.Move_Holders.Holder := (if Closed_High then L.Moves_Here else L.Moves_There);
-      Shut     : constant Lobes.Move_Holders.Holder := (if Closed_High then L.Moves_There else L.Moves_Here);
-      Open_Tip : constant Natural := (if Closed_High then L.Tip_Move_Here else L.Tip_Move_There);
-      Shut_Tip : constant Natural := (if Closed_High then L.Tip_Move_There else L.Tip_Move_Here);
-      Bordered : constant Boolean := (if Closed_High then L.Bordered_Here else L.Bordered_There);
-
-      function Line (Px : Driver.Images.Pixel) return Vec3 is
-        (Mount.Pose.Rotation * Eye_Ray (M, Eye, Px).Direction.Unit_Vector);
-   begin
-      if Mount.Position_Covariance (1, 1) = Real'Last then
-         return Shapes.Unfitted ("its eye's mount was not measured when it was swept");
-      elsif not Known (Noise.Displacement) then
-         return Shapes.Unfitted ("the matcher's own noise between its ends is not known");
-      elsif Open_Tip = 0 or else Shut_Tip = 0 or else Opened.Is_Empty or else Shut.Is_Empty then
-         return Shapes.Unfitted ("its tip is not seen at both ends");
-      elsif Eye_Ray (M, Eye, Opened.Constant_Reference.Element (Open_Tip).From).Direction.Sigma = Real'Last then
-         return Shapes.Unfitted ("its eye's lens was not measured when it was swept");
-      end if;
-      declare
-         Moves : Lobes.Move_Array renames Opened.Constant_Reference.Element.all;
-         --  Sized by pixels: a function result, off the stack.
-         Seen  : constant Shapes.Sighting_Array :=
-           Shapes.From_Moves (Moves, Shut.Constant_Reference.Element (Shut_Tip), Line'Access, Noise.Displacement.Sigma);
-      begin
-         return Shapes.Fit (Mount.Pose.Translation, Seen, Open_Tip - Moves'First + 1, Seen'Last, Bordered);
-      end;
-   end Shape_Of;
 
    function Sizes_Text (R : Hand_Record) return String;
    --  The hand's sizes as measured so far, for the log.
@@ -425,6 +318,22 @@ package body Driver.Robot.Hand is
       D.Found.Append (Made);
    end Keep;
 
+   procedure Drop (D : in out Hand_Data; Group : Group_Id);
+   --  The hand found from a closer group goes, when its ends were measured
+   --  again and give no lobes: a measurement of older ends no longer stands.
+
+   procedure Drop (D : in out Hand_Data; Group : Group_Id) is
+   begin
+      for Id in D.Found.First_Index .. D.Found.Last_Index loop
+         if D.Found (Id).Group = Group then
+            Driver.Log.Line (Driver.Log.Robot, "hand: the hand of closer group" & Group'Image
+                             & " is dropped: its ends were measured again and gave no lobes");
+            D.Found.Delete (Id);
+            return;
+         end if;
+      end loop;
+   end Drop;
+
    procedure Rebuild (D : in out Hand_Data; P : Pair; M : Model);
    --  The hand of a closer group from what its own eye measured: every
    --  measured channel's lobes with their tips at both openings.
@@ -452,8 +361,8 @@ package body Driver.Robot.Hand is
                        (Lobe_Record'(Channel => C,
                                      Sights  => [Open         => (if Closed_High then At_Low else At_High),
                                                  Closed_Empty => (if Closed_High then At_High else At_Low)],
-                                     Shape   => Shape_Of (M, P.Eye, L, (if Closed_High then Low else High), Closed_High,
-                                                          Sweeps.Noise_Of (P.Sweep, C)),
+                                     Shape   => Driver.Robot.Hand.Shape.Unfitted
+                                       ("its pixels are not matched between the ends: the hand asks no instrument"),
                                      Size    => <>));
                   end;
                end loop;
@@ -481,6 +390,8 @@ package body Driver.Robot.Hand is
       end loop;
       if not Made.Lobes.Is_Empty then
          Keep (D, Made);
+      else
+         Drop (D, P.Group);
       end if;
    end Rebuild;
 
@@ -512,65 +423,42 @@ package body Driver.Robot.Hand is
       end if;
    end Adopt;
 
-   procedure Collect (P : in out Pair; D : in out Hand_Data; M : Model);
-   --  Reads the replies that are in and finds the lobes from them.
+   procedure Report (P : in out Pair; D : in out Hand_Data; M : Model);
+   --  Says what became of every channel whose ends are new since it last
+   --  said, and makes the hand of the measured ones again: a hand found from
+   --  older ends does not stand when the ends are new and give no lobes.
 
-   procedure Collect (P : in out Pair; D : in out Hand_Data; M : Model) is
-      Measured_Now : Boolean := False;
+   procedure Report (P : in out Pair; D : in out Hand_Data; M : Model) is
+      Said : Boolean := False;
    begin
       for C in 1 .. Sweeps.Channels (P.Sweep) loop
-         declare
-            Asked : constant Request := P.Requests.Element (C);
-         begin
-            if Asked.Out_Now and then Driver.Services.Ready (Asked.Forward) and then Driver.Services.Ready (Asked.Backward)
-            then
+         if Sweeps.Unannounced (P.Sweep, C) then
+            Sweeps.Announce (P.Sweep, C);
+            Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & P.Group'Image & " channel" & C'Image & " in eye"
+                             & P.Eye'Image & ": " & Sweeps.Account (P.Sweep, C));
+            if Sweeps.Status (P.Sweep, C) = Sweeps.Measured then
                declare
-                  Points   : constant Driver.Instrument.Point_Array := Asked.Points.Element;
-                  Forward  : Answers_Access := new Driver.Instrument.Answer_Array (Points'Range);
-                  Backward : Answers_Access := new Driver.Instrument.Answer_Array (Points'Range);
-                  Ok_Forward, Ok_Backward : Boolean;
-                  Why_Forward, Why_Backward : Unbounded_String;
-                  Requests : Request_Array := P.Requests.Element;
-                  Ahead    : constant Driver.Services.Reply := Driver.Services.Collect (Asked.Forward);
-                  Behind   : constant Driver.Services.Reply := Driver.Services.Collect (Asked.Backward);
+                  Number : Natural := 0;
                begin
-                  Driver.Instrument.Read_Match (Ahead, True, Forward.all, Ok_Forward, Why_Forward);
-                  Driver.Instrument.Read_Match (Behind, True, Backward.all, Ok_Backward, Why_Backward);
-                  Requests (C).Out_Now := False;
-                  P.Requests := Request_Holders.To_Holder (Requests);
-                  if Ok_Forward and then Ok_Backward then
-                     Sweeps.Answer (P.Sweep, C, Points, Forward.all, Backward.all, Asked.Attached);
+                  for L of Sweeps.Lobes_Of (P.Sweep, C) loop
+                     Number := Number + 1;
                      Driver.Log.Line
                        (Driver.Log.Robot, "hand: closer group" & P.Group'Image & " channel" & C'Image & " in eye"
-                        & P.Eye'Image & ": "
-                        & (if Sweeps.Status (P.Sweep, C) = Sweeps.Measured
-                           then Natural (Sweeps.Lobes_Of (P.Sweep, C).Length)'Image & " lobes, "
-                                & (if not Sweeps.Closing_Known (P.Sweep, C) then "closing direction not significant"
-                                   elsif Sweeps.Closed_End_Is_High (P.Sweep, C) then "closed at the high reading"
-                                   else "closed at the low reading")
-                           else "nothing moves between its ends"));
-                     Measured_Now := Measured_Now or else Sweeps.Status (P.Sweep, C) = Sweeps.Measured;
-                  else
-                     declare
-                        Why     : constant String := To_String (if Ok_Forward then Why_Backward else Why_Forward);
-                        Lasting : constant Boolean := Ahead.Lasting or else Behind.Lasting;
-                     begin
-                        Sweeps.Refuse (P.Sweep, C, Lasting, Why);
-                        Driver.Log.Line (Driver.Log.Robot, "hand: the instrument did not answer for closer group"
-                                         & P.Group'Image & " channel" & C'Image & ": " & Why
-                                         & (if Lasting then "; it never can, so nothing more is asked" else ""));
-                     end;
-                  end if;
-                  Free (Forward);
-                  Free (Backward);
+                        & P.Eye'Image & ": lobe" & Number'Image & ":" & L.Count_Here'Image & " pixels at the low reading, "
+                        & (if L.Tip_Known_Here then "tip " & Image (L.Tip_Here) else "no tip")
+                        & (if L.Bordered_Here then " from the border" else "") & ";" & L.Count_There'Image
+                        & " at the high reading, " & (if L.Tip_Known_There then "tip " & Image (L.Tip_There) else "no tip")
+                        & (if L.Bordered_There then " from the border" else ""));
+                  end loop;
                end;
             end if;
-         end;
+            Said := True;
+         end if;
       end loop;
-      if Measured_Now and then P.Own then
+      if Said then
          Rebuild (D, P, M);
       end if;
-   end Collect;
+   end Report;
 
    function Opening_Of (R : Hand_Record; M : Model; Readings : Real_Array; Which : out Opening) return Boolean;
    --  The opening the closer was at, when its readings equal those of one
@@ -695,8 +583,7 @@ package body Driver.Robot.Hand is
             P : Pair := H.Data.Pairs (I);
          begin
             Feed (P, M, O);
-            Ask (P, M, O);
-            Collect (P, H.Data.all, M);
+            Report (P, H.Data.all, M);
             H.Data.Pairs.Replace_Element (I, P);
          end;
       end loop;
@@ -808,7 +695,7 @@ package body Driver.Robot.Hand is
 
    function Sweepable (H : Hands; M : Model; G : Group_Id) return Boolean is
      (H.Data /= null
-      and then (for some P of H.Data.Pairs => P.Group = G and then P.Own and then Still_A_Pair (P, M)));
+      and then (for some P of H.Data.Pairs => P.Group = G and then Still_A_Pair (P, M)));
 
    procedure Measure (H : in out Hands; M : in out Model) is separate;
    --  The decider (driver-robot-hand-measure.adb).
@@ -917,13 +804,13 @@ package body Driver.Robot.Hand is
    function Describe (H : Hands) return String is
       Text : Unbounded_String;
    begin
-      --  Every closer an eye watches that no hand is made of in that eye says
-      --  why not, channel by channel: a hand is made of its arm's own eye.
+      --  Every closer of an arm's own eye that no hand is made of says why not,
+      --  channel by channel.
       if H.Data /= null then
          for P of H.Data.Pairs loop
-            if not (P.Own and then (for some R of H.Data.Found => R.Group = P.Group)) then
+            if not (for some R of H.Data.Found => R.Group = P.Group) then
                Append (Text, "closer group" & P.Group'Image & " on arm" & P.Arm'Image & " in eye" & P.Eye'Image
-                       & (if P.Own then ", its own: no hand;" else ", not its own, no hand is made of it;"));
+                       & ", its own: no hand;");
                for C in 1 .. Sweeps.Channels (P.Sweep) loop
                   Append (Text, " channel" & C'Image & ": " & Sweeps.Account (P.Sweep, C) & ";");
                end loop;

@@ -13,8 +13,8 @@ looking at.
 
 ## What is measured, and from what
 
-Everything comes from the recorded stream: readings, commands, images and the
-instrument's replies, with path A's measured geometry. The estimators
+Everything comes from the recorded stream: readings, commands and images, with
+path A's measured geometry; the hand asks no instrument. The estimators
 (`Hands.Observe`) run on every beat whoever drives the robot, so a replay of
 any run measures the same hands. The decider (`Hands.Measure`, in
 `driver-robot-hand-measure.adb`) only chooses commands: it sweeps and presses,
@@ -23,8 +23,9 @@ and the estimators find what it did in the stream.
 | Package | Responsibility |
 |---|---|
 | `Hand.Views` | per channel, the still views at the two ends of its travel, with the rest of the body unchanged between them |
-| `Hand.Sweep` | per closer and eye, the correspondence request between the ends and the lobes from the reply, as plain data |
-| `Hand.Lobes` | the lobes from the matcher's correspondences, their masks and tips in the image, which end is closed |
+| `Hand.Selfsight` | what an eye that rides on an arm shows of the robot itself, from the arm's own motion: the eye's still frames at each setting of the closer, one for each pose of the rest of the body (a plain-data memory that moves into the model behind `Self_Mask`) |
+| `Hand.Sweep` | per closer and own eye, the change between the ends of each channel and the lobes found from it and the arm's poses, as plain data |
+| `Hand.Lobes` | the lobes from that change, their masks and tips in the image, which end is closed (and, kept for the shape's moves, the matcher-based finding) |
 | `Hand.Frames` | points and lines of sight taken into the tool frame, and a tip into the world, with their uncertainty |
 | `Hand.Presses` | the presses an arm made, found in the stream |
 | `Hand.Touch` | tips and the surface pressed on, fitted together |
@@ -32,7 +33,7 @@ and the estimators find what it did in the stream.
 | `Hand.Aims` | the turn about the eye that aims a press |
 | `Hand.Pressing` | what one press asks of its arm, in the arm's own frame: the aim, the lowering, the way back, the tip's gap above the table |
 
-## Lobes from two still views
+## Lobes from the change and the arm's poses
 
 A channel is seen at the two ends of its travel while everything else holds
 still: the readings of every other group must not change between the two
@@ -40,63 +41,126 @@ views, or the background moves and the comparison means nothing. Each view
 gathers frames while the body is still; two frames at least, since the first
 alone cannot show that the body held still.
 
-The instrument's matcher gives, for every pixel of the box the change covers,
-where it went in the other view and where that point matches back to, both
-ways round. Pixels whose intensity did not change measure the matcher's own
-noise (robust spread, degrees of freedom from the median absolute deviation's
-efficiency). A pixel moves when its displacement passes the two-dimensional
-gate and its round trip does not.
-
-**Lesson: two views of one scene differ a little everywhere.** A14's ends
-differed by one to three levels at most pixels (the median absolute
+**What changed.** Two views of one scene differ a little everywhere: A14's
+ends differed by one to three levels at most pixels (the median absolute
 difference was 2.0 levels in the wrist eye and 1.0 in the head's: the
 renderer's lighting moves with the fingers) while the frames within a view
 agreed to the quantization, and the test of each pixel's difference against
 the frames' own variance (Welch) called 262 474 of 307 200 pixels changed in
-the wrist eye (85 %) and 258 310 in the head's. The fingers' own swept area
-was a third of the one picture and 1.5 % of the other. Three things followed:
-the matcher's noise was measured on the 15 % quietest pixels, so its sigma
-came out 0.067 px and any textured spot off by 0.4 px was a moving lobe (20
-lobes, none on a finger); "the eye sees something new" was true of any two
-views; and the query box was the whole picture, 307 200 points both ways,
-sixteen times for each eye. `Driver.Pixels.Compare` takes the null from the
-difference itself: its median is the typical difference (a lighting shift of
-the whole view is no change), its spread is found from the nearer half of the
-pixels and then from the pixels within the gate of that spread until no more
-drop out, never below the quantization of two means, and every pixel is one
-test of a family of as many as the view has pixels. It assumes that most of
-the view does not change, and says so when half of it or more does (no pixel
-marked, and the sweep's channel is `Everything_Moves`). On the A14 ends, one
-frame each, it marks 89 148 pixels (29.0 %) in the wrist eye, beyond 16.3
-levels of a spread of 2.8, the solid union of both fingers' two positions;
-4 705 (1.5 %) in the head's. A trusted answer is one consistent with the
-assumption: a view most of which changed in one way is not told from a view
-whose smaller part did.
+the wrist eye (85 %) and 258 310 in the head's. `Driver.Pixels.Compare` takes
+the null from the difference itself: its median is the typical difference (a
+lighting shift of the whole view is no change), its spread is found from the
+nearer half of the pixels and then from the pixels within the gate of that
+spread until no more drop out, never below the quantization of two means, and
+every pixel is one test of a family of as many as the view has pixels. It
+assumes that most of the view does not change, and says so when half of it or
+more does (no pixel marked, and the sweep's channel is `Everything_Moves`). On
+the A14 ends, one frame each, it marks 89 148 pixels (29.0 %) in the wrist
+eye, beyond 16.3 levels of a spread of 2.8, the solid union of both fingers'
+two positions; 4 705 (1.5 %) in the head's. A trusted answer is one consistent
+with the assumption: a view most of which changed in one way is not told from
+a view whose smaller part did.
 
-**Lesson: a lobe needs a seed that passes the family gate.** With about 19 000
-pixels tested per view at the single rate, dozens of still pixels pass by
-chance, and some land on one another across the views and make a lobe. A
-component counts only when one of its pixels passes `Vector_Gate (2, Dof,
-Tests => every correspondence tested)`. Measured: 100 still synthetic scenes,
-10 414 still pixels pass the single test, 0 scenes give a lobe; without the
-seed rule 18 of 100 do.
+**Lesson: a matcher cannot follow a smooth finger.** A14's fingers were two
+black wedges, each a quarter of the wrist eye's picture, moving 150 pixels.
+The instrument's matcher, asked where every pixel of the box went and where
+that point matches back to, answered for no pixel of the changed set by more
+than 64 pixels, with round trips that failed inside the wedges; 7 583 pixels
+forward and 10 724 backward passed as moving, more than half of them outside the changed
+set (the matcher's warp carried the fingers' motion into the plain wood beside
+them), the rest in patches at the fan's base, the pens and the keys, not along
+the fingers' edges. Its noise, taken from the pixels that had not changed, was
+measured on the quietest 15 % of the picture (0.067 px). Twenty lobes were
+found in the wrist eye of the replay (eleven in the live run) and not one was a finger; the head's eye said the hand
+was closed at the high reading, and by eye it was closed at the low one.
 
-**Lesson: the tip is the farthest seed.** The tip is the lobe pixel farthest,
-along the lobe, from where it is attached (the image border or the robot's
-still pixels). A still pixel next to a finger that passed the single test by
-chance becomes the farthest pixel by one row; seeds pass the family test, so
-taking the farthest seed removes it.
+**Which end a changed pixel belongs to.** The change alone does not say: a
+pixel that changed shows a part at one end and the world at the other, and the
+picture is the same with the ends exchanged. The cue is what the eye shows of
+the robot itself as its arm moves (`Hand.Selfsight`): the parts that go with
+the eye stay where they are in its picture and the world slides across it. For
+each setting of the closer's readings the memory keeps the eye's still frames,
+one for each pose of the rest of the body it was seen still in; a setting the
+closer leaves after one pose is forgotten, and no more than `Capacity` of two
+poses or more are kept. In A14 the closer sat at 1.000 from beat 1193 to the
+sweep's start at 6283: 269 poses, and the mean over them shows both fingers as
+crisp black wedges at the borders and the world ghosted.
 
-**Lesson: a refusal that can never pass ends the sweep.** A refused pair of
-ends is not asked again, but new ends are. While the boot moves the arm, the
-closer's views begin again at new beats, so the ends are new on nearly every
-still beat. Path A's rig, run without an instrument address, asked about 6000
-times. The service now says when its failure is lasting
-(`Driver.Services.Reply.Lasting`: no address was given). Then every channel
-of that sweep is `Unanswerable` with the reason, nothing is asked again,
-`Measure` does not sweep the channels left and says why, and `Describe`
-states it. A reply that does not fit, or a failed request, may pass, and new
-ends are asked again. There is no retry count.
+The deviation over the poses is a seed and not a mask. A14's left finger
+varied by 11.4 levels over them (median; 8.1 to 17.0), the right one, which
+reflects more, by 16.1 (11.5 to 23.8), the table by 29.5 (13.1 at the tenth
+percentile). Among the changed pixels, 33 948 showed a finger at the starting
+end and 57 609 did not, and a cut at 20 levels (Otsu's cut inside the set
+chooses 22) put 89.5 % of the fingers' below it and 15.1 % of the others:
+86.6 % right, the errors in clusters, a wedge of the flat dark world beside the
+right finger's other place and the right finger's reflecting patches.
+
+`Lobes.From_Change` takes the seeds as the start of a mixture of the two
+kinds of changed pixel: the robot at the starting end and the world at the
+other, or the robot at the other end and the world at the starting end. A
+pixel of either kind has a brightness at each end, and the kinds are told by
+how bright the robot and the world are where they changed, each a histogram
+(every one begins with one pixel a bin), found together with every pixel's
+share in each kind by expectation and maximisation (`Give_To_Ends`). No number
+from the seeds stays but which kind is which. The seeds are wrong where the
+world is flat, and a flat patch is wrong as a whole and explains itself: when
+the rounds have settled every connected part of one label is tried the other
+way round against the histograms of all the rest, and turned when that is the
+likelier by more than Z squared over two in the log of the likelihood. Last
+the eight neighbours are heard (how many of them are of each kind, another
+histogram), and the rounds end when the labels one changed are fewer than
+`Unchanged_Fraction` of them (the convention for an iterative estimate). A pixel is given to a
+kind only when the other kind's share of it is below what one test alarms at
+(Z); the rest are left unassigned, never guessed, and the log counts them. On
+A14's final ends: of 89 294 changed pixels, 51 512 to the low end, 34 314 to
+the high end, 3 468 to neither; against the truth taken from the dark region
+connected to the fingers at the starting end (itself imperfect), 78 865 of the
+85 826 assigned are right, 91.9 %, where the seeds alone were 86.6 % right.
+
+**Lesson: the parts of a mixture's sets are not all lobes.** Each end's
+pixels are cleaned of what is one pixel across and split in their
+eight-connected parts. The first form took every part attached to the image's
+border for a lobe, and A14's low end held, beside its two fingers of 29 219 and
+19 664 pixels, parts of 899, 400, 334, 149 ... pixels (islands of keyboard
+keys, dark stripes on dark stripes, that the mixture cannot tell from the
+finger): six lobes, and the 400-pixel fragment at the bottom left, nearest to
+the open finger's wedge, took its place, so the finger it belonged to was left
+without a partner and dropped. Three rules decide which parts count. (1) A
+part must be attached, to the border or to the robot's pixels that did not
+change. (2) It must hold more pixels than the mixture's doubt, the number of
+pixels it expects to have given to the wrong end (the sum over the pixels of
+the smaller of the two shares); a part no larger could be made of nothing
+else. A14's doubt was 381, which the mixture's confidence made too small to
+matter, since it is confidently wrong at the keys. (3) It must not be a
+fragment by its size: the log sizes of an end's parts are parted in two groups,
+and the parting stands when the groups' mean log sizes differ by more than Z
+standard errors, from the spread within the groups, and the biggest part is
+more than N times the size parted at, N the number of parts; what is left out
+is then smaller than the share 1 / N the biggest would have if all the parts
+were of its size. A finger half the size of the others is kept (a ratio of 2
+against N of 3), and so are fingers that touch at one end and show as one part
+twice as large, since each end is judged by its own parts and the end with too
+few parts takes the other's threshold. The lobes are then the parts of the end
+that has the more of them, and each part of the other goes to the lobe whose
+part is nearest by their centres (pixel by pixel when fewer parts remain than
+lobes: fingers that touched, each taking what is nearest).
+
+**Lesson: the tip is the farthest pixel along the lobe's reach.** The tip
+was the lobe pixel farthest by the paths through the lobe from where it is
+attached (the image border or the robot's still pixels). A14's open wedge had
+a strip of keyboard pixels hanging on it along the bottom of the picture: 143
+pixels from the border by the paths, where the wedge's own apex is 118 from
+it, so the strip's end was the tip (160.8 against 127.9), 200 pixels from where
+a press must land. The tip is now the pixel farthest along the lobe's reach,
+the direction from the centre of where it is attached to the centre of its
+pixels: the strip is 110 along it and the apex 157. (The matcher-based
+finding, `Lobes.Find`, took the farthest seed that passed the family gate; it
+is kept for the moves the shape is fitted from, which the hand does not ask
+for yet.)
+
+The hand asks no instrument: its lobes, tips and closed end come from the
+stream alone, so the same estimators run on a recording, in a test and live,
+and a recording of a run needs no replies to measure its hands.
 
 ## Closers whose reading echoes the command
 
@@ -226,3 +290,20 @@ the body touch first.
 - The descent doubles its step towards a surface it does not know; the last
   step can push up to as far beyond the contact as the hand travelled before
   it, which is why the press reads the pose only after letting go.
+- The hand's sizes (width, thickness, face, depth) are unmeasured: they were
+  fitted from the matcher's moves of a lobe's pixels, and the hand asks no
+  instrument now. The matcher is for later, asked only about the pixels of
+  lobes already found; `Lobes.Find` and the shape's tests are kept for that.
+- The eye must have seen the closer's readings from two poses of the arm, as
+  the boot gives it (A14: 269 at the starting reading). A body whose arm does
+  not move before the closer is swept gets `Unlocated` for the channel, with
+  the poses it has; the decider does not yet move the arm to make them.
+- A lobe is attached to the image's border, or to the robot's own pixels that
+  did not change, which the model does not yet give (`Self_Mask` is empty): a
+  hand whose fingers do not reach the border of its own eye's picture gets no
+  lobes. Path A takes the memory of the eye's poses (`Hand.Selfsight`, written
+  so that the move is a rename) into the model behind `Self_Mask`.
+- Pixels that no end's brightness tells (both ends have the robot's, or
+  neither) stay unassigned; the log counts them. A glossy finger whose
+  brightness runs out of the band measured from the seeds loses those pixels
+  to it, never to the other end.

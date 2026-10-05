@@ -4,9 +4,10 @@
 --  several closable groups of fingers, a suction cup has one lobe.
 --
 --  Measured by the body itself, from the recorded stream alone: the two ends
---  of each closer channel's travel seen still by an eye on its arm, the
---  instrument's correspondences between them and the lobes they show
---  (Driver.Robot.Hand.Sweep); each lobe's tip at both ends, as a pixel and as
+--  of each closer channel's travel seen still by an eye on its arm, what
+--  changed between them, what that eye shows of the robot itself as its arm
+--  moves, and the lobes they give (Driver.Robot.Hand.Sweep, Selfsight); each
+--  lobe's tip at both ends, as a pixel and as
 --  a line of sight in the tool frame; and, from the beats a press on a
 --  surface was blocked, where along that line the tip is
 --  (Driver.Robot.Hand.Touch). Until a quantity is measured it is reported

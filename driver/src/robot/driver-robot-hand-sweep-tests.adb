@@ -11,6 +11,7 @@ package body Driver.Robot.Hand.Sweep.Tests is
    use Driver.Tests;
    use type Driver.Clock.Beat;
    use type Driver.Bytes.Offset;
+   use type Driver.Robot.Hand.Lobes.Placing;
 
    W : constant := 160;
    H : constant := 120;
@@ -39,18 +40,23 @@ package body Driver.Robot.Hand.Sweep.Tests is
       return 0;
    end On_Finger;
 
-   --  Light: the renderer's lighting moves with the fingers. At reading R every
-   --  pixel of the table is lit (1 - R) times one to three levels more, more
-   --  towards the right and by a level either way at each pixel. Fingers
-   --  False leaves the table alone with that lighting. Wide: two fifths of the
-   --  columns are lifted by forty levels (1 - R) and the next three tenths
-   --  lowered by as much, a change of far more than half the picture.
+   --  The eye of an arm. Pose: the arm's, which slides the table across the
+   --  picture while the fingers, that go with the eye, stay where the closer
+   --  puts them. Light: the renderer's lighting moves with the fingers: at
+   --  reading R every pixel of the table is lit (1 - R) times one to three
+   --  levels more, more towards the right and by a level either way at each
+   --  pixel. Fingers False leaves the table alone with that lighting. Wide:
+   --  two fifths of the columns are lifted by forty levels (1 - R) and the
+   --  next three tenths lowered by as much, a change of far more than half
+   --  the picture. Floating: the fingers are cut off from the bottom border.
    function Frame
-     (R       : Real;
-      Scale   : Positive := 1;
-      Light   : Boolean := False;
-      Fingers : Boolean := True;
-      Wide    : Boolean := False) return Driver.Images.Image
+     (R        : Real;
+      Pose     : Natural := 0;
+      Scale    : Positive := 1;
+      Light    : Boolean := False;
+      Fingers  : Boolean := True;
+      Wide     : Boolean := False;
+      Floating : Boolean := False) return Driver.Images.Image
    is
       Data : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset (3 * Scale * W * Scale * H));
    begin
@@ -58,8 +64,11 @@ package body Driver.Robot.Hand.Sweep.Tests is
          for C in 0 .. Scale * W - 1 loop
             declare
                --  A textured table, so every background pixel has its own value.
+               Seen_C : constant Integer := C + 5 * Pose;
+               Seen_R : constant Integer := Row + 3 * Pose;
                Table : constant Natural :=
-                 Natural (128.0 + 60.0 * Sin (Real (C) * 0.37) * Cos (Real (Row) * 0.23) + Real ((C * 7 + Row * 13) mod 19));
+                 Natural (128.0 + 60.0 * Sin (Real (Seen_C) * 0.37) * Cos (Real (Seen_R) * 0.23)
+                          + Real ((Seen_C * 7 + Seen_R * 13) mod 19));
                Lit   : constant Real :=
                  (if Light
                   then (1.0 - R) * (1.0 + 2.0 * Real (C) / Real (Scale * W - 1) + Real ((C * 7 + Row * 13) mod 3) - 1.0)
@@ -67,8 +76,9 @@ package body Driver.Robot.Hand.Sweep.Tests is
                  + (if Wide and then C < 4 * Scale * W / 10 then 40.0 * (1.0 - R)
                     elsif Wide and then C < 7 * Scale * W / 10 then -40.0 * (1.0 - R)
                     else 0.0);
+               Cut_Off : constant Boolean := Floating and then Row > Scale * (H - 10);
                L : constant Driver.Bytes.Byte :=
-                 Driver.Bytes.Byte (if Fingers and then On_Finger (C, Row, R, Scale) > 0 then 20
+                 Driver.Bytes.Byte (if Fingers and then not Cut_Off and then On_Finger (C, Row, R, Scale) > 0 then 20
                                     else Natural (Real'Max (0.0, Real'Min (255.0, Real'Rounding (Real (Table) + Lit)))));
                K : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Row * Scale * W + C));
             begin
@@ -81,52 +91,57 @@ package body Driver.Robot.Hand.Sweep.Tests is
       return Driver.Images.Create (Scale * W, Scale * H, Data);
    end Frame;
 
-   --  The matcher's answers for points of the view at reading From, looked
-   --  for in the view at reading To.
-   function Answers (Points : Driver.Instrument.Point_Array; From, To : Real; Scale : Positive := 1)
-     return Driver.Instrument.Answer_Array is
-   begin
-      return Result : Driver.Instrument.Answer_Array (Points'Range) do
-         for K in Points'Range loop
-            declare
-               P : constant Driver.Images.Pixel := Points (K);
-               C : constant Natural := Natural (Real'Floor (P.U));
-               R : constant Natural := Natural (Real'Floor (P.V));
-               F : constant Natural := On_Finger (C, R, From, Scale);
-            begin
-               if F > 0 then
-                  Result (K) := (Found => True, Certainty => 1.0, Back => P,
-                                 To => (U => P.U + Real (Left_Edge (F, To, Scale) - Left_Edge (F, From, Scale)),
-                                        V => P.V));
-               elsif On_Finger (C, R, To, Scale) > 0 then
-                  --  Covered in the other view: nowhere to go, no way back.
-                  Result (K) := (Found => True, Certainty => 0.1, To => (U => P.U + 7.0, V => P.V),
-                                 Back => (U => P.U + 11.0, V => P.V + 3.0));
-               else
-                  Result (K) := (Found => True, Certainty => 1.0, To => P, Back => P);
-               end if;
-            end;
-         end loop;
-      end return;
-   end Answers;
+   --  How a scene is drawn, for the choreography below.
+   type Scene is record
+      Light, Fingers, Wide, Floating : Boolean := False;
+      Moving_Arm                     : Boolean := True;   --  the arm's poses move the eye
+   end record;
 
-   procedure Two_Fingers_Swept is
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
-      B : Driver.Clock.Beat := 0;
+   Plain : constant Scene := (Fingers => True, Moving_Arm => True, others => False);
+
+   --  The closer sits open, at reading 1, while the arm goes through
+   --  Boot_Poses poses, three still frames each (the body's boot); then the
+   --  closer is swept at one more pose: open, closed, open, its readings
+   --  moving between. The rest of the body is the arm's pose number.
+   Boot_Poses : constant := 12;
+
+   procedure Observe_Frame
+     (S     : in out State;
+      B     : in out Driver.Clock.Beat;
+      Still : Boolean;
+      R     : Real;
+      Pose  : Natural;
+      Looks : Scene)
+   is
+   begin
+      Observe (S, At_Beat (B), Still, [1 => R], [1 => Real (Pose)],
+               Frame (R, (if Looks.Moving_Arm then Pose else 0), 1, Looks.Light, Looks.Fingers, Looks.Wide, Looks.Floating),
+               Exact'Access);
+      B := B + 1;
+   end Observe_Frame;
+
+   procedure Boot (S : in out State; B : in out Driver.Clock.Beat; Looks : Scene) is
+   begin
+      for P in 0 .. Boot_Poses - 1 loop
+         for I in 1 .. 3 loop
+            Observe_Frame (S, B, True, 1.0, P, Looks);
+         end loop;
+      end loop;
+   end Boot;
+
+   procedure Sweep (S : in out State; B : in out Driver.Clock.Beat; Looks : Scene) is
+      Pose : constant := Boot_Poses;
       procedure Hold (R : Real; Frames : Positive) is
       begin
          for I in 1 .. Frames loop
-            Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame (R), Exact'Access);
-            B := B + 1;
+            Observe_Frame (S, B, True, R, Pose, Looks);
          end loop;
       end Hold;
       procedure Move (R : Real) is
       begin
-         Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame (R), Exact'Access);
-         B := B + 1;
+         Observe_Frame (S, B, False, R, Pose, Looks);
       end Move;
    begin
-      --  Open, then pushed closed in two steps, then opened again.
       Hold (1.0, 3);
       Move (0.7);
       Hold (0.5, 2);
@@ -135,44 +150,60 @@ package body Driver.Robot.Hand.Sweep.Tests is
       Move (0.5);
       Hold (1.0, 2);
       Move (1.0);
-      Check (Wants_Correspondences (S, 1), "a full sweep did not ask for correspondences");
-      if Wants_Correspondences (S, 1) then
-         declare
-            Points : constant Driver.Instrument.Point_Array := Query_Points (S, 1);
-            Low  : constant Real := Views.Reading (Low_End (S, 1), 1);
-            High : constant Real := Views.Reading (High_End (S, 1), 1);
-         begin
-            Check (Low = 0.0 and then High = 1.0, "the ends are not closed and open");
-            --  The box of the change spans both fingers' travel from the top row down.
-            Check (Points'Length = (149 - 10 + 1) * (H - 40), "the query box is not the change's box:"
-                   & Natural'Image (Points'Length));
-            Asked (S, 1);
-            Check (Status (S, 1) = Requested and then not Wants_Correspondences (S, 1), "asking was not recorded");
-            Answer (S, 1, Points, Answers (Points, Low, High), Answers (Points, High, Low), Driver.Images.Create (W, H));
-         end;
-         Check (Status (S, 1) = Measured, "the answers gave no lobes");
-         if Status (S, 1) = Measured then
-            Check (Natural (Lobes_Of (S, 1).Length) = 2, "two fingers gave"
-                   & Natural'Image (Natural (Lobes_Of (S, 1).Length)) & " lobes");
-            Check (Closing_Known (S, 1) and then not Closed_End_Is_High (S, 1),
-                   "the closed end is not the low reading");
-         end if;
+   end Sweep;
+
+   function Swept_Scene (Looks : Scene) return State is
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
+      B : Driver.Clock.Beat := 0;
+   begin
+      Boot (S, B, Looks);
+      Sweep (S, B, Looks);
+      return S;
+   end Swept_Scene;
+
+   function Mentions (Text, Part : String) return Boolean is (Ada.Strings.Fixed.Index (Text, Part) > 0);
+
+   procedure Two_Fingers_Swept is
+      S : constant State := Swept_Scene (Plain);
+   begin
+      Check (Has_Ends (S, 1), "a full sweep gave no ends");
+      if Has_Ends (S, 1) then
+         Check (Views.Reading (Low_End (S, 1), 1) = 0.0 and then Views.Reading (High_End (S, 1), 1) = 1.0,
+                "the ends are not closed and open");
+      end if;
+      Check (Status (S, 1) = Measured, "the sweep gave no lobes: " & Account (S, 1));
+      if Status (S, 1) = Measured then
+         Check (Natural (Lobes_Of (S, 1).Length) = 2, "two fingers gave"
+                & Natural'Image (Natural (Lobes_Of (S, 1).Length)) & " lobes");
+         Check (Closing_Known (S, 1) and then not Closed_End_Is_High (S, 1), "the closed end is not the low reading");
+         for L of Lobes_Of (S, 1) loop
+            Check (L.Tip_Known_Here and then L.Tip_Known_There and then abs (L.Tip_Here.V - 40.5) < 1.0e-9
+                   and then abs (L.Tip_There.V - 40.5) < 1.0e-9,
+                   "a lobe's tip is not its finger's top");
+         end loop;
+         --  Everything that changed is the fingers' swept area, which is two
+         --  fingers' two places of 20 columns by 80 rows.
+         Check (Located_Of (S, 1).Changed = 4 * 20 * 80, "the pixels that changed are not the fingers' two places:"
+                & Natural'Image (Located_Of (S, 1).Changed));
+         Check (Located_Of (S, 1).Unassigned = 0, "a pixel that changed was given to neither end:"
+                & Natural'Image (Located_Of (S, 1).Unassigned));
       end if;
    end Two_Fingers_Swept;
 
    procedure Swept_In_A_Task is
       --  The hand's estimate runs inside the decider's task, whose stack is
       --  GNAT's default: the closer swept open to closed and back in a VGA
-      --  eye the fingers fill much of, the change between its ends asked of
-      --  the matcher pixel by pixel both ways round, and the lobes found from
-      --  the answers. Every per-pixel quantity of that is megabytes.
+      --  eye the fingers fill much of, the arm's poses kept as per-pixel
+      --  statistics, the change between its ends compared and its lobes found.
+      --  Every per-pixel quantity of that is megabytes.
       Scale    : constant := 4;
       Readings : constant Real_Array := [1.0, 0.7, 0.5, 0.2, 0.0];
       type Frame_Array is array (Readings'Range) of Driver.Images.Image;
-      Frames   : constant Frame_Array := [for I in Readings'Range => Frame (Readings (I), Scale)];
+      Frames   : constant Frame_Array := [for I in Readings'Range => Frame (Readings (I), Boot_Poses, Scale)];
+      type Pose_Array is array (0 .. Boot_Poses - 1) of Driver.Images.Image;
+      Poses    : constant Pose_Array := [for P in Pose_Array'Range => Frame (1.0, P, Scale)];
       S        : State := Start (Scale * W, Scale * H, Channels => 1, Closer_Noise => [1 => 0.0]);
       Done     : Boolean := False with Atomic;
-      Asked_At : Natural := 0;
       Found    : Natural := 0;
       Failure  : Ada.Strings.Unbounded.Unbounded_String;
 
@@ -193,16 +224,22 @@ package body Driver.Robot.Hand.Sweep.Tests is
             procedure Hold (R : Real; Count : Positive) is
             begin
                for I in 1 .. Count loop
-                  Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame_At (R), Exact'Access);
+                  Observe (S, At_Beat (B), True, [1 => R], [1 => Real (Boot_Poses)], Frame_At (R), Exact'Access);
                   B := B + 1;
                end loop;
             end Hold;
             procedure Move (R : Real) is
             begin
-               Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame_At (R), Exact'Access);
+               Observe (S, At_Beat (B), False, [1 => R], [1 => Real (Boot_Poses)], Frame_At (R), Exact'Access);
                B := B + 1;
             end Move;
          begin
+            for P in Pose_Array'Range loop
+               for I in 1 .. 3 loop
+                  Observe (S, At_Beat (B), True, [1 => 1.0], [1 => Real (P)], Poses (P), Exact'Access);
+                  B := B + 1;
+               end loop;
+            end loop;
             Hold (1.0, 3);
             Move (0.7);
             Hold (0.5, 2);
@@ -211,20 +248,8 @@ package body Driver.Robot.Hand.Sweep.Tests is
             Move (0.5);
             Hold (1.0, 2);
             Move (1.0);
-            if Wants_Correspondences (S, 1) then
-               declare
-                  Points : constant Driver.Instrument.Point_Array := Query_Points (S, 1);
-                  Low    : constant Real := Views.Reading (Low_End (S, 1), 1);
-                  High   : constant Real := Views.Reading (High_End (S, 1), 1);
-               begin
-                  Asked_At := Points'Length;
-                  Asked (S, 1);
-                  Answer (S, 1, Points, Answers (Points, Low, High, Scale), Answers (Points, High, Low, Scale),
-                          Driver.Images.Create (Scale * W, Scale * H));
-               end;
-               if Status (S, 1) = Measured then
-                  Found := Natural (Lobes_Of (S, 1).Length);
-               end if;
+            if Status (S, 1) = Measured then
+               Found := Natural (Lobes_Of (S, 1).Length);
             end if;
             Done := True;
          exception
@@ -236,9 +261,138 @@ package body Driver.Robot.Hand.Sweep.Tests is
       end;
       Check (Done, "the sweep's estimate failed in a task with the default stack: "
              & Ada.Strings.Unbounded.To_String (Failure));
-      Check (not Done or else Found = 2, "two fingers in a VGA view gave" & Found'Image & " lobes, from"
-             & Asked_At'Image & " pixels asked");
+      Check (not Done or else Found = 2, "two fingers in a VGA view gave" & Found'Image & " lobes: " & Account (S, 1));
    end Swept_In_A_Task;
+
+   procedure Lit_By_The_Fingers is
+      --  The renderer's lighting moves with the fingers: at the closed end
+      --  every pixel of the table is one to three levels brighter, a level
+      --  either way at each. That is not a change of anything. A14's two ends
+      --  differed so at 85 % of the pixels.
+      S : constant State := Swept_Scene ((Light => True, Fingers => True, Moving_Arm => True, others => False));
+   begin
+      Check (Status (S, 1) = Measured and then Natural (Lobes_Of (S, 1).Length) = 2
+             and then Closing_Known (S, 1) and then not Closed_End_Is_High (S, 1),
+             "two fingers in moving light were not two lobes closed at the low reading: " & Account (S, 1));
+      --  The fingers' two places, and not the lit table.
+      Check (Located_Of (S, 1).Changed < 4 * 20 * 80 + 4 * 20 * 80 / 10,
+             "the pixels that changed were many more than the fingers' two places:" & Natural'Image (Located_Of (S, 1).Changed));
+   end Lit_By_The_Fingers;
+
+   procedure Only_The_Light_Moves is
+      --  Nothing but the lighting differs between the ends.
+      S : constant State := Swept_Scene ((Light => True, Fingers => False, Moving_Arm => True, others => False));
+   begin
+      Check (Status (S, 1) = Nothing_Moves, "lighting that moves with the closer, and nothing else, was taken for a hand: "
+             & Account (S, 1));
+   end Only_The_Light_Moves;
+
+   procedure More_Than_Half_Moves is
+      --  Seven tenths of the picture change between the ends, in two ways:
+      --  what moved cannot be told from what did not.
+      S : constant State := Swept_Scene ((Wide => True, Fingers => False, Moving_Arm => True, others => False));
+   begin
+      Check (Status (S, 1) = Everything_Moves and then Mentions (Account (S, 1), "half of this eye's picture"),
+             "a picture changed over most of it was not said to be: " & Account (S, 1));
+   end More_Than_Half_Moves;
+
+   procedure Without_Poses is
+      --  The arm's poses did not move the eye (the frames repeat while the
+      --  rest of the body's readings change), so nothing tells the fingers
+      --  from the table.
+      S : constant State := Swept_Scene ((Fingers => True, Moving_Arm => False, others => False));
+   begin
+      Check (Status (S, 1) = Unplaced and then Located_Of (S, 1).How = Driver.Robot.Hand.Lobes.Unseparated,
+             "poses that did not move the eye told fingers from table: " & Account (S, 1));
+   end Without_Poses;
+
+   procedure Never_Seen_From_Poses is
+      --  The closer is swept without the arm having moved at its starting
+      --  reading: one pose.
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
+      B : Driver.Clock.Beat := 0;
+   begin
+      Sweep (S, B, Plain);
+      Check (Status (S, 1) = Unlocated and then Mentions (Account (S, 1), "has not moved the eye against its surroundings"),
+             "a sweep with no poses of the arm at its ends said: " & Account (S, 1));
+      --  The arm then goes through poses at the open reading, and the same ends
+      --  are placed.
+      for P in 0 .. Boot_Poses - 1 loop
+         for I in 1 .. 3 loop
+            Observe_Frame (S, B, True, 1.0, P, Plain);
+         end loop;
+      end loop;
+      Check (Status (S, 1) = Measured, "ends swept before the poses came were not placed once they did: " & Account (S, 1));
+   end Never_Seen_From_Poses;
+
+   procedure Floating_Patch is
+      --  A moving patch cut off from the border is attached to nothing.
+      S : constant State := Swept_Scene ((Fingers => True, Floating => True, Moving_Arm => True, others => False));
+   begin
+      Check (Status (S, 1) = Unplaced and then Located_Of (S, 1).How = Driver.Robot.Hand.Lobes.One_Sided,
+             "a patch attached to nothing was made a lobe: " & Account (S, 1));
+   end Floating_Patch;
+
+   --  What the log says of a channel, at each stage of its sweep: the ends
+   --  not seen, nothing moving, everything moving, no poses, poses that tell
+   --  nothing, parts attached to nothing, and lobes measured and closed at one
+   --  end, or measured but not told which end is closed (with by how much and
+   --  against what the lobes' distances changed). A14's hand phase ended on
+   --  "closing direction not significant" and then nothing: no hand, no
+   --  press, and not a word on whether it was the sweep, the instrument or
+   --  the lobes.
+   procedure Account_Follows_The_Sweep is
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
+      B : Driver.Clock.Beat := 0;
+   begin
+      Observe_Frame (S, B, True, 1.0, Boot_Poses, Plain);
+      Check (Mentions (Account (S, 1), "not both seen still"), "a channel with one end says: " & Account (S, 1));
+      S := Swept_Scene (Plain);
+      Check (Status (S, 1) = Measured and then Mentions (Account (S, 1), "2 lobes, closed at the low reading"),
+             "a channel measured says: " & Account (S, 1));
+      Check (Mentions (Account (S, 1), "pixels changed") and then Mentions (Account (S, 1), "given to the low end"),
+             "a channel measured does not say what changed: " & Account (S, 1));
+      Check (Unannounced (S, 1), "ends not yet said are not so");
+      Announce (S, 1);
+      Check (not Unannounced (S, 1), "ends said are not so");
+      S := Swept_Scene ((Wide => True, Fingers => False, Moving_Arm => True, others => False));
+      Check (Mentions (Account (S, 1), "half of this eye's picture or more changes"), "everything moving says: " & Account (S, 1));
+      S := Swept_Scene ((Fingers => True, Moving_Arm => False, others => False));
+      Check (Mentions (Account (S, 1), "do not fall in two groups"), "poses that tell nothing say: " & Account (S, 1));
+      S := Swept_Scene ((Fingers => True, Floating => True, Moving_Arm => True, others => False));
+      Check (Mentions (Account (S, 1), "larger than the doubt"), "a patch attached to nothing says: " & Account (S, 1));
+      S := Swept_Scene (Plain);
+      --  The same lobes with nothing to tell which end is closed: how far their distances changed, and the
+      --  sigma that was not enough.
+      declare
+         Per_Channel : Channel_Array := S.Per_Channel.Element;
+      begin
+         Per_Channel (1).Closing := Driver.Robot.Hand.Lobes.Undecided;
+         Per_Channel (1).Change := (Value => 3.0, Sigma => 40.0, Degrees_Of_Freedom => 0);
+         S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
+         Check (Mentions (Account (S, 1), "closing direction not significant")
+                and then Mentions (Account (S, 1), "changed by 3.00"),
+                "a channel whose lobes' distances did not tell says: " & Account (S, 1));
+         Per_Channel (1).Change := Unknown;
+         S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
+         Check (Mentions (Account (S, 1), "nothing to compare"), "a channel with nothing to compare says: " & Account (S, 1));
+      end;
+   end Account_Follows_The_Sweep;
+
+   procedure Nothing_Seen is
+      --  A channel whose push changes nothing this eye sees.
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
+   begin
+      for I in 1 .. 3 loop
+         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 1.0], [1 => 0.0], Frame (1.0), Exact'Access);
+      end loop;
+      Observe (S, At_Beat (4), False, [1 => 0.5], [1 => 0.0], Frame (1.0), Exact'Access);
+      for I in 5 .. 7 loop
+         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 0.0], [1 => 0.0], Frame (1.0), Exact'Access);
+      end loop;
+      Observe (S, At_Beat (8), False, [1 => 0.5], [1 => 0.0], Frame (1.0), Exact'Access);
+      Check (Status (S, 1) = Nothing_Moves, "a push that changes nothing was placed: " & Account (S, 1));
+   end Nothing_Seen;
 
    --  A11's closer: at the upper end of its travel, 0 to 1, swept down and up
    --  from there through the views of its own eye as Hand.Measure sweeps it,
@@ -333,7 +487,7 @@ package body Driver.Robot.Hand.Sweep.Tests is
       for I in 1 .. Settling + 3 loop
          Beat_On (Still => True);
       end loop;
-      Result.Ends := Wants_Correspondences (S, 1);
+      Result.Ends := Has_Ends (S, 1);
       if Result.Ends then
          Result.Low := Views.Reading (Low_End (S, 1), 1);
          Result.High := Views.Reading (High_End (S, 1), 1);
@@ -368,258 +522,26 @@ package body Driver.Robot.Hand.Sweep.Tests is
              & " past it, a pixel's push being" & Real'Image (Pixel));
    end Below_The_Views;
 
-   function Mentions (Text, Part : String) return Boolean is (Ada.Strings.Fixed.Index (Text, Part) > 0);
-
-   --  What the log says of a channel, at each stage of its sweep: the ends
-   --  not seen, asked and not answered, refused, measured and closed at one
-   --  end, and measured but not told which end is closed (with by how much
-   --  and against what the lobes' distances changed). A14's hand phase ended
-   --  on "closing direction not significant" and then nothing: no hand, no
-   --  press, and not a word on whether it was the sweep, the instrument or
-   --  the lobes.
-   procedure Account_Follows_The_Sweep is
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
-      B : Driver.Clock.Beat := 0;
-      procedure Hold (R : Real; Frames : Positive) is
-      begin
-         for I in 1 .. Frames loop
-            Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame (R), Exact'Access);
-            B := B + 1;
-         end loop;
-      end Hold;
-      procedure Move (R : Real) is
-      begin
-         Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame (R), Exact'Access);
-         B := B + 1;
-      end Move;
-      procedure Swept_Both_Ends is
-      begin
-         Hold (1.0, 3);
-         Move (0.5);
-         Hold (0.0, 3);
-         Move (0.5);
-         Hold (1.0, 2);
-         Move (1.0);
-      end Swept_Both_Ends;
-      procedure Answer_Both_Ways is
-         Points : constant Driver.Instrument.Point_Array := Query_Points (S, 1);
-         Low    : constant Real := Views.Reading (Low_End (S, 1), 1);
-         High   : constant Real := Views.Reading (High_End (S, 1), 1);
-      begin
-         Asked (S, 1);
-         Answer (S, 1, Points, Answers (Points, Low, High), Answers (Points, High, Low), Driver.Images.Create (W, H));
-      end Answer_Both_Ways;
-   begin
-      Hold (1.0, 3);
-      Check (Mentions (Account (S, 1), "not both seen still"), "a channel with one end says: " & Account (S, 1));
-      Move (0.5);
-      Hold (0.0, 3);
-      Move (0.5);
-      Hold (1.0, 2);
-      Move (1.0);
-      Check (Mentions (Account (S, 1), "nothing has been asked"), "a channel with both ends seen says: " & Account (S, 1));
-      Asked (S, 1);
-      Check (Mentions (Account (S, 1), "answer for its ends did not come"), "a channel asked says: " & Account (S, 1));
-      Refuse (S, 1, False, "the instrument went away");
-      Check (Mentions (Account (S, 1), "could not answer"), "a channel refused says: " & Account (S, 1));
-      S := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
-      Swept_Both_Ends;
-      Asked (S, 1);
-      Refuse (S, 1, True, "no address was given for the instrument service");
-      Check (Mentions (Account (S, 1), "can never answer (no address"), "a channel never to be answered says: " & Account (S, 1));
-      S := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
-      Swept_Both_Ends;
-      Answer_Both_Ways;
-      Check (Status (S, 1) = Measured and then Mentions (Account (S, 1), "2 lobes, closed at the low reading"),
-             "a channel measured says: " & Account (S, 1));
-      --  The same lobes with nothing to tell which end is closed: how far their distances changed, and the
-      --  sigma that was not enough.
-      declare
-         Per_Channel : Channel_Array := S.Per_Channel.Element;
-      begin
-         Per_Channel (1).Closing := Driver.Robot.Hand.Lobes.Undecided;
-         Per_Channel (1).Change := (Value => 3.0, Sigma => 40.0, Degrees_Of_Freedom => 0);
-         S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
-         Check (Mentions (Account (S, 1), "closing direction not significant")
-                and then Mentions (Account (S, 1), "changed by 3.00"),
-                "a channel whose lobes' distances did not tell says: " & Account (S, 1));
-         Per_Channel (1).Change := Unknown;
-         S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
-         Check (Mentions (Account (S, 1), "nothing to compare"), "a channel with nothing to compare says: " & Account (S, 1));
-      end;
-   end Account_Follows_The_Sweep;
-
-   --  The closer swept open, closed, open and its ends seen, in frames that
-   --  Light (and Wide) make: a procedure over the whole choreography so that
-   --  each test below says only what is in the picture.
-   procedure Sweep_With
-     (S       : in out State;
-      Light   : Boolean;
-      Fingers : Boolean;
-      Wide    : Boolean := False)
-   is
-      B : Driver.Clock.Beat := 0;
-      procedure Hold (R : Real; Frames : Positive) is
-      begin
-         for I in 1 .. Frames loop
-            Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame (R, 1, Light, Fingers, Wide), Exact'Access);
-            B := B + 1;
-         end loop;
-      end Hold;
-      procedure Move (R : Real) is
-      begin
-         Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame (R, 1, Light, Fingers, Wide), Exact'Access);
-         B := B + 1;
-      end Move;
-   begin
-      Hold (1.0, 3);
-      Move (0.7);
-      Hold (0.5, 2);
-      Move (0.2);
-      Hold (0.0, 3);
-      Move (0.5);
-      Hold (1.0, 2);
-      Move (1.0);
-   end Sweep_With;
-
-   procedure Lit_By_The_Fingers is
-      --  The renderer's lighting moves with the fingers: at the closed end
-      --  every pixel of the table is one to three levels brighter, a level
-      --  either way at each. That is not a change of anything. A14's two ends
-      --  differed so at 85 % of the pixels, the whole picture was asked of the
-      --  matcher, and the matcher's noise came from the quietest of them.
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
-   begin
-      Sweep_With (S, Light => True, Fingers => True);
-      Check (Wants_Correspondences (S, 1), "a sweep of two fingers in moving light did not ask for correspondences");
-      if Wants_Correspondences (S, 1) then
-         declare
-            Points : constant Driver.Instrument.Point_Array := Query_Points (S, 1);
-            Low    : constant Real := Views.Reading (Low_End (S, 1), 1);
-            High   : constant Real := Views.Reading (High_End (S, 1), 1);
-         begin
-            Check (Points'Length = (149 - 10 + 1) * (H - 40), "the query box is not the fingers' travel in moving light:"
-                   & Natural'Image (Points'Length) & " of" & Natural'Image (W * H) & " pixels");
-            Asked (S, 1);
-            Answer (S, 1, Points, Answers (Points, Low, High), Answers (Points, High, Low), Driver.Images.Create (W, H));
-         end;
-         Check (Status (S, 1) = Measured and then Natural (Lobes_Of (S, 1).Length) = 2
-                and then Closing_Known (S, 1) and then not Closed_End_Is_High (S, 1),
-                "two fingers in moving light were not two lobes closed at the low reading: " & Account (S, 1));
-      end if;
-   end Lit_By_The_Fingers;
-
-   procedure Only_The_Light_Moves is
-      --  Nothing but the lighting differs between the ends.
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
-   begin
-      Sweep_With (S, Light => True, Fingers => False);
-      Check (Status (S, 1) = Nothing_Moves and then not Wants_Correspondences (S, 1),
-             "lighting that moves with the closer, and nothing else, was sent to the matcher: " & Account (S, 1));
-   end Only_The_Light_Moves;
-
-   procedure More_Than_Half_Moves is
-      --  Seven tenths of the picture change between the ends, in two ways:
-      --  what moved cannot be told from what did not.
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
-   begin
-      Sweep_With (S, Light => False, Fingers => False, Wide => True);
-      Check (Status (S, 1) = Everything_Moves and then not Wants_Correspondences (S, 1)
-             and then Mentions (Account (S, 1), "half of this eye's picture"),
-             "a picture changed over most of it was not said to be: " & Account (S, 1));
-   end More_Than_Half_Moves;
-
-   procedure Nothing_Seen is
-      --  A channel whose push changes nothing this eye sees.
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
-   begin
-      for I in 1 .. 3 loop
-         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 1.0], [1 => 0.0], Frame (1.0), Exact'Access);
-      end loop;
-      Observe (S, At_Beat (4), False, [1 => 0.5], [1 => 0.0], Frame (1.0), Exact'Access);
-      for I in 5 .. 7 loop
-         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 0.0], [1 => 0.0], Frame (1.0), Exact'Access);
-      end loop;
-      Observe (S, At_Beat (8), False, [1 => 0.5], [1 => 0.0], Frame (1.0), Exact'Access);
-      Check (Status (S, 1) = Nothing_Moves and then not Wants_Correspondences (S, 1),
-             "a push that changes nothing asked the matcher");
-   end Nothing_Seen;
-
-   procedure Refused (Lasting : Boolean) is
-      --  A sweep asked, refused, and swept again with new ends.
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
-      B : Driver.Clock.Beat := 0;
-      Rest_At : Real := 0.0;   --  the rest of the body, which the boot moves between sweeps
-      procedure Hold (R : Real; Frames : Positive) is
-      begin
-         for I in 1 .. Frames loop
-            Observe (S, At_Beat (B), True, [1 => R], [1 => Rest_At], Frame (R), Exact'Access);
-            B := B + 1;
-         end loop;
-      end Hold;
-      procedure Move (R : Real) is
-      begin
-         Observe (S, At_Beat (B), False, [1 => R], [1 => Rest_At], Frame (R), Exact'Access);
-         B := B + 1;
-      end Move;
-      procedure Sweep is
-      begin
-         Hold (1.0, 3);
-         Move (0.5);
-         Hold (0.0, 3);
-         Move (0.5);
-         Hold (1.0, 3);
-         Move (1.0);
-      end Sweep;
-   begin
-      Sweep;
-      Check (Wants_Correspondences (S, 1), "a full sweep did not ask for correspondences");
-      if Wants_Correspondences (S, 1) then
-         Asked (S, 1);
-         Refuse (S, 1, Lasting, "no address was given for the instrument service");
-         --  The arm moved, and the closer was swept again there: new ends.
-         Rest_At := 0.5;
-         Sweep;
-         if Lasting then
-            Check (Status (S, 1) = Unanswerable and then not Wants_Correspondences (S, 1)
-                   and then Refusal (S) = "no address was given for the instrument service",
-                   "an instrument that can never answer is asked again for new ends, or the reason is lost");
-         else
-            Check (Wants_Correspondences (S, 1) and then Refusal (S) = "",
-                   "new ends are not asked for after a refusal that may pass");
-         end if;
-      end if;
-   end Refused;
-
-   procedure Refused_For_Good is
-   begin
-      Refused (Lasting => True);
-   end Refused_For_Good;
-
-   procedure Refused_For_Now is
-   begin
-      Refused (Lasting => False);
-   end Refused_For_Now;
-
    procedure Register is
    begin
-      Driver.Tests.Register ("hand.sweep.lasting",
-                             "an instrument that can never answer is asked again whenever the closer's ends are new",
-                             Refused_For_Good'Access);
-      Driver.Tests.Register ("hand.sweep.transient", "new ends are not asked for after a refusal that may pass",
-                             Refused_For_Now'Access);
       Driver.Tests.Register ("hand.sweep.two", "a closer swept open to closed does not yield its lobes and closed end",
                              Two_Fingers_Swept'Access);
       Driver.Tests.Register ("hand.sweep.task", "the sweep's estimate fails in a task with the default stack, as the "
                              & "decider's does", Swept_In_A_Task'Access);
-      Driver.Tests.Register ("hand.sweep.nothing", "a push that changes nothing in the eye is sent to the matcher",
+      Driver.Tests.Register ("hand.sweep.nothing", "a push that changes nothing in the eye is placed",
                              Nothing_Seen'Access);
-      Driver.Tests.Register ("hand.sweep.lighting", "lighting that moves with the fingers is a change of the whole picture",
-                             Lit_By_The_Fingers'Access);
-      Driver.Tests.Register ("hand.sweep.lightonly", "a push that changes only the lighting is sent to the matcher",
+      Driver.Tests.Register ("hand.sweep.lighting", "lighting that moves with the fingers is a change of the whole "
+                             & "picture", Lit_By_The_Fingers'Access);
+      Driver.Tests.Register ("hand.sweep.lightonly", "a push that changes only the lighting is taken for a hand",
                              Only_The_Light_Moves'Access);
       Driver.Tests.Register ("hand.sweep.crowded", "a picture changed over most of it is taken for a measurement",
                              More_Than_Half_Moves'Access);
+      Driver.Tests.Register ("hand.sweep.poses", "poses of the arm that did not move the eye tell fingers from table",
+                             Without_Poses'Access);
+      Driver.Tests.Register ("hand.sweep.unposed", "ends swept without poses of the arm are never placed once they "
+                             & "come", Never_Seen_From_Poses'Access);
+      Driver.Tests.Register ("hand.sweep.adrift", "a patch that changed and is attached to nothing is made a lobe",
+                             Floating_Patch'Access);
       Driver.Tests.Register ("hand.sweep.account", "a channel's sweep ends, at any stage, without a word of what became "
                              & "of it", Account_Follows_The_Sweep'Access);
       Driver.Tests.Register ("hand.sweep.blind", "a sweep from a step its views cannot see stops at its first push "
