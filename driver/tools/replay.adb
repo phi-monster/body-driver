@@ -11,7 +11,8 @@
 --  the run read it, so a run that booted from a body file replays as it ran,
 --  even after the run rewrote the file. Every estimate a decider
 --  asked for at once is in the recording too (kind E) and is made at the
---  same point. With --estimates, every beat after boot writes
+--  same point, and so is every write a decider made into the world (kind W).
+--  With --estimates, every beat after boot writes
 --  one JSON line with each arm's tool pose and each eye's pose (row-major 4 x 4,
 --  world frame); two last lines hold, for each eye, the lines of sight of a
 --  grid of pixels in the eye's own frame, and each hand's tips in its tool
@@ -64,6 +65,7 @@ procedure Replay is
    Estimates : Unbounded_String;
    Out_File  : Ada.Text_IO.File_Type;
    Last_Obs  : Driver.Observations.Observation;
+   Current   : Driver.Observations.Observation;   --  the observation of the latest beat
 
    R        : Driver.Recording.Reader;
    Opened   : Boolean;
@@ -211,6 +213,7 @@ procedure Replay is
          end if;
          if Known then
             Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), O);
+            Current := O;
             Driver.Services.Replay_Beat (Driver.Clock.Beat (Beat));
             Driver.Robot.Observe (Robot, O, Sent);
             Driver.Robot.Hand.Observe (Hands, Robot, O, Sent);
@@ -336,6 +339,15 @@ procedure Replay is
       end if;
    end File_Read;
 
+   procedure World_Write (Data : Driver.Bytes.Byte_Array) is
+      Ok : Boolean;
+   begin
+      Driver.World.Replay_Write (Scene, Robot, Current, Data, Ok);
+      if not Ok then
+         Line (Core, "a write into the world this code cannot read is skipped");
+      end if;
+   end World_Write;
+
    procedure Report_Services is
    begin
       for S in Driver.Services.Service loop
@@ -384,6 +396,7 @@ begin
          when Driver.Recording.Service_Reply   => Payload.Query (Service_Reply'Access);
          when Driver.Recording.File_Read       => Payload.Query (File_Read'Access);
          when Driver.Recording.Estimates_Asked => Driver.Robot.Estimate_Now (Robot);
+         when Driver.Recording.World_Written   => Payload.Query (World_Write'Access);
          when others                          => null;
       end case;
    end loop;

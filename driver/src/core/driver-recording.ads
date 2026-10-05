@@ -6,8 +6,9 @@
 --
 --  Kinds: R robot to driver, D driver to robot (binary messages), r and d the
 --  same for text messages, C a new robot connection, S a service request,
---  T a service reply, F a file the driver read and E a decider's call for
---  the estimates at once (Driver.Robot.Estimate_Now, no payload). A service record starts
+--  T a service reply, F a file the driver read, E a decider's call for the
+--  estimates at once (Driver.Robot.Estimate_Now, no payload) and W a
+--  decider's write into the world (Driver.World.Replay_Write). A service record starts
 --  with a line naming the call: the service, its call number (which pairs a
 --  reply with its request) and, for a call an estimator submitted, "beat"
 --  and the beat it was submitted at. A request goes on with the path, LF,
@@ -24,7 +25,7 @@ package Driver.Recording is
 
    type Record_Kind is
      (Robot_Message, Driver_Message, Robot_Text, Driver_Text, Connection, Service_Request, Service_Reply,
-      File_Read, Estimates_Asked);
+      File_Read, Estimates_Asked, World_Written);
 
    type Reader is limited private;
 
@@ -53,8 +54,11 @@ package Driver.Recording is
    procedure Start_Shared (Path : String);
    procedure Write_Shared (Kind : Record_Kind; Payload : Driver.Bytes.Byte_Array);
    procedure Stop_Shared;
+   function Shared_Started return Boolean;
    --  The process-wide recording the main loop and the service workers write
    --  to, one record at a time; Write_Shared does nothing until it is started.
+   --  Shared_Started says whether it is being written, so a writer can skip
+   --  encoding a record nobody keeps.
 
 private
 
