@@ -13,6 +13,9 @@ with Driver.Log;
 with Driver.Numerics.Dense;
 with Ada.Strings.Fixed;
 with Driver.Robot.Body_File;
+with Driver.Recording;
+with Ada.Text_IO;
+with GNAT.OS_Lib;
 with Driver.Robot.Boot;
 with Driver.Robot.Kinematics;
 with Driver.Robot.Lockin;
@@ -2011,8 +2014,12 @@ package body Driver.Robot.Tests is
    --  Track_Error the spread of an error shared by one point's sightings in
    --  every keyframe (where the matcher finds it), each point's drawn at
    --  random: the fit's reported uncertainty must still cover its errors.
+   --  Pending: the matches of joint 1's widest keyframes, both ways, have not
+   --  come back (a boot refits between a keyframe and its answer): they have
+   --  no sightings yet.
    procedure Synthetic_Sweep
-     (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0; Track_Error : Real := 0.0)
+     (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0; Track_Error : Real := 0.0;
+      Pending : Boolean := False)
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N       : constant := 6;
@@ -2114,12 +2121,35 @@ package body Driver.Robot.Tests is
             end;
          end;
       end loop;
+      if Pending then
+         declare
+            Up, Down : Positive := 2;
+            Kept     : Natural := 0;
+         begin
+            --  Joint 1's keyframes are the first of the sweep.
+            for F in 2 .. 1 + Levels'Length loop
+               if Changes (F, 1) > Changes (Up, 1) then
+                  Up := F;
+               end if;
+               if Changes (F, 1) < Changes (Down, 1) then
+                  Down := F;
+               end if;
+            end loop;
+            for I in 1 .. Seen loop
+               if All_Seen (I).Frame /= Up and then All_Seen (I).Frame /= Down then
+                  Kept := Kept + 1;
+                  All_Seen (Kept) := All_Seen (I);
+               end if;
+            end loop;
+            Seen := Kept;
+         end;
+      end if;
       declare
          Joints : Fit.Joint_Array (1 .. N);
          Found  : Fit.Lens;
          Report : Fit.Fit_Report;
       begin
-         Fit.Fit (Changes, [1 .. N => 0.01 * Scale], All_Seen (1 .. Seen), 640, 480, Joints, Found, Report);
+         Fit.Fit (Changes, [1 .. N => 0.01 * Scale], All_Seen (1 .. Seen), 640, 480, 0, Joints, Found, Report);
          if not Expect_Fit then
             Check (not Report.Fitted, "a sweep of" & Real'Image (0.2 * Scale) & " rad at most was fitted, focal"
                    & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy));
@@ -2324,6 +2354,63 @@ package body Driver.Robot.Tests is
       Check (not M.Kinematics (1).Result.Fitted, "the refit keeps the fit of a group that is no arm");
    end Stale_Fit_Is_No_Arms;
 
+   --  The arm of Build_Fitted_Arm: its eye's lens, the table it sees, and
+   --  the matcher's error, pixels per coordinate.
+   Arm_Lens  : constant Driver.Robot.Kinematics.Fit.Lens :=
+     (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+   Arm_Table : constant Vec3 := [0.0, -0.6, -0.8];
+   Arm_Noise : constant := 0.1;
+
+   --  A keyframe of the arm at Readings, and the matches of the reference's
+   --  query points into it: what the eye of the true joints sees of the
+   --  table, with the matcher's error. The reference is the first keyframe,
+   --  at Ref.
+   procedure Add_Keyframe
+     (R        : in out Arm_Evidence;
+      Readings : Real_Array;
+      Ref      : Real_Array;
+      Truth    : Driver.Robot.Kinematics.Fit.Joint_Array;
+      Rng      : in out Generator)
+   is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      K : Keyframe;
+   begin
+      K.Beat := Natural (R.Frames.Length) + 1;
+      for X of Readings loop
+         K.Readings.Append (X);
+      end loop;
+      R.Frames.Append (K);
+      if Natural (R.Frames.Length) > 1 then
+         declare
+            D   : Real_Array (1 .. Readings'Length);
+            T   : Rigid;
+            Set : Match_Set;
+         begin
+            for J in D'Range loop
+               D (J) := Readings (Readings'First + J - 1) - Ref (Ref'First + J - 1);
+            end loop;
+            T := Inverse (Fit.Eye_At (Truth, D));
+            Set.Frame := Natural (R.Frames.Length);
+            for I in 0 .. Natural (R.Query_U.Length) - 1 loop
+               declare
+                  H     : constant Vec3 := Fit.Ray (Arm_Lens, R.Query_U (I), R.Query_V (I));
+                  X     : constant Vec3 := (-1.0 / Real'(Unit (Arm_Table) * H)) * H;
+                  U, V  : Real;
+                  Ahead : Boolean;
+               begin
+                  Fit.Project (Arm_Lens, T * X, U, V, Ahead);
+                  Set.To_U.Append (U + Arm_Noise * Gaussian (Rng));
+                  Set.To_V.Append (V + Arm_Noise * Gaussian (Rng));
+                  Set.Back_U.Append (R.Query_U (I) + Arm_Noise * Gaussian (Rng));
+                  Set.Back_V.Append (R.Query_V (I) + Arm_Noise * Gaussian (Rng));
+                  Set.Found.Append (Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0);
+               end;
+            end loop;
+            R.Matches.Append (Set);
+         end;
+      end if;
+   end Add_Keyframe;
+
    --  A10's arm 2: its reference keyframe came from a push of the
    --  recognition rounds, 3e-5 rad down on one joint, so every keyframe of
    --  its sweep differs from the reference in that joint too. That is ten
@@ -2341,9 +2428,6 @@ package body Driver.Robot.Tests is
       Rows_H  : constant := 7;          --  the Hadamard keyframes
       Columns : constant := 16;
       Rows    : constant := 12;
-      Noise   : constant := 0.1;        --  the matcher's, pixels per coordinate
-      Table   : constant Vec3 := [0.0, -0.6, -0.8];
-      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
       Truth   : Fit.Joint_Array (1 .. N);
       Axes    : constant array (1 .. N) of Vec3 :=
         [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
@@ -2356,42 +2440,8 @@ package body Driver.Robot.Tests is
       Cells   : constant := 4;
 
       procedure Add_Frame (Readings : Real_Array) is
-         K : Keyframe;
       begin
-         K.Beat := Natural (R.Frames.Length) + 1;
-         for X of Readings loop
-            K.Readings.Append (X);
-         end loop;
-         R.Frames.Append (K);
-         if Natural (R.Frames.Length) > 1 then
-            declare
-               D   : Real_Array (1 .. N);
-               T   : Rigid;
-               Set : Match_Set;
-            begin
-               for J in 1 .. N loop
-                  D (J) := Readings (J) - Ref (J);
-               end loop;
-               T := Inverse (Fit.Eye_At (Truth, D));
-               Set.Frame := Natural (R.Frames.Length);
-               for I in 0 .. Natural (R.Query_U.Length) - 1 loop
-                  declare
-                     H     : constant Vec3 := Fit.Ray (Lens, R.Query_U (I), R.Query_V (I));
-                     X     : constant Vec3 := (-1.0 / Real'(Unit (Table) * H)) * H;
-                     U, V  : Real;
-                     Ahead : Boolean;
-                  begin
-                     Fit.Project (Lens, T * X, U, V, Ahead);
-                     Set.To_U.Append (U + Noise * Gaussian (Rng));
-                     Set.To_V.Append (V + Noise * Gaussian (Rng));
-                     Set.Back_U.Append (R.Query_U (I) + Noise * Gaussian (Rng));
-                     Set.Back_V.Append (R.Query_V (I) + Noise * Gaussian (Rng));
-                     Set.Found.Append (Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0);
-                  end;
-               end loop;
-               R.Matches.Append (Set);
-            end;
-         end if;
+         Add_Keyframe (R, Readings, Ref, Truth, Rng);
       end Add_Frame;
    begin
       for J in 1 .. N loop
@@ -2414,7 +2464,7 @@ package body Driver.Robot.Tests is
             S.Kept_Channels.Append (C);
          end loop;
          for Cell in 1 .. Cells loop
-            S.Noise.Append (Noise);
+            S.Noise.Append (Arm_Noise);
             for C in 1 .. N loop
                S.Gains.Append (1.0e16);
                S.Gain_Variances.Append (1.0);
@@ -3293,6 +3343,82 @@ package body Driver.Robot.Tests is
       end;
    end Body_File_Round_Trip;
 
+   --  A body file the driver reads goes into the recording where it was
+   --  read, once, and the recorded text reloads the body the file gave.
+   procedure Body_File_In_The_Recording is
+      use type Driver.Recording.Record_Kind;
+      use type GNAT.OS_Lib.File_Descriptor;
+      use type GNAT.OS_Lib.String_Access;
+      M, Live, Again : Model;
+      Ok    : Boolean;
+      Why   : Ada.Strings.Unbounded.Unbounded_String;
+      FD    : GNAT.OS_Lib.File_Descriptor;
+      File_Name, Recording_Name : GNAT.OS_Lib.String_Access;
+      Found : Natural := 0;
+      Gone  : Boolean;
+   begin
+      Measured_Body (M);
+      GNAT.OS_Lib.Create_Temp_File (FD, File_Name);
+      Check (FD /= GNAT.OS_Lib.Invalid_FD, "no scratch file for the body file");
+      GNAT.OS_Lib.Close (FD);
+      GNAT.OS_Lib.Create_Temp_File (FD, Recording_Name);
+      Check (FD /= GNAT.OS_Lib.Invalid_FD, "no scratch file for the recording");
+      GNAT.OS_Lib.Close (FD);
+      if File_Name = null or else Recording_Name = null then
+         return;
+      end if;
+      declare
+         F : Ada.Text_IO.File_Type;
+      begin
+         Ada.Text_IO.Open (F, Ada.Text_IO.Out_File, File_Name.all);
+         Ada.Text_IO.Put (F, Driver.Robot.Body_File.Text (M));
+         Ada.Text_IO.Close (F);
+      end;
+      Driver.Recording.Start_Shared (Recording_Name.all);
+      Load_Body (Live, File_Name.all, Ok, Why);
+      Driver.Recording.Stop_Shared;
+      Check (Ok, "the body file was not loaded: " & Ada.Strings.Unbounded.To_String (Why));
+      declare
+         R       : Driver.Recording.Reader;
+         Opened  : Boolean;
+         More    : Boolean := True;
+         Kind    : Driver.Recording.Record_Kind;
+         Ns      : Long_Long_Integer;
+         Payload : Driver.Bytes.Buffer;
+         Head    : constant String := "body " & File_Name.all & ASCII.LF;
+         procedure Reload_Recorded (Data : Driver.Bytes.Byte_Array) is
+            Text : constant String := Driver.Bytes.To_String (Data);
+         begin
+            Found := Found + 1;
+            if Text'Length < Head'Length or else Text (Text'First .. Text'First + Head'Length - 1) /= Head then
+               Check (False, "the file record does not name the body file it holds");
+               return;
+            end if;
+            Load_Body_Text (Again, Text (Text'First + Head'Length .. Text'Last), Ok, Why);
+            Check (Ok, "the recorded text does not reload: " & Ada.Strings.Unbounded.To_String (Why));
+            Check (Driver.Robot.Body_File.Text (Again) = Driver.Robot.Body_File.Text (Live),
+                   "the recorded text reloads another body than the file did");
+         end Reload_Recorded;
+      begin
+         Driver.Recording.Open (R, Recording_Name.all, Opened);
+         Check (Opened, "the recording cannot be opened");
+         while Opened and then More loop
+            Driver.Recording.Next (R, Kind, Ns, Payload, More);
+            if More and then Kind = Driver.Recording.File_Read then
+               Payload.Query (Reload_Recorded'Access);
+            end if;
+         end loop;
+         if Opened then
+            Driver.Recording.Close (R);
+         end if;
+      end;
+      Check (Found = 1, "the body file read is in the recording" & Found'Image & " times, not once");
+      GNAT.OS_Lib.Delete_File (File_Name.all, Gone);
+      GNAT.OS_Lib.Delete_File (Recording_Name.all, Gone);
+      GNAT.OS_Lib.Free (File_Name);
+      GNAT.OS_Lib.Free (Recording_Name);
+   end Body_File_In_The_Recording;
+
    --  A quantity measured by another method than the code's is measured
    --  again, with what rests on it; the rest stands, and the estimates leave
    --  it as reloaded.
@@ -3624,10 +3750,104 @@ package body Driver.Robot.Tests is
       end if;
    end Plan_And_Follow_Beyond_The_Travel;
 
+   --  The unit of length is the first fit's. A keyframe taken after the arm
+   --  was fitted (every rest of a hand's presses, every stop of an action)
+   --  refines every term and moves no length: the eye's position at a pose
+   --  stays where it was, within its sigmas. The unit used to be the root mean
+   --  square of the eye positions over every keyframe there was, so each new
+   --  pose changed it, and with it every length of the arm's frame, which for
+   --  the first arm is the world's.
+   procedure Unit_Holds_As_Keyframes_Arrive is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      M      : Model;
+      Truth  : constant Fit.Joint_Array := Truth_Of (1);
+      Base   : constant Real_Array (1 .. 6) := [others => 0.0];
+      Pose   : constant Real_Array (1 .. 6) := [0.1, -0.05, 0.08, 0.05, 0.1, -0.1];
+      Rows   : constant array (1 .. 6) of Natural := [1, 2, 4, 5, 7, 8];
+      Rng    : Generator := (State => 99);
+      First_Frames, First_Used : Natural;
+      Was, Now : Vec3;
+      Turn, Place_1, Place_2 : Mat3;
+   begin
+      Build_Fitted_Arm (M, 0.0);
+      Check (Driver.Robot.Kinematics.Fitted (M, 1), "the arm to refit is not fitted");
+      if not Driver.Robot.Kinematics.Fitted (M, 1) then
+         return;
+      end if;
+      First_Frames := Natural (M.Kinematics (1).Frames.Length);
+      First_Used := M.Kinematics (1).Result.Used;
+      Was := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Pose).Translation;
+      Driver.Robot.Kinematics.Pose_Covariance (M, 1, Pose, Turn, Place_1);
+      --  Poses a long way off the sweep's: every joint at 0.4 rad one way, the
+      --  other or not at all, so that the eye's positions over all the
+      --  keyframes have another root mean square.
+      for Row of Rows loop
+         declare
+            Q : Real_Array (1 .. 6);
+         begin
+            for J in Q'Range loop
+               Q (J) := 0.4 * Real ((Row * J) mod 3 - 1);
+            end loop;
+            Add_Keyframe (M.Kinematics (1), Q, Base, Truth, Rng);
+         end;
+      end loop;
+      Driver.Robot.Kinematics.Refit (M);
+      Check (Driver.Robot.Kinematics.Fitted (M, 1), "the arm is not fitted with the keyframes taken after its fit");
+      Check (M.Kinematics (1).Result.Matches = Natural (M.Kinematics (1).Matches.Length)
+             and then M.Kinematics (1).Result.Used > First_Used,
+             "the refit did not use the keyframes taken after the fit:" & M.Kinematics (1).Result.Used'Image
+             & " sightings against" & First_Used'Image);
+      Now := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Pose).Translation;
+      Driver.Robot.Kinematics.Pose_Covariance (M, 1, Pose, Turn, Place_2);
+      declare
+         Sigma : constant Real := Sqrt (Place_1 (1, 1) + Place_1 (2, 2) + Place_1 (3, 3)
+                                        + Place_2 (1, 1) + Place_2 (2, 2) + Place_2 (3, 3));
+      begin
+         Check (abs (Now - Was) <= Driver.Conventions.Z * Sigma,
+                "the eye at a given pose moved by" & Real'Image (abs (Now - Was)) & " model units of" & Real'Image (abs Was)
+                & " as keyframes arrived after the fit; its sigmas" & Real'Image (Sigma));
+      end;
+      --  The unit is the root mean square of the eye's positions over the keyframes of the first fit.
+      declare
+         Joints : Fit.Joint_Array (1 .. 6);
+         Sum    : Real := 0.0;
+      begin
+         for J in Joints'Range loop
+            declare
+               F : Joint_Fit renames M.Kinematics (1).Result.Joints (J);
+            begin
+               Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
+            end;
+         end loop;
+         for F in 1 .. First_Frames loop
+            declare
+               D : Real_Array (1 .. 6);
+            begin
+               for C in D'Range loop
+                  D (C) := M.Kinematics (1).Frames (F).Readings (C - 1) - M.Kinematics (1).Result.Reference (C - 1);
+               end loop;
+               Sum := Sum + Fit.Eye_At (Joints, D).Translation * Fit.Eye_At (Joints, D).Translation;
+            end;
+         end loop;
+         Check_Close (Sqrt (Sum / Real (First_Frames)), 1.0, 1.0e-9,
+                      "the root mean square of the eye's positions over the keyframes of the first fit");
+      end;
+   end Unit_Holds_As_Keyframes_Arrive;
+
    procedure Kinematics_Of_A_Synthetic_Arm is
    begin
       Synthetic_Sweep (1.0, Expect_Fit => True);
    end Kinematics_Of_A_Synthetic_Arm;
+
+   --  A boot refits whenever the evidence has doubled, which can fall between
+   --  a keyframe and its matches' return. The widest keyframes of a joint
+   --  with no sightings yet are no widest ones: the search scores the widest
+   --  that have some (the first boot of A13 died with a range check in the
+   --  standard error of an empty median, the arm unfitted).
+   procedure Kinematics_With_Matches_Pending is
+   begin
+      Synthetic_Sweep (1.0, Expect_Fit => True, Pending => True);
+   end Kinematics_With_Matches_Pending;
 
    --  The same arm swept a five-hundredth as far: the image moves by less
    --  than its noise, and the fit must say it cannot tell.
@@ -3682,12 +3902,21 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.kinematics.tracks", "the fit's lens or eye pose is off by more than Z of its own "
                              & "sigmas when every point carries an error of its own in all its keyframes",
                              Kinematics_With_Errors_Of_Their_Own'Access);
+      Driver.Tests.Register ("robot.kinematics.pending", "a joint whose widest keyframes have no sightings yet (their "
+                             & "matches have not come back) raises in the search of its axis, or leaves the arm "
+                             & "unfitted", Kinematics_With_Matches_Pending'Access);
+      Driver.Tests.Register ("robot.kinematics.unit", "a keyframe taken after the arm was fitted moves the lengths of "
+                             & "its frame (the unit follows every keyframe, not the first fit's), or the refit leaves "
+                             & "it out", Unit_Holds_As_Keyframes_Arrive'Access);
       Driver.Tests.Register ("robot.body.file", "a body written to its file and read back is not the body that was "
                              & "written", Body_File_Round_Trip'Access);
       Driver.Tests.Register ("robot.body.method", "a quantity measured by another method is reloaded, or the "
                              & "quantities of unchanged methods are measured again", Body_File_Method_Change'Access);
       Driver.Tests.Register ("robot.body.plan", "a body reloaded from its file cannot plan a reach without a "
                              & "stream or an instrument", Plan_On_A_Reloaded_Body'Access);
+      Driver.Tests.Register ("robot.body.recorded", "a body file the driver reads is not in the recording once, "
+                             & "where it was read, or its recorded text reloads another body",
+                             Body_File_In_The_Recording'Access);
       Driver.Tests.Register ("robot.world.place", "a second arm whose eye sees the first arm's table is placed in the "
                              & "wrong spot, turn or scale, beyond its own sigma, or not through its own eye",
                              Place_A_Second_Arm'Access);

@@ -13,7 +13,7 @@ package body Driver.Recording is
 
    Codes : constant array (Record_Kind) of Character :=
      [Robot_Message => 'R', Driver_Message => 'D', Robot_Text => 'r', Driver_Text => 'd',
-      Connection => 'C', Service_Request => 'S', Service_Reply => 'T'];
+      Connection => 'C', Service_Request => 'S', Service_Reply => 'T', File_Read => 'F'];
 
    type Byte_Array_Access is access Byte_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Byte_Array, Byte_Array_Access);

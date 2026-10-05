@@ -1055,12 +1055,15 @@ package body Driver.Robot.Kinematics.Fit is
       Visible    : Real_Array;
       Sightings  : Sighting_Array;
       Width, Height : Positive;
+      Unit_Frames : Natural;
       Joints     : out Joint_Array;
       L          : out Lens;
       Report     : out Fit_Report)
    is
       N      : constant Natural := Visible'Length;
       Frames : constant Natural := Changes'Length (1);
+      --  The keyframes that define the unit of length.
+      Unit_Count : constant Natural := (if Unit_Frames = 0 then Frames else Unit_Frames);
       S      : constant Natural := Sightings'Length;
       Sight  : Sighting_Array renames Sightings;
       type Sighting_Access is access Sighting_Array;
@@ -1115,12 +1118,12 @@ package body Driver.Robot.Kinematics.Fit is
          end loop;
       end Poses_Of;
 
-      --  Lengths in model units: the eye positions over the keyframes have a
-      --  root mean square of one.
+      --  Lengths in model units: the eye positions over the unit's keyframes
+      --  have a root mean square of one.
       procedure Normalize (Jx : in out Joint_Array) is
          Sum : Real := 0.0;
       begin
-         for Frame in 1 .. Frames loop
+         for Frame in 1 .. Unit_Count loop
             declare
                T : constant Vec3 := Eye_At (Jx, Changes_Of (Frame)).Translation;
             begin
@@ -1129,7 +1132,7 @@ package body Driver.Robot.Kinematics.Fit is
          end loop;
          if Sum > 0.0 then
             declare
-               F : constant Real := 1.0 / Sqrt (Sum / Real (Frames));
+               F : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));
             begin
                for J of Jx loop
                   if J.Slide then
@@ -1193,6 +1196,11 @@ package body Driver.Robot.Kinematics.Fit is
          --  that tell its axis best; the later stages use every keyframe.
          Up_Frame, Down_Frame : array (1 .. N) of Natural := [others => 0];
          Grid_Counts : array (1 .. N) of Natural := [others => 0];
+
+         --  How many sightings each keyframe has: one whose matches have not
+         --  come back yet (the newest, widest keyframe of a boot's refit) has
+         --  none, and is no widest one.
+         Seen_In : array (1 .. Frames) of Natural := [others => 0];
 
          function Widest (Frame : Positive) return Boolean is
            (Single (Frame) > 0
@@ -1402,11 +1410,14 @@ package body Driver.Robot.Kinematics.Fit is
          A, B, X1, X2 : Real;
          BA, BB, B1, B2 : Best_Array;
       begin
+         for X of Sight loop
+            Seen_In (X.Frame) := Seen_In (X.Frame) + 1;
+         end loop;
          for Frame in 2 .. Frames loop
             declare
                J : constant Natural := Single (Frame);
             begin
-               if J > 0 then
+               if J > 0 and then Seen_In (Frame) > 0 then
                   if Change (Frame, J) > 0.0
                     and then (Up_Frame (J) = 0 or else Change (Frame, J) > Change (Up_Frame (J), J))
                   then
@@ -2017,7 +2028,7 @@ package body Driver.Robot.Kinematics.Fit is
       declare
          Sum : Real := 0.0;
       begin
-         for Frame in 1 .. Frames loop
+         for Frame in 1 .. Unit_Count loop
             declare
                T : constant Vec3 := Eye_At (Joints, Changes_Of (Frame)).Translation;
             begin
@@ -2028,13 +2039,13 @@ package body Driver.Robot.Kinematics.Fit is
          --  The depths follow the lengths into model units.
          if Sum > 0.0 then
             for D of Report.Depths loop
-               D := D / Sqrt (Sum / Real (Frames));
+               D := D / Sqrt (Sum / Real (Unit_Count));
             end loop;
          end if;
          --  The covariance follows the lengths into model units.
          if Sum > 0.0 and then not Report.Covariance.Is_Empty then
             declare
-               F       : constant Real := 1.0 / Sqrt (Sum / Real (Frames));
+               F       : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));
                Reduced : constant Natural := Terms (N);
                --  The terms that are lengths: the points, and a slide's scale.
                Length  : array (1 .. Reduced) of Boolean := [others => False];

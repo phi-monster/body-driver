@@ -40,6 +40,9 @@ that measured it.
 `driver/bin/replay RECORDING --body FILE` writes the body measured from a
 recording, so its estimates can be scored against the truth of the run
 (`driver/bin/score`).
+A run that reloaded a body file replays as it ran: the driver records the
+text it reloaded (`Driver.Recording`, kind F), and replay reloads that text
+where the run read it, even after the run rewrote the file.
 
 ## 3. Do not edit it
 
@@ -73,7 +76,11 @@ Per arm, `kinematics.arms` holds:
 
 - `joints`, `lens` and `covariance`: the fit of the arm and of the eye it
   carries, in the eye's frame at the arm's reference readings (`reference`):
-  the arm's own frame, in the arm's own unit.
+  the arm's own frame, in the arm's own unit. The unit is the first fit's:
+  the root mean square of the eye's positions over the keyframes of that fit.
+  A keyframe taken later refines every term in that unit and moves no
+  length, and a reloaded arm is not fitted again, so what is stored stays in
+  the unit it was stored in.
 - `table`: the plane most of the arm's tracked points lie on, each point
   judged by its own depth uncertainty, in the arm's own frame, with its whole
   uncertainty: its points' scatter about it, what the fit moves every depth

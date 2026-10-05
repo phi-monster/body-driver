@@ -108,6 +108,16 @@ package Driver.Robot is
    --  has them must match the file's key, or nothing is reloaded. Ok is
    --  False when the file cannot be read or is not a body file of this
    --  body; Why says what was reloaded and what is to be measured again.
+   --  The text read goes into the recording (Driver.Recording, kind F), so a
+   --  replay of the run reloads it where the run read it.
+
+   procedure Load_Body_Text
+     (M    : in out Model;
+      Text : String;
+      Ok   : out Boolean;
+      Why  : out Ada.Strings.Unbounded.Unbounded_String);
+   --  Load_Body from the text of a body file: what a replay calls where the
+   --  recording shows the run read its body file.
 
    function Reloaded (M : Model; Q : Stored) return Boolean;
    --  Q came from a body file and stands: the estimators do not measure it
@@ -451,6 +461,12 @@ private
       Used      : Natural := 0;           --  sightings in the last fit
       Median_Px, Sigma_Px : Real := 0.0;
       Matches   : Natural := 0;           --  keyframes with matches behind it
+      --  How many of the arm's first keyframes define its unit of length: the
+      --  eye's positions over them have a root mean square of one
+      --  (Kinematics.Fit). Those of its first fit, kept as that set: a
+      --  keyframe taken later refines every term and moves no length. 0 until
+      --  the arm is fitted.
+      Unit_Frames : Natural := 0;
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
       --  The table its eye saw, in its reference frame (Table_In_Arm): the

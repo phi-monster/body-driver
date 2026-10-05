@@ -3,9 +3,11 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Ada.Directories;
 with Ada.Text_IO;
+with Driver.Bytes;
 with Driver.Clock;
 with Driver.Conventions;
 with Driver.Log;
+with Driver.Recording;
 with Driver.Robot.Body_File;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
@@ -210,9 +212,8 @@ package body Driver.Robot is
       end if;
    end Observe;
 
-   --  Booted once the kinematics of every arm that carries an eye are
-   --  fitted, and of one at least: a function of the evidence, so a replay
-   --  finds the boot where the run did.
+   --  The text read goes into the recording (kind F) before the body takes
+   --  it, so a replay reloads the same text at the same point of the run.
    procedure Load_Body
      (M    : in out Model;
       Path : String;
@@ -235,15 +236,29 @@ package body Driver.Robot is
             Append (Text, Ada.Text_IO.Get_Line (F) & ASCII.LF);
          end loop;
          Ada.Text_IO.Close (F);
-         Body_File.Read (M, To_String (Text), Ok, Why);
+         Driver.Recording.Write_Shared
+           (Driver.Recording.File_Read, Driver.Bytes.To_Bytes ("body " & Path & ASCII.LF & To_String (Text)));
+         Load_Body_Text (M, To_String (Text), Ok, Why);
       exception
          when Ada.Text_IO.Name_Error | Ada.Text_IO.Use_Error | Ada.Text_IO.Data_Error =>
             Why := To_Unbounded_String ("the body file " & Path & " cannot be read");
       end;
    end Load_Body;
 
+   procedure Load_Body_Text
+     (M    : in out Model;
+      Text : String;
+      Ok   : out Boolean;
+      Why  : out Ada.Strings.Unbounded.Unbounded_String) is
+   begin
+      Body_File.Read (M, Text, Ok, Why);
+   end Load_Body_Text;
+
    function Reloaded (M : Model; Q : Stored) return Boolean is (M.From_File (Q));
 
+   --  Booted once the kinematics of every arm that carries an eye are
+   --  fitted, and of one at least: a function of the evidence, so a replay
+   --  finds the boot where the run did.
    function Booted (M : Model) return Boolean is
       Any : Boolean := False;
    begin
