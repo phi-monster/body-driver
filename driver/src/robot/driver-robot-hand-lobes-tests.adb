@@ -85,6 +85,24 @@ package body Driver.Robot.Hand.Lobes.Tests is
       return Result;
    end Matches;
 
+   --  The lobes found between two views, the first view's correspondences
+   --  drawn before the second's. They come from one generator, and the order
+   --  in which a call's arguments are evaluated is the compiler's own: x86-64
+   --  evaluates the last first, arm64 the first, so one seed gave the two
+   --  targets different noise, and a count of pixels that stays within a
+   --  finger's size by chance on one was one over on the other.
+   function Found
+     (Fingers    : Finger_Array;
+      Here_Moved : Boolean;
+      Noise      : Matcher_Noise;
+      Still      : Mask) return Lobe_Vectors.Vector
+   is
+      Here  : constant Correspondence_Array := Matches (Fingers, Here_Moved);
+      There : constant Correspondence_Array := Matches (Fingers, not Here_Moved);
+   begin
+      return Find (Here, There, Noise, Still, W, H);
+   end Found;
+
    function Still_Sample (Fingers : Finger_Array) return Correspondence_Array is
       --  Pixels away from every finger, in both views.
       All_Matches : constant Correspondence_Array := Matches (Fingers, False);
@@ -118,7 +136,7 @@ package body Driver.Robot.Hand.Lobes.Tests is
       Ada.Numerics.Float_Random.Reset (Gen, 1);
       Noise := Noise_Of (Still_Sample (Fingers));
       Check_Close (Noise.Displacement.Sigma, Noise_Px, 0.05, "matcher noise from still pixels");
-      Lobes := Find (Matches (Fingers, False), Matches (Fingers, True), Noise, Create (W, H), W, H);
+      Lobes := Found (Fingers, False, Noise, Create (W, H));
       Check (Natural (Lobes.Length) = 2, "two closing fingers gave" & Natural'Image (Natural (Lobes.Length)) & " lobes");
       if Natural (Lobes.Length) = 2 then
          for L of Lobes loop
@@ -137,7 +155,7 @@ package body Driver.Robot.Hand.Lobes.Tests is
       Check (Direction (Lobes, Create (W, H), Noise) = Towards_There,
              "closing fingers judged " & Closing'Image (Direction (Lobes, Create (W, H), Noise)));
       --  Seen from the closed end, the open end is where they part.
-      Lobes := Find (Matches (Fingers, True), Matches (Fingers, False), Noise, Create (W, H), W, H);
+      Lobes := Found (Fingers, True, Noise, Create (W, H));
       Check (Direction (Lobes, Create (W, H), Noise) = Towards_Here,
              "opening fingers judged " & Closing'Image (Direction (Lobes, Create (W, H), Noise)));
    end Two_Fingers_Close;
@@ -187,7 +205,7 @@ package body Driver.Robot.Hand.Lobes.Tests is
    begin
       Ada.Numerics.Float_Random.Reset (Gen, 2);
       Noise := Noise_Of (Still_Sample (Fingers));
-      Lobes := Find (Matches (Fingers, False), Matches (Fingers, True), Noise, Create (W, H), W, H);
+      Lobes := Found (Fingers, False, Noise, Create (W, H));
       Check (Natural (Lobes.Length) = 2, "touching closed fingers gave" & Natural'Image (Natural (Lobes.Length)) & " lobes");
       for L of Lobes loop
          Check (L.Count_There >= Lobe_Floor and then L.Count_There <= 20 * 80,
@@ -195,7 +213,7 @@ package body Driver.Robot.Hand.Lobes.Tests is
          Check (abs (L.Centre_There.U - L.Centre_Here.U) > 39.0, "a closed lobe's centre did not move with its finger");
       end loop;
       --  Seen from the touching end the same two lobes come out.
-      Lobes := Find (Matches (Fingers, True), Matches (Fingers, False), Noise, Create (W, H), W, H);
+      Lobes := Found (Fingers, True, Noise, Create (W, H));
       Check (Natural (Lobes.Length) = 2, "from the touching end:" & Natural'Image (Natural (Lobes.Length)) & " lobes");
    end Touching_At_The_Closed_End;
 
@@ -214,7 +232,7 @@ package body Driver.Robot.Hand.Lobes.Tests is
          end loop;
       end loop;
       Noise := Noise_Of (Still_Sample (Fingers));
-      Lobes := Find (Matches (Fingers, False), Matches (Fingers, True), Noise, Still_Finger, W, H);
+      Lobes := Found (Fingers, False, Noise, Still_Finger);
       Check (Natural (Lobes.Length) = 1, "one moving finger gave" & Natural'Image (Natural (Lobes.Length)) & " lobes");
       Check (Direction (Lobes, Still_Finger, Noise) = Towards_There, "closing against the still finger not seen");
       Check (Direction (Lobes, Create (W, H), Noise) = Undecided, "one lobe judged closing with nothing to close on");
