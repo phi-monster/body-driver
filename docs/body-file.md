@@ -126,6 +126,29 @@ within Z's tail of the truth where method 4's sigmas were 3 to 4 times too
 small (A11: a chi square of 94 and 51 on the lens's six terms against the
 truth, 15 and 10 now, Z's tail 21). The stored `covariance` is that matrix.
 
+What the lens's sigmas do not cover. The covariance describes the random
+errors the residuals show, about a fit taken to be at its minimum (the final
+refinement runs until a step cannot move any combination of the parameters by
+more than 1 % of its standard error). It does not cover a bias the fit
+absorbs. On A10 and A11 the lens came out 2 to 4 sigmas off the truth along
+one axis of its covariance, the weakest, a mix of the focal length and the two
+distortion terms (its sigma is some 1.5e-4 in the terms' own units), with the
+same sign in both arms and in both runs of the one scene, while the five other
+axes lay within their sigmas (chi squares of 4 to 8 on five terms). The sum of
+the sightings' true errors, each weighted by its influence on that axis,
+reproduces the lens's error along it to a few per cent, and little of it is a
+point's error in every keyframe or a keyframe's shift (4 % and 2 % on one arm,
+31 % and 23 % on the other): the rest is what is left of each sighting when
+those are taken out, and it is no error proportional to the displacement (a
+scale of 1e-4 of it) nor one that belongs to the place in the target picture
+(1 % of the variance). A reader of the lens must therefore take the sigma of the
+focal length, of the distortion terms and of any quantity that leans on their
+difference (the scale of a view, the position of a point far from the picture's
+centre) as a lower bound, not as the whole error. Taking the distortion terms
+as zero does not remove it: it moves the same error onto the focal length, 0.2
+to 0.8 px too long on the recorded fits, 1.3 to 4.6 of that fit's smaller sigma.
+The principal point and the joints' terms are not on that axis.
+
 Method 3 kept only the table's normal, its offset and two scalar sigmas: a
 plane of measured covariance, which pressing a hand onto it needs, cannot be
 rebuilt from them. Method 2 placed the arm from its own eye's view of the
