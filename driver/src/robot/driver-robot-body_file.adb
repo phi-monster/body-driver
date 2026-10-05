@@ -175,10 +175,8 @@ package body Driver.Robot.Body_File is
       Add ("]}," & LF);
 
       --  The kinematics: every arm's fit with its lens and covariance, and
-      --  the table's normal the first arm's eye found.
-      Add (" ""kinematics"": {""method"": " & Int (Kinematics_Method)
-           & ", ""up"": {""vector"": " & Three (M.Table_Up.Unit_Vector) & ", ""sigma"": " & Num (M.Table_Up.Sigma)
-           & "}, ""arms"": [");
+      --  the table its eye found, in its own frame.
+      Add (" ""kinematics"": {""method"": " & Int (Kinematics_Method) & ", ""arms"": [");
       for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
          declare
             R : Arm_Evidence renames M.Kinematics (K);
@@ -199,9 +197,11 @@ package body Driver.Robot.Body_File is
                  & ", ""sigma_px"": " & Num (F.Sigma_Px) & ", ""matches"": " & Int (F.Matches)
                  & ", ""why"": " & Driver.Json.Quote (To_String (F.Why))
                  & ", ""covariance"": " & Reals (F.Covariance)
-                 & ", ""table"": {""found"": " & Flag (F.Table_Found) & ", ""normal"": " & Three (F.Table_Normal)
-                 & ", ""offset"": " & Num (F.Table_Offset) & ", ""offset_sigma"": " & Num (F.Table_Offset_Sigma)
-                 & ", ""sigma"": " & Num (F.Table_Sigma) & "}"
+                 & ", ""table"": {""centre"": " & Three (F.Table.Centre) & ", ""normal"": " & Three (F.Table.Normal)
+                 & ", ""tangent"": " & Three (F.Table.Tangent_1) & ", ""offset_sigma"": " & Num (F.Table.Offset_Sigma)
+                 & ", ""tilt"": [" & Num (F.Table.Tilt_11) & ", " & Num (F.Table.Tilt_12) & ", "
+                 & Num (F.Table.Tilt_22) & "], ""points"": " & Int (F.Table.Points)
+                 & ", ""scatter"": " & Num (F.Table.Scatter) & "}"
                  & ", ""placed"": " & Flag (F.Placed)
                  & ", ""placement"": {""rotation"": " & Nine (F.Placement.Rotation)
                  & ", ""centre"": " & Three (F.Placement.Translation)
@@ -518,8 +518,6 @@ package body Driver.Robot.Body_File is
             As : constant Node := Field (N, "arms");
          begin
             if Restored (Stored_Graph) and then Method_Is (N, Kinematics_Method) then
-               M.Table_Up := (Unit_Vector => Three_Of (Field (Field (N, "up"), "vector")),
-                              Sigma       => Value (Field (Field (N, "up"), "sigma")));
                M.Kinematics.Clear;
                for I in 1 .. Size (As) loop
                   declare
@@ -552,12 +550,18 @@ package body Driver.Robot.Body_File is
                      declare
                         T : constant Node := Field (X, "table");
                         P : constant Node := Field (X, "placement");
+                        Tilt : constant Node := Field (T, "tilt");
                      begin
-                        R.Result.Table_Found := Truth (T, "found");
-                        R.Result.Table_Normal := Three_Of (Field (T, "normal"));
-                        R.Result.Table_Offset := Value (Field (T, "offset"));
-                        R.Result.Table_Offset_Sigma := Value (Field (T, "offset_sigma"));
-                        R.Result.Table_Sigma := Value (Field (T, "sigma"));
+                        R.Result.Table.Centre := Three_Of (Field (T, "centre"));
+                        R.Result.Table.Normal := Three_Of (Field (T, "normal"));
+                        R.Result.Table.Tangent_1 := Three_Of (Field (T, "tangent"));
+                        R.Result.Table.Tangent_2 := Cross (R.Result.Table.Normal, R.Result.Table.Tangent_1);
+                        R.Result.Table.Offset_Sigma := Value (Field (T, "offset_sigma"));
+                        R.Result.Table.Tilt_11 := Value (Item (Tilt, 1));
+                        R.Result.Table.Tilt_12 := Value (Item (Tilt, 2));
+                        R.Result.Table.Tilt_22 := Value (Item (Tilt, 3));
+                        R.Result.Table.Points := Natural'Max (0, Whole (T, "points"));
+                        R.Result.Table.Scatter := Value (Field (T, "scatter"));
                         R.Result.Placed := Truth (X, "placed");
                         R.Result.Placement := (Rotation    => Nine_Of (Field (P, "rotation")),
                                                Translation => Three_Of (Field (P, "centre")));

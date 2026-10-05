@@ -2919,9 +2919,30 @@ package body Driver.Robot.Tests is
              & Real'Image (abs (Placement.Translation - (1.0 / Unit_Of (M, 1)) * Far_Second.Translation)) & " units");
    end Moved_Head_Places_Nothing;
 
+   --  How far a plane estimate lies from the true plane True_N * X = True_O
+   --  (True_N towards the eye) in units of its own uncertainty: the length of
+   --  its whitened error, its offset at its centre and its tilt.
+   function Plane_Off (P : Driver.Geometry.Plane_Estimate; True_N : Vec3; True_O : Real) return Real is
+      A   : constant Real := True_N * P.Tangent_1;
+      B   : constant Real := True_N * P.Tangent_2;
+      H   : constant Real := True_N * P.Centre - True_O;
+      Det : constant Real := P.Tilt_11 * P.Tilt_22 - P.Tilt_12 ** 2;
+   begin
+      return Sqrt ((H / P.Offset_Sigma) ** 2 + (P.Tilt_22 * A * A - 2.0 * P.Tilt_12 * A * B + P.Tilt_11 * B * B) / Det);
+   end Plane_Off;
+
+   --  The true table in the frame of arm A's reference eye, in the arm's unit:
+   --  its normal towards the eye and its offset.
+   procedure True_Table (M : Model; A : Positive; Placed : Rigid; Normal : out Vec3; Offset : out Real) is
+   begin
+      Normal := Transpose (Placed.Rotation) * Table_N;
+      Offset := (Table_O - Real'(Table_N * Placed.Translation)) / Unit_Of (M, A);
+   end True_Table;
+
    --  Boxes on the table, more than half of each arm's view: each arm's
    --  table is still the plane its table points lie on, none of the boxes'
-   --  points with it, and its normal within Z of its own sigma of the truth.
+   --  points with it, and the plane in the arm's frame (its normal, and its
+   --  offset and tilt together) within Z of its own uncertainty of the truth.
    procedure Table_Among_Boxes is
       M : Model;
    begin
@@ -2930,12 +2951,18 @@ package body Driver.Robot.Tests is
       for A in 1 .. 2 loop
          declare
             R      : Arm_Fit renames M.Kinematics (A).Result;
+            P      : constant Driver.Geometry.Plane_Estimate := Table_In_Arm (M, Arm_Id (A));
+            Up_A   : constant Direction_Estimate := Up_In_Arm (M, Arm_Id (A));
             Placed : constant Rigid := (if A = 1 then Driver.Numerics.Identity else Far_Second);
-            True_N : constant Vec3 := Transpose (Placed.Rotation) * Table_N;
-            Off    : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, R.Table_Normal * True_N)));
+            True_N : Vec3;
+            True_O : Real;
+            Off    : Real;
             Boxed, Table, On : Natural := 0;
          begin
-            Check (R.Table_Found, "arm" & A'Image & "'s table is not found");
+            True_Table (M, A, Placed, True_N, True_O);
+            Off := Arccos (Real'Max (-1.0, Real'Min (1.0, P.Normal * True_N)));
+            Check (Driver.Geometry.Known (P), "arm" & A'Image & "'s table is not found");
+            Check (Up_A.Unit_Vector = P.Normal, "arm" & A'Image & "'s up is not its table's normal");
             for I in 0 .. Natural (M.Kinematics (A).Query_U.Length) - 1 loop
                declare
                   X : Vec3;
@@ -2955,14 +2982,165 @@ package body Driver.Robot.Tests is
             end loop;
             Driver.Log.Line (Driver.Log.Robot, "table test: arm" & A'Image & ":" & On'Image & " points on its table of"
                              & Table'Image & " truly there," & Boxed'Image & " on boxes; normal off" & Off'Image
-                             & " rad, its sigma" & R.Table_Sigma'Image);
+                             & " rad, its sigma" & Up_A.Sigma'Image & "; the plane off by"
+                             & Real'Image (Plane_Off (P, True_N, True_O)) & " of its own uncertainty");
             Check (Boxed = 0, "arm" & A'Image & "'s table holds" & Boxed'Image & " points of the boxes");
             Check (2 * On > Table, "arm" & A'Image & "'s table holds" & On'Image & " of its" & Table'Image & " table points");
-            Check (Off <= Driver.Conventions.Z * R.Table_Sigma,
-                   "arm" & A'Image & "'s table normal is off by" & Off'Image & " rad, its sigma" & R.Table_Sigma'Image);
+            Check (Off <= Driver.Conventions.Z * Up_A.Sigma,
+                   "arm" & A'Image & "'s table normal is off by" & Off'Image & " rad, its sigma" & Up_A.Sigma'Image);
+            Check (Plane_Off (P, True_N, True_O) <= Threshold (Vector_Gate (3)),
+                   "arm" & A'Image & "'s table is off by" & Real'Image (Plane_Off (P, True_N, True_O))
+                   & " of its own uncertainty in its offset and tilt");
          end;
       end loop;
    end Table_Among_Boxes;
+
+   function Trace (S : Mat3) return Real is (S (1, 1) + S (2, 2) + S (3, 3));
+
+   --  ── An arm's own frame, free of its placement ──
+   --
+   --  The head rig: the second arm placed through the head, four and a half
+   --  units from the first and turned. In its own frame its tool at a pose no
+   --  keyframe had, its table and its up come out within Z of their own
+   --  uncertainty of the truth, in the arm's unit. Then the second arm is
+   --  misplaced in the world far beyond its placement's own sigma (the head
+   --  places its eye to a fifth of a unit): turned by a hundredth of a
+   --  radian, its centre moved by a unit, its scale five per cent too large.
+   --  Its tool in the world moves by all of that; in its own frame nothing
+   --  moves, neither its tool nor its table nor its up nor a reach planned
+   --  there, and that reach still plans with the arm not placed at all,
+   --  where one given in the world cannot.
+   procedure Arm_Frame_Free_Of_Placement is
+      use type Driver.Robot.Motion.Plan_Status;
+      use type Driver.Geometry.Plane_Estimate;
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      package Motion renames Driver.Robot.Motion;
+      M : Model;
+      Q : constant Real_Array (1 .. 6) := [0.15, -0.1, 0.08, -0.12, 0.1, -0.15];
+      O : Observation;
+   begin
+      Head_Scene (M, Unseen_Wrist => False);
+      O.Readings.Append (Real_Array'(1 .. 6 => 0.0));
+      O.Readings.Append (Q);
+      declare
+         R2     : Arm_Fit renames M.Kinematics (2).Result;
+         Tool   : constant Pose_Estimate := Tool_In_Arm (M, 2, O);
+         Table  : constant Driver.Geometry.Plane_Estimate := Table_In_Arm (M, 2);
+         Up_2   : constant Direction_Estimate := Up_In_Arm (M, 2);
+         World  : constant Pose_Estimate := Tool_Pose (M, 2, O);
+         Truth  : constant Rigid := Fit.Eye_At (Truth_Of (2), Q);
+         Off    : constant Real := abs (Tool.Pose.Translation - (1.0 / Unit_Of (M, 2)) * Truth.Translation);
+         Turned : constant Real := Driver.Numerics.Angle (Transpose (Tool.Pose.Rotation) * Truth.Rotation);
+         Goal   : constant Motion.Pose_Goal :=
+           (Pose          => (Rotation    => Tool.Pose.Rotation * Driver.Numerics.Exp ([0.0, 0.02, 0.0]),
+                              Translation => Tool.Pose.Translation + [0.02, -0.01, 0.0]),
+            Position_Only => False);
+         Plan   : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 2, O, Goal);
+         True_N : Vec3;
+         True_O : Real;
+      begin
+         Check (R2.Placed and then Known (Arm_Unit (M, 2)), "the second arm is not placed through the head");
+         Check (Off <= Driver.Conventions.Z * Sqrt (Trace (Tool.Position_Covariance)),
+                "the second arm's tool in its own frame is off by" & Off'Image & " units, its sigma"
+                & Real'Image (Sqrt (Trace (Tool.Position_Covariance))));
+         Check (Turned <= Driver.Conventions.Z * Sqrt (Trace (Tool.Rotation_Covariance)),
+                "the second arm's tool in its own frame is turned by" & Turned'Image & " rad, its sigma"
+                & Real'Image (Sqrt (Trace (Tool.Rotation_Covariance))));
+         True_Table (M, 2, Far_Second, True_N, True_O);
+         Check (Plane_Off (Table, True_N, True_O) <= Threshold (Vector_Gate (3)),
+                "the second arm's table in its own frame is off by" & Real'Image (Plane_Off (Table, True_N, True_O))
+                & " of its own uncertainty");
+         Check (Up_2.Unit_Vector = Table.Normal and then Up_2.Sigma < Real'Last,
+                "the second arm's up is not its table's normal");
+         Check (Motion.Status (Plan) = Motion.Planned,
+                "a reach in the second arm's own frame is not planned: " & Motion.Why (Plan));
+         Driver.Log.Line (Driver.Log.Robot, "arm frame test: tool off" & Off'Image & " sigma"
+                          & Real'Image (Sqrt (Trace (Tool.Position_Covariance))) & ", turned" & Turned'Image
+                          & " sigma" & Real'Image (Sqrt (Trace (Tool.Rotation_Covariance))) & "; table off"
+                          & Real'Image (Plane_Off (Table, True_N, True_O)) & " of its uncertainty");
+         --  Misplaced in the world.
+         R2.Placement := (Rotation    => Driver.Numerics.Exp ([0.0, 0.0, 0.01]) * R2.Placement.Rotation,
+                          Translation => R2.Placement.Translation + [1.0, 0.0, 0.0]);
+         R2.Scale := 1.05 * R2.Scale;
+         declare
+            Moved_By : constant Real := abs (Tool_Pose (M, 2, O).Pose.Translation - World.Pose.Translation);
+         begin
+            Check (Moved_By > Driver.Conventions.Z * Sqrt (Trace (World.Position_Covariance)),
+                   "misplacing the second arm moves its tool in the world by only" & Moved_By'Image
+                   & " units, its sigma" & Real'Image (Sqrt (Trace (World.Position_Covariance))));
+         end;
+         Check (Tool_In_Arm (M, 2, O) = Tool, "misplacing the second arm in the world moves its tool in its own frame");
+         Check (Table_In_Arm (M, 2) = Table, "misplacing the second arm in the world moves its table in its own frame");
+         Check (Up_In_Arm (M, 2) = Up_2, "misplacing the second arm in the world turns its up in its own frame");
+         if Motion.Status (Plan) = Motion.Planned then
+            declare
+               Again : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 2, O, Goal);
+            begin
+               Check (Motion.Status (Again) = Motion.Planned
+                      and then Motion.Last_Readings (Again) = Motion.Last_Readings (Plan),
+                      "misplacing the second arm in the world changes a reach planned in its own frame");
+            end;
+            --  Not placed at all.
+            R2.Placed := False;
+            declare
+               Unplaced : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 2, O, Goal);
+            begin
+               Check (Motion.Status (Unplaced) = Motion.Planned
+                      and then Motion.Last_Readings (Unplaced) = Motion.Last_Readings (Plan),
+                      "a reach in the arm's own frame does not plan, or plans elsewhere, with the arm not placed");
+               Check (Tool_In_Arm (M, 2, O) = Tool, "the tool in its own frame changes with the arm not placed");
+               Check (Motion.Status (Motion.Plan_Reach (M, 2, O, (Pose => World.Pose, Position_Only => False)))
+                      = Motion.Unmeasured, "a reach given in the world plans for an arm not placed in it");
+            end;
+         end if;
+      end;
+   end Arm_Frame_Free_Of_Placement;
+
+   --  A reach given in the world for the head rig's second arm, placed four
+   --  and a half units from the first and turned: the readings it plans put
+   --  the arm's tool where the goal is in the world, by the arm's model and
+   --  placement, within what the planner leaves (Z times the angle a pixel
+   --  subtends, in the arm's unit). A goal taken as if the arm's own frame
+   --  were the world lands the placement away, or nowhere.
+   procedure Reach_Through_The_Placement is
+      use type Driver.Robot.Motion.Plan_Status;
+      package Motion renames Driver.Robot.Motion;
+      M       : Model;
+      Q_Goal  : constant Real_Array (1 .. 6) := [0.1, -0.05, 0.08, 0.05, 0.1, -0.1];
+      O, Want : Observation;
+   begin
+      Head_Scene (M, Unseen_Wrist => False);
+      O.Readings.Append (Real_Array'(1 .. 6 => 0.0));
+      O.Readings.Append (Real_Array'(1 .. 6 => 0.0));
+      Want.Readings.Append (Real_Array'(1 .. 6 => 0.0));
+      Want.Readings.Append (Q_Goal);
+      declare
+         Goal : constant Rigid := Tool_Pose (M, 2, Want).Pose;
+         P    : constant Motion.Plan := Motion.Plan_Reach (M, 2, O, (Pose => Goal, Position_Only => False));
+      begin
+         Check (Motion.Status (P) = Motion.Planned, "a reach given in the world for the placed arm is not planned: "
+                & Motion.Why (P));
+         if Motion.Status (P) = Motion.Planned then
+            declare
+               Reached : Observation;
+            begin
+               Reached.Readings.Append (Real_Array'(1 .. 6 => 0.0));
+               Reached.Readings.Append (Motion.Last_Readings (P));
+               declare
+                  Got   : constant Rigid := Tool_Pose (M, 2, Reached).Pose;
+                  Sigma : constant Real := Driver.Robot.Kinematics.Angle_Sigma (M, 2);
+                  Off   : constant Real := abs (Got.Translation - Goal.Translation);
+                  Turn  : constant Real := Driver.Numerics.Angle (Transpose (Got.Rotation) * Goal.Rotation);
+               begin
+                  Check (Off <= Driver.Conventions.Z * Arm_Unit (M, 2).Value * Sigma
+                         and then Turn <= Driver.Conventions.Z * Sigma,
+                         "the plan puts the placed arm's tool" & Off'Image & " world units and" & Turn'Image
+                         & " rad from its goal in the world");
+               end;
+            end;
+         end if;
+      end;
+   end Reach_Through_The_Placement;
 
    procedure Kinematics_With_An_Offset_Reference is
       M : Model;
@@ -3447,6 +3625,11 @@ package body Driver.Robot.Tests is
                              Place_Through_A_Precise_Head'Access);
       Driver.Tests.Register ("robot.world.moved", "a head that moved between the two arms' views places the second arm",
                              Moved_Head_Places_Nothing'Access);
+      Driver.Tests.Register ("robot.arm.frame", "an arm's tool, table or up in its own frame, or a reach planned there, "
+                             & "moves when the arm is misplaced in the world or not placed, or comes out off the truth "
+                             & "beyond Z of its own sigma", Arm_Frame_Free_Of_Placement'Access);
+      Driver.Tests.Register ("robot.reach.world", "a reach given in the world for an arm placed away from the first "
+                             & "does not bring its tool to the goal in the world", Reach_Through_The_Placement'Access);
       Driver.Tests.Register ("robot.kinematics.table", "with boxes on more than half of a view, an arm's table takes in "
                              & "box points or its normal is off by more than Z of its sigma", Table_Among_Boxes'Access);
       Driver.Tests.Register ("robot.kinematics.offset", "an arm whose reference keyframe lies off its sweep's base by "

@@ -496,85 +496,81 @@ package body Driver.Robot.Kinematics is
       end loop;
    end Table_Of;
 
-   --  The table normal's uncertainty, its points' and its lens's: the plane
-   --  refitted on the same points with each lens term moved by its standard
-   --  deviation either way (the depths held), the normal's change per unit of
-   --  the term carried with the lens's covariance.
-   function Table_Sigma_Of
+   --  The table in the arm's frame with its whole uncertainty: its points'
+   --  scatter about it (Plane's, the sandwich of Refit_Plane) and the fit's
+   --  terms, carried with their covariance through how they move it: every
+   --  term through every depth together (Fit.Plane_Response), and each lens
+   --  term through the lines of sight as well, the depths held (the plane
+   --  refitted on the same points with the term moved by its standard
+   --  deviation either way). Unknown without the fit's covariance.
+   function Table_Estimate
      (U, V       : Real_Vectors.Vector;
       F          : Arm_Fit;
       L          : Fit.Lens;
+      Sights     : Fit.Sight_Point_Array;
       Plane      : Fit.Sight_Plane;
-      Covariance : Fit.Real_Lists.Vector) return Real
+      Gains      : Fit.Real_Lists.Vector;
+      Covariance : Fit.Real_Lists.Vector) return Driver.Geometry.Plane_Estimate
    is
+      use Driver.Numerics.Arrays;
       Q     : constant Natural := Natural (U.Length);
       Terms : constant Natural := Natural (Ada.Numerics.Long_Elementary_Functions.Sqrt
                                              (Real (Natural (Covariance.Length))));
-      N0    : constant Vec3 := Fit.Plane_Normal (Plane);
-      Total : Mat3;
-      Jl    : Driver.Numerics.Arrays.Real_Matrix (1 .. 3, 1 .. Fit.Lens_Terms) := [others => [others => 0.0]];
-      On    : Fit_Flag_Access := new Fit.Flag_Array (1 .. Q);
-      S     : Sight_Access := new Fit.Sight_Point_Array (1 .. Q);
 
-      function Lc (P, C : Positive) return Real is (Covariance (Covariance.First_Index + (P - 1) * Terms + C - 1));
+      function Vc (P, C : Positive) return Real is (Covariance (Covariance.First_Index + (P - 1) * Terms + C - 1));
    begin
-      --  The points' share: the normal's change across the plane.
+      if not Plane.Found or else Terms < Fit.Lens_Terms or else Terms * Terms /= Natural (Covariance.Length) then
+         return (others => <>);
+      end if;
       declare
-         use Driver.Numerics.Arrays;
-         Length : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (Plane.A * Plane.A);
-         Pr     : constant Mat3 := Driver.Numerics.Identity3 - Driver.Numerics.Outer (N0, N0);
+         On : Fit_Flag_Access := new Fit.Flag_Array (1 .. Q);
+         S  : Sight_Access := new Fit.Sight_Point_Array (1 .. Q);
       begin
-         Total := (1.0 / Length ** 2) * (Pr * Plane.Covariance * Pr);
-      end;
-      Table_Of (F, On.all);
-      if Terms >= Fit.Lens_Terms and then Terms * Terms = Natural (Covariance.Length) then
-         for K in 1 .. Fit.Lens_Terms loop
-            if Lc (K, K) > 0.0 then
-               declare
-                  Sigma_K : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (Lc (K, K));
-                  Ends    : array (1 .. 2) of Vec3;
-                  Ok      : Boolean := True;
-               begin
-                  for E in 1 .. 2 loop
-                     declare
-                        P : Fit.Sight_Plane;
-                     begin
-                        Sights_Of (U, V, F, Moved (L, K, (if E = 1 then -Sigma_K else Sigma_K)), S.all);
-                        --  The depths held, the points move with their lines of sight.
-                        Fit.Refit_Plane (S.all, On.all, P);
-                        Ok := Ok and then P.Found;
-                        Ends (E) := Fit.Plane_Normal (P);
-                     end;
-                  end loop;
-                  if Ok then
-                     for D in 1 .. 3 loop
-                        Jl (D, K) := (Ends (2) (D) - Ends (1) (D)) / (2.0 * Sigma_K);
+         Table_Of (F, On.all);
+         declare
+            T     : Real_Matrix := Fit.Plane_Response (Sights, On.all, Gains, Terms);
+            Cv    : Real_Matrix (1 .. Terms, 1 .. Terms);
+            Total : Mat3;
+         begin
+            for K in 1 .. Fit.Lens_Terms loop
+               if Vc (K, K) > 0.0 then
+                  declare
+                     Sigma_K : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (Vc (K, K));
+                     Ends    : array (1 .. 2) of Vec3;
+                     Ok      : Boolean := True;
+                  begin
+                     for E in 1 .. 2 loop
+                        declare
+                           P : Fit.Sight_Plane;
+                        begin
+                           Sights_Of (U, V, F, Moved (L, K, (if E = 1 then -Sigma_K else Sigma_K)), S.all);
+                           --  The depths held, the points move with their lines of sight.
+                           Fit.Refit_Plane (S.all, On.all, P);
+                           Ok := Ok and then P.Found;
+                           Ends (E) := P.A;
+                        end;
                      end loop;
-                  end if;
-               end;
-            end if;
-         end loop;
-         for P in 1 .. 3 loop
-            for C in 1 .. 3 loop
-               for A in 1 .. Fit.Lens_Terms loop
-                  for B in 1 .. Fit.Lens_Terms loop
-                     Total (P, C) := Total (P, C) + Jl (P, A) * Lc (A, B) * Jl (C, B);
-                  end loop;
+                     if Ok then
+                        for D in 1 .. 3 loop
+                           T (T'First (1) + D - 1, T'First (2) + K - 1) :=
+                             T (T'First (1) + D - 1, T'First (2) + K - 1) + (Ends (2) (D) - Ends (1) (D)) / (2.0 * Sigma_K);
+                        end loop;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            for P in 1 .. Terms loop
+               for C in 1 .. Terms loop
+                  Cv (P, C) := Vc (P, C);
                end loop;
             end loop;
-         end loop;
-      end if;
-      Free (On);
-      Free (S);
-      declare
-         Values  : Vec3;
-         Vectors : Mat3;
-      begin
-         Driver.Numerics.Symmetric_Eigensystem (Total, Values, Vectors);
-         return Ada.Numerics.Long_Elementary_Functions.Sqrt
-           (Real'Max (0.0, Real'Max (Values (1), Real'Max (Values (2), Values (3)))));
+            Total := Plane.Covariance + T * Cv * Transpose (T);
+            Free (On);
+            Free (S);
+            return Fit.Plane_Estimate_Of (Plane, Total);
+         end;
       end;
-   end Table_Sigma_Of;
+   end Table_Estimate;
 
    procedure Refit (M : in out Model) is
    begin
@@ -699,28 +695,20 @@ package body Driver.Robot.Kinematics is
                                     Sights (I + 1) := (H => H, Depth => D, Sigma => S);
                                  end;
                               end loop;
-                              --  The table: the plane most of them lie on.
+                              --  The table: the plane most of them lie on, with its
+                              --  whole uncertainty (Table_In_Arm).
                               Fit.Dominant_Plane (Sights.all, Plane, On.all);
-                              --  Its uncertainty with what the fit moves every depth by
-                              --  together.
-                              Plane.Covariance :=
-                                Fit.Plane_Covariance (Sights.all, On.all, Plane, Report.Depth_Gains, Report.Covariance);
                               for B of On.all loop
                                  Result.Table_On.Append (B);
                               end loop;
-                              Result.Table_Found := Plane.Found;
+                              Result.Table := Table_Estimate (R.Query_U, R.Query_V, Result, Lens, Sights.all, Plane,
+                                                              Report.Depth_Gains, Report.Covariance);
+                              --  For the link, which holds the lens apart: its points'
+                              --  scatter and what the fit moves every depth by together.
+                              Plane.Covariance :=
+                                Fit.Plane_Covariance (Sights.all, On.all, Plane, Report.Depth_Gains, Report.Covariance);
                               Result.Table_A := Plane.A;
                               Result.Table_Covariance := Plane.Covariance;
-                              Result.Table_Normal := Fit.Plane_Normal (Plane);
-                              Result.Table_Offset := Fit.Plane_Offset (Plane);
-                              Result.Table_Offset_Sigma := Fit.Plane_Offset_Sigma (Plane);
-                              Result.Table_Sigma :=
-                                (if Plane.Found
-                                 then Table_Sigma_Of (R.Query_U, R.Query_V, Result, Lens, Plane, Report.Covariance)
-                                 else Real'Last);
-                              if Plane.Found and then R.Arm = 1 then
-                                 M.Table_Up := (Unit_Vector => Result.Table_Normal, Sigma => Result.Table_Sigma);
-                              end if;
                               Free (Sights);
                               Free (On);
                            end;
@@ -933,7 +921,7 @@ package body Driver.Robot.Kinematics is
          end if;
          Free (Map1);
          Free (Map2);
-         if not (R1.Result.Table_Found and then R2.Result.Table_Found) then
+         if not (Driver.Geometry.Known (R1.Result.Table) and then Driver.Geometry.Known (R2.Result.Table)) then
             Why := Ada.Strings.Unbounded.To_Unbounded_String ("an arm's table is not found");
             return;
          end if;
@@ -1112,6 +1100,17 @@ package body Driver.Robot.Kinematics is
       end if;
    end In_World;
 
+   function Scale_In_World (M : Model; A : Arm_Id) return Estimate is
+      K : constant Natural := Index_Of (M, A);
+   begin
+      if K = 0 or else not M.Kinematics (K).Result.Fitted or else not M.Kinematics (K).Result.Placed then
+         return Driver.Uncertain.Unknown;
+      end if;
+      return (Value              => M.Kinematics (K).Result.Scale,
+              Sigma              => M.Kinematics (K).Result.Scale_Sigma,
+              Degrees_Of_Freedom => 0);
+   end Scale_In_World;
+
    procedure World_Pose_Covariance (M : Model; A : Arm_Id; Readings : Real_Array; Turn, Place : out Mat3) is
       use Driver.Numerics.Arrays;
       K : constant Natural := Index_Of (M, A);
@@ -1212,6 +1211,9 @@ package body Driver.Robot.Kinematics is
 
    function Fitted (M : Model; A : Arm_Id) return Boolean is
      (Index_Of (M, A) > 0 and then M.Kinematics (Index_Of (M, A)).Result.Fitted);
+
+   function Table (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate is
+     (if Fitted (M, A) then M.Kinematics (Index_Of (M, A)).Result.Table else (others => <>));
 
    procedure Solve_Pose
      (M             : Model;
