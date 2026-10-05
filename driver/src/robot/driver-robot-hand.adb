@@ -917,26 +917,39 @@ package body Driver.Robot.Hand is
    function Describe (H : Hands) return String is
       Text : Unbounded_String;
    begin
-      --  A closer the instrument can never answer for is not measured, and says why.
+      --  Every closer an eye watches that no hand is made of in that eye says
+      --  why not, channel by channel: a hand is made of its arm's own eye.
       if H.Data /= null then
          for P of H.Data.Pairs loop
-            if Sweeps.Refusal (P.Sweep) /= "" then
-               Append (Text, "closer group" & P.Group'Image & " in eye" & P.Eye'Image & ": not measured, the instrument"
-                       & " can never answer (" & Sweeps.Refusal (P.Sweep) & ")" & ASCII.LF);
+            if not (P.Own and then (for some R of H.Data.Found => R.Group = P.Group)) then
+               Append (Text, "closer group" & P.Group'Image & " on arm" & P.Arm'Image & " in eye" & P.Eye'Image
+                       & (if P.Own then ", its own: no hand;" else ", not its own, no hand is made of it;"));
+               for C in 1 .. Sweeps.Channels (P.Sweep) loop
+                  Append (Text, " channel" & C'Image & ": " & Sweeps.Account (P.Sweep, C) & ";");
+               end loop;
+               Append (Text, ASCII.LF);
             end if;
          end loop;
       end if;
       for Id in 1 .. Hand_Id'Base (Hand_Count (H)) loop
          declare
-            R : constant Hand_Record := Found (H, Id);
+            R      : constant Hand_Record := Found (H, Id);
+            Known_Tips, Sought : Natural := 0;
          begin
             Append (Text, "hand" & Id'Image & ": closer group" & R.Group'Image & " on arm" & R.Arm'Image & ", eye"
                     & R.Eye'Image & "," & R.Lobes.Length'Image & " lobes;");
-            for L of R.Lobes loop
-               Append (Text, " channel" & L.Channel'Image & " tip open " & Image (L.Sights (Open).Pixel)
-                       & " closed " & Image (L.Sights (Closed_Empty).Pixel) & ";");
+            for L in R.Lobes.First_Index .. R.Lobes.Last_Index loop
+               Append (Text, " channel" & R.Lobes (L).Channel'Image & " tip open " & Image (R.Lobes (L).Sights (Open).Pixel)
+                       & " closed " & Image (R.Lobes (L).Sights (Closed_Empty).Pixel) & ";");
+               for Which in Opening loop
+                  if R.Lobes (L).Sights (Which).Known then
+                     Sought := Sought + 1;
+                     Known_Tips := Known_Tips + Boolean'Pos (Known (Driver.Robot.Hand.Tips.Tip (R.Book, L, Which)));
+                  end if;
+               end loop;
             end loop;
-            Append (Text, " sizes: " & Sizes_Text (R) & ASCII.LF);
+            Append (Text, " presses:" & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image & " kept, tips measured:"
+                    & Known_Tips'Image & " of" & Sought'Image & "; sizes: " & Sizes_Text (R) & ASCII.LF);
          end;
       end loop;
       return To_String (Text);

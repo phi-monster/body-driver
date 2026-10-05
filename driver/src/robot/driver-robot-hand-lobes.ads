@@ -104,8 +104,16 @@ package Driver.Robot.Hand.Lobes is
    --  Towards_Here   the first view is the closed end
    --  Undecided      no significant difference either way
 
+   function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Estimate;
+   --  How far apart the lobes are in the other view less how far apart they
+   --  are in the first, in pixels, summed over their pairs; with a single
+   --  lobe, how far it is from the robot's still pixels it can close against.
+   --  Its sigma is that of the lobes' centres, from the matcher's noise and
+   --  the pixel grid. Unknown when there is nothing to compare.
+
    function Direction (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Closing;
    --  Which view has the lobes closer to each other; with a single lobe,
-   --  closer to the robot's still pixels it can close against.
+   --  closer to the robot's still pixels it can close against: the sign of
+   --  Closing_Change when it is significant.
 
 end Driver.Robot.Hand.Lobes;

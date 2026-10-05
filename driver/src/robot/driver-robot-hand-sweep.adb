@@ -1,4 +1,5 @@
 with Ada.Unchecked_Deallocation;
+with Driver.Log;
 with Driver.Pixels;
 
 package body Driver.Robot.Hand.Sweep is
@@ -48,6 +49,7 @@ package body Driver.Robot.Hand.Sweep is
          Changed   => Change_Holders.To_Holder (Changed),
          Lobes     => Driver.Robot.Hand.Lobes.Lobe_Vectors.Empty_Vector,
          Closing   => Driver.Robot.Hand.Lobes.Undecided,
+         Change    => Unknown,
          Noise     => <>);
       S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
    end Renew;
@@ -220,6 +222,7 @@ package body Driver.Robot.Hand.Sweep is
             Per_Channel (Channel).Lobes := Found;
             Per_Channel (Channel).Noise := Noise;
             Per_Channel (Channel).Closing := Driver.Robot.Hand.Lobes.Direction (Found, Attached_Still, Noise);
+            Per_Channel (Channel).Change := Driver.Robot.Hand.Lobes.Closing_Change (Found, Attached_Still, Noise);
             Per_Channel (Channel).Status := (if Found.Is_Empty then Nothing_Moves else Measured);
             S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
          end;
@@ -240,5 +243,33 @@ package body Driver.Robot.Hand.Sweep is
 
    function Noise_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Matcher_Noise is
      (S.Per_Channel.Constant_Reference.Element (Channel).Noise);
+
+   function Account (S : State; Channel : Positive) return String is
+      Here : constant Channel_State := S.Per_Channel.Constant_Reference.Element (Channel);
+   begin
+      case Here.Status is
+         when Waiting =>
+            return (if Driver.Robot.Hand.Views.Has_Ends (S.Views, Channel)
+                    then "its ends are seen, and nothing has been asked of the instrument for them"
+                    else "its two ends were not both seen still");
+         when Requested =>
+            return "the instrument's answer for its ends did not come";
+         when Unanswered =>
+            return "the instrument could not answer for its ends";
+         when Unanswerable =>
+            return "the instrument can never answer (" & Refusal (S) & ")";
+         when Nothing_Moves =>
+            return "nothing in this eye moves between its ends";
+         when Measured =>
+            return Natural'Image (Natural (Here.Lobes.Length)) & " lobes, "
+              & (if Here.Closing = Driver.Robot.Hand.Lobes.Towards_There then "closed at the high reading"
+                 elsif Here.Closing = Driver.Robot.Hand.Lobes.Towards_Here then "closed at the low reading"
+                 elsif Known (Here.Change)
+                 then "closing direction not significant: their distances changed by "
+                      & Driver.Log.Image (Here.Change.Value, 3) & " +- " & Driver.Log.Image (Here.Change.Sigma, 3)
+                      & " pixels between the ends"
+                 else "closing direction not known: there is nothing to compare their distances with");
+      end case;
+   end Account;
 
 end Driver.Robot.Hand.Sweep;

@@ -568,7 +568,7 @@ package body Driver.Robot.Hand.Lobes is
       return Result;
    end Find;
 
-   function Direction (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Closing is
+   function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Estimate is
       --  A centre of n pixels moves by less than its pixels' own noise, which
       --  is the matcher's and the pixel grid's (a uniform square of side one).
       Pixel_Variance : constant Real := Noise.Displacement.Sigma ** 2 + 1.0 / 12.0;
@@ -614,12 +614,18 @@ package body Driver.Robot.Hand.Lobes is
             Variance := Pixel_Variance * (1.0 / Real (L.Count_Here) + 1.0 / Real (L.Count_There));
          end;
       else
+         return Unknown;
+      end if;
+      return (Value => Change, Sigma => Sqrt (Variance), Degrees_Of_Freedom => Noise.Displacement.Degrees_Of_Freedom);
+   end Closing_Change;
+
+   function Direction (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Closing is
+      Change : constant Estimate := Closing_Change (Lobes, Attached, Noise);
+   begin
+      if not Known (Change) or else not Significant (Change.Value, Change.Sigma, Change.Degrees_Of_Freedom) then
          return Undecided;
       end if;
-      if not Significant (Change, Sqrt (Variance), Noise.Displacement.Degrees_Of_Freedom) then
-         return Undecided;
-      end if;
-      return (if Change < 0.0 then Towards_There else Towards_Here);
+      return (if Change.Value < 0.0 then Towards_There else Towards_Here);
    end Direction;
 
 end Driver.Robot.Hand.Lobes;

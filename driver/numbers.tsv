@@ -876,6 +876,8 @@ driver-robot-hand-shape.ads	Open_Anchor : Positive := 1;	1	structure	first index
 driver-robot-hand-shape.ads	Scatter : Real := 1.0;	1.0	statistics	the noise as measured, before any scatter raises it
 driver-robot-hand-shape.ads	subtype Mat5 is Driver.Numerics.Arrays.Real_Matrix (1 .. 5, 1 .. 5);	5	structure	the motion's five unknowns
 driver-robot-hand-shape.ads	subtype Mat5 is Driver.Numerics.Arrays.Real_Matrix (1 .. 5, 1 .. 5);	5	structure	the motion's five unknowns
+driver-robot-hand-sweep.adb	& Driver.Log.Image (Here.Change.Value, 3) & "" & Driver.Log.Image (Here.Change.Sigma, 3)	3	format	digits printed in a log line or a message
+driver-robot-hand-sweep.adb	& Driver.Log.Image (Here.Change.Value, 3) & "" & Driver.Log.Image (Here.Change.Sigma, 3)	3	format	digits printed in a log line or a message
 driver-robot-hand-sweep.adb	Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-sweep.adb	Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-sweep.adb	Still : Correspondences_Access := new Correspondence_Array (1 .. 2 * Still_Count);	2	structure	each unchanged pixel is matched both ways round
