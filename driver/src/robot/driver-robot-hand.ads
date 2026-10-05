@@ -12,6 +12,12 @@
 --  (Driver.Robot.Hand.Touch). Until a quantity is measured it is reported
 --  unknown. Path B owns this package; Driver.Robot.Boot calls Measure, the
 --  decider that sweeps and presses.
+--
+--  What a hand is, it is in its tool frame and its arm's own unit: the
+--  presses that measure it are made, and its surface fitted, in the arm's own
+--  frame (Driver.Robot.Tool_In_Arm, Table_In_Arm), which needs the arm's fit
+--  and nothing of where the arm stands in the world. Only Tip, Tip_Now and
+--  Grip_Centre take it into the world, through the arm's placement and unit.
 
 with Driver.Commands;
 with Driver.Images;
@@ -39,15 +45,19 @@ package Driver.Robot.Hand is
 
    function Tip (H : Hands; M : Model; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; O : Observation)
      return Point_Estimate;
-   --  A lobe's tip in the world frame with the arm as at O.
+   --  A lobe's tip in the world frame with the arm as at O, in the world's
+   --  lengths (the arm's unit taken in, Frames.Into_World). Not known while the
+   --  arm is not placed in the world.
 
    function Tip_Now (H : Hands; M : Model; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate;
    --  A lobe's tip at the closer reading of O, on the straight path between
-   --  its two measured ends in the proportion its channel is closed.
+   --  its two measured ends in the proportion its channel is closed; in the
+   --  world as Tip is.
 
    function Tip_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Point_Estimate;
-   --  A lobe's tip in the tool frame of the hand's arm (Driver.Robot.Tool_Pose):
-   --  what the hand measured, before any arm pose is applied.
+   --  A lobe's tip in the tool frame of the hand's arm (Driver.Robot.Tool_Pose),
+   --  in the arm's own unit (Driver.Robot.Arm_Unit): what the hand measured,
+   --  before any arm pose is applied.
 
    function Press_Direction (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening)
      return Direction_Estimate;
@@ -58,7 +68,8 @@ package Driver.Robot.Hand is
    --  The closer group's readings at that opening, the ones Tip refers to.
 
    function Grip_Centre (H : Hands; M : Model; Id : Hand_Id; O : Observation) return Point_Estimate;
-   --  The middle of the region the lobes close on, at the opening of O.
+   --  The middle of the region the lobes close on, at the opening of O, in
+   --  the world as Tip is.
 
    function Own_Eye (H : Hands; Id : Hand_Id) return Eye_Id;
    --  The eye on the hand's arm its lobes were found in.
@@ -116,6 +127,43 @@ private
    end record;
 
    overriding procedure Finalize (H : in out Hands);
+
+   --  A lobe's tip at one opening: its pixel in the own eye and its line of
+   --  sight in the tool frame.
+   type Sight is record
+      Known : Boolean := False;
+      Pixel : Driver.Images.Pixel;
+      Ray   : Ray_Estimate;
+   end record;
+
+   type Sight_Array is array (Opening) of Sight;
+
+   type Sight_Rows is array (Positive range <>) of Sight_Array;
+   --  One row per lobe.
+
+   procedure Adopt
+     (H         : in out Hands;
+      Group     : Group_Id;
+      Arm       : Arm_Id;
+      Eye       : Eye_Id;
+      Open_At   : Real_Array;
+      Closed_At : Real_Array;
+      Lobes     : Sight_Rows);
+   --  The hand of a closer group as its sweep leaves it: the group's
+   --  readings at each opening and every lobe's tips seen at both. What the
+   --  sweep makes of the views ends here, and what is done with a hand begins
+   --  (its presses, its sizes); the tests start there.
+
+   procedure Press_Beat
+     (H          : in out Hands;
+      Id         : Hand_Id;
+      M          : Model;
+      O          : Observation;
+      Is_Blocked : Boolean;
+      Is_Still   : Boolean);
+   --  One beat of one hand's arm for its presses: Observe's step, given the
+   --  body's two judgments of the beat (Driver.Robot.Blocked and Still), from
+   --  which a press is found.
 
    type Showing is (Not_Yet, Nothing_New, Something_New);
    --  What the views of a closer's own eye make of a push: Not_Yet while the

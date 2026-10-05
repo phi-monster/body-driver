@@ -34,6 +34,7 @@ package body Driver.Robot.Hand.Presses is
       Blocked : Boolean;
       Still   : Boolean;
       Tool    : Pose_Estimate;
+      Arm     : Real_Array;
       Closer  : Real_Array;
       Found   : out Boolean;
       Press   : out Event)
@@ -53,7 +54,11 @@ package body Driver.Robot.Hand.Presses is
          when Pressing =>
             if Still and then not Blocked then
                Found := True;
-               Press := (Tool => Tool, Approach => W.Approach, Closer => Reading_Holders.To_Holder (Closer), Beat => Beat);
+               Press := (Tool     => Tool,
+                         Arm      => Reading_Holders.To_Holder (Arm),
+                         Approach => W.Approach,
+                         Closer   => Reading_Holders.To_Holder (Closer),
+                         Beat     => Beat);
                W.State := Free;
                W.Stood := True;
                W.Last_Still := Tool;

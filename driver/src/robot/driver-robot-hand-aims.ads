@@ -17,7 +17,8 @@ package Driver.Robot.Hand.Aims is
    function Turned_About (Tool : Rigid; Eye, Along, Into : Vec3) return Rigid;
    --  The tool's pose turned about the eye (a point in the tool frame) by the
    --  least rotation that points Along (a tool-frame direction) along Into (a
-   --  world direction); the eye stays where it was.
+   --  direction in the frame the tool's pose is given in); the eye stays where
+   --  it was.
 
    function Any_Across (V : Vec3) return Vec3;
    --  A unit direction across V.

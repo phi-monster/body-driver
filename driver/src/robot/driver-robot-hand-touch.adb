@@ -377,7 +377,11 @@ package body Driver.Robot.Hand.Touch is
          for P of Presses loop
             Into (Surface_Of (P)) := Into (Surface_Of (P)) - P.Tool.Pose.Rotation * Line (Sight_Of (P)).Direction.Unit_Vector;
          end loop;
-         if Rows < Columns then
+         --  A tip or a surface no press bears on is pinned below, so the rest
+         --  can be solved however many of them there are (a hand's four tips
+         --  and the first lobe's presses); a rank the presses leave short is
+         --  found by the solve.
+         if Rows = 0 then
             return;
          end if;
          declare

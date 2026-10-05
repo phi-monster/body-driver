@@ -85,6 +85,85 @@ package body Driver.Robot.Hand.Frames.Tests is
       end;
    end Sampled_Uncertainty;
 
+   procedure World_Tip_Sampled is
+      --  A tip of the tool frame, in the arm's unit, taken into a world whose
+      --  length is 1.4 of the arm's, the unit uncertain by 5 per cent. The
+      --  tool's place in the world is its place in the arm turned by the
+      --  placement and scaled by the unit; its covariance, as the body builds
+      --  it, has the unit's share of that (Unit_Sigma squared along it) among
+      --  the rest. The tip's offset from the tool is scaled by the same unit:
+      --  what the unit does to the tip is what it does to the tool's place
+      --  and to the offset together.
+      Unit_Value : constant Real := 1.4;
+      Unit_Sigma : constant Real := 0.05;
+      Arm_Place  : constant Vec3 := [0.05, -0.1, 0.2];
+      Arm_Turn   : constant Mat3 := Exp ([0.1, 0.2, -0.3]);
+      Placement  : constant Mat3 := Exp ([0.4, -0.8, 0.3]);
+      Pose_Sigma : constant Vec3 := [0.002, 0.004, 0.001];
+      Turn_Sigma : constant Vec3 := [0.01, 0.003, 0.006];
+      Point_Sigma : constant Vec3 := [0.001, 0.001, 0.002];
+      In_World   : constant Vec3 := Placement * Arm_Place;   --  the tool's place in the arm, turned by the placement
+      R_World    : constant Mat3 := Placement * Arm_Turn;
+      Tool : constant Pose_Estimate :=
+        (Pose                => (Rotation => R_World, Translation => Unit_Value * In_World + [3.0, -1.0, 0.5]),
+         Position_Covariance => Diagonal (Pose_Sigma) + Unit_Sigma ** 2 * Outer (In_World, In_World),
+         Rotation_Covariance => Diagonal (Turn_Sigma));
+      In_Arm : constant Pose_Estimate :=
+        (Pose                => (Rotation => Arm_Turn, Translation => Arm_Place),
+         Position_Covariance => [others => [others => 0.0]],
+         Rotation_Covariance => [others => [others => 0.0]]);
+      Point : constant Point_Estimate := (Mean => [0.04, 0.03, 0.13], Covariance => Diagonal (Point_Sigma));
+      Unit  : constant Estimate := (Value => Unit_Value, Sigma => Unit_Sigma, Degrees_Of_Freedom => 0);
+      Predicted : constant Point_Estimate := Into_World (Tool, In_Arm, Unit, Point);
+      Samples   : constant := 40_000;
+      Sum       : Mat3 := [others => [others => 0.0]];
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 13);
+      Check (abs (Predicted.Mean - (Placement * (Unit_Value * (Arm_Turn * Point.Mean + Arm_Place)) + [3.0, -1.0, 0.5])) < 1.0e-12,
+             "the tip in the world is not the placement's turn of its place in the arm, in the unit");
+      for K in 1 .. Samples loop
+         declare
+            Scale : constant Real := Unit_Value + Unit_Sigma * Gaussian;
+            Seen  : constant Vec3 := Exp (Draw (Turn_Sigma)) * R_World * (Scale * (Point.Mean + Draw (Point_Sigma)));
+            --  The unit moves the tool's place with the offset, by the same draw.
+            X     : constant Vec3 :=
+              Seen + Tool.Pose.Translation + Draw (Pose_Sigma) + (Scale - Unit_Value) * In_World;
+            D     : constant Vec3 := X - Predicted.Mean;
+         begin
+            Sum := Sum + Outer (D, D);
+         end;
+      end loop;
+      declare
+         Measured  : constant Mat3 := (1.0 / Real (Samples)) * Sum;
+         Tolerance : constant Real := Driver.Conventions.Z * Sqrt (2.0 / Real (Samples));
+      begin
+         for I in 1 .. 3 loop
+            for J in I .. 3 loop
+               Check (abs (Measured (I, J) - Predicted.Covariance (I, J))
+                      <= Tolerance * Sqrt (Predicted.Covariance (I, I) * Predicted.Covariance (J, J)),
+                      "world tip covariance" & I'Image & J'Image & " sampled" & Real'Image (Measured (I, J))
+                      & " predicted" & Real'Image (Predicted.Covariance (I, J)));
+            end loop;
+         end loop;
+      end;
+   end World_Tip_Sampled;
+
+   procedure World_Tip_Unknown is
+      Unplaced : Pose_Estimate;   --  never placed in the world
+      Known_In_Arm : constant Pose_Estimate :=
+        (Pose => Identity, Position_Covariance => [others => [others => 0.0]],
+         Rotation_Covariance => [others => [others => 0.0]]);
+      Point : constant Point_Estimate := (Mean => [0.0, 0.0, 0.1], Covariance => Diagonal ([0.001, 0.001, 0.001]));
+      Placed : constant Pose_Estimate := Known_In_Arm;
+   begin
+      Check (not Known (Into_World (Unplaced, Known_In_Arm, (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Point)),
+             "a tip is known in a world its arm is not placed in");
+      Check (not Known (Into_World (Placed, Known_In_Arm, Unknown, Point)),
+             "a tip is known in a world whose unit is not measured");
+      Check (Known (Into_World (Placed, Known_In_Arm, (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Point)),
+             "the first arm's tip is not known in its own world");
+   end World_Tip_Unknown;
+
    procedure Unknown_Stays_Unknown is
       Line  : constant Ray_Estimate :=
         (Origin => (Mean => [0.0, 0.0, 0.0], Covariance => [others => [others => 0.0]]),
@@ -101,6 +180,10 @@ package body Driver.Robot.Hand.Frames.Tests is
                              Sampled_Uncertainty'Access);
       Driver.Tests.Register ("hand.frames.unknown", "an unmeasured eye mount gives a known line of sight",
                              Unknown_Stays_Unknown'Access);
+      Driver.Tests.Register ("hand.frames.world", "a tip of an arm placed at another scale is taken into the world "
+                             & "without the unit, or with the wrong uncertainty", World_Tip_Sampled'Access);
+      Driver.Tests.Register ("hand.frames.world_unknown", "a tip is known in a world its arm is not placed in or "
+                             & "whose unit is not measured", World_Tip_Unknown'Access);
    end Register;
 
 end Driver.Robot.Hand.Frames.Tests;

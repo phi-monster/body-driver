@@ -136,6 +136,10 @@ package body Driver.Robot.Hand.Tips is
       end;
    end Direction;
 
+   function Prior_Of (B : Book) return Driver.Robot.Hand.Touch.Surface_Prior is
+     (if Driver.Geometry.Known (B.Table) then (Measured => True, Plane => B.Table) else (Measured => False));
+   --  The surface as measured before the presses, when it was.
+
    procedure Refit (B : in out Book);
    --  Fits every press given to a lobe whose line of sight at its opening is known.
 
@@ -166,7 +170,7 @@ package body Driver.Robot.Hand.Tips is
          end loop;
          declare
             F : constant Driver.Robot.Hand.Touch.Fit_Result :=
-              Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => (Measured => False)]);
+              Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);
          begin
             B.Fitted := Fit_Holders.To_Holder (F);
             for I in B.Kept.First_Index .. B.Kept.Last_Index loop
@@ -276,6 +280,38 @@ package body Driver.Robot.Hand.Tips is
       B.Fitted := Fit_Holders.Empty_Holder;
       Settle (B);
    end Set_Sights;
+
+   procedure Set_Frame
+     (B       : in out Book;
+      Surface : Driver.Geometry.Plane_Estimate;
+      Pose_Of : not null access function (Arm : Real_Array) return Pose_Estimate;
+      Moved   : out Boolean)
+   is
+      use type Driver.Geometry.Plane_Estimate;
+   begin
+      Moved := Surface /= B.Table;
+      if not Moved then
+         return;
+      end if;
+      B.Table := Surface;
+      for I in B.Kept.First_Index .. B.Kept.Last_Index loop
+         declare
+            K : Kept := B.Kept (I);
+         begin
+            if not K.Event.Arm.Is_Empty then
+               declare
+                  Pose : constant Pose_Estimate := Pose_Of (K.Event.Arm.Element);
+               begin
+                  if Pose.Position_Covariance (1, 1) < Real'Last and then Pose.Rotation_Covariance (1, 1) < Real'Last then
+                     K.Event.Tool := Pose;
+                     B.Kept.Replace_Element (I, K);
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      Settle (B);
+   end Set_Frame;
 
    procedure Add (B : in out Book; Press : Driver.Robot.Hand.Presses.Event; At_Opening : Opening) is
    begin
