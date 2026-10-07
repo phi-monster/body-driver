@@ -14,14 +14,17 @@
 --  T_true = S T_est X. Every true link that turns like the tool between the
 --  estimate's own successive distinct poses is tried (the angle of R_i^T R_j
 --  does not depend on S or X; a link that moves while the tool stands, a finger
---  of the other hand, is not compared on the beats the tool stood); S and X are
---  fitted on every other distinct pose and the errors reported on the rest, for
---  the link that fits best (links rigid with one another fit alike).
+--  of the other hand, is not compared on the beats the tool stood); the fit is
+--  made on every other distinct pose of the estimate and the errors reported on
+--  the rest, with how far apart those poses lie, for the link that fits best
+--  (links rigid with one another fit alike). The driver has one world, so
+--  there is one S: the first tool fitted finds it with its X, and every later
+--  tool is fitted in that world with only its own X.
 --
 --  Eyes: an eye frame is defined (z along the optical axis, x and y along +U
 --  and +V), so an estimated eye pose is compared with the true optical frame
---  through the first arm's S, with no offset of its own; its lines of sight
---  with the rays of the true intrinsics, or of the rig's F-theta lens.
+--  through the one S, with no offset of its own; its lines of sight with the
+--  rays of the true intrinsics, or of the rig's F-theta lens.
 --
 --  Hands: each estimated tip is taken into the true tool link by its arm's S
 --  and X and compared, at the beat whose closer reading is nearest the tip's,
@@ -509,22 +512,29 @@ procedure Score is
 
    --  Gauss-Newton with backtracking, until a step lowers the cost by less
    --  than the unchanged fraction of it. The caps only bound pathological
-   --  inputs; on scoring data the fit converges in a handful of steps.
-   procedure Fit (Pairs : Pair_Vectors.Vector; Length : Real; X : in out Parameters) is
+   --  inputs; on scoring data the fit converges in a handful of steps. Only
+   --  X (First .. Parameters'Last) moves: a tool fitted in a world already
+   --  fitted keeps that world (First = Offset_First).
+   Offset_First : constant Positive := Parameters'Last - 5;
+
+   procedure Fit (Pairs : Pair_Vectors.Vector; Length : Real; X : in out Parameters;
+                  First : Positive := Parameters'First) is
       Iteration_Cap : constant := 200;
       Halving_Cap   : constant := 52;   --  a binary64 mantissa: the step is then below rounding
+      Free          : constant Positive := Parameters'Last - First + 1;
    begin
       for Iteration in 1 .. Iteration_Cap loop
          declare
             R0 : constant Real_Vector := Residuals (X, Pairs, Length);
             C0 : constant Real := R0 * R0;
-            J  : Real_Matrix (R0'Range, Parameters'Range);
-            Step : Parameters;
+            J  : Real_Matrix (R0'Range, 1 .. Free);
+            Step : Real_Vector (1 .. Free);
             Full_Rank : Boolean;
             Moved : Boolean := False;
          begin
-            for K in Parameters'Range loop
+            for C in 1 .. Free loop
                declare
+                  K  : constant Positive := First + C - 1;
                   H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (K));
                   Xp : Parameters := X;
                   Xm : Parameters := X;
@@ -535,7 +545,7 @@ procedure Score is
                      D : constant Real_Vector := Residuals (Xp, Pairs, Length) - Residuals (Xm, Pairs, Length);
                   begin
                      for I in D'Range loop
-                        J (I, K) := D (I) / (2.0 * H);
+                        J (I, C) := D (I) / (2.0 * H);
                      end loop;
                   end;
                end;
@@ -544,13 +554,18 @@ procedure Score is
             exit when not Full_Rank;
             for Try in 1 .. Halving_Cap loop
                declare
-                  C1 : constant Real := Cost (X + Step, Pairs, Length);
+                  Next : Parameters := X;
                begin
-                  if C1 < C0 then
-                     Moved := C0 - C1 > Driver.Conventions.Unchanged_Fraction * C0;
-                     X := X + Step;
-                     exit;
-                  end if;
+                  Next (First .. Parameters'Last) := X (First .. Parameters'Last) + Step;
+                  declare
+                     C1 : constant Real := Cost (Next, Pairs, Length);
+                  begin
+                     if C1 < C0 then
+                        Moved := C0 - C1 > Driver.Conventions.Unchanged_Fraction * C0;
+                        X := Next;
+                        exit;
+                     end if;
+                  end;
                end;
                Step := Step / 2.0;
             end loop;
@@ -610,8 +625,14 @@ procedure Score is
       return Sqrt (Sum / N);
    end Spread;
 
-   function Best_Fit (Pairs : Pair_Vectors.Vector) return Parameters is
-      Length    : constant Real := Spread (Pairs, True);
+   --  The driver has one world, so one similarity S maps it into the true
+   --  world for every tool and eye. The first tool fitted finds S with its
+   --  offset X (Has_World False); every later one is fitted in that world,
+   --  only its own X free (World, Length: the first fit's parameters and the
+   --  length its rotation residuals were weighed by), so an arm placed wrong
+   --  in the one world shows as that arm's error, not as a world of its own.
+   function Best_Fit (Pairs : Pair_Vectors.Vector; Has_World : Boolean; World : Parameters; Length : Real)
+                      return Parameters is
       Best      : Parameters := [others => 0.0];
       Best_Cost : Real := Real'Last;
    begin
@@ -619,9 +640,15 @@ procedure Score is
          declare
             X : Parameters := [others => 0.0];
          begin
-            X (1) := Log (Spread (Pairs, True) / Spread (Pairs, False));
-            X (2 .. 4) := Log (Cube_Rotation (Start));
-            Fit (Pairs, Length, X);
+            if Has_World then
+               X (1 .. Offset_First - 1) := World (1 .. Offset_First - 1);
+               X (Offset_First .. Offset_First + 2) := Log (Cube_Rotation (Start));
+               Fit (Pairs, Length, X, Offset_First);
+            else
+               X (1) := Log (Spread (Pairs, True) / Spread (Pairs, False));
+               X (2 .. 4) := Log (Cube_Rotation (Start));
+               Fit (Pairs, Length, X);
+            end if;
             if Cost (X, Pairs, Length) < Best_Cost then
                Best_Cost := Cost (X, Pairs, Length);
                Best := X;
@@ -654,8 +681,11 @@ procedure Score is
    Arm_Fits : Arm_Fit_Vectors.Vector;
 
    procedure Split_Pairs (Tool : Positive; Link : String; Train, Test : out Pair_Vectors.Vector) is
-      --  Beats at which the true pose did not move are one pose; distinct
-      --  poses alternate between fitting and testing.
+      --  Beats at which the estimate did not move are one pose; distinct
+      --  poses alternate between fitting and testing. The poses are the
+      --  estimate's, as in the ranking: on the truth's own, a link that moved
+      --  while the tool stood gave a standing estimate pairs enough to be
+      --  fitted to it (A16's arm 2 on its own fingers, 3.5e8 m per unit).
       Last_Position : Vec3 := [Real'Last, 0.0, 0.0];
       To_Train      : Boolean := True;
    begin
@@ -668,13 +698,14 @@ procedure Score is
          then
             declare
                T : constant Rigid := Truth (Recorded (B).Line).Links (Link);
+               E : constant Rigid := Estimated (B).Tools (Tool);
             begin
-               if abs (T.Translation - Last_Position) > 0.0 then
-                  Last_Position := T.Translation;
+               if abs (E.Translation - Last_Position) > 0.0 then
+                  Last_Position := E.Translation;
                   if To_Train then
-                     Train.Append (Pair'(Est => Estimated (B).Tools (Tool), Truth => T));
+                     Train.Append (Pair'(Est => E, Truth => T));
                   else
-                     Test.Append (Pair'(Est => Estimated (B).Tools (Tool), Truth => T));
+                     Test.Append (Pair'(Est => E, Truth => T));
                   end if;
                   To_Train := not To_Train;
                end if;
@@ -740,6 +771,11 @@ procedure Score is
    procedure Score_Arms is
       Tools : Natural := 0;
       Links : Name_Vectors.Vector;
+      --  The one world (Best_Fit): set by the first tool fitted.
+      Has_World    : Boolean := False;
+      World        : Parameters := [others => 0.0];
+      World_Length : Real := 0.0;
+      World_Tool   : Positive := 1;
    begin
       for E of Estimated loop
          Tools := Natural'Max (Tools, Natural (E.Tools.Length));
@@ -755,6 +791,7 @@ procedure Score is
          declare
             Best : Arm_Fit;
             Best_Test : Pair_Vectors.Vector;
+            Best_Length : Real := 0.0;
             Least : Turn_Mismatch;
             Turns : array (1 .. Natural (Links.Length)) of Turn_Mismatch;
          begin
@@ -777,9 +814,14 @@ procedure Score is
                   then
                      Split_Pairs (Tool, Link, Train, Test);
                   end if;
-                  if Natural (Train.Length) >= 5 and then not Test.Is_Empty then
+                  --  A world of its own needs both the estimate and the link to
+                  --  have moved: the scale is the ratio of their spreads.
+                  if Natural (Train.Length) >= 5 and then not Test.Is_Empty
+                    and then (Has_World or else (Spread (Train, True) > 0.0 and then Spread (Train, False) > 0.0))
+                  then
                      declare
-                        X : constant Parameters := Best_Fit (Train);
+                        X : constant Parameters :=
+                          Best_Fit (Train, Has_World, World, (if Has_World then World_Length else Spread (Train, True)));
                         Position : Real_Array (1 .. Natural (Test.Length));
                      begin
                         for I in Position'Range loop
@@ -789,17 +831,18 @@ procedure Score is
                            Best := (Found => True, Link => To_Unbounded_String (Link), X => X,
                                     Median_Position => Driver.Stats.Median (Position));
                            Best_Test := Test;
+                           Best_Length := Spread (Train, True);
                         end if;
                      end;
                   end if;
                end;
             end loop;
-            Arm_Fits.Append (Best);
             if not Best.Found then
                Ada.Text_IO.Put_Line ("tool" & Tool'Image & ": too few distinct poses to fit (the estimate moves too little)");
             else
                declare
                   Position, Rotation : Real_Array (1 .. Natural (Best_Test.Length));
+                  Travel : constant Real := Millimetres_Per_Metre * Spread (Best_Test, True);
                begin
                   for I in Position'Range loop
                      declare
@@ -809,14 +852,38 @@ procedure Score is
                         Rotation (I) := Degrees_Per_Radian * Angle (Transpose (Best_Test (I).Truth.Rotation) * M.Rotation);
                      end;
                   end loop;
-                  Ada.Text_IO.Put_Line
-                    ("tool" & Tool'Image & " (true link " & To_String (Best.Link) & "):" & Best_Test.Length'Image
-                     & " test poses, position median " & Image (Driver.Stats.Median (Position), 2) & " mm, largest "
-                     & Image (Largest (Position), 2) & " mm; rotation median " & Image (Driver.Stats.Median (Rotation), 3)
-                     & " deg, largest " & Image (Largest (Rotation), 3) & " deg; scale "
-                     & Image (Scale_Of (Best.X), 6) & " m per unit");
+                  --  How far the test poses lie apart is said with their errors:
+                  --  an error is only as telling as the motion it was found over.
+                  --  A link that moves no more than the largest error has not
+                  --  shown which link carries the tool (A16's arm 2 stood: every
+                  --  standing link of it fitted alike), so it carries neither
+                  --  the world nor a hand.
+                  if Travel <= Largest (Position) then
+                     Best.Found := False;
+                     Ada.Text_IO.Put_Line
+                       ("tool" & Tool'Image & ": its true link moves no more over the" & Best_Test.Length'Image
+                        & " test poses (" & Image (Travel, 3) & " mm) than its largest error ("
+                        & Image (Largest (Position), 3) & " mm), so which link carries it is not known; its pose"
+                        & " is scored as its eye's");
+                  else
+                     if not Has_World then
+                        Has_World := True;
+                        World := Best.X;
+                        World_Length := Best_Length;
+                        World_Tool := Tool;
+                     end if;
+                     Ada.Text_IO.Put_Line
+                       ("tool" & Tool'Image & " (true link " & To_String (Best.Link) & "):" & Best_Test.Length'Image
+                        & " test poses spread over " & Image (Travel, 1)
+                        & " mm, position median " & Image (Driver.Stats.Median (Position), 2) & " mm, largest "
+                        & Image (Largest (Position), 2) & " mm; rotation median "
+                        & Image (Driver.Stats.Median (Rotation), 3) & " deg, largest " & Image (Largest (Rotation), 3)
+                        & " deg; scale " & Image (Scale_Of (Best.X), 6) & " m per unit"
+                        & (if World_Tool = Tool then "" else ", in the world of tool" & World_Tool'Image));
+                  end if;
                end;
             end if;
+            Arm_Fits.Append (Best);
          end;
       end loop;
    end Score_Arms;
@@ -837,8 +904,15 @@ procedure Score is
    end Camera_Name;
 
    procedure Score_Eyes is
+      --  Every fitted tool carries the one world (Best_Fit): the first does.
+      World_Fit : Natural := 0;
    begin
-      if Arm_Fits.Is_Empty or else not Arm_Fits (1).Found then
+      for I in reverse 1 .. Natural (Arm_Fits.Length) loop
+         if Arm_Fits (I).Found then
+            World_Fit := I;
+         end if;
+      end loop;
+      if World_Fit = 0 then
          Ada.Text_IO.Put_Line ("eyes: no arm fit to carry the world frame");
          return;
       end if;
@@ -856,7 +930,7 @@ procedure Score is
                     and then Truth (Recorded (B).Line).Cameras.Contains (Name)
                   then
                      declare
-                        M : constant Rigid := World (Arm_Fits (1).X, Estimated (B).Eyes (Eye));
+                        M : constant Rigid := World (Arm_Fits (World_Fit).X, Estimated (B).Eyes (Eye));
                         T : constant Rigid := Truth (Recorded (B).Line).Cameras (Name);
                      begin
                         N := N + 1;
