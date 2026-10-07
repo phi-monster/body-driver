@@ -215,9 +215,10 @@ package body Driver.Action.Contact.Wrench.Tests is
       --  eliminations, and the rows Bland's rule must choose among by their
       --  basic columns were chosen among by that noise: with every number of
       --  the touches moved by a few units of its last place, one balance in
-      --  ten went round a cycle for ever (the search of a symmetric hand did
-      --  on x86-64, where the same numbers are a little different). Whatever
-      --  the last bits, every balance ends, and says the same.
+      --  ten went round a cycle for ever, as one balance of the search of a
+      --  symmetric hand did on x86-64, where the same numbers differ in the
+      --  last place. Whatever the last bits, every balance ends, and says the
+      --  same.
       Up    : constant Vec3 := [0.0, 0.0, 1.0];
       Where : constant array (1 .. 3) of Vec3 :=
         [[0.02, 0.0, 0.03], [-0.0070920977408507092, 0.018700324853708296, 0.065],
@@ -246,8 +247,7 @@ package body Driver.Action.Contact.Wrench.Tests is
       Ada.Numerics.Float_Random.Reset (Generator, 1);
       for Scale of Real_Array'[1.0, 4.0, 16.0] loop
          for Run in 1 .. Runs loop
-            --  The unit's draws are made in this order, whatever evaluates
-            --  first.
+            --  The noise is drawn in this order, whatever evaluates first.
             for K in Noise'Range loop
                Noise (K) := 2.0 * Real (Ada.Numerics.Float_Random.Random (Generator)) - 1.0;
             end loop;
