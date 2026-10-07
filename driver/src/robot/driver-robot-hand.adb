@@ -693,11 +693,6 @@ package body Driver.Robot.Hand is
       end loop;
    end Descend;
 
-   function Pushed_Through (Report : Driver.Robot.Motion.Step_Report) return Boolean is
-     (Report.Delivered.Value >= 1.0
-      or else not Driver.Uncertain.Significant
-                    (1.0 - Report.Delivered.Value, Report.Delivered.Sigma, Report.Delivered.Degrees_Of_Freedom));
-
    function Sweepable (H : Hands; M : Model; G : Group_Id) return Boolean is
      (H.Data /= null
       and then (for some P of H.Data.Pairs => P.Group = G and then Still_A_Pair (P, M)));

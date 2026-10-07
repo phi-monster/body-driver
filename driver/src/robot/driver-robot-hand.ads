@@ -22,7 +22,6 @@
 
 with Driver.Commands;
 with Driver.Images;
-with Driver.Robot.Motion;
 
 private with Ada.Finalization;
 
@@ -251,17 +250,6 @@ private
    --  choice everywhere; creeping by Least took A11's first presses into the
    --  thousands of pushes). Least is the smallest move of the tool that tells
    --  from its noise.
-
-   function Pushed_Through (Report : Driver.Robot.Motion.Step_Report) return Boolean;
-   --  A push went where it was asked: it delivered of its ask no less than the
-   --  noise of that allows. The body's own verdict on a step (Report.Outcome)
-   --  is blocked or short when a joint falls short of its ask by as little as
-   --  its visible step, a few millionths of a radian, as every step did from the
-   --  end of A15's first press that met the table (aims of 0.9 radian and
-   --  pushes of 0.005 alike: judged blocked with 0.9995 or more of the ask
-   --  delivered, and each press ended at its first push, in the air). What lowers a tool onto a table is told by how
-   --  much of the ask was delivered, against the noise of that: the push
-   --  that met A15's table delivered 0.716 of its ask.
 
    function Sweepable (H : Hands; M : Model; G : Group_Id) return Boolean;
    --  The group is a closer by the body's roles now, and the hand watches it

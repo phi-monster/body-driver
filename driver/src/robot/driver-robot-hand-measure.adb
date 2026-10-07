@@ -288,9 +288,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
             return;
          end if;
          Driver.Robot.Motion.Follow (M, Plan, Report);
-         --  Reached is what the push delivered of its ask, against the noise of
-         --  that, not the body's verdict on the step (Pushed_Through).
-         Reached := Driver.Robot.Hand.Pushed_Through (Report);
+         Reached := Report.Outcome = Driver.Robot.Motion.Reached;
          if Reached then
             Descended := Descended + Step;
          end if;

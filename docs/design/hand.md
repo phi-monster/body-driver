@@ -327,29 +327,30 @@ be reached. Tilting away from the other lobes keeps them behind the aimed tip;
 in the legacy driver's runs (V1B79), tilting towards a finger's own body made
 the body touch first.
 
-**Lesson: a push is blocked by what it delivered, and the smallest push is read
-where the aim leaves the tool.** A15 was the first live run that pressed, and
-its presses failed in two ways, both in the log. (1) The first press of the
-first lobe lowered from a least push too small to print: 34 pushes, the first
-33 asking of the arm less than five millionths of a radian, "blocked after
-lowering 0.0000". The arm's frame is the eye at its reference readings, where
-the tool's place is known exactly, and the arm stood there before the aim; the
-least push was read there, not where the aim leaves the tool (0.06 to 0.2 two
-presses later). It is now read at the readings the aim's plan ends at
-(`hand.pressing.least`). (2) After the first press that met the table (6
-pushes, the last of 3.26, "delivered 0.716" of its ask) every push of every
-later press was judged blocked at once, with the whole of the ask delivered:
-the step tracker calls a push short when a joint stops short of its ask by its
-visible step, 1 to 5 millionths of a radian, and from the end of that press on it
-was true of every step whatever its size or direction. Of the 46 steps from the first press's end on, 31 pushes
-of 0.005 to 0.02 radian and 15 aims and retreats of 0.1 to 0.9, every one was
-judged blocked, having delivered 0.9995 or more of its ask, and each press
-ended at its first push, in the air. The descent now ends at a
-push that delivered less of its ask than the noise of that allows
-(`Pushed_Through`; `hand.measure.free`: 0.716 of an ask, against a noise of
-0.0001, is the table; 0.9997, against 0.0005, is not). The presses found in
-the stream were not misled: from all of it the estimators kept one press, the
-one that met the table.
+**Lesson: the smallest push is read where the aim leaves the tool, and the
+step tracker calls a push short for a visible step.** A15 was the first live
+run that pressed, and its presses failed in two ways, both in the log. (1) The
+first press of the first lobe lowered from a least push too small to print: 34
+pushes, the first 33 asking of the arm less than five millionths of a radian,
+"blocked after lowering 0.0000". The arm's frame is the eye at its reference
+readings, where the tool's place is known exactly, and the arm stood there
+before the aim; the least push was read there, not where the aim leaves the
+tool (0.06 to 0.2 two presses later). It is now read at the readings the aim's
+plan ends at (`hand.pressing.least`). (2) After the first press that met the
+table (6 pushes, the last of 3.26, "delivered 0.716" of its ask) every push of
+every later press was judged blocked at once, with the whole of the ask
+delivered: the step tracker calls a push short when a joint stops short of its
+ask by its visible step, 1 to 5 millionths of a radian, and from the end of
+that press on it was true of every step whatever its size or direction. Of the
+46 steps from the first press's end on, 31 pushes of 0.005 to 0.02 radian and
+15 aims and retreats of 0.1 to 0.9, every one was judged blocked, having
+delivered 0.9995 or more of its ask, and each press ended at its first push,
+in the air. The press reads the verdict as every decider does
+(`Report.Outcome`); the defect lives in the step tracker (`Steps`, path A's):
+a push that delivered 0.9995 of its ask is not blocked, and the push that met
+A15's table, 0.716 of its ask against a noise of 0.0001, is. The presses found
+in the stream were not misled: from all of it the estimators kept one press,
+the one that met the table.
 
 ## Open
 
