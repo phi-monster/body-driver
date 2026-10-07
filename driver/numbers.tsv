@@ -755,45 +755,121 @@ driver-robot-graph.adb	Gr.Breach.Replace_Element (G, 2);	2	structure	clause 2 of
 driver-robot-graph.adb	if Whole_Eyes = Eyes and then Eyes >= 2 then	2	structure	with a single eye, carrying the whole body and carrying that eye cannot be told apart
 driver-robot-hand-aims.adb	(if Size > Real'Model_Epsilon then Exp (Arctan (Size, Now * Goal) * ((1.0 / Size) * Axis))	1.0	math	a vector over its length is its unit vector
 driver-robot-hand-frames.adb	Across : constant Real := (Turn (1, 1) + Turn (2, 2) + Turn (3, 3) - U * (Turn * U)) / 2.0;	2.0	math	the mean of the turn's variance about the two axes across the line
-driver-robot-hand-lobes.adb	+ 1.0 / Real (Li.Count_There) + 1.0 / Real (Lj.Count_There));	1.0	math	the variance of a mean of n pixels is the pixel variance over n
-driver-robot-hand-lobes.adb	+ 1.0 / Real (Li.Count_There) + 1.0 / Real (Lj.Count_There));	1.0	math	the variance of a mean of n pixels is the pixel variance over n
+driver-robot-hand-lobes.adb	(Change_Of (Lobes, Attached, 1.0 / 12.0, 0, Averaged => False));	1.0	math	the variance of a uniform step of one pixel is 1/12
+driver-robot-hand-lobes.adb	(Change_Of (Lobes, Attached, 1.0 / 12.0, 0, Averaged => False));	12.0	math	the variance of a uniform step of one pixel is 1/12
+driver-robot-hand-lobes.adb	(Change_Of (Lobes, Attached, Noise.Displacement.Sigma ** 2 + 1.0 / 12.0, Noise.Displacement.Degrees_Of_Freedom, Averaged => True));	1.0	math	the variance of a uniform step of one pixel is 1/12
+driver-robot-hand-lobes.adb	(Change_Of (Lobes, Attached, Noise.Displacement.Sigma ** 2 + 1.0 / 12.0, Noise.Displacement.Degrees_Of_Freedom, Averaged => True));	12.0	math	the variance of a uniform step of one pixel is 1/12
+driver-robot-hand-lobes.adb	Along : constant Real := ((Real (C) + 0.5 - Au) * Reach_U + (Real (R) + 0.5 - Av) * Reach_V) / Length;	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Along : constant Real := ((Real (C) + 0.5 - Au) * Reach_U + (Real (R) + 0.5 - Av) * Reach_V) / Length;	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Au := Au + Real (C) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Av := Av + Real (R) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Best : Real := -1.0;	1.0	structure	below any between-group variance: no cut found yet
 driver-robot-hand-lobes.adb	Best := Real'Min (Best, Sqrt ((Real (C) + 0.5 - P.U) ** 2 + (Real (R) + 0.5 - P.V) ** 2));	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-lobes.adb	Best := Real'Min (Best, Sqrt ((Real (C) + 0.5 - P.U) ** 2 + (Real (R) + 0.5 - P.V) ** 2));	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-lobes.adb	Cap := Kind_A / (Real (Total) + 2.0);	2.0	statistics	a share of n pixels with one counted in each of the two kinds: n + 2 pseudo-counts
+driver-robot-hand-lobes.adb	Cu := Cu + Real (C) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Cut := (Sorted (K) + Sorted (K + 1)) / 2.0;	2.0	math	the cut lies midway between the two values it parts
+driver-robot-hand-lobes.adb	Cv := Cv + Real (R) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Diagonal : constant Real := Sqrt (2.0);	2.0	math	a diagonal step between pixels is the square root of two
 driver-robot-hand-lobes.adb	Displacement_Gate => Vector_Gate (2),	2	structure	an image displacement has two components
 driver-robot-hand-lobes.adb	Displacement_Gate => Vector_Gate (2, Dof),	2	structure	an image displacement has two components
 driver-robot-hand-lobes.adb	Dist.Replace_Element (Index (W, C, R), 0.0);	0.0	math	where the lobe is attached its distance to the attachment is zero
 driver-robot-hand-lobes.adb	Dof : constant Natural := Natural (Real'Floor (Mad_Efficiency * Real (2 * Count)));	2	structure	two coordinates per correspondence
 driver-robot-hand-lobes.adb	Family : constant Gate := Vector_Gate (2, Noise.Displacement.Degrees_Of_Freedom, Tests => Tests);	2	structure	an image displacement has two components
+driver-robot-hand-lobes.adb	Flips := Flips + Boolean'Pos ((Next (J) > 0.5) /= Label (J));	0.5	math	a pixel is of the kind it is likelier to be of: a share above a half
+driver-robot-hand-lobes.adb	Kind_A : Real := 1.0;	1.0	statistics	one pseudo-pixel counted in the kind, as in every histogram
+driver-robot-hand-lobes.adb	Label (J) := Next (J) > 0.5;	0.5	math	a pixel is of the kind it is likelier to be of: a share above a half
+driver-robot-hand-lobes.adb	Levels : constant := 256;	256	format	a pixel's brightness in whole levels of eight bits
+driver-robot-hand-lobes.adb	Logs (K) := 0.5 * Log (Driver.Pixels.Variance (Anchor, C, R));	0.5	math	the log of a deviation is half the log of the variance
 driver-robot-hand-lobes.adb	Moves : Real_Access := new Real_Array (1 .. 2 * Count);	2	structure	two coordinates per correspondence
-driver-robot-hand-lobes.adb	Pixel_Variance : constant Real := Noise.Displacement.Sigma ** 2 + 1.0 / 12.0;	1.0	math	the variance of a uniform of unit width is 1/12: where in its pixel a point lies
-driver-robot-hand-lobes.adb	Pixel_Variance : constant Real := Noise.Displacement.Sigma ** 2 + 1.0 / 12.0;	12.0	math	the variance of a uniform of unit width is 1/12: where in its pixel a point lies
+driver-robot-hand-lobes.adb	Next (J) := 1.0 / (1.0 + Exp (Real'Min (Lb - La, Odds_Range)));	1.0	math	a share is one over one plus the odds against
+driver-robot-hand-lobes.adb	Next (J) := 1.0 / (1.0 + Exp (Real'Min (Lb - La, Odds_Range)));	1.0	math	a share is one over one plus the odds against
+driver-robot-hand-lobes.adb	Odds_Range : constant Real := Log (Real'Last) / 2.0;	2.0	math	half the exponent range: past it the share is zero to working precision
+driver-robot-hand-lobes.adb	Of_A, Of_B : Votes := [others => 1.0];	1.0	statistics	every histogram begins with one pixel a bin
+driver-robot-hand-lobes.adb	Reach : constant := 8;	8	structure	a pixel has eight neighbours: their labels add up to eight either way
+driver-robot-hand-lobes.adb	Result (K).Su := Result (K).Su + Real (C) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Result (K).Sv := Result (K).Sv + Real (R) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Robot (A_Bin (J)) := Robot (A_Bin (J)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	Robot (A_Bin (P)) := Robot (A_Bin (P)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	Robot (A_Bin (P)) := Robot (A_Bin (P)) - 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	Robot (B_Bin (J)) := Robot (B_Bin (J)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	Robot (B_Bin (P)) := Robot (B_Bin (P)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	Robot (B_Bin (P)) := Robot (B_Bin (P)) - 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	Robot, World : Histogram := [others => 1.0];	1.0	statistics	every histogram begins with one pixel a bin
+driver-robot-hand-lobes.adb	Robot, World : Histogram := [others => 1.0];	1.0	statistics	every histogram begins with one pixel a bin
 driver-robot-hand-lobes.adb	Round_Trip_Gate => Vector_Gate (2));	2	structure	an image displacement has two components
 driver-robot-hand-lobes.adb	Round_Trip_Gate => Vector_Gate (2, Dof));	2	structure	an image displacement has two components
+driver-robot-hand-lobes.adb	Share (J) := (if Seeds (Seeds'First + J - 1) then 1.0 else 0.0);	1.0	math	a seed is wholly of the kind with the robot at the anchored end
+driver-robot-hand-lobes.adb	Share (P) := (if Now_A then 1.0 else 0.0);	1.0	math	a pixel turned is wholly of its new kind
+driver-robot-hand-lobes.adb	Sqrt (Within / Real (N - 2)) * Sqrt (1.0 / Real (Big) + 1.0 / Real (Small)))	1.0	math	the standard error of a difference of two means: root of one over each count
+driver-robot-hand-lobes.adb	Sqrt (Within / Real (N - 2)) * Sqrt (1.0 / Real (Big) + 1.0 / Real (Small)))	1.0	math	the standard error of a difference of two means: root of one over each count
+driver-robot-hand-lobes.adb	Sqrt (Within / Real (N - 2)) * Sqrt (1.0 / Real (Big) + 1.0 / Real (Small)))	2	statistics	a pooled spread of two groups has two means fitted: n - 2 degrees of freedom
 driver-robot-hand-lobes.adb	Step : constant Real := (if Dr /= 0 and then Dc /= 0 then Diagonal else 1.0);	1.0	math	a step between side neighbours is one pixel
 driver-robot-hand-lobes.adb	Su := Su + Real (C) + 0.5;	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-lobes.adb	Sum := Sum + (if Label (Neighbour) then 1 else -1);	1	math	a neighbour of the one kind counts one, of the other minus one
+driver-robot-hand-lobes.adb	Sum := Sum + (if Label (Neighbour) then 1 else -1);	1	math	a neighbour of the one kind counts one, of the other minus one
 driver-robot-hand-lobes.adb	Sv := Sv + Real (R) + 0.5;	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Trips : Real_Access := new Real_Array (1 .. 2 * Count);	2	structure	two coordinates per correspondence
-driver-robot-hand-lobes.adb	Variance := Pixel_Variance * (1.0 / Real (L.Count_Here) + 1.0 / Real (L.Count_There));	1.0	math	the variance of a mean of n pixels is the pixel variance over n
-driver-robot-hand-lobes.adb	Variance := Pixel_Variance * (1.0 / Real (L.Count_Here) + 1.0 / Real (L.Count_There));	1.0	math	the variance of a mean of n pixels is the pixel variance over n
-driver-robot-hand-lobes.adb	Variance := Variance + Pixel_Variance * (1.0 / Real (Li.Count_Here) + 1.0 / Real (Lj.Count_Here)	1.0	math	the variance of a mean of n pixels is the pixel variance over n
-driver-robot-hand-lobes.adb	Variance := Variance + Pixel_Variance * (1.0 / Real (Li.Count_Here) + 1.0 / Real (Lj.Count_Here)	1.0	math	the variance of a mean of n pixels is the pixel variance over n
+driver-robot-hand-lobes.adb	Turn : constant Real := Driver.Conventions.Z ** 2 / 2.0;	2.0	math	twice the log of the likelihood ratio is above Z squared when two kinds are told apart (Wilks)
+driver-robot-hand-lobes.adb	World (A_Bin (J)) := World (A_Bin (J)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	World (A_Bin (P)) := World (A_Bin (P)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	World (A_Bin (P)) := World (A_Bin (P)) - 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	World (B_Bin (J)) := World (B_Bin (J)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	World (B_Bin (P)) := World (B_Bin (P)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	World (B_Bin (P)) := World (B_Bin (P)) - 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0.5, Real (R) + 0.5)	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0.5, Real (R) + 0.5)	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0.5, Real (R) + 0.5)	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0.5, Real (R) + 0.5)	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	elsif Natural (Lobes.Length) = 1 and then Width (Attached) > 0 and then Count (Attached) > 0 then	1	structure	a single lobe closes against what it is attached to
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	function Share (Count : Natural) return Real is (if Averaged then 1.0 / Real (Count) else 1.0);	1.0	math	n pixels placed on their own share a centre's variance by 1/n; placed together by the one edge, they do not
+driver-robot-hand-lobes.adb	function Share (Count : Natural) return Real is (if Averaged then 1.0 / Real (Count) else 1.0);	1.0	math	n pixels placed on their own share a centre's variance by 1/n; placed together by the one edge, they do not
+driver-robot-hand-lobes.adb	if 2 * Right < Seeded then	2	math	fewer than half of the seeds
+driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 1 => (for all Dc in -1 .. 1 => Inside (C + Dc, R + Dr)))	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 1 => (for all Dc in -1 .. 1 => Inside (C + Dc, R + Dr)))	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 1 => (for all Dc in -1 .. 1 => Inside (C + Dc, R + Dr)))	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 1 => (for all Dc in -1 .. 1 => Inside (C + Dc, R + Dr)))	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	if N < 3 then	3	statistics	a spread within two groups needs a third value
+driver-robot-hand-lobes.adb	if N >= 2 then	2	statistics	a spread needs two values
 driver-robot-hand-lobes.adb	if Natural (Lobes.Length) >= 2 then	2	structure	lobes close towards one another when there are two or more
+driver-robot-hand-lobes.adb	or else Exp (Driver.Stats.Median (Above (1 .. Over))) <= Gate_Z * Spread / Sqrt (2.0)	2.0	math	two views' difference at a pixel has root two the spread of one view's pixel
+driver-robot-hand-lobes.ads	and then Driver.Pixels.Frames (Anchor) >= 2;	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Aimed.Least, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& (if Pixel > 0.0 then Driver.Log.Image (Pixel, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Aimed.Least, 4) & ""));	4	format	digits printed in a log line or a message
@@ -811,6 +887,14 @@ driver-robot-hand-measure.adb	then Driver.Robot.Hand.Aims.Spread (Sight, [1 => R
 driver-robot-hand-measure.adb	while Tilt < Ada.Numerics.Pi / 2.0 loop	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
 driver-robot-hand-presses.adb	- U * (Step.Covariance * U)) / 2.0);	2.0	math	the mean of the variance about the two axes across the move
 driver-robot-hand-presses.adb	U : constant Vec3 := (1.0 / Length) * Step.Mean;	1.0	math	a vector over its length is its unit vector
+driver-robot-hand-selfsight.adb	Kept := Kept + Boolean'Pos (S.Poses >= 2);	2	statistics	a deviation over poses needs two poses
+driver-robot-hand-selfsight.adb	Poses => 1,	1	structure	a setting is first seen from one pose
+driver-robot-hand-selfsight.adb	Sqrt (2.0) * Noise (Noise'First + I - A'First))));	2.0	math	each reading carries its noise, so their difference carries it twice over
+driver-robot-hand-selfsight.adb	function Anchored (M : Memory; Key : Real_Array) return Boolean is (Poses (M, Key) >= 2);	2	statistics	a deviation over poses needs two poses
+driver-robot-hand-selfsight.adb	if M.Settings (I).Poses < 2 then	2	statistics	a deviation over poses needs two poses
+driver-robot-hand-selfsight.adb	if M.Settings (I).Poses >= 2	2	statistics	a deviation over poses needs two poses
+driver-robot-hand-selfsight.adb	if S.Poses = 1 then	1	structure	a setting seen from one pose holds that one frame, not yet a view
+driver-robot-hand-selfsight.ads	Capacity : constant := 8;	8	structure	memory: how many settings seen from two poses or more an eye remembers
 driver-robot-hand-shape.adb	& "" & Driver.Log.Image (Thick.Value, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-shape.adb	& Driver.Log.Image (Depth.Value, 4) & "" & Driver.Log.Image (Depth.Sigma, 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand-shape.adb	& Driver.Log.Image (Depth.Value, 4) & "" & Driver.Log.Image (Depth.Sigma, 4) & "");	4	format	digits printed in a log line or a message
@@ -879,11 +963,16 @@ driver-robot-hand-shape.ads	Open_Anchor : Positive := 1;	1	structure	first index
 driver-robot-hand-shape.ads	Scatter : Real := 1.0;	1.0	statistics	the noise as measured, before any scatter raises it
 driver-robot-hand-shape.ads	subtype Mat5 is Driver.Numerics.Arrays.Real_Matrix (1 .. 5, 1 .. 5);	5	structure	the motion's five unknowns
 driver-robot-hand-shape.ads	subtype Mat5 is Driver.Numerics.Arrays.Real_Matrix (1 .. 5, 1 .. 5);	5	structure	the motion's five unknowns
+driver-robot-hand-sweep.adb	& "" & Driver.Log.Image (Here.Spread, 2);	2	format	digits printed in a log line or a message
 driver-robot-hand-sweep.adb	& Driver.Log.Image (Here.Change.Value, 3) & "" & Driver.Log.Image (Here.Change.Sigma, 3)	3	format	digits printed in a log line or a message
 driver-robot-hand-sweep.adb	& Driver.Log.Image (Here.Change.Value, 3) & "" & Driver.Log.Image (Here.Change.Sigma, 3)	3	format	digits printed in a log line or a message
-driver-robot-hand-sweep.adb	Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
-driver-robot-hand-sweep.adb	Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
-driver-robot-hand-sweep.adb	Still : Correspondences_Access := new Correspondence_Array (1 .. 2 * Still_Count);	2	structure	each unchanged pixel is matched both ways round
+driver-robot-hand-sweep.adb	Natural'Image (Here.Changed) & "" & Driver.Log.Image (Here.Beyond, 1)	1	format	digits printed in a log line or a message
+driver-robot-hand-sweep.adb	elsif Now.Poses_Low < 2 and then Now.Poses_High < 2 then	2	statistics	a deviation over poses needs two poses
+driver-robot-hand-sweep.adb	elsif Now.Poses_Low < 2 and then Now.Poses_High < 2 then	2	statistics	a deviation over poses needs two poses
+driver-robot-hand-sweep.adb	or else (High >= 2 and then High >= 2 * Was.Element (Channel).Poses_High);	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
+driver-robot-hand-sweep.adb	or else (High >= 2 and then High >= 2 * Was.Element (Channel).Poses_High);	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
+driver-robot-hand-sweep.adb	return (Low >= 2 and then Low >= 2 * Was.Element (Channel).Poses_Low)	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
+driver-robot-hand-sweep.adb	return (Low >= 2 and then Low >= 2 * Was.Element (Channel).Poses_Low)	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
 driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);	1	structure	the presses of a hand are fitted on one surface
 driver-robot-hand-tips.adb	Presses (N) := (Tool => K.Event.Tool, Sight => Index_Of (T, K.Lobe, K.Opening), Surface => 1);	1	structure	a hand's presses are fitted on one surface
 driver-robot-hand-tips.adb	Spread := Spread + (Across * Across) / 2.0;	2.0	math	the mean of the squared angle about the two axes across the direction
