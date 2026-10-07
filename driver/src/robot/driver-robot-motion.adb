@@ -336,9 +336,12 @@ package body Driver.Robot.Motion is
    end Move_And_Look;
 
    --  A probe level took the channel further along its ask than any smaller
-   --  offset did, by Advance, as far as anything can tell: by a step an eye
-   --  watching it can see, or, for a channel no eye watches, significantly
-   --  against the readings' noise. (Not the fraction of the offset
+   --  offset did, by Advance, as far as anything can tell: by a step that is
+   --  both one an eye watching the channel can see (when one does) and
+   --  significant against the readings' noise, the body's one test of motion
+   --  (Channels.Visible) for one channel's advance. A visible step alone is
+   --  no evidence (a lock-in can fit 1e-17 to a creeping group), nor is a
+   --  noise that is not measured. (Not the fraction of the offset
    --  delivered: a reading held a constant hair off its target delivers a
    --  fraction that shrinks towards one as the offset grows, which exact
    --  readings call significant.)
@@ -347,8 +350,8 @@ package body Driver.Robot.Motion is
    is
       V : constant Estimate := Visible_Step (M, Ref.Group, Ref.Channel);
    begin
-      return (if Known (V) then Advance >= V.Value
-              else Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom));
+      return Advance > 0.0 and then (not Known (V) or else Advance >= V.Value)
+        and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom);
    end Further;
 
    --  A level some eye saw, confirmed by moves back and forth by the same

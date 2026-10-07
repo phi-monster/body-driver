@@ -951,6 +951,90 @@ package body Driver.Robot.Tests is
              "a push that is not answered within the measured delay is over");
    end Channel_Noise_And_Pushes;
 
+   --  The one test of motion needs a visible step and the noise, each guarding
+   --  the other. One commandable group creeps by 1e-9 a beat with a jitter of
+   --  1e-12 about it (a simulator's arm that never comes quite to rest), its
+   --  target changing at each of the first thirty beats and then held, one
+   --  camera. A lock-in credits the group's channel with a visible step (Z over
+   --  the root of Gain: eye 1 watches it).
+   procedure Visible_Step_Needs_The_Noise is
+      Creep_Per_Beat : constant Real := 1.0e-9;   --  what the readings change by at every beat
+
+      --  The group's stream, given to M: its first channel's readings and one camera.
+      procedure Creep (M : in out Model) is
+         Rng  : Generator;
+         O    : Observation;
+         Sent : Driver.Commands.Command;
+      begin
+         for B in 0 .. 119 loop
+            O := (others => <>);
+            O.Beat := Driver.Clock.Beat (B);
+            O.Images.Append (Driver.Images.No_Image);
+            O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+            O.Readings.Append (Real_Array'(1 => Creep_Per_Beat * Real (B) + 1.0e-12 * Gaussian (Rng)));
+            Sent := Driver.Commands.Hold;
+            --  The target alternates at every beat of the first thirty, then stays.
+            Driver.Commands.Set_Target (Sent, 1, [(if B in 1 .. 29 and then B mod 2 = 1 then 1.0e-6 else 0.0)]);
+            Observe (M, O, Sent);
+         end loop;
+      end Creep;
+
+      --  What a lock-in that credits eye 1 with a response to the group gives it.
+      procedure Credit (M : in out Model; Gain : Real) is
+         Effect : constant Eye_Effect :=
+           (Verdict => Patch, Responding => 1, Textured => 1,
+            Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0));
+      begin
+         M.Eyes (1).Kept_Groups.Append (1);
+         M.Eyes (1).Kept_Channels.Append (1);
+         M.Eyes (1).Gains.Append (Gain);
+         M.Eyes (1).Gain_Variances.Append (1.0);
+         if M.Graph.Effects.Is_Empty then
+            M.Graph.Effects.Append (Effect);
+         else
+            M.Graph.Effects.Replace_Element (1, Effect);
+         end if;
+      end Credit;
+   begin
+      --  A step of 3e-17, far below what the readings jitter by: it must not
+      --  make every beat a push, leave the group no beat at rest, and its
+      --  noise unmeasured, as it did A15's second arm.
+      declare
+         M : Model;
+      begin
+         Creep (M);
+         Credit (M, 1.0e34);
+         Check (Known (Visible_Step (M, 1, 1)) and then Visible_Step (M, 1, 1).Value < 1.0e-16,
+                "the credited visible step is not tiny");
+         Channels.Measure (M);
+         Check (Reading_Noise (M, 1, 1) < Real'Last,
+                "a visible step far below the readings' noise left the group's noise unmeasured: every beat was a push");
+         Check (not Channels.Visible (M, 1, [Creep_Per_Beat]),
+                "a change of the readings' own size, which a visible step of 3e-17 cannot make motion, is motion");
+         Check (Channels.Visible (M, 1, [1.0]), "a push of 1 is not motion");
+         --  A noise that is not measured gives no evidence, whatever the step.
+         M.Noise.Replace_Element (0, Real'Last);
+         Check (not Channels.Visible (M, 1, [1.0]), "a change is motion where no noise is measured, by the step alone");
+      end;
+      --  A step far above the noise: a change between them, which the noise
+      --  alone calls motion (a joint held away from rest jitters far more
+      --  than it did at rest), is none.
+      declare
+         M : Model;
+      begin
+         Creep (M);
+         Credit (M, 1.0);
+         Channels.Measure (M);
+         Check (Reading_Noise (M, 1, 1) < Real'Last, "the group's noise is unmeasured");
+         Check (Visible_Step (M, 1, 1).Value > 1.0, "the credited visible step is not large");
+         Check (not Channels.Visible (M, 1, [0.5 * Visible_Step (M, 1, 1).Value]),
+                "a change far above the noise but below what any eye sees is motion");
+         Check (Channels.Visible (M, 1, [2.0 * Visible_Step (M, 1, 1).Value]),
+                "a change above the visible step and the noise is not motion");
+      end;
+   end Visible_Step_Needs_The_Noise;
+
    procedure Eye_Stillness is
       Rng : Generator;
       S   : Eye_Stream;
@@ -1958,11 +2042,14 @@ package body Driver.Robot.Tests is
          when Wide_Deadband  => (if abs Target < 5.0e-4 then 0.0 else Real'Max (-1.0e-3, Real'Min (Target, 1.0e-3))),
          when Disconnected   => 0.0);
 
-   --  What the model has of group 5's noise when the probe begins: measured
-   --  (the estimates before it), lost (its noise unmeasured, as a group that
-   --  never came to rest leaves it, though measuring again would find it), or
-   --  unmeasurable (a noise that stands as stored, unmeasured).
-   type Noise_State is (Measured, Lost, Unmeasurable);
+   --  What the model has of group 5 when the probe begins: its noise measured
+   --  (the estimates before it), lost (unmeasured, as a group that never came to
+   --  rest leaves it, though measuring again would find it), unmeasurable (a
+   --  noise that stands as stored, unmeasured), or measured with a lock-in's
+   --  visible step of 3e-17 credited to the channel, far below its noise (which
+   --  is where a lock-in that credits a group with the pictures' motion beside
+   --  its tiny readings leaves them), kept for good.
+   type Noise_State is (Measured, Lost, Unmeasurable, Credited);
 
    procedure Probe_Idle_Both_Ways
      (Kind     : Idle_Kind;
@@ -1992,6 +2079,25 @@ package body Driver.Robot.Tests is
             M.Noise_Freedom.Replace_Element (Index, 0);
             M.From_File (Stored_Noise) := Noise = Unmeasurable;
          end Lose_Noise;
+         procedure Credit_Step is
+            Eyes : constant Natural := Natural (M.Eyes.Length);
+         begin
+            --  Eye 1's lock-in as it would stand if it knew only this channel: one cell,
+            --  a gain of 1e34, a step of Z over its root.
+            M.Eyes (1).Kept_Groups.Clear;
+            M.Eyes (1).Kept_Channels.Clear;
+            M.Eyes (1).Gains.Clear;
+            M.Eyes (1).Gain_Variances.Clear;
+            M.Eyes (1).Kept_Groups.Append (5);
+            M.Eyes (1).Kept_Channels.Append (1);
+            M.Eyes (1).Gains.Append (1.0e34);
+            M.Eyes (1).Gain_Variances.Append (1.0);
+            M.Graph.Effects.Replace_Element
+              ((5 - 1) * Eyes + 1,
+               (Verdict => Patch, Responding => 1, Textured => 1,
+                Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0)));
+            M.From_File (Stored_Responses) := True;
+         end Credit_Step;
       begin
          Driver.Robot.Motion.Settle (M, W);
          Driver.Robot.Motion.Hold (M, 100);
@@ -2008,7 +2114,9 @@ package body Driver.Robot.Tests is
          end loop;
          Driver.Beats.Within_A_Beat (Estimate'Access);
          Driver.Robot.Motion.Gather_Rest (M, 2);
-         if Noise /= Measured then
+         if Noise = Credited then
+            Driver.Beats.Within_A_Beat (Credit_Step'Access);
+         elsif Noise /= Measured then
             Driver.Beats.Within_A_Beat (Lose_Noise'Access);
          end if;
          Driver.Robot.Motion.Probe_Both_Ways (M, (Group => 5, Channel => 1), 1.0e-5, Got);
@@ -2097,7 +2205,8 @@ package body Driver.Robot.Tests is
    --  an end, however much wider the band is than what the rest of the body
    --  needed (the rest of the body bounds a channel in no way). A disconnected
    --  channel answers neither way at any level: asked as many levels each way
-   --  as a float has bits, it is called dead; with its noise unmeasured, so that
+   --  as a float has bits, it is called dead, also when a lock-in credits it with a
+   --  visible step far below its noise; with its noise unmeasured, so that
    --  nothing tells whether its reading followed, it is asked the same and
    --  called blind, not dead.
    procedure Probe_Limits_And_Deadbands is
@@ -2158,6 +2267,15 @@ package body Driver.Robot.Tests is
              & R.Levels (Mo.Increasing)'Image & R.Levels (Mo.Decreasing)'Image);
       Check (Up = 1.0e-5 * 2.0 ** (Real'Machine_Mantissa - 1) and then Down = Up,
              "the dead channel was asked" & Up'Image & " up and" & Down'Image & " down");
+
+      --  A lock-in's visible step of 3e-17 credited to it, far below its noise, is no
+      --  evidence of a following: half the jitters of its readings are positive.
+      Probe_Idle_Both_Ways (Disconnected, Credited, R, Up, Down, Finished);
+      Check (Finished, "the probe of a disconnected channel with a tiny visible step did not finish");
+      Check (R.Dead and then R.Levels (Mo.Increasing) = Real'Machine_Mantissa
+             and then R.Levels (Mo.Decreasing) = Real'Machine_Mantissa,
+             "a visible step far below the noise made a disconnected channel's jitter a following: levels"
+             & R.Levels (Mo.Increasing)'Image & R.Levels (Mo.Decreasing)'Image);
 
       --  Its noise unmeasured, nothing tells a following from none.
       Probe_Idle_Both_Ways (Disconnected, Unmeasurable, R, Up, Down, Finished);
@@ -4274,7 +4392,7 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.probe.limits", "a channel at its limit one way is asked ever further that way though "
                              & "it answered the other way (its noise lost or not), a deadband is not found however much "
                              & "wider than what the rest of the body needed, a channel that answers neither way is called "
-                             & "dead before every level was asked each way, or one whose noise is unmeasured is called dead",
+                             & "dead before every level was asked each way (or when a visible step far below its noise credits it with a following), or one whose noise is unmeasured is called dead",
                              Probe_Limits_And_Deadbands'Access);
       Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
@@ -4400,6 +4518,10 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "
                              & "given noise zero, so its jitter passes for motion), a hold is taken for a push, or a "
                              & "push never ends", Channel_Noise_And_Pushes'Access);
+      Driver.Tests.Register ("robot.channels.visible", "a visible step far below the readings' noise makes every jitter "
+                             & "motion, so a group that creeps has no beat at rest and no noise, a change below what any "
+                             & "eye sees is motion by the noise alone, or a change is motion where no noise is measured",
+                             Visible_Step_Needs_The_Noise'Access);
       Driver.Tests.Register ("robot.flow", "a cell's displacement between two frames is misestimated or a flat cell "
                              & "reports one", Flow_Recovers_Shifts'Access);
       Driver.Tests.Register ("robot.regression", "wild observations or collinear regressors bend the robust fit, "
