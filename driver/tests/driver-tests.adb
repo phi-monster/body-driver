@@ -49,7 +49,12 @@ package body Driver.Tests is
          declare
             Name : constant String := To_String (E.Name);
          begin
-            if Name'Length >= Filter'Length and then Name (Name'First .. Name'First + Filter'Length - 1) = Filter then
+            --  A filter ending in $ names one test exactly; otherwise it is a prefix.
+            if (if Filter'Length > 0 and then Filter (Filter'Last) = '$'
+                then Name = Filter (Filter'First .. Filter'Last - 1)
+                else Name'Length >= Filter'Length
+                       and then Name (Name'First .. Name'First + Filter'Length - 1) = Filter)
+            then
                Failures := 0;
                First_Failure := Null_Unbounded_String;
                begin
