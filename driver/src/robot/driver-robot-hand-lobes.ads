@@ -199,25 +199,41 @@ package Driver.Robot.Hand.Lobes is
    --  and the kinds are told by these: how bright the robot is and how bright
    --  the world is where it changed, each a histogram (every one begins with
    --  one pixel a bin), found together with every pixel's share in each kind
-   --  by expectation and maximisation. The seeds, the pixels the poses call
-   --  the robot's at the anchored end, begin the rounds and say which kind is
-   --  which; no number from them stays.
+   --  by expectation and maximisation. The rounds begin, where the two ends
+   --  differ most (the half of the pixels above their median difference),
+   --  from which end shows the pixel darker: the robot is darker than the
+   --  world where they changed, or lighter, the same way for most pixels of
+   --  one hand, and the seeds say which. Elsewhere, and where the ends show
+   --  one level, a pixel begins at its seed. The seeds, the pixels the poses
+   --  call the robot's at the anchored end, are wrong where the world is
+   --  flat, and histograms begun from them hold the world's grey as the
+   --  robot's, where every group of pixels with a brightness of its own keeps
+   --  the label its seeds gave it (A15's final ends: 69 % of the seeds right,
+   --  and 47 % of the pixels given the end that shows them darker, against
+   --  91 % begun from the order). Where two levels differ little their order
+   --  is noise, which histograms begun from it sort into a robot and a world
+   --  that are not there. When the rounds are over the seeds say which kind
+   --  is which, as a whole: more of them in the kind with the robot at the
+   --  anchored end than not, or the kinds are exchanged.
    --
-   --  The seeds are wrong where the world is flat, and a flat patch is wrong
-   --  as a whole and explains itself: robot and world lumas can be exchanged
-   --  for it and the histograms follow. So when the rounds have settled (the
-   --  labels they changed fewer than Unchanged_Fraction of the pixels), every
-   --  connected part of one label is tried the other way round against the
-   --  histograms of all the rest, and given the other label when that is the
-   --  likelier by more than one test of Z tells apart (twice the log of the
-   --  ratio above Z squared); the rounds begin again, until no part is turned.
+   --  A flat patch is wrong as a whole and explains itself: robot and world
+   --  lumas can be exchanged for it and the histograms follow. So when the
+   --  rounds have settled (the labels they changed fewer than
+   --  Unchanged_Fraction of the pixels), every connected part of one label is
+   --  tried the other way round against the histograms of all the rest, and
+   --  given the other label when that is the likelier by more than one test of
+   --  Z tells apart (twice the log of the ratio above Z squared); the rounds
+   --  begin again, until no part is turned or a pass turns no fewer than the
+   --  one before.
    --
    --  Last the neighbours are heard: a pixel's eight, each with the label it
    --  has, the number of those of each kind a histogram too. The rounds end
-   --  when the labels one changed are fewer than Unchanged_Fraction of them
-   --  (the convention for an iterative estimate), or when a label has crossed
-   --  the picture. A pixel is given to a kind only when the other kind's
-   --  share of it is below what one test alarms at (Z), else to neither.
+   --  when the doubt, the expected error, has stopped changing by the
+   --  convention for an iterative estimate (Unchanged_Fraction of itself, in
+   --  each of two rounds in a row, or two rounds apart twice), or has gone
+   --  round a cycle, or when a label has crossed the picture. A pixel is given
+   --  to a kind only when the other kind's share of it is below what one test
+   --  alarms at (Z), else to neither.
 
    function Lobes_Of_Sets
      (Here_Set, There_Set : Mask;

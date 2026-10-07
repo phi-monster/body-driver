@@ -641,7 +641,7 @@ package body Driver.Robot.Hand.Lobes.Tests is
 
       function Uniform return Real is (Real (Ada.Numerics.Float_Random.Random (Gen)));
    begin
-      for Seed in 2 .. 8 loop
+      for Seed in 1 .. 8 loop
          Ada.Numerics.Float_Random.Reset (Gen, Seed);
          for C in 1 .. Cells loop
             Anchored_Low (C) := Real'Rounding ((255.0 - Span) * Uniform);
@@ -681,10 +681,11 @@ package body Driver.Robot.Hand.Lobes.Tests is
       --  The rounds must go on while the doubt, the expected error, still
       --  moves (A14's final ends: 12 962 of 89 294 pixels left to neither when
       --  the rounds ended with the labels, 3 840 when they end with the
-      --  doubt), and must end when it stops moving or comes back to what it was
-      --  two rounds before, not at the most a label can cross the picture in:
-      --  two pixels whose neighbours each tell them to take the other's label
-      --  swap it every round for ever (scene 2: 200 rounds, 21 with the rule).
+      --  doubt), and the doubt can wait a round on a plateau before it falls:
+      --  scene 2 had 331 of 2 421 of these pixels given to the right end and
+      --  2 090 to neither when one round that moved the doubt by less than the
+      --  fraction ended the rounds (6 rounds), 2 088 and 333 when two in a row
+      --  had to (24).
       type Layout is record
          Seed  : Integer;
          Blank : Real;   --  the share of the pixels dark at both ends
@@ -758,6 +759,84 @@ package body Driver.Robot.Hand.Lobes.Tests is
       end loop;
    end Neighbours_Decide_What_Brightness_Cannot;
 
+   procedure Flat_World_Seeds_Do_Not_Tell_The_Dark_From_The_Light is
+      --  The robot is black and the world is not, at the two ends: three
+      --  groups of pixels with the robot at the anchored end, each over a
+      --  world of its own brightness, and three with the robot at the other.
+      --  The poses call the robot's most of the pixels of the groups where the
+      --  world is flat (the grey table the robot's other end shows a moment
+      --  later), and nearly all of the clear ones: histograms begun from those
+      --  seeds hold the table's grey as the robot's, and every group keeps the
+      --  label its seeds gave it. A15's final ends were such a scene: 69 % of
+      --  the seeds right, 47 % of the pixels given the end that shows them
+      --  darker (scene here: 58 % of the seeds right, 3 136 of 10 600 pixels
+      --  given the wrong end).
+      type Group is record
+         Count  : Positive;
+         X, Y   : Real;   --  brightness at the anchored end and at the other, to within Spread
+         Spread : Real;
+         Is_A   : Boolean;   --  the robot is at the anchored end
+         Seeded : Real;   --  the share of the group the poses call the robot's
+      end record;
+      Groups : constant array (1 .. 6) of Group :=
+        [(3000, 40.0, 150.0, 12.0, True, 0.85),
+         (1500, 40.0, 95.0, 8.0, True, 0.85),
+         (900, 42.0, 230.0, 10.0, True, 0.85),
+         (3300, 95.0, 40.0, 8.0, False, 0.80),
+         (1200, 150.0, 40.0, 12.0, False, 0.48),
+         (700, 230.0, 42.0, 10.0, False, 0.24)];
+      Total    : constant := 10_600;
+      Width    : constant := 100;
+      Height   : constant := 106;
+      Where    : Places (1 .. Total);
+      Seeds    : Flags (1 .. Total);
+      Anchored : Driver.Real_Array (1 .. Total);
+      Other    : Driver.Real_Array (1 .. Total);
+      Truth_A  : Flags (1 .. Total);
+      Given    : Kinds (1 .. Total);
+      Rounds   : Natural;
+      Doubt    : Real;
+      K        : Natural := 0;
+      Right, Wrong, Undecided : Natural := 0;
+
+      function Uniform return Real is (Real (Ada.Numerics.Float_Random.Random (Gen)));
+      function Around (Mean, Spread : Real) return Real is (Real'Rounding (Mean + Spread * (2.0 * Uniform - 1.0)));
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 1);
+      for G of Groups loop
+         for N in 1 .. G.Count loop
+            K := K + 1;
+            Where (K) := K - 1;
+            Anchored (K) := Around (G.X, G.Spread);
+            Other (K) := Around (G.Y, G.Spread);
+            Seeds (K) := Uniform < G.Seeded;
+            Truth_A (K) := G.Is_A;
+         end loop;
+      end loop;
+      Tell_Ends (Width, Height, Where, Seeds, Anchored, Other, Given, Rounds, Doubt);
+      for J in 1 .. Total loop
+         case Given (J) is
+            when Anchored_End =>
+               if Truth_A (J) then
+                  Right := Right + 1;
+               else
+                  Wrong := Wrong + 1;
+               end if;
+            when Other_End =>
+               if Truth_A (J) then
+                  Wrong := Wrong + 1;
+               else
+                  Right := Right + 1;
+               end if;
+            when Neither =>
+               Undecided := Undecided + 1;
+         end case;
+      end loop;
+      Check (Wrong = 0, "of 10 600 pixels," & Natural'Image (Wrong) & " were given the end that shows the world");
+      Check (Undecided < Right, "of 10 600 pixels," & Natural'Image (Right) & " were given the right end and"
+             & Natural'Image (Undecided) & " to neither");
+   end Flat_World_Seeds_Do_Not_Tell_The_Dark_From_The_Light;
+
    procedure Change_Nothing is
       Here  : constant Driver.Pixels.View := View_At (Two, False, 2, (others => False));
       Found : constant Located :=
@@ -788,6 +867,8 @@ package body Driver.Robot.Hand.Lobes.Tests is
                              Parts_Are_Not_Turned_For_Ever'Access);
       Driver.Tests.Register ("hand.lobes.blank", "pixels dark at both ends are told by their neighbours, and the rounds end",
                              Neighbours_Decide_What_Brightness_Cannot'Access);
+      Driver.Tests.Register ("hand.lobes.order", "seeds the flat world misleads do not tell the pixels the ends differ most at",
+                             Flat_World_Seeds_Do_Not_Tell_The_Dark_From_The_Light'Access);
       Driver.Tests.Register ("hand.lobes.fragments", "fragments of a sixtieth of a finger's size are lobes",
                              Fragments_Are_Not_Lobes'Access);
       Driver.Tests.Register ("hand.lobes.doubt", "parts no larger than the mixture's doubt are lobes",
