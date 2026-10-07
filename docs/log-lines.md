@@ -50,6 +50,17 @@ The boot's body file (`--body`, [`body-file.md`](body-file.md)):
 | `boot: the body is kept in <file> after <stage>` | the body measured so far was written to the file, after recognizing the groups and after sweeping the arms; the line `the body as measured:` and its table follow the hands, the last write |
 | `the body file <file> cannot be written` | a write failed; the boot goes on |
 
+Recognizing the groups (every commandable channel probed, then each group pushed channel by channel):
+
+| line | meaning |
+|---|---|
+| `boot: every commandable channel moved together is first seen at <x> reading units, after <n> doublings` | every commandable channel was moved away from its hold by one amount, doubled from the smallest step the readings can tell, until some eye saw the body move; each channel's own probe starts from that amount |
+| `boot: group <g> channel <c> is seen when moved by <x> reading units` | an eye saw this channel move at that amount, confirmed by moves back and forth; the group's pushes use it |
+| `boot: group <g> channel <c> is at its end <upwards or downwards>: it delivered nothing that way up to <x> reading units, while it answered the other way` | a limit on one side (a closer resting at its upper limit): that way is not asked further and not pushed again |
+| `boot: group <g> channel <c> moves nothing any eye sees, up to where it stops following` | its reading followed each way and then went no further, and no eye saw it move; it is not pushed |
+| `boot: group <g> channel <c> answers neither way up to <x> reading units, at every level it was asked either way: dead or disconnected for this boot; it is left alone` | its reading followed no ask either way, at every level, as many levels each way as a float has bits of precision (a deadband yields to a large enough one); nothing the other channels needed bounds it; it is not pushed |
+| `boot: group <g> channel <c> moves nothing any eye sees, and its reading's noise is not measured, so how its reading followed is not known` | the model had no noise for the channel even after measuring again, so nothing tells a reading that followed from one that did not; the eyes' evidence alone was asked, up to every level; it is not called dead |
+
 The kinematics (an arm's joints and the lens of the eye it carries, fitted from its keyframes):
 
 | line | meaning |

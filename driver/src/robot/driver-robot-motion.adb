@@ -389,8 +389,9 @@ package body Driver.Robot.Motion is
    end Confirm;
 
    --  Where every listed channel is held and reads, read in a held beat:
-   --  which channels can take part, their readings, their noise, the hold
-   --  every listed group is moved from, and the first step when First is 0.
+   --  which channels can take part, their readings, their noise (measured
+   --  again first when some channel's is not), the hold every listed group is
+   --  moved from, and the first step when First is 0.
    procedure Begin_Probe
      (M        : in out Model;
       Listed   : Channel_Refs;
@@ -443,6 +444,19 @@ package body Driver.Robot.Motion is
                end if;
             end;
          end loop;
+         --  A reading whose noise is unmeasured tells nothing of whether it
+         --  followed (Further). What the model had when it last measured was
+         --  not enough to find a rest for its group, and the beats since may
+         --  be: the noise is measured again from every one of them.
+         if (for some I in Listed'Range => Usable (I) and then Noise (I) >= Real'Last) then
+            Estimate_Now (M);
+            for I in Listed'Range loop
+               if Usable (I) then
+                  Noise (I) := Reading_Noise (M, Listed (I).Group, Listed (I).Channel);
+                  Freedom (I) := Channels.Noise_Freedom (M, Listed (I).Group, Listed (I).Channel);
+               end if;
+            end loop;
+         end if;
       end if;
       Driver.Beats.Send (Driver.Commands.Hold);
    end Begin_Probe;
@@ -452,8 +466,7 @@ package body Driver.Robot.Motion is
       Channels  : Channel_Refs;
       Direction : Real;
       First     : Real;
-      Report    : out Probe_Report;
-      Answers   : out Real_Array)
+      Report    : out Probe_Report)
    is
       Sign      : constant Real := (if Direction > 0.0 then 1.0 else -1.0);
       N         : constant Natural := Channels'Length;
@@ -471,7 +484,6 @@ package body Driver.Robot.Motion is
       Unlooked  : Natural;
    begin
       Report := (others => <>);
-      Answers := [others => 0.0];
       Begin_Probe (M, Listed, First, Usable, Start, Noise, Freedom, Base, Amount, Unlooked);
       Following := Usable;
       if Amount <= 0.0 or else (for all U of Usable => not U) then
@@ -505,9 +517,6 @@ package body Driver.Robot.Motion is
                      else
                         Kept (I) := Sign * Amount;
                         if Went then
-                           if not Delivered (I) then
-                              Answers (Answers'First + I - 1) := Amount;
-                           end if;
                            Delivered (I) := True;
                            Farthest (I) := Excursion;
                         end if;
@@ -534,23 +543,10 @@ package body Driver.Robot.Motion is
       Step (M, Base, Report.Last);
    end Probe_Together;
 
-   procedure Probe_Together
-     (M         : in out Model;
-      Channels  : Channel_Refs;
-      Direction : Real;
-      First     : Real;
-      Report    : out Probe_Report)
-   is
-      Answers : Real_Array (1 .. Channels'Length);
-   begin
-      Probe_Together (M, Channels, Direction, First, Report, Answers);
-   end Probe_Together;
-
    procedure Probe_Both_Ways
      (M      : in out Model;
       Ref    : Channel_Ref;
       First  : Real;
-      Bound  : Real;
       Report : out Two_Way_Report)
    is
       Listed    : constant Channel_Refs (1 .. 1) := [1 => Ref];
@@ -640,19 +636,15 @@ package body Driver.Robot.Motion is
                      Report.At_End (S) := True;
                   end if;
                end loop;
-               --  Neither way answered, and the next level each way would pass
-               --  twice what every other channel of the body needed: dead or
-               --  disconnected for this boot. A deadband wider than the others
-               --  needed is pushed through up to there.
-               if not Delivered (Increasing) and then not Delivered (Decreasing)
-                 and then Report.Levels (Increasing) = Report.Levels (Decreasing) and then Offset > Bound
-               then
-                  Report.Dead := True;
-                  exit;
-               end if;
             end;
          end;
       end loop;
+      --  Neither way followed at any level either way: a deadband would have
+      --  yielded to a level that large, so the channel is dead or
+      --  disconnected, where the noise tells a following from none.
+      Report.Blind := Noise (1) >= Real'Last;
+      Report.Dead := not Report.Seen and then not Report.Blind
+        and then not Delivered (Increasing) and then not Delivered (Decreasing);
       --  Back to the hold.
       Step (M, Base, Report.Last);
    end Probe_Both_Ways;

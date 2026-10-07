@@ -107,23 +107,15 @@ package Driver.Robot.Motion is
    --  far as anything can tell (by a step an eye watching it can see, or,
    --  watched by none, significantly against the readings' noise), and no
    --  longer moves; it is held where it last followed and takes no further
-   --  part. The probe ends when an eye saw the
-   --  body, when no channel follows any more, or after as many doublings as a
-   --  float has bits of precision, and returns the body to the hold. A
-   --  channel of a group that is not commandable, or that the group does not
-   --  have, takes no part; with none left, nothing is probed (Steps = 0).
-
-   procedure Probe_Together
-     (M         : in out Model;
-      Channels  : Channel_Refs;
-      Direction : Real;
-      First     : Real;
-      Report    : out Probe_Report;
-      Answers   : out Real_Array)
-     with Pre => Direction /= 0.0 and then First >= 0.0 and then Answers'Length = Channels'Length;
-   --  The same, and for every listed channel the amount of the level at
-   --  which its reading first followed (went further along the ask than any
-   --  smaller offset took it, by the test above); 0 for one that never did.
+   --  part. A reading whose noise the model has not measured tells nothing of
+   --  whether it followed (the test above is against the noise), so a listed
+   --  channel in that state has the noise measured first, from every beat so
+   --  far (Estimate_Now), before anything is moved. The probe ends when an
+   --  eye saw the body, when no channel follows any more, or after as many
+   --  doublings as a float has bits of precision, and returns the body to the
+   --  hold. A channel of a group that is not commandable, or that the group
+   --  does not have, takes no part; with none left, nothing is probed
+   --  (Steps = 0).
 
    procedure Probe (M : in out Model; G : Group_Id; Channel : Positive; Direction : Real; Report : out Probe_Report)
      with Pre => Direction /= 0.0;
@@ -140,7 +132,8 @@ package Driver.Robot.Motion is
       Answered   : Real := 0.0;        --  the smallest amount at which its reading first followed, either way; 0 when never
       Levels     : Sense_Counts := [others => 0];    --  how many levels each way was asked
       At_End     : Sense_Flags := [others => False];  --  the way stopped because the other one answered while it delivered nothing
-      Dead       : Boolean := False;   --  it answered neither way up to twice where every other channel of the body did
+      Dead       : Boolean := False;   --  its reading followed no ask either way, at any level, though its noise is measured
+      Blind      : Boolean := False;   --  its reading's noise is not measured: nothing is known of how its reading followed
       Last       : Step_Report;        --  the last step's report
    end record;
 
@@ -148,7 +141,6 @@ package Driver.Robot.Motion is
      (M      : in out Model;
       Ref    : Channel_Ref;
       First  : Real;
-      Bound  : Real;
       Report : out Two_Way_Report)
      with Pre => First > 0.0;
    --  Probes one channel both ways, each way by the levels Probe_Together
@@ -161,13 +153,17 @@ package Driver.Robot.Motion is
    --  the other one answered is at its end there, and its doubling stops (a
    --  closer resting at its upper limit answers downwards at once). A
    --  deadband is two-sided: small asks fail both ways and larger ones
-   --  succeed, so both ways go on doubling while neither answers. Bound is
-   --  where every other channel of the body has answered (the largest
-   --  amount at which another channel first followed; Real'Last when none
-   --  did): a channel that has answered neither way when the next level
-   --  each way would pass twice that is dead or disconnected for this boot,
-   --  and the probe stops. A deadband wider than every other channel needed
-   --  is pushed through up to there. The body returns to the hold.
+   --  succeed, so both ways go on doubling while neither answers. Nothing
+   --  the other channels of the body needed bounds a channel: it is pushed on
+   --  until an eye sees it, or its own reading ends each way (a way that
+   --  followed and then went no further), or, answering neither way, both
+   --  ways have been asked as many levels as a float has bits of precision;
+   --  then it is dead or disconnected for this boot (Dead), as far as its
+   --  reading's noise tells a following from none. A reading whose noise the
+   --  model has not measured has it measured first, from every beat so far
+   --  (as Probe_Together does); a channel whose noise stays unmeasured is
+   --  Blind, pushed on by what the eyes see alone, never called dead. The
+   --  body returns to the hold.
 
    procedure Gather_Rest (M : in out Model; Probes : Natural);
    --  Holds the body still for as long as one more still beat shortens the

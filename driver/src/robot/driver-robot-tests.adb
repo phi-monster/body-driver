@@ -1943,22 +1943,30 @@ package body Driver.Robot.Tests is
    --
    --  The rig of the drooping-joint probe, its group 5 (which no eye sees)
    --  resting at 0 and reading its target as Kind says, probed both ways
-   --  from 1e-5 against Bound (where every other channel of the body has
-   --  answered). The largest targets asked of it each way are kept.
+   --  from 1e-5, the amount at which the rest of the body was first seen.
+   --  The largest targets asked of it each way are kept.
 
-   type Idle_Kind is (At_Upper_Limit, Deadband, Disconnected);
+   type Idle_Kind is (At_Upper_Limit, Deadband, Wide_Deadband, Disconnected);
 
    --  At its upper limit, 0, and free down to -1e-3; a deadband of 5e-5 each
-   --  way, free beyond to 1e-3; disconnected, never moving.
+   --  way, free beyond to 1e-3; the same with a deadband of 5e-4; disconnected,
+   --  never moving.
    function Idle_Reading (Kind : Idle_Kind; Target : Real) return Real is
      (case Kind is
          when At_Upper_Limit => Real'Max (-1.0e-3, Real'Min (Target, 0.0)),
          when Deadband       => (if abs Target < 5.0e-5 then 0.0 else Real'Max (-1.0e-3, Real'Min (Target, 1.0e-3))),
+         when Wide_Deadband  => (if abs Target < 5.0e-4 then 0.0 else Real'Max (-1.0e-3, Real'Min (Target, 1.0e-3))),
          when Disconnected   => 0.0);
+
+   --  What the model has of group 5's noise when the probe begins: measured
+   --  (the estimates before it), lost (its noise unmeasured, as a group that
+   --  never came to rest leaves it, though measuring again would find it), or
+   --  unmeasurable (a noise that stands as stored, unmeasured).
+   type Noise_State is (Measured, Lost, Unmeasurable);
 
    procedure Probe_Idle_Both_Ways
      (Kind     : Idle_Kind;
-      Bound    : Real;
+      Noise    : Noise_State;
       Report   : out Driver.Robot.Motion.Two_Way_Report;
       Up, Down : out Real;
       Finished : out Boolean)
@@ -1974,6 +1982,16 @@ package body Driver.Robot.Tests is
          begin
             Estimate_Now (M);
          end Estimate;
+         procedure Lose_Noise is
+            Index : Natural := 0;   --  group 5's channel after every channel of the groups before it
+         begin
+            for G in 1 .. 4 loop
+               Index := Index + Group_Size (M, Group_Id (G));
+            end loop;
+            M.Noise.Replace_Element (Index, Real'Last);
+            M.Noise_Freedom.Replace_Element (Index, 0);
+            M.From_File (Stored_Noise) := Noise = Unmeasurable;
+         end Lose_Noise;
       begin
          Driver.Robot.Motion.Settle (M, W);
          Driver.Robot.Motion.Hold (M, 100);
@@ -1990,7 +2008,10 @@ package body Driver.Robot.Tests is
          end loop;
          Driver.Beats.Within_A_Beat (Estimate'Access);
          Driver.Robot.Motion.Gather_Rest (M, 2);
-         Driver.Robot.Motion.Probe_Both_Ways (M, (Group => 5, Channel => 1), 1.0e-5, Bound, Got);
+         if Noise /= Measured then
+            Driver.Beats.Within_A_Beat (Lose_Noise'Access);
+         end if;
+         Driver.Robot.Motion.Probe_Both_Ways (M, (Group => 5, Channel => 1), 1.0e-5, Got);
          Done := True;
       exception
          when others =>
@@ -2067,38 +2088,49 @@ package body Driver.Robot.Tests is
       Report := Got;
    end Probe_Idle_Both_Ways;
 
-   --  A closer at its upper limit (a live x5's closer rests at 1.0 and was
-   --  asked 6.87e10 upwards): it answers downwards at the first level, so
-   --  the upward way stops there, never asked more than that first level.
-   --  A deadband is two-sided: small asks fail both ways, a larger one
-   --  succeeds, and the channel is found answering, not called dead or at
-   --  an end, also when it is wider than every other channel of the body
-   --  needed (it is pushed through, up to twice that). A disconnected
-   --  channel answers neither way: once the next level each way would pass
-   --  twice what every other channel needed, it is called dead and asked
-   --  no more.
+   --  A closer at its upper limit (a live one rests at 1.0 and was asked
+   --  6.87e10 upwards): it answers downwards at the first level, so the upward
+   --  way stops there, never asked more than that first level, also when the
+   --  model has lost the channel's noise (the probe measures it again before
+   --  it begins). A deadband is two-sided: small asks fail both ways, a larger
+   --  one succeeds, and the channel is found answering, not called dead or at
+   --  an end, however much wider the band is than what the rest of the body
+   --  needed (the rest of the body bounds a channel in no way). A disconnected
+   --  channel answers neither way at any level: asked as many levels each way
+   --  as a float has bits, it is called dead; with its noise unmeasured, so that
+   --  nothing tells whether its reading followed, it is asked the same and
+   --  called blind, not dead.
    procedure Probe_Limits_And_Deadbands is
       use type Driver.Robot.Motion.Sense;
       package Mo renames Driver.Robot.Motion;
       R        : Mo.Two_Way_Report;
       Up, Down : Real;
       Finished : Boolean;
-   begin
-      Probe_Idle_Both_Ways (At_Upper_Limit, Real'Last, R, Up, Down, Finished);
-      Check (Finished, "the probe of a channel at its upper limit did not finish");
-      Check (R.At_End (Mo.Increasing) and then R.Levels (Mo.Increasing) = 1,
-             "the upward way of a channel at its upper limit was asked" & R.Levels (Mo.Increasing)'Image
-             & " levels, not stopped at the first, where the downward way answered");
-      Check (Up <= 1.0e-5, "the channel at its upper limit was asked" & Up'Image & " upwards");
-      Check (R.Answered = 1.0e-5 and then not R.Dead and then not R.At_End (Mo.Decreasing),
-             "the channel at its upper limit is not found answering downwards from the first level");
-      --  Down from 1e-5 it follows to 1e-3 (level 8, 1.28e-3, takes it there);
-      --  level 9 takes it no further: its own end.
-      Check (R.Levels (Mo.Decreasing) = 9, "the downward way ended after" & R.Levels (Mo.Decreasing)'Image & " levels, not 9");
 
-      --  Every other channel has answered by 1e-4; the deadband yields at
-      --  level 4, 8e-5.
-      Probe_Idle_Both_Ways (Deadband, 1.0e-4, R, Up, Down, Finished);
+      procedure Check_Upper_Limit (Noise : Noise_State; Name : String) is
+      begin
+         Probe_Idle_Both_Ways (At_Upper_Limit, Noise, R, Up, Down, Finished);
+         Check (Finished, "the probe of a channel at its upper limit, its noise " & Name & ", did not finish");
+         Check (R.At_End (Mo.Increasing) and then R.Levels (Mo.Increasing) = 1,
+                "the upward way of a channel at its upper limit, its noise " & Name & ", was asked"
+                & R.Levels (Mo.Increasing)'Image & " levels, not stopped at the first, where the downward way answered");
+         Check (Up <= 1.0e-5, "the channel at its upper limit, its noise " & Name & ", was asked" & Up'Image & " upwards");
+         Check (R.Answered = 1.0e-5 and then not R.Dead and then not R.Blind and then not R.At_End (Mo.Decreasing),
+                "the channel at its upper limit, its noise " & Name & ", is not found answering downwards from the"
+                & " first level");
+         --  Down from 1e-5 it follows to 1e-3 (level 8, 1.28e-3, takes it there);
+         --  level 9 takes it no further: its own end.
+         Check (R.Levels (Mo.Decreasing) = 9,
+                "the downward way, the channel's noise " & Name & ", ended after" & R.Levels (Mo.Decreasing)'Image
+                & " levels, not 9");
+      end Check_Upper_Limit;
+   begin
+      Check_Upper_Limit (Measured, "measured");
+      Check_Upper_Limit (Lost, "lost");
+
+      --  The rest of the body was first seen at 1e-5; the deadband yields at
+      --  level 4, 8e-5, eight times that.
+      Probe_Idle_Both_Ways (Deadband, Measured, R, Up, Down, Finished);
       Check (Finished, "the probe of a channel with a deadband did not finish");
       Check (not R.Dead and then R.Answered = 8.0e-5,
              "a deadband of 5e-5 is not found answering at 8e-5: answered at" & R.Answered'Image
@@ -2106,22 +2138,31 @@ package body Driver.Robot.Tests is
       Check (not R.At_End (Mo.Increasing) and then not R.At_End (Mo.Decreasing),
              "a channel with a deadband is called at an end");
 
-      --  Every other channel has answered by 4e-5 (level 3): the deadband of
-      --  5e-5 is wider, and yields at level 4, 8e-5, twice that.
-      Probe_Idle_Both_Ways (Deadband, 4.0e-5, R, Up, Down, Finished);
-      Check (Finished, "the probe of a channel with a deadband wider than the others needed did not finish");
-      Check (not R.Dead and then R.Answered = 8.0e-5,
-             "a deadband of 5e-5, where every other channel answered by 4e-5, is not pushed through to 8e-5:"
-             & " answered at" & R.Answered'Image & (if R.Dead then ", called dead" else ""));
+      --  A deadband of 5e-4 yields at level 7, 6.4e-4, sixty-four times what
+      --  the rest of the body needed.
+      Probe_Idle_Both_Ways (Wide_Deadband, Measured, R, Up, Down, Finished);
+      Check (Finished, "the probe of a channel with a wide deadband did not finish");
+      Check (not R.Dead and then R.Answered = 6.4e-4,
+             "a deadband of 5e-4 is not found answering at 6.4e-4: answered at" & R.Answered'Image
+             & (if R.Dead then ", called dead" else ""));
+      Check (not R.At_End (Mo.Increasing) and then not R.At_End (Mo.Decreasing),
+             "a channel with a wide deadband is called at an end");
 
-      --  Every other channel has answered by 4e-5 (level 3).
-      Probe_Idle_Both_Ways (Disconnected, 4.0e-5, R, Up, Down, Finished);
+      --  Neither way answers at any level: every level each way is asked, the
+      --  last 1e-5 times two to the power of one less than the bits of a float.
+      Probe_Idle_Both_Ways (Disconnected, Measured, R, Up, Down, Finished);
       Check (Finished, "the probe of a disconnected channel did not finish");
-      Check (R.Dead and then R.Levels (Mo.Increasing) = 4 and then R.Levels (Mo.Decreasing) = 4,
-             "a channel that answers neither way is not called dead once both ways were asked 8e-5, twice what"
-             & " the others needed: levels" & R.Levels (Mo.Increasing)'Image & R.Levels (Mo.Decreasing)'Image);
-      Check (Up <= 8.0e-5 and then Down <= 8.0e-5,
+      Check (R.Dead and then not R.Blind and then R.Levels (Mo.Increasing) = Real'Machine_Mantissa
+             and then R.Levels (Mo.Decreasing) = Real'Machine_Mantissa,
+             "a channel that answers neither way is not called dead once asked every level each way: levels"
+             & R.Levels (Mo.Increasing)'Image & R.Levels (Mo.Decreasing)'Image);
+      Check (Up = 1.0e-5 * 2.0 ** (Real'Machine_Mantissa - 1) and then Down = Up,
              "the dead channel was asked" & Up'Image & " up and" & Down'Image & " down");
+
+      --  Its noise unmeasured, nothing tells a following from none.
+      Probe_Idle_Both_Ways (Disconnected, Unmeasurable, R, Up, Down, Finished);
+      Check (Finished, "the probe of a disconnected channel with no noise did not finish");
+      Check (R.Blind and then not R.Dead, "a channel whose noise is unmeasured is called dead, or not blind");
    end Probe_Limits_And_Deadbands;
 
    --  ── The kinematics of a synthetic arm ──
@@ -4231,8 +4272,9 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
                              & "stack, as the decider's does", Estimate_In_A_Task'Access);
       Driver.Tests.Register ("robot.probe.limits", "a channel at its limit one way is asked ever further that way though "
-                             & "it answered the other way, a deadband is not found or not pushed through up to twice what "
-                             & "every other channel needed, or a channel that answers neither way is asked past that",
+                             & "it answered the other way (its noise lost or not), a deadband is not found however much "
+                             & "wider than what the rest of the body needed, a channel that answers neither way is called "
+                             & "dead before every level was asked each way, or one whose noise is unmeasured is called dead",
                              Probe_Limits_And_Deadbands'Access);
       Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);

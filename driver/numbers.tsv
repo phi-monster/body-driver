@@ -682,8 +682,8 @@ driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * Half / (Real (N
 driver-robot-boot.adb	/ 2.0;	2.0	structure	a view keeps half of itself in sight while turning by half
 driver-robot-boot.adb	Col := Col / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
-driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P, First_Followed);	0.0	structure	from zero: the first step is the smallest every reading can tell
-driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P, First_Followed);	1.0	structure	the positive direction for every channel
+driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	0.0	structure	from zero: the first step is the smallest every reading can tell
+driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	1.0	structure	the positive direction for every channel
 driver-robot-boot.adb	Eye : Eye_Id := 1;	1	structure	a placeholder, set before it is read
 driver-robot-boot.adb	Factor (G) := 2.0 * Factor (G);	2.0	numerics	doubling search: each round pushes twice as far as the one before, so the evidence any eye needs is reached in a number of rounds logarithmic in it
 driver-robot-boot.adb	Factor : array (1 .. Count) of Real := [others => 1.0];	1.0	structure	the first round pushes by the amounts the probes found
