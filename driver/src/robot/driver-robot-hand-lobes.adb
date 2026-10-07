@@ -767,7 +767,7 @@ package body Driver.Robot.Hand.Lobes is
       type Votes is array (0 .. 2 * Reach) of Real;
 
       Flips   : Natural;
-      Doubt_Now, Doubt_Before : Real := 0.0;   --  the expected error after the last round and the round before
+      Doubt_Now, Doubt_Before, Doubt_Earlier : Real := 0.0;   --  the expected error after the last round, the one before and the one before that
 
       function Changed_Neighbour (J : Positive; Dc, Dr : Integer) return Natural is
          P : constant Natural := At_Pixel (At_Pixel'First + J - 1);
@@ -828,6 +828,7 @@ package body Driver.Robot.Hand.Lobes is
          end loop;
          Cap := Kind_A / (Real (Total) + 2.0);
          Flips := 0;
+         Doubt_Earlier := Doubt_Before;
          Doubt_Before := Doubt_Now;
          Doubt_Now := 0.0;
          for J in 1 .. Total loop
@@ -857,12 +858,16 @@ package body Driver.Robot.Hand.Lobes is
       --  a kind of everything. After, it is the doubt, the expected error,
       --  which goes on sharpening for many rounds after the labels have
       --  stopped: A14's final ends, 89 294 pixels, left 12 962 to neither when
-      --  the rounds ended with the labels (nine rounds), 3 917 when they ended
-      --  with the doubt (25), and 3 468 after 1 120 rounds. And the rounds end
-      --  when a label has crossed the picture.
+      --  the rounds ended with the labels (nine rounds), 3 840 when they ended
+      --  with the doubt (23), and 3 468 after 1 120 rounds. A round that takes
+      --  the doubt back to what it was two rounds before has not moved it
+      --  either, though the round before did: two pixels whose neighbours each
+      --  tell them to take the other's label swap it for ever. And the rounds
+      --  end when a label has crossed the picture.
       function Labels_Settled return Boolean is (Real (Flips) < Driver.Conventions.Unchanged_Fraction * Real (Total));
       function Doubt_Settled return Boolean is
-        (abs (Doubt_Now - Doubt_Before) <= Driver.Conventions.Unchanged_Fraction * Doubt_Now);
+        (abs (Doubt_Now - Doubt_Before) <= Driver.Conventions.Unchanged_Fraction * Doubt_Now
+         or else abs (Doubt_Now - Doubt_Earlier) <= Driver.Conventions.Unchanged_Fraction * Doubt_Now);
       function Crossed return Boolean is (Rounds >= W + H);
 
       procedure Turn_Parts (Turned : out Natural) is

@@ -108,14 +108,38 @@ the rounds have settled every connected part of one label is tried the other
 way round against the histograms of all the rest, and turned when that is the
 likelier by more than Z squared over two in the log of the likelihood. Last
 the eight neighbours are heard (how many of them are of each kind, another
-histogram), and the rounds end when the labels one changed are fewer than
-`Unchanged_Fraction` of them (the convention for an iterative estimate). A pixel is given to a
-kind only when the other kind's share of it is below what one test alarms at
-(Z); the rest are left unassigned, never guessed, and the log counts them. On
-A14's final ends: of 89 294 changed pixels, 51 512 to the low end, 34 314 to
-the high end, 3 468 to neither; against the truth taken from the dark region
-connected to the fingers at the starting end (itself imperfect), 78 865 of the
-85 826 assigned are right, 91.9 %, where the seeds alone were 86.6 % right.
+histogram). A pixel is given to a kind only when the other kind's share of it
+is below what one test alarms at (Z); the rest are left unassigned, never
+guessed, and the log counts them.
+
+The rounds end by the convention for an iterative estimate: it has stopped
+when one more round moves it by less than `Unchanged_Fraction` of its own
+size, and what is estimated differs between the two phases. While only the
+brightness speaks the estimate is the labels, and the phase ends when fewer
+than that fraction of them change in a round (run on, the brightness alone
+drifts to one kind for everything); the parts are then turned, and the phase
+begins again unless none was turned or a pass turned no fewer than the pass
+before it (two sets of parts that each explain the other better turned can be
+turned back and forth for ever: A14's stage of 62 570 changed pixels turned
+four to nine parts at every pass for 1 120 rounds, fourteen seconds, and left
+38 % of its pixels to neither; it now ends in 33 rounds, 0.23 s, with 6 %;
+`hand.lobes.cycle`). Once the neighbours are heard the estimate is the doubt,
+the expected error, which goes on sharpening for many rounds after the labels
+have stopped, a pixel at a round from the clear ones around it: on A14's final
+ends 12 962 pixels were left to neither when the rounds ended with the labels
+(nine rounds), 3 840 when they end with the doubt (23 rounds, 0.24 s), 3 468
+after 1 120 rounds (the most a label can cross the picture in, its width and
+height); on two regions with a quarter of their pixels dark at both ends, 2 177
+of 2 522 were left to neither by the labels' rule and 255 by the doubt's
+(`hand.lobes.blank`). A round that takes the doubt back to what it was two
+rounds before has not moved it either, though the round before did: two pixels
+whose neighbours each tell them to take the other's label swap it every round,
+and ran the second scene of that test to the 200 rounds a label can cross its
+picture in. On A14's final ends, 89 294 changed pixels: 51 177 to the low end,
+34 277 to the high end, 3 840 to neither; against the truth taken from the dark
+region connected to the fingers at the starting end (itself imperfect), 78 474
+of the 85 454 assigned are right, 91.8 %, where the seeds alone were 86.6 %
+right.
 
 **Lesson: the parts of a mixture's sets are not all lobes.** Each end's
 pixels are cleaned of what is one pixel across and split in their
@@ -303,7 +327,17 @@ the body touch first.
   hand whose fingers do not reach the border of its own eye's picture gets no
   lobes. Path A takes the memory of the eye's poses (`Hand.Selfsight`, written
   so that the move is a rename) into the model behind `Self_Mask`.
-- Pixels that no end's brightness tells (both ends have the robot's, or
-  neither) stay unassigned; the log counts them. A glossy finger whose
-  brightness runs out of the band measured from the seeds loses those pixels
-  to it, never to the other end.
+- Pixels the mixture cannot tell (the other kind's share of them is above what
+  one test alarms at) stay unassigned; the log counts them (about 4 % of
+  A14's changed pixels). Dark stripes on dark stripes, the keyboard keys under
+  A14's open finger, are where it is wrong: 91 % of the assigned pixels agree
+  with the dark region of the starting view, and what is wrong forms
+  fragments that the size rule leaves out of the lobes.
+- A finger much smaller than the others (under the share 1 / N of the biggest
+  part, N the parts of its end) is taken for a fragment, and one cut in several
+  parts by a gap wider than a pixel or two is several lobes; the closing
+  direction needs two lobes, or one and the robot's still pixels (empty until
+  the model gives them).
+- The subprograms that fitted a lobe's shape from the matcher's moves
+  (`Lobes.Find`, `Shape.From_Moves`, `Shape.Fit`) are not reached from the
+  driver now; the deadcode report lists them.

@@ -610,16 +610,26 @@ package body Driver.Robot.Hand.Lobes.Tests is
    end Tip_Is_The_Reach_Not_The_Strip;
 
 
-   procedure Mixture_Stops_On_Noise is
-      --  Changed pixels whose two brightnesses are noise, and seeds that are
-      --  noise: nothing to tell the kinds by. The mixture must end its rounds
-      --  by its own rules, not by the rounds it is allowed, and say how little
-      --  it knows: A14's stage of 62 570 changed pixels turned four to nine
-      --  parts at every pass for a thousand rounds (fifteen seconds, in a
-      --  loop that must answer its simulator within twenty), and left 38 % of
-      --  its pixels to neither.
-      Side  : constant := 70;
-      Total : constant := Side * Side;
+   procedure Parts_Are_Not_Turned_For_Ever is
+      --  Sixteen separate parts of changed pixels, each with a brightness of
+      --  its own at each end, and seeds right in most of their pixels. A part
+      --  is turned when the rest explain it better the other way round, and
+      --  turning one moves what the others are explained by, so a pass can
+      --  turn parts that the next turns back. A pass that turns no fewer
+      --  parts than the one before has not come closer, and the rounds must
+      --  end there, not at the most a label can cross the picture in (A14's
+      --  stage of 62 570 changed pixels turned four to nine parts at every
+      --  pass for 1 120 rounds, fourteen seconds, and left 38 % of its pixels
+      --  to neither; here eight of twelve scenes ran to that most).
+      Grid  : constant := 4;
+      Block : constant := 12;
+      Pitch : constant := Block + 2;
+      Side  : constant := Grid * Pitch;
+      Cells : constant := Grid * Grid;
+      Total : constant := Cells * Block * Block;
+      Span  : constant Real := 40.0;
+      Anchored_Low, Other_Low : array (1 .. Cells) of Real;
+      Is_Robot : array (1 .. Cells) of Boolean;
       Where    : Places (1 .. Total);
       Seeds    : Flags (1 .. Total);
       Anchored : Driver.Real_Array (1 .. Total);
@@ -627,23 +637,126 @@ package body Driver.Robot.Hand.Lobes.Tests is
       Given    : Kinds (1 .. Total);
       Rounds   : Natural;
       Doubt    : Real;
-      Level    : Real;
-      Coin     : Real;
+      Next     : Natural;
+
+      function Uniform return Real is (Real (Ada.Numerics.Float_Random.Random (Gen)));
    begin
-      Ada.Numerics.Float_Random.Reset (Gen, 8);
-      for J in 1 .. Total loop
-         Where (J) := J - 1;
-         Level := Real (Ada.Numerics.Float_Random.Random (Gen));
-         Anchored (J) := Real'Rounding (255.0 * Level);
-         Level := Real (Ada.Numerics.Float_Random.Random (Gen));
-         Other (J) := Real'Rounding (255.0 * Level);
-         Coin := Real (Ada.Numerics.Float_Random.Random (Gen));
-         Seeds (J) := Coin < 0.5;
+      for Seed in 2 .. 8 loop
+         Ada.Numerics.Float_Random.Reset (Gen, Seed);
+         for C in 1 .. Cells loop
+            Anchored_Low (C) := Real'Rounding ((255.0 - Span) * Uniform);
+            Other_Low (C) := Real'Rounding ((255.0 - Span) * Uniform);
+            Is_Robot (C) := Uniform < 0.5;
+         end loop;
+         Next := 0;
+         for Cell_Row in 0 .. Grid - 1 loop
+            for Cell_Column in 0 .. Grid - 1 loop
+               for R in 0 .. Block - 1 loop
+                  for Column in 0 .. Block - 1 loop
+                     Next := Next + 1;
+                     Where (Next) := (Cell_Row * Pitch + R) * Side + Cell_Column * Pitch + Column;
+                     Anchored (Next) := Real'Rounding (Anchored_Low (Cell_Row * Grid + Cell_Column + 1) + Span * Uniform);
+                     Other (Next) := Real'Rounding (Other_Low (Cell_Row * Grid + Cell_Column + 1) + Span * Uniform);
+                     Seeds (Next) := (if Uniform < 0.2 then not Is_Robot (Cell_Row * Grid + Cell_Column + 1)
+                                      else Is_Robot (Cell_Row * Grid + Cell_Column + 1));
+                  end loop;
+               end loop;
+            end loop;
+         end loop;
+         Tell_Ends (Side, Side, Where, Seeds, Anchored, Other, Given, Rounds, Doubt);
+         Check (Rounds < 2 * Side,
+                "scene" & Integer'Image (Seed) & ": the mixture ran" & Natural'Image (Rounds)
+                & " rounds, to the most it is allowed");
+         Check (Doubt >= 0.0 and then Doubt <= Real (Total) / 2.0,
+                "scene" & Integer'Image (Seed) & ": the doubt is not a count of pixels:" & Real'Image (Doubt));
       end loop;
-      Tell_Ends (Side, Side, Where, Seeds, Anchored, Other, Given, Rounds, Doubt);
-      Check (Rounds < 2 * Side, "the mixture on noise ran" & Natural'Image (Rounds) & " rounds, to the most it is allowed");
-      Check (Doubt >= 0.0 and then Doubt <= Real (Total) / 2.0, "the doubt is not a count of pixels:" & Real'Image (Doubt));
-   end Mixture_Stops_On_Noise;
+   end Parts_Are_Not_Turned_For_Ever;
+
+   procedure Neighbours_Decide_What_Brightness_Cannot is
+      --  Two regions, the robot at the anchored end on the left and at the
+      --  other end on the right, in each of which some pixels are dark at
+      --  both ends: their brightnesses tell nothing, and only their neighbours
+      --  can, a pixel at a round from the clear ones around them. The seeds
+      --  are right but for a few of the clear pixels, and a coin on the rest.
+      --  The rounds must go on while the doubt, the expected error, still
+      --  moves (A14's final ends: 12 962 of 89 294 pixels left to neither when
+      --  the rounds ended with the labels, 3 840 when they end with the
+      --  doubt), and must end when it stops moving or comes back to what it was
+      --  two rounds before, not at the most a label can cross the picture in:
+      --  two pixels whose neighbours each tell them to take the other's label
+      --  swap it every round for ever (scene 2: 200 rounds, 21 with the rule).
+      type Layout is record
+         Seed  : Integer;
+         Blank : Real;   --  the share of the pixels dark at both ends
+         Wrong : Real;   --  the share of the clear pixels whose seed is wrong
+      end record;
+      Layouts : constant array (1 .. 3) of Layout := [(1, 0.25, 0.05), (2, 0.25, 0.05), (3, 0.40, 0.10)];
+      Side     : constant := 100;
+      Total    : constant := Side * Side;
+      Where    : Places (1 .. Total);
+      Seeds    : Flags (1 .. Total);
+      Anchored : Driver.Real_Array (1 .. Total);
+      Other    : Driver.Real_Array (1 .. Total);
+      Given    : Kinds (1 .. Total);
+      Blank    : Flags (1 .. Total);
+      On_Left  : Flags (1 .. Total);
+      Rounds   : Natural;
+      Doubt    : Real;
+      Right, Undecided : Natural;
+
+      function Uniform return Real is (Real (Ada.Numerics.Float_Random.Random (Gen)));
+      function Draw (Low, High : Real) return Real is (Real'Rounding (Low + (High - Low) * Uniform));
+   begin
+      for Which in Layouts'Range loop
+         Ada.Numerics.Float_Random.Reset (Gen, Layouts (Which).Seed);
+         for Row in 0 .. Side - 1 loop
+            for Column in 0 .. Side - 1 loop
+               declare
+                  J     : constant Positive := Row * Side + Column + 1;
+                  Empty : constant Boolean := Uniform < Layouts (Which).Blank;
+               begin
+                  Where (J) := J - 1;
+                  Blank (J) := Empty;
+                  On_Left (J) := Column < Side / 2;
+                  if Empty then
+                     Anchored (J) := Draw (20.0, 60.0);
+                     Other (J) := Draw (20.0, 60.0);
+                     Seeds (J) := Uniform < 0.5;
+                  elsif On_Left (J) then
+                     Anchored (J) := Draw (20.0, 45.0);
+                     Other (J) := Draw (80.0, 250.0);
+                     Seeds (J) := not (Uniform < Layouts (Which).Wrong);
+                  else
+                     Anchored (J) := Draw (80.0, 250.0);
+                     Other (J) := Draw (20.0, 45.0);
+                     Seeds (J) := Uniform < Layouts (Which).Wrong;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         Tell_Ends (Side, Side, Where, Seeds, Anchored, Other, Given, Rounds, Doubt);
+         Right := 0;
+         Undecided := 0;
+         for J in 1 .. Total loop
+            if Blank (J) then
+               case Given (J) is
+                  when Anchored_End =>
+                     Right := Right + Boolean'Pos (On_Left (J));
+                  when Other_End =>
+                     Right := Right + Boolean'Pos (not On_Left (J));
+                  when Neither =>
+                     Undecided := Undecided + 1;
+               end case;
+            end if;
+         end loop;
+         Check (Rounds < 2 * Side,
+                "scene" & Integer'Image (Which) & ": the mixture ran" & Natural'Image (Rounds)
+                & " rounds, to the most it is allowed");
+         Check (Undecided < Right,
+                "scene" & Integer'Image (Which) & ": of the pixels dark at both ends" & Natural'Image (Right)
+                & " went to the right end and" & Natural'Image (Undecided) & " to neither");
+      end loop;
+   end Neighbours_Decide_What_Brightness_Cannot;
 
    procedure Change_Nothing is
       Here  : constant Driver.Pixels.View := View_At (Two, False, 2, (others => False));
@@ -671,8 +784,10 @@ package body Driver.Robot.Hand.Lobes.Tests is
       Driver.Tests.Register ("hand.lobes.poses", "poses that did not move the eye place lobes",
                              Change_Without_Poses'Access);
       Driver.Tests.Register ("hand.lobes.nothing", "no change places lobes", Change_Nothing'Access);
-      Driver.Tests.Register ("hand.lobes.noise", "the mixture on pixels it cannot tell runs to the end of the rounds it is allowed",
-                             Mixture_Stops_On_Noise'Access);
+      Driver.Tests.Register ("hand.lobes.cycle", "parts turned back and forth are not turned for ever",
+                             Parts_Are_Not_Turned_For_Ever'Access);
+      Driver.Tests.Register ("hand.lobes.blank", "pixels dark at both ends are told by their neighbours, and the rounds end",
+                             Neighbours_Decide_What_Brightness_Cannot'Access);
       Driver.Tests.Register ("hand.lobes.fragments", "fragments of a sixtieth of a finger's size are lobes",
                              Fragments_Are_Not_Lobes'Access);
       Driver.Tests.Register ("hand.lobes.doubt", "parts no larger than the mixture's doubt are lobes",
