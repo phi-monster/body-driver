@@ -751,10 +751,28 @@ package body Driver.Action.Plants.Tests is
                                W.Up, W.Things (I).Mu).Rests;
    end Rests_On;
 
+   --  The live plant's rule, kept by this one too so that every test of the
+   --  engine tests the engine's use of windows: what reads the lower layers'
+   --  models is asked inside Within, what takes beats of its own outside.
+   procedure Must_Be_Inside (W : World; What : String) is
+   begin
+      if not W.Inside then
+         raise Program_Error with What & " asked outside a window, where the models change";
+      end if;
+   end Must_Be_Inside;
+
+   procedure Must_Be_Outside (W : World; What : String) is
+   begin
+      if W.Inside then
+         raise Program_Error with What & " asked inside a window, which holds the beat it would wait for";
+      end if;
+   end Must_Be_Outside;
+
    overriding procedure Look (W : in out World; S : out Snapshot) is
       Sigma : constant Real := W.Sigma;
       Cov   : constant Mat3 := (Sigma * Sigma) * Identity3;
    begin
+      Must_Be_Outside (W, "a look");
       S := (Beat => Driver.Clock.Beat (W.Beat), Up => (Unit_Vector => W.Up, Sigma => Sigma), Still => not W.Moved,
             others => <>);
       for A of W.Arms loop
@@ -839,7 +857,7 @@ package body Driver.Action.Plants.Tests is
       S.Eyes.Append (Eye_State'(Pose => (Pose => W.Eye, Position_Covariance => Cov, Rotation_Covariance => Cov), On_Arm => 0));
    end Look;
 
-   overriding function Reach (W : World; Goal : Arm_Goal) return Reach_Answer is
+   function Reach_Of (W : World; Goal : Arm_Goal) return Reach_Answer is
       A : constant Sim_Arm := W.Arms (Arm_Index (W, Goal.Arm));
    begin
       if abs (Goal.Tool.Translation - A.Base) > A.Reach then
@@ -862,6 +880,12 @@ package body Driver.Action.Plants.Tests is
          end if;
       end;
       return (Status => Reachable, Why => Null_Unbounded_String);
+   end Reach_Of;
+
+   overriding function Reach (W : World; Goal : Arm_Goal) return Reach_Answer is
+   begin
+      Must_Be_Inside (W, "a reach");
+      return Reach_Of (W, Goal);
    end Reach;
 
    procedure Put_Tool (W : in out World; Arm : Arm_Id; Pose : Rigid; Blocked : out Boolean) is
@@ -916,6 +940,7 @@ package body Driver.Action.Plants.Tests is
       Rejected : array (1 .. Natural (W.Arms.Length)) of Boolean := [others => False];
       Beats   : Natural := 0;
    begin
+      Must_Be_Outside (W, "a move");
       R := (others => <>);
       for G of O.Arms loop
          declare
@@ -923,7 +948,7 @@ package body Driver.Action.Plants.Tests is
             Goal : constant Rigid := (if G.Position_Only
                                       then (Rotation => W.Arms (I).Tool.Rotation, Translation => G.Tool.Translation)
                                       else G.Tool);
-            Can  : constant Reach_Answer := Reach (W, (G with delta Tool => Goal));
+            Can  : constant Reach_Answer := Reach_Of (W, (G with delta Tool => Goal));
          begin
             if Can.Status /= Reachable then
                Rejected (I) := True;
@@ -985,12 +1010,14 @@ package body Driver.Action.Plants.Tests is
    overriding function Predicted (W : World; T : Thing_Id; Beats : Natural) return Point_Estimate is
       I : constant Positive := Index_Of (W, T);
    begin
+      Must_Be_Inside (W, "a prediction");
       return (Mean       => Centre_Of (W, I) + Real (Beats) * W.Things (I).Drift,
               Covariance => (W.Sigma * W.Sigma) * Identity3);
    end Predicted;
 
    overriding procedure Learn (W : in out World; L : Lesson) is
    begin
+      Must_Be_Outside (W, "a lesson");
       if L.Kind = Friction_Learned then
          for B of W.Learned loop
             if B.Thing = L.Thing then
@@ -1010,13 +1037,20 @@ package body Driver.Action.Plants.Tests is
    overriding function In_View (W : World; Point : Vec3) return Boolean is
       Q : constant Vec3 := Transpose (W.Eye.Rotation) * (Point - W.Eye.Translation);
    begin
+      Must_Be_Inside (W, "a view");
       return Q (3) > 0.0 and then Arctan (Sqrt (Q (1) ** 2 + Q (2) ** 2), Q (3)) <= Half_View;
    end In_View;
 
    overriding procedure Within (W : in out World; During : not null access procedure) is
-      pragma Unreferenced (W);
    begin
+      Must_Be_Outside (W, "a window");
+      W.Inside := True;
       During.all;
+      W.Inside := False;
+   exception
+      when others =>
+         W.Inside := False;
+         raise;
    end Within;
 
 end Driver.Action.Plants.Tests;

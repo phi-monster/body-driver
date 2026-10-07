@@ -261,8 +261,24 @@ package body Driver.Action.Plants.Live is
       return S;
    end Snapshot_Of;
 
-   --  The models are read only in a beat's window: the main loop changes
-   --  them every beat, whether the decider takes the beat or not.
+   --  The models are read and written only in a beat's window: the main loop
+   --  changes them every beat, whether the decider takes the beat or not. What
+   --  needs the models is asked inside a window; what takes a beat of its own
+   --  would wait for the one the window holds, for ever, so it is refused.
+   procedure Must_Be_Inside (P : Live; What : String) is
+   begin
+      if not P.Inside then
+         raise Program_Error with What & " asked outside a beat's window, where the models change";
+      end if;
+   end Must_Be_Inside;
+
+   procedure Must_Be_Outside (P : Live; What : String) is
+   begin
+      if P.Inside then
+         raise Program_Error with What & " asked inside a beat's window, which holds the beat it would wait for";
+      end if;
+   end Must_Be_Outside;
+
    overriding procedure Look (P : in out Live; S : out Driver.Action.Snapshots.Snapshot) is
       procedure During is
       begin
@@ -270,6 +286,7 @@ package body Driver.Action.Plants.Live is
          S := Snapshot_Of (P.Robot.all, P.Hands.all, P.Scene.all, P.Last);
       end During;
    begin
+      Must_Be_Outside (P, "a look");
       if not P.Started then
          P.Episode := Driver.Beats.Episode;
          P.Started := True;
@@ -290,15 +307,9 @@ package body Driver.Action.Plants.Live is
             raise;
       end Held;
    begin
+      Must_Be_Outside (P, "a window");
       Driver.Beats.Within_A_Beat (Held'Access);
    end Within;
-
-   procedure Must_Be_Inside (P : Live; What : String) is
-   begin
-      if not P.Inside then
-         raise Program_Error with What & " asked outside a beat's window, where the models change";
-      end if;
-   end Must_Be_Inside;
 
    overriding function Reach (P : Live; Goal : Arm_Goal) return Reach_Answer is
    begin
@@ -331,6 +342,7 @@ package body Driver.Action.Plants.Live is
    --  the motion layer moves one plan or one set of targets at a time.
    overriding procedure Move (P : in out Live; O : Order; R : out Report) is
    begin
+      Must_Be_Outside (P, "a move");
       R := (others => <>);
       if O.Arms.Is_Empty and then O.Closers.Is_Empty then
          Driver.Beats.Within_A_Beat (Nothing'Access);
@@ -405,8 +417,10 @@ package body Driver.Action.Plants.Live is
          end case;
       end Recording;
    begin
+      Must_Be_Outside (P, "a lesson");
       --  The world is written in a beat's window too: the main loop writes it
-      --  every beat.
+      --  every beat, and the write goes into the recording (kind W) at the
+      --  point of the stream where the beat is, where a replay applies it.
       Driver.Beats.Within_A_Beat (Recording'Access);
    end Learn;
 

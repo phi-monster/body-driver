@@ -43,7 +43,9 @@ package Driver.Action.Plants.Live is
    --  During runs in one beat's window (Driver.Beats.Within_A_Beat), from
    --  the readings of that beat; Reach, In_View and Predicted asked outside
    --  one raise Program_Error, since the main loop changes the models every
-   --  beat.
+   --  beat. So do Look, Move, Learn and another Within asked inside one:
+   --  each takes a beat of its own and would wait for ever on the beat the
+   --  window holds.
    overriding function Reach (P : Live; Goal : Arm_Goal) return Reach_Answer;
    overriding procedure Move (P : in out Live; O : Order; R : out Report);
    overriding function Predicted (P : Live; T : Driver.Action.Snapshots.Thing_Id; Beats : Natural)

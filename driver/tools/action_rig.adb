@@ -24,6 +24,13 @@ package body Action_Rig is
       end if;
    end Must_Be_Inside;
 
+   procedure Must_Be_Outside (P : Rig; What : String) is
+   begin
+      if P.Inside then
+         raise Program_Error with What & " asked inside a beat's window, which holds the beat it would wait for";
+      end if;
+   end Must_Be_Outside;
+
    overriding procedure Look (P : in out Rig; S : out Driver.Action.Snapshots.Snapshot) is
       procedure During is
       begin
@@ -40,6 +47,7 @@ package body Action_Rig is
          S.Beat := P.Last.Beat;
       end During;
    begin
+      Must_Be_Outside (P, "a look");
       if not P.Started then
          P.Episode := Driver.Beats.Episode;
          P.Started := True;
@@ -52,7 +60,9 @@ package body Action_Rig is
       begin
          P.Last := Driver.Beats.Latest.all;
          P.Inside := True;
-         During.all;
+         --  The simulated world keeps the same rule: it answers its views and
+         --  predictions only inside its own window.
+         P.World.Within (During);
          P.Inside := False;
       exception
          when others =>
@@ -60,6 +70,7 @@ package body Action_Rig is
             raise;
       end Held;
    begin
+      Must_Be_Outside (P, "a window");
       Driver.Beats.Within_A_Beat (Held'Access);
    end Within;
 
@@ -91,6 +102,7 @@ package body Action_Rig is
 
    overriding procedure Move (P : in out Rig; O : Plants.Order; R : out Plants.Report) is
    begin
+      Must_Be_Outside (P, "a move");
       R := (others => <>);
       if O.Arms.Is_Empty and then O.Closers.Is_Empty then
          Driver.Beats.Within_A_Beat (Nothing'Access);
@@ -174,6 +186,7 @@ package body Action_Rig is
          P.World.Learn (L);
       end Recording;
    begin
+      Must_Be_Outside (P, "a lesson");
       Driver.Beats.Within_A_Beat (Recording'Access);
    end Learn;
 

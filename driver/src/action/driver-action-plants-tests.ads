@@ -121,6 +121,7 @@ package Driver.Action.Plants.Tests is
       Noise     : Ada.Numerics.Float_Random.Generator;
       Learned   : Bound_Vectors.Vector;
       Moved     : Boolean := False;      --  something moved in the last beat
+      Inside    : Boolean := False;      --  a window of Within is open
    end record;
 
    procedure Start (W : in out World; Place : Rigid; Sigma, Pitch : Real; Seed : Integer);
@@ -170,7 +171,12 @@ package Driver.Action.Plants.Tests is
 
    overriding procedure Look (W : in out World; S : out Snapshot);
    overriding procedure Within (W : in out World; During : not null access procedure);
-   --  Nothing changes between its beats unless it is moved: During runs at once.
+   --  Nothing changes between its beats unless it is moved: During runs at
+   --  once. The rule of a window is kept as the live plant keeps it: Reach,
+   --  In_View and Predicted raise Program_Error outside one, and Look, Move,
+   --  Learn and another Within inside one, so a test of the engine fails
+   --  where the engine would race the main loop or wait for a beat that its
+   --  own window holds.
    overriding function Reach (W : World; Goal : Arm_Goal) return Reach_Answer;
    overriding procedure Move (W : in out World; O : Order; R : out Report);
    overriding function Predicted (W : World; T : Thing_Id; Beats : Natural) return Driver.Uncertain.Point_Estimate;
