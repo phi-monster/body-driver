@@ -1410,6 +1410,193 @@ package body Driver.Robot.Tests is
       end if;
    end Step_Ends_Against_Chatter;
 
+   --  The eye the step tests put in: every channel of group 1 (one, or as many
+   --  as given) credited a visible step of 1.5 millionths (every estimate
+   --  measures the lock-in afresh, so it is put back after each).
+   procedure Put_Eye (M : in out Model; Count : Positive := 1) is
+      S : Eye_Stream renames M.Eyes (1);
+   begin
+      S.Kept_Groups.Clear;
+      S.Kept_Channels.Clear;
+      S.Gains.Clear;
+      S.Gain_Variances.Clear;
+      for C in 1 .. Count loop
+         S.Kept_Groups.Append (1);
+         S.Kept_Channels.Append (C);
+         S.Gains.Append (4.0e12);
+         S.Gain_Variances.Append (1.0);
+      end loop;
+      M.Graph.Effects.Replace_Element
+        (1, (Verdict => Whole, Responding => 1, Textured => 1,
+             Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+   end Put_Eye;
+
+   --  A joint pressed into a table moves about against it (A16's arm 1,
+   --  joint 2: between 1.9758 and 1.9985 for 3,460 beats, and no end to the
+   --  push) and now and then sets a new extreme, a few thousandths of a
+   --  radian beyond the last, a step far beyond what an eye can see, at
+   --  beats that come later and later, each within twice the beats since the
+   --  push began, so that waiting as long as the push took to come as close
+   --  as it did never ends. Such an extreme is no progress: the joint moves
+   --  about by several times as much, and the push ends soon after it
+   --  stopped coming closer, blocked. Pushes 1 to 4 go back and forth by
+   --  0.01 for the group's free pushes and delay to be known; push 5 asks
+   --  1.0, comes to 0.45 in three beats and moves about in a band 0.0227 wide beneath a
+   --  top that rises by 0.002 at beats 2, 5, 10, 18, 31, 51, 84, 136, 219, 352
+   --  and 565 of its chatter (each within twice the beats the push has gone
+   --  on by then, which is as soon as the push may be given up); push 6 goes
+   --  back to 0; push 7 asks 1.0 of a joint that moves about the same for
+   --  two beats and gives way, 0.95 and 1.0: a gain beyond the chatter is
+   --  progress, and the push is not given up.
+   procedure Step_Ends_Against_Rising_Chatter is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Band : constant Real := 0.0227;
+      Rises : constant array (1 .. 11) of Natural := [2, 5, 10, 18, 31, 51, 84, 136, 219, 352, 565];
+      Target, Reading, Top : Real := 0.0;
+   begin
+      for B in 0 .. 799 loop
+         --  The estimates at 64, 128, 256 and 512 beats measured the lock-in afresh
+         --  (the first, the delay of the first four pushes too).
+         if B = 64 or else B = 128 or else B = 256 or else B = 512 then
+            Put_Eye (M);
+         end if;
+         if B in 40 | 46 | 52 | 58 then
+            Target := (if B in 40 | 52 then 0.01 else 0.0);
+         elsif B in 41 | 47 | 53 | 59 then
+            Reading := Target;
+         elsif B = 90 then
+            Target := 1.0;
+         elsif B in 91 .. 93 then
+            Reading := (case B is when 91 => 0.25, when 92 => 0.4, when others => 0.45);
+            Top := 0.45;
+         elsif B in 94 .. 700 then
+            if (for some R of Rises => R = B - 93) then
+               Top := Top + 0.002;
+               Reading := Top;
+            else
+               Reading := Top - Band * Uniform (Rng);
+            end if;
+         elsif B = 701 then
+            Target := 0.0;
+         elsif B = 702 then
+            Reading := 0.0;
+         elsif B = 740 then
+            Target := 1.0;
+         elsif B in 741 .. 743 then
+            Reading := (case B is when 741 => 0.25, when 742 => 0.4, when others => 0.45);
+            Top := 0.45;
+         elsif B in 744 .. 745 then
+            Reading := Top - Band * Uniform (Rng);
+         elsif B in 746 .. 747 then
+            Reading := (if B = 746 then 0.95 else 1.0);
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Reading + 1.0e-12 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Known (Visible_Step (M, 1, 1)), "the eye's visible step is known");
+      Check (Steps.Episodes (M, 1) = 7, "seven pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 7 then
+         declare
+            E    : constant Episode := M.Groups (1).Episodes (5);
+            Wait : constant Natural := M.Groups (1).Delay_Beats;
+         begin
+            Check (E.Ended and then E.Settled, "the push against the table never ends while its joint moves about it");
+            if E.Ended and then E.Settled then
+               Check (E.Blocked and then not E.Rested, "the push against the table is not judged blocked, still moving");
+               Check (E.Closest_At - E.Start <= 3,
+                      "an extreme of the chatter is taken for the push's closest point, at"
+                      & Natural'Image (E.Closest_At - E.Start));
+               Check (E.End_At - E.Closest_At <= Integer'Max (E.Closest_At - E.Start, Wait) + 1,
+                      "the push ends" & Natural'Image (E.End_At - E.Closest_At) & " beats after it last came closer");
+            end if;
+         end;
+         declare
+            E : constant Episode := M.Groups (1).Episodes (7);
+         begin
+            Check (E.Ended and then E.Rested and then not E.Blocked,
+                   "the push that gave way, from 0.45 to its target in two beats, was given up or called blocked");
+         end;
+      end if;
+   end Step_Ends_Against_Rising_Chatter;
+
+   --  A push whose own joint holds still, but another joint of its group moves
+   --  about by a hundredth of a radian every beat (so that the group never
+   --  comes to rest), and whose own reading, exact but for a noise of 1e-12,
+   --  sets a new extreme now and then, by 1e-7: a step that stands far out
+   --  of the push's own scatter (the reading repeats between the rises) but
+   --  is below what an eye can see, 1.5 millionths. It is no progress either:
+   --  no one could tell where the push stands from where it stood, and the
+   --  push ends soon after it stopped coming closer, blocked. Group 1 has
+   --  two channels; pushes 1 to 4 take the first back and forth by 0.01;
+   --  push 5 asks it 1.0, and it comes to 0.45 in three beats and rises by
+   --  1e-7 at beats 2, 5, 10, 18, 31, 51, 84, 136, 219, 352 and 565, a sum
+   --  that stays below the step.
+   procedure Step_Ends_Beside_A_Moving_Joint is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Rises : constant array (1 .. 11) of Natural := [2, 5, 10, 18, 31, 51, 84, 136, 219, 352, 565];
+      Target, Reading : Real_Array (1 .. 2) := [0.0, 0.0];
+   begin
+      for B in 0 .. 700 loop
+         --  The estimates at 64, 128, 256 and 512 beats measured the lock-in afresh.
+         if B = 64 or else B = 128 or else B = 256 or else B = 512 then
+            Put_Eye (M, 2);
+         end if;
+         if B in 40 | 46 | 52 | 58 then
+            Target (1) := (if B in 40 | 52 then 0.01 else 0.0);
+         elsif B in 41 | 47 | 53 | 59 then
+            Reading (1) := Target (1);
+         elsif B = 90 then
+            Target (1) := 1.0;
+         elsif B in 91 .. 93 then
+            Reading (1) := (case B is when 91 => 0.25, when 92 => 0.4, when others => 0.45);
+         elsif B in 94 .. 700 and then (for some R of Rises => R = B - 93) then
+            Reading (1) := Reading (1) + 1.0e-7;
+         end if;
+         if B >= 91 then
+            Reading (2) := 0.01 * (2.0 * Uniform (Rng) - 1.0);
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(Reading (1) + 1.0e-12 * Gaussian (Rng), Reading (2) + 1.0e-12 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target (1), Target (2)]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Known (Visible_Step (M, 1, 1)), "the eye's visible step is known");
+      Check (Steps.Episodes (M, 1) = 5, "five pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 5 then
+         declare
+            E    : constant Episode := M.Groups (1).Episodes (5);
+            Wait : constant Natural := M.Groups (1).Delay_Beats;
+         begin
+            Check (E.Ended and then E.Settled, "the push never ends while another joint of its group moves about");
+            if E.Ended and then E.Settled then
+               Check (E.Blocked and then not E.Rested, "the push is not judged blocked, still moving");
+               Check (E.Closest_At - E.Start <= 3,
+                      "a rise of 1e-7 is taken for the push's closest point, at" & Natural'Image (E.Closest_At - E.Start));
+               Check (E.End_At - E.Closest_At <= Integer'Max (E.Closest_At - E.Start, Wait) + 1,
+                      "the push ends" & Natural'Image (E.End_At - E.Closest_At) & " beats after it last came closer");
+            end if;
+         end;
+      end if;
+   end Step_Ends_Beside_A_Moving_Joint;
+
    --  A joint an eye watches, read exactly as a simulator reads it: every push
    --  closes all but 1.45 % of its ask in one beat and stops there, which is
    --  far beyond the readings' noise and, for a long push, far beyond what
@@ -4981,6 +5168,11 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.steps.chatter", "a push against something its joint keeps chattering against never "
                              & "ends, or a free push that rings about its target is given up or called blocked",
                              Step_Ends_Against_Chatter'Access);
+      Driver.Tests.Register ("robot.steps.creep", "a push pressed into something its joint keeps moving about, which sets a new "
+                             & "extreme of that movement now and then, never ends, or a push whose joint gives way beyond "
+                             & "its chatter is given up", Step_Ends_Against_Rising_Chatter'Access);
+      Driver.Tests.Register ("robot.steps.aside", "a push whose own reading sets a new extreme now and then by less than the step an "
+                             & "eye can see never ends while another joint of its group moves about", Step_Ends_Beside_A_Moving_Joint'Access);
       Driver.Tests.Register ("robot.steps.sight", "a push of a joint an eye watches is called blocked though it stopped "
                              & "short by less than the eye can see, or asked less than the eye can see", Step_Short_Of_Sight'Access);
       Driver.Tests.Register ("robot.steps.free", "a push of a joint an eye watches is called blocked though it stopped short by "
