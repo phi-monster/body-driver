@@ -952,16 +952,17 @@ package body Driver.Robot.Tests is
    end Channel_Noise_And_Pushes;
 
    --  The one test of motion needs a visible step and the noise, each guarding
-   --  the other. One commandable group creeps by 1e-9 a beat with a jitter of
-   --  1e-12 about it (a simulator's arm that never comes quite to rest), its
-   --  target changing at each of the first thirty beats and then held, one
-   --  camera. A lock-in credits the group's channel with a visible step (Z over
-   --  the root of Gain: eye 1 watches it).
+   --  the other, and the step is itself no smaller than what the reading tells
+   --  from its noise. One commandable group creeps by 1e-9 a beat with a
+   --  jitter of 1e-12 about it (a simulator's arm that never comes quite to
+   --  rest), its target changing at each of the first thirty beats and then
+   --  held, one camera. A lock-in credits the group's first channel with a
+   --  visible step (Z over the root of Gain: eye 1 watches it).
    procedure Visible_Step_Needs_The_Noise is
       Creep_Per_Beat : constant Real := 1.0e-9;   --  what the readings change by at every beat
 
-      --  The group's stream, given to M: its first channel's readings and one camera.
-      procedure Creep (M : in out Model) is
+      --  The group's stream, given to M: Size channels' readings and one camera.
+      procedure Creep (M : in out Model; Size : Positive) is
          Rng  : Generator;
          O    : Observation;
          Sent : Driver.Commands.Command;
@@ -972,15 +973,25 @@ package body Driver.Robot.Tests is
             O.Images.Append (Driver.Images.No_Image);
             O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
             O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
-            O.Readings.Append (Real_Array'(1 => Creep_Per_Beat * Real (B) + 1.0e-12 * Gaussian (Rng)));
-            Sent := Driver.Commands.Hold;
-            --  The target alternates at every beat of the first thirty, then stays.
-            Driver.Commands.Set_Target (Sent, 1, [(if B in 1 .. 29 and then B mod 2 = 1 then 1.0e-6 else 0.0)]);
+            declare
+               Readings : Real_Array (1 .. Size);
+               Target   : Real_Array (1 .. Size);
+            begin
+               for C in 1 .. Size loop
+                  Readings (C) := Creep_Per_Beat * Real (B) + 1.0e-12 * Gaussian (Rng);
+                  --  The target changes at every beat of the first thirty, then stays.
+                  Target (C) := (if B in 1 .. 29 and then B mod 2 = 1 then 1.0e-6 else 0.0);
+               end loop;
+               O.Readings.Append (Readings);
+               Sent := Driver.Commands.Hold;
+               Driver.Commands.Set_Target (Sent, 1, Target);
+            end;
             Observe (M, O, Sent);
          end loop;
       end Creep;
 
-      --  What a lock-in that credits eye 1 with a response to the group gives it.
+      --  What a lock-in that credits eye 1 with a response to the group's
+      --  first channel gives it.
       procedure Credit (M : in out Model; Gain : Real) is
          Effect : constant Eye_Effect :=
            (Verdict => Patch, Responding => 1, Textured => 1,
@@ -996,6 +1007,10 @@ package body Driver.Robot.Tests is
             M.Graph.Effects.Replace_Element (1, Effect);
          end if;
       end Credit;
+
+      --  What a reading tells from its noise: Z sigmas of the change of two readings.
+      function Tellable (M : Model) return Real is
+        (Driver.Conventions.Z * Reading_Noise (M, 1, 1) * Sqrt (2.0));
    begin
       --  A step of 3e-17, far below what the readings jitter by: it must not
       --  make every beat a push, leave the group no beat at rest, and its
@@ -1003,35 +1018,62 @@ package body Driver.Robot.Tests is
       declare
          M : Model;
       begin
-         Creep (M);
+         Creep (M, 1);
          Credit (M, 1.0e34);
-         Check (Known (Visible_Step (M, 1, 1)) and then Visible_Step (M, 1, 1).Value < 1.0e-16,
-                "the credited visible step is not tiny");
          Channels.Measure (M);
          Check (Reading_Noise (M, 1, 1) < Real'Last,
                 "a visible step far below the readings' noise left the group's noise unmeasured: every beat was a push");
+         Check (Known (Visible_Step (M, 1, 1)) and then Visible_Step (M, 1, 1).Value >= Tellable (M),
+                "a visible step of 3e-17 is no larger than what the reading tells from its noise");
          Check (not Channels.Visible (M, 1, [Creep_Per_Beat]),
                 "a change of the readings' own size, which a visible step of 3e-17 cannot make motion, is motion");
          Check (Channels.Visible (M, 1, [1.0]), "a push of 1 is not motion");
-         --  A noise that is not measured gives no evidence, whatever the step.
+         --  A noise that is not measured gives no evidence, whatever the step,
+         --  and tells no step either.
          M.Noise.Replace_Element (0, Real'Last);
+         Check (not Known (Visible_Step (M, 1, 1)), "a channel whose noise is not measured has a visible step");
          Check (not Channels.Visible (M, 1, [1.0]), "a change is motion where no noise is measured, by the step alone");
       end;
-      --  A step far above the noise: a change between them, which the noise
-      --  alone calls motion (a joint held away from rest jitters far more
-      --  than it did at rest), is none.
+      --  A step far above the noise is unchanged, and a change between the
+      --  noise and the step, which the noise alone calls motion (a joint held
+      --  away from rest jitters far more than it did at rest), is none.
       declare
          M : Model;
       begin
-         Creep (M);
+         Creep (M, 1);
          Credit (M, 1.0);
          Channels.Measure (M);
          Check (Reading_Noise (M, 1, 1) < Real'Last, "the group's noise is unmeasured");
-         Check (Visible_Step (M, 1, 1).Value > 1.0, "the credited visible step is not large");
+         Check_Close (Visible_Step (M, 1, 1).Value, Driver.Conventions.Z, 1.0e-12,
+                      "the lock-in's step of Z over the root of a gain of 1 is not kept");
          Check (not Channels.Visible (M, 1, [0.5 * Visible_Step (M, 1, 1).Value]),
                 "a change far above the noise but below what any eye sees is motion");
          Check (Channels.Visible (M, 1, [2.0 * Visible_Step (M, 1, 1).Value]),
                 "a change above the visible step and the noise is not motion");
+      end;
+      --  A group of six channels, the step of the first the least that can be
+      --  told from its noise: a change of that channel past the step, but
+      --  within what six channels' noises together can make, is no motion
+      --  (the step alone would give a group of many channels as many false
+      --  alarms as it has channels).
+      declare
+         M : Model;
+      begin
+         Creep (M, 6);
+         Credit (M, 1.0e34);
+         Channels.Measure (M);
+         Check (Reading_Noise (M, 1, 1) < Real'Last and then Reading_Noise (M, 1, 6) < Real'Last,
+                "the six channels' noise is unmeasured");
+         declare
+            Step : constant Real := Visible_Step (M, 1, 1).Value;
+            Past : constant Real_Array := [1.1 * Step, 0.0, 0.0, 0.0, 0.0, 0.0];
+         begin
+            Check (Step >= Tellable (M), "the least step is below what the reading tells from its noise");
+            Check (not Channels.Visible (M, 1, Past),
+                   "a change just past the visible step of one channel of six, within the six noises, is motion");
+            Check (Channels.Visible (M, 1, [100.0 * Step, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                   "a change far past the visible step and the noises is not motion");
+         end;
       end;
    end Visible_Step_Needs_The_Noise;
 
@@ -1450,6 +1492,82 @@ package body Driver.Robot.Tests is
          Check (M.Groups (1).Episodes (12).Blocked, "a push the eye could see and nothing answered is not called blocked");
       end if;
    end Step_Short_Of_Sight;
+
+   --  The same joint, read as exactly, with a lock-in's step of 3e-17
+   --  credited to it (what a lock-in that credits a group with the pictures'
+   --  motion beside its tiny readings can fit): every push asks 1e-10, closes
+   --  all but 1.45 % of it in one beat and stops there, short by 1.45e-12, a
+   --  hair beside the readings' noise of 1e-12. A step of 3e-17 would take
+   --  that shortfall for one an eye can see and the push for blocked; the
+   --  step is no smaller than the reading tells from its noise (Visible_Step),
+   --  and no push is blocked.
+   procedure Step_Short_By_A_Hair is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Asks : constant Real_Array (1 .. 8) := [1.0e-10, 0.0, 1.0e-10, 0.0, 1.0e-10, 0.0, 1.0e-10, 0.0];
+      Target, Reading, From : Real := 0.0;
+   begin
+      for B in 0 .. 130 loop
+         --  Every estimate measures the lock-in afresh; the eye is put back.
+         if B = 64 or else B = 128 then
+            declare
+               S : Eye_Stream renames M.Eyes (1);
+            begin
+               S.Kept_Groups.Clear;
+               S.Kept_Channels.Clear;
+               S.Gains.Clear;
+               S.Gain_Variances.Clear;
+               S.Kept_Groups.Append (1);
+               S.Kept_Channels.Append (1);
+               S.Gains.Append (1.0e34);
+               S.Gain_Variances.Append (1.0);
+               M.Graph.Effects.Replace_Element
+                 (1, (Verdict => Whole, Responding => 1, Textured => 1,
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+            end;
+         end if;
+         if B in 66 .. 105 then
+            declare
+               K     : constant Natural := (B - 66) / 5 + 1;
+               Phase : constant Natural := (B - 66) mod 5;
+            begin
+               if Phase = 0 then
+                  Target := Asks (K);
+                  From := Reading;
+               elsif Phase = 1 then
+                  Reading := From + 0.9855 * (Target - From);
+               end if;
+            end;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Reading + 1.0e-12 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Known (Visible_Step (M, 1, 1)), "the eye's visible step is known");
+      Check (Visible_Step (M, 1, 1).Value > 3.0e-12,
+             "the credited step is below what the reading tells from its noise:"
+             & Real'Image (Visible_Step (M, 1, 1).Value));
+      Check (Steps.Episodes (M, 1) = 8, "eight pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 8 then
+         for K in 1 .. 8 loop
+            declare
+               E : constant Episode := M.Groups (1).Episodes (K);
+            begin
+               Check (E.Ended and then not E.Blocked,
+                      "push" & K'Image & " stopped short by" & Real'Image (E.Shortfall.Value)
+                      & ", a hair beside the readings' noise, and is called blocked");
+            end;
+         end loop;
+      end if;
+   end Step_Short_By_A_Hair;
 
    procedure Step_Responses is
       M    : Model;
@@ -4491,6 +4609,9 @@ package body Driver.Robot.Tests is
                              Step_Ends_Against_Chatter'Access);
       Driver.Tests.Register ("robot.steps.sight", "a push of a joint an eye watches is called blocked though it stopped "
                              & "short by less than the eye can see, or asked less than the eye can see", Step_Short_Of_Sight'Access);
+      Driver.Tests.Register ("robot.steps.hair", "a push of a joint an eye watches is called blocked though it stopped short by "
+                             & "a hair, less than its reading tells from its noise, because a lock-in credited the joint "
+                             & "a step of 3e-17", Step_Short_By_A_Hair'Access);
       Driver.Tests.Register ("robot.steps", "a free push that falls as short as free pushes do is called blocked, a "
                              & "push stopped by an obstacle or never answered is called free, or the wait for an "
                              & "answer is not the measured delay", Step_Responses'Access);

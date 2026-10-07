@@ -232,7 +232,12 @@ package Driver.Robot is
    function Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate;
    --  The smallest change of the channel's command whose effect the eyes that
    --  see it tell from their own noise, in reading units: where a probe or a
-   --  sweep of the channel starts.
+   --  sweep of the channel starts. It is also a change the channel's own
+   --  reading tells from its noise: no smaller than Z sigmas of the change of
+   --  two readings (a lock-in that credits a group with the pictures' motion
+   --  beside its tiny readings can fit a step of 1e-17, which no reading can
+   --  show). Unknown while the channel's noise is not measured, since nothing
+   --  tells a step from it.
 
    type Eye_Response is (Unmeasured, Nothing, Patch, Undecided, Whole);
    --  What pushing a group does to what an eye sees: nothing, a patch of the
