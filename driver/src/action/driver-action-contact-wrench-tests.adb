@@ -1,3 +1,5 @@
+with Ada.Numerics;
+with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Tests;
@@ -205,8 +207,79 @@ package body Driver.Action.Contact.Wrench.Tests is
       Check_Close (A.Force, 1.59810185373185E+03, 1.0E-6, "the least force of a degenerate balance");
    end Degenerate_Balance_Ends;
 
+   procedure Noise_Does_Not_Decide is
+      --  Three touches round an upright cylinder, at three heights and a
+      --  third of a turn about, that are to lift it off the table it stands
+      --  on: a balance they cannot make. Their program is degenerate, its
+      --  right-hand sides at a vertex are the rounding noise of the
+      --  eliminations, and the rows Bland's rule must choose among by their
+      --  basic columns were chosen among by that noise: with every number of
+      --  the touches moved by a few units of its last place, one balance in
+      --  ten went round a cycle for ever (the search of a symmetric hand did
+      --  on x86-64, where the same numbers are a little different). Whatever
+      --  the last bits, every balance ends, and says the same.
+      Up    : constant Vec3 := [0.0, 0.0, 1.0];
+      Where : constant array (1 .. 3) of Vec3 :=
+        [[0.02, 0.0, 0.03], [-0.0070920977408507092, 0.018700324853708296, 0.065],
+         [-0.011361294934623119, -0.016459677317873126, 0.0]];
+      Along : constant array (1 .. 3) of Vec3 :=
+        [[-1.0, 0.0, 0.0], [0.35460488704253545, -0.93501624268541483, 0.0],
+         [0.56806474673115592, 0.82298386589365635, 0.0]];
+      Patch : constant Real := 0.006;
+      Mu    : constant Real := 0.91947909715639886;
+      Radius : constant Real := 0.02;
+      Foot_Points : constant := 25;
+      Unit  : constant Real := Real'Epsilon;
+      Runs  : constant := 100;
+      Generator : Ada.Numerics.Float_Random.Generator;
+      Foot  : Point_Vectors.Vector;
+      Wrong : Natural := 0;   --  balances that were not unbalanced
+      Noise : Real_Array (1 .. 20);
+   begin
+      for K in 0 .. Foot_Points - 1 loop
+         declare
+            Angle : constant Real := 2.0 * Ada.Numerics.Pi * Real (K) / Real (Foot_Points);
+         begin
+            Foot.Append (Vec3'[Radius * Cos (Angle), Radius * Sin (Angle), 0.0]);
+         end;
+      end loop;
+      Ada.Numerics.Float_Random.Reset (Generator, 1);
+      for Scale of Real_Array'[1.0, 4.0, 16.0] loop
+         for Run in 1 .. Runs loop
+            --  The unit's draws are made in this order, whatever evaluates
+            --  first.
+            for K in Noise'Range loop
+               Noise (K) := 2.0 * Real (Ada.Numerics.Float_Random.Random (Generator)) - 1.0;
+            end loop;
+            declare
+               function Moved (X : Real; K : Positive) return Real is (X * (1.0 + Scale * Unit * Noise (K)));
+               T : Touch_Vectors.Vector;
+            begin
+               for I in Where'Range loop
+                  T.Append (Touch'(Point   => [Moved (Where (I) (1), 6 * I - 5), Moved (Where (I) (2), 6 * I - 4),
+                                               Moved (Where (I) (3), 6 * I - 3)],
+                                   Inward  => [Moved (Along (I) (1), 6 * I - 2), Moved (Along (I) (2), 6 * I - 1),
+                                               Moved (Along (I) (3), 6 * I)],
+                                   Patch   => Moved (Patch, 19),
+                                   Tension => False));
+               end loop;
+               if Need (T, Footing_Of (Foot, Zero3, Up, 0.005), Slide (Up), [0.0, 0.0, 0.04], Up, Moved (Mu, 20)).Why
+                 /= Unbalanced
+               then
+                  Wrong := Wrong + 1;
+               end if;
+            end;
+         end loop;
+      end loop;
+      Check (Wrong = 0, Wrong'Image & " balances of touches the last bits of whose numbers were moved did not say "
+             & "unbalanced");
+   end Noise_Does_Not_Decide;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("action.wrench.noise", "the rounding noise of a symmetric contact set's program decides "
+                             & "which row leaves, and the balance goes round a cycle for ever or says another thing",
+                             Noise_Does_Not_Decide'Access);
       Driver.Tests.Register ("action.wrench.cycle", "a pivot that does not move the solution is taken by the most "
                              & "improving column, which goes round a cycle for ever", Degenerate_Balance_Ends'Access);
       Driver.Tests.Register ("action.wrench.squeeze", "an opposed pair is judged without friction, or by the frame",
