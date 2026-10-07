@@ -121,6 +121,7 @@ package Driver.Action.Plants.Tests is
       Noise     : Ada.Numerics.Float_Random.Generator;
       Learned   : Bound_Vectors.Vector;
       Moved     : Boolean := False;      --  something moved in the last beat
+      Inside    : Boolean := False;      --  a window of Within is open
    end record;
 
    procedure Start (W : in out World; Place : Rigid; Sigma, Pitch : Real; Seed : Integer);
@@ -146,7 +147,36 @@ package Driver.Action.Plants.Tests is
    --  It lies on the other's top and would stay there.
    function Table_Frame (W : World) return Rigid is (W.Table);
 
+   --  For a rig whose arm is moved from outside, by a body's joints: the
+   --  world takes the tool where it is put, one beat at a time.
+
+   procedure Put_Tool (W : in out World; Arm : Arm_Id; Pose : Rigid; Blocked : out Boolean);
+   --  Takes the arm's tool to Pose as Move's steps do, in pieces of half a
+   --  pitch: things in the way are pushed along the table or stop it, what
+   --  the hand holds comes along while its grip carries it. Where a piece is
+   --  stopped the tool stays at the last one that was not, and Blocked is
+   --  True.
+
+   procedure Tick (W : in out World);
+   --  One beat: drifting things drift, closers move toward their goals.
+
+   procedure Set_Closer (W : in out World; Hand : Hand_Id; Fraction : Real);
+   --  The hand's next goal, taken up after its arm's lag.
+
+   function Closer_Done (W : World; Hand : Hand_Id) return Boolean;
+   --  The hand reached its goal, or something stopped it.
+
+   function Closer_Stopped (W : World; Hand : Hand_Id) return Boolean;
+   --  Something stopped the hand short of its goal.
+
    overriding procedure Look (W : in out World; S : out Snapshot);
+   overriding procedure Within (W : in out World; During : not null access procedure);
+   --  Nothing changes between its beats unless it is moved: During runs at
+   --  once. The rule of a window is kept as the live plant keeps it: Reach,
+   --  In_View and Predicted raise Program_Error outside one, and Look, Move,
+   --  Learn and another Within inside one, so a test of the engine fails
+   --  where the engine would race the main loop or wait for a beat that its
+   --  own window holds.
    overriding function Reach (W : World; Goal : Arm_Goal) return Reach_Answer;
    overriding procedure Move (W : in out World; O : Order; R : out Report);
    overriding function Predicted (W : World; T : Thing_Id; Beats : Natural) return Driver.Uncertain.Point_Estimate;
