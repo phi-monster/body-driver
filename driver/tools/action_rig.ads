@@ -8,8 +8,9 @@
 --  where the simulated world stops the tool.
 --
 --  Like the live plant, the rig reads the models only in a beat's window
---  (Driver.Beats), and a reach, a view or a prediction asked outside one
---  raises Program_Error.
+--  (Driver.Beats): a reach, a view or a prediction asked outside one raises
+--  Program_Error, and so does a look, a move, a lesson or another window asked
+--  inside one, which would wait for ever for the beat the window holds.
 
 with Ada.Containers.Vectors;
 with Ada.Strings.Unbounded;

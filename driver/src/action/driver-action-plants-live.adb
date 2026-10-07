@@ -356,7 +356,8 @@ package body Driver.Action.Plants.Live is
             procedure Planning is
             begin
                P.Last := Driver.Beats.Latest.all;
-               Plan := Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last, (Pose => G.Tool, Position_Only => G.Position_Only));
+               Plan := Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last,
+                                          (Pose => G.Tool, Position_Only => G.Position_Only));
             end Planning;
          begin
             Driver.Beats.Within_A_Beat (Planning'Access);

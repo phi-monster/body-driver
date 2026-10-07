@@ -422,7 +422,8 @@ package body Driver.Action.Plants.Live.Tests is
          end if;
       end;
       Check (Learned.Is_Up, "the lesson was not learned");
-      Check (Ada.Strings.Fixed.Count (To_String (Order), "W") = 1, "the lesson is not in the recording once: " & To_String (Order));
+      Check (Ada.Strings.Fixed.Count (To_String (Order), "W") = 1,
+             "the lesson is not in the recording once: " & To_String (Order));
       Check (Ada.Strings.Fixed.Index (To_String (Order), "RWD") > 0,
              "the lesson is not between the message that brought a beat and its reply: " & To_String (Order));
       GNAT.OS_Lib.Delete_File (Name.all, Gone);

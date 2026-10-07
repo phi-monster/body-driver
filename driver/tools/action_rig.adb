@@ -83,8 +83,10 @@ package body Action_Rig is
       begin
          case Motion.Status (Plan) is
             when Motion.Planned     => return (Status => Plants.Reachable, Why => Null_Unbounded_String);
-            when Motion.Unreachable => return (Status => Plants.Unreachable, Why => To_Unbounded_String (Motion.Why (Plan)));
-            when Motion.Unmeasured  => return (Status => Plants.Unmeasured, Why => To_Unbounded_String (Motion.Why (Plan)));
+            when Motion.Unreachable =>
+               return (Status => Plants.Unreachable, Why => To_Unbounded_String (Motion.Why (Plan)));
+            when Motion.Unmeasured  =>
+               return (Status => Plants.Unmeasured, Why => To_Unbounded_String (Motion.Why (Plan)));
          end case;
       end;
    end Reach;
@@ -116,7 +118,8 @@ package body Action_Rig is
             procedure Planning is
             begin
                P.Last := Driver.Beats.Latest.all;
-               Plan := Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last, (Pose => G.Tool, Position_Only => G.Position_Only));
+               Plan := Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last,
+                                          (Pose => G.Tool, Position_Only => G.Position_Only));
             end Planning;
             procedure Arrived is
             begin
