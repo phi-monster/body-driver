@@ -2,6 +2,14 @@
 --  them, from two still views of that eye at two readings of the channel
 --  while everything else holds still.
 --
+--  The hand finds them from the change between the two views and from what
+--  the eye's own motion shows of the robot (From_Change): the pixels that
+--  changed are where a part was at one end and not at the other, and which
+--  end each belongs to is told by the robot's look, not by the pictures'
+--  texture, so that a smooth black finger is found as well as a textured one.
+--  The matcher-based finding below (Find) is kept for the moves the shape is
+--  fitted from; the hand does not call it.
+--
 --  The instrument's matcher says, for each pixel of one view, where it is in
 --  the other and where that point matches back to. A pixel of a moving part
 --  lands elsewhere and comes back to where it started; a pixel the moving
@@ -29,6 +37,7 @@
 with Ada.Containers.Indefinite_Holders;
 with Ada.Containers.Vectors;
 with Driver.Images;
+with Driver.Pixels;
 
 package Driver.Robot.Hand.Lobes is
 
@@ -98,6 +107,143 @@ package Driver.Robot.Hand.Lobes is
       Width, Height : Positive) return Lobe_Vectors.Vector;
    --  The lobes, each with its pixels and tip in both views.
 
+   type Placing is (Placed, Nothing_Changed, Unseparated, One_Sided);
+   --  Placed           the changed pixels were given to the two ends
+   --  Nothing_Changed  no pixel changed
+   --  Unseparated      the changed pixels do not fall in two groups by how
+   --                   much they vary over the eye's poses: the poses did not
+   --                   move the eye against its surroundings, or the robot
+   --                   does not show in what changed
+   --  One_Sided        what could be given to an end went to one end only, or
+   --                   the parts it went to are attached to nothing, no larger
+   --                   than the mixture's doubt, or fragments
+
+   type Located is record
+      How            : Placing := Nothing_Changed;
+      Lobes          : Lobe_Vectors.Vector;
+      Changed        : Natural := 0;   --  pixels that changed between the ends
+      Seeds          : Natural := 0;   --  those the poses call the robot's at the anchored end
+      Here, There    : Natural := 0;   --  those the robot's look gave to the first view, to the other
+      Unassigned     : Natural := 0;   --  those it could not: left to neither end
+      Cut            : Real := 0.0;    --  the deviation over the poses below which a changed pixel is a seed, levels
+      Share          : Real := 0.0;    --  of the changed pixels' variance of log deviation the cut explains
+      Rounds         : Natural := 0;   --  rounds the mixture took to settle (Give_To_Ends)
+      Doubt          : Real := 0.0;    --  changed pixels expected to have been given to the wrong end: the mixture's own error
+      Parts_Here     : Natural := 0;   --  parts of the pixels given to each end that are attached and larger than the doubt
+      Parts_There    : Natural := 0;
+   end record;
+
+   function From_Change
+     (Changed          : Mask;
+      Here, There      : Driver.Pixels.View;
+      Anchor           : Driver.Pixels.View;
+      Anchored_At_Here : Boolean;
+      Spread           : Real;
+      Attached         : Mask) return Located
+     with Pre => Driver.Images.Width (Changed) = Driver.Pixels.Width (Here)
+                 and then Driver.Images.Height (Changed) = Driver.Pixels.Height (Here)
+                 and then Driver.Pixels.Width (There) = Driver.Pixels.Width (Here)
+                 and then Driver.Pixels.Height (There) = Driver.Pixels.Height (Here)
+                 and then Driver.Pixels.Width (Anchor) = Driver.Pixels.Width (Here)
+                 and then Driver.Pixels.Height (Anchor) = Driver.Pixels.Height (Here)
+                 and then Driver.Pixels.Frames (Here) > 0 and then Driver.Pixels.Frames (There) > 0
+                 and then Driver.Pixels.Frames (Anchor) >= 2;
+   --  The lobes between two still views of an eye that rides on an arm, from
+   --  the pixels that changed between them (Driver.Pixels.Compare), and the
+   --  eye's views of the robot at the reading of the anchored end, over the
+   --  poses of the arm (Driver.Robot.Hand.Selfsight).
+   --
+   --  A changed pixel is where a part was at one end and a part of the world
+   --  at the other. Over the poses, the robot stays where it is in the eye's
+   --  picture, and a pixel of the world varies; so among the changed pixels
+   --  the ones that vary least are, as far as they go, the robot's at the
+   --  anchored end. They are only seeds: the world that is flat or dark
+   --  varies little too, and a glossy finger varies much. They say which
+   --  end is which and begin a mixture of the two kinds of changed pixel
+   --  (robot at the anchored end, robot at the other), told by how bright the
+   --  robot and the world are where they changed and, last, by the labels of
+   --  a pixel's neighbours (Give_To_Ends). A part of one label that the
+   --  rest of the pixels explain better the other way round is turned. A
+   --  pixel whose kind is not told to better than one test of Z alarms at is
+   --  left unassigned, never guessed. Spread, that of the difference at a
+   --  pixel that did not change, says whether the poses told anything: the
+   --  world where it changed must vary over them by more than two views of it
+   --  differ where it did not.
+   --
+   --  The lobes are made of the pixels given to each end by Lobes_Of_Sets.
+
+   type Places is array (Positive range <>) of Natural;
+   type Flags is array (Positive range <>) of Boolean;
+
+   type Kind is (Neither, Anchored_End, Other_End);
+   --  The end of a changed pixel's two ends that shows the robot: the anchored
+   --  end, the other, or neither is told.
+   type Kinds is array (Positive range <>) of Kind;
+
+   procedure Tell_Ends
+     (W, H     : Positive;
+      At_Pixel : Places;    --  each changed pixel's place in the picture, row * W + column, in any order
+      Seeds    : Flags;     --  those the poses call the robot's at the anchored end
+      Anchored : Real_Array;   --  its brightness at the anchored end, in levels
+      Other    : Real_Array;   --  and at the other
+      Given    : out Kinds;
+      Rounds   : out Natural;
+      Doubt    : out Real)
+     with Pre => At_Pixel'Length > 0 and then Seeds'Length = At_Pixel'Length and then Anchored'Length = At_Pixel'Length
+                 and then Other'Length = At_Pixel'Length and then Given'Length = At_Pixel'Length;
+   --  Each changed pixel shows the robot at the anchored end and the world at
+   --  the other, or the robot at the other end and the world at the anchored:
+   --  a mixture of two kinds of pixel, whose brightness at the two ends are
+   --  the robot's and the world's in one order or in the other. A changed
+   --  pixel has a brightness at each end (Anchored, Other, in whole levels),
+   --  and the kinds are told by these: how bright the robot is and how bright
+   --  the world is where it changed, each a histogram (every one begins with
+   --  one pixel a bin), found together with every pixel's share in each kind
+   --  by expectation and maximisation. The seeds, the pixels the poses call
+   --  the robot's at the anchored end, begin the rounds and say which kind is
+   --  which; no number from them stays.
+   --
+   --  The seeds are wrong where the world is flat, and a flat patch is wrong
+   --  as a whole and explains itself: robot and world lumas can be exchanged
+   --  for it and the histograms follow. So when the rounds have settled (the
+   --  labels they changed fewer than Unchanged_Fraction of the pixels), every
+   --  connected part of one label is tried the other way round against the
+   --  histograms of all the rest, and given the other label when that is the
+   --  likelier by more than one test of Z tells apart (twice the log of the
+   --  ratio above Z squared); the rounds begin again, until no part is turned.
+   --
+   --  Last the neighbours are heard: a pixel's eight, each with the label it
+   --  has, the number of those of each kind a histogram too. The rounds end
+   --  when the labels one changed are fewer than Unchanged_Fraction of them
+   --  (the convention for an iterative estimate), or when a label has crossed
+   --  the picture. A pixel is given to a kind only when the other kind's
+   --  share of it is below what one test alarms at (Z), else to neither.
+
+   function Lobes_Of_Sets
+     (Here_Set, There_Set : Mask;
+      Attached            : Mask;
+      Doubt               : Real;
+      Parts_Here          : out Natural;
+      Parts_There         : out Natural) return Lobe_Vectors.Vector
+     with Pre => Driver.Images.Width (Here_Set) = Driver.Images.Width (There_Set)
+                 and then Driver.Images.Height (Here_Set) = Driver.Images.Height (There_Set);
+   --  The lobes of the pixels given to each end (From_Change's last step).
+   --  Each end's pixels are cleaned of what is one pixel across and split in
+   --  their eight-connected parts. A part counts when it is attached (to the
+   --  image's border or to Attached, the robot's own pixels that did not
+   --  change) and holds more pixels than Doubt, the number of pixels expected
+   --  to have been given to the wrong end: a smaller part could be made of
+   --  nothing but those. Parts_Here and Parts_There are how many count at each
+   --  end.
+   --
+   --  The lobes are the parts of the end that has the more of them (the first
+   --  when equal): fingers that touch at one end are one part there and
+   --  separate parts at the other. Each part of the other end goes to the
+   --  lobe whose part is nearest to it (by their centres), and when that end
+   --  has fewer parts than there are lobes, each of its pixels goes to the
+   --  nearest lobe: the fingers that touched, each taking what is nearest.
+   --  A lobe's tips are as Find gives them, every pixel of it having changed.
+
    type Closing is (Towards_There, Towards_Here, Undecided);
    --  Towards_There  the lobes are closer together (or to what they are
    --                 attached to) in the other view: it is the closed end
@@ -115,5 +261,10 @@ package Driver.Robot.Hand.Lobes is
    --  Which view has the lobes closer to each other; with a single lobe,
    --  closer to the robot's still pixels it can close against: the sign of
    --  Closing_Change when it is significant.
+
+   function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask) return Estimate;
+   function Direction (Lobes : Lobe_Vectors.Vector; Attached : Mask) return Closing;
+   --  The same for lobes of From_Change, whose pixels' places are known to
+   --  the grid alone (a uniform square of side one) and not to a matcher.
 
 end Driver.Robot.Hand.Lobes;

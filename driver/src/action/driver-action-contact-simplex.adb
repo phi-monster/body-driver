@@ -19,6 +19,18 @@ package body Driver.Action.Contact.Simplex is
       Basis : array (1 .. M) of Positive;
       S  : Solution (N);
 
+      --  A basic variable that counts as zero is zero. The eliminations leave
+      --  one that is zero in exact arithmetic as noise of either sign, and
+      --  noise ties with nothing (Ratio_Test).
+      procedure Settle is
+      begin
+         for I in 1 .. M loop
+            if abs T (I, W) <= Zero then
+               T (I, W) := 0.0;
+            end if;
+         end loop;
+      end Settle;
+
       procedure Pivot (Row, Col : Positive) is
          P : constant Real := T (Row, Col);
       begin
@@ -37,11 +49,15 @@ package body Driver.Action.Contact.Simplex is
             end if;
          end loop;
          Basis (Row) := Col;
+         Settle;
+         S.Pivots := S.Pivots + 1;
       end Pivot;
 
       --  The row that leaves when column Enter enters: among rows with the
       --  least ratio, the one whose basic column is lowest; 0 when no row
-      --  bounds it. Step is that least ratio.
+      --  bounds it. Step is that least ratio. The rows at a degenerate vertex
+      --  have a right-hand side of exactly zero (Settle), so their ratios are
+      --  exactly zero and tie exactly.
       procedure Ratio_Test (Enter : Positive; Leave : out Natural; Step : out Real) is
       begin
          Leave := 0;
@@ -127,6 +143,7 @@ package body Driver.Action.Contact.Simplex is
             Basis (I) := N + I;
          end;
       end loop;
+      Settle;
       --  Phase one: minimize the sum of the artificial variables.
       for I in 1 .. M loop
          for J in 1 .. N loop

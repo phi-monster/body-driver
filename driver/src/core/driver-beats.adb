@@ -26,6 +26,7 @@ package body Driver.Beats is
       procedure Put (Beat : Driver.Clock.Beat; Taken : out Boolean);
       procedure Reply (C : Driver.Commands.Command);
       procedure Reply_If_Held (C : Driver.Commands.Command);
+      function Is_Held return Boolean;
       entry Collect (C : out Driver.Commands.Command);
    private
       Offered  : Boolean := False;
@@ -62,6 +63,8 @@ package body Driver.Beats is
          Held := False;
       end Reply;
 
+      function Is_Held return Boolean is (Held);
+
       procedure Reply_If_Held (C : Driver.Commands.Command) is
       begin
          if Held then
@@ -91,6 +94,8 @@ package body Driver.Beats is
    begin
       Channel.Reply_If_Held (Driver.Commands.Hold);
    end Release;
+
+   function Held return Boolean is (Channel.Is_Held);
 
    procedure Within_A_Beat (During : not null access procedure) is
       Beat : Driver.Clock.Beat;

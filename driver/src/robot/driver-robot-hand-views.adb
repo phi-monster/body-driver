@@ -191,7 +191,6 @@ package body Driver.Robot.Hand.Views is
            ((Closer => Reading_Holders.To_Holder (Closer),
              Rest   => Reading_Holders.To_Holder (Rest),
              Frames => Driver.Pixels.Empty (T.Width, T.Height),
-             Last   => Image,
              Seen   => Seen,
              From   => Seen.Beat,
              To     => Seen.Beat));
@@ -200,7 +199,6 @@ package body Driver.Robot.Hand.Views is
          R : constant View_Holders.Reference_Type := T.Current.Reference;
       begin
          Driver.Pixels.Add (R.Element.Frames, Image);
-         R.Element.Last := Image;
          R.Element.To := Seen.Beat;
       end;
    end Observe;
@@ -281,5 +279,11 @@ package body Driver.Robot.Hand.Views is
 
    function High_Beat (T : Tracker; Channel : Positive) return Driver.Clock.Beat is
      (T.Ends.Constant_Reference.Element (Channel).High.Constant_Reference.Element.From);
+
+   function Low_Closer (T : Tracker; Channel : Positive) return Real_Array is
+     (T.Ends.Constant_Reference.Element (Channel).Low.Constant_Reference.Element.Closer.Element);
+
+   function High_Closer (T : Tracker; Channel : Positive) return Real_Array is
+     (T.Ends.Constant_Reference.Element (Channel).High.Constant_Reference.Element.Closer.Element);
 
 end Driver.Robot.Hand.Views;

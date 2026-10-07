@@ -1,4 +1,3 @@
-with Ada.Unchecked_Deallocation;
 with Driver.Log;
 with Driver.Pixels;
 
@@ -7,56 +6,100 @@ package body Driver.Robot.Hand.Sweep is
    use Driver.Images;
    use type Driver.Clock.Beat;
    use type Driver.Robot.Hand.Lobes.Closing;
-
-   --  Everything sized by pixels lives on the heap: the estimates also run in
-   --  the decider's task, whose stack is small.
-   type Correspondences_Access is access Driver.Robot.Hand.Lobes.Correspondence_Array;
-   procedure Free is new Ada.Unchecked_Deallocation
-     (Driver.Robot.Hand.Lobes.Correspondence_Array, Correspondences_Access);
+   use type Driver.Robot.Hand.Lobes.Placing;
 
    function Start (Width, Height : Positive; Channels : Positive; Closer_Noise : Real_Array) return State is
      ((Width       => Width,
        Height      => Height,
        Views       => Driver.Robot.Hand.Views.Start (Width, Height, Closer_Noise),
-       Per_Channel => Channel_Holders.To_Holder ([1 .. Channels => (others => <>)]),
-       Never       => Why_Holders.Empty_Holder));
+       Memory      => Driver.Robot.Hand.Selfsight.Start (Width, Height, Closer_Noise),
+       Per_Channel => Channel_Holders.To_Holder ([1 .. Channels => (others => <>)])));
 
    function Channels (S : State) return Positive is (S.Per_Channel.Element'Length);
+
+   function Status (S : State; Channel : Positive) return Progress is
+     (S.Per_Channel.Constant_Reference.Element (Channel).Status);
+
+   function Has_Ends (S : State; Channel : Positive) return Boolean is
+     (Driver.Robot.Hand.Views.Has_Ends (S.Views, Channel));
+
+   function Poses_Doubled (S : State; Channel : Positive) return Boolean is
+      Was  : constant Channel_Holders.Constant_Reference_Type := S.Per_Channel.Constant_Reference;
+      Low  : constant Natural :=
+        Driver.Robot.Hand.Selfsight.Poses (S.Memory, Driver.Robot.Hand.Views.Low_Closer (S.Views, Channel));
+      High : constant Natural :=
+        Driver.Robot.Hand.Selfsight.Poses (S.Memory, Driver.Robot.Hand.Views.High_Closer (S.Views, Channel));
+   begin
+      return (Low >= 2 and then Low >= 2 * Was.Element (Channel).Poses_Low)
+        or else (High >= 2 and then High >= 2 * Was.Element (Channel).Poses_High);
+   end Poses_Doubled;
+   --  The arm has moved the eye, at the readings of an end, through twice the
+   --  poses the last placing had (two at the least): a deviation over more
+   --  poses is a better one.
 
    function Ends_Moved (S : State; Channel : Positive) return Boolean is
       Now : constant Channel_Holders.Constant_Reference_Type := S.Per_Channel.Constant_Reference;
    begin
       return Driver.Robot.Hand.Views.Has_Ends (S.Views, Channel)
-        and then (Now.Element (Channel).Changed.Is_Empty
+        and then (not Now.Element (Channel).Analysed
                   or else Driver.Robot.Hand.Views.Low_Beat (S.Views, Channel) /= Now.Element (Channel).Low_From
-                  or else Driver.Robot.Hand.Views.High_Beat (S.Views, Channel) /= Now.Element (Channel).High_From);
+                  or else Driver.Robot.Hand.Views.High_Beat (S.Views, Channel) /= Now.Element (Channel).High_From
+                  or else ((Now.Element (Channel).Status = Unlocated or else Now.Element (Channel).Status = Unplaced)
+                           and then Poses_Doubled (S, Channel)));
    end Ends_Moved;
 
    procedure Renew (S : in out State; Channel : Positive);
-   --  New ends: what changed between them decides whether anything is to
-   --  be asked; a measurement of older ends no longer stands.
+   --  New ends: what changed between them decides whether anything is to be
+   --  placed; a measurement of older ends no longer stands.
 
    procedure Renew (S : in out State; Channel : Positive) is
-      Low     : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.Low_End (S.Views, Channel);
-      High    : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.High_End (S.Views, Channel);
+      Low      : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.Low_End (S.Views, Channel);
+      High     : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.High_End (S.Views, Channel);
       Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Low.Frames, High.Frames);
       Per_Channel : Channel_Array := S.Per_Channel.Element;
+      Now      : Channel_State;
+      Nothing  : constant Mask := Create (0, 0);   --  the robot's own pixels that did not change: not yet known
    begin
-      Per_Channel (Channel) :=
-        (Status    => (if not Compared.Trusted then Everything_Moves
-                       elsif Count (Compared.Changed) = 0 then Nothing_Moves
-                       else Waiting),
-         Low_From  => Low.From,
-         High_From => High.From,
-         Changed   => Change_Holders.To_Holder (Compared.Changed),
-         Lobes     => Driver.Robot.Hand.Lobes.Lobe_Vectors.Empty_Vector,
-         Closing   => Driver.Robot.Hand.Lobes.Undecided,
-         Change    => Unknown,
-         Noise     => <>);
+      Now.Low_From := Low.From;
+      Now.High_From := High.From;
+      Now.Analysed := True;
+      Now.Announced := False;
+      Now.Poses_Low := Driver.Robot.Hand.Selfsight.Poses (S.Memory, Low.Closer.Element);
+      Now.Poses_High := Driver.Robot.Hand.Selfsight.Poses (S.Memory, High.Closer.Element);
+      Now.Changed := Count (Compared.Changed);
+      Now.Spread := Compared.Spread;
+      Now.Beyond := Compared.Beyond;
+      if not Compared.Trusted then
+         Now.Status := Everything_Moves;
+      elsif Now.Changed = 0 then
+         Now.Status := Nothing_Moves;
+      elsif Now.Poses_Low < 2 and then Now.Poses_High < 2 then
+         Now.Status := Unlocated;
+      else
+         declare
+            At_Low : constant Boolean := Now.Poses_Low >= Now.Poses_High;
+            Anchor : constant Driver.Pixels.View :=
+              Driver.Robot.Hand.Selfsight.Anchor_For (S.Memory, (if At_Low then Low.Closer.Element else High.Closer.Element));
+         begin
+            Now.Located := Driver.Robot.Hand.Lobes.From_Change
+              (Compared.Changed, Low.Frames, High.Frames, Anchor, At_Low, Compared.Spread, Nothing);
+            Now.Closing := Driver.Robot.Hand.Lobes.Direction (Now.Located.Lobes, Nothing);
+            Now.Change := Driver.Robot.Hand.Lobes.Closing_Change (Now.Located.Lobes, Nothing);
+            Now.Status := (if Now.Located.How = Driver.Robot.Hand.Lobes.Placed then Measured else Unplaced);
+         end;
+      end if;
+      Per_Channel (Channel) := Now;
       S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
    end Renew;
 
    procedure Set_Status (S : in out State; Channel : Positive; To : Progress);
+
+   procedure Set_Status (S : in out State; Channel : Positive; To : Progress) is
+      Per_Channel : Channel_Array := S.Per_Channel.Element;
+   begin
+      Per_Channel (Channel).Status := To;
+      S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
+   end Set_Status;
 
    procedure Observe
      (S          : in out State;
@@ -69,20 +112,15 @@ package body Driver.Robot.Hand.Sweep is
    is
    begin
       Driver.Robot.Hand.Views.Observe (S.Views, Seen, Still, Closer, Rest, Image, Rest_Moved);
-      --  With an instrument that can never answer, new ends change nothing.
-      if S.Never.Is_Empty then
-         for C in 1 .. Channels (S) loop
-            if Ends_Moved (S, C) then
-               Renew (S, C);
-            elsif Status (S, C) = Waiting and then Driver.Robot.Hand.Views.Unseen_Travel (S.Views, C) then
-               Set_Status (S, C, Nothing_Moves);
-            end if;
-         end loop;
-      end if;
+      Driver.Robot.Hand.Selfsight.Observe (S.Memory, Closer, Rest, Still, Image, Rest_Moved);
+      for C in 1 .. Channels (S) loop
+         if Ends_Moved (S, C) then
+            Renew (S, C);
+         elsif Status (S, C) = Waiting and then Driver.Robot.Hand.Views.Unseen_Travel (S.Views, C) then
+            Set_Status (S, C, Nothing_Moves);
+         end if;
+      end loop;
    end Observe;
-
-   function Status (S : State; Channel : Positive) return Progress is
-     (S.Per_Channel.Constant_Reference.Element (Channel).Status);
 
    function Would_Extend
      (S          : State;
@@ -92,150 +130,17 @@ package body Driver.Robot.Hand.Sweep is
 
    function Gathered (S : State) return Boolean is (Driver.Robot.Hand.Views.Gathered (S.Views));
 
-   function Wants_Correspondences (S : State; Channel : Positive) return Boolean is
-     (Status (S, Channel) = Waiting and then not S.Per_Channel.Constant_Reference.Element (Channel).Changed.Is_Empty
-      and then Driver.Robot.Hand.Views.Has_Ends (S.Views, Channel));
-
    function Low_End (S : State; Channel : Positive) return Driver.Robot.Hand.Views.View is
      (Driver.Robot.Hand.Views.Low_End (S.Views, Channel));
 
    function High_End (S : State; Channel : Positive) return Driver.Robot.Hand.Views.View is
      (Driver.Robot.Hand.Views.High_End (S.Views, Channel));
 
-   function Changed_Of (S : State; Channel : Positive) return Mask is
-     (S.Per_Channel.Constant_Reference.Element (Channel).Changed.Element);
-
-   function Query_Points (S : State; Channel : Positive) return Driver.Instrument.Point_Array is
-      Changed : constant Mask := Changed_Of (S, Channel);
-      C0, R0  : Natural := Natural'Last;
-      C1, R1  : Natural := 0;
-   begin
-      for R in 0 .. Height (Changed) - 1 loop
-         for C in 0 .. Width (Changed) - 1 loop
-            if Contains (Changed, C, R) then
-               C0 := Natural'Min (C0, C);
-               C1 := Natural'Max (C1, C);
-               R0 := Natural'Min (R0, R);
-               R1 := Natural'Max (R1, R);
-            end if;
-         end loop;
-      end loop;
-      --  Built where it is returned, off the stack.
-      return Points : Driver.Instrument.Point_Array (1 .. (C1 - C0 + 1) * (R1 - R0 + 1)) do
-         declare
-            K : Natural := 0;
-         begin
-            for R in R0 .. R1 loop
-               for C in C0 .. C1 loop
-                  K := K + 1;
-                  --  The pixel's centre.
-                  Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);
-               end loop;
-            end loop;
-         end;
-      end return;
-   end Query_Points;
-
-   procedure Set_Status (S : in out State; Channel : Positive; To : Progress) is
-      Per_Channel : Channel_Array := S.Per_Channel.Element;
-   begin
-      Per_Channel (Channel).Status := To;
-      S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
-   end Set_Status;
-
-   procedure Asked (S : in out State; Channel : Positive) is
-   begin
-      Set_Status (S, Channel, Requested);
-   end Asked;
-
-   procedure Refuse (S : in out State; Channel : Positive; Lasting : Boolean; Why : String) is
-   begin
-      if Lasting then
-         S.Never := Why_Holders.To_Holder (Why);
-         for C in 1 .. Channels (S) loop
-            Set_Status (S, C, Unanswerable);
-         end loop;
-      else
-         Set_Status (S, Channel, Unanswered);
-      end if;
-   end Refuse;
-
-   function Refusal (S : State) return String is (if S.Never.Is_Empty then "" else S.Never.Element);
-
-   procedure Answer
-     (S        : in out State;
-      Channel  : Positive;
-      Points   : Driver.Instrument.Point_Array;
-      Forward  : Driver.Instrument.Answer_Array;
-      Backward : Driver.Instrument.Answer_Array;
-      Attached : Driver.Images.Mask)
-   is
-      subtype Correspondence_Array is Driver.Robot.Hand.Lobes.Correspondence_Array;
-      subtype Matcher_Noise is Driver.Robot.Hand.Lobes.Matcher_Noise;
-      Changed  : constant Mask := Changed_Of (S, Channel);
-      Ahead    : Correspondences_Access := new Correspondence_Array (Points'Range);
-      Behind   : Correspondences_Access := new Correspondence_Array (Points'Range);
-      Still_Count : Natural := 0;
-   begin
-      for K in Points'Range loop
-         declare
-            F : constant Driver.Instrument.Answer := Forward (Forward'First + K - Points'First);
-            B : constant Driver.Instrument.Answer := Backward (Backward'First + K - Points'First);
-         begin
-            Ahead (K) := (From => Points (K), To => F.To, Back => F.Back, Matched => F.Found);
-            Behind (K) := (From => Points (K), To => B.To, Back => B.Back, Matched => B.Found);
-            if not Contains (Changed, Natural (Real'Floor (Points (K).U)), Natural (Real'Floor (Points (K).V))) then
-               Still_Count := Still_Count + 1;
-            end if;
-         end;
-      end loop;
-      declare
-         --  Pixels that did not change between the ends, both ways round:
-         --  what the matcher does with pixels that did not move.
-         Still : Correspondences_Access := new Correspondence_Array (1 .. 2 * Still_Count);
-         K     : Natural := 0;
-         Attached_Still : Mask := Create (S.Width, S.Height);
-      begin
-         for I in Points'Range loop
-            if not Contains (Changed, Natural (Real'Floor (Points (I).U)), Natural (Real'Floor (Points (I).V))) then
-               K := K + 1;
-               Still (K) := Ahead (I);
-               K := K + 1;
-               Still (K) := Behind (I);
-            end if;
-         end loop;
-         --  The robot's own pixels a lobe can be attached to are those that
-         --  did not move with the closer.
-         if Width (Attached) = S.Width and then Height (Attached) = S.Height then
-            for R in 0 .. S.Height - 1 loop
-               for C in 0 .. S.Width - 1 loop
-                  if Contains (Attached, C, R) and then not Contains (Changed, C, R) then
-                     Include (Attached_Still, C, R);
-                  end if;
-               end loop;
-            end loop;
-         end if;
-         declare
-            Noise : constant Matcher_Noise := Driver.Robot.Hand.Lobes.Noise_Of (Still.all);
-            Found : constant Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector :=
-              Driver.Robot.Hand.Lobes.Find (Ahead.all, Behind.all, Noise, Attached_Still, S.Width, S.Height);
-            Per_Channel : Channel_Array := S.Per_Channel.Element;
-         begin
-            Per_Channel (Channel).Lobes := Found;
-            Per_Channel (Channel).Noise := Noise;
-            Per_Channel (Channel).Closing := Driver.Robot.Hand.Lobes.Direction (Found, Attached_Still, Noise);
-            Per_Channel (Channel).Change := Driver.Robot.Hand.Lobes.Closing_Change (Found, Attached_Still, Noise);
-            Per_Channel (Channel).Status := (if Found.Is_Empty then Nothing_Moves else Measured);
-            S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
-         end;
-         Free (Still);
-      end;
-      Free (Ahead);
-      Free (Behind);
-   end Answer;
-
    function Lobes_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector is
-     (S.Per_Channel.Constant_Reference.Element (Channel).Lobes);
+     (S.Per_Channel.Constant_Reference.Element (Channel).Located.Lobes);
+
+   function Located_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Located is
+     (S.Per_Channel.Constant_Reference.Element (Channel).Located);
 
    function Closed_End_Is_High (S : State; Channel : Positive) return Boolean is
      (S.Per_Channel.Constant_Reference.Element (Channel).Closing = Driver.Robot.Hand.Lobes.Towards_There);
@@ -243,36 +148,61 @@ package body Driver.Robot.Hand.Sweep is
    function Closing_Known (S : State; Channel : Positive) return Boolean is
      (S.Per_Channel.Constant_Reference.Element (Channel).Closing /= Driver.Robot.Hand.Lobes.Undecided);
 
-   function Noise_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Matcher_Noise is
-     (S.Per_Channel.Constant_Reference.Element (Channel).Noise);
+   function Unannounced (S : State; Channel : Positive) return Boolean is
+     (not S.Per_Channel.Constant_Reference.Element (Channel).Announced);
+
+   procedure Announce (S : in out State; Channel : Positive) is
+      Per_Channel : Channel_Array := S.Per_Channel.Element;
+   begin
+      Per_Channel (Channel).Announced := True;
+      S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
+   end Announce;
 
    function Account (S : State; Channel : Positive) return String is
       Here : constant Channel_State := S.Per_Channel.Constant_Reference.Element (Channel);
+      Lobes_Text : constant String := Natural'Image (Natural (Here.Located.Lobes.Length)) & " lobes";
+      Pixels_Text : constant String :=
+        Natural'Image (Here.Changed) & " pixels changed, beyond " & Driver.Log.Image (Here.Beyond, 1)
+        & " levels of a spread of " & Driver.Log.Image (Here.Spread, 2);
    begin
       case Here.Status is
          when Waiting =>
-            return (if Driver.Robot.Hand.Views.Has_Ends (S.Views, Channel)
-                    then "its ends are seen, and nothing has been asked of the instrument for them"
-                    else "its two ends were not both seen still");
-         when Requested =>
-            return "the instrument's answer for its ends did not come";
-         when Unanswered =>
-            return "the instrument could not answer for its ends";
-         when Unanswerable =>
-            return "the instrument can never answer (" & Refusal (S) & ")";
+            return "its two ends were not both seen still";
          when Nothing_Moves =>
             return "nothing in this eye moves between its ends";
          when Everything_Moves =>
             return "half of this eye's picture or more changes between its ends, so what moved cannot be told from what did not";
+         when Unlocated =>
+            return "the arm has not moved the eye against its surroundings at either end's readings (seen from"
+              & Here.Poses_Low'Image & " poses at the low reading,"
+              & Here.Poses_High'Image & " at the high one; two are needed): " & Pixels_Text;
+         when Unplaced =>
+            return (case Here.Located.How is
+                       when Driver.Robot.Hand.Lobes.Unseparated =>
+                          "the " & Pixels_Text & ", do not fall in two groups by how much they vary over the arm's poses"
+                          & " (the poses seen from:" & Here.Poses_Low'Image & " at the low reading,"
+                          & Here.Poses_High'Image & " at the high one)",
+                       when Driver.Robot.Hand.Lobes.One_Sided =>
+                          "the " & Pixels_Text & "; of them" & Here.Located.Here'Image & " went to the low end,"
+                          & Here.Located.There'Image & " to the high end," & Here.Located.Unassigned'Image
+                          & " to neither; the parts they made that are attached to the picture's border and larger than the"
+                          & " doubt of " & Driver.Log.Image (Here.Located.Doubt, 0) & " pixels are" & Here.Located.Parts_Here'Image
+                          & " at the low end and" & Here.Located.Parts_There'Image & " at the high end",
+                       when others =>
+                          "the changed pixels could not be placed");
          when Measured =>
-            return Natural'Image (Natural (Here.Lobes.Length)) & " lobes, "
+            return Lobes_Text & ", "
               & (if Here.Closing = Driver.Robot.Hand.Lobes.Towards_There then "closed at the high reading"
                  elsif Here.Closing = Driver.Robot.Hand.Lobes.Towards_Here then "closed at the low reading"
                  elsif Known (Here.Change)
                  then "closing direction not significant: their distances changed by "
                       & Driver.Log.Image (Here.Change.Value, 3) & " +- " & Driver.Log.Image (Here.Change.Sigma, 3)
                       & " pixels between the ends"
-                 else "closing direction not known: there is nothing to compare their distances with");
+                 else "closing direction not known: there is nothing to compare their distances with")
+              & " (" & Pixels_Text & ";" & Here.Located.Here'Image & " given to the low end,"
+              & Here.Located.There'Image & " to the high end," & Here.Located.Unassigned'Image & " to neither, of doubt "
+              & Driver.Log.Image (Here.Located.Doubt, 0) & " pixels, after" & Here.Located.Rounds'Image & " rounds; its parts:"
+              & Here.Located.Parts_Here'Image & " at the low end," & Here.Located.Parts_There'Image & " at the high end)";
       end case;
    end Account;
 

@@ -44,6 +44,11 @@ package Driver.Beats is
    --  returned, Send not yet called), it is answered with hold, so the main
    --  loop never waits on a decider that has stopped.
 
+   function Held return Boolean;
+   --  A beat is held now: Next has returned and Send has not been called yet,
+   --  the only window in which a decider may read and change the models.
+   --  Code that must run only there, or never there, asks this.
+
    procedure Within_A_Beat (During : not null access procedure);
    --  Decider side: takes the next beat, runs During in its window (the
    --  models hold still until it returns) and answers the beat with a hold,

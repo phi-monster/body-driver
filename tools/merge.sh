@@ -8,7 +8,8 @@
 # gates the self tests run once more built with AddressSanitizer (BD_BUILD=asan), which
 # catches memory corruption the checked build only shows as a later crash. Any other
 # conflict, a new unclassified literal, a failed gate or a sanitizer report stops here
-# with the working tree left as it is, for a person to resolve.
+# with the working tree left as it is, for a person to resolve. Then every self test runs on the box
+# (tools/boxtest.sh); if one fails there the merge commit is taken back out (exit 8).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -42,8 +43,15 @@ fi
 rm -f /tmp/bd_asan_build.$$ /tmp/bd_asan.$$
 git commit -q -m "$MESSAGE
 
-Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 git log -1 --format="merged %h"
+# The driver runs on the box, x86-64 Linux, where a call's actuals are evaluated in another order
+# and no multiply-add is fused: every self test runs there as well (tools/boxtest.sh). A failure
+# there takes the merge back out before anything is pushed.
+if ! "$ROOT/tools/boxtest.sh" HEAD; then
+  git reset -q --hard HEAD~1
+  echo "the self tests fail on the box; the merge is undone and nothing is pushed"; exit 8
+fi
 # The owner keeps GitHub current (10-05): every merge is pushed. A failed push leaves the merge in place.
 if ! git push -q origin HEAD:main; then
   echo "merged, but the push to origin failed; push by hand"
