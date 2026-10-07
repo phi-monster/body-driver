@@ -19,7 +19,7 @@ package body Driver.Robot.Hand.Tips.Tests is
          U1 := Real (Ada.Numerics.Float_Random.Random (Gen));
          exit when U1 > 0.0;
       end loop;
-      return Sqrt (-2.0 * Log (U1)) * Cos (2.0 * Ada.Numerics.Pi * U2);
+      return Sqrt (-2.0 * Ada.Numerics.Long_Elementary_Functions.Log (U1)) * Cos (2.0 * Ada.Numerics.Pi * U2);
    end Gaussian;
 
    --  Two fingers in the tool frame, apart when open, nearly touching when
@@ -32,7 +32,21 @@ package body Driver.Robot.Hand.Tips.Tests is
 
    Pose_Sigma    : constant Real := 5.0e-5;
    Turn_Sigma    : constant Real := 1.0e-4;
-   Contact_Sigma : constant Real := 2.0e-4;
+   Contact_Sigma : constant Real := 2.0e-5;   --  contacts as repeatable as the arm is (see Driver.Robot.Hand.Touch)
+
+   --  The table z = 0 as the arm's own eye saw it before any press, its
+   --  height known to a fifth of a millimetre and its tilt to a ten-thousandth.
+   Table : constant Driver.Geometry.Plane_Estimate :=
+     (Centre => Zero3, Normal => [0.0, 0.0, 1.0], Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
+      Offset_Sigma => 2.0e-4, Tilt_11 => 1.0e-8, Tilt_12 => 0.0, Tilt_22 => 1.0e-8, Points => 100, Scatter => 1.0);
+
+   function No_Pose (Arm : Real_Array) return Pose_Estimate is
+      pragma Unreferenced (Arm);
+      Never_Measured : Pose_Estimate;
+   begin
+      return Never_Measured;
+   end No_Pose;
+   --  The presses of these tests keep no arm readings: their poses stay.
 
    function Line (L : Positive; O : Opening) return Vec3 is (Unit (Tips_True (L, O) - Eye));
 
@@ -52,12 +66,13 @@ package body Driver.Robot.Hand.Tips.Tests is
 
    --  A press aimed at one lobe on the table z = 0, made only when that lobe
    --  is really the one that touches; the tool reports its pose with the
-   --  arm's noise, and was pressing straight down.
+   --  arm's noise, and was pressing straight down. Lift is how far above the
+   --  table the tip stopped: the arm stopped on something else.
    procedure Press_At (L : Positive; O : Opening; Tilt, Azimuth, X, Y : Real; Made : out Boolean;
-                       Press : out Driver.Robot.Hand.Presses.Event)
+                       Press : out Driver.Robot.Hand.Presses.Event; Lift : Real := 0.0)
    is
       R       : constant Mat3 := Exp (Tilt * [Cos (Azimuth), Sin (Azimuth), 0.0]) * Pointing_Down (L, O);
-      Landing : constant Vec3 := [X, Y, Contact_Sigma * Gaussian];
+      Landing : constant Vec3 := [X, Y, Lift + Contact_Sigma * Gaussian];
       T       : constant Vec3 := Landing - R * Tips_True (L, O);
       Other   : constant Positive := 3 - L;
       Beside  : constant Vec3 := R * Tips_True (Other, O) + T;
@@ -75,12 +90,16 @@ package body Driver.Robot.Hand.Tips.Tests is
 
    procedure Pressed_At_Both_Openings (Mislead : Boolean) is
       B     : Book;
+      Moved : Boolean;
       Aimed : array (1 .. 2, Opening) of Natural := [others => [others => 0]];
       --  The true directions into the table of the presses aimed at each tip.
       Pressed_Along : array (1 .. 2, Opening) of Vec3 := [others => [others => Zero3]];
    begin
       Ada.Numerics.Float_Random.Reset (Gen, 31);
       Set_Sights (B, Sights);
+      --  The surface is the table the arm's own eye saw: a press is made on
+      --  no other.
+      Set_Frame (B, Table, No_Pose'Access, Moved);
       for L in 1 .. 2 loop
          for O in Opening loop
             for K in 0 .. 11 loop
@@ -114,6 +133,8 @@ package body Driver.Robot.Hand.Tips.Tests is
                T : constant Point_Estimate := Tip (B, L, O);
             begin
                Check (Known (T), "lobe" & L'Image & " " & O'Image & ": no tip from" & Aimed (L, O)'Image & " presses");
+               Check (Confirmed (B, L, O), "lobe" & L'Image & " " & O'Image & ": a tip " & Aimed (L, O)'Image
+                      & " presses made is not confirmed");
                if Known (T) then
                   declare
                      D : constant Vec3 := T.Mean - Tips_True (L, O);
@@ -129,10 +150,19 @@ package body Driver.Robot.Hand.Tips.Tests is
                       "lobe" & L'Image & " " & O'Image & " got" & Agreeing (B, L, O)'Image & " of its"
                       & Aimed (L, O)'Image & " presses");
                --  The direction is the presses' own, through the fitted table:
-               --  off only by the table's tilt error.
-               Check (Direction (B, L, O).Sigma < Real'Last
-                      and then abs Cross (Direction (B, L, O).Unit_Vector, Unit (Pressed_Along (L, O))) < 0.01,
-                      "lobe" & L'Image & " " & O'Image & ": the press direction is not the presses' own");
+               --  off only by the table's tilt error, and by the share of the
+               --  presses the tip does not rest on, each of which leans from the
+               --  mean by the largest tilt made (0.6 rad).
+               declare
+                  Left_Out : constant Real := Real (Aimed (L, O) - Agreeing (B, L, O));
+                  Allowed  : constant Real := 0.01 + 0.6 * Left_Out / Real'Max (1.0, Real (Agreeing (B, L, O)));
+               begin
+                  Check (Direction (B, L, O).Sigma < Real'Last
+                         and then abs Cross (Direction (B, L, O).Unit_Vector, Unit (Pressed_Along (L, O))) < Allowed,
+                         "lobe" & L'Image & " " & O'Image & ": the press direction is not the presses' own:"
+                         & Real'Image (abs Cross (Direction (B, L, O).Unit_Vector, Unit (Pressed_Along (L, O))))
+                         & " agreeing" & Agreeing (B, L, O)'Image & " of" & Aimed (L, O)'Image);
+               end;
             end;
          end loop;
       end loop;
@@ -143,24 +173,11 @@ package body Driver.Robot.Hand.Tips.Tests is
       Pressed_At_Both_Openings (Mislead => False);
    end Both_Openings;
 
-   function No_Pose (Arm : Real_Array) return Pose_Estimate is
-      pragma Unreferenced (Arm);
-      Never_Measured : Pose_Estimate;
-   begin
-      return Never_Measured;
-   end No_Pose;
-   --  The presses of these tests keep no arm readings: their poses stay.
-
-   --  The table z = 0 as the arm's own eye saw it before any press, its
-   --  height known to a fifth of a millimetre and its tilt to a ten-thousandth.
    --  Three presses of one lobe, each from another orientation: a lobe's tip
    --  and the table under it are four unknowns, and three presses leave them
    --  undetermined; with the table's prior the three presses fix the tip, and
    --  the table they fix is the prior's, corrected.
    procedure Table_Seen_Before is
-      Table : constant Driver.Geometry.Plane_Estimate :=
-        (Centre => Zero3, Normal => [0.0, 0.0, 1.0], Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
-         Offset_Sigma => 2.0e-4, Tilt_11 => 1.0e-8, Tilt_12 => 0.0, Tilt_22 => 1.0e-8, Points => 100, Scatter => 1.0);
    begin
       for Prior in Boolean loop
          declare
@@ -228,6 +245,42 @@ package body Driver.Robot.Hand.Tips.Tests is
       Pressed_At_Both_Openings (Mislead => True);
    end Directions_Unknown_Or_Misleading;
 
+   procedure Stalls_Neither_Agree_Nor_Confirm is
+      --  The book as A16's first hand filled it: a straight press the tip
+      --  stopped, then two tilted presses the arm stopped on itself, short
+      --  of the table. The tip is the first press's, provisional; the
+      --  presses that stopped short are kept and are not ones it rests on;
+      --  a later press from another pose that the tip stopped confirms it.
+      B     : Book;
+      Moved : Boolean;
+      Made  : Boolean;
+      Press : Driver.Robot.Hand.Presses.Event;
+      First : Point_Estimate;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 33);
+      Set_Sights (B, Sights);
+      Set_Frame (B, Table, No_Pose'Access, Moved);
+      Press_At (1, Open, 0.0, 0.0, 0.45, 0.10, Made, Press);
+      Add (B, Press, Open);
+      First := Tip (B, 1, Open);
+      Check (Made and then Known (First) and then not Confirmed (B, 1, Open) and then Latest_Agrees (B),
+             "one press the tip stopped did not give a provisional tip");
+      Press_At (1, Open, 0.3, 1.0, 0.40, 0.15, Made, Press, Lift => 0.06);
+      Add (B, Press, Open);
+      Check (Made and then not Latest_Agrees (B) and then Agreeing (B, 1, Open) = 1 and then not Confirmed (B, 1, Open),
+             "a press that stopped 60 mm short is one the tip rests on");
+      Press_At (1, Open, 0.3, 4.0, 0.50, 0.12, Made, Press, Lift => 0.03);
+      Add (B, Press, Open);
+      Check (Made and then not Latest_Agrees (B) and then Agreeing (B, 1, Open) = 1 and then Pressed (B) = 3,
+             "a press that stopped 30 mm short is one the tip rests on");
+      Check (Tip (B, 1, Open).Mean = First.Mean,
+             "presses that stopped short moved the tip by" & Real'Image (abs (Tip (B, 1, Open).Mean - First.Mean)));
+      Press_At (1, Open, 0.6, 2.0, 0.42, 0.13, Made, Press);
+      Add (B, Press, Open);
+      Check (Made and then Latest_Agrees (B) and then Agreeing (B, 1, Open) = 2 and then Confirmed (B, 1, Open),
+             "a second press from another pose that the tip stopped did not confirm it:" & Agreeing (B, 1, Open)'Image);
+   end Stalls_Neither_Agree_Nor_Confirm;
+
 
    procedure Register is
    begin
@@ -236,6 +289,9 @@ package body Driver.Robot.Hand.Tips.Tests is
       Driver.Tests.Register ("hand.tips.reassign",
                              "a press whose approach is unknown or misleading stays with the wrong lobe or none",
                              Directions_Unknown_Or_Misleading'Access);
+      Driver.Tests.Register ("hand.tips.stalls",
+                             "presses that stopped short of the table move the tip, agree with it or confirm it",
+                             Stalls_Neither_Agree_Nor_Confirm'Access);
       Driver.Tests.Register ("hand.tips.table", "a table the arm's own eye saw is not the prior of the presses on it, "
                              & "or a change of it leaves the tips where they were", Table_Seen_Before'Access);
    end Register;

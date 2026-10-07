@@ -155,13 +155,14 @@ package body Driver.Robot.Hand.Tests is
             Tip := Target / (1.0 + Stiffer);
          end if;
       end Lower;
-      function Gap return Estimate is
-        (if Predict then (Value => Tip - Predicted, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown);
+      function Above return Heights is
+        ((Tip => (if Predict then (Value => Tip - Predicted, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown),
+          Eye => Unknown));
       procedure Press (From : Real) is
       begin
          Tip := From;
          Over := 0.0;
-         Descend (Gap'Access, Least, Lower'Access, Steps);
+         Descend (Above'Access, Least, Lower'Access, Steps);
       end Press;
       Bound : constant Real := Real'Max (Sigma, Least);
    begin
@@ -194,6 +195,53 @@ package body Driver.Robot.Hand.Tests is
              "(c) an obstacle the prediction misses was met with an overshoot of" & Over'Image
              & ", not by the fast step past the bound");
    end Press_Overshoot;
+
+   procedure Eye_Room_Caps_The_Steps is
+      --  A hand lowered with nothing to stop it, as A16's third press was:
+      --  the arm gives way to the doubling, and the tip is nowhere near the
+      --  table when the steps pass the height of the eye above it. The eye is
+      --  0.05 above the tip, the tip starts 0.2 above the table, the tool's
+      --  Least is 0.001 and the eye's height is known to 0.001:
+      --  (a) no step takes the eye nearer the table than Z sigma of its height,
+      --      and the descent ends, Spent, when less than Least is left;
+      --  (b) the steps double up to the last, cut to what is left: the cut
+      --      step is counted, and there is one;
+      --  (c) with the eye's height unknown nothing caps the steps, which go on
+      --      as long as the arm gives way.
+      Least  : constant Real := 0.001;
+      Sigma  : constant Real := 0.001;
+      Z      : constant Real := Threshold (Scalar_Gate);
+      Tip    : Real := 0.0;
+      Known_Eye : Boolean := True;
+      Lowest : Real := Real'Last;   --  the eye's height at its lowest
+      Steps  : Descent_Steps;
+      Pushes : Natural := 0;
+      procedure Lower (By : Real; Reached : out Boolean) is
+      begin
+         Pushes := Pushes + 1;
+         Tip := Tip - By;
+         Lowest := Real'Min (Lowest, Tip + 0.05);
+         Reached := Pushes < 40;   --  the arm gives way until the test ends it
+      end Lower;
+      function Above return Heights is
+        ((Tip => Unknown,
+          Eye => (if Known_Eye then (Value => Tip + 0.05, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown)));
+   begin
+      Tip := 0.2;
+      Descend (Above'Access, Least, Lower'Access, Steps);
+      Check (Steps.Spent, "the eye went on lowering past the table: " & Pushes'Image & " pushes, the eye at"
+             & Real'Image (Lowest));
+      Check (Lowest >= Z * Sigma - 1.0e-12, "a step took the eye to" & Real'Image (Lowest) & ", nearer the table than Z sigma");
+      Check (Lowest - Z * Sigma < Least, "the descent ended with" & Real'Image (Lowest - Z * Sigma) & " of the eye's room unused");
+      Check (Steps.Capped = 1 and then Total (Steps) = Pushes and then Steps.Blind = Total (Steps),
+             "the last step was not the one cut to the room left: capped" & Steps.Capped'Image & " of" & Pushes'Image);
+      Known_Eye := False;
+      Pushes := 0;
+      Tip := 0.2;
+      Descend (Above'Access, Least, Lower'Access, Steps);
+      Check (not Steps.Spent and then Steps.Capped = 0 and then Pushes = 40,
+             "with the eye's height unknown the steps were stopped: " & Pushes'Image & " pushes");
+   end Eye_Room_Caps_The_Steps;
 
    procedure Roles_Re_Read is
       --  A group the body first takes for a closer of an arm whose eye sees
@@ -292,6 +340,8 @@ package body Driver.Robot.Hand.Tests is
                              Views_Never_Form'Access);
       Driver.Tests.Register ("hand.measure.press", "a press overshoots the contact by more than its prediction admits, "
                              & "or creeps when nothing predicts it", Press_Overshoot'Access);
+      Driver.Tests.Register ("hand.measure.room", "a step lowers the eye below the table its arm's own eye saw",
+                             Eye_Room_Caps_The_Steps'Access);
       Driver.Tests.Register ("hand.measure.roles", "a group the body re-read as an arm is swept as a closer",
                              Roles_Re_Read'Access);
       Driver.Robot.Hand.Frames.Tests.Register;

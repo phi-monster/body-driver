@@ -10,6 +10,7 @@ with Driver.Robot.Hand.Shape;
 with Driver.Robot.Hand.Sweep;
 with Driver.Robot.Hand.Tips;
 with Driver.Robot.Hand.Views;
+with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
 
 package body Driver.Robot.Hand is
@@ -266,14 +267,18 @@ package body Driver.Robot.Hand is
       N      : constant Natural := Natural (R.Lobes.Length);
       Fits   : Shapes.Lobe_Shape_Array (1 .. N);
       Tipped : Shapes.Tip_Array (1 .. N, Opening);
+      Unmeasured : Point_Estimate;
    begin
       if N = 0 then
          return;
       end if;
+      --  A size rests on tips two presses have landed on: a provisional tip
+      --  is a bound, and what is taken from it would be taken for measured.
       for L in 1 .. N loop
          Fits (L) := R.Lobes (L).Shape;
          for O in Opening loop
-            Tipped (L, O) := Driver.Robot.Hand.Tips.Tip (R.Book, L, O);
+            Tipped (L, O) := (if Driver.Robot.Hand.Tips.Confirmed (R.Book, L, O)
+                              then Driver.Robot.Hand.Tips.Tip (R.Book, L, O) else Unmeasured);
          end loop;
       end loop;
       declare
@@ -492,13 +497,37 @@ package body Driver.Robot.Hand is
       return False;
    end Opening_Of;
 
+   function Tips_Said (R : Hand_Record; Which : Opening) return String;
+   --  What the presses make of each lobe's tip at an opening: how far along
+   --  its line of sight in the arm's unit, and whether a second press from
+   --  another pose has landed on it (confirmed) or not (provisional).
+
+   function Tips_Said (R : Hand_Record; Which : Opening) return String is
+      Text : Unbounded_String;
+   begin
+      for L in 1 .. Natural (R.Lobes.Length) loop
+         declare
+            Reach : constant Estimate := Driver.Robot.Hand.Tips.Distance (R.Book, L, Which);
+         begin
+            Append (Text, (if L > 1 then ", " else "") & "lobe" & L'Image & " "
+                    & (if not Known (Reach) then "none"
+                       else (if Driver.Robot.Hand.Tips.Confirmed (R.Book, L, Which) then "confirmed " else "provisional ")
+                            & Driver.Log.Image (Reach.Value, 4) & " +- " & Driver.Log.Image (Reach.Sigma, 4)
+                            & " along its sight, on" & Driver.Robot.Hand.Tips.Agreeing (R.Book, L, Which)'Image
+                            & " presses"));
+         end;
+      end loop;
+      return To_String (Text);
+   end Tips_Said;
+
    procedure Watch
      (R          : in out Hand_Record;
       Id         : Hand_Id;
       M          : Model;
       O          : Observation;
       Is_Blocked : Boolean;
-      Is_Still   : Boolean);
+      Is_Still   : Boolean;
+      Is_Pushing : Boolean);
    --  Follows the hand's arm for presses and keeps every press made at one
    --  of the hand's openings. Presses are found in the arm's own frame, the
    --  one its fit gives the tool pose (Tool_In_Arm) and the table its eye saw
@@ -514,7 +543,8 @@ package body Driver.Robot.Hand is
       M          : Model;
       O          : Observation;
       Is_Blocked : Boolean;
-      Is_Still   : Boolean)
+      Is_Still   : Boolean;
+      Is_Pushing : Boolean)
    is
       Found : Boolean;
       Moved : Boolean;
@@ -538,7 +568,7 @@ package body Driver.Robot.Hand is
       if not Driver.Observations.Has_Reading (O, R.Group) then
          return;
       end if;
-      Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked, Is_Still, Tool_In_Arm (M, R.Arm, O),
+      Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked, Is_Pushing, Is_Still, Tool_In_Arm (M, R.Arm, O),
                                          O.Readings.Element (Arm_Group (M, R.Arm)), O.Readings.Element (R.Group),
                                          Found, Press);
       if not Found then
@@ -547,9 +577,12 @@ package body Driver.Robot.Hand is
       if Opening_Of (R, M, Press.Closer.Element, Which) then
          Driver.Robot.Hand.Tips.Add (R.Book, Press, Which);
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": a press at the " & Opening'Image (Which)
-                          & " opening, " & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image & " kept; it "
-                          & (if Driver.Robot.Hand.Tips.Latest_Agrees (R.Book) then "agrees" else "does not agree")
-                          & " with the others");
+                          & " opening, at beat" & Press.Beat'Image & "," & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image
+                          & " kept; "
+                          & (if Driver.Robot.Hand.Tips.Latest_Agrees (R.Book)
+                             then "a tip rests on it"
+                             else "no tip rests on it (it stopped short of the table, or no tip is fixed)")
+                          & "; the tips at this opening: " & Tips_Said (R, Which));
          Size_Up (R, Id);
       else
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image
@@ -563,13 +596,27 @@ package body Driver.Robot.Hand is
       M          : Model;
       O          : Observation;
       Is_Blocked : Boolean;
-      Is_Still   : Boolean)
+      Is_Still   : Boolean;
+      Is_Pushing : Boolean := False)
    is
       R : Hand_Record := H.Data.Found (Id);
    begin
-      Watch (R, Id, M, O, Is_Blocked, Is_Still);
+      Watch (R, Id, M, O, Is_Blocked, Is_Still, Is_Pushing);
       H.Data.Found.Replace_Element (Id, R);
    end Press_Beat;
+
+   function Arm_At_Rest (M : Model; A : Arm_Id; O : Observation) return Boolean is
+     (Natural (A) <= Arm_Count (M)
+      and then Driver.Robot.Stillness.Group_Still (M, Arm_Group (M, A), Natural (O.Beat)));
+   --  The arm's own readings are at rest at the beat. The body's eyes are not
+   --  asked: the pose of a press is a function of the readings alone, and the
+   --  pictures settle after the arm does.
+
+   function Arm_Pushed (M : Model; A : Arm_Id) return Boolean is
+     (Natural (A) <= Arm_Count (M)
+      and then Driver.Robot.Steps.Episodes (M, Arm_Group (M, A)) > 0
+      and then not Driver.Robot.Steps.Latest (M, Arm_Group (M, A)).Ended);
+   --  The arm's latest push has begun and not ended.
 
    procedure Observe (H : in out Hands; M : Model; O : Observation; Sent : Driver.Commands.Command) is
       pragma Unreferenced (Sent);
@@ -588,7 +635,10 @@ package body Driver.Robot.Hand is
          end;
       end loop;
       for Id in H.Data.Found.First_Index .. H.Data.Found.Last_Index loop
-         Press_Beat (H, Id, M, O, Blocked (M, H.Data.Found (Id).Arm, O), Still (M));
+         Press_Beat (H, Id, M, O,
+                     Is_Blocked => Blocked (M, H.Data.Found (Id).Arm, O),
+                     Is_Still   => Arm_At_Rest (M, H.Data.Found (Id).Arm, O),
+                     Is_Pushing => Arm_Pushed (M, H.Data.Found (Id).Arm));
       end loop;
    end Observe;
 
@@ -651,7 +701,7 @@ package body Driver.Robot.Hand is
    end Sweep_Way;
 
    procedure Descend
-     (Gap   : not null access function return Estimate;
+     (Above : not null access function return Heights;
       Least : Real;
       Lower : not null access procedure (By : Real; Reached : out Boolean);
       Steps : out Descent_Steps)
@@ -659,11 +709,14 @@ package body Driver.Robot.Hand is
       Fast    : Real := Least;   --  the next step of the fast part, doubling
       Reached : Boolean;
    begin
-      Steps := (others => 0);
+      Steps := (others => <>);
       loop
          declare
-            G  : constant Estimate := Gap.all;
-            By : Real := Least;
+            type Kind is (Doubling, Banded, Blind);
+            Seen : constant Heights := Above.all;
+            G    : Estimate renames Seen.Tip;
+            By   : Real := Least;
+            How  : Kind := Blind;
          begin
             if Known (G) then
                declare
@@ -674,10 +727,10 @@ package body Driver.Robot.Hand is
                   if Room >= Least then
                      By := Real'Min (Fast, Room);
                      Fast := 2.0 * Fast;
-                     Steps.Fast := Steps.Fast + 1;
+                     How := Doubling;
                   else
                      By := Real'Max (G.Sigma, Least);
-                     Steps.Band := Steps.Band + 1;
+                     How := Banded;
                   end if;
                end;
             else
@@ -685,8 +738,27 @@ package body Driver.Robot.Hand is
                --  not reached, the overshoot as it comes.
                By := Fast;
                Fast := 2.0 * Fast;
-               Steps.Blind := Steps.Blind + 1;
             end if;
+            --  The eye stays above the surface, whatever the tip does.
+            if Known (Seen.Eye) then
+               declare
+                  Room : constant Real :=
+                    Seen.Eye.Value - Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
+               begin
+                  if Room < Least then
+                     Steps.Spent := True;
+                     exit;
+                  elsif By > Room then
+                     By := Room;
+                     Steps.Capped := Steps.Capped + 1;
+                  end if;
+               end;
+            end if;
+            case How is
+               when Doubling => Steps.Fast := Steps.Fast + 1;
+               when Banded   => Steps.Band := Steps.Band + 1;
+               when Blind    => Steps.Blind := Steps.Blind + 1;
+            end case;
             Lower (By, Reached);
             exit when not Reached;
          end;
@@ -735,6 +807,9 @@ package body Driver.Robot.Hand is
 
    function Tip_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Point_Estimate is
      (Driver.Robot.Hand.Tips.Tip (Found (H, Id).Book, Lobe, At_Opening));
+
+   function Tip_Confirmed (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Boolean is
+     (Driver.Robot.Hand.Tips.Confirmed (Found (H, Id).Book, Lobe, At_Opening));
 
    function Press_Direction (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening)
      return Direction_Estimate is
@@ -821,7 +896,7 @@ package body Driver.Robot.Hand is
       for Id in 1 .. Hand_Id'Base (Hand_Count (H)) loop
          declare
             R      : constant Hand_Record := Found (H, Id);
-            Known_Tips, Sought : Natural := 0;
+            Known_Tips, Checked_Tips, Sought : Natural := 0;
          begin
             Append (Text, "hand" & Id'Image & ": closer group" & R.Group'Image & " on arm" & R.Arm'Image & ", eye"
                     & R.Eye'Image & "," & R.Lobes.Length'Image & " lobes;");
@@ -832,11 +907,13 @@ package body Driver.Robot.Hand is
                   if R.Lobes (L).Sights (Which).Known then
                      Sought := Sought + 1;
                      Known_Tips := Known_Tips + Boolean'Pos (Known (Driver.Robot.Hand.Tips.Tip (R.Book, L, Which)));
+                     Checked_Tips := Checked_Tips + Boolean'Pos (Driver.Robot.Hand.Tips.Confirmed (R.Book, L, Which));
                   end if;
                end loop;
             end loop;
             Append (Text, " presses:" & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image & " kept, tips measured:"
-                    & Known_Tips'Image & " of" & Sought'Image & "; sizes: " & Sizes_Text (R) & ASCII.LF);
+                    & Known_Tips'Image & " of" & Sought'Image & " (" & Natural'Image (Checked_Tips)
+                    & " confirmed by a second press); sizes: " & Sizes_Text (R) & ASCII.LF);
          end;
       end loop;
       return To_String (Text);

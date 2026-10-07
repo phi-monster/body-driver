@@ -277,11 +277,40 @@ comes only from touching.
 
 ## Presses
 
-A press is a run of beats at which the arm was blocked, ended by the first
-still beat after the push let go. The tool's pose at that beat is where the
-hand rests on what it pressed. Reading it while the push still drives the hand
-in would be wrong: in the legacy driver's runs (V1B21) the finger sank 6.6 mm
-into the table while pushed and came back to 2.5 mm once the command stopped.
+A press is the arm blocked and then at rest once the push that drove it in has
+let go. The tool's pose at that rest is where the hand rests on what it
+pressed. Reading it while the push still drives the hand in would be wrong: in
+the legacy driver's runs (V1B21) the finger sank 6.6 mm into the table while
+pushed and came back to 2.5 mm once the command stopped; in A16 the first
+press's arm eased back 0.52 mrad over the 83 beats after the let-go, and its
+line of sight met the table at 4.798 units from the stop (the true table along
+that sight lies at 4.82 to 4.84) and at 4.826 from the rest.
+
+**Lesson: the rest after the let-go, not the stop and not the first rest after
+the block (A16).** The watcher waited for the first beat at which the whole
+body was still and its verdict was not Blocked. A16's three presses ended at
+beats 10275, 10377 and 10546, each at the end of the retreat, where the tool is
+at the arm's origin (the aim pose): the stops were at 10178, 10348 and 10529,
+the tool 5.19, 0.46 and 4.47 units from the aim. Two things kept the rest from
+being seen. The let-go is a push that asks nothing (4e-7 rad, the arm's own
+reading as its target) and the arm eased back from the table during it, so
+the step tracker judged it Blocked (it fell short of a target it had no
+distance to); the verdict stands until the next push, so at the rest (10264)
+the body was still but Blocked, and the watcher went on to the retreat. And in
+two presses of three the pictures of the eyes were still settling at the rest
+(10353 to 10355, 10533 to 10535) and the retreat began after three beats.
+Now a press is found at the first beat after the push that followed the block
+has ended at which the arm's own readings are still, whatever that push was
+judged (`Presses.Observe`, which settles after a press and is free again at
+the next rest unblocked, so that the let-go's verdict cannot begin another
+press). It needs the let-go: a driver that retreats at once has the rest of its
+retreat. The stop needs no let-go, but it is read under the push: the last step
+of a descent that doubles with nothing to stop it can drive the hand in as far
+as the whole descent before it was long, so what the arm gives under it differs
+press to press (the shortfalls of A16's three stops: 0.0036 rad, 0.0055 rad,
+4.9 rad). The rest has no push to give under. Measured in A16 the rest is the
+pose within 0.3 mm of the truth and the stop within 0.9 mm; the reason for the
+rest is the first, not the second.
 
 **Lesson: a hand is measured in its arm's own frame.** The pose of a press is
 `Tool_In_Arm`, the table is `Table_In_Arm`, down is `Up_In_Arm`, and every move
@@ -322,15 +351,49 @@ moves, so a press that came in sideways ends up with the lobe that touched.
 
 ## Tips and the surface, fitted together
 
-A press says the tip, fixed in the tool frame, lies on the surface:
-n . (R x + t) = d. The tip lies on its line of sight (one unknown) or anywhere
-(three, the check); a surface is either measured before (a prior) or unknown
-(three unknowns: offset and two tilts). Everything is solved together by
-weighted least squares, so the surface's uncertainty is in every tip's. The
-presses' noise is the one predicted from the arm's pose, raised to the scatter
-the agreeing presses show when that is larger; a press whose deleted residual
-is significant is dropped (stopped above the surface: something else touched;
-sunk below: a yielding contact).
+A press the tip stopped says the tip, fixed in the tool frame, lies on the
+surface: n . (R x + t) = d. The tip lies on its line of sight (one unknown) or
+anywhere (three, the check); a surface is either measured before (a prior) or
+unknown (three unknowns: offset and two tilts). Everything is solved together
+by weighted least squares, so the surface's uncertainty is in every tip's. A
+press the tip did not stop says only that the tip is above the surface (see the
+lesson below), and is left out. The presses' noise is the one predicted from
+the arm's pose and the surface's uncertainty.
+
+**Lesson: a tip cannot be below the table, and an arm is stopped by much
+besides the tip (A16).** The fit raised the presses' noise to the scatter
+they showed, and dropped a press whose residual, predicted from the others,
+was significant against that noise. A16's hand had three presses on its first
+lobe: one the tip stopped (its line of sight meets the table 4.80 units from
+the eye at that press's pose) and two the arm stopped on itself (the lines meet
+it 16.77 and 9.78 units from the eye at theirs; at the second, link 2 was
+within 6.3 mm of link 4, at the third within 2.0 mm of link 5 and 4.8 mm over
+the table; the tip was 86 and 45 mm above the table). With the poses read at
+the stops, the three hits disagreed by 12 units and the noise was raised
+520-fold (the scatter 275128), so the test had no power left and all three
+agreed: the tip came out at 14.2 +- 3.3 units, where the finger's vertex
+nearest the line of sight is 4.70 from the eye, and the fourth press, a true
+contact of the other lobe, went to the first lobe because its far tip led.
+With the poses read at the aim (the old watcher) it was 17.3 +- 0.06, the two
+stops being one pose twice. A scatter taken from a few presses cannot tell a
+contact less repeatable than the arm from a stop on something else, and the
+wider it is allowed to grow the more stops it takes in. The fit now reads each
+press as a bound: the tip is no farther along its line than the hit, the
+distance at which the line of sight meets the surface from the press's pose,
+and only a press the tip stopped gives the hit itself. The tip is the lowest
+hit; a press that leaves the tip above the surface by more than the predicted
+noise is left out (Stopped), the most above first, one at a time; a press that
+leaves it below stays and the ones above it go (A16's three: the first). One
+press with the surface measured before fixes a tip and nothing checks it:
+provisional (A16: 4.80 units, against the 4.70 of the vertex nearest the sight).
+It is Confirmed when a second press, from a pose distinct from the first's,
+lands on it within the noise; the same stop twice from one pose is not a second
+press (`Touch.Distinct`: the positions or the turns apart by more than the
+poses' uncertainty tells apart). The noise is not raised any more: a contact
+less repeatable than the arm reads as the lowest of its presses, its error
+bounded by the scatter, and a tip that two such contacts land on within the
+arm's noise is rarer than it was. What real contacts scatter is measured
+against the truth (A17), not assumed.
 
 **Lesson: on an unknown surface the tilts must differ in size.** With the tool
 turned by a tilt about the eye, the tip's distance s along its line enters
@@ -367,12 +430,32 @@ that tells from the arm's own noise until the arm is blocked, lets go, and
 lifts back. Once the presses so far fix the lobe's tip, the steps stop
 doubling Z sigma above the contact they predict and go on by that sigma. The
 first press is straight along the line of sight; then the line is tilted away
-from the other lobes, on either side, by doubling multiples of the angle to
-the nearest other lobe's line (a lone lobe: the angle it travels through
-between the openings), until a press stops agreeing with the others or cannot
-be reached. Tilting away from the other lobes keeps them behind the aimed tip;
-in the legacy driver's runs (V1B79), tilting towards a finger's own body made
-the body touch first.
+from the other lobes, on either side, by the angle to the nearest other lobe's
+line (a lone lobe: the angle it travels through between the openings), doubled
+while the presses are ones the tip rests on and halved when one stops short of
+the table, until the lobe's tip is confirmed, or the tilts are past a right
+angle or past the least that tells a tip from a stop that does not move with
+the tilt (`Aims.Least_Tilt`), or a press cannot be made. Tilting away from the
+other lobes keeps them behind the aimed tip; in the
+legacy driver's runs (V1B79), tilting towards a finger's own body made the
+body touch first. No step takes the eye below the table its arm's own eye saw,
+the height of the eye above it less Z of its sigma.
+
+**Lesson: a doubling step is bounded by the eye's height above the table, and
+the planner's answer to a step beyond reach was a turn the long way (A16).**
+The third press of A16's first lobe doubled to 5.85 units after 5.80, with
+the eye 10.0 units above the table: a lowering to 11.65, the eye 1.65 units
+under it. The step asked of the arm 5.68 rad of joint motion (the one before it,
+2.9 units, 0.33 rad), of which it made 13.6 per cent before link 2 lay on the
+table and the arm folded on itself. Replayed at the readings of that push,
+`Plan_Reach_In_Arm` for the same lowering ends at joint 2 = -3.677 and joint 4
+= -4.310; planned in twenty steps of 0.29 units, each from the readings the
+last ended at, it ends at 2.610 and 1.977: the same pose, each joint a full
+turn apart (6.287 and 6.288 rad against 2 pi), the second 3.26 rad from the
+readings and the first 5.68. The planner's solve ends at a representative of
+the joint angle that is not the nearest to where the arm is, and the arm is
+asked to turn the long way round (path A's: `Motion.Plan_Reach_In_Arm`). The
+step capped to the eye's room (4.2 units less Z sigma) ends 1.18 rad away.
 
 **Lesson: the smallest push is read where the aim leaves the tool, and the
 step tracker calls a push short for a visible step.** A15 was the first live
@@ -401,6 +484,22 @@ the one that met the table.
 
 ## Open
 
+- A contact that is less repeatable than the arm's predicted noise is not
+  modelled (the fit no longer raises its noise to the scatter it sees, which a
+  few presses cannot tell from stops on something else). Such contacts read as
+  the lowest of them, and the tips two presses land on within the arm's noise
+  are fewer. What the contacts of the rigs scatter, at different tilts, is to be
+  measured against the truth (A17 has it); a measured term goes in the
+  presses' noise then, not an assumed one.
+- The tilts of a lobe's presses start at the hand's own angle (to the other
+  lobe), as they were. A16's two tilted presses, 0.96 and 1.23 rad, both
+  stopped on the arm itself, at 0.46 and 4.5 of the 7.2 units of lowering the
+  table asked, and their aims stood the wrist's fifth joint at 0.743 rad,
+  0.002 under the largest reading it had in the run; the straight press's aim
+  had it at 0.258. A tilt that stops short is now followed by half of it, down
+  to the least that tells a tip from a stop that does not move with the tilt
+  (0.239 rad for A16's first tip). Whether the half reaches the table, and the
+  second press of a tip is a contact, is A17's measurement.
 - A closer group is one hand. A five-finger hand that reports all its fingers
   as one group yields one hand with a lobe per channel; the graspers that are
   subsets of its channels are not separated yet.

@@ -32,6 +32,7 @@ package body Driver.Robot.Hand.Presses is
      (W       : in out Watcher;
       Beat    : Driver.Clock.Beat;
       Blocked : Boolean;
+      Pushing : Boolean;
       Still   : Boolean;
       Tool    : Pose_Estimate;
       Arm     : Real_Array;
@@ -45,24 +46,43 @@ package body Driver.Robot.Hand.Presses is
       case W.State is
          when Free =>
             if Blocked then
-               W.State := Pressing;
+               W.State := Driven;
                W.Approach := (if W.Stood then Moved_Into (W.Last_Still, Tool) else (others => <>));
             elsif Still then
                W.Stood := True;
                W.Last_Still := Tool;
             end if;
-         when Pressing =>
-            if Still and then not Blocked then
+         when Driven =>
+            --  The verdict stands until another push begins: that is the let-go.
+            if not Blocked then
+               W.State := Let_Go;
+            end if;
+         when Let_Go | Settling =>
+            null;
+      end case;
+      --  The rest is after the let-go has ended, not at the beat it begins: a
+      --  body that answers a push late is still at that beat, and its pose is
+      --  the one under the push.
+      case W.State is
+         when Let_Go =>
+            if Still and then not Pushing then
                Found := True;
                Press := (Tool     => Tool,
                          Arm      => Reading_Holders.To_Holder (Arm),
                          Approach => W.Approach,
                          Closer   => Reading_Holders.To_Holder (Closer),
                          Beat     => Beat);
+               W.State := Settling;
+            end if;
+         when Settling =>
+            --  Whatever the let-go was judged, it is not a press.
+            if Still and then not Blocked then
                W.State := Free;
                W.Stood := True;
                W.Last_Still := Tool;
             end if;
+         when Free | Driven =>
+            null;
       end case;
    end Observe;
 

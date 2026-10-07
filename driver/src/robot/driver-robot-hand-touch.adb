@@ -24,6 +24,17 @@ package body Driver.Robot.Hand.Touch is
    end Pose_Sigma;
    --  The height noise a press has from the arm's pose alone.
 
+   function Distinct (A, B : Pose_Estimate) return Boolean is
+      --  The turn that takes A's rotation to B's, in the parent frame; two
+      --  independent estimates apart when it is significant against the sum
+      --  of their covariances, as two points are.
+      Turn : constant Vec3 := Log (B.Pose.Rotation * Transpose (A.Pose.Rotation));
+   begin
+      return Significant (Position (A), Position (B))
+        or else Significant (Point_Estimate'(Mean => Zero3, Covariance => A.Rotation_Covariance),
+                             Point_Estimate'(Mean => Turn, Covariance => B.Rotation_Covariance));
+   end Distinct;
+
    function With_Tangents (Centre, Normal : Vec3) return Geometry.Plane_Estimate is
       N    : constant Vec3 := Unit (Normal);
       --  Tangents from the coordinate axis furthest from the normal.
@@ -99,7 +110,6 @@ package body Driver.Robot.Hand.Touch is
 
       Chosen  : Flags_Access := new Flags'(Presses'Range => True);
       Deleted : Vector_Access := new Real_Vector'(Presses'Range => 0.0);
-      Dof_Of  : Index_Access := new Index_Array'(Presses'Range => 0);
       Stopped : Index_Array (1 .. J) := [others => 0];
       Sunk    : Index_Array (1 .. J) := [others => 0];
 
@@ -141,12 +151,9 @@ package body Driver.Robot.Hand.Touch is
       end Lay_Out;
 
       --  The last step's solution: the tips' unknowns and the surfaces'
-      --  corrections, their covariance, the noise scale and its degrees of
-      --  freedom (none when the predicted noise set it).
+      --  corrections, and their covariance.
       Solution_Q   : Real_Vector (1 .. W * J + Plane_Unknowns * K);
       Solution_Cov : Real_Matrix (1 .. W * J + Plane_Unknowns * K, 1 .. W * J + Plane_Unknowns * K);
-      Noise        : Real := 1.0;
-      Noise_Dof    : Natural := 0;
 
       --  One weighted least-squares solve at the current estimate over the
       --  chosen presses and the measured surfaces' priors. Every press says
@@ -154,17 +161,18 @@ package body Driver.Robot.Hand.Touch is
       --  x the tips' unknowns and the surfaces' corrections (an unknown
       --  surface's relative to its current plane, a measured one's relative
       --  to its prior). Also every chosen press's residual predicted from all
-      --  the others, in units of its own deleted sigma.
+      --  the others, in units of its own deleted sigma: the press's height
+      --  above the surface when the others fix the tip (none when there are
+      --  no others to check it by).
       procedure Solve (Ok : out Boolean) is
          Rows : constant Natural := Chosen_Count + Prior_Rows;
       begin
          Ok := False;
-         --  One equation beyond the unknowns checks the others.
-         if Unknowns = 0 or else Rows <= Unknowns then
+         --  As many equations as unknowns fix them; one more checks them.
+         if Unknowns = 0 or else Rows < Unknowns then
             return;
          end if;
          declare
-            Dof   : constant Positive := Rows - Unknowns;
             A     : Matrix_Access := new Real_Matrix (1 .. Rows, 1 .. Unknowns);
             B     : Vector_Access := new Real_Vector (1 .. Rows);
             Base  : Matrix_Access := new Real_Matrix'(1 .. Rows => [1 .. Unknowns => 0.0]);
@@ -174,8 +182,6 @@ package body Driver.Robot.Hand.Touch is
             Q     : Real_Vector (1 .. Unknowns);
             Full  : Boolean;
             Row   : Natural := 0;
-            Scale : Real := 1.0;
-            Previous : Real := Real'Last;
             procedure Solved;
             --  The solve itself; it may end early, and its rows are
             --  released after.
@@ -237,46 +243,27 @@ package body Driver.Robot.Hand.Touch is
                      end;
                   end if;
                end loop;
-               --  The presses' variance in units of their predicted one: never
-               --  below it, raised to what they actually scatter when that is
-               --  more; it is the fixed point at which the chi square of all rows
-               --  matches its degrees of freedom. The priors keep their own.
-               loop
-                  for R in 1 .. Rows loop
-                     declare
-                        S : constant Real := (if Press_Of_Row (R) > 0 then Sigma (R) * Sqrt (Scale) else 1.0);
-                     begin
-                        for C in 1 .. Unknowns loop
-                           A (R, C) := Base (R, C) / S;
-                        end loop;
-                        B (R) := Rhs (R) / S;
-                     end;
+               --  Every row in units of its own sigma: the presses' is the noise
+               --  their poses predict, the priors' are whitened already. The
+               --  noise is not raised by how the presses scatter (see above).
+               for R in 1 .. Rows loop
+                  for C in 1 .. Unknowns loop
+                     A (R, C) := Base (R, C) / Sigma (R);
                   end loop;
-                  Driver.Numerics.Dense.Least_Squares (A.all, B.all, Q, Full);
-                  if not Full then
-                     return;
-                  end if;
-                  declare
-                     Res    : constant Real_Vector := A.all * Q - B.all;
-                     Next   : constant Real := Real'Max (1.0, Scale * (Res * Res) / Real (Dof));
-                     Change : constant Real := abs (Next - Scale);
-                  begin
-                     exit when Change <= Driver.Conventions.Unchanged_Fraction * Scale or else Change >= Previous;
-                     Previous := Change;
-                     Scale := Next;
-                  end;
+                  B (R) := Rhs (R) / Sigma (R);
                end loop;
+               Driver.Numerics.Dense.Least_Squares (A.all, B.all, Q, Full);
+               if not Full then
+                  return;
+               end if;
                declare
                   Inv : constant Real_Matrix := Inverse (Transpose (A.all) * A.all);
                   Res : constant Real_Vector := A.all * Q - B.all;
-                  Chi : constant Real := Res * Res;
                begin
                   --  An unknown the presses fix only to round-off has no variance.
                   if (for some R in 1 .. Unknowns => not (Inv (R, R) > 0.0)) then
                      return;
                   end if;
-                  Noise := Scale;
-                  Noise_Dof := (if Scale > 1.0 then Dof else 0);
                   Solution_Q := [others => 0.0];
                   Solution_Cov := [others => [others => 0.0]];
                   for R in 1 .. Unknowns loop
@@ -286,23 +273,19 @@ package body Driver.Robot.Hand.Touch is
                      end loop;
                   end loop;
                   Deleted.all := [others => 0.0];
-                  Dof_Of.all := [others => 0];
                   for R in 1 .. Rows loop
                      if Press_Of_Row (R) > 0 then
                         declare
-                           Row_R    : constant Real_Vector := [for C in 1 .. Unknowns => A (R, C)];
-                           Free     : constant Real := 1.0 - Row_R * (Inv * Row_R);
-                           --  The others' noise in the same units, at least the predicted one.
-                           Without  : Real := 1.0 / Scale;
+                           Row_R : constant Real_Vector := [for C in 1 .. Unknowns => A (R, C)];
+                           Free  : constant Real := 1.0 - Row_R * (Inv * Row_R);
                         begin
+                           --  A press nothing else bears on (its own tip's only one) is
+                           --  fitted exactly and has nothing to be checked by.
                            if Free > Real'Model_Epsilon then
-                              --  Leaving this press out removes Res^2 / (1 - h) from the chi square.
-                              if Dof > 1 and then (Chi - Res (R) ** 2 / Free) / Real (Dof - 1) > Without then
-                                 Without := (Chi - Res (R) ** 2 / Free) / Real (Dof - 1);
-                                 Dof_Of (Press_Of_Row (R)) := Dof - 1;
-                              end if;
-                              --  The residual is the tip's height above the surface.
-                              Deleted (Press_Of_Row (R)) := Res (R) / Sqrt (Without * Free);
+                              --  Leaving this press out, its residual is its own over the
+                              --  square root of the share the others leave it. The residual
+                              --  is the tip's height above the surface.
+                              Deleted (Press_Of_Row (R)) := Res (R) / Sqrt (Free);
                            end if;
                         end;
                      end if;
@@ -473,7 +456,6 @@ package body Driver.Robot.Hand.Touch is
             Free (Result);
             Free (Chosen);
             Free (Deleted);
-            Free (Dof_Of);
          end return;
       end Done;
 
@@ -519,9 +501,12 @@ package body Driver.Robot.Hand.Touch is
          end;
       end if;
       --  Solve, reweighting at the estimate until it moves by a negligible
-      --  part of its own uncertainty or stops shrinking the move; then drop
-      --  the press whose deleted residual is the most significant, one at a
-      --  time, until none is.
+      --  part of its own uncertainty or stops shrinking the move; then leave
+      --  out the press that, the others fixing its tip, leaves the tip most
+      --  above the surface, one at a time, until none leaves it above by more
+      --  than its noise. A press that leaves a tip below the surface stays:
+      --  the tip cannot be there, so it is the presses above it that stopped
+      --  on something else.
       loop
          declare
             Previous : Real := Real'Last;
@@ -545,28 +530,25 @@ package body Driver.Robot.Hand.Touch is
             Worst : Natural := 0;
          begin
             for I in Presses'Range loop
-               if Chosen (I) and then Significant (Deleted (I), 1.0, Dof_Of (I))
-                 and then (Worst = 0 or else abs Deleted (I) > abs Deleted (Worst))
+               --  Residuals are heights above the surface: positive left the tip above it.
+               if Chosen (I) and then Deleted (I) > 0.0 and then Significant (Deleted (I), 1.0)
+                 and then (Worst = 0 or else Deleted (I) > Deleted (Worst))
                then
                   Worst := I;
                end if;
             end loop;
             exit when Worst = 0;
-            --  Residuals are heights above the surface: positive left the tip
-            --  above it, negative below.
-            if Deleted (Worst) > 0.0 then
-               Stopped (Sight_Of (Presses (Worst))) := Stopped (Sight_Of (Presses (Worst))) + 1;
-            else
-               Sunk (Sight_Of (Presses (Worst))) := Sunk (Sight_Of (Presses (Worst))) + 1;
-            end if;
+            Stopped (Sight_Of (Presses (Worst))) := Stopped (Sight_Of (Presses (Worst))) + 1;
             Chosen (Worst) := False;
          end;
       end loop;
       Result.Ok := True;
       for I in Presses'Range loop
          Result.Agrees (I - Presses'First + 1) := Chosen (I);
+         if Chosen (I) and then Deleted (I) < 0.0 and then Significant (Deleted (I), 1.0) then
+            Sunk (Sight_Of (Presses (I))) := Sunk (Sight_Of (Presses (I))) + 1;
+         end if;
       end loop;
-      Result.Scatter := Noise;
       for S in 1 .. J loop
          Result.Tips (S).Stopped := Stopped (S);
          Result.Tips (S).Sunk := Sunk (S);
@@ -578,6 +560,17 @@ package body Driver.Robot.Hand.Touch is
                for I in Presses'Range loop
                   if Chosen (I) and then Sight_Of (Presses (I)) = S then
                      Result.Tips (S).Used := Result.Tips (S).Used + 1;
+                     --  Two presses land on one tip when the others fix it past what they
+                     --  could do on their own, and they come from poses apart.
+                     if Chosen_Count + Prior_Rows > Unknowns then
+                        for L in Presses'First .. I - 1 loop
+                           if Chosen (L) and then Sight_Of (Presses (L)) = S
+                             and then Distinct (Presses (L).Tool, Presses (I).Tool)
+                           then
+                              Result.Tips (S).Confirmed := True;
+                           end if;
+                        end loop;
+                     end if;
                   end if;
                end loop;
                if As = On_Sight then
@@ -586,7 +579,7 @@ package body Driver.Robot.Hand.Touch is
                      Dist  : constant Real := Tip_Q (S);
                      Var_S : constant Real := Solution_Cov (C0, C0);
                   begin
-                     Result.Tips (S).Distance := (Value => Dist, Sigma => Sqrt (Var_S), Degrees_Of_Freedom => Noise_Dof);
+                     Result.Tips (S).Distance := (Value => Dist, Sigma => Sqrt (Var_S), Degrees_Of_Freedom => 0);
                      --  Along the line as the presses fixed it, across it as the eye did.
                      Result.Tips (S).Tip :=
                        (Mean       => Line (S).Origin.Mean + Dist * U,
@@ -627,7 +620,7 @@ package body Driver.Robot.Hand.Touch is
                P.Tilt_11 := T11;
                P.Tilt_12 := T12;
                P.Tilt_22 := T22;
-               P.Scatter := Noise;
+               P.Scatter := (if Prior (F).Measured then Prior (F).Plane.Scatter else 1.0);
                P.Points := 0;
                for I in Presses'Range loop
                   if Chosen (I) and then Surface_Of (Presses (I)) = F then
