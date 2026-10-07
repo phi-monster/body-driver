@@ -431,7 +431,7 @@ package body Driver.Robot.Hand.Pressing.Tests is
                First := Got;
                First_Gap := Gap_Is;
             else
-               Check (Got.Into = First.Into and then Got.Above = First.Above and then Got.Least = First.Least,
+               Check (Got.Into = First.Into and then Got.Above = First.Above,
                       "the aim differs from where the arm stands placed, the arm standing " & How'Image);
                Check (Gap_Is = First_Gap, "the tip's gap differs from where the arm stands placed, the arm standing "
                       & How'Image);
@@ -554,6 +554,29 @@ package body Driver.Robot.Hand.Pressing.Tests is
       end loop;
    end Tip_Taken_Into_The_World;
 
+   --  Where the least push is read. The arm's frame is the eye at its
+   --  reference readings, where the tool's place is known exactly, and A15's
+   --  first press stood there before its aim: the least push read there was
+   --  too small to print and the descent doubled from it for 34 pushes of nothing. A
+   --  press lowers the tool from where the aim leaves it, which is where the
+   --  push is to be told from the tool's noise.
+   procedure Least_Push_Is_Where_The_Aim_Leaves_The_Tool is
+      Idle  : constant Real_Array (1 .. Joint_Count) := [others => 0.0];
+      Along : constant Vec3 := Unit (Tips_True (1, Open));
+      M     : Model;
+      Got   : Aimed;
+   begin
+      Build (M, Placed);
+      Aim (M, 1, 1, Observed (1, Idle, Idle, 0.0), Along, Got);
+      Check (Got.Ok and then Motion.Status (Got.Plan) = Motion.Planned, "the aim from the reference readings is not planned");
+      Check (Least_Push (M, 1, Observed (1, Idle, Idle, 0.0)) = 0.0,
+             "the tool's place at the arm's reference readings is not known exactly");
+      Check (Got.Least > 0.0 and then Got.Least < Real'Last,
+             "the least push where the aim leaves the tool is" & Got.Least'Image & ", not above zero");
+      Check (Got.Least = Least_Push (M, 1, Observed (1, Motion.Last_Readings (Got.Plan), Idle, 0.0)),
+             "the least push is not where the aim's plan ends");
+   end Least_Push_Is_Where_The_Aim_Leaves_The_Tool;
+
    procedure Register is
    begin
       Driver.Tests.Register ("hand.pressing.tips",
@@ -568,6 +591,9 @@ package body Driver.Robot.Hand.Pressing.Tests is
       Driver.Tests.Register ("hand.pressing.world",
                              "a tip is taken into the world without the arm's unit, or known of an arm not placed "
                              & "there", Tip_Taken_Into_The_World'Access);
+      Driver.Tests.Register ("hand.pressing.least",
+                             "the least push of a press is read where the aim leaves the tool, not at the arm's "
+                             & "reference readings where the tool's place is exact", Least_Push_Is_Where_The_Aim_Leaves_The_Tool'Access);
    end Register;
 
 end Driver.Robot.Hand.Pressing.Tests;

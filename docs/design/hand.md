@@ -95,22 +95,47 @@ chooses 22) put 89.5 % of the fingers' below it and 15.1 % of the others:
 86.6 % right, the errors in clusters, a wedge of the flat dark world beside the
 right finger's other place and the right finger's reflecting patches.
 
-`Lobes.From_Change` takes the seeds as the start of a mixture of the two
-kinds of changed pixel: the robot at the starting end and the world at the
-other, or the robot at the other end and the world at the starting end. A
-pixel of either kind has a brightness at each end, and the kinds are told by
-how bright the robot and the world are where they changed, each a histogram
-(every one begins with one pixel a bin), found together with every pixel's
-share in each kind by expectation and maximisation (`Give_To_Ends`). No number
-from the seeds stays but which kind is which. The seeds are wrong where the
-world is flat, and a flat patch is wrong as a whole and explains itself: when
-the rounds have settled every connected part of one label is tried the other
-way round against the histograms of all the rest, and turned when that is the
-likelier by more than Z squared over two in the log of the likelihood. Last
-the eight neighbours are heard (how many of them are of each kind, another
-histogram). A pixel is given to a kind only when the other kind's share of it
-is below what one test alarms at (Z); the rest are left unassigned, never
-guessed, and the log counts them.
+`Lobes.From_Change` tells the changed pixels in a mixture of two kinds: the
+robot at the starting end and the world at the other, or the robot at the
+other end and the world at the starting end. A pixel of either kind has a
+brightness at each end, and the kinds are told by how bright the robot and the
+world are where they changed, each a histogram (every one begins with one
+pixel a bin), found together with every pixel's share in each kind by
+expectation and maximisation (`Tell_Ends`). A pixel is given to a kind only
+when the other kind's share of it is below what one test alarms at (Z); the
+rest are left unassigned, never guessed, and the log counts them.
+
+**Lesson: where the rounds begin decides where they end.** Histograms this
+free keep any labelling they are begun from, if each group of pixels with a
+brightness of its own supports it. The first form began from the seeds, the
+pixels whose deviation over the poses is low, and the seeds are wrong where
+the world is flat. A14's final ends (89 294 changed pixels, the seeds 86.6 %
+right) came out 91.8 % right. A15's final ends (86 392 pixels; the closed
+fingers touch and cover the grey table beside them) had seeds 69 % right and
+came out with 47 % of the pixels given the end that shows them darker, three
+lobes and a tip where no finger was: the table's grey held as the robot's and
+the finger's black as the world's, each group at the label its seeds gave it
+(the likelihood of that state was higher than of the right one, by 2 600 in
+the log, so the likelihood cannot choose). Begun instead from which end shows
+the pixel darker where the two ends differ most (the half of the pixels above
+their median difference; elsewhere, and where the levels are equal, from the
+seed) the same pixels came out 91 % (`hand.lobes.order`: a scene of six
+groups, 58 % of its seeds right, 3 136 of 10 600 pixels given the wrong end
+from the seeds and none from the order). Over A15's stages of 7 657 changed
+pixels and more the agreement went 18 to 85 %, 86 to 86, 83 to 83, 78 to 79,
+94 to 94, 47 to 91 and 94 to 95 %. The seeds say which kind is which when the
+rounds are over: more of them in the kind with the robot at the anchored end
+than not, or the kinds are exchanged. Not the order for every pixel: of two
+levels that differ little the order is noise, which histograms begun from it
+sort into a robot and a world that are not there, and the neighbours cannot
+decide them (`hand.lobes.blank`, pixels dark at both ends, begun from the
+order: 332 of 2 522 right; begun from their seeds 2 267). The seeds are wrong
+where the world is flat, and a flat patch is wrong as a whole and explains
+itself: when the rounds have settled every connected part of one label is
+tried the other way round against the histograms of all the rest, and turned
+when that is the likelier by more than Z squared over two in the log of the
+likelihood. Last the eight neighbours are heard (how many of them are of each
+kind, another histogram).
 
 The rounds end by the convention for an iterative estimate: it has stopped
 when one more round moves it by less than `Unchanged_Fraction` of its own
@@ -127,19 +152,17 @@ four to nine parts at every pass for 1 120 rounds, fourteen seconds, and left
 the expected error, which goes on sharpening for many rounds after the labels
 have stopped, a pixel at a round from the clear ones around it: on A14's final
 ends 12 962 pixels were left to neither when the rounds ended with the labels
-(nine rounds), 3 840 when they end with the doubt (23 rounds, 0.24 s), 3 468
-after 1 120 rounds (the most a label can cross the picture in, its width and
-height); on two regions with a quarter of their pixels dark at both ends, 2 177
-of 2 522 were left to neither by the labels' rule and 255 by the doubt's
-(`hand.lobes.blank`). A round that takes the doubt back to what it was two
-rounds before has not moved it either, though the round before did: two pixels
-whose neighbours each tell them to take the other's label swap it every round,
-and ran the second scene of that test to the 200 rounds a label can cross its
-picture in. On A14's final ends, 89 294 changed pixels: 51 177 to the low end,
-34 277 to the high end, 3 840 to neither; against the truth taken from the dark
-region connected to the fingers at the starting end (itself imperfect), 78 474
-of the 85 454 assigned are right, 91.8 %, where the seeds alone were 86.6 %
-right.
+(nine rounds), 3 840 when they end with the doubt (23 rounds, 0.24 s). The
+doubt can wait on a plateau for a round before it falls, so it has stopped
+when two rounds in a row moved it by less than the fraction (pixels dark at
+both ends: 331 of 2 421 right and 2 090 to neither after 6 rounds when one
+round sufficed, 2 088 and 333 after 24 when two had to, `hand.lobes.blank`),
+or when it came back within the fraction of its value two rounds before,
+twice in a row (two pixels whose neighbours each tell them to take the
+other's label swap it every round: the 112 rounds a label can cross the
+picture in, against 32 with the rule; `hand.lobes.cycle`), or when it and the
+doubt before it are what they were in an earlier round. On A15's three last
+stages: 29, 26 and 40 rounds, 0.21 to 0.36 s on the Mac.
 
 **Lesson: the parts of a mixture's sets are not all lobes.** Each end's
 pixels are cleaned of what is one pixel across and split in their
@@ -303,6 +326,31 @@ between the openings), until a press stops agreeing with the others or cannot
 be reached. Tilting away from the other lobes keeps them behind the aimed tip;
 in the legacy driver's runs (V1B79), tilting towards a finger's own body made
 the body touch first.
+
+**Lesson: the smallest push is read where the aim leaves the tool, and the
+step tracker calls a push short for a visible step.** A15 was the first live
+run that pressed, and its presses failed in two ways, both in the log. (1) The
+first press of the first lobe lowered from a least push too small to print: 34
+pushes, the first 33 asking of the arm less than five millionths of a radian,
+"blocked after lowering 0.0000". The arm's frame is the eye at its reference
+readings, where the tool's place is known exactly, and the arm stood there
+before the aim; the least push was read there, not where the aim leaves the
+tool (0.06 to 0.2 two presses later). It is now read at the readings the aim's
+plan ends at (`hand.pressing.least`). (2) After the first press that met the
+table (6 pushes, the last of 3.26, "delivered 0.716" of its ask) every push of
+every later press was judged blocked at once, with the whole of the ask
+delivered: the step tracker calls a push short when a joint stops short of its
+ask by its visible step, 1 to 5 millionths of a radian, and from the end of
+that press on it was true of every step whatever its size or direction. Of the
+46 steps from the first press's end on, 31 pushes of 0.005 to 0.02 radian and
+15 aims and retreats of 0.1 to 0.9, every one was judged blocked, having
+delivered 0.9995 or more of its ask, and each press ended at its first push,
+in the air. The press reads the verdict as every decider does
+(`Report.Outcome`); the defect lives in the step tracker (`Steps`, path A's):
+a push that delivered 0.9995 of its ask is not blocked, and the push that met
+A15's table, 0.716 of its ask against a noise of 0.0001, is. The presses found
+in the stream were not misled: from all of it the estimators kept one press,
+the one that met the table.
 
 ## Open
 

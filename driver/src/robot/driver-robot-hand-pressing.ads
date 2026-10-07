@@ -29,7 +29,7 @@ package Driver.Robot.Hand.Pressing is
       Above : Rigid := Driver.Numerics.Identity;   --  the tool aimed, arm frame
       Turn  : Real := 0.0;        --  how far the aim turns the tool, radians
       Into  : Vec3 := Zero3;      --  down: into the table, unit, arm frame
-      Least : Real := Real'Last;  --  the smallest move of the tool that tells from its noise
+      Least : Real := Real'Last;  --  the smallest move of the tool that tells from its noise, where the aim leaves it
       Plan  : Driver.Robot.Motion.Plan;   --  from the tool as at O to Above; unset unless Ok
    end record;
 
@@ -37,6 +37,17 @@ package Driver.Robot.Hand.Pressing is
    --  The tool turned about the eye (a point of the tool frame, so that the
    --  eye keeps its view) by the least rotation that points Along, a
    --  direction of the tool frame, into the table, and a plan to get there.
+
+   function Least_Push (M : Model; Arm : Arm_Id; O : Observation) return Real;
+   --  The smallest move of the tool that tells from its noise, where the tool
+   --  is at O: Z times the root of the largest variance of its position there.
+   --  Aim gives it where the aim leaves the tool (Aimed.Least), which is where
+   --  a press lowers it from, not where it stood before the aim: the arm's
+   --  frame is the eye at its reference readings, where the tool's place is
+   --  known exactly and a push of any size tells from the noise (A15's first
+   --  press stood there: 34 pushes, the first 33 of them asking less than
+   --  five millionths of a radian; two presses later the least push was 0.06
+   --  to 0.2).
 
    function Lowered
      (M : Model; Arm : Arm_Id; O : Observation; Into : Vec3; By : Real) return Driver.Robot.Motion.Plan;

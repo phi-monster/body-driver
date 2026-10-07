@@ -767,7 +767,11 @@ package body Driver.Robot.Hand.Lobes is
       type Votes is array (0 .. 2 * Reach) of Real;
 
       Flips   : Natural;
-      Doubt_Now, Doubt_Before, Doubt_Earlier : Real := 0.0;   --  the expected error after the last round, the one before and the one before that
+      Doubt_Now : Real := 0.0;   --  the expected error after the last round
+
+      --  The doubt each round of the neighbours' phase left.
+      package Doubt_Vectors is new Ada.Containers.Vectors (Natural, Real);
+      Doubts : Doubt_Vectors.Vector;
 
       function Changed_Neighbour (J : Positive; Dc, Dr : Integer) return Natural is
          P : constant Natural := At_Pixel (At_Pixel'First + J - 1);
@@ -828,8 +832,6 @@ package body Driver.Robot.Hand.Lobes is
          end loop;
          Cap := Kind_A / (Real (Total) + 2.0);
          Flips := 0;
-         Doubt_Earlier := Doubt_Before;
-         Doubt_Before := Doubt_Now;
          Doubt_Now := 0.0;
          for J in 1 .. Total loop
             declare
@@ -857,17 +859,39 @@ package body Driver.Robot.Hand.Lobes is
       --  round moves by Flips of Total: run on, the brightness alone drifts to
       --  a kind of everything. After, it is the doubt, the expected error,
       --  which goes on sharpening for many rounds after the labels have
-      --  stopped: A14's final ends, 89 294 pixels, left 12 962 to neither when
-      --  the rounds ended with the labels (nine rounds), 3 840 when they ended
-      --  with the doubt (23), and 3 468 after 1 120 rounds. A round that takes
-      --  the doubt back to what it was two rounds before has not moved it
-      --  either, though the round before did: two pixels whose neighbours each
-      --  tell them to take the other's label swap it for ever. And the rounds
-      --  end when a label has crossed the picture.
+      --  stopped (A14's final ends left 12 962 of 89 294 pixels to neither
+      --  when the rounds ended with the labels, nine of them) and can wait on
+      --  a plateau for a round before it falls (pixels dark at both ends:
+      --  6 rounds and 2 090 of 2 421 left to neither when one round that moved
+      --  the doubt by less than the fraction ended them, 24 and 333 when two
+      --  in a row had to): it has stopped when two rounds in a row moved it
+      --  by less than the fraction, or when it came back within the fraction
+      --  of its value two rounds before, twice in a row (two pixels whose
+      --  neighbours each tell them to take the other's label swap it every
+      --  round). The rounds are deterministic, so a longer cycle is a round
+      --  and its predecessor that give the doubts of two rounds before, any
+      --  rounds before. And the rounds end when a label has crossed the
+      --  picture.
       function Labels_Settled return Boolean is (Real (Flips) < Driver.Conventions.Unchanged_Fraction * Real (Total));
       function Doubt_Settled return Boolean is
-        (abs (Doubt_Now - Doubt_Before) <= Driver.Conventions.Unchanged_Fraction * Doubt_Now
-         or else abs (Doubt_Now - Doubt_Earlier) <= Driver.Conventions.Unchanged_Fraction * Doubt_Now);
+         Last : constant Integer := Doubts.Last_Index;
+
+         function Still (A, B : Integer) return Boolean is
+           (abs (Doubts (A) - Doubts (B)) <= Driver.Conventions.Unchanged_Fraction * Doubts (A));
+      begin
+         return (Last >= Doubts.First_Index + 2 and then Still (Last, Last - 1) and then Still (Last - 1, Last - 2))
+           or else (Last >= Doubts.First_Index + 3 and then Still (Last, Last - 2) and then Still (Last - 1, Last - 3));
+      end Doubt_Settled;
+      function Cycling return Boolean is
+         Last : constant Integer := Doubts.Last_Index;
+      begin
+         for K in Doubts.First_Index + 1 .. Last - 1 loop
+            if Doubts (K) = Doubts (Last) and then Doubts (K - 1) = Doubts (Last - 1) then
+               return True;
+            end if;
+         end loop;
+         return False;
+      end Cycling;
       function Crossed return Boolean is (Rounds >= W + H);
 
       procedure Turn_Parts (Turned : out Natural) is
@@ -985,11 +1009,47 @@ package body Driver.Robot.Hand.Lobes is
       Slot.all := [others => 0];
       for J in 1 .. Total loop
          Slot (At_Pixel (At_Pixel'First + J - 1) + 1) := J;
-         Share (J) := (if Seeds (Seeds'First + J - 1) then 1.0 else 0.0);
-         Label (J) := Seeds (Seeds'First + J - 1);
          A_Bin (J) := Bin (Anchored (Anchored'First + J - 1));
          B_Bin (J) := Bin (Other (Other'First + J - 1));
       end loop;
+      --  The rounds begin from the order of the two levels where the ends
+      --  differ most (the half of the pixels above their median difference):
+      --  there the robot is the darker, or the lighter, the same way for most
+      --  pixels of one hand, and the seeds say which. Elsewhere, and where
+      --  the ends show one level, a pixel begins at its seed. The seeds are
+      --  wrong where the world is flat, and histograms begun from them hold
+      --  the world's grey as the robot's, where every group of pixels with a
+      --  brightness of its own keeps the label its seeds gave it (A15's
+      --  final ends, seeds 69 % right: 47 % of the pixels given the end that
+      --  shows them darker, 93 % when begun so); and the order of two levels
+      --  that differ little is no more than noise, which histograms begun
+      --  from it then sort into a robot and a world that are not there.
+      declare
+         Contrast : Real_Access := new Real_Array (1 .. Total);
+         Typical  : Real;
+         Seeded, Darker : Natural := 0;
+         Robot_Is_Darker : Boolean;
+
+         function Ends_Differ_Most (J : Positive) return Boolean is (Contrast (J) > 0.0 and then Contrast (J) >= Typical);
+      begin
+         for J in 1 .. Total loop
+            Contrast (J) := abs (Real (A_Bin (J)) - Real (B_Bin (J)));
+         end loop;
+         Typical := Driver.Stats.Median (Contrast.all);
+         for J in 1 .. Total loop
+            if Seeds (Seeds'First + J - 1) and then Ends_Differ_Most (J) then
+               Seeded := Seeded + 1;
+               Darker := Darker + Boolean'Pos (A_Bin (J) < B_Bin (J));
+            end if;
+         end loop;
+         Robot_Is_Darker := 2 * Darker >= Seeded;
+         for J in 1 .. Total loop
+            Label (J) :=
+              (if Ends_Differ_Most (J) then (A_Bin (J) < B_Bin (J)) = Robot_Is_Darker else Seeds (Seeds'First + J - 1));
+            Share (J) := (if Label (J) then 1.0 else 0.0);
+         end loop;
+         Free (Contrast);
+      end;
       Rounds := 0;
       --  Parts are turned until none is, or until a pass turns no fewer than
       --  the pass before: two parts that each explain the other better turned
@@ -1006,7 +1066,8 @@ package body Driver.Robot.Hand.Lobes is
       end loop;
       loop
          Round (Heard => True);
-         exit when Doubt_Settled or else Crossed;
+         Doubts.Append (Doubt_Now);
+         exit when Doubt_Settled or else Cycling or else Crossed;
       end loop;
       --  The seeds say which kind is which: more of them are of the kind with
       --  the robot at the anchored end than not.
