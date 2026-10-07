@@ -51,6 +51,13 @@ private package Driver.Robot.Channels is
    --  The degrees of freedom the channel's noise rests on (0: known or exact).
    --  Every channel of the group has its noise measured.
 
+   function Resolution (M : Model; G : Group_Id; Beat : Natural) return Real
+     with Pre => Has_Reading (M, G, Beat);
+   --  The least change of the group's readings that float arithmetic on them
+   --  can tell, whatever their noise (none, when they repeat exactly): the
+   --  float's resolution of the group's largest reading at Beat, or of one
+   --  reading unit when every reading is zero.
+
    function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean
      with Pre => D'First = 1 and then D'Length = Group_Size (M, G);
    --  A change D of the group's readings, one value per channel, is motion
@@ -64,10 +71,12 @@ private package Driver.Robot.Channels is
    --  significant against the channels' noise, as the change of two readings
    --  and as one vector, so a group of many channels raises no more false
    --  alarms than one. The noise guards the visible step as the step guards
-   --  the noise: a lock-in that credits a group with the pictures' motion
-   --  beside its tiny readings can fit a visible step of 1e-17, which alone
-   --  would make every jitter of the reading a motion, a push without end,
-   --  and a group with no beat at rest to measure its noise from; and a
+   --  the noise: a visible step alone (a lock-in that credits a group with
+   --  the pictures' motion beside its tiny readings can fit one of 1e-17,
+   --  which Visible_Step floors at what a reading tells from its noise, but
+   --  one small beside all the channels' noises together is still no
+   --  evidence) would make every jitter of a reading a motion, every beat a
+   --  push, and a group with no beat at rest to measure its noise from; and a
    --  channel whose noise is not measured gives no evidence, so its jitter is
    --  not motion whatever the step. The one test of motion.
 

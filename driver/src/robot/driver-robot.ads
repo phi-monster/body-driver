@@ -232,7 +232,12 @@ package Driver.Robot is
    function Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate;
    --  The smallest change of the channel's command whose effect the eyes that
    --  see it tell from their own noise, in reading units: where a probe or a
-   --  sweep of the channel starts.
+   --  sweep of the channel starts. It is also a change the channel's own
+   --  reading tells from its noise: no smaller than Z sigmas of the change of
+   --  two readings (a lock-in that credits a group with the pictures' motion
+   --  beside its tiny readings can fit a step of 1e-17, which no reading can
+   --  show). Unknown while the channel's noise is not measured, since nothing
+   --  tells a step from it.
 
    type Eye_Response is (Unmeasured, Nothing, Patch, Undecided, Whole);
    --  What pushing a group does to what an eye sees: nothing, a patch of the
@@ -295,7 +300,8 @@ private
       Length    : Real := 0.0;        --  how far it asked, in reading units
       Shortfall : Estimate;           --  how far short of the target it stopped, along the ask
       Delivered : Estimate;           --  the fraction of the ask it delivered, along the ask
-      Blocked   : Boolean := False;   --  it fell short by a step an eye can see, or by more than free pushes do
+      Blocked   : Boolean := False;   --  it fell short by more than the group's free pushes do, and by a shortfall the one
+                                      --  test of motion sees, or nothing answered an ask that test would see
    end record;
 
    package Episode_Vectors is new Ada.Containers.Vectors (Positive, Episode);
@@ -314,7 +320,7 @@ private
       Delay_Known : Boolean := False;      --  some push was answered
       Episodes    : Episode_Vectors.Vector;   --  every push and how it went (Driver.Robot.Steps)
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
-      Free_Shortfalls : Real_Vectors.Vector;   --  of every push that moved freely, in order
+      Free_Shortfalls : Real_Vectors.Vector;   --  of every answered push that was not blocked, along its ask, in order
       Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
    end record;
 

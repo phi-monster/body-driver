@@ -16,22 +16,33 @@
 --  and is judged like any other.
 --
 --  A push that came to rest is judged by its shortfall: how far short of
---  its target it stopped. A channel an eye watches (one with a Visible_Step)
---  is short when it stopped short of its ask by at least that step: less
---  than that no eye can tell from where it was asked to be, however exactly
---  the readings tell it (a simulator's joint closes all but a percent of a
---  push and stops, which is far beyond its readings' noise). The channels no
---  eye watches are judged together, along the direction they were asked to
---  move: free motion falls short too (a joint held against gravity settles
---  short of its target), so their shortfall is compared with that of the
---  last push that moved them freely, and they are short when they fall
---  short by significantly more, against the spread of the free pushes'
---  shortfalls (the first pushes have nothing to be compared with and count
---  as free). A push is blocked when a channel is short, or when nothing
---  answered the channels no eye watches. A push answers when its reading
---  moves (Channels.Moving); one that asks a watched channel for less than
---  its visible step moves nothing any eye can see, so that it did not seem
---  to answer says nothing, and it is judged by its shortfall alone.
+--  its target it stopped, along its ask. Free motion falls short too (a
+--  joint held against gravity settles short of its target; a simulator's
+--  joint closes all but a hair of a push and stops, a few millionths of a
+--  radian, which is far beyond its readings' noise and as much as the step
+--  an eye can see, and more once the arm has met something than before): a
+--  push is short only when it falls short by more than the group's own free
+--  pushes did, by more than Driver.Conventions.Z times the most any of them
+--  fell short by, either way, and than its readings can tell from none
+--  (their noise, and where they repeat exactly the float's resolution,
+--  Channels.Resolution). The first pushes of a group have nothing to be
+--  compared with and count as free. That is not enough: the shortfall must
+--  be a change the one test of motion sees (Channels.Visible), spread over
+--  the channels along the ask as the push was, so that where an eye watches
+--  a joint it is at least the step that eye can see (less than that no eye
+--  can tell from where it was asked to be, however exactly the readings tell
+--  it) and the readings' noise can tell it. The two guard each other as in
+--  the one test of motion: the step alone would call every free push blocked
+--  where the joints' own error is as large as the step, and the free pushes
+--  alone would call a push blocked that fell short by a hair no eye could
+--  tell from the target. The shortfall weighs each channel by its share of
+--  the ask, so that a joint standing a few millionths of a radian off a
+--  target it was given before is nothing beside one stopped by something
+--  while the others move. A push answers when its reading moves
+--  (Channels.Moving); one that asks for less than the one test of motion
+--  sees moves nothing any eye can see, so that it did not seem to answer
+--  says nothing, and is judged by its shortfall alone; one that asks for
+--  more and was not answered is blocked.
 --
 --  The judgment is made from the stream alone, as the pushes happen, so the
 --  same verdicts follow from a recording (Driver.Robot.Blocked) as from the
