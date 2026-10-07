@@ -20,7 +20,8 @@ package Driver.Tests is
    --  Check (abs (Actual - Expected) <= Tolerance), reporting both values.
 
    function Run_All (Filter : String := "") return Natural;
-   --  Runs every registered test whose name starts with Filter; prints one
-   --  line per test and returns the number of failed tests.
+   --  Runs every registered test whose name starts with Filter, or, when
+   --  Filter ends in $, the one test so named; prints one line per test and
+   --  returns the number of failed tests.
 
 end Driver.Tests;

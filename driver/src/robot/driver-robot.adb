@@ -566,6 +566,23 @@ package body Driver.Robot is
             end if;
          end;
       end loop;
+      --  A step the reading cannot tell from its own noise is no step: the
+      --  change of two readings stands Z of its sigmas above zero from there
+      --  on. A lock-in that credits a group with the pictures' motion beside
+      --  its tiny readings can fit a step of 1e-17, which no reading can show,
+      --  and every user of the step would take a hair's shortfall for one an
+      --  eye can see. Where the noise is not measured nothing tells a step
+      --  from it, and there is none.
+      if Known (Best) then
+         declare
+            Noise : constant Real := Channels.Noise (M, G, Channel);
+         begin
+            if Noise >= Real'Last then
+               return Unknown;
+            end if;
+            Best.Value := Real'Max (Best.Value, Driver.Conventions.Z * Noise * Sqrt (2.0));
+         end;
+      end if;
       return Best;
    end Visible_Step;
 

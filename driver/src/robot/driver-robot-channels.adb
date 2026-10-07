@@ -210,6 +210,15 @@ package body Driver.Robot.Channels is
    function Noise_Measured (M : Model; G : Group_Id) return Boolean is
      (First_Channel (M, G) + M.Groups (G).Size <= Natural (M.Noise.Length));
 
+   function Resolution (M : Model; G : Group_Id; Beat : Natural) return Real is
+      Scale : Real := 0.0;
+   begin
+      for C in 1 .. M.Groups (G).Size loop
+         Scale := Real'Max (Scale, abs Reading (M, G, Beat, C));
+      end loop;
+      return Real'Model_Epsilon * (if Scale > 0.0 then Scale else 1.0);
+   end Resolution;
+
    function Noise_Freedom (M : Model; G : Group_Id; Channel : Positive) return Natural is
       K : constant Natural := First_Channel (M, G) + Channel - 1;
    begin
@@ -415,28 +424,26 @@ package body Driver.Robot.Channels is
    end Measure;
 
    function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean is
-      Rest    : Real_Array := D;
-      Watched : Natural := 0;   --  channels an eye watches, their steps below what it sees
+      Seen : Real_Array := D;   --  the changes an eye could tell
    begin
-      for C in Rest'Range loop
+      for C in Seen'Range loop
          declare
             V : constant Estimate := Visible_Step (M, G, C);
          begin
-            if Known (V) then
-               --  A channel an eye watches moves when its change is a step the
-               --  eye can see; below that no eye can tell, however the held
-               --  reading jitters.
-               if abs Rest (C) >= V.Value then
-                  return True;
-               end if;
-               Rest (C) := 0.0;
-               Watched := Watched + 1;
+            --  A channel an eye watches changed by less than that eye can see
+            --  is no change: below that no eye can tell, however the held
+            --  reading jitters.
+            if Known (V) and then abs Seen (C) < V.Value then
+               Seen (C) := 0.0;
             end if;
          end;
       end loop;
-      --  The others against their noise: the change of two readings has
-      --  twice the variance of one.
-      return Watched < Rest'Length and then Significant_Change (M, G, Rest, Sqrt (2.0));
+      --  What an eye could tell is motion when it is also significant against
+      --  the noise: the change of two readings has twice the variance of one.
+      --  A visible step is no evidence of its own (a lock-in that credits a
+      --  group with the pictures' motion beside its tiny readings gives steps
+      --  of 1e-17); a noise that is not measured gives none either.
+      return Significant_Change (M, G, Seen, Sqrt (2.0));
    end Visible;
 
    function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean is

@@ -671,7 +671,7 @@ driver-robot-body_file.ads	Kinematics_Method : constant := 5;	5	structure	the ki
 driver-robot-body_file.ads	Lag_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Lockin_Method : constant := 3;	3	format	the third version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Noise_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
-driver-robot-body_file.ads	Steps_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
+driver-robot-body_file.ads	Steps_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log names
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
@@ -682,8 +682,8 @@ driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * Half / (Real (N
 driver-robot-boot.adb	/ 2.0;	2.0	structure	a view keeps half of itself in sight while turning by half
 driver-robot-boot.adb	Col := Col / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
-driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P, First_Followed);	0.0	structure	from zero: the first step is the smallest every reading can tell
-driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P, First_Followed);	1.0	structure	the positive direction for every channel
+driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	0.0	structure	from zero: the first step is the smallest every reading can tell
+driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	1.0	structure	the positive direction for every channel
 driver-robot-boot.adb	Eye : Eye_Id := 1;	1	structure	a placeholder, set before it is read
 driver-robot-boot.adb	Factor (G) := 2.0 * Factor (G);	2.0	numerics	doubling search: each round pushes twice as far as the one before, so the evidence any eye needs is reached in a number of rounds logarithmic in it
 driver-robot-boot.adb	Factor : array (1 .. Count) of Real := [others => 1.0];	1.0	structure	the first round pushes by the amounts the probes found
@@ -733,8 +733,9 @@ driver-robot-channels.adb	if Back and then Round > 1 then	1	structure	a round br
 driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	1	statistics	a sigma from two or more samples rests on at least one degree of freedom
 driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	2	statistics	a spread takes two samples
 driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	8.0	math	the median absolute deviation's asymptotic efficiency at the Gaussian is 8 c^2 phi (c)^2
+driver-robot-channels.adb	return Real'Model_Epsilon * (if Scale > 0.0 then Scale else 1.0);	1.0	structure	one reading unit when every reading is zero
 driver-robot-channels.adb	return Significant_Change (M, G, Ask, 1.0);	1.0	math	a target against one reading carries that reading's noise once
-driver-robot-channels.adb	return Watched < Rest'Length and then Significant_Change (M, G, Rest, Sqrt (2.0));	2.0	math	a change is the difference of two readings
+driver-robot-channels.adb	return Significant_Change (M, G, Seen, Sqrt (2.0));	2.0	math	a change is the difference of two readings
 driver-robot-channels.ads	with Pre => D'First = 1 and then D'Length = Group_Size (M, G);	1	structure	one value per channel, the channels counted from one
 driver-robot-flow.adb	(Driver.Uncertain.Vector_Gate (2), Final,	2	structure	a displacement has two components
 driver-robot-flow.adb	(Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;	2.0	math	the smaller eigenvalue of a symmetric 2 x 2 matrix, (trace - sqrt (trace^2 - 4 det)) / 2
@@ -1593,11 +1594,10 @@ driver-robot-motion.adb	Usable : Flag_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	Wait : Natural := 1;	1	structure	the beat the move shows in the readings
 driver-robot-motion.adb	Window : Natural := 2;	2	structure	the beat of the move and the beat it shows in the readings
 driver-robot-motion.adb	Window := Natural'Max (Window, 2 + Natural'Max (0, Image_Lag (M, Eye_Id (E))));	2	structure	the beat of the move and the beat it shows in the readings
-driver-robot-motion.adb	else Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom));	2.0	math	the difference of two readings has twice the variance of one
+driver-robot-motion.adb	and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom);	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	elsif Chance >= 1.0 then	1.0	math	a chance of one or more cannot be beaten by any run
 driver-robot-motion.adb	return (if K >= Real (Natural'Last) then Natural'Last else Natural'Max (1, Natural (K)));	1	structure	at least one move
 driver-robot-motion.adb	return 1;	1	structure	one move suffices when false alarms cannot happen
-driver-robot-motion.adb	return Real'Model_Epsilon * (if Scale > 0.0 then Scale else 1.0);	1.0	structure	one reading unit when every reading is zero
 driver-robot-motion.ads	Channel : Positive := 1;	1	structure	channels are numbered from one
 driver-robot-motion.ads	Group : Group_Id := 1;	1	structure	groups are numbered from one
 driver-robot-motion.ads	Group : Group_Id := 1;	1	structure	groups are numbered from one
@@ -1614,10 +1614,7 @@ driver-robot-regression.adb	return (if U <= Huber_K then 1.0 else Huber_K / U);	
 driver-robot-regression.ads	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean	1	structure	a count that is no best of many is one test
 driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
 driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
-driver-robot-steps.adb	if Ask /= 0.0 and then (Ask - Got) * (if Ask > 0.0 then 1.0 else -1.0) >= V.Value then	1.0	math	the sign of the ask, so that a shortfall counts toward the target
-driver-robot-steps.adb	if Ask /= 0.0 and then (Ask - Got) * (if Ask > 0.0 then 1.0 else -1.0) >= V.Value then	1.0	math	the sign of the ask, so that a shortfall counts toward the target
-driver-robot-steps.adb	if Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	two pairs of free shortfalls in a row are the fewest a scatter can be measured from
-driver-robot-steps.adb	with Pre => Natural (Shortfalls.Length) > 2	2	structure	two pairs of free shortfalls in a row are the fewest a scatter can be measured from
+driver-robot-steps.adb	if Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-stillness.adb	S.Change_1 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	S.Change_2 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
@@ -1626,6 +1623,7 @@ driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (
 driver-robot.adb	& "" & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
 driver-robot.adb	Best := (Value => Step, Sigma => Step * Sqrt (Spread) / (2.0 * Gain), Degrees_Of_Freedom => 0);	2.0	math	the sigma of Z / sqrt (G) from that of G: half its relative error
+driver-robot.adb	Best.Value := Real'Max (Best.Value, Driver.Conventions.Z * Noise * Sqrt (2.0));	2.0	math	a change is the difference of two readings, whose variance is twice one reading's
 driver-robot.adb	Mean : constant Real := (P.Tilt_11 + P.Tilt_22) / 2.0;	2.0	math	the larger eigenvalue of a symmetric 2 x 2: the mean of the diagonal plus the root of the half difference squared and the off diagonal squared
 driver-robot.adb	S.Condition.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
 driver-robot.adb	S.Condition.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent

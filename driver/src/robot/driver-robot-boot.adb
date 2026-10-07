@@ -12,7 +12,6 @@ with Driver.Robot.Motion;
 package body Driver.Robot.Boot is
 
    use type Driver.Robot.Motion.Step_Outcome;
-   use type Driver.Robot.Motion.Channel_Ref;
    use type Driver.Observations.Group_Id;
 
    package Real_IO is new Ada.Text_IO.Float_IO (Real);
@@ -112,43 +111,6 @@ package body Driver.Robot.Boot is
          Driver.Robot.Motion.Step (M, C, Report);
       end Go_To;
 
-      --  Where each channel's reading first followed a probe, from the probe of
-      --  every channel together on: the amount of that level.
-      type Answer is record
-         Ref    : Driver.Robot.Motion.Channel_Ref;
-         Amount : Real := 0.0;
-      end record;
-      package Answer_Vectors is new Ada.Containers.Vectors (Positive, Answer);
-      Answers : Answer_Vectors.Vector;
-
-      procedure Record_Answer (Ref : Driver.Robot.Motion.Channel_Ref; Amount : Real) is
-      begin
-         if Amount <= 0.0 then
-            return;
-         end if;
-         for A of Answers loop
-            if A.Ref = Ref then
-               A.Amount := Real'Min (A.Amount, Amount);
-               return;
-            end if;
-         end loop;
-         Answers.Append (Answer'(Ref => Ref, Amount => Amount));
-      end Record_Answer;
-
-      --  Where every other channel of the body has answered: the largest
-      --  amount at which a channel other than Ref first followed; Real'Last
-      --  when none has.
-      function Answered_Elsewhere (Ref : Driver.Robot.Motion.Channel_Ref) return Real is
-         Bound : Real := 0.0;
-      begin
-         for A of Answers loop
-            if A.Ref /= Ref then
-               Bound := Real'Max (Bound, A.Amount);
-            end if;
-         end loop;
-         return (if Bound > 0.0 then Bound else Real'Last);
-      end Answered_Elsewhere;
-
       --  What Recognize found of each channel: the amount an eye sees it move
       --  at (0 when none does) and the ways found at their ends.
       type Recognized_Channel is record
@@ -199,8 +161,9 @@ package body Driver.Robot.Boot is
       --  Finds how far each channel of the group must move for an eye to see
       --  it, both ways from the amount at which the whole body was first seen
       --  (Motion.Probe_Both_Ways: a way at its end stops where the other one
-      --  answered; a channel that answers neither way up to twice where
-      --  every other one did is dead for this boot), then pushes every
+      --  answered; a channel is pushed on until an eye sees it or its own
+      --  reading ends, whatever the other channels needed, and is dead only
+      --  when its reading followed no level either way), then pushes every
       --  channel both ways by that much (Push_Both_Ways).
       procedure Recognize (G : Group_Id; Size : Positive; From : Real) is
          use type Driver.Robot.Motion.Sense;
@@ -213,8 +176,7 @@ package body Driver.Robot.Boot is
                Ref : constant Driver.Robot.Motion.Channel_Ref := (Group => G, Channel => C);
                P   : Driver.Robot.Motion.Two_Way_Report;
             begin
-               Driver.Robot.Motion.Probe_Both_Ways (M, Ref, From, Answered_Elsewhere (Ref), P);
-               Record_Answer (Ref, P.Answered);
+               Driver.Robot.Motion.Probe_Both_Ways (M, Ref, From, P);
                if P.Seen then
                   Amount (C) := P.Excursion;
                end if;
@@ -234,9 +196,11 @@ package body Driver.Robot.Boot is
                                    elsif P.Dead
                                    then " answers neither way up to "
                                         & Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))
-                                        & " reading units, past which the next level would pass twice what every other"
-                                        & " channel of the body needed: dead or disconnected for this boot; it is not"
-                                        & " probed further"
+                                        & " reading units, at every level it was asked either way: dead or"
+                                        & " disconnected for this boot; it is left alone"
+                                   elsif P.Blind
+                                   then " moves nothing any eye sees, and its reading's noise is not measured, so how"
+                                        & " its reading followed is not known"
                                    else " moves nothing any eye sees, up to where it stops following"));
             end;
          end loop;
@@ -550,14 +514,7 @@ package body Driver.Robot.Boot is
                      --  more than twice what an eye needs to see it, whatever its
                      --  units; each channel alone then starts from there.
                      Driver.Robot.Motion.Gather_Rest (M, Total + 1);
-                     declare
-                        First_Followed : Real_Array (1 .. Total);
-                     begin
-                        Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P, First_Followed);
-                        for K in Refs'Range loop
-                           Record_Answer (Refs (K), First_Followed (K));
-                        end loop;
-                     end;
+                     Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);
                      if not P.Seen then
                         Driver.Beats.Within_A_Beat (Estimate'Access);
                         Driver.Beats.Within_A_Beat (Read_Body'Access);

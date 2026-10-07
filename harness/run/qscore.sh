@@ -8,8 +8,8 @@
 # the driver's tools (replay, score). Extra options go to replay (for example --inst 127.0.0.1:8077
 # for a recording without service replies). The recording is streamed from its compressed file
 # (it is never unpacked on disk); only the truth is unpacked, into a scratch directory removed at
-# the end. The report goes to stdout and to RUN_DIR/score.txt, and the replay's log to
-# RUN_DIR/replay.log.
+# the end. The report goes to stdout and to RUN_DIR/score.txt, the replay's log to
+# RUN_DIR/replay.log and its estimates to RUN_DIR/estimates.jsonl.zst, so a score can be read again.
 set -u
 RUN=$1; BIN=$2; shift 2
 REC=$(ls "$RUN"/run.rec.zst "$RUN"/wire.rec.zst 2>/dev/null | head -1)
@@ -20,5 +20,6 @@ trap 'rm -rf "$W"' EXIT
 zstd -q -d "$RUN/truth.jsonl.zst" -o "$W/truth.jsonl" || exit 3
 zstd -q -dc "$REC" | "$BIN/replay" /dev/stdin --estimates "$W/estimates.jsonl" "$@" > "$W/replay.log" 2>&1
 cp "$W/replay.log" "$RUN/replay.log"
+zstd -q -f "$W/estimates.jsonl" -o "$RUN/estimates.jsonl.zst"
 tail -3 "$W/replay.log"
 zstd -q -dc "$REC" | "$BIN/score" "$W/estimates.jsonl" /dev/stdin "$W/truth.jsonl" | tee "$RUN/score.txt"

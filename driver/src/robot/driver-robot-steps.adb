@@ -1,6 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions;
-with Ada.Unchecked_Deallocation;
-with Driver.Stats;
+with Driver.Conventions;
 with Driver.Robot.Channels;
 
 package body Driver.Robot.Steps is
@@ -8,27 +7,15 @@ package body Driver.Robot.Steps is
    use Ada.Numerics.Long_Elementary_Functions;
    use type Driver.Observations.Group_Id;
 
-   --  Everything sized by beats or pushes lives on the heap: the estimates
-   --  also run in the decider's task, whose stack is small.
-   type Real_Access is access Real_Array;
-   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
-
-   --  How much two free pushes in a row differ in shortfall: the robust sigma
-   --  of every consecutive pair's difference, which is what a push's shortfall
-   --  minus the last free one's varies by when it too moves freely (the
-   --  readings' noise included), and the degrees of freedom it rests on.
-   procedure Pair_Scatter (Shortfalls : Real_Vectors.Vector; Sigma : out Real; Freedom : out Natural)
-     with Pre => Natural (Shortfalls.Length) > 2
-   is
-      Pairs : Real_Access := new Real_Array (1 .. Natural (Shortfalls.Length) - 1);
+   --  The step along the push's ask by Amount, one value per channel.
+   function Along_Ask (S : Group_Stream; Length, Amount : Real) return Real_Array is
+      D : Real_Array (1 .. S.Size);
    begin
-      for K in Pairs'Range loop
-         Pairs (K) := Shortfalls (K) - Shortfalls (K - 1);
+      for C in D'Range loop
+         D (C) := Amount * S.Ask (C - 1) / Length;
       end loop;
-      Sigma := Driver.Stats.Robust_Sigma (Pairs.all);
-      Freedom := Channels.Mad_Degrees_Of_Freedom (Pairs'Length);
-      Free (Pairs);
-   end Pair_Scatter;
+      return D;
+   end Along_Ask;
 
    --  Closes the push under way at Beat and judges it. Answered is False for
    --  a push the reading never moved for; Settled is False for one the next
@@ -46,33 +33,16 @@ package body Driver.Robot.Steps is
          declare
             Along, Spread : Real := 0.0;
             Noise_Known   : Boolean := True;
-            --  A channel an eye watches stopped short of its ask by a step
-            --  that eye can see.
-            Seen_Short : Boolean := False;
-            --  The ask and what came of it along the channels no eye watches,
-            --  which are judged against the free pushes.
-            Unwatched_Length, Unwatched_Along : Real := 0.0;
          begin
             for C in 1 .. S.Size loop
                declare
-                  Ask   : constant Real := S.Ask (C - 1);
-                  Unit  : constant Real := Ask / E.Length;
+                  Unit  : constant Real := S.Ask (C - 1) / E.Length;
                   Sigma : constant Real := Channels.Noise (M, G, C);
-                  Got   : constant Real := Channels.Reading (M, G, Beat, C) - S.From (C - 1);
-                  V     : constant Estimate := Visible_Step (M, G, C);
                begin
-                  Along := Along + Unit * Got;
+                  Along := Along + Unit * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));
                   Noise_Known := Noise_Known and then Sigma < Real'Last;
                   if Noise_Known then
                      Spread := Spread + (Unit * Sigma) ** 2;
-                  end if;
-                  if Known (V) then
-                     if Ask /= 0.0 and then (Ask - Got) * (if Ask > 0.0 then 1.0 else -1.0) >= V.Value then
-                        Seen_Short := True;
-                     end if;
-                  else
-                     Unwatched_Length := Unwatched_Length + Unit * Ask;
-                     Unwatched_Along := Unwatched_Along + Unit * Got;
                   end if;
                end;
             end loop;
@@ -82,39 +52,47 @@ package body Driver.Robot.Steps is
                   --  before the push and the one where it stopped.
                   Sigma : constant Real := Sqrt (2.0 * Spread);
                   Short : constant Real := E.Length - Along;
+                  --  It falls short by more than the group's free pushes do.
+                  Falls_Short : Boolean := False;
                begin
                   E.Shortfall := (Value => Short, Sigma => Sigma, Degrees_Of_Freedom => 0);
                   E.Delivered := (Value => Along / E.Length, Sigma => Sigma / E.Length, Degrees_Of_Freedom => 0);
+                  if Natural (S.Free_Shortfalls.Length) > 2 then
+                     declare
+                        --  What the float arithmetic on the readings of the push,
+                        --  where it began and where it stopped, can tell.
+                        Floor   : constant Real :=
+                          Real'Max (Channels.Resolution (M, G, E.Start - 1), Channels.Resolution (M, G, Beat));
+                        --  The most any free push of the group fell short by,
+                        --  either way, or by as much as the readings could
+                        --  tell from none: their noise, and where they repeat
+                        --  exactly the resolution of the float.
+                        Largest : Real := Real'Max (Sigma, Floor);
+                     begin
+                        for F of S.Free_Shortfalls loop
+                           Largest := Real'Max (Largest, abs F);
+                        end loop;
+                        Falls_Short := Short > Driver.Conventions.Z * Largest;
+                     end;
+                  end if;
+                  --  Free motion falls short too, so a push is blocked only by
+                  --  falling short by more than the group's own free pushes
+                  --  did, and by a shortfall the one test of motion sees,
+                  --  spread along the ask as the push was: one an eye could
+                  --  tell (where one watches) and the readings' noise could.
+                  --  A shortfall no eye can tell from where the push was
+                  --  asked to be is none, however exactly the readings tell
+                  --  it. A push is blocked as well when it asked what that
+                  --  test would see and nothing answered: a push smaller than
+                  --  the visible step moves nothing any eye can see, so that
+                  --  it did not seem to answer says nothing.
+                  E.Blocked :=
+                    (not Answered and then Channels.Visible (M, G, Along_Ask (S, E.Length, E.Length)))
+                    or else (Falls_Short and then Channels.Visible (M, G, Along_Ask (S, E.Length, Short)));
+                  if Answered and then not E.Blocked then
+                     S.Free_Shortfalls.Append (Short);
+                  end if;
                end;
-               --  The channels an eye watches are judged by what the eye could
-               --  tell, answered or not: a push smaller than their visible step
-               --  moves nothing any eye can see, so that it did not seem to
-               --  answer says nothing. The others are blocked when nothing
-               --  answered them, or when they fell short by more than free
-               --  pushes do.
-               if Seen_Short then
-                  E.Blocked := True;
-               elsif Unwatched_Length > 0.0 and then not Answered then
-                  E.Blocked := True;
-               elsif Unwatched_Length > 0.0 then
-                  declare
-                     Short : constant Real := Unwatched_Length - Unwatched_Along;
-                  begin
-                     if Natural (S.Free_Shortfalls.Length) > 2 then
-                        declare
-                           Excess  : constant Real := Short - S.Free_Shortfalls.Last_Element;
-                           Scatter : Real;
-                           Freedom : Natural;
-                        begin
-                           Pair_Scatter (S.Free_Shortfalls, Scatter, Freedom);
-                           E.Blocked := Excess > 0.0 and then Driver.Uncertain.Significant (Excess, Scatter, Freedom);
-                        end;
-                     end if;
-                     if not E.Blocked then
-                        S.Free_Shortfalls.Append (Short);
-                     end if;
-                  end;
-               end if;
             end if;
          end;
       end if;
@@ -142,16 +120,6 @@ package body Driver.Robot.Steps is
       E.Closest := 0.0;
       S.Episodes.Append (E);
    end Start;
-
-   --  The step along the push's ask by Amount, one value per channel.
-   function Along_Ask (S : Group_Stream; Length, Amount : Real) return Real_Array is
-      D : Real_Array (1 .. S.Size);
-   begin
-      for C in D'Range loop
-         D (C) := Amount * S.Ask (C - 1) / Length;
-      end loop;
-      return D;
-   end Along_Ask;
 
    --  Follows how close the moving push under way has come to its target,
    --  and gives it up when it is plainly going nowhere: still short of its

@@ -50,6 +50,17 @@ The boot's body file (`--body`, [`body-file.md`](body-file.md)):
 | `boot: the body is kept in <file> after <stage>` | the body measured so far was written to the file, after recognizing the groups and after sweeping the arms; the line `the body as measured:` and its table follow the hands, the last write |
 | `the body file <file> cannot be written` | a write failed; the boot goes on |
 
+Recognizing the groups (every commandable channel probed, then each group pushed channel by channel):
+
+| line | meaning |
+|---|---|
+| `boot: every commandable channel moved together is first seen at <x> reading units, after <n> doublings` | every commandable channel was moved away from its hold by one amount, doubled from the smallest step the readings can tell, until some eye saw the body move; each channel's own probe starts from that amount |
+| `boot: group <g> channel <c> is seen when moved by <x> reading units` | an eye saw this channel move at that amount, confirmed by moves back and forth; the group's pushes use it |
+| `boot: group <g> channel <c> is at its end <upwards or downwards>: it delivered nothing that way up to <x> reading units, while it answered the other way` | a limit on one side (a closer resting at its upper limit): that way is not asked further and not pushed again |
+| `boot: group <g> channel <c> moves nothing any eye sees, up to where it stops following` | its reading followed each way and then went no further, and no eye saw it move; it is not pushed |
+| `boot: group <g> channel <c> answers neither way up to <x> reading units, at every level it was asked either way: dead or disconnected for this boot; it is left alone` | its reading followed no ask either way, at every level, as many levels each way as a float has bits of precision (a deadband yields to a large enough one); nothing the other channels needed bounds it; it is not pushed |
+| `boot: group <g> channel <c> moves nothing any eye sees, and its reading's noise is not measured, so how its reading followed is not known` | the model had no noise for the channel even after measuring again, so nothing tells a reading that followed from one that did not; the eyes' evidence alone was asked, up to every level; it is not called dead |
+
 The kinematics (an arm's joints and the lens of the eye it carries, fitted from its keyframes):
 
 | line | meaning |
@@ -62,7 +73,7 @@ The hand (measured at boot):
 | line | meaning |
 |---|---|
 | `hand: closer group <g> on arm <a> is watched in eye <e>, its own` | the group that closes a hand, and the eye on its arm that watches it |
-| `hand: closer group <g> channel <c> has no visible step measured; not swept` | the channel's response is unmeasured, so it is not swept |
+| `hand: closer group <g> channel <c> has no visible step measured; not swept` | the channel's response is unmeasured, or its reading's noise is (a visible step is one the reading tells from its noise as well), so it is not swept |
 | `hand: closer group <g> of arm <a> is not swept: no eye on its arm watches it, so no hand is made of it` | a closer of the body that no arm-carried eye sees move |
 | `hand: closer group <g> channel <c> in eye <e>: <account>` | what the channel's sweep made of its new ends, said once for the ends, from the pictures alone (the hand asks no instrument). The account is one of: `its two ends were not both seen still`; `nothing in this eye moves between its ends`; `half of this eye's picture or more changes between its ends, so what moved cannot be told from what did not`; `the arm has not moved the eye against its surroundings at either end's readings (seen from <a> poses at the low reading, <b> at the high one; two are needed): <n> pixels changed, beyond <x> levels of a spread of <y>`; `the <n> pixels changed, ..., do not fall in two groups by how much they vary over the arm's poses (...)`; `the <n> pixels changed, ...; of them <h> went to the low end, <t> to the high end, <u> to neither; the parts they made that are attached to the picture's border and larger than the doubt of <d> pixels are <p> at the low end and <q> at the high end`; or `<k> lobes, ` then `closed at the high reading` (or `at the low reading`, or `closing direction not significant: their distances changed by <v> +- <s> pixels between the ends`, or `closing direction not known: there is nothing to compare their distances with`) and `(<n> pixels changed, beyond <x> levels of a spread of <y>; <h> given to the low end, <t> to the high end, <u> to neither, of doubt <d> pixels, after <r> rounds; its parts: <p> at the low end, <q> at the high end)` |
 | `hand: closer group <g> channel <c> in eye <e>: lobe <i>: <n> pixels at the low reading, tip (<u>, <v>)[ from the border]; <m> at the high reading, tip (...)` | each lobe of a measured channel, its pixels and tip (or `no tip`) at each end |
