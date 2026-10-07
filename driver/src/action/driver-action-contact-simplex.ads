@@ -9,6 +9,16 @@
 --  solving, and an entry counts as zero below the square root of the machine
 --  epsilon: the point where cancellation in the eliminations leaves no
 --  trustworthy digit. Nothing else is chosen.
+--
+--  Bland's rule takes the lowest basic column among the rows tied at the
+--  least ratio, so the ties have to be ties. A right-hand side that counts as
+--  zero is therefore made exactly zero after every pivot: a degenerate vertex
+--  has right-hand sides of exactly zero, its ratios are exactly zero and tie
+--  exactly, and the row Bland's rule names is the row that leaves. Left as
+--  the rounding noise the eliminations make of it, in either sign, the ratios
+--  of those rows differ by that noise, the noise decides who leaves, and the
+--  cycle Bland's rule excludes comes back, in whichever of the platforms'
+--  roundings happens to produce the noise.
 
 package Driver.Action.Contact.Simplex is
 
@@ -18,6 +28,7 @@ package Driver.Action.Contact.Simplex is
       Result : Status := Infeasible;
       Value  : Real := Real'Last;               --  the minimum, for Optimal
       X      : Real_Vector (1 .. Columns) := [others => 0.0];
+      Pivots : Natural := 0;                    --  how many pivots it took, both phases together
    end record;
 
    function Minimize (A : Real_Matrix; B : Real_Vector; Cost : Real_Vector) return Solution

@@ -25,12 +25,27 @@ package Driver.Action.Plants.Live is
       O     : Driver.Observations.Observation) return Driver.Action.Snapshots.Snapshot;
    --  The estimates at the beat of O.
 
+   function Arm_Of
+     (Robot : Driver.Robot.Model;
+      A     : Driver.Action.Snapshots.Arm_Id;
+      O     : Driver.Observations.Observation) return Driver.Action.Snapshots.Arm_State
+     with Pre => Natural (A) <= Driver.Robot.Arm_Count (Robot);
+   --  One arm of Snapshot_Of: its tool with its uncertainty, and how finely it
+   --  places the tool, from the body's own measurements.
+
    type Live
      (Robot : not null access Driver.Robot.Model;
       Hands : not null access Driver.Robot.Hand.Hands;
       Scene : not null access Driver.World.Scene) is limited new Plant with private;
 
    overriding procedure Look (P : in out Live; S : out Driver.Action.Snapshots.Snapshot);
+   overriding procedure Within (P : in out Live; During : not null access procedure);
+   --  During runs in one beat's window (Driver.Beats.Within_A_Beat), from
+   --  the readings of that beat; Reach, In_View and Predicted asked outside
+   --  one raise Program_Error, since the main loop changes the models every
+   --  beat. So do Look, Move, Learn and another Within asked inside one:
+   --  each takes a beat of its own and would wait for ever on the beat the
+   --  window holds.
    overriding function Reach (P : Live; Goal : Arm_Goal) return Reach_Answer;
    overriding procedure Move (P : in out Live; O : Order; R : out Report);
    overriding function Predicted (P : Live; T : Driver.Action.Snapshots.Thing_Id; Beats : Natural)
@@ -46,9 +61,10 @@ private
       Hands : not null access Driver.Robot.Hand.Hands;
       Scene : not null access Driver.World.Scene) is limited new Plant with
    record
-      Last    : Driver.Observations.Observation;   --  a copy of the latest look's observation
+      Last    : Driver.Observations.Observation;   --  a copy of the latest window's observation
       Episode : Natural := 0;
       Started : Boolean := False;
+      Inside  : Boolean := False;                  --  a window of Within is open
    end record;
 
 end Driver.Action.Plants.Live;

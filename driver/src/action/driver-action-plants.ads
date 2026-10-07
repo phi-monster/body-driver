@@ -90,16 +90,24 @@ package Driver.Action.Plants is
    procedure Look (P : in out Plant; S : out Snapshot) is abstract;
    --  The estimates at the latest beat.
 
+   procedure Within (P : in out Plant; During : not null access procedure) is abstract;
+   --  Runs During while the estimates hold still, all of one beat, and the
+   --  body holds: the lower layers' models change every beat in the main
+   --  loop, so Reach, In_View and Predicted are asked only inside it. Look,
+   --  Move and Learn take beats of their own and are never called inside it.
+
    function Reach (P : Plant; Goal : Arm_Goal) return Reach_Answer is abstract;
    --  Whether the arm can be brought there from where it is now, solved
-   --  along the way; the same solver Move uses. Moves nothing.
+   --  along the way; the same solver Move uses. Moves nothing. Asked within
+   --  Within.
 
    procedure Move (P : in out Plant; O : Order; R : out Report) is abstract;
    --  One step of every arm and closer in O, together.
 
    function Predicted (P : Plant; T : Thing_Id; Beats : Natural) return Driver.Uncertain.Point_Estimate is abstract;
    --  Where the thing's centre will be that many beats from now, from its
-   --  measured motion; a thing not moving stays where it is.
+   --  measured motion; a thing not moving stays where it is. Asked within
+   --  Within.
 
    procedure Learn (P : in out Plant; L : Lesson) is abstract;
    --  Records what an outcome showed about a thing, for every later look.
@@ -109,5 +117,6 @@ package Driver.Action.Plants is
 
    function In_View (P : Plant; Point : Vec3) return Boolean is abstract;
    --  Some eye that rides on no arm would see the point, as the body is now.
+   --  Asked within Within.
 
 end Driver.Action.Plants;

@@ -662,10 +662,12 @@ package body Driver.Core_Tests is
 
    procedure Beat_Window is
       Looked : Boolean := False with Atomic;
+      Held_Inside : Boolean := False with Atomic;
 
       procedure Look is
       begin
          Looked := True;
+         Held_Inside := Driver.Beats.Held;
       end Look;
 
       task Decider;
@@ -687,6 +689,8 @@ package body Driver.Core_Tests is
       end loop;
       Driver.Beats.Await (Reply);
       Check (Looked, "the procedure of a beat window did not run in it");
+      Check (Held_Inside, "a beat window does not count as holding a beat");
+      Check (not Driver.Beats.Held, "a beat still counts as held after its answer");
       Check (Driver.Commands.Is_Hold (Reply), "a beat taken only to look did not answer hold");
    end Beat_Window;
 
