@@ -198,7 +198,10 @@ package Driver.Robot.Kinematics.Fit is
    --  their points (Errors): a point errs alike in every keyframe, so do points
    --  near each other, and the points of a keyframe err alike. Sightings counted
    --  as independent, or clustered by keyframe, hide the first two and come
-   --  out far too sure.
+   --  out far too sure. It describes random errors: it does not cover a bias
+   --  the fit absorbs (the lens's weakest axis, a mix of the focal length and
+   --  the distortion terms, came out 2 to 4 sigmas off on A10 and A11:
+   --  docs/body-file.md, what the lens's sigmas do not cover).
 
    procedure Sandwich
      (Inverse, Meat : Driver.Numerics.Arrays.Real_Matrix;
