@@ -846,8 +846,142 @@ package body Driver.Robot.Hand.Lobes.Tests is
       Check (Found.How = Nothing_Changed and then Found.Lobes.Is_Empty, "no change placed lobes");
    end Change_Nothing;
 
+   procedure Tell_Stage
+     (Sample                                         : String;
+      First_Column, Last_Column, First_Row, Last_Row : Natural;
+      To_Anchored, To_Other, To_Neither              : out Natural)
+   is
+      --  A stage (those of the specification's private part) given to the
+      --  mixture, and of the pixels within a window of its picture how many
+      --  it gave to each end.
+      Count    : constant Natural := Sample'Length / 8;
+      Where    : Places (1 .. Count);
+      Seeds    : Flags (1 .. Count);
+      Anchored : Driver.Real_Array (1 .. Count);
+      Other    : Driver.Real_Array (1 .. Count);
+      Given    : Kinds (1 .. Count);
+      Rounds   : Natural;
+      Doubt    : Real;
+
+      function Hex (From : Positive; Length : Positive) return Natural is
+        (Natural'Value ("16#" & Sample (From .. From + Length - 1) & "#"));
+   begin
+      for K in 1 .. Count loop
+         declare
+            First : constant Positive := Sample'First + (K - 1) * 8;
+            Place : constant Natural := Hex (First, 4);
+         begin
+            Where (K) := Place mod 4096;
+            Seeds (K) := Place >= 4096;
+            Anchored (K) := Real (Hex (First + 4, 2));
+            Other (K) := Real (Hex (First + 6, 2));
+         end;
+      end loop;
+      Tell_Ends (Stage_Columns, Stage_Rows, Where, Seeds, Anchored, Other, Given, Rounds, Doubt);
+      To_Anchored := 0;
+      To_Other := 0;
+      To_Neither := 0;
+      for K in 1 .. Count loop
+         if Where (K) mod Stage_Columns in First_Column .. Last_Column
+           and then Where (K) / Stage_Columns in First_Row .. Last_Row
+         then
+            case Given (K) is
+               when Anchored_End => To_Anchored := To_Anchored + 1;
+               when Other_End    => To_Other := To_Other + 1;
+               when Neither      => To_Neither := To_Neither + 1;
+            end case;
+         end if;
+      end loop;
+   end Tell_Stage;
+
+   procedure Check_Window (Gave : String; To_Anchored, To_Other, To_Neither : Natural) is
+      --  The window is the robot's at the other end, all of it: the pixels
+      --  given to the anchored end are at most a twentieth of those given to
+      --  the other, and those given to the other more than half of all.
+   begin
+      Check (To_Anchored * 20 <= To_Other and then To_Other * 2 > To_Anchored + To_Other + To_Neither,
+             Gave & ": of its pixels" & Natural'Image (To_Anchored) & " went to the anchored end,"
+             & Natural'Image (To_Other) & " to the other (the robot's) and"
+             & Natural'Image (To_Neither) & " to neither");
+   end Check_Window;
+
+   procedure Lit_Face_Is_The_Closed_Finger is
+      --  A16's last ends of the second hand's closer: the closed finger's lit
+      --  face, a grey a little darker than the table the other end shows
+      --  there, is the robot's at the closed end. The poses did not call it
+      --  the robot's (the table varies over them, and the face is there only
+      --  at the closed end), and the histograms alone, begun from the order
+      --  of the levels, drifted in nine rounds to the labelling in which the
+      --  robot's lighter grey is at the open end and the world's darker grey
+      --  at the closed (the window's 9 229 pixels of 10 177 went so, in the
+      --  full picture; here 76 of 107).
+      To_Anchored, To_Other, To_Neither : Natural;
+   begin
+      Tell_Stage (A16_Final_Ends, 15, 27, 39, 47, To_Anchored, To_Other, To_Neither);
+      Check_Window ("A16's closed finger's lit face", To_Anchored, To_Other, To_Neither);
+   end Lit_Face_Is_The_Closed_Finger;
+
+   procedure Finger_Over_Keys_Is_The_Closed_Finger is
+      --  A15's last ends: the closed finger over a keyboard, its lower part a
+      --  lit face of the same kind (63 of the window's 67 pixels were given to
+      --  the anchored end, none to the other, by the histograms alone).
+      To_Anchored, To_Other, To_Neither : Natural;
+   begin
+      Tell_Stage (A15_Final_Ends, 15, 23, 40, 47, To_Anchored, To_Other, To_Neither);
+      Check_Window ("A15's closed finger over the keys", To_Anchored, To_Other, To_Neither);
+   end Finger_Over_Keys_Is_The_Closed_Finger;
+
+   procedure Pieces_Of_A_Finger_Are_Not_Lobes is
+      --  Two fingers at each end, and at the open end two pieces of them that
+      --  a thing in front left, on the bottom border: one of 192 pixels nearer
+      --  the first finger closed than the finger is open, one of 32 nearer the
+      --  second. A16's open end held 18 032 and 17 036 and 2 114 and 354: the
+      --  sizes were parted at the middle of their gap, where the biggest was
+      --  3.0 times the size and had to be N = 4 times, so the pieces were
+      --  lobes, took the closed fingers, and the fingers they were pieces of
+      --  were left without a partner; here the sizes are 1 600, 1 600, 192,
+      --  32 (2.9 times, 4 needed).
+      Here_Set  : Mask := Create (W, H);
+      There_Set : Mask := Create (W, H);
+      Here_Parts, There_Parts : Natural;
+   begin
+      Block (Here_Set, 55, 74, 40, H - 1);        --  the first finger, closed
+      Block (Here_Set, 85, 104, 40, H - 1);       --  the second
+      Block (There_Set, 10, 29, 40, H - 1);       --  the first, open
+      Block (There_Set, 130, 149, 40, H - 1);     --  the second
+      Block (There_Set, 36, 47, H - 16, H - 1);   --  192 pixels, a piece of the first
+      Block (There_Set, 115, 118, H - 8, H - 1);  --  32 pixels, a piece of the second
+      declare
+         Lobes : constant Lobe_Vectors.Vector :=
+           Lobes_Of_Sets (Here_Set, There_Set, Create (W, H), 0.0, Here_Parts, There_Parts);
+      begin
+         Check (Natural (Lobes.Length) = 2 and then Here_Parts = 2 and then There_Parts = 2,
+                "pieces of an eighth and a fiftieth of a finger were lobes or parts:"
+                & Natural'Image (Natural (Lobes.Length)) & " lobes, parts"
+                & Natural'Image (Here_Parts) & Natural'Image (There_Parts));
+         if Natural (Lobes.Length) = 2 then
+            for L of Lobes loop
+               Check (L.Count_Here = 20 * 80 and then L.Count_There = 20 * 80,
+                      "a lobe is not a whole finger at both ends:"
+                      & Natural'Image (L.Count_Here) & Natural'Image (L.Count_There));
+            end loop;
+            Check (Lobes (1).Centre_Here.U < 80.0 and then Lobes (1).Centre_There.U < 40.0
+                   and then Lobes (2).Centre_Here.U > 80.0 and then Lobes (2).Centre_There.U > 100.0,
+                   "a finger's open place was given to the other finger's closed one");
+         end if;
+      end;
+   end Pieces_Of_A_Finger_Are_Not_Lobes;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.lobes.lit", "a closed finger's lit face, whose brightness the table's at the other "
+                             & "end shares, is the closed end's, told by the poses",
+                             Lit_Face_Is_The_Closed_Finger'Access);
+      Driver.Tests.Register ("hand.lobes.keys",
+                             "a closed finger over a keyboard is the closed end's, told by the poses",
+                             Finger_Over_Keys_Is_The_Closed_Finger'Access);
+      Driver.Tests.Register ("hand.lobes.pieces", "pieces of a finger, an eighth of its size and less, are not lobes",
+                             Pieces_Of_A_Finger_Are_Not_Lobes'Access);
       Driver.Tests.Register ("hand.lobes.change", "two smooth closing fingers are not two lobes with their tips and "
                              & "direction, found from the change and the poses", Change_Two_Fingers'Access);
       Driver.Tests.Register ("hand.lobes.glossy", "fingers that reflect, and so vary with the arm's poses, are not "

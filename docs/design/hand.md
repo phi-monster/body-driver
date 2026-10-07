@@ -137,6 +137,45 @@ when that is the likelier by more than Z squared over two in the log of the
 likelihood. Last the eight neighbours are heard (how many of them are of each
 kind, another histogram).
 
+**Lesson: the seeds are evidence in every brightness round, not only where
+the rounds begin.** A pixel whose two brightnesses belong to the robot as much
+as to the world (a closed finger's lit face against the table's grey at the
+other end) is told by nothing the histograms hold, and the histograms drift
+from the order of the levels to whatever labelling explains itself. A16's
+final ends of the second hand (88 090 changed pixels, eye 3): the lit face of
+the closed left finger, 10 177 pixels of a grey a little darker than the
+table, began at the end that shows it darker, right, and went in nine rounds
+(1 074 of them by the third, 8 727 by the ninth) to the kind with the robot at
+the anchored end; 9 229 of them were there when the rounds ended, the part was
+never turned back (the labelling it had made was the likelier by 15 427 in the
+log of the whole mixture, and by 38 706 for the part against the rest), and the
+lobes' tips were 60 and 125 pixels low (the face, 10 216 pixels of it, took
+the place of the open finger as the lobe's open end, and the closed right
+finger's inner face and outer face were two parts). The poses had called
+almost none of that face the robot's, and they are right about the robot: 55 %
+of the pixels given the kind with the robot at the anchored end are seeds and
+2 % of the others, the robot there holding still in the eye's picture while the
+eye moves and the world not. Each kind now has seeds at a rate of its own,
+found with the histograms from the shares, and a pixel's seed or none is
+heard in every brightness round: the face stays at the closed end (0 of the
+window's pixels to the anchored end, from 9 229), the lobes' tips on A16's last
+stages are at the fingers' tips but one, the closed left finger's, which is 30
+pixels low (the baseball's shadow, unchanged, cuts the tip off the finger),
+and A15's final ends, three lobes of two fingers and closed tips 100 and 175
+pixels low, are two lobes with their tips (`hand.lobes.lit` and
+`hand.lobes.keys`: the changed pixels of the two stages at every tenth column
+and row, 76 of 107 and 63 of 67 pixels of a window of the closed finger given
+to the anchored end without the seeds, none with). Three forms did worse and
+are not the one. Rates for the pixels the ends differ most at and for the
+others apart return the failure, for the face is most of the others and its
+own labelling sets their rate. Seeds in the neighbours' rounds too leave 364 of
+the 2 522 pixels dark at both ends to the right end and 2 158 to neither
+(`hand.lobes.blank`): a flat dark world is as still over the poses as the
+robot is, and the seeds there are a coin, the neighbours' to decide. Seeds in
+the turning of parts count a part's thousands of seeds as thousands of
+independent tests, and turned the final fingers of A15 and of A16's first hand
+over (their closed tips 80 to 160 pixels low).
+
 The rounds end by the convention for an iterative estimate: it has stopped
 when one more round moves it by less than `Unchanged_Fraction` of its own
 size, and what is estimated differs between the two phases. While only the
@@ -179,18 +218,26 @@ pixels it expects to have given to the wrong end (the sum over the pixels of
 the smaller of the two shares); a part no larger could be made of nothing
 else. A14's doubt was 381, which the mixture's confidence made too small to
 matter, since it is confidently wrong at the keys. (3) It must not be a
-fragment by its size: the log sizes of an end's parts are parted in two groups,
-and the parting stands when the groups' mean log sizes differ by more than Z
-standard errors, from the spread within the groups, and the biggest part is
-more than N times the size parted at, N the number of parts; what is left out
-is then smaller than the share 1 / N the biggest would have if all the parts
-were of its size. A finger half the size of the others is kept (a ratio of 2
-against N of 3), and so are fingers that touch at one end and show as one part
-twice as large, since each end is judged by its own parts and the end with too
-few parts takes the other's threshold. The lobes are then the parts of the end
-that has the more of them, and each part of the other goes to the lobe whose
-part is nearest by their centres (pixel by pixel when fewer parts remain than
-lobes: fingers that touched, each taking what is nearest).
+fragment by its size: it must hold at least the share 1 / N of the biggest
+part's pixels, N the number of parts the end has (from three parts on; the
+share a part would hold if all were as big as the biggest). The first form
+parted the log sizes in two groups and let the parting stand when the groups'
+mean log sizes differed by more than Z standard errors and the biggest part
+was more than N times the size parted at; at A16's open end, of 18 032 and
+17 036 pixels (two fingers) and 2 114 and 354 (pieces of the finger the jeans
+lay on), the sizes parted in the middle of their gap, where the biggest was 3.0
+times the size and had to be 4, so (the lit face being at the right end) the
+2 114 pixels nearest the closed finger took the open finger's place and its tip
+was found 160 pixels from where it is (`hand.lobes.pieces`: parts of 1 600,
+1 600, 192 and 32 pixels, four lobes where two fingers are); another view of
+it, 17 699, 14 354, 3 197 and 213, had a piece of 3 197 that no parting of two
+groups could leave out. Now the thresholds are 4 508 and 4 425. A finger half the size of the others is kept (a
+ratio of 2 against N of 3), and so are fingers that touch at one end and show
+as one part twice as large, since each end is judged by its own parts and the
+end with too few parts takes the other's threshold. The lobes are then the
+parts of the end that has the more of them, and each part of the other goes to
+the lobe whose part is nearest by their centres (pixel by pixel when fewer
+parts remain than lobes: fingers that touched, each taking what is nearest).
 
 **Lesson: the tip is the farthest pixel along the lobe's reach.** The tip
 was the lobe pixel farthest by the paths through the lobe from where it is
