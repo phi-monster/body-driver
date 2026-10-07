@@ -53,13 +53,23 @@ private package Driver.Robot.Channels is
 
    function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean
      with Pre => D'First = 1 and then D'Length = Group_Size (M, G);
-   --  A change D of the group's readings, one value per channel, is motion:
-   --  a channel an eye watches changed by a step that eye can see
-   --  (Visible_Step: below it no eye can tell, however a held reading
-   --  jitters, and a joint held away from rest jitters far more than it was
-   --  measured to at rest), or the change of the channels no eye watches is
-   --  significant against their noise, as the change of two readings. The
-   --  one test of motion.
+   --  A change D of the group's readings, one value per channel, is motion
+   --  when it is both a change an eye could tell and significant against the
+   --  noise. A channel an eye watches that changed by less than the step that
+   --  eye can see (Visible_Step) did not change: below it no eye can tell,
+   --  however a held reading jitters, and a joint held away from rest jitters
+   --  far more than it was measured to at rest (the noise alone would call
+   --  that motion). What is left, the watched channels' visible changes and
+   --  the changes of the channels no eye watches, is motion when it is
+   --  significant against the channels' noise, as the change of two readings
+   --  and as one vector, so a group of many channels raises no more false
+   --  alarms than one. The noise guards the visible step as the step guards
+   --  the noise: a lock-in that credits a group with the pictures' motion
+   --  beside its tiny readings can fit a visible step of 1e-17, which alone
+   --  would make every jitter of the reading a motion, a push without end,
+   --  and a group with no beat at rest to measure its noise from; and a
+   --  channel whose noise is not measured gives no evidence, so its jitter is
+   --  not motion whatever the step. The one test of motion.
 
    function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean;
    --  The group moved at Beat: its change from Beat - 1 is Visible. False
