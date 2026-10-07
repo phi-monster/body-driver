@@ -195,6 +195,33 @@ package body Driver.Robot.Hand.Tests is
              & ", not by the fast step past the bound");
    end Press_Overshoot;
 
+   procedure Free_Push_Is_Not_The_Table is
+      --  What a press's pushes delivered of their asks, and the readings' noise
+      --  of that, as the step tracker judged them in A15: the first push after
+      --  the first press that met the table delivered the whole of its ask of
+      --  0.005 radian to three places and was judged short (blocked), because a
+      --  joint fell short of it by some millionths of a radian, as every later
+      --  step was, aims of 0.9 radian too; the push that met the table
+      --  delivered 0.716 of its ask, the let-go that followed minus 0.683.
+      use Driver.Robot.Motion;
+
+      function Report (How : Step_Outcome; Delivered, Sigma : Real) return Step_Report is
+        (Outcome => How, Delivered => (Value => Delivered, Sigma => Sigma, Degrees_Of_Freedom => 0), others => <>);
+   begin
+      Check (Pushed_Through (Report (Reached, 1.0, 0.002)), "a push the body judged reached was not pushed through");
+      Check (Pushed_Through (Report (Short, 1.0, 0.002)),
+             "a push that delivered all of its ask but was judged short by a joint fell short");
+      Check (Pushed_Through (Report (Blocked, 0.9997, 0.0005)),
+             "a push that delivered 0.9997 of its ask, within the noise of that, was judged blocked");
+      Check (Pushed_Through (Report (Short, 1.002, 0.001)), "a push that went past its ask fell short");
+      Check (Pushed_Through (Report (Short, 0.99, 0.02)),
+             "a push that delivered 0.99 of its ask, against a noise of 0.02, fell short");
+      Check (not Pushed_Through (Report (Short, 0.716, 0.0001)),
+             "a push that delivered 0.716 of its ask, against a noise of 0.0001, was pushed through");
+      Check (not Pushed_Through (Report (Blocked, -0.683, 0.0001)),
+             "a push that went the other way was pushed through");
+   end Free_Push_Is_Not_The_Table;
+
    procedure Roles_Re_Read is
       --  A group the body first takes for a closer of an arm whose eye sees
       --  it, then re-reads as an arm of its own (as A10's boot did with its
@@ -292,6 +319,9 @@ package body Driver.Robot.Hand.Tests is
                              Views_Never_Form'Access);
       Driver.Tests.Register ("hand.measure.press", "a press overshoots the contact by more than its prediction admits, "
                              & "or creeps when nothing predicts it", Press_Overshoot'Access);
+      Driver.Tests.Register ("hand.measure.free",
+                             "a push that delivered all it was asked is not the table, whatever the joints' verdict",
+                             Free_Push_Is_Not_The_Table'Access);
       Driver.Tests.Register ("hand.measure.roles", "a group the body re-read as an arm is swept as a closer",
                              Roles_Re_Read'Access);
       Driver.Robot.Hand.Frames.Tests.Register;

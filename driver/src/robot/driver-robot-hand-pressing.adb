@@ -5,12 +5,20 @@ package body Driver.Robot.Hand.Pressing is
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
+   use type Driver.Robot.Motion.Plan_Status;
+
+   function Least_Push (M : Model; Arm : Arm_Id; O : Observation) return Real is
+      Tool    : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
+      Values  : Vec3;
+      Vectors : Mat3;
+   begin
+      Symmetric_Eigensystem (Tool.Position_Covariance, Values, Vectors);
+      return Threshold (Vector_Gate (Vec3'Length)) * Sqrt (Real'Max (Values (1), Real'Max (Values (2), Values (3))));
+   end Least_Push;
 
    procedure Aim (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed) is
       Tool    : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
       Down    : constant Direction_Estimate := Up_In_Arm (M, Arm);
-      Values  : Vec3;
-      Vectors : Mat3;
    begin
       Result := (others => <>);
       Result.Ok := Down.Sigma < Real'Last and then Tool.Position_Covariance (1, 1) < Real'Last
@@ -19,13 +27,18 @@ package body Driver.Robot.Hand.Pressing is
          return;
       end if;
       Result.Into := -Down.Unit_Vector;
-      Symmetric_Eigensystem (Tool.Position_Covariance, Values, Vectors);
-      Result.Least := Threshold (Vector_Gate (Vec3'Length))
-        * Sqrt (Real'Max (Values (1), Real'Max (Values (2), Values (3))));
       Result.Above := Driver.Robot.Hand.Aims.Turned_About
         (Tool.Pose, Eye_In_Tool (M, Eye, O).Pose.Translation, Along, Result.Into);
       Result.Turn := Angle (Transpose (Tool.Pose.Rotation) * Result.Above.Rotation);
       Result.Plan := Driver.Robot.Motion.Plan_Reach_In_Arm (M, Arm, O, (Pose => Result.Above, Position_Only => False));
+      if Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Planned then
+         declare
+            There : Observation := O;
+         begin
+            There.Readings.Replace_Element (Arm_Group (M, Arm), Driver.Robot.Motion.Last_Readings (Result.Plan));
+            Result.Least := Least_Push (M, Arm, There);
+         end;
+      end if;
    end Aim;
 
    function Lowered

@@ -269,6 +269,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Driver.Robot.Hand.Pressing.Aim (M, R.Arm, R.Eye, O, Along, Aimed);
       end Read_Aim;
 
+      Least : Real;   --  the least push, where the aim leaves the tool, kept above zero so that the doubling begins
       By : Real := 0.0;
       Descended : Real := 0.0;   --  how far the pushes that were reached have lowered the tool
       procedure Read_Lower (O : Observation) is
@@ -287,7 +288,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
             return;
          end if;
          Driver.Robot.Motion.Follow (M, Plan, Report);
-         Reached := Report.Outcome = Driver.Robot.Motion.Reached;
+         --  Reached is what the push delivered of its ask, against the noise of
+         --  that, not the body's verdict on the step (Pushed_Through).
+         Reached := Driver.Robot.Hand.Pushed_Through (Report);
          if Reached then
             Descended := Descended + Step;
          end if;
@@ -321,6 +324,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          return False;
       end if;
       Plan := Aimed.Plan;
+      Least := Real'Max (Real'Model_Epsilon, Aimed.Least);
       if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": cannot aim a press: " & Driver.Robot.Motion.Why (Plan));
          return False;
@@ -338,9 +342,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
                              then ", " & Driver.Log.Image (First.Value, 4) & " +- " & Driver.Log.Image (First.Sigma, 4)
                                   & " above the surface the presses so far fixed"
                              else ", nothing yet predicting the surface below its tip: doubling from "
-                                  & Driver.Log.Image (Aimed.Least, 4) & " until blocked"));
+                                  & Driver.Log.Image (Least, 4) & " until blocked"));
       end;
-      Driver.Robot.Hand.Descend (Gap'Access, Aimed.Least, Lower'Access, Steps);
+      Driver.Robot.Hand.Descend (Gap'Access, Least, Lower'Access, Steps);
       --  One line a press, for the boot's account of where its time went:
       --  how many pushes, and why each was as long as it was.
       Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": press of lobe" & Lobe'Image & " at "
@@ -348,7 +352,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                        & Natural'Image (Driver.Robot.Hand.Total (Steps)) & " pushes,"
                        & Steps.Fast'Image & " fast and" & Steps.Band'Image
                        & " within Z sigma of the contact its presses predict," & Steps.Blind'Image
-                       & " doubling from " & Driver.Log.Image (Aimed.Least, 4) & " with nothing predicting it; "
+                       & " doubling from " & Driver.Log.Image (Least, 4) & " with nothing predicting it; "
                        & (if Unplanned then "then it cannot press lower: " & Driver.Robot.Motion.Why (Plan)
                           else "blocked, the last push by " & Driver.Log.Image (By, 4) & " after lowering "
                                & Driver.Log.Image (Descended, 4)));
