@@ -58,7 +58,13 @@ package Driver.Robot.Hand is
    function Tip_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Point_Estimate;
    --  A lobe's tip in the tool frame of the hand's arm (Driver.Robot.Tool_Pose),
    --  in the arm's own unit (Driver.Robot.Arm_Unit): what the hand measured,
-   --  before any arm pose is applied.
+   --  before any arm pose is applied. Known from the first press the tip
+   --  stopped, and provisional until Tip_Confirmed.
+
+   function Tip_Confirmed (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Boolean;
+   --  Tip_In_Tool's tip is checked: a second press, from a pose distinct from
+   --  the first's, landed on it within the noise. A tip one press fixes is a
+   --  bound the tip is not beyond, and the lowest one the presses gave.
 
    function Press_Direction (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening)
      return Direction_Estimate;
@@ -161,10 +167,11 @@ private
       M          : Model;
       O          : Observation;
       Is_Blocked : Boolean;
-      Is_Still   : Boolean);
+      Is_Still   : Boolean;
+      Is_Pushing : Boolean := False);
    --  One beat of one hand's arm for its presses: Observe's step, given the
-   --  body's two judgments of the beat (Driver.Robot.Blocked and Still), from
-   --  which a press is found.
+   --  judgments of the beat on its arm (Driver.Robot.Blocked, its readings
+   --  at rest, its latest push under way), from which a press is found.
 
    type Showing is (Not_Yet, Nothing_New, Something_New);
    --  What the views of a closer's own eye make of a push: Not_Yet while the
@@ -223,33 +230,50 @@ private
    --  change none. Zero, no blind push, when the shift is not measured.
 
    type Descent_Steps is record
-      Fast  : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
-      Band  : Natural := 0;   --  within that band, each the larger of the sigma and Least
-      Blind : Natural := 0;   --  doubling, nothing predicting the contact
+      Fast   : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
+      Band   : Natural := 0;   --  within that band, each the larger of the sigma and Least
+      Blind  : Natural := 0;   --  doubling, nothing predicting the contact
+      Capped : Natural := 0;   --  of those, the steps cut to the eye's room above the surface
+      Spent  : Boolean := False;   --  ended with the eye no room left to go down, and nothing met
    end record;
 
    function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Blind);
 
+   type Heights is record
+      Tip : Estimate := Unknown;   --  the tip above the contact predicted under it, along the way down
+      Eye : Estimate := Unknown;   --  the eye above the surface, along the way down
+   end record;
+
    procedure Descend
-     (Gap   : not null access function return Estimate;
+     (Above : not null access function return Heights;
       Least : Real;
       Lower : not null access procedure (By : Real; Reached : out Boolean);
       Steps : out Descent_Steps)
      with Pre => Least > 0.0;
    --  A press's descent: each step lowers the tool By, until one does not
-   --  reach (Lower says so: the arm met something, or cannot go there). Gap is
-   --  the tip's height above the contact predicted under it, with its sigma,
-   --  Unknown when nothing predicts it. With a prediction, the steps double
-   --  from Least for as long as each ends Z sigma or more above the predicted
-   --  contact, the last cut to end there; within that band each step is the
-   --  larger of the sigma and Least, so the tip meets the surface at most
-   --  that far short of a step's end: the overshoot the prediction already
-   --  admits, and less force and less sinking in where the tip is read.
-   --  Without one the steps double from Least until one is not reached, the
-   --  overshoot as it comes (the owner's rule, 10-05: the most aggressive
-   --  choice everywhere; creeping by Least took A11's first presses into the
-   --  thousands of pushes). Least is the smallest move of the tool that tells
-   --  from its noise.
+   --  reach (Lower says so: the arm met something, or cannot go there). Above
+   --  is read before each step. Tip is the tip's height above the contact
+   --  predicted under it, with its sigma, Unknown when nothing predicts it.
+   --  With a prediction, the steps double from Least for as long as each ends
+   --  Z sigma or more above the predicted contact, the last cut to end there;
+   --  within that band each step is the larger of the sigma and Least, so the
+   --  tip meets the surface at most that far short of a step's end: the
+   --  overshoot the prediction already admits, and less force and less sinking
+   --  in where the tip is read. Without one the steps double from Least until
+   --  one is not reached, the overshoot as it comes (the owner's rule, 10-05:
+   --  the most aggressive choice everywhere; creeping by Least took A11's first
+   --  presses into the thousands of pushes). Least is the smallest move of the
+   --  tool that tells from its noise.
+   --
+   --  Eye is how far the eye can still go down before it reaches the surface
+   --  the arm's own eye saw: whatever the tip is, the hand can be lowered no
+   --  further than that, and a step to a pose with the eye under the table
+   --  asks for a pose no hand can be in. Every step is cut to end Z sigma of
+   --  that height above the surface, and the descent ends, Spent, when less
+   --  than Least is left. (A16's third press doubled to 5.85 units after
+   --  5.80 with the eye 10.0 units above the table: a lowering to 11.65, 5.68
+   --  rad of joint motion, of which the arm made 13.6 per cent before it
+   --  folded on itself.)
 
    function Sweepable (H : Hands; M : Model; G : Group_Id) return Boolean;
    --  The group is a closer by the body's roles now, and the hand watches it

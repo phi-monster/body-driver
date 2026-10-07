@@ -86,6 +86,31 @@ package body Driver.Robot.Hand.Tips is
       end;
    end Tip;
 
+   function Confirmed (B : Book; Lobe : Positive; At_Opening : Opening) return Boolean is
+   begin
+      if B.Sights.Is_Empty or else Lobe > Lobes (B) or else not Fit_Ok (B) then
+         return False;
+      end if;
+      declare
+         Index : constant Natural := Index_Of (Sights_Of (B), Lobe, At_Opening);
+      begin
+         return Index > 0 and then B.Fitted.Element.Tips (Index).Ok and then B.Fitted.Element.Tips (Index).Confirmed;
+      end;
+   end Confirmed;
+
+   function Distance (B : Book; Lobe : Positive; At_Opening : Opening) return Estimate is
+   begin
+      if B.Sights.Is_Empty or else Lobe > Lobes (B) or else not Fit_Ok (B) then
+         return Unknown;
+      end if;
+      declare
+         Index : constant Natural := Index_Of (Sights_Of (B), Lobe, At_Opening);
+      begin
+         return (if Index > 0 and then B.Fitted.Element.Tips (Index).Ok
+                 then B.Fitted.Element.Tips (Index).Distance else Unknown);
+      end;
+   end Distance;
+
    function Into_Surface (B : Book; K : Kept) return Vec3 is
      (-(Transpose (K.Event.Tool.Pose.Rotation) * Surface (B).Normal));
    --  The direction into the fitted surface at a press, tool frame.

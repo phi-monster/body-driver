@@ -324,6 +324,7 @@ package body Driver.Robot.Hand.Pressing.Tests is
                      What : constant String := "lobe" & L'Image & " at " & W'Image & ", the arm standing " & How'Image;
                   begin
                      Check (Known (T), What & ": no tip");
+                     Check (Tip_Confirmed (H, 1, L, W), What & ": a tip of many presses is not confirmed");
                      if Known (T) then
                         Worst := Real'Max (Worst, Mahalanobis (T, Tips_True (L, W)));
                         Wide := Real'Max (Wide, Sqrt (Trace (T.Covariance)));

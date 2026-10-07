@@ -51,8 +51,52 @@ package body Driver.Robot.Hand.Aims.Tests is
              "away from the other lobe is not across the line and away from it");
    end Hand_Scale;
 
+   procedure Tilts_Follow_The_Arm is
+      --  The least tilt a second press can tell from a stop that does not move
+      --  with it: a tip 4.83 along its line known to 0.0324 (A16's first): the
+      --  hits of a stop at the same height, straight and tilted by T, differ by
+      --  the distance times T squared over 2, which is Z times the root of 2
+      --  of the sigma at T = 0.239.
+      Least : constant Real := Least_Tilt ((Value => 4.826, Sigma => 0.0324, Degrees_Of_Freedom => 0));
+      Tilt, Bound : Real;
+   begin
+      Check (abs (Least - 0.2387) < 1.0e-3, "the least tilt of the tip A16 gave is" & Real'Image (Least));
+      Check (Least_Tilt (Unknown) = Real'Last, "a tilt is worth something with the tip's distance unknown");
+      --  The hand's own angle, 1.0, stopped on the arm: half of it, then a
+      --  quarter, which is under the least: no more.
+      Tilt := 1.0;
+      Bound := Ada.Numerics.Pi / 2.0;
+      Next_Tilt (Tilt, Stalled => True, Bound => Bound, Least => 0.3);
+      Check (Tilt = 0.5 and then Bound = 1.0, "after a stop at 1.0 the next tilt is" & Real'Image (Tilt));
+      Next_Tilt (Tilt, Stalled => True, Bound => Bound, Least => 0.3);
+      Check (Tilt = 0.0 and then Bound = 0.5, "after a stop at 0.5, under the least a quarter, the next is" & Real'Image (Tilt));
+      --  Presses that a tip rests on double, up to a right angle.
+      Tilt := 0.3;
+      Bound := Ada.Numerics.Pi / 2.0;
+      Next_Tilt (Tilt, Stalled => False, Bound => Bound, Least => 0.2);
+      Check (Tilt = 0.6, "a press the tip rests on at 0.3 was followed by" & Real'Image (Tilt));
+      Next_Tilt (Tilt, Stalled => False, Bound => Bound, Least => 0.2);
+      Check (Tilt = 1.2, "a press the tip rests on at 0.6 was followed by" & Real'Image (Tilt));
+      Next_Tilt (Tilt, Stalled => False, Bound => Bound, Least => 0.2);
+      Check (Tilt = 0.0, "a tilt past a right angle was made");
+      --  A stop at 1.0 and a press the tip rests on at half of it: the double
+      --  of that is the tilt that stopped, which is not made again.
+      Tilt := 1.0;
+      Bound := Ada.Numerics.Pi / 2.0;
+      Next_Tilt (Tilt, Stalled => True, Bound => Bound, Least => 0.2);
+      Next_Tilt (Tilt, Stalled => False, Bound => Bound, Least => 0.2);
+      Check (Tilt = 0.0, "a tilt that stopped was made again after half of it did not:" & Real'Image (Tilt));
+      --  With the tip's distance unknown nothing halves: an arm that stopped is not asked for less.
+      Tilt := 1.0;
+      Bound := Ada.Numerics.Pi / 2.0;
+      Next_Tilt (Tilt, Stalled => True, Bound => Bound, Least => Real'Last);
+      Check (Tilt = 0.0, "a stop was followed by half of the tilt with no tip to tell it from");
+   end Tilts_Follow_The_Arm;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.aims.tilts", "a tilt the arm cannot make is asked again, or the tilts never end",
+                             Tilts_Follow_The_Arm'Access);
       Driver.Tests.Register ("hand.aims.turn", "the turn that aims a lobe moves the eye or aims it wrong",
                              Turned_Keeps_The_Eye'Access);
       Driver.Tests.Register ("hand.aims.scale", "the tilts' direction or size is not the hand's own",

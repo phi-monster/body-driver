@@ -75,4 +75,22 @@ package body Driver.Robot.Hand.Aims is
       return Best;
    end Spread;
 
+   function Least_Tilt (Distance : Estimate) return Real is
+     (if Known (Distance) and then Distance.Value > 0.0
+      then Sqrt (2.0 * Sqrt (2.0) * Threshold (Scalar_Gate (Distance.Degrees_Of_Freedom)) * Distance.Sigma
+                 / Distance.Value)
+      else Real'Last);
+
+   procedure Next_Tilt (Tilt : in out Real; Stalled : Boolean; Bound : in out Real; Least : Real) is
+      Next : Real;
+   begin
+      if Stalled then
+         Bound := Real'Min (Bound, Tilt);
+         Next := Tilt / 2.0;
+      else
+         Next := 2.0 * Tilt;
+      end if;
+      Tilt := (if Next < Least or else Next >= Bound then 0.0 else Next);
+   end Next_Tilt;
+
 end Driver.Robot.Hand.Aims;

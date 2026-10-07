@@ -65,16 +65,29 @@ package Driver.Robot.Hand.Tips is
    --  Every press kept, agreeing or not.
 
    function Tip (B : Book; Lobe : Positive; At_Opening : Opening) return Point_Estimate;
-   --  Unknown until enough agreeing presses fix it.
+   --  The tip as the presses fix it: the lowest of their hits, unknown until
+   --  a press stopped by the tip fixes it (Driver.Robot.Hand.Touch). One
+   --  press fixes it and nothing has checked it: provisional, as long as it
+   --  is not Confirmed.
+
+   function Confirmed (B : Book; Lobe : Positive; At_Opening : Opening) return Boolean;
+   --  A second press, from a pose distinct from the first's, landed on the
+   --  tip within the noise.
+
+   function Distance (B : Book; Lobe : Positive; At_Opening : Opening) return Estimate;
+   --  How far along its line of sight from the eye the tip is, in the arm's
+   --  own unit; unknown when the tip is.
 
    function Direction (B : Book; Lobe : Positive; At_Opening : Opening) return Direction_Estimate;
-   --  The direction into the surface at the tip's agreeing presses, tool
+   --  The direction into the surface at the presses the tip rests on, tool
    --  frame, averaged; its sigma is their spread.
 
    function Agreeing (B : Book; Lobe : Positive; At_Opening : Opening) return Natural;
+   --  The presses the tip rests on.
 
    function Latest_Agrees (B : Book) return Boolean;
-   --  The press kept last agrees with the others.
+   --  The press kept last is one its tip rests on: the tip stopped it, and
+   --  not something else that left the tip above the surface.
 
    function Surface (B : Book) return Driver.Geometry.Plane_Estimate;
    --  The surface as the presses and the prior make it, in the frame of the

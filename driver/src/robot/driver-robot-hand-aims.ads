@@ -33,4 +33,26 @@ package Driver.Robot.Hand.Aims is
    --  The angle to the nearest other line of sight: the hand's own angular
    --  scale; zero when there are no others.
 
+   function Least_Tilt (Distance : Estimate) return Real;
+   --  The least tilt at which a second press can tell a tip from a stop on
+   --  something that does not move with the tilt. A tip s along its line of
+   --  sight, pressed straight, meets the surface s from the eye; the same
+   --  stop of the eye, pressed tilted by T, meets it s / cos T: the hits
+   --  differ by s T^2 / 2 at least, and that tells from the noise of two hits
+   --  when it exceeds Z times the square root of 2 of the tip's sigma. Real'Last
+   --  when the distance is not known: no tilt is then told from another.
+
+   procedure Next_Tilt (Tilt : in out Real; Stalled : Boolean; Bound : in out Real; Least : Real);
+   --  The tilt of the next press of a lobe's tip on one side, after one at
+   --  Tilt that stopped short of the table (Stalled: no tip rests on it) or
+   --  did not; zero when there is none. The tilts double while the presses
+   --  are ones the tip rests on, as the hand's own angle sets them, and
+   --  halve when one stops short: an arm that cannot make a tilt can often
+   --  make half of it (A16: the aims of both tilted presses, 0.96 and 1.23
+   --  rad, stood the wrist's fifth joint at 0.743 rad, 0.002 under the largest
+   --  reading it had in the run, where the straight press's aim had it at
+   --  0.258; both stopped on the arm itself). Bound is the least tilt
+   --  found not to be made on this side, which none after it reaches; Least
+   --  is Least_Tilt, which none under it is worth.
+
 end Driver.Robot.Hand.Aims;

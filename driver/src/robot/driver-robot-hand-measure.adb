@@ -251,11 +251,13 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  way down, its sigma the plane's there with the tip's and the tool
    --  pose's. Before that nothing predicts it (a lobe's tip rides with its
    --  eye, so no view of the surface tells how far below the tip it is) and
-   --  the descent doubles until blocked. The way back is to the arm's readings
-   --  the descent began from, not to a pose: the arm is fitted again as it
-   --  moves, and a pose of the arm's frame kept through a press would be in a
-   --  frame that has moved.
-   --  False when the arm cannot reach it or the body does not say where down is.
+   --  the descent doubles until blocked, no step taking the eye below the
+   --  table its arm's own eye saw (Driver.Robot.Hand.Descend). The way back is
+   --  to the arm's readings the descent began from, not to a pose: the arm is
+   --  fitted again as it moves, and a pose of the arm's frame kept through a
+   --  press would be in a frame that has moved.
+   --  False when the arm cannot reach it or the body does not say where down
+   --  is, or the eye had no room left above the table and nothing was met.
    function Press_Once (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening; Along : Vec3) return Boolean is
       Aimed  : Driver.Robot.Hand.Pressing.Aimed;
       Plan   : Driver.Robot.Motion.Plan;
@@ -294,19 +296,23 @@ procedure Measure (H : in out Hands; M : in out Model) is
          end if;
       end Lower;
 
-      function Gap return Estimate is
-         --  The lobe's tip above the surface the presses so far fixed, along the way down.
-         Result : Estimate := Unknown;
-         procedure Read_Gap (O : Observation) is
-            B : Driver.Robot.Hand.Tips.Book renames H.Data.Found (Id).Book;
+      function Above return Driver.Robot.Hand.Heights is
+         --  The lobe's tip above the surface the presses so far fixed, and the
+         --  eye above the table its arm's own eye saw, along the way down.
+         Result : Driver.Robot.Hand.Heights;
+         procedure Read_Above (O : Observation) is
+            B   : Driver.Robot.Hand.Tips.Book renames H.Data.Found (Id).Book;
+            Eye : constant Point_Estimate :=
+              (Mean => Eye_In_Tool (M, R.Eye, O).Pose.Translation, Covariance => [others => [others => 0.0]]);
          begin
-            Result := Driver.Robot.Hand.Pressing.Gap
+            Result.Tip := Driver.Robot.Hand.Pressing.Gap
               (M, R.Arm, O, Driver.Robot.Hand.Tips.Tip (B, Lobe, Which), Driver.Robot.Hand.Tips.Surface (B), Aimed.Into);
-         end Read_Gap;
+            Result.Eye := Driver.Robot.Hand.Pressing.Gap (M, R.Arm, O, Eye, Table_In_Arm (M, R.Arm), Aimed.Into);
+         end Read_Above;
       begin
-         Hold_Beat (Read_Gap'Access);
+         Hold_Beat (Read_Above'Access);
          return Result;
-      end Gap;
+      end Above;
       Steps : Driver.Robot.Hand.Descent_Steps;
 
       procedure Read_Arm (O : Observation) is
@@ -331,18 +337,21 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Hold_Beat (Read_Arm'Access);
       Aim_At := Arm_Now;
       declare
-         First : constant Estimate := Gap;
+         First : constant Driver.Robot.Hand.Heights := Above;
       begin
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": pressing lobe" & Lobe'Image & " at "
                           & (if Which = Open then "open" else "closed") & ", aimed by turning the hand "
                           & Driver.Log.Image (Aimed.Turn, 4) & " rad"
-                          & (if Known (First)
-                             then ", " & Driver.Log.Image (First.Value, 4) & " +- " & Driver.Log.Image (First.Sigma, 4)
+                          & (if Known (First.Tip)
+                             then ", " & Driver.Log.Image (First.Tip.Value, 4) & " +- " & Driver.Log.Image (First.Tip.Sigma, 4)
                                   & " above the surface the presses so far fixed"
                              else ", nothing yet predicting the surface below its tip: doubling from "
-                                  & Driver.Log.Image (Least, 4) & " until blocked"));
+                                  & Driver.Log.Image (Least, 4) & " until blocked")
+                          & (if Known (First.Eye)
+                             then "; the eye " & Driver.Log.Image (First.Eye.Value, 4) & " above the table"
+                             else "; the eye's height above the table unknown"));
       end;
-      Driver.Robot.Hand.Descend (Gap'Access, Least, Lower'Access, Steps);
+      Driver.Robot.Hand.Descend (Above'Access, Least, Lower'Access, Steps);
       --  One line a press, for the boot's account of where its time went:
       --  how many pushes, and why each was as long as it was.
       Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": press of lobe" & Lobe'Image & " at "
@@ -350,11 +359,14 @@ procedure Measure (H : in out Hands; M : in out Model) is
                        & Natural'Image (Driver.Robot.Hand.Total (Steps)) & " pushes,"
                        & Steps.Fast'Image & " fast and" & Steps.Band'Image
                        & " within Z sigma of the contact its presses predict," & Steps.Blind'Image
-                       & " doubling from " & Driver.Log.Image (Least, 4) & " with nothing predicting it; "
+                       & " doubling from " & Driver.Log.Image (Least, 4) & " with nothing predicting it,"
+                       & Steps.Capped'Image & " cut to the eye's room above the table; "
                        & (if Unplanned then "then it cannot press lower: " & Driver.Robot.Motion.Why (Plan)
+                          elsif Steps.Spent then "then the eye has no room left above the table and nothing was met, after lowering "
+                               & Driver.Log.Image (Descended, 4)
                           else "blocked, the last push by " & Driver.Log.Image (By, 4) & " after lowering "
                                & Driver.Log.Image (Descended, 4)));
-      if Unplanned then
+      if Unplanned or else Steps.Spent then
          return False;
       end if;
       --  Let go: the arm held where the block left it, so the hand rests; then
@@ -388,14 +400,32 @@ procedure Measure (H : in out Hands; M : in out Model) is
             elsif R.Lobes (Lobe).Sights (Other_End).Known
             then Driver.Robot.Hand.Aims.Spread (Sight, [1 => R.Lobes (Lobe).Sights (Other_End).Ray.Direction.Unit_Vector])
             else 0.0);
-         Agreed : Boolean := True;
+         Agreed  : Boolean := True;    --  the latest press is one its tip rests on
+         Checked : Boolean := False;   --  the lobe's tip is confirmed by a second press from another pose
+         Least   : Real := Real'Last;  --  the least tilt that tells the tip from a stop that does not move with it
          procedure Read_Agreed (O : Observation) is
             pragma Unreferenced (O);
+            Book : Driver.Robot.Hand.Tips.Book renames H.Data.Found (Id).Book;
          begin
-            Agreed := Driver.Robot.Hand.Tips.Latest_Agrees (H.Data.Found (Id).Book);
+            Agreed := Driver.Robot.Hand.Tips.Latest_Agrees (Book);
+            Checked := Driver.Robot.Hand.Tips.Confirmed (Book, Lobe, Which);
+            Least := Driver.Robot.Hand.Aims.Least_Tilt (Driver.Robot.Hand.Tips.Distance (Book, Lobe, Which));
          end Read_Agreed;
       begin
+         Hold_Beat (Read_Agreed'Access);
+         if Checked then
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image & " at "
+                             & (if Which = Open then "open" else "closed") & " is not pressed: its tip is confirmed already");
+            return;
+         end if;
          if not Press_Once (Id, R, Lobe, Which, Sight) then
+            return;
+         end if;
+         Hold_Beat (Read_Agreed'Access);
+         if Checked then
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image & " at "
+                             & (if Which = Open then "open" else "closed") & " pressed once, straight, and its tip is"
+                             & " confirmed: presses made for other lobes had landed on it");
             return;
          end if;
          if Scale <= 0.0 then
@@ -406,26 +436,37 @@ procedure Measure (H : in out Hands; M : in out Model) is
          end if;
          --  Leaning to either side of away, half-way to across.
          for Side of Real_Array'[-1.0, 1.0] loop
+            exit when Checked;
             declare
-               Lean : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;
-               Tilt : Real := Scale;
-               Made : Natural := 0;
-               Why  : Ada.Strings.Unbounded.Unbounded_String :=
+               Lean  : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;
+               Tilt  : Real := Scale;
+               Bound : Real := Ada.Numerics.Pi / 2.0;   --  the least tilt this side was found not to make
+               Made  : Natural := 0;
+               Why   : Ada.Strings.Unbounded.Unbounded_String :=
                  Ada.Strings.Unbounded.To_Unbounded_String ("tilted to a right angle");
             begin
-               while Tilt < Ada.Numerics.Pi / 2.0 loop
+               --  The hand's own angle, then double while the presses are ones
+               --  the tip rests on, half when one stops short of the table
+               --  (Driver.Robot.Hand.Aims.Next_Tilt).
+               while Tilt > 0.0 and then Tilt < Bound loop
                   if not Press_Once (Id, R, Lobe, Which, Driver.Robot.Hand.Aims.Tilted (Sight, Lean, Tilt)) then
                      Why := Ada.Strings.Unbounded.To_Unbounded_String ("a press could not be made");
                      exit;
                   end if;
                   Made := Made + 1;
                   Hold_Beat (Read_Agreed'Access);
-                  if not Agreed then
-                     Why := Ada.Strings.Unbounded.To_Unbounded_String ("the latest does not agree with the others");
+                  if Checked then
+                     Why := Ada.Strings.Unbounded.To_Unbounded_String
+                       ("the tip is confirmed: a press from another pose landed on it");
                      exit;
                   end if;
-                  Tilt := 2.0 * Tilt;
+                  Driver.Robot.Hand.Aims.Next_Tilt (Tilt, Stalled => not Agreed, Bound => Bound, Least => Least);
                end loop;
+               if Bound < Ada.Numerics.Pi / 2.0 and then not Checked and then Tilt = 0.0 then
+                  Why := Ada.Strings.Unbounded.To_Unbounded_String
+                    ("a press stopped short of the table at" & Driver.Log.Image (Bound, 4)
+                     & " rad, and the tilts under it are none that tells the tip from a stop");
+               end if;
                Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image & " at "
                                 & (if Which = Open then "open" else "closed") & " tilted "
                                 & (if Side < 0.0 then "one way" else "the other") & ":" & Made'Image
