@@ -212,9 +212,28 @@ package Driver.Robot.Hand.Lobes is
    --  and 47 % of the pixels given the end that shows them darker, against
    --  91 % begun from the order). Where two levels differ little their order
    --  is noise, which histograms begun from it sort into a robot and a world
-   --  that are not there. When the rounds are over the seeds say which kind
-   --  is which, as a whole: more of them in the kind with the robot at the
-   --  anchored end than not, or the kinds are exchanged.
+   --  that are not there.
+   --
+   --  The seeds are heard in every round before the neighbours are, not only
+   --  at the beginning: each kind has them at a rate of its own (the robot at
+   --  the anchored end holds still in the eye's picture while the eye moves,
+   --  the world does not), found with the histograms from the shares, and a
+   --  pixel whose two brightnesses do not tell the kinds apart is told by
+   --  whether the poses called it the robot's. Where the neighbours speak the
+   --  seeds do not: a flat dark world is as still over the poses as the robot
+   --  is, and where both ends are dark the seeds are a coin. Without them the
+   --  histograms alone drift from the order of the levels to a labelling that
+   --  explains itself: A16's final ends, a closed finger's lit face (10 177
+   --  pixels of a grey a little darker than the table the other end shows
+   --  there, hardly one a seed) went to the kind with the robot at the
+   --  anchored end in nine rounds, 9 229 of them, and the lobes' tips were 60
+   --  and 125 pixels low; with the seeds heard none went, and the tips are at
+   --  the fingers' tips but one, 30 pixels low (53 % of the pixels the
+   --  anchored end holds had seeds, 3 % of the other's). A15's final ends, the
+   --  same way: three lobes of two fingers and closed tips 100 and 175 pixels
+   --  low, then two lobes with their tips. When the rounds are over the seeds
+   --  say which kind is which, as a whole: more of them in the kind with the
+   --  robot at the anchored end than not, or the kinds are exchanged.
    --
    --  A flat patch is wrong as a whole and explains itself: robot and world
    --  lumas can be exchanged for it and the histograms follow. So when the

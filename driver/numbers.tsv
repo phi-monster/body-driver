@@ -782,6 +782,7 @@ driver-robot-hand-lobes.adb	Kind_A : Real := 1.0;	1.0	statistics	one pseudo-pixe
 driver-robot-hand-lobes.adb	Label (J) := Next (J) > 0.5;	0.5	math	a pixel is of the kind it is likelier to be of: a share above a half
 driver-robot-hand-lobes.adb	Levels : constant := 256;	256	format	a pixel's brightness in whole levels of eight bits
 driver-robot-hand-lobes.adb	Logs (K) := 0.5 * Log (Driver.Pixels.Variance (Anchor, C, R));	0.5	math	the log of a deviation is half the log of the variance
+driver-robot-hand-lobes.adb	Mass_A, Mass_B : Real := 2.0;	2.0	statistics	one pixel with a seed and one without are counted in each kind before any: a rate over n pixels has n + 2 pseudo-counts
 driver-robot-hand-lobes.adb	Moves : Real_Access := new Real_Array (1 .. 2 * Count);	2	structure	two coordinates per correspondence
 driver-robot-hand-lobes.adb	Next (J) := 1.0 / (1.0 + Exp (Real'Min (Lb - La, Odds_Range)));	1.0	math	a share is one over one plus the odds against
 driver-robot-hand-lobes.adb	Next (J) := 1.0 / (1.0 + Exp (Real'Min (Lb - La, Odds_Range)));	1.0	math	a share is one over one plus the odds against
@@ -801,11 +802,9 @@ driver-robot-hand-lobes.adb	Robot, World : Histogram := [others => 1.0];	1.0	sta
 driver-robot-hand-lobes.adb	Robot_Is_Darker := 2 * Darker >= Seeded;	2	math	twice the seeds whose anchored end is darker is at least all the seeds: at least half of them
 driver-robot-hand-lobes.adb	Round_Trip_Gate => Vector_Gate (2));	2	structure	an image displacement has two components
 driver-robot-hand-lobes.adb	Round_Trip_Gate => Vector_Gate (2, Dof));	2	structure	an image displacement has two components
+driver-robot-hand-lobes.adb	Seeded_A, Seeded_B : Real := 1.0;	1.0	statistics	one pseudo-pixel with a seed counted in each kind, as in every histogram
 driver-robot-hand-lobes.adb	Share (J) := (if Label (J) then 1.0 else 0.0);	1.0	math	a pixel begins wholly of the kind it is labelled
 driver-robot-hand-lobes.adb	Share (P) := (if Now_A then 1.0 else 0.0);	1.0	math	a pixel turned is wholly of its new kind
-driver-robot-hand-lobes.adb	Sqrt (Within / Real (N - 2)) * Sqrt (1.0 / Real (Big) + 1.0 / Real (Small)))	1.0	math	the standard error of a difference of two means: root of one over each count
-driver-robot-hand-lobes.adb	Sqrt (Within / Real (N - 2)) * Sqrt (1.0 / Real (Big) + 1.0 / Real (Small)))	1.0	math	the standard error of a difference of two means: root of one over each count
-driver-robot-hand-lobes.adb	Sqrt (Within / Real (N - 2)) * Sqrt (1.0 / Real (Big) + 1.0 / Real (Small)))	2	statistics	a pooled spread of two groups has two means fitted: n - 2 degrees of freedom
 driver-robot-hand-lobes.adb	Step : constant Real := (if Dr /= 0 and then Dc /= 0 then Diagonal else 1.0);	1.0	math	a step between side neighbours is one pixel
 driver-robot-hand-lobes.adb	Su := Su + Real (C) + 0.5;	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-lobes.adb	Sum := Sum + (if Label (Neighbour) then 1 else -1);	1	math	a neighbour of the one kind counts one, of the other minus one

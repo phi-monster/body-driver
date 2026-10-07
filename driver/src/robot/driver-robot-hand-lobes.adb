@@ -783,11 +783,16 @@ package body Driver.Robot.Hand.Lobes is
 
       procedure Round (Heard : Boolean) is
          --  One round: the histograms from the shares, the shares from the
-         --  histograms (the neighbours' labels too when Heard).
+         --  histograms (the neighbours' labels too when Heard); before the
+         --  neighbours are heard, the rate at which each kind has seeds too:
+         --  where the two brightnesses do not tell the kinds apart, whether the
+         --  poses called a pixel the robot's does.
          Robot, World : Histogram := [others => 1.0];
          Of_A, Of_B   : Votes := [others => 1.0];
          Robots, Worlds, Votes_A, Votes_B : Real := 0.0;
          Kind_A       : Real := 1.0;
+         Seeded_A, Seeded_B : Real := 1.0;   --  the share of each kind the poses called the robot's, and
+         Mass_A, Mass_B     : Real := 2.0;   --  the share there is of it: one pixel with and one without each
          Cap          : Real;
       begin
          Rounds := Rounds + 1;
@@ -817,6 +822,12 @@ package body Driver.Robot.Hand.Lobes is
             Of_A (Near (J)) := Of_A (Near (J)) + Share (J);
             Of_B (Near (J)) := Of_B (Near (J)) + (1.0 - Share (J));
             Kind_A := Kind_A + Share (J);
+            Mass_A := Mass_A + Share (J);
+            Mass_B := Mass_B + (1.0 - Share (J));
+            if Seeds (Seeds'First + J - 1) then
+               Seeded_A := Seeded_A + Share (J);
+               Seeded_B := Seeded_B + (1.0 - Share (J));
+            end if;
          end loop;
          for X of Robot loop
             Robots := Robots + X;
@@ -835,11 +846,16 @@ package body Driver.Robot.Hand.Lobes is
          Doubt_Now := 0.0;
          for J in 1 .. Total loop
             declare
+               Seeded : constant Boolean := Seeds (Seeds'First + J - 1);
+               Rate_A : constant Real := Seeded_A / Mass_A;
+               Rate_B : constant Real := Seeded_B / Mass_B;
                La : constant Real :=
                  Log (Cap) + Log (Robot (A_Bin (J)) / Robots) + Log (World (B_Bin (J)) / Worlds)
+                 + (if Heard then 0.0 else Log (if Seeded then Rate_A else 1.0 - Rate_A))
                  + (if Heard then Log (Of_A (Near (J)) / Votes_A) else 0.0);
                Lb : constant Real :=
                  Log (1.0 - Cap) + Log (World (A_Bin (J)) / Worlds) + Log (Robot (B_Bin (J)) / Robots)
+                 + (if Heard then 0.0 else Log (if Seeded then Rate_B else 1.0 - Rate_B))
                  + (if Heard then Log (Of_B (Near (J)) / Votes_B) else 0.0);
             begin
                Next (J) := 1.0 / (1.0 + Exp (Real'Min (Lb - La, Odds_Range)));
@@ -1104,76 +1120,37 @@ package body Driver.Robot.Hand.Lobes is
 
    function Large_From (Sizes : Real_Array) return Real;
    --  The size from which a part of an end is one of the lobes' and not a
-   --  fragment of what the mixture was unsure of, from the sizes of the end's
-   --  parts: the log sizes are parted in two groups (Cut_In_Two), and the
-   --  parting stands when the two groups' mean log sizes differ by more than Z
-   --  standard errors of their difference, from the spread the log sizes show
-   --  within the groups, and the biggest part is more than N times the size
-   --  parted at, N the number of parts: what is left out is smaller than the
-   --  share 1 / N the biggest would be if all the parts were of its size. The
-   --  fingers of a hand are of one order of size and what the mixture
-   --  misplaces is not: A14's low end held parts of 29 219 and 19 664 pixels
-   --  and of 400, 334, 149 ... , the high end 19 689 and 11 680 and 832, 670,
-   --  300 ... A finger half the size of the others is not left out, nor are
-   --  fingers that touch, one part twice as large as the other end's two.
-   --  Zero, nothing parted, below three parts (a spread within groups needs a
-   --  third value) and when the parting does not stand.
+   --  fragment, from the sizes of the end's parts: the biggest part's over N,
+   --  N the number of parts, the share a part would hold if all of them were
+   --  as big as the biggest. The fingers of a hand are of one order of size,
+   --  and what the mixture misplaces, or a thing in front of a finger leaves
+   --  of it, is not: A14's low end held parts of 29 219 and 19 664 pixels and
+   --  of 400, 334, 149 ... , the high end 19 689 and 11 680 and 832, 670,
+   --  300 ...; A16's open end of two fingers held 18 032 and 17 036 and, of
+   --  the finger the jeans lay on, 2 114 and 354 (the same ends' closed
+   --  fingers, 25 248 and 22 226), and another view of it 17 699 and 14 354
+   --  and 3 197 and 213. The sizes were parted at the middle of the gap between
+   --  the pieces and the fingers, where the biggest was 3.0 times the size
+   --  parted at and had to be N = 4 times, and the piece nearest to the closed
+   --  finger took the place of the finger it was a piece of (the open tip was
+   --  then found 160 pixels from where it is). A finger half the size of the
+   --  others is not left out (it holds more than 1 / N of the biggest from
+   --  N = 2 on), nor are fingers that touch, one part twice as large as the
+   --  other end's two. Zero, nothing parted, below three parts: two parts at an
+   --  end are two fingers, or one and a piece of it, and the other end's parts
+   --  tell which.
 
    function Large_From (Sizes : Real_Array) return Real is
-      N : constant Natural := Sizes'Length;
+      N       : constant Natural := Sizes'Length;
+      Biggest : Real := 0.0;
    begin
       if N < 3 then
          return 0.0;
       end if;
-      declare
-         Logs     : Real_Access := new Real_Array (1 .. N);
-         Cut      : Real;
-         Share    : Real;
-         Cuttable : Boolean;
-         Result   : Real := 0.0;
-      begin
-         for K in 1 .. N loop
-            Logs (K) := Log (Sizes (Sizes'First + K - 1));
-         end loop;
-         Cut_In_Two (Logs.all, Cut, Share, Cuttable);
-         if Cuttable then
-            declare
-               Big, Small         : Natural := 0;
-               Big_Sum, Small_Sum : Real := 0.0;
-               Max_Log            : Real := Real'First;
-            begin
-               for V of Logs.all loop
-                  Max_Log := Real'Max (Max_Log, V);
-                  if V > Cut then
-                     Big := Big + 1;
-                     Big_Sum := Big_Sum + V;
-                  else
-                     Small := Small + 1;
-                     Small_Sum := Small_Sum + V;
-                  end if;
-               end loop;
-               if Big > 0 and then Small > 0 then
-                  declare
-                     Big_Mean   : constant Real := Big_Sum / Real (Big);
-                     Small_Mean : constant Real := Small_Sum / Real (Small);
-                     Within     : Real := 0.0;
-                  begin
-                     for V of Logs.all loop
-                        Within := Within + (V - (if V > Cut then Big_Mean else Small_Mean)) ** 2;
-                     end loop;
-                     if Significant (Big_Mean - Small_Mean,
-                                     Sqrt (Within / Real (N - 2)) * Sqrt (1.0 / Real (Big) + 1.0 / Real (Small)))
-                       and then Exp (Max_Log - Cut) > Real (N)
-                     then
-                        Result := Exp (Cut);
-                     end if;
-                  end;
-               end if;
-            end;
-         end if;
-         Free (Logs);
-         return Result;
-      end;
+      for V of Sizes loop
+         Biggest := Real'Max (Biggest, V);
+      end loop;
+      return Biggest / Real (N);
    end Large_From;
 
    procedure Keep_Large (Parts : Part_Access; Large : Real);
