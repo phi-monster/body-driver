@@ -300,7 +300,8 @@ private
       Length    : Real := 0.0;        --  how far it asked, in reading units
       Shortfall : Estimate;           --  how far short of the target it stopped, along the ask
       Delivered : Estimate;           --  the fraction of the ask it delivered, along the ask
-      Blocked   : Boolean := False;   --  it fell short by a step an eye can see, or by more than free pushes do
+      Blocked   : Boolean := False;   --  it fell short by more than the group's free pushes do, and by a shortfall the one
+                                      --  test of motion sees, or nothing answered an ask that test would see
    end record;
 
    package Episode_Vectors is new Ada.Containers.Vectors (Positive, Episode);
@@ -319,7 +320,7 @@ private
       Delay_Known : Boolean := False;      --  some push was answered
       Episodes    : Episode_Vectors.Vector;   --  every push and how it went (Driver.Robot.Steps)
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
-      Free_Shortfalls : Real_Vectors.Vector;   --  of every push that moved freely, in order
+      Free_Shortfalls : Real_Vectors.Vector;   --  of every answered push that was not blocked, along its ask, in order
       Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
    end record;
 

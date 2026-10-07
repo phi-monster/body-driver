@@ -210,6 +210,15 @@ package body Driver.Robot.Channels is
    function Noise_Measured (M : Model; G : Group_Id) return Boolean is
      (First_Channel (M, G) + M.Groups (G).Size <= Natural (M.Noise.Length));
 
+   function Resolution (M : Model; G : Group_Id; Beat : Natural) return Real is
+      Scale : Real := 0.0;
+   begin
+      for C in 1 .. M.Groups (G).Size loop
+         Scale := Real'Max (Scale, abs Reading (M, G, Beat, C));
+      end loop;
+      return Real'Model_Epsilon * (if Scale > 0.0 then Scale else 1.0);
+   end Resolution;
+
    function Noise_Freedom (M : Model; G : Group_Id; Channel : Positive) return Natural is
       K : constant Natural := First_Channel (M, G) + Channel - 1;
    begin

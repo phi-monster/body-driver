@@ -51,6 +51,13 @@ private package Driver.Robot.Channels is
    --  The degrees of freedom the channel's noise rests on (0: known or exact).
    --  Every channel of the group has its noise measured.
 
+   function Resolution (M : Model; G : Group_Id; Beat : Natural) return Real
+     with Pre => Has_Reading (M, G, Beat);
+   --  The least change of the group's readings that float arithmetic on them
+   --  can tell, whatever their noise (none, when they repeat exactly): the
+   --  float's resolution of the group's largest reading at Beat, or of one
+   --  reading unit when every reading is zero.
+
    function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean
      with Pre => D'First = 1 and then D'Length = Group_Size (M, G);
    --  A change D of the group's readings, one value per channel, is motion
