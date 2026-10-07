@@ -1331,10 +1331,34 @@ package body Driver.Robot.Kinematics is
             exit when not Improved;
          end;
       end loop;
-      Q := X;
+      Q := Nearest_Readings (M, A, Start, X);
       Position_Off := Sqrt (R0 (1) ** 2 + R0 (2) ** 2 + R0 (3) ** 2);
       Turn_Off := (if Position_Only then 0.0 else Sqrt (R0 (4) ** 2 + R0 (5) ** 2 + R0 (6) ** 2));
    end Solve_Pose;
+
+   function Nearest_Readings (M : Model; A : Arm_Id; Near, Readings : Real_Array) return Real_Array is
+      Result : Real_Array (Readings'Range) := Readings;
+      I      : constant Natural := Index_Of (M, A);
+   begin
+      if I > 0 and then Natural (M.Kinematics (I).Result.Joints.Length) = Readings'Length then
+         for J in 1 .. Readings'Length loop
+            declare
+               F : constant Joint_Fit := M.Kinematics (I).Result.Joints (J);
+            begin
+               if not F.Slide and then F.C /= 0.0 then
+                  declare
+                     Period : constant Real := 2.0 * Ada.Numerics.Pi / abs F.C;
+                     Here   : constant Real := Readings (Readings'First + J - 1);
+                     Turns  : constant Real := Real'Rounding ((Here - Near (Near'First + J - 1)) / Period);
+                  begin
+                     Result (Result'First + J - 1) := Here - Turns * Period;
+                  end;
+               end if;
+            end;
+         end loop;
+      end if;
+      return Result;
+   end Nearest_Readings;
 
    function Result_Of (M : Model; A : Arm_Id) return Arm_Fit is
      (if Index_Of (M, A) > 0 then M.Kinematics (Index_Of (M, A)).Result else (others => <>));

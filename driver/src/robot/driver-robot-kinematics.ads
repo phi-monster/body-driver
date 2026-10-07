@@ -108,7 +108,19 @@ private package Driver.Robot.Kinematics is
    --  beyond them, by damped least squares from Start on the position (model
    --  units) and the turn (radians) left, until a step lowers what is left
    --  by less than the unchanged fraction of it; how far the eye remains
-   --  from Goal.
+   --  from Goal. Q gives every joint that turns as the reading nearest Start
+   --  (Nearest_Readings): the same pose, the way the arm is nearest to go.
+
+   function Nearest_Readings (M : Model; A : Arm_Id; Near, Readings : Real_Array) return Real_Array
+     with Pre => Near'Length = Readings'Length,
+          Post => Nearest_Readings'Result'Length = Readings'Length;
+   --  Readings that put the arm's eye where Readings put it, each joint that
+   --  turns given as the reading nearest Near. A joint that turns repeats its
+   --  pose over a turn of its axis, which the fit reads as a period of
+   --  readings: two pi over the scale it found for the joint, in the reading's
+   --  own units, which is no more two pi than the reading is radians. A joint
+   --  that slides has none, and a model that is not the arm's leaves
+   --  Readings as they are.
 
    function Angle_Sigma (M : Model; A : Arm_Id) return Real;
    --  The angle one pixel of the fit's measured noise subtends at the arm's

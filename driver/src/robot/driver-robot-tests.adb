@@ -3381,6 +3381,118 @@ package body Driver.Robot.Tests is
       end;
    end Reach_A_Pose;
 
+   --  A joint that turns repeats its pose over a turn of its axis, which the fit reads as a period of readings:
+   --  two pi over the scale it found for the joint. The readings that put the eye at a pose are the ones nearest
+   --  where the arm is, however many turns the solver's steps made on the way: A16's press 3 was planned as one
+   --  waypoint 5.68 rad from the readings, where the same pose is 3.26 rad from them.
+   procedure Reach_The_Nearest_Turn is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      package Motion renames Driver.Robot.Motion;
+      use type Motion.Plan_Status;
+      M      : Model;
+      Axes   : constant array (1 .. 6) of Vec3 :=
+        [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
+      Points : constant array (1 .. 6) of Vec3 :=
+        [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
+      --  Readings that are not radians (two joints' scales), and a sixth joint that slides.
+      Scales : constant Real_Array (1 .. 6) := [1.0, 0.9, 1.0, 1.1, 1.0, 1.0];
+      Slides : constant array (1 .. 6) of Boolean := [False, False, False, False, False, True];
+      Truth  : Fit.Joint_Array (1 .. 6);
+      Arm    : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
+      Rng    : Generator;
+
+      function Period (J : Positive) return Real is (2.0 * Ada.Numerics.Pi / Scales (J));
+   begin
+      for J in 1 .. 6 loop
+         declare
+            W : constant Vec3 := Unit (Axes (J));
+         begin
+            Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => Scales (J), Slide => Slides (J));
+            Arm.Result.Joints.Append (Joint_Fit'(W => W, P => Truth (J).P, C => Scales (J), Slide => Slides (J)));
+            Arm.Result.Reference.Append (0.0);
+         end;
+      end loop;
+      Arm.Result.Fitted := True;
+      Arm.Result.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Arm.Result.Sigma_Px := 0.1;
+      M.Kinematics.Append (Arm);
+      M.Groups.Append (Group_Stream'(Size => 6, Commandable => True, others => <>));
+      M.Graph.Arms.Append (1);
+      M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => 1));
+      --  The nearest representative: whole periods of the fit, not of a turn of readings taken as radians.
+      declare
+         Near : constant Real_Array (1 .. 6) := [0.1, -0.2, 0.3, 0.0, -0.1, 0.4];
+         Far  : constant Real_Array (1 .. 6) :=
+           [0.1 + 3.0 * Period (1), -0.2 + 2.0 * Period (2), 0.3 - Period (3), 0.0 - 2.0 * Period (4),
+            -0.1 + 0.49 * Period (5), 0.4 + 5.0];
+         Back : constant Real_Array := Driver.Robot.Kinematics.Nearest_Readings (M, 1, Near, Far);
+      begin
+         for J in 1 .. 5 loop
+            Check (abs (Back (J) - (if J = 5 then Far (5) else Near (J))) < 1.0e-9,
+                   "joint" & J'Image & " is given as reading" & Real'Image (Back (J)) & ", the nearest to" & Real'Image (Near (J))
+                   & " that puts the eye where the far one does is" & Real'Image (if J = 5 then Far (5) else Near (J)));
+         end loop;
+         Check (Back (6) = Far (6), "a joint that slides is given as a nearer reading");
+      end;
+      --  Far goals: whatever the solver's steps came to, no joint that turns ends more than half a period from
+      --  where it started.
+      declare
+         Reached, Wrapped : Natural := 0;
+      begin
+         for Trial in 1 .. 60 loop
+            declare
+               Goal_Q, Start, Q : Real_Array (1 .. 6);
+               Position_Off, Turn_Off : Real;
+            begin
+               for J in 1 .. 6 loop
+                  Goal_Q (J) := (2.0 * Uniform (Rng) - 1.0) * 4.5;
+                  Start (J) := (2.0 * Uniform (Rng) - 1.0) * 0.5;
+               end loop;
+               Driver.Robot.Kinematics.Solve_Pose (M, 1, Start, Fit.Eye_At (Truth, Goal_Q), False, Q, Position_Off, Turn_Off);
+               if Position_Off < 1.0e-6 and then Turn_Off < 1.0e-6 then
+                  Reached := Reached + 1;
+                  for J in 1 .. 5 loop
+                     Check (abs (Q (J) - Start (J)) <= Period (J) / 2.0 + 1.0e-9,
+                            "goal" & Trial'Image & ": joint" & J'Image & " ends" & Real'Image (Q (J) - Start (J))
+                            & " from where it started, over half its period" & Real'Image (Period (J) / 2.0));
+                  end loop;
+                  for J in 1 .. 5 loop
+                     if abs (Goal_Q (J) - Start (J)) > Period (J) / 2.0 then
+                        Wrapped := Wrapped + 1;
+                     end if;
+                  end loop;
+               end if;
+            end;
+         end loop;
+         Driver.Log.Line (Driver.Log.Robot, "reach test: of 60 far goals" & Reached'Image & " were reached, and" & Wrapped'Image
+                          & " joints of them lay over half a period from the start");
+         Check (Reached >= 10, "only" & Reached'Image & " of 60 far goals were reached");
+         Check (Wrapped >= 5, "only" & Wrapped'Image & " joints of the goals needed a nearer representative");
+      end;
+      --  A reach planned there ends at the nearest readings too.
+      declare
+         Start  : constant Real_Array (1 .. 6) := [0.2232, 0.5132, 0.2175, -0.4909, 0.7443, -1.3984];
+         Goal_Q : constant Real_Array (1 .. 6) := [0.2232, 0.5132 - 2.0 * Period (2), 0.2175, -0.4909 + Period (4), 0.7443, -1.3984 + 1.0];
+         O      : Observation;
+      begin
+         O.Readings.Append (Start);
+         declare
+            P : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Fit.Eye_At (Truth, Goal_Q), Position_Only => False));
+         begin
+            Check (Motion.Status (P) = Motion.Planned, "a goal a period away is not planned: " & Motion.Why (P));
+            if Motion.Status (P) = Motion.Planned then
+               declare
+                  End_At : constant Real_Array := Motion.Last_Readings (P);
+               begin
+                  Check (abs (End_At (2) - Start (2)) < 1.0e-6 and then abs (End_At (4) - Start (4)) < 1.0e-6,
+                         "the plan ends at joint 2 =" & Real'Image (End_At (2)) & " and joint 4 =" & Real'Image (End_At (4))
+                         & ", not where the arm is");
+               end;
+            end if;
+         end;
+      end;
+   end Reach_The_Nearest_Turn;
+
    --  A fit belongs to an arm only while the graph has its group as that arm,
    --  carrying that eye: once the group stops being an arm, or the eye rides
    --  on another, the fit is no arm's, and the refit clears it.
@@ -5077,6 +5189,9 @@ package body Driver.Robot.Tests is
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
       Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found",
                              Reach_A_Pose'Access);
+      Driver.Tests.Register ("robot.reach.turn", "a reach ends a joint that turns a whole period of its fit from "
+                             & "where the arm is, the same pose as a reading that is not the nearest",
+                             Reach_The_Nearest_Turn'Access);
       Driver.Tests.Register ("robot.still.reloaded", "a reloaded body creeping uncommanded below its visible step is "
                              & "not still, or Settle or Hold_For_Keyframe does not end on it", Reloaded_Creep_Is_Still'Access);
       Driver.Tests.Register ("robot.plan.beyond", "a goal past the readings the arm has shown is not planned, its plan "
