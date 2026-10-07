@@ -11,11 +11,12 @@
 --  Arms: an estimated tool pose T_est relates to the true pose T_true of some
 --  link by an unknown similarity S (world frames and units differ) and a
 --  constant offset X (the frame the driver chose on its last link):
---  T_true = S T_est X. Every true link that turns like the tool between its
---  successive poses is tried (the angle of R_i^T R_j does not depend on S or
---  X); S and X are fitted on every other distinct pose and the errors reported
---  on the rest, for the link that fits best (links rigid with one another fit
---  alike).
+--  T_true = S T_est X. Every true link that turns like the tool between the
+--  estimate's own successive distinct poses is tried (the angle of R_i^T R_j
+--  does not depend on S or X; a link that moves while the tool stands, a finger
+--  of the other hand, is not compared on the beats the tool stood); S and X are
+--  fitted on every other distinct pose and the errors reported on the rest, for
+--  the link that fits best (links rigid with one another fit alike).
 --
 --  Eyes: an eye frame is defined (z along the optical axis, x and y along +U
 --  and +V), so an estimated eye pose is compared with the true optical frame
@@ -687,10 +688,14 @@ procedure Score is
    end record;
 
    function Rotation_Mismatch (Tool : Positive; Link : String) return Turn_Mismatch is
-      --  How much the tool turns between successive distinct poses is the
-      --  same angle whatever the world frame and the offset on the link (S
-      --  and X cancel in R_i^T R_j), so the tool's true link turns as much as
-      --  the estimate does: a cheap ranking of the links before any fit.
+      --  How much the tool turns between the estimate's successive distinct
+      --  poses is the same angle whatever the world frame and the offset on
+      --  the link (S and X cancel in R_i^T R_j), so the tool's true link turns
+      --  as much as the estimate does: a cheap ranking of the links before any
+      --  fit. The poses are the estimate's: on the truth's own, a link that
+      --  moved while the tool stood (A16: the other hand's fingers, turn 0
+      --  against 0) tied at no mismatch and no scatter and pushed the tool's
+      --  link out of the candidates.
       package Real_Vectors is new Ada.Containers.Vectors (Positive, Real);
       Differences   : Real_Vectors.Vector;
       Last_Position : Vec3 := [Real'Last, 0.0, 0.0];
@@ -706,8 +711,8 @@ procedure Score is
                T : constant Rigid := Truth (Recorded (B).Line).Links (Link);
                E : constant Rigid := Estimated (B).Tools (Tool);
             begin
-               if abs (T.Translation - Last_Position) > 0.0 then
-                  Last_Position := T.Translation;
+               if abs (E.Translation - Last_Position) > 0.0 then
+                  Last_Position := E.Translation;
                   if Have then
                      Differences.Append (abs (Angle (Transpose (Previous_Est.Rotation) * E.Rotation)
                                               - Angle (Transpose (Previous_True.Rotation) * T.Rotation)));
@@ -766,7 +771,10 @@ procedure Score is
                   Link        : constant String := Links (I);
                   Train, Test : Pair_Vectors.Vector;
                begin
-                  if Turns (I).Median <= Least.Median + Driver.Conventions.Z * Least.Spread then
+                  --  No link to rank when the estimate never moved (A16's arm 2 stood after its boot).
+                  if Least.Median < Real'Last
+                    and then Turns (I).Median <= Least.Median + Driver.Conventions.Z * Least.Spread
+                  then
                      Split_Pairs (Tool, Link, Train, Test);
                   end if;
                   if Natural (Train.Length) >= 5 and then not Test.Is_Empty then
@@ -788,7 +796,7 @@ procedure Score is
             end loop;
             Arm_Fits.Append (Best);
             if not Best.Found then
-               Ada.Text_IO.Put_Line ("tool" & Tool'Image & ": too few distinct poses to fit");
+               Ada.Text_IO.Put_Line ("tool" & Tool'Image & ": too few distinct poses to fit (the estimate moves too little)");
             else
                declare
                   Position, Rotation : Real_Array (1 .. Natural (Best_Test.Length));
@@ -906,6 +914,9 @@ procedure Score is
               or else (not Lenses (Name).Has_K and then Lenses (Name).Coefficients.Is_Empty)
             then
                Ada.Text_IO.Put_Line ("eye" & E'Image & ": no true lens");
+            elsif (for some S of Rays (E) => abs S.D = 0.0) then
+               --  An eye whose lens the driver has not measured writes no line of sight.
+               Ada.Text_IO.Put_Line ("eye" & E'Image & " (" & Name & "): no lines of sight estimated");
             else
                for I in Errors'Range loop
                   declare
@@ -1107,6 +1118,8 @@ procedure Score is
                   type Truth_Grid is array (1 .. Natural (H.Lobes.Length), 1 .. Natural (Fingers.Length)) of Tip_Truth;
                   Grid      : Truth_Grid;
                   Estimates : array (1 .. Natural (H.Lobes.Length)) of Vec3;
+                  --  A tip no press has measured at this opening (its press direction zero) is not scored.
+                  Measured  : array (1 .. Natural (H.Lobes.Length)) of Boolean := [others => True];
                   Usable    : Boolean := not Fingers.Is_Empty;
                begin
                   for Lobe in Estimates'Range loop
@@ -1116,10 +1129,12 @@ procedure Score is
                         B : constant Natural := Nearest_Beat (To_String (H.Closer), E.Reading.Element);
                         --  Into the true link frame: p = s Rx^T (p_D - tx), d = Rx^T d_D.
                         Rx : constant Mat3 := X_Rotation (Fit.X);
-                        Press : constant Vec3 := Unit (Transpose (Rx) * E.Press);
+                        Press : constant Vec3 := (if abs E.Press > 0.0 then Unit (Transpose (Rx) * E.Press) else Zero3);
                      begin
                         Estimates (Lobe) := Scale_Of (Fit.X) * (Transpose (Rx) * (E.Tip - X_Translation (Fit.X)));
-                        if B = Natural'Last then
+                        if abs E.Press = 0.0 then
+                           Measured (Lobe) := False;
+                        elsif B = Natural'Last then
                            Usable := False;
                         else
                            for F in 1 .. Natural (Fingers.Length) loop
@@ -1155,6 +1170,11 @@ procedure Score is
                               end if;
                               return;
                            end if;
+                           if not Measured (Lobe) then
+                              Current (Lobe) := 0;
+                              Assign (Lobe + 1, Total);
+                              return;
+                           end if;
                            for F in 1 .. Natural (Fingers.Length) loop
                               if (for all K in 1 .. Lobe - 1 => Current (K) /= F) then
                                  Current (Lobe) := F;
@@ -1165,7 +1185,10 @@ procedure Score is
                      begin
                         Assign (1, 0.0);
                         for Lobe in 1 .. Lobes loop
-                           if Best_Of (Lobe) = 0 then
+                           if not Measured (Lobe) then
+                              Ada.Text_IO.Put_Line ("  " & (if At_Open then "open" else "closed") & " lobe" & Lobe'Image
+                                                    & ": no press has measured its tip");
+                           elsif Best_Of (Lobe) = 0 then
                               Ada.Text_IO.Put_Line ("  lobe" & Lobe'Image & ": more lobes than fingers");
                            else
                               Ada.Text_IO.Put_Line
