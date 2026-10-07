@@ -228,8 +228,8 @@ package Driver.Robot.Hand.Lobes is
    --  there, hardly one a seed) went to the kind with the robot at the
    --  anchored end in nine rounds, 9 229 of them, and the lobes' tips were 60
    --  and 125 pixels low; with the seeds heard none went, and the tips are at
-   --  the fingers' tips but one, 30 pixels low (55 % of the pixels the
-   --  anchored end holds had seeds, 2 % of the other's). A15's final ends, the
+   --  the fingers' tips but one, 30 pixels low (53 % of the pixels the
+   --  anchored end holds had seeds, 3 % of the other's). A15's final ends, the
    --  same way: three lobes of two fingers and closed tips 100 and 175 pixels
    --  low, then two lobes with their tips. When the rounds are over the seeds
    --  say which kind is which, as a whole: more of them in the kind with the

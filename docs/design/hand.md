@@ -152,9 +152,9 @@ log of the whole mixture, and by 38 706 for the part against the rest), and the
 lobes' tips were 60 and 125 pixels low (the face, 10 216 pixels of it, took
 the place of the open finger as the lobe's open end, and the closed right
 finger's inner face and outer face were two parts). The poses had called
-almost none of that face the robot's, and they are right about the robot: 55 %
+almost none of that face the robot's, and they are right about the robot: 53 %
 of the pixels given the kind with the robot at the anchored end are seeds and
-2 % of the others, the robot there holding still in the eye's picture while the
+3 % of the others, the robot there holding still in the eye's picture while the
 eye moves and the world not. Each kind now has seeds at a rate of its own,
 found with the histograms from the shares, and a pixel's seed or none is
 heard in every brightness round: the face stays at the closed end (0 of the
