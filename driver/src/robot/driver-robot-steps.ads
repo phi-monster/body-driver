@@ -10,10 +10,21 @@
 --  short, or until it is plainly going nowhere: a joint chattering against
 --  what stops it moves every beat, by many steps an eye can see, and never
 --  comes to rest. A push comes closer to its target when it advances along
---  its ask by a step the one test of motion would see (Channels.Visible);
---  one still short of its target by such a step, that has not come closer
---  for as long as it took to come as close as it did, ends there, moving,
---  and is judged like any other.
+--  its ask by a step the one test of motion would see (Channels.Visible)
+--  and by more than its own chatter makes: held against something, a push
+--  moves about, and a stick-slip against a table sets a new extreme of
+--  that movement, a visible step each, at rarer and rarer beats for as long
+--  as it is watched, which is no progress. The chatter is the scatter of the
+--  push's own progress since it last came closer (that beat included), and
+--  a gain is the difference of two beats' progress: it comes closer when
+--  that is significant against the scatter, with the degrees of freedom of
+--  the beats it rests on (a push that comes closer at every beat has fewer
+--  than two, and no chatter to tell a gain from). One still short of its
+--  target by such a step, that has not come closer for as long as it took
+--  to come as close as it did (and no less than the wait above), ends
+--  there, moving, and is judged like any other: a push that moves about
+--  against an obstacle ends within as many beats of its last closest point
+--  as it took to come that close.
 --
 --  A push that came to rest is judged by its shortfall: how far short of
 --  its target it stopped, along its ask. Free motion falls short too (a

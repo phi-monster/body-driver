@@ -1,6 +1,7 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Robot.Channels;
+with Driver.Uncertain;
 
 package body Driver.Robot.Steps is
 
@@ -121,12 +122,37 @@ package body Driver.Robot.Steps is
       S.Episodes.Append (E);
    end Start;
 
+   --  Counts the beat's progress along the ask among those since the push
+   --  came closest to its target (Welford's running mean and sum of squares).
+   procedure Note (E : in out Episode; Along : Real) is
+      Off : constant Real := Along - E.Mean_Along;
+   begin
+      E.Followed := E.Followed + 1;
+      E.Mean_Along := E.Mean_Along + Off / Real (E.Followed);
+      E.Spread_Along := E.Spread_Along + Off * (Along - E.Mean_Along);
+   end Note;
+
+   --  Whether a push came closer to its target by Gain than its closest point
+   --  was, by more than its own chatter makes: held against something, a push
+   --  moves about, and the new extreme of that movement is no progress (a
+   --  stick-slip against a table sets new extremes for as long as it is
+   --  watched, at rarer and rarer beats, each a visible step). The beats
+   --  since its closest point, that one included, say how much it moves
+   --  about, and a gain is the difference of two of them. With fewer than
+   --  two there is no chatter to tell it from: a push that comes closer at
+   --  every beat never has any.
+   function Beyond_Chatter (E : Episode; Gain : Real) return Boolean is
+     (E.Followed < 2
+      or else Driver.Uncertain.Significant
+                (Gain, Sqrt (2.0 * E.Spread_Along / Real (E.Followed - 1)), E.Followed - 1));
+
    --  Follows how close the moving push under way has come to its target,
    --  and gives it up when it is plainly going nowhere: still short of its
    --  target by a step the motion test would see, it has not come closer for
    --  as long as it took to come as close as it did, nor for less than the
    --  wait a push of the group may take to answer (a new target cannot show
-   --  sooner).
+   --  sooner). Coming closer is a step the motion test sees and its own
+   --  chatter does not make (Beyond_Chatter).
    procedure Follow (M : in out Model; G : Group_Id; Beat : Natural; Wait : Natural) is
       S     : Group_Stream renames M.Groups (G);
       E     : Episode := S.Episodes.Last_Element;
@@ -138,14 +164,24 @@ package body Driver.Robot.Steps is
       for C in 1 .. S.Size loop
          Along := Along + S.Ask (C - 1) / E.Length * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));
       end loop;
-      if Along > E.Closest and then Channels.Visible (M, G, Along_Ask (S, E.Length, Along - E.Closest)) then
+      if Along > E.Closest and then Channels.Visible (M, G, Along_Ask (S, E.Length, Along - E.Closest))
+        and then Beyond_Chatter (E, Along - E.Closest)
+      then
          E.Closest := Along;
          E.Closest_At := Beat;
+         E.Followed := 0;
+         E.Mean_Along := 0.0;
+         E.Spread_Along := 0.0;
+         Note (E, Along);
          S.Episodes.Replace_Element (S.Episodes.Last_Index, E);
-      elsif E.Closest < E.Length and then Channels.Visible (M, G, Along_Ask (S, E.Length, E.Length - E.Closest))
-        and then Beat - E.Closest_At > Integer'Max (E.Closest_At - E.Start, Wait)
-      then
-         Finish (M, G, Beat, Answered => True, Settled => True, Rested => False);
+      else
+         Note (E, Along);
+         S.Episodes.Replace_Element (S.Episodes.Last_Index, E);
+         if E.Closest < E.Length and then Channels.Visible (M, G, Along_Ask (S, E.Length, E.Length - E.Closest))
+           and then Beat - E.Closest_At > Integer'Max (E.Closest_At - E.Start, Wait)
+         then
+            Finish (M, G, Beat, Answered => True, Settled => True, Rested => False);
+         end if;
       end if;
    end Follow;
 
