@@ -27,12 +27,15 @@
 --  as a share of the ask's length. Nothing of the arm's geometry is read.
 --
 --  The hand's points. The readings tell where they are (Driver.Robot.Tool_In_Arm),
---  and a point that stopped short of where it was asked has stopped when its
---  shortfall is a larger share of what the push asked of the hand (the most any
---  point was asked to go down: a push that turns the tool about its origin asks
---  the origin nothing, and a share of that is no number, as A17's aim gave one
---  of 1.6e9 and left the descent with nothing to compare a push with) than any
---  push of the descent before it fell short by. The points are the tool's origin
+--  and a point asked to go down that stopped short of where it was asked has
+--  stopped when its shortfall is a larger share of what the push asked of the
+--  hand (the farthest any point was asked to go: a push that turns the tool about
+--  its origin asks the origin nothing, and a share of that is no number, as A17's
+--  aim gave one of 1.6e9; nor is a share of how far the push asked the hand down,
+--  as A22's aims, which turned the hand about the way down, asked every point of
+--  it 2e-16 down by the rounding of the turn and gave one of 2.3e8; each left the
+--  descent with nothing to compare a push with) than any push of the descent
+--  before it fell short by. The points are the tool's origin
 --  and the tips the hand has measured at the opening it stands at; a hand
 --  turning about the finger on the table lowers its origin and raises what lies
 --  beyond the finger, and that point stopped.
@@ -43,8 +46,9 @@
 --  target): the test is the body's own floor under both, since the tool's
 --  uncertainty is that of a fit, common to the two poses a push is the difference
 --  of, and says nothing of how little of a move is told. The pushes before are
---  forgotten when a push asks nothing down (a retreat, a hold), so that a descent
---  is compared with itself. A stall among the first three pushes is taken for
+--  forgotten when a push asks the hand nothing down, the mean of its points (a
+--  retreat, a hold, a let-go that raises one side of the hand as it lowers the
+--  other), so that a descent is compared with itself. A stall among the first three pushes is taken for
 --  what free pushes do, and counted among them.
 --
 --  Plain arithmetic on poses and on the shortfalls; the models are read by

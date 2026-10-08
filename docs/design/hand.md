@@ -641,9 +641,18 @@ first version had the tool's `Least_Push` for a floor, the tool's uncertainty at
 the pose it stands at; it is the uncertainty of a fit, common to the two poses a
 push is the difference of, and it grew with the descent: A17's pushes were 0.0561
 units, and from beat 7502 the lowered tool's was more, so nothing was judged after
-it, the contact included. The pushes are forgotten when a push asks nothing down
-(a retreat, a hold), so a descent is compared with itself, and a stall among the
-first three pushes is taken for what free pushes do. The verdict is read from the
+it, the contact included. The pushes are forgotten when a push asks the hand
+nothing down (the mean of its points: a retreat, a hold, a let-go that raises one
+side as it lowers the other), so a descent is compared with itself, and a stall
+among the first three pushes is taken for what free pushes do. A share is of the
+farthest any point was asked to go, not of what was asked down: A22's aims at
+presses 2 and 5 turned the hand about the way down, asked every point of it 2e-16
+down by the rounding of the turn, and 4.7e-8 came back up, a share of 2.1e8 that
+stood as the largest free share of the descent and blinded the points' measure
+for the pushes after it (the readings' measure, which has its own, went on); the
+let-go after press 5 (one point asked up 0.0525 that went up 0.139, the other
+asked down) was judged a descent push and a stall by the readings. Only a point
+asked to go down can have stopped going down. The verdict is read from the
 stream by the estimators as the press is, so the same push is a block for the
 watcher that finds the press (the verdict stands until the next push begins, as a
 Blocked one does), and it is read with the heights before the next step, not by a
