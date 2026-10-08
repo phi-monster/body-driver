@@ -36,8 +36,10 @@ if ! tools/check.sh; then
   echo "gates failed after the merge; nothing committed"; exit 5
 fi
 # use_sigaltstack=0: the sanitizer's own alternate signal stack cannot be unmapped from a GNAT task.
-if ! (cd driver && "$ALR" -n build -- -XBD_BUILD=asan > /tmp/bd_asan_build.$$ 2>&1 && ASAN_OPTIONS=use_sigaltstack=0 ./bin-asan/selftest > /tmp/bd_asan.$$ 2>&1); then
-  grep -E "error|ERROR|FAIL" /tmp/bd_asan_build.$$ /tmp/bd_asan.$$ | head -20; rm -f /tmp/bd_asan_build.$$ /tmp/bd_asan.$$
+if ! (cd driver && "$ALR" -n build -- -XBD_BUILD=asan > /tmp/bd_asan_build.$$ 2>&1) \
+   || ! ASAN_OPTIONS=use_sigaltstack=0 tools/selftests.sh bin-asan > /tmp/bd_asan.$$ 2>&1; then
+  grep -E "error|ERROR" /tmp/bd_asan_build.$$ | head -10; grep -v "^ " /tmp/bd_asan.$$ | head -20
+  grep -A5 "ERROR: AddressSanitizer" /tmp/bd_asan.$$ | head -20; rm -f /tmp/bd_asan_build.$$ /tmp/bd_asan.$$
   echo "the self tests fail under AddressSanitizer; nothing committed"; exit 7
 fi
 rm -f /tmp/bd_asan_build.$$ /tmp/bd_asan.$$
