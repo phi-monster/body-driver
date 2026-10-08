@@ -365,11 +365,16 @@ package body Driver.Action.Execution is
    procedure Travel (P : in out Plant'Class; X : in out State; A : Arm_Id; Goal : Rigid; Except, Held : Thing_Id'Base;
                      Outcome : out Step_Outcome; Why : out Unbounded_String)
    is
+      --  The goal was found clear by the arm's uncertainty where it began; the
+      --  arm is less sure of its pose farther from where it was measured, and
+      --  a way judged by that on the way would refuse the pose it is going to
+      --  for the margin the search had kept.
+      Sigma : constant Real := Search.Effector_Of (X.S, A).Sigma;
    begin
       Why := Null_Unbounded_String;
       loop
          declare
-            E    : constant Search.Effector := Search.Effector_Of (X.S, A);
+            E    : constant Search.Effector := (Search.Effector_Of (X.S, A) with delta Sigma => Sigma);
             From : constant Rigid := E.Tool;
             Now  : constant Arm_State := Arm (X.S, A);
             Up   : constant Vec3 := Gravity (X.S);

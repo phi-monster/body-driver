@@ -741,7 +741,7 @@ package body Driver.Action.Plants.Tests is
 
    procedure Add_Arm (W : in out World; Base : Vec3; Reach : Real; Tool : Rigid; Lag : Natural; Rate : Real;
                       Delivery_Low, Delivery_High : Real; Wrist, Tilt : Real; Plate_Radius : Real := 0.0;
-                      Reading_Sigma : Real := Real'Last)
+                      Reading_Sigma : Real := Real'Last; Spread : Real := 0.0)
    is
       T : constant Rigid := W.Table * Tool;
    begin
@@ -758,6 +758,8 @@ package body Driver.Action.Plants.Tests is
                       Delivery_High => Delivery_High,
                       Plate_Radius  => Plate_Radius,
                       Reading_Sigma => Reading_Sigma,
+                      Spread        => Spread,
+                      Home          => T.Translation,
                       Pending       => Command_Vectors.Empty_Vector,
                       Start         => T,
                       Target        => T,
@@ -845,7 +847,9 @@ package body Driver.Action.Plants.Tests is
             --  given a sigma of its own (a real arm's joints are read far
             --  more finely than anything an eye sees).
             Reading : constant Real := Resolution (W, A);
-            Own_Cov : constant Mat3 := (Reading * Reading) * Identity3;
+            --  Its pose is the less certain the farther it has gone from where it began.
+            Pose_Sigma : constant Real := Reading + A.Spread * abs (A.Tool.Translation - A.Home);
+            Own_Cov : constant Mat3 := (Pose_Sigma * Pose_Sigma) * Identity3;
             --  It does not move once a beat would move it by no more than
             --  its noise, and a step has to stand out of two noisy readings.
             Least   : constant Real := Real'Max (Driver.Conventions.Z * Sqrt (2.0) * Reading,

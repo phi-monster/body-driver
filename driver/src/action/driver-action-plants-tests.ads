@@ -74,6 +74,8 @@ package Driver.Action.Plants.Tests is
       Delivery_High : Real := 1.0;
       Plate_Radius  : Real := 0.0;         --  a lobeless arm ends in a disc of this radius facing the tool's z
       Reading_Sigma : Real := Real'Last;   --  of the arm's own readings; Real'Last: as noisy as the eyes
+      Spread        : Real := 0.0;         --  the pose's uncertainty grows by this per unit of distance from where the tool began
+      Home          : Vec3 := Zero3;       --  where the tool began
       Pending       : Command_Vectors.Vector;
       Start         : Rigid := Identity;
       Target        : Rigid := Identity;
@@ -131,9 +133,12 @@ package Driver.Action.Plants.Tests is
 
    procedure Add_Arm (W : in out World; Base : Vec3; Reach : Real; Tool : Rigid; Lag : Natural; Rate : Real;
                       Delivery_Low, Delivery_High : Real; Wrist, Tilt : Real; Plate_Radius : Real := 0.0;
-                      Reading_Sigma : Real := Real'Last);
+                      Reading_Sigma : Real := Real'Last; Spread : Real := 0.0);
    --  In the table's frame. Reading_Sigma is the sigma of the arm's own
    --  readings (its tool, its step); left out, they are as noisy as the eyes'.
+   --  Spread is how much its pose is the less certain for each unit of its
+   --  distance from where it began, as a fitted arm's is away from the pose it
+   --  was measured at.
 
    procedure Add_Gripper (W : in out World; Arm : Arm_Id; Opening, Width, Thickness, Depth : Real);
 

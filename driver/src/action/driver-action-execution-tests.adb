@@ -287,6 +287,27 @@ package body Driver.Action.Execution.Tests is
              "a bar put onto a block by an arm finer than the eyes does not rest on it, let go");
    end A_Fine_Arm_Goes_Over_And_Down;
 
+   --  An arm is the less sure of its pose the farther it has gone from where it
+   --  was measured. The search finds where to take hold of a thing clear of
+   --  everything by the margin the arm's uncertainty at the start asks; a way
+   --  judged on the way by the larger uncertainty where the arm has come to
+   --  would refuse the very pose it is going to.
+   procedure A_Travel_Keeps_The_Margin_It_Was_Cleared_By is
+      W : Sim.World;
+      R : Result;
+   begin
+      Sim.Start (W, Turned, Sigma, Pitch, 91);
+      Sim.Add_Arm (W, Base => [0.0, -0.3, 0.0], Reach => 0.8, Tool => Down_At (0.0, -0.1, 0.25), Lag => 2,
+                   Rate => 0.5, Delivery_Low => 0.7, Delivery_High => 0.85, Wrist => Pi, Tilt => Pi / 2.0,
+                   Reading_Sigma => Reading, Spread => 0.007);
+      Sim.Add_Gripper (W, 1, Opening => 0.08, Width => 0.015, Thickness => 0.01, Depth => 0.04);
+      Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.12, 0.4), Mu => 0.6);
+      --  A wall between the hand and the bar, so the way there is over the top, in legs, each judged anew.
+      Sim.Add_Thing (W, Block (0.3, 0.02, 0.2), On_Table (0.05, 0.02, 0.0), Mu => 0.6, Fixed => True);
+      Run (W, Height_Want (1, True, Free), R);
+      Check (R.Final = Free, "a bar behind a wall is not lifted by an arm that is less sure of its pose where it has gone");
+   end A_Travel_Keeps_The_Margin_It_Was_Cleared_By;
+
    --  A step of a heading goes as far as the arm can turn it, not the finest
    --  turn it can tell: round the thing's own axis nothing is ahead to meet,
    --  though the table is under it and the axis is square to the table within
@@ -457,7 +478,9 @@ package body Driver.Action.Execution.Tests is
       Register ("action.run.detour", "the hand goes through a wall instead of over it", Over_An_Obstacle'Access);
       Register ("action.run.detour.top", "a hand that cannot rise above where it starts is refused a way over a wall",
                 A_Hand_At_The_Top_Of_Its_Reach_Goes_Over'Access);
-      Register ("action.run.fine.down","an arm much finer than the eyes creeps to the table by its smallest steps",
+      Register ("action.run.margin", "a way is judged by the larger uncertainty where the arm has come to, and refuses "
+                & "the pose the search cleared by the one at the start", A_Travel_Keeps_The_Margin_It_Was_Cleared_By'Access);
+      Register ("action.run.fine.down", "an arm much finer than the eyes creeps to the table by its smallest steps",
                 A_Fine_Arm_Puts_Down'Access);
       Register ("action.run.fine.over", "an arm much finer than the eyes stalls on the route over a block",
                 A_Fine_Arm_Goes_Over_And_Down'Access);
