@@ -39,6 +39,40 @@ package Action_Rig is
 
    package Move_Vectors is new Ada.Containers.Vectors (Positive, Move_Record);
 
+   --  Every reach the action layer asked of the motion layer, when Trace is
+   --  on: from the tool where it was, the pose asked, and the answer.
+   type Reach_Record is record
+      From, Asked : Rigid;
+      Status      : Plants.Reach_Status := Plants.Unmeasured;
+      Why         : Ada.Strings.Unbounded.Unbounded_String;
+   end record;
+
+   package Reach_Vectors is new Ada.Containers.Vectors (Positive, Reach_Record);
+
+   --  Every beat in which the arm's joints were taken somewhere, when Trace is
+   --  on: the tool where the beat began, where the joints' targets put it, how
+   --  far the joints' own straight line bows from the straight line between
+   --  the two (in position), and where the world stopped it, if it did.
+   type Beat_Record is record
+      From, To : Rigid;
+      Bow      : Driver.Real := 0.0;
+      Stopped  : Boolean := False;
+      At_Stop  : Rigid;
+   end record;
+
+   package Beat_Vectors is new Ada.Containers.Vectors (Positive, Beat_Record);
+
+   Trace     : Boolean := False;
+   Reach_Log : Reach_Vectors.Vector;
+   Beat_Log  : Beat_Vectors.Vector;
+
+   Cartesian : Boolean := False;
+   --  The arm's controller carries the tool along the straight line between
+   --  the poses a beat's joint targets put it at, not along the joints' own
+   --  straight line (which bows from it): an ideal body, to tell what the
+   --  action layer does with a path it can rely on from what the motion
+   --  layer's path does to it.
+
    type Rig (Robot : not null access Driver.Robot.Model; World : not null access Sim.World)
      is limited new Plants.Plant with record
       Last    : Driver.Observations.Observation;   --  of the latest window

@@ -180,7 +180,8 @@ package Driver.Robot.Motion is
 
    type Plan is private;
 
-   function Plan_Reach (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan;
+   function Plan_Reach (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal;
+                        Clearance : Real := Real'Last; Lever : Real := 0.0) return Plan;
    --  A joint path from the arm's configuration at O to the goal, a pose of
    --  the tool in the world (Tool_Pose), solved along the way so it never
    --  jumps between solution branches: a joint that turns is given as the
@@ -192,11 +193,26 @@ package Driver.Robot.Motion is
    --  the arm's own frame by the arm's placement and planned there
    --  (Plan_Reach_In_Arm), so a move given relative to the tool's pose in the
    --  world is the same move whatever the placement.
+   --
+   --  The arm is taken from one waypoint to the next along the joints' own
+   --  straight line, which bows from the tool's straight line (A17's left
+   --  arm bowed by up to a fifth of a move). Clearance is how far the tool
+   --  may leave the straight path to the goal (straight in position, about
+   --  one axis in turn), and with its turn the body out to Lever from it,
+   --  in the unit of the goal's pose (Real'Last: not bounded): a segment is
+   --  cut in two until the tool, at the middle of the joints' straight line,
+   --  is within the clearance of where the straight path has it. A segment
+   --  the solver cannot close is cut in two only while it is longer than the
+   --  fit can tell apart (its Angle_Sigma): shorter, cutting it again learns
+   --  nothing, and the goal is called unreachable there. A bow that cannot be
+   --  cut away because the straight path leaves what the arm can reach is
+   --  left: the joints' own line, which does reach, is taken.
 
-   function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan;
+   function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal;
+                               Clearance : Real := Real'Last; Lever : Real := 0.0) return Plan;
    --  The same, the goal a pose of the tool in the arm's own frame
    --  (Tool_In_Arm): it needs only the arm's kinematics, not its placement in
-   --  the world.
+   --  the world; the Clearance and the Lever are in the arm's own unit.
 
    function Status (P : Plan) return Plan_Status;
    function Why (P : Plan) return String;
@@ -206,6 +222,15 @@ package Driver.Robot.Motion is
    function Last_Readings (P : Plan) return Real_Array
      with Pre => Status (P) = Planned;
    --  The readings the plan ends at: where the fitted model puts the goal.
+
+   function Waypoint_Count (P : Plan) return Natural;
+   function Waypoint (P : Plan; K : Positive) return Real_Array
+     with Pre => K <= Waypoint_Count (P);
+   --  The arm's targets in turn, the goal last: what Follow sends.
+
+   function Solve_Count (P : Plan) return Natural;
+   --  How many times the solver was asked to close a segment of the path:
+   --  what planning cost, whether it ended Planned or Unreachable.
 
    procedure Follow (M : in out Model; P : Plan; Report : out Step_Report)
      with Pre => Status (P) = Planned;
@@ -220,6 +245,7 @@ private
       Reason    : Unbounded_String;
       Group     : Group_Id := 1;
       Waypoints : Waypoint_Vectors.Vector;   --  the arm's targets in turn, the goal last
+      Solves    : Natural := 0;              --  segments the solver was asked to close
    end record;
 
 end Driver.Robot.Motion;

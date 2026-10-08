@@ -3690,6 +3690,134 @@ package body Driver.Robot.Tests is
       end;
    end Reach_The_Nearest_Turn;
 
+   --  The arm goes from one waypoint to the next along its joints' own
+   --  straight line, which bows from the straight line of the tool (A17's left
+   --  arm, asked for moves of 16 to 23 units in one beat, bowed by 3.7 to 14.7
+   --  of them, and the straight line is what the action layer clears
+   --  obstacles by): a reach given a clearance is cut until the tool, at the
+   --  middle of the joints' straight line, is within it of the straight path.
+   procedure Plan_Stays_Within_Its_Clearance is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      package Motion renames Driver.Robot.Motion;
+      use type Motion.Plan_Status;
+      M      : Model;
+      Axes   : constant array (1 .. 6) of Vec3 :=
+        [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
+      Points : constant array (1 .. 6) of Vec3 :=
+        [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
+      Truth  : Fit.Joint_Array (1 .. 6);
+      Arm    : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
+      Start  : constant Real_Array (1 .. 6) := [others => 0.0];
+      Goal_Q : constant Real_Array (1 .. 6) := [1.2, -0.9, 1.1, 0.8, -1.0, 0.9];
+      O      : Observation;
+      From, Goal : Rigid;
+      Line   : Vec3;
+
+      --  How far the arm strays from the straight line from where it is to the goal, going from waypoint to
+      --  waypoint along the joints' straight lines.
+      function Stray (P : Motion.Plan) return Real is
+         Worst : Real := 0.0;
+         Back  : Real_Array (1 .. 6) := Start;
+      begin
+         for K in 1 .. Motion.Waypoint_Count (P) loop
+            declare
+               Next : constant Real_Array := Motion.Waypoint (P, K);
+            begin
+               for S in 1 .. 16 loop
+                  declare
+                     Q : Real_Array (1 .. 6);
+                  begin
+                     for J in 1 .. 6 loop
+                        Q (J) := Back (J) + (Real (S) / 16.0) * (Next (J) - Back (J));
+                     end loop;
+                     declare
+                        T   : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q);
+                        D   : constant Vec3 := T.Translation - From.Translation;
+                        Off : constant Vec3 := D - Real'(D * Line) * Line;
+                     begin
+                        Worst := Real'Max (Worst, abs Off);
+                     end;
+                  end;
+               end loop;
+               Back := Next;
+            end;
+         end loop;
+         return Worst;
+      end Stray;
+   begin
+      for J in 1 .. 6 loop
+         declare
+            W : constant Vec3 := Unit (Axes (J));
+         begin
+            Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => 1.0, Slide => False);
+            Arm.Result.Joints.Append (Joint_Fit'(W => Truth (J).W, P => Truth (J).P, C => 1.0, Slide => False));
+            Arm.Result.Reference.Append (0.0);
+         end;
+      end loop;
+      Arm.Result.Fitted := True;
+      Arm.Result.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Arm.Result.Sigma_Px := 0.1;
+      M.Kinematics.Append (Arm);
+      M.Groups.Append (Group_Stream'(Size => 6, Commandable => True, others => <>));
+      M.Graph.Arms.Append (1);
+      M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => 1));
+      O.Readings.Append (Start);
+      From := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Start);
+      Goal := Fit.Eye_At (Truth, Goal_Q);
+      Line := Unit (Goal.Translation - From.Translation);
+      declare
+         Sigma : constant Real := Driver.Robot.Kinematics.Angle_Sigma (M, 1);
+         Free  : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Goal, Position_Only => False));
+         Bow   : Real;
+      begin
+         Check (Motion.Status (Free) = Motion.Planned, "a pose the arm can reach is not planned: " & Motion.Why (Free));
+         Bow := Stray (Free);
+         Driver.Log.Line (Driver.Log.Robot, "plan test: a move of" & Real'Image (abs (Goal.Translation - From.Translation))
+                          & " bows by" & Real'Image (Bow) & " in" & Motion.Waypoint_Count (Free)'Image & " waypoints");
+         Check (Bow > 10.0 * Sigma, "the joints' straight line does not bow from the tool's here, so the test shows nothing");
+         declare
+            Asked : constant Real := Bow / 8.0;
+            Held  : constant Motion.Plan := Motion.Plan_Reach_In_Arm
+              (M, 1, O, (Pose => Goal, Position_Only => False), Clearance => Asked);
+         begin
+            Check (Motion.Status (Held) = Motion.Planned, "a pose the arm can reach is not planned with a clearance: "
+                   & Motion.Why (Held));
+            Driver.Log.Line (Driver.Log.Robot, "plan test: with a clearance of" & Real'Image (Asked) & " it strays by"
+                             & Real'Image (Stray (Held)) & " in" & Motion.Waypoint_Count (Held)'Image & " waypoints");
+            Check (Stray (Held) <= Asked + Driver.Conventions.Z * Sigma,
+                   "the arm strays" & Real'Image (Stray (Held)) & " from the straight path though it was asked to keep within"
+                   & Real'Image (Asked));
+            Check (Motion.Waypoint_Count (Held) > Motion.Waypoint_Count (Free),
+                   "a reach asked to keep to the straight path is not cut");
+            --  The goal is still where the plan ends.
+            declare
+               End_At : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Motion.Last_Readings (Held));
+            begin
+               Check (abs (End_At.Translation - Goal.Translation) < Driver.Conventions.Z * Sigma,
+                      "a plan kept to the straight path ends away from the goal");
+            end;
+         end;
+         --  A goal the arm cannot reach is refused when halving the path has
+         --  come down to what the fit can tell apart; halving it on to the
+         --  float's last bit learns nothing (it cost 100 ms of a turned cup's
+         --  search, hundreds of times over).
+         declare
+            Far    : constant Rigid := (Rotation => Goal.Rotation, Translation => From.Translation + 100.0 * Line);
+            Lost   : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Far, Position_Only => False));
+            Levels : constant Natural :=
+              Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (100.0 / Sigma)
+                                     / Ada.Numerics.Long_Elementary_Functions.Log (2.0)));
+         begin
+            Check (Motion.Status (Lost) = Motion.Unreachable, "a goal a hundred units off is planned");
+            Driver.Log.Line (Driver.Log.Robot, "plan test: refusing a goal 100 away took" & Motion.Solve_Count (Lost)'Image
+                             & " solves; the path halves" & Levels'Image & " times down to the fit's sigma" & Real'Image (Sigma));
+            Check (Motion.Solve_Count (Lost) <= 2 * (Levels + 1),
+                   "refusing a goal out of reach took" & Motion.Solve_Count (Lost)'Image & " solves, more than halving "
+                   & "the path down to the fit's sigma needs (" & Natural'Image (2 * (Levels + 1)) & ")");
+         end;
+      end;
+   end Plan_Stays_Within_Its_Clearance;
+
    --  A fit belongs to an arm only while the graph has its group as that arm,
    --  carrying that eye: once the group stops being an arm, or the eye rides
    --  on another, the fit is no arm's, and the refit clears it.
@@ -5662,6 +5790,9 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.reach.turn", "a reach ends a joint that turns a whole period of its fit from "
                              & "where the arm is, the same pose as a reading that is not the nearest",
                              Reach_The_Nearest_Turn'Access);
+      Driver.Tests.Register ("robot.plan.straight", "a reach given a clearance is not cut where the arm's joints would "
+                             & "take the tool farther off the straight path than that, or one given none is cut",
+                             Plan_Stays_Within_Its_Clearance'Access);
       Driver.Tests.Register ("robot.still.reloaded", "a reloaded body creeping uncommanded below its visible step is "
                              & "not still, or Settle or Hold_For_Keyframe does not end on it", Reloaded_Creep_Is_Still'Access);
       Driver.Tests.Register ("robot.plan.beyond", "a goal past the readings the arm has shown is not planned, its plan "
