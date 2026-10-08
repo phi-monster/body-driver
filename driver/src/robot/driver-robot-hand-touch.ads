@@ -28,7 +28,29 @@
 --  it is provisional. It is Confirmed when a second press at a pose distinct
 --  from the first's, within what the poses' uncertainty tells apart, lands
 --  on it within the noise: two stops on something else do not land together
---  from two poses, and from one pose they do whatever stopped them.
+--  from two poses, and from one pose they do whatever stopped them; and the
+--  presses have tested the tip across its line of sight as well (Tested).
+--
+--  The tip is on its line of sight only as far as the eye tells: the point of
+--  the lobe that touches is somewhere in the region at the lobe's tip, so the
+--  tip is the line's point at a distance and two small angles across it, the
+--  region's spread their prior. A press at a pose turned about the eye from
+--  another's meets the surface at a different distance for a tip that is off
+--  the line, by the offset times the difference of the tangents of the angles
+--  its tool stood at to the surface's normal: two presses tell the offset
+--  along the turn between them to the noise of the difference over that
+--  difference, and nothing of it across, however large the turn. A lateral
+--  axis is Tested when the presses leave its variance below the prior's over
+--  one more than Z squared (an offset of a prior sigma then shows above Z
+--  times the noise), or when the prior is already below the noise. Two
+--  presses a hair apart in tilt agree on the distance, and say nothing across;
+--  A22's lobe 2 was confirmed by five presses of a hand lying on the table.
+--
+--  A finger that slides under its press (the table pushes it along its way)
+--  is not where its free pixel puts it. A press that knows how far it slid
+--  (Slide_Angle) takes that, in every direction, as noise: the finger can have
+--  moved that far along an axis the picture does not tell, so a press whose
+--  finger was pushed shut says nothing of the tip and cannot confirm one.
 --
 --  The noise is the one predicted from the pose and surface uncertainties,
 --  and it is not raised by what the presses are seen to scatter: a scatter
@@ -63,6 +85,11 @@ package Driver.Robot.Hand.Touch is
       --  slides under its load touches with the tip it has slid to. Zero, the tip fitted is the finger as it stood
       --  under the press (the loaded tip); the finger's slide, the tip fitted is the finger as it stands free.
       Slide_Covariance : Mat3 := [others => [others => 0.0]];   --  how well that is known
+      Slide_Angle : Real := 0.0;
+      --  How far the finger stood from where its free pixel puts it under this press, as an angle seen from the eye,
+      --  when no vector tells which way (the loaded fit has the travel of no lobe): at the tip's distance it is the
+      --  length of noise added to the press in every direction. The most a finger can be off is the whole of its
+      --  travel, so a press that cannot say how far it slid has that.
    end record;
 
    type Press_Array is array (Positive range <>) of Press;
@@ -76,7 +103,10 @@ package Driver.Robot.Hand.Touch is
       Tip       : Point_Estimate;    --  tool frame
       Distance  : Estimate;          --  On_Sight: along the line from its origin
       Used      : Natural := 0;      --  presses it rests on
-      Confirmed : Boolean := False;  --  two of them, at poses distinct from each other, land on it within the noise
+      Confirmed : Boolean := False;  --  two of them, at poses distinct from each other, land on it within the noise,
+                                     --  and the tip is Tested
+      Tested    : Boolean := True;   --  the presses have tested the tip along each axis across its line of sight, or the
+                                     --  prior there is below the noise (On_Sight; a free tip has no line)
       Stopped   : Natural := 0;      --  presses left out because the tip stayed above the surface
       Sunk      : Natural := 0;      --  presses it rests on that left it below the surface
    end record;

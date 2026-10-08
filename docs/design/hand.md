@@ -727,6 +727,44 @@ and the boot's waits for an eye, which are the same rule, shorten with it.
 (`robot.stillness.watch`: wandering and flickering pictures stop within twelve
 beats of a move, a drift never does, a move that decays does not until it has.)
 
+**Lesson: a tip is confirmed across its line of sight only by tilts, and a
+finger pushed shut confirms nothing (A22).** A22's lobe 1 was confirmed, with the
+tip 1.35 mm from the support point along the press (1.3 of its sigma) and 7.1 mm
+from it across: the tip is on the line of sight to its tip pixel, and the point
+of the lobe that touches is somewhere in the region at its tip, 0.391 units
+(7.5 mm) wide per axis, which no distance along the line tells. A press at a
+pose turned about the eye meets the surface at a different distance for a tip
+that is off the line, by the offset times the difference of the tangents of the
+angles its tool stood at to the surface's normal (the aim turns the hand about
+the eye, so the first press stands at none); two presses tell the offset along
+the turn between them to the noise of the difference over that difference, and
+nothing of it across the turn, however many presses and from however many
+places. So the tip is a distance and two angles across its line, the region's
+spread (with the eye's) their prior, and the presses leave the variance of each
+axis the tilts told: `Touch.Fit` has them as unknowns, `Tested` is true when the
+variance left along the least told axis is the prior's over one more than Z
+squared (an offset of a prior sigma shows above Z noises: tilts of atan (Z noise
+over spread) at the least, 0.75 rad for lobe 1) or the prior is below the noise
+already, and Confirmed is a second press from another pose landing on the tip and
+Tested. The truth gave A22's pairs: the tilts from the first press, from the
+arm's last link at the press beats, were 0.943 rad (13840), 0.467 (13952) and 0.957
+(14057, the confirming one, tan 1.4): that pair pinned one lateral axis to
+about 1.7 mm and left the other at the prior, which is where the 7.1 mm lay; the
+other side's presses, about another axis, stopped short of the table. Lobe 2's
+first press (14217) found the finger "not at 177.71 pixels": 87 per cent shut, and
+five presses of the crawl had it 94 to 99 per cent shut; they agreed (the same
+hand on the table) and confirmed one another, 19 mm off. A press whose finger
+slid under it, by what the picture measured or the whole of its travel when it
+could not say, takes that, at the tip's distance and in every direction, as
+noise (`Slide_Angle`; the loaded fit has no vector for it, the free one does); it
+confirms nothing unless the slide is below its pose's own noise (`Firm`); and
+the tip carries, whatever the scatter of the presses, the slide they took
+together, since every press pushes the finger the same way and averaging does
+not average it out. Presses of a hand lying on the table with the finger pushed
+shut now give a tip as wide as the slide, unconfirmed; with the finger in place
+(0.7 per cent, A22's lobe 1 at the press that gave its tip) as before.
+(`hand.touch.lateral`, `hand.tips.shut`.)
+
 **Lesson: the free finger is the loaded fit with each press taken with the tip
 it had slid to.** A press loads its finger, and the finger gives way along its
 own axis (A16: 5 and 17.5 mm inward, the closer's reading exactly where it was).

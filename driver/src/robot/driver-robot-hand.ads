@@ -114,6 +114,16 @@ package Driver.Robot.Hand is
    --  one press fixes is a bound the tip is not beyond, and the lowest one the
    --  presses gave.
 
+   function Tip_Tested
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Boolean;
+   --  The presses the tip of that kind rests on have told where it is across its line of sight, along both axes
+   --  (Tips.Tested): a tip is Confirmed only when they have.
+
+   function Tip_Across
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Real_Array;
+   --  The tip's standard deviations across its line of sight, the axis the presses told most and the one they told
+   --  least (Tips.Across), in the arm's own unit.
+
    function Press_Direction (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening)
      return Direction_Estimate;
    --  The direction the tip was pressed along when it was measured, in the
@@ -190,6 +200,7 @@ private
       Pixel  : Driver.Images.Pixel;
       Ray    : Ray_Estimate;
       Spread : Real := 0.0;   --  of the lobe's tip region from that pixel, per axis, as an angle (Tips.Sight_Of)
+      Pitch  : Real := 0.0;   --  the angle a pixel spans there
    end record;
 
    type Sight_Array is array (Opening) of Sight;
