@@ -76,7 +76,9 @@ hits=$(for f in $(sources); do b=$(basename "$f"); [[ "$b" == driver-robot-motio
 if [ -n "$hits" ]; then echo "$hits" | head -20; red "motion"; else ok "motion"; fi
 
 # selftest and dead code
-if (cd "$D" && ./bin/selftest > /tmp/bd_selftest.$$ 2>&1); then ok "selftest ($(tail -1 /tmp/bd_selftest.$$))"; else grep -A1 FAIL /tmp/bd_selftest.$$ | head -20; red "selftest"; fi
+#  Each test alone and several at a time (tools/selftests.sh): one process for the whole suite took
+#  45 minutes of every merge.
+if "$ROOT/tools/selftests.sh" bin > /tmp/bd_selftest.$$ 2>&1; then ok "selftest ($(tail -1 /tmp/bd_selftest.$$))"; else head -40 /tmp/bd_selftest.$$; red "selftest"; fi
 rm -f /tmp/bd_selftest.$$
 echo "info  deadcode: $(cd "$ROOT" && "$D/bin/deadcode" | head -1 | sed 's/^== //; s/ ==$//')"
 
