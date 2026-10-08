@@ -72,17 +72,17 @@ driver-action-contact.adb	Low : Positive := 1;	1	structure	the first coordinate 
 driver-action-contact.adb	Seed (Low) := 1.0;	1.0	math	the seed is a unit coordinate axis
 driver-action-contact.adb	for K in 2 .. 3 loop	2	structure	the remaining coordinate axes, second and third
 driver-action-contact.adb	for K in 2 .. 3 loop	3	structure	the remaining coordinate axes, second and third
-driver-action-execution.adb	((Arms => Arm_Goal_Vectors.To_Vector ((Arm => A, Tool => Tool, Position_Only => False), 1),	1	structure	an order for one arm holds one goal
 driver-action-execution.adb	(Object_Pitch / 2.0 + Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
 driver-action-execution.adb	(Z * Sqrt (Sigma ** 2 + T.Sigma ** 2) + T.Pitch / 2.0);	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
-driver-action-execution.adb	(if Margin < 2.0 * Lever then 2.0 * Arccos (1.0 - Margin / Lever) else Pi);	2.0	math	the tool's straight path leaves the arc by the lever times one minus the cosine of half the turn: a margin of twice the lever or more allows any turn up to the half circle
 driver-action-execution.adb	(if Margin < 2.0 * Lever then 2.0 * Arccos (1.0 - Margin / Lever) else Pi);	2.0	math	a turn is twice its half, the angle whose cosine is one minus the margin over the lever
+driver-action-execution.adb	(if Margin < 2.0 * Lever then 2.0 * Arccos (1.0 - Margin / Lever) else Pi);	2.0	math	the tool's straight path leaves the arc by the lever times one minus the cosine of half the turn: a margin of twice the lever or more allows any turn up to the half circle
 driver-action-execution.adb	Closers => Closer_Goal_Vectors.To_Vector ((Hand => H, Fraction => Fraction), 1),	1	structure	an order for one closer holds one goal
 driver-action-execution.adb	High := (Low + High) / 2.0;	2.0	numerics	bisection halves the interval
 driver-action-execution.adb	High := 2.0 * High;	2.0	numerics	doubling search: the bound is found within a factor two in a number of tries logarithmic in it
 driver-action-execution.adb	K : Positive := 1;	1	structure	a plan is followed from its first point
 driver-action-execution.adb	K := 1;	1	structure	a new plan is followed from its first point
 driver-action-execution.adb	Last : constant Vec3 := (if K > 1 then Route.Points (K) - Route.Points (K - 1) else D);	1	structure	the leg into point K starts at the point before it, when there is one
+driver-action-execution.adb	Lever => Lever_Of (S, A)), 1),	1	structure	an order for one arm holds one goal
 driver-action-execution.adb	Lift := (if Lift > 0.0 then 2.0 * Lift else Real'Max (E.Depth + E.Sigma, Now.Step.Value));	2.0	numerics	doubling search: the lift is found within a factor two in a number of tries logarithmic in it
 driver-action-execution.adb	Limit := Real'Min (Limit, Real'Max (Fine, Z * Sqrt (2.0) * Largest_Sigma (Start.Covariance)	2.0	statistics	a rise is the difference of two readings: its sigma is root two times theirs
 driver-action-execution.adb	Low := (Low + High) / 2.0;	2.0	numerics	bisection halves the interval
@@ -100,12 +100,12 @@ driver-action-execution.adb	Set_Closer (P, X, H.Hand, 0.0, Out_Come);	0.0	math	a
 driver-action-execution.adb	Set_Closer (P, X, H.Hand, 1.0, Out_Come);	1.0	math	a closer's fraction: one is closed on nothing, so it closes until it stops on something
 driver-action-execution.adb	Several : constant Boolean := Natural (Best.Touches.Length) > 1;	1	math	more than one touch is a set that closes on the thing; one touch alone presses
 driver-action-execution.adb	Sigma => Sqrt (2.0) * Largest_Sigma (Start.Covariance), Degrees_Of_Freedom => 0);	2.0	statistics	a rise is the difference of two readings: its sigma is root two times theirs
-driver-action-execution.adb	Z * Sigma + (if Finest_Pitch (X.S) < Real'Last then Finest_Pitch (X.S) / 2.0 else 0.0);	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
+driver-action-execution.adb	else Z * Sigma + (if Finest_Pitch (S) < Real'Last then Finest_Pitch (S) / 2.0 else 0.0));	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
 driver-action-execution.adb	function Img (X : Real) return String is (Driver.Log.Image (X, 3));	3	format	digits printed in a log line or a message
 driver-action-execution.adb	if Fits ((Low + High) / 2.0) then	2.0	numerics	bisection tries the middle
 driver-action-execution.adb	or else not Significant (Vector_Gate (3), Turn, Largest_Sigma (A.Tool.Rotation_Covariance)));	3	structure	a turn is a rotation vector of three components
-driver-action-goals.adb	Above : constant Real := Arcsin (Real'Max (-1.0, Real'Min (1.0, Out_Of)));	1.0	numerics	a sine rounded below minus one is minus one, where Arcsin is defined
 driver-action-goals.adb	Above : constant Real := Arcsin (Real'Max (-1.0, Real'Min (1.0, Out_Of)));	1.0	numerics	a sine rounded above one is one, where Arcsin is defined
+driver-action-goals.adb	Above : constant Real := Arcsin (Real'Max (-1.0, Real'Min (1.0, Out_Of)));	1.0	numerics	a sine rounded below minus one is minus one, where Arcsin is defined
 driver-action-goals.adb	Grow : constant Vec3 := P.Rotation * [1.0, 0.0, -U_S];	1.0	math	the image column x / z grows as 1 / z along the eye's x and as -u / z along its z
 driver-action-goals.adb	Half_Gap : constant Real := Sqrt (((Sxx - Syy) / 2.0) ** 2 + Sxy ** 2);	2.0	math	eigenvalues of a symmetric two by two matrix: half their difference
 driver-action-goals.adb	Larger : constant Real := (Sxx + Syy) / 2.0 + Half_Gap;	2.0	math	eigenvalues of a symmetric two by two matrix: their mean

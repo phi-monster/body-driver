@@ -1,3 +1,4 @@
+with Ada.Containers.Vectors;
 with Ada.Numerics;
 with Ada.Text_IO;
 with Driver.Action.Goals;
@@ -378,6 +379,99 @@ package body Driver.Action.Execution.Tests is
 
    function In_View (P : Stalling; Point : Vec3) return Boolean is (P.W.In_View (Point));
 
+   --  A body that notes the clearance and the lever of every arm goal it is
+   --  sent, and moves as the simulated one does.
+   package Real_Lists is new Ada.Containers.Vectors (Positive, Real);
+
+   type Noting (W : not null access Sim.World) is limited new Plants.Plant with record
+      Clearances : Real_Lists.Vector;
+      Levers     : Real_Lists.Vector;
+   end record;
+
+   overriding procedure Look (P : in out Noting; S : out Snapshot);
+   overriding procedure Within (P : in out Noting; During : not null access procedure);
+   overriding function Reach (P : Noting; Goal : Plants.Arm_Goal) return Plants.Reach_Answer;
+   overriding procedure Move (P : in out Noting; O : Plants.Order; R : out Plants.Report);
+   overriding function Predicted (P : Noting; T : Thing_Id; Beats : Natural) return Driver.Uncertain.Point_Estimate;
+   overriding procedure Learn (P : in out Noting; L : Plants.Lesson);
+   overriding function Episode_Over (P : Noting) return Boolean;
+   overriding function In_View (P : Noting; Point : Vec3) return Boolean;
+
+   procedure Look (P : in out Noting; S : out Snapshot) is
+   begin
+      P.W.Look (S);
+   end Look;
+
+   procedure Within (P : in out Noting; During : not null access procedure) is
+   begin
+      P.W.Within (During);
+   end Within;
+
+   function Reach (P : Noting; Goal : Plants.Arm_Goal) return Plants.Reach_Answer is (P.W.Reach (Goal));
+
+   procedure Move (P : in out Noting; O : Plants.Order; R : out Plants.Report) is
+   begin
+      for G of O.Arms loop
+         P.Clearances.Append (G.Clearance);
+         P.Levers.Append (G.Lever);
+      end loop;
+      P.W.Move (O, R);
+   end Move;
+
+   function Predicted (P : Noting; T : Thing_Id; Beats : Natural) return Driver.Uncertain.Point_Estimate
+   is (P.W.Predicted (T, Beats));
+
+   procedure Learn (P : in out Noting; L : Plants.Lesson) is
+   begin
+      P.W.Learn (L);
+   end Learn;
+
+   function Episode_Over (P : Noting) return Boolean is (P.W.Episode_Over);
+
+   function In_View (P : Noting; Point : Vec3) return Boolean is (P.W.In_View (Point));
+
+   --  The engine clears the straight path of an arm's move by a margin, and
+   --  the arm may leave that path only by as much as it was cleared by: every
+   --  goal is sent with the clearance of its path (not unbounded) and the lever
+   --  of the body about the tool. A move up from a place with nothing near is
+   --  allowed far more than one that ends beside the thing, over a wall.
+   procedure Moves_Are_Given_What_They_May_Leave is
+   begin
+      for Walled in Boolean loop
+         declare
+            W : aliased Sim.World;
+            P : Noting (W'Access);
+            R : Result;
+         begin
+            One_Gripper (W, Turned, 91);
+            Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.12, 0.4), Mu => 0.6);
+            if Walled then
+               --  A wall that stands in the way from the hand to the bar, which it goes up over.
+               Sim.Add_Thing (W, Block (0.02, 0.1, 0.1), On_Table (0.09, 0.0, 0.0), Mu => 0.6, Fixed => True);
+            end if;
+            Execute (P, Height_Want (1, True, Free), R);
+            Check (R.Final = Free, "a bar is not lifted" & (if Walled then " behind a wall" else ""));
+            Check (not P.Clearances.Is_Empty, "no arm goal was sent");
+            Check ((for all C of P.Clearances => C < Real'Last), "an arm goal was sent with no bound on its path");
+            Check ((for all L of P.Levers => L > 0.0), "an arm goal was sent with no lever");
+            if Walled and then not P.Clearances.Is_Empty then
+               declare
+                  Least    : Real := Real'Last;
+                  Greatest : Real := 0.0;
+               begin
+                  for C of P.Clearances loop
+                     Least := Real'Min (Least, C);
+                     Greatest := Real'Max (Greatest, C);
+                  end loop;
+                  Check (Greatest > 10.0 * Least,
+                         "the way up over a wall is allowed no more off its path than the way in beside the bar ("
+                         & Driver.Log.Image (Greatest, 4) & " against" & Driver.Log.Image (Least, 4) & ")");
+               end;
+            end if;
+         end;
+      end loop;
+   end Moves_Are_Given_What_They_May_Leave;
+
    --  An arm that carries out only part of every move, and says it was
    --  stopped, is not blocked for good: asked again from where it got to, it
    --  goes on, and only a push that moves nothing is a block.
@@ -480,6 +574,9 @@ package body Driver.Action.Execution.Tests is
                 A_Hand_At_The_Top_Of_Its_Reach_Goes_Over'Access);
       Register ("action.run.margin", "a way is judged by the larger uncertainty where the arm has come to, and refuses "
                 & "the pose the search cleared by the one at the start", A_Travel_Keeps_The_Margin_It_Was_Cleared_By'Access);
+      Register ("action.run.clearance", "an arm goal is sent with no bound on how far the arm may leave the straight path, "
+                & "or a move beside a wall is allowed as much as one in the open",
+                Moves_Are_Given_What_They_May_Leave'Access);
       Register ("action.run.fine.down", "an arm much finer than the eyes creeps to the table by its smallest steps",
                 A_Fine_Arm_Puts_Down'Access);
       Register ("action.run.fine.over", "an arm much finer than the eyes stalls on the route over a block",

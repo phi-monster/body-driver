@@ -77,10 +77,16 @@ package body Driver.Action.Execution is
       return (Rotation => R * Tool.Rotation, Translation => R * (Tool.Translation - G.Pivot) + G.Pivot + S * G.Linear);
    end Moved;
 
-   function One_Arm (A : Arm_Id; Tool : Rigid) return Order is
-     ((Arms     => Arm_Goal_Vectors.To_Vector ((Arm => A, Tool => Tool, Position_Only => False), 1),
-       Closers  => Closer_Goal_Vectors.Empty_Vector,
-       Settle   => True));
+   --  The goal of taking an arm's tool to Tool, its orientation too, by any path.
+   function Goal_Of (A : Arm_Id; Tool : Rigid) return Arm_Goal is
+     ((Arm => A, Tool => Tool, Position_Only => False, others => <>));
+
+   function One_Arm (S : Snapshot; A : Arm_Id; Tool : Rigid; Slack : Real := Real'Last) return Order;
+   --  An order for one arm to take its tool to Tool, and to keep it within
+   --  Slack of the straight path there on the way, as the engine cleared that
+   --  path by that much; but not within less than the arm can tell its pose
+   --  to, where keeping closer to the line learns nothing. Real'Last: not
+   --  bounded.
 
    --  The smallest step the arm delivers distinguishably, for a twist: a
    --  length for a shift, an angle for a turn.
@@ -104,7 +110,7 @@ package body Driver.Action.Execution is
    --  until it is there as far as it can tell, the plant says it is, or a
    --  send moves it by nothing it can tell from noise.
    procedure Go (P : in out Plant'Class; X : in out State; A : Arm_Id; Goal : Rigid; Outcome : out Step_Outcome;
-                 Why : out Unbounded_String)
+                 Why : out Unbounded_String; Slack : Real := Real'Last)
    is
    begin
       Why := Null_Unbounded_String;
@@ -120,7 +126,7 @@ package body Driver.Action.Execution is
                Outcome := Short;
                return;
             end if;
-            P.Move (One_Arm (A, Goal), R);
+            P.Move (One_Arm (X.S, A, Goal, Slack), R);
             declare
                Res : constant Arm_Result := R.Arms.First_Element;
             begin
@@ -228,10 +234,49 @@ package body Driver.Action.Execution is
       return Pts;
    end Body_Points;
 
+   --  How far from the tool any measured part of the arm lies, or any part of
+   --  what it holds: what a turn of the tool carries about.
+   function Lever_Of (S : Snapshot; A : Arm_Id) return Real is
+      E       : constant Search.Effector := Search.Effector_Of (S, A);
+      Spacing : constant Real := Finest_Pitch (S);
+      Far     : Real := 0.0;
+   begin
+      for Q of Body_Points (E, E.Tool, (if Spacing = Real'Last then Arm (S, A).Step.Value else Spacing)) loop
+         Far := Real'Max (Far, abs (Q - E.Tool.Translation));
+      end loop;
+      for T of S.Things loop
+         if T.Held_By /= 0 and then Has_Hand (S, T.Held_By) and then Hand (S, T.Held_By).Arm = A then
+            for Smp of T.Samples loop
+               Far := Real'Max (Far, abs (Smp.Point - E.Tool.Translation));
+            end loop;
+         end if;
+      end loop;
+      return Far;
+   end Lever_Of;
+
+   function One_Arm (S : Snapshot; A : Arm_Id; Tool : Rigid; Slack : Real := Real'Last) return Order is
+      Sigma : constant Real := Search.Effector_Of (S, A).Sigma;
+   begin
+      return (Arms     => Arm_Goal_Vectors.To_Vector
+                            ((Goal_Of (A, Tool)
+                              with delta Clearance => (if Slack = Real'Last or else Sigma = Real'Last then Real'Last
+                                                       else Real'Max (Slack, Z * Sigma)),
+                                         Lever     => Lever_Of (S, A)), 1),
+              Closers  => Closer_Goal_Vectors.Empty_Vector,
+              Settle   => True);
+   end One_Arm;
+
    --  The margin a body part known to Sigma keeps from a thing's samples:
    --  Z of the two sigmas together, and half a pitch between samples.
    function Margin_From (T : Thing_State; Sigma : Real) return Real is
      (Z * Sqrt (Sigma ** 2 + T.Sigma ** 2) + T.Pitch / 2.0);
+
+   --  The margin the body keeps from a path it means to take, known to Sigma:
+   --  Z of it, and half the finest spacing of the samples a path is cleared by;
+   --  Real'Last where Sigma is not measured.
+   function Margin_Of (S : Snapshot; Sigma : Real) return Real is
+     (if Sigma = Real'Last then Real'Last
+      else Z * Sigma + (if Finest_Pitch (S) < Real'Last then Finest_Pitch (S) / 2.0 else 0.0));
 
    --  The samples of every thing but Except and Held, filed for nearness.
    function Obstacles (S : Snapshot; Sigma : Real; Except, Held : Thing_Id'Base) return Grids.Grid is
@@ -280,18 +325,22 @@ package body Driver.Action.Execution is
       return Least;
    end Least_Gap;
 
-   --  Whether the arm's measured parts, and what it holds, moving straight
+   --  By how much the arm's measured parts, and what it holds, moving straight
    --  from one tool pose to another, keep clear of the surfaces and of every
-   --  other thing; coming no nearer than it was at the start always is.
-   function Clear_Way (S : Snapshot; E : Search.Effector; From, To : Rigid; Held : Thing_Id'Base; Near : Grids.Grid)
-     return Boolean
+   --  other thing, at the nearest: the least gap along the way, less the gap
+   --  the start lacks where it begins nearer than the margin asks (coming no
+   --  nearer than it was at the start is always clear). Below zero as soon
+   --  as the way is not clear, by no more than is known of how far; Real'Last
+   --  where nothing is measured to keep clear of.
+   function Slack_Of (S : Snapshot; E : Search.Effector; From, To : Rigid; Held : Thing_Id'Base; Near : Grids.Grid)
+     return Real
    is
       Spacing : constant Real := Finest_Pitch (S);
       Lever   : Real := 0.0;
       Carried : Contact.Point_Vectors.Vector;
    begin
       if Spacing = Real'Last then
-         return True;
+         return Real'Last;
       end if;
       if Held /= 0 and then Has_Thing (S, Held) then
          for Smp of Thing (S, Held).Samples loop
@@ -309,6 +358,8 @@ package body Driver.Action.Execution is
             return Pts;
          end At_Pose;
          Start_Gap : constant Real := Least_Gap (S, Near, At_Pose (From), E.Sigma);
+         Lacking   : constant Real := Real'Min (0.0, Start_Gap);   --  what the start lacks of the margin
+         Least     : Real := Start_Gap;
       begin
          for P of At_Pose (From) loop
             Lever := Real'Max (Lever, abs (P - From.Translation));
@@ -325,17 +376,34 @@ package body Driver.Action.Execution is
                     (Rotation    => From.Rotation
                                       * Exp (Share * Driver.Numerics.Log (Transpose (From.Rotation) * To.Rotation)),
                      Translation => From.Translation + Share * (To.Translation - From.Translation));
-                  Gap   : constant Real := Least_Gap (S, Near, At_Pose (Pose), E.Sigma);
                begin
-                  if Gap < 0.0 and then Gap < Start_Gap then
-                     return False;
+                  Least := Real'Min (Least, Least_Gap (S, Near, At_Pose (Pose), E.Sigma));
+                  if Least < Lacking then
+                     return Least - Lacking;
                   end if;
                end;
             end loop;
          end;
+         return (if Least = Real'Last then Real'Last else Least - Lacking);
       end;
-      return True;
-   end Clear_Way;
+   end Slack_Of;
+
+   --  Whether the way keeps clear: it has no negative slack.
+   function Clear_Way (S : Snapshot; E : Search.Effector; From, To : Rigid; Held : Thing_Id'Base; Near : Grids.Grid)
+     return Boolean is (Slack_Of (S, E, From, To, Held, Near) >= 0.0);
+
+   --  By how much the arm may leave the straight path of a step to Tool that
+   --  moves thing T (held by this arm or pushed by it): as much as the path
+   --  keeps clear of everything but T, with T carried along when held. A
+   --  thing that slides along a surface keeps no clearance from it, so a step
+   --  of it may leave its path by no more than the arm can tell.
+   function Step_Slack (S : Snapshot; A : Arm_Id; T : Thing_Id'Base; Tool : Rigid) return Real is
+      E    : constant Search.Effector := Search.Effector_Of (S, A);
+      Held : constant Thing_Id'Base :=
+        (if T /= 0 and then Has_Thing (S, T) and then Thing (S, T).Held_By /= 0 then T else 0);
+   begin
+      return Slack_Of (S, E, E.Tool, Tool, Held, Obstacles (S, E.Sigma, T, Held));
+   end Step_Slack;
 
    --  Whether the arm's travel can bring its body to Tool, its closers at
    --  Fractions: there it keeps the clearance travel keeps from the surfaces
@@ -384,10 +452,15 @@ package body Driver.Action.Execution is
                Outcome := Reached;
                return;
             end if;
-            if not (abs Up > 0.0) or else Clear_Way (X.S, E, From, Goal, Held, Near) then
-               Go (P, X, A, Goal, Outcome, Why);
-               return;
-            end if;
+            declare
+               Straight : constant Real :=
+                 (if abs Up > 0.0 then Slack_Of (X.S, E, From, Goal, Held, Near) else Real'Last);
+            begin
+               if Straight >= 0.0 then
+                  Go (P, X, A, Goal, Outcome, Why, Straight);
+                  return;
+               end if;
+            end;
             declare
                --  The way over runs at one level, up from where the arm is,
                --  across, and down to the goal: the higher of the two to begin
@@ -406,8 +479,8 @@ package body Driver.Action.Execution is
                                Translation => From.Translation + (Base_Level + Lift - From.Translation * Up) * Up);
                      Via_2 := (Rotation    => Goal.Rotation,
                                Translation => Goal.Translation + (Base_Level + Lift - Goal.Translation * Up) * Up);
-                     exit when P.Reach ((Arm => A, Tool => Via_1, Position_Only => False)).Status /= Reachable
-                       or else P.Reach ((Arm => A, Tool => Via_2, Position_Only => False)).Status /= Reachable;
+                     exit when P.Reach (Goal_Of (A, Via_1)).Status /= Reachable
+                       or else P.Reach (Goal_Of (A, Via_2)).Status /= Reachable;
                      if Clear_Way (X.S, E, From, Via_1, Held, Near)
                        and then Clear_Way (X.S, E, Via_1, Via_2, Held, Near)
                        and then Clear_Way (X.S, E, Via_2, Goal, Held, Near)
@@ -434,7 +507,7 @@ package body Driver.Action.Execution is
                     abs (From.Translation - Via_2.Translation) <= Now.Step.Value;
                   Leg    : constant Rigid := (if Over then Goal elsif Raised then Via_2 else Via_1);
                begin
-                  Go (P, X, A, Leg, Outcome, Why);
+                  Go (P, X, A, Leg, Outcome, Why, Slack_Of (X.S, E, From, Leg, Held, Near));
                   if Outcome in Refused | Blocked then
                      return;
                   end if;
@@ -559,7 +632,7 @@ package body Driver.Action.Execution is
                         --  What the travel there keeps clear of: everything.
                         Near  : constant Grids.Grid := Obstacles (X.S, E.Sigma, 0, 0);
                         function Can_Reach (Tool : Rigid) return Boolean is
-                          (P.Reach ((Arm => Arm_Id_Now, Tool => Tool, Position_Only => False)).Status = Reachable);
+                          (P.Reach (Goal_Of (Arm_Id_Now, Tool)).Status = Reachable);
                         function Can_Be_Free (Tool : Rigid; Fractions : Search.Real_Vectors.Vector) return Boolean is
                           (Free_At (X.S, Arm_Id_Now, Near, Tool, Fractions));
                         C     : Search.Candidate;
@@ -610,7 +683,9 @@ package body Driver.Action.Execution is
                   Ok := True;
                   return;
                end if;
-               Go (P, X, Arm_Of_Best, Best.Tool, Out_Come, Why);
+               --  The lobes were cleared of the thing by the search's margin all the way in.
+               Go (P, X, Arm_Of_Best, Best.Tool, Out_Come, Why,
+                   Slack => Margin_Of (X.S, Sqrt (E.Sigma ** 2 + Thing (X.S, T).Sigma ** 2)));
                if Out_Come = Refused then
                   Note_Tried (X, "coming in to touch it: " & To_String (Why));
                   return;
@@ -864,8 +939,7 @@ package body Driver.Action.Execution is
                Fine  : constant Real := Resolution (Now, Goal.Motion);
                Limit : Real := Real'Last;
                function Fits (S : Real) return Boolean is
-                 (P.Reach ((Arm => G.Arm, Tool => Moved (Goal.Motion, S, Now.Tool.Pose), Position_Only => False))
-                    .Status = Reachable
+                 (P.Reach (Goal_Of (G.Arm, Moved (Goal.Motion, S, Now.Tool.Pose))).Status = Reachable
                   and then P.In_View (Contact.Apply (Contact.Scaled (Goal.Motion, S), Centre.Mean)));
             begin
                --  The contact is somewhere in its band ahead: a step goes up to
@@ -900,8 +974,7 @@ package body Driver.Action.Execution is
                      Axis   : constant Vec3 := Unit (Goal.Motion.Angular);
                      Apart  : constant Vec3 := Now.Tool.Pose.Translation - Goal.Motion.Pivot;
                      Lever  : constant Real := abs (Apart - Real'(Apart * Axis) * Axis);
-                     Margin : constant Real :=
-                       Z * Sigma + (if Finest_Pitch (X.S) < Real'Last then Finest_Pitch (X.S) / 2.0 else 0.0);
+                     Margin : constant Real := Margin_Of (X.S, Sigma);
                      Turn   : constant Real :=
                        (if Margin < 2.0 * Lever then 2.0 * Arccos (1.0 - Margin / Lever) else Pi);
                   begin
@@ -944,9 +1017,10 @@ package body Driver.Action.Execution is
             F.Exhausted := Goal.Ok and then (not Goal.Done or else Pushing) and then Step = 0.0;
             if F.Commanded then
                declare
-                  R : Report;
+                  R    : Report;
+                  Tool : constant Rigid := Moved (Goal.Motion, Step, Now.Tool.Pose);
                begin
-                  P.Move (One_Arm (G.Arm, Moved (Goal.Motion, Step, Now.Tool.Pose)), R);
+                  P.Move (One_Arm (X.S, G.Arm, Tool, Step_Slack (X.S, G.Arm, T, Tool)), R);
                   Res := R.Arms.First_Element;
                end;
             else

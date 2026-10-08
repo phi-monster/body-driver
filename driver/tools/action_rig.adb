@@ -134,7 +134,8 @@ package body Action_Rig is
             begin
                P.Last := Driver.Beats.Latest.all;
                Plan := Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last,
-                                          (Pose => G.Tool, Position_Only => G.Position_Only));
+                                          (Pose => G.Tool, Position_Only => G.Position_Only),
+                                          Clearance => G.Clearance, Lever => G.Lever);
             end Planning;
             procedure Arrived is
             begin
