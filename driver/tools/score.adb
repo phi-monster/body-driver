@@ -699,11 +699,65 @@ procedure Score is
       Found : Boolean := False;
       Link  : Unbounded_String;
       X     : Parameters := [others => 0.0];
-      Median_Position : Real := Real'Last;
+      --  The links are ranked by the root mean square of the test positions'
+      --  errors, not their median: a link rigid with the estimate at every
+      --  test pose beats one that is so at most of them (A17: a finger that
+      --  slid under its presses fitted with the median as well as the wrist,
+      --  and its slides bent the one world, the wrist eye 30.7 mm off).
+      Rank : Real := Real'Last;
+      --  The fit's own largest test errors (metres, radians): a relative pose
+      --  that moves no more than these cannot be told from rigid.
+      Largest_Position, Largest_Turn : Real := 0.0;
    end record;
 
    package Arm_Fit_Vectors is new Ada.Containers.Vectors (Positive, Arm_Fit);
    Arm_Fits : Arm_Fit_Vectors.Vector;
+
+   --  The one world (Best_Fit), set by the first tool fitted.
+   Has_World    : Boolean := False;
+   World_X      : Parameters := [others => 0.0];
+   World_Length : Real := 0.0;
+
+   function Parent_Of (Link : String) return String is
+      --  The link the joint tree hangs Link from; "" for a root.
+   begin
+      for J of Joints loop
+         if To_String (J.Child) = Link then
+            return To_String (J.Parent);
+         end if;
+      end loop;
+      return "";
+   end Parent_Of;
+
+   function Rigid_With (Tool : Positive; Upper, Lower : String; Position_Bound, Turn_Bound : Real) return Boolean is
+      --  Whether Lower's pose in Upper's frame moves, over the beats the tool
+      --  has estimates, by no more than the bounds.
+      First : Rigid;
+      Have  : Boolean := False;
+   begin
+      for B in Recorded.First_Index .. Recorded.Last_Index loop
+         if Recorded (B).Line > 0 and then Estimated.Contains (B)
+           and then Natural (Estimated (B).Tools.Length) >= Tool
+           and then Truth (Recorded (B).Line).Links.Contains (Upper)
+           and then Truth (Recorded (B).Line).Links.Contains (Lower)
+         then
+            declare
+               L : constant Truth_Line := Truth (Recorded (B).Line);
+               R : constant Rigid := Inverse (L.Links (Upper)) * L.Links (Lower);
+            begin
+               if not Have then
+                  First := R;
+                  Have := True;
+               elsif abs (R.Translation - First.Translation) > Position_Bound
+                 or else Angle (Transpose (First.Rotation) * R.Rotation) > Turn_Bound
+               then
+                  return False;
+               end if;
+            end;
+         end if;
+      end loop;
+      return Have;
+   end Rigid_With;
 
    procedure Split_Pairs (Tool : Positive; Link : String; Train, Test : out Pair_Vectors.Vector) is
       --  Beats at which the estimate did not move are one pose; distinct
@@ -796,11 +850,7 @@ procedure Score is
    procedure Score_Arms is
       Tools : Natural := 0;
       Links : Name_Vectors.Vector;
-      --  The one world (Best_Fit): set by the first tool fitted.
-      Has_World    : Boolean := False;
-      World        : Parameters := [others => 0.0];
-      World_Length : Real := 0.0;
-      World_Tool   : Positive := 1;
+      World_Tool : Positive := 1;   --  the tool whose fit set the one world
    begin
       for E of Estimated loop
          Tools := Natural'Max (Tools, Natural (E.Tools.Length));
@@ -846,15 +896,19 @@ procedure Score is
                   then
                      declare
                         X : constant Parameters :=
-                          Best_Fit (Train, Has_World, World, (if Has_World then World_Length else Spread (Train, True)));
-                        Position : Real_Array (1 .. Natural (Test.Length));
+                          Best_Fit (Train, Has_World, World_X, (if Has_World then World_Length else Spread (Train, True)));
+                        Squares : Real := 0.0;
                      begin
-                        for I in Position'Range loop
-                           Position (I) := abs (Similarity (X, Test (I).Est).Translation - Test (I).Truth.Translation);
+                        for P of Test loop
+                           declare
+                              D : constant Vec3 := Similarity (X, P.Est).Translation - P.Truth.Translation;
+                           begin
+                              Squares := Squares + D * D;
+                           end;
                         end loop;
-                        if Driver.Stats.Median (Position) < Best.Median_Position then
+                        if Sqrt (Squares / Real (Test.Length)) < Best.Rank then
                            Best := (Found => True, Link => To_Unbounded_String (Link), X => X,
-                                    Median_Position => Driver.Stats.Median (Position));
+                                    Rank => Sqrt (Squares / Real (Test.Length)), others => <>);
                            Best_Test := Test;
                            Best_Length := Spread (Train, True);
                         end if;
@@ -891,9 +945,11 @@ procedure Score is
                         & Image (Largest (Position), 3) & " mm), so which link carries it is not known; its pose"
                         & " is scored as its eye's");
                   else
+                     Best.Largest_Position := Largest (Position) / Millimetres_Per_Metre;
+                     Best.Largest_Turn := Largest (Rotation) / Degrees_Per_Radian;
                      if not Has_World then
                         Has_World := True;
-                        World := Best.X;
+                        World_X := Best.X;
                         World_Length := Best_Length;
                         World_Tool := Tool;
                      end if;
@@ -1182,6 +1238,60 @@ procedure Score is
    end Nearest_Beat;
 
    procedure Score_Hands is
+
+      function Fingers_Below (Tool_Link : String) return Name_Vectors.Vector is
+         --  The fingers: links below the tool link in the joint tree, through a joint that moves.
+         Prefix : constant String := Tool_Link (Tool_Link'First .. Ada.Strings.Fixed.Index (Tool_Link, "/"));
+         Found  : Name_Vectors.Vector;
+      begin
+         for C in Link_Keys.Iterate loop
+            declare
+               Name : constant String := Key_Maps.Key (C);
+            begin
+               if Name /= Tool_Link and then Name'Length > Prefix'Length
+                 and then Name (Name'First .. Name'First + Prefix'Length - 1) = Prefix
+                 and then Is_Finger (Name, Tool_Link)
+               then
+                  Found.Append (Name);
+               end if;
+            end;
+         end loop;
+         return Found;
+      end Fingers_Below;
+
+      function Hand_Fit (Arm : Positive) return Arm_Fit is
+         --  Links rigid with one another while the tool was scored fit alike, so
+         --  the arm's fit may have taken one the fingers do not hang from (A17's
+         --  closer stood: a finger, or the camera fixed to the wrist). The hand
+         --  is scored from the nearest link up the tree that has fingers and
+         --  stayed rigid with the fitted one, its offset fitted again in the one
+         --  world.
+         Fit  : Arm_Fit := Arm_Fits (Arm);
+         Link : Unbounded_String := Fit.Link;
+      begin
+         while Fingers_Below (To_String (Link)).Is_Empty loop
+            declare
+               Up : constant String := Parent_Of (To_String (Link));
+            begin
+               exit when Up = ""
+                 or else not Rigid_With (Arm, Up, To_String (Fit.Link), Fit.Largest_Position, Fit.Largest_Turn);
+               Link := To_Unbounded_String (Up);
+            end;
+         end loop;
+         if Link /= Fit.Link and then not Fingers_Below (To_String (Link)).Is_Empty then
+            declare
+               Train, Test : Pair_Vectors.Vector;
+            begin
+               Split_Pairs (Arm, To_String (Link), Train, Test);
+               if Natural (Train.Length) >= 5 then
+                  Fit.X := Best_Fit (Train, True, World_X, World_Length);
+                  Fit.Link := Link;
+               end if;
+            end;
+         end if;
+         return Fit;
+      end Hand_Fit;
+
    begin
       for H of Hands loop
          if H.Arm > Natural (Arm_Fits.Length) or else not Arm_Fits (H.Arm).Found then
@@ -1189,24 +1299,10 @@ procedure Score is
             goto Next_Hand;
          end if;
          declare
-            Fit       : constant Arm_Fit := Arm_Fits (H.Arm);
+            Fit       : constant Arm_Fit := Hand_Fit (H.Arm);
             Tool_Link : constant String := To_String (Fit.Link);
-            Prefix    : constant String := Tool_Link (Tool_Link'First .. Ada.Strings.Fixed.Index (Tool_Link, "/"));
-            Fingers   : Name_Vectors.Vector;
+            Fingers   : constant Name_Vectors.Vector := Fingers_Below (Tool_Link);
          begin
-            --  The fingers: links below the tool link in the joint tree, through a joint that moves.
-            for C in Link_Keys.Iterate loop
-               declare
-                  Name : constant String := Key_Maps.Key (C);
-               begin
-                  if Name /= Tool_Link and then Name'Length > Prefix'Length
-                    and then Name (Name'First .. Name'First + Prefix'Length - 1) = Prefix
-                    and then Is_Finger (Name, Tool_Link)
-                  then
-                     Fingers.Append (Name);
-                  end if;
-               end;
-            end loop;
             Ada.Text_IO.Put_Line ("hand of arm" & H.Arm'Image & " (tool link " & Tool_Link & ", fingers"
                                   & Fingers.Length'Image & ", lobes" & H.Lobes.Length'Image & "):");
             for At_Open in reverse Boolean loop
