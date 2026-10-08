@@ -84,6 +84,33 @@ package body Driver.Robot.Kinematics.Fixed is
       --  (Point_Variance): a point whose position is uncertain tells less of the eye.
       Extra   : Real_Access := new Real_Array (1 .. 2 * N);
 
+      --  The root of each point's own covariance, Own = Root * Transpose (Root), from the eigenvectors of its
+      --  symmetric part with the negative eigenvalues set to zero. What a position's uncertainty makes of a pixel is
+      --  then the squared length of Transpose (Root) times the pixel's slope, which cannot be negative. The quadratic
+      --  form summed term by term can: a track the arm fit leaves with no depth at all (A17's first fit had one at
+      --  1.7E97 units, its log depth uncertain by 2.5E6) has a covariance of 1E207, its terms cancel to less than the
+      --  rounding of their sum, and Scale_Of took the square root of one plus that over the noise (the replay raised
+      --  there). A covariance with a negative eigenvalue makes the same, and says nothing about the pixel there.
+      type Root_Array is array (Positive range <>) of Mat3;
+
+      function Root_Of (Own : Mat3) return Mat3 is
+         Values  : Vec3;
+         Vectors : Mat3;
+         Result  : Mat3 := [others => [others => 0.0]];
+      begin
+         Driver.Numerics.Symmetric_Eigensystem (Own, Values, Vectors);
+         for K in 1 .. 3 loop
+            if Values (K) > 0.0 then
+               for A in 1 .. 3 loop
+                  Result (A, K) := Vectors (A, K) * Sqrt (Values (K));
+               end loop;
+            end if;
+         end loop;
+         return Result;
+      end Root_Of;
+
+      Roots : constant Root_Array (Points'Range) := [for P in Points'Range => Root_Of (Points (P).Own)];
+
       type Free_Terms is array (Positive range <>) of Positive;
       Without_Distortion : constant Free_Terms := [1, 2, 3, 4, 7, 8, 9, 10, 11, 12];
       With_Distortion    : constant Free_Terms := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -124,7 +151,7 @@ package body Driver.Robot.Kinematics.Fixed is
          for K in 1 .. N loop
             declare
                Sg    : Sighting renames Sightings (Sightings'First + K - 1);
-               Own   : Mat3 renames Points (Sg.Point).Own;
+               Root  : Mat3 renames Roots (Sg.Point);
                Rot   : constant Mat3 := Poses (Sg.Pose).Rotation;
                Slope : array (1 .. 3, 0 .. 1) of Real := [others => [others => 0.0]];
             begin
@@ -146,11 +173,11 @@ package body Driver.Robot.Kinematics.Fixed is
                   end;
                end loop;
                for C in 0 .. 1 loop
-                  for X in 1 .. 3 loop
-                     for Y in 1 .. 3 loop
-                        Extra (2 * K - 1 + C) := Extra (2 * K - 1 + C) + Slope (X, C) * Own (X, Y) * Slope (Y, C);
-                     end loop;
-                  end loop;
+                  declare
+                     Along : constant Vec3 := Transpose (Root) * [Slope (1, C), Slope (2, C), Slope (3, C)];
+                  begin
+                     Extra (2 * K - 1 + C) := Along * Along;
+                  end;
                end loop;
             end;
          end loop;
