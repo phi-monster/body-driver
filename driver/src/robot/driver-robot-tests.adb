@@ -1320,6 +1320,56 @@ package body Driver.Robot.Tests is
              & (if Tail (0) then " 42" else " 41") & " beats");
    end Alternating_Rounds_Stop;
 
+   --  A group the driver never commanded is held by sending it its current reading, beat after beat (Driver.Replies), and
+   --  a joint that creeps by a hair every beat makes that target change every beat. A beat whose target changed was
+   --  taken for no rest beat, so that the arms of A22 had no rest and no noise until the estimate at the doubling of
+   --  the stream (736 beats), Moving was false, and each push was waited for as long as the stream was old: three holds
+   --  of 292, 661 and 913 beats in the probes, 1,866 of the boot's 17,465. A hold asks for nothing: a beat is at rest
+   --  when no push is under way. A real push, after the rest, is still a push.
+   procedure Held_Group_Reaches_Its_Noise is
+      M       : Model;
+      Rng     : Generator;
+      Reading : Real := 5.0e-10;
+      Echo    : Real := Reading;   --  what the hold sends: the reading of the beat before
+      Pushed_At : constant := 140;
+
+      --  One beat: the group's reading creeps by a hair and jitters; the hold sends the reading of the beat before,
+      --  until a real command, at Pushed_At, asks 0.01 of it.
+      procedure Beat (B : Natural) is
+         O    : Observation;
+         Sent : Driver.Commands.Command := Driver.Commands.Hold;
+      begin
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         if B >= Pushed_At then
+            Reading := Reading + (if B = Pushed_At then 0.01 else 0.0);
+         else
+            Reading := Reading + 1.4e-12 + 1.0e-13 * Gaussian (Rng);
+         end if;
+         O.Readings.Append (Real_Array'(1 => Reading));
+         Driver.Commands.Set_Target (Sent, 1, [(if B < Pushed_At then Echo else Echo + 0.01)]);
+         Observe (M, O, Sent);
+         Echo := Reading;
+      end Beat;
+   begin
+      for B in 0 .. 119 loop
+         Beat (B);
+      end loop;
+      Driver.Robot.Channels.Measure (M);
+      Check (Driver.Robot.Channels.Noise (M, 1, 1) < 1.0e-9,
+             "the noise of a held group never commanded is" & Real'Image (Driver.Robot.Channels.Noise (M, 1, 1))
+             & ", not that of a creep of a hair a beat, after 120 beats");
+      for B in 120 .. 160 loop
+         Beat (B);
+      end loop;
+      Driver.Robot.Channels.Measure (M);
+      Check (Driver.Robot.Channels.Pushed (M, 1, Pushed_At), "the push after the rest is not a push");
+      Check (not Driver.Robot.Channels.Pushed (M, 1, 100), "a beat of the rest is part of a push");
+   end Held_Group_Reaches_Its_Noise;
+
    --  A joint stopped short of its target by something it keeps chattering
    --  against (a live x5's arm 2 in its first Hadamard cell: joint 3 moved by
    --  20 to 240 visible steps every beat for 800 beats and never came to
@@ -6040,6 +6090,7 @@ package body Driver.Robot.Tests is
                              Unanswered_Push_Of_An_Unanswered_Group'Access);
       Driver.Tests.Register ("robot.channels.rounds", "the channels' noise and push rounds alternate for good, or take a "
                              & "beat whose mark alternates for rest", Alternating_Rounds_Stop'Access);
+      Driver.Tests.Register ("robot.channels.echo", "a group held by sending it its own reading, never commanded, has no rest and no noise because its target changes at every beat", Held_Group_Reaches_Its_Noise'Access);
       Driver.Tests.Register ("robot.steps.chatter", "a push against something its joint keeps chattering against never "
                              & "ends, or a free push that rings about its target is given up or called blocked",
                              Step_Ends_Against_Chatter'Access);
