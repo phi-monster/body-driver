@@ -932,9 +932,9 @@ package body Driver.Action.Plants.Tests is
       A : constant Sim_Arm := W.Arms (Arm_Index (W, Goal.Arm));
    begin
       if abs (Goal.Tool.Translation - A.Base) > A.Reach then
-         return (Status => Unreachable, Why => To_Unbounded_String ("too far from its base"));
+         return (Status => Unreachable, Why => To_Unbounded_String ("too far from its base"), Bow => 0.0);
       elsif Goal.Position_Only then
-         return (Status => Reachable, Why => Null_Unbounded_String);
+         return (Status => Reachable, Why => Null_Unbounded_String, Bow => 0.0);
       end if;
       declare
          Rel  : constant Mat3 := Transpose (A.Neutral) * Goal.Tool.Rotation;
@@ -945,12 +945,12 @@ package body Driver.Action.Plants.Tests is
          Twist : constant Vec3 := Log (Transpose (Swing) * Rel);
       begin
          if Bend > A.Tilt then
-            return (Status => Unreachable, Why => To_Unbounded_String ("the wrist bends no further"));
+            return (Status => Unreachable, Why => To_Unbounded_String ("the wrist bends no further"), Bow => 0.0);
          elsif abs Twist (3) > A.Wrist then
-            return (Status => Unreachable, Why => To_Unbounded_String ("the wrist turns no further"));
+            return (Status => Unreachable, Why => To_Unbounded_String ("the wrist turns no further"), Bow => 0.0);
          end if;
       end;
-      return (Status => Reachable, Why => Null_Unbounded_String);
+      return (Status => Reachable, Why => Null_Unbounded_String, Bow => 0.0);
    end Reach_Of;
 
    overriding function Reach (W : World; Goal : Arm_Goal) return Reach_Answer is

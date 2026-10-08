@@ -742,7 +742,8 @@ procedure Action_Matrix is
                   begin
                      Say ("    reach" & K'Image & ": shift " & Img (abs (Q.Asked.Translation - Q.From.Translation), 4)
                           & " units, turn " & Img (Angle (Transpose (Q.From.Rotation) * Q.Asked.Rotation), 4) & " rad: "
-                          & Plants.Reach_Status'Image (Q.Status) & (if Length (Q.Why) > 0 then " | " & To_String (Q.Why) else ""));
+                          & Plants.Reach_Status'Image (Q.Status) & (if Length (Q.Why) > 0 then " | " & To_String (Q.Why) else "")
+                          & (if Q.Bow > 0.0 then " | the straight path leaves a bow of " & Img (Q.Bow, 4) & " units" else ""));
                   end;
                end loop;
                declare

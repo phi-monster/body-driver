@@ -23,6 +23,8 @@ package Driver.Action.Plants is
    type Reach_Answer is record
       Status : Reach_Status := Unmeasured;
       Why    : Unbounded_String;   --  for Unreachable: which limit, joint or distance
+      Bow    : Real := 0.0;        --  for Reachable: how far above the goal's Clearance the arm must stray from the
+                                   --  straight path there, because that path leaves what it can reach; zero if it need not
    end record;
 
    type Arm_Goal is record

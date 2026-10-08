@@ -3646,60 +3646,16 @@ package body Driver.Robot.Tests is
       end;
    end Reach_The_Nearest_Turn;
 
-   --  The arm goes from one waypoint to the next along its joints' own
-   --  straight line, which bows from the straight line of the tool (A17's left
-   --  arm, asked for moves of 16 to 23 units in one beat, bowed by 3.7 to 14.7
-   --  of them, and the straight line is what the action layer clears
-   --  obstacles by): a reach given a clearance is cut until the tool, at the
-   --  middle of the joints' straight line, is within it of the straight path.
-   procedure Plan_Stays_Within_Its_Clearance is
-      package Fit renames Driver.Robot.Kinematics.Fit;
-      package Motion renames Driver.Robot.Motion;
-      use type Motion.Plan_Status;
-      M      : Model;
+   --  A six-joint arm for the planner's tests, its fit exact: the model, the
+   --  joints it was made of, and the readings it starts at.
+   procedure Planner_Arm (M : in out Model; Truth : out Driver.Robot.Kinematics.Fit.Joint_Array; O : out Observation;
+                          Start : Real_Array)
+   is
       Axes   : constant array (1 .. 6) of Vec3 :=
         [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
       Points : constant array (1 .. 6) of Vec3 :=
         [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
-      Truth  : Fit.Joint_Array (1 .. 6);
       Arm    : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
-      Start  : constant Real_Array (1 .. 6) := [others => 0.0];
-      Goal_Q : constant Real_Array (1 .. 6) := [1.2, -0.9, 1.1, 0.8, -1.0, 0.9];
-      O      : Observation;
-      From, Goal : Rigid;
-      Line   : Vec3;
-
-      --  How far the arm strays from the straight line from where it is to the goal, going from waypoint to
-      --  waypoint along the joints' straight lines.
-      function Stray (P : Motion.Plan) return Real is
-         Worst : Real := 0.0;
-         Back  : Real_Array (1 .. 6) := Start;
-      begin
-         for K in 1 .. Motion.Waypoint_Count (P) loop
-            declare
-               Next : constant Real_Array := Motion.Waypoint (P, K);
-            begin
-               for S in 1 .. 16 loop
-                  declare
-                     Q : Real_Array (1 .. 6);
-                  begin
-                     for J in 1 .. 6 loop
-                        Q (J) := Back (J) + (Real (S) / 16.0) * (Next (J) - Back (J));
-                     end loop;
-                     declare
-                        T   : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q);
-                        D   : constant Vec3 := T.Translation - From.Translation;
-                        Off : constant Vec3 := D - Real'(D * Line) * Line;
-                     begin
-                        Worst := Real'Max (Worst, abs Off);
-                     end;
-                  end;
-               end loop;
-               Back := Next;
-            end;
-         end loop;
-         return Worst;
-      end Stray;
    begin
       for J in 1 .. 6 loop
          declare
@@ -3718,6 +3674,63 @@ package body Driver.Robot.Tests is
       M.Graph.Arms.Append (1);
       M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => 1));
       O.Readings.Append (Start);
+   end Planner_Arm;
+
+   --  How far the arm strays from the straight line through From along Line, going from waypoint to waypoint of
+   --  the plan along the joints' straight lines, from the readings Start.
+   function Plan_Stray (M : Model; P : Driver.Robot.Motion.Plan; Start : Real_Array; From : Rigid; Line : Vec3)
+     return Real
+   is
+      Worst : Real := 0.0;
+      Back  : Real_Array (Start'Range) := Start;
+   begin
+      for K in 1 .. Driver.Robot.Motion.Waypoint_Count (P) loop
+         declare
+            Next : constant Real_Array := Driver.Robot.Motion.Waypoint (P, K);
+         begin
+            for S in 1 .. 16 loop
+               declare
+                  Q : Real_Array (Start'Range);
+               begin
+                  for J in Start'Range loop
+                     Q (J) := Back (J) + (Real (S) / 16.0) * (Next (J) - Back (J));
+                  end loop;
+                  declare
+                     T   : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q);
+                     D   : constant Vec3 := T.Translation - From.Translation;
+                     Off : constant Vec3 := D - Real'(D * Line) * Line;
+                  begin
+                     Worst := Real'Max (Worst, abs Off);
+                  end;
+               end;
+            end loop;
+            Back := Next;
+         end;
+      end loop;
+      return Worst;
+   end Plan_Stray;
+
+   --  The arm goes from one waypoint to the next along its joints' own
+   --  straight line, which bows from the straight line of the tool (A17's left
+   --  arm, asked for moves of 16 to 23 units in one beat, bowed by 3.7 to 14.7
+   --  of them, and the straight line is what the action layer clears
+   --  obstacles by): a reach given a clearance is cut until the tool, at the
+   --  middle of the joints' straight line, is within it of the straight path.
+   procedure Plan_Stays_Within_Its_Clearance is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      package Motion renames Driver.Robot.Motion;
+      use type Motion.Plan_Status;
+      M      : Model;
+      Truth  : Fit.Joint_Array (1 .. 6);
+      Start  : constant Real_Array (1 .. 6) := [others => 0.0];
+      Goal_Q : constant Real_Array (1 .. 6) := [1.2, -0.9, 1.1, 0.8, -1.0, 0.9];
+      O      : Observation;
+      From, Goal : Rigid;
+      Line   : Vec3;
+
+      function Stray (P : Motion.Plan) return Real is (Plan_Stray (M, P, Start, From, Line));
+   begin
+      Planner_Arm (M, Truth, O, Start);
       From := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Start);
       Goal := Fit.Eye_At (Truth, Goal_Q);
       Line := Unit (Goal.Translation - From.Translation);
@@ -3773,6 +3786,118 @@ package body Driver.Robot.Tests is
          end;
       end;
    end Plan_Stays_Within_Its_Clearance;
+
+   --  Two joints about parallel axes, the eye A beyond the first axis's reach of the second and B beyond that, at
+   --  readings zero: the eye is at e^(i q1) (A + B e^(i q2)) from the first axis.
+   procedure Planar_Arm (M : in out Model; Truth : out Driver.Robot.Kinematics.Fit.Joint_Array; O : out Observation;
+                         Start : Real_Array; A, B : Real)
+   is
+      Arm : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
+      Pts : constant array (1 .. 2) of Vec3 := [[-(A + B), 0.0, 0.0], [-B, 0.0, 0.0]];
+   begin
+      for J in 1 .. 2 loop
+         Truth (J) := (W => [0.0, 0.0, 1.0], P => Pts (J), C => 1.0, Slide => False);
+         Arm.Result.Joints.Append (Joint_Fit'(W => Truth (J).W, P => Truth (J).P, C => 1.0, Slide => False));
+         Arm.Result.Reference.Append (0.0);
+      end loop;
+      Arm.Result.Fitted := True;
+      Arm.Result.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Arm.Result.Sigma_Px := 0.1;
+      M.Kinematics.Append (Arm);
+      M.Groups.Append (Group_Stream'(Size => 2, Commandable => True, others => <>));
+      M.Graph.Arms.Append (1);
+      M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => 1));
+      O.Readings.Append (Start);
+   end Planar_Arm;
+
+   --  The joints' straight line can take the tool out along its path ahead of
+   --  where the straight path has it and back behind it, and be exactly on it
+   --  at the middle: two joints about parallel axes with equal links, from
+   --  readings zero to 3 and -6, put the eye on a line with its share at the
+   --  quarter well ahead and at the three quarters well behind. A chain of
+   --  halved segments can wind a joint so, though the nearest solution of one
+   --  does not. Tested at the middle alone it is not seen.
+   procedure Stray_Is_Seen_Off_The_Middle is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      package Motion renames Driver.Robot.Motion;
+      M      : Model;
+      Truth  : Fit.Joint_Array (1 .. 2);
+      O      : Observation;
+      Start  : constant Real_Array (1 .. 2) := [others => 0.0];
+      Goal_Q : constant Real_Array (1 .. 2) := [3.0, -6.0];
+   begin
+      Planar_Arm (M, Truth, O, Start, 1.0, 1.0);
+      declare
+         From   : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Start);
+         To     : constant Rigid := Fit.Eye_At (Truth, Goal_Q);
+         Middle : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, [1.5, -3.0]);
+         At_Mid : constant Real := abs (Middle.Translation - (From.Translation + To.Translation) / 2.0);
+         Seen   : constant Real := Motion.Stray (M, 1, From, To, Start, Goal_Q, Position_Only => True);
+      begin
+         Driver.Log.Line (Driver.Log.Robot, "stray test: at the middle" & Real'Image (At_Mid) & ", seen" & Real'Image (Seen));
+         Check (Seen > 2.0 * At_Mid,
+                "a bow that is on the straight path at its middle and well off it at its quarters is seen as"
+                & Real'Image (Seen) & ", the middle alone showing" & Real'Image (At_Mid));
+      end;
+   end Stray_Is_Seen_Off_The_Middle;
+
+   --  A plan that is given a clearance and cannot keep to it, for the straight
+   --  path leaves what the arm can reach, says how much it is left with: it
+   --  strays no more than the clearance, or no more than the bow it says.
+   procedure A_Bow_That_Is_Left_Is_Said is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      package Motion renames Driver.Robot.Motion;
+      use type Motion.Plan_Status;
+      M      : Model;
+      Truth  : Fit.Joint_Array (1 .. 6);
+      O      : Observation;
+      Start  : constant Real_Array (1 .. 6) := [others => 0.0];
+      Asked  : constant Real := 0.001;
+      G      : Generator;
+      Planned_Count, Left_Count, Lying : Natural := 0;
+   begin
+      Planner_Arm (M, Truth, O, Start);
+      declare
+         From  : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Start);
+         Sigma : constant Real := Driver.Robot.Kinematics.Angle_Sigma (M, 1);
+      begin
+         for K in 1 .. 200 loop
+            declare
+               Q    : Real_Array (1 .. 6);
+            begin
+               for J in 1 .. 6 loop
+                  Q (J) := 2.4 * Uniform (G) - 1.2;
+               end loop;
+               declare
+                  Goal : constant Rigid := Fit.Eye_At (Truth, Q);
+                  Held : constant Motion.Plan :=
+                    Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Goal, Position_Only => True), Clearance => Asked);
+               begin
+                  if Motion.Status (Held) = Motion.Planned and then abs (Goal.Translation - From.Translation) > Sigma then
+                     declare
+                        Line : constant Vec3 := Unit (Goal.Translation - From.Translation);
+                        Off  : constant Real := Plan_Stray (M, Held, Start, From, Line);
+                        Bow  : constant Real := Motion.Worst_Bow (Held);
+                     begin
+                        Planned_Count := Planned_Count + 1;
+                        if Bow > 0.0 then
+                           Left_Count := Left_Count + 1;
+                        end if;
+                        --  Off the straight line by more than asked is a bow, and a bow left is said.
+                        if Off > Asked + Driver.Conventions.Z * Sigma and then Bow = 0.0 then
+                           Lying := Lying + 1;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end;
+         end loop;
+         Driver.Log.Line (Driver.Log.Robot, "bow test: planned" & Planned_Count'Image & " of 200, a bow left in" & Left_Count'Image
+                          & ", strayed unsaid in" & Lying'Image);
+         Check (Left_Count > 0, "no goal here leaves a bow, so the test shows nothing");
+         Check (Lying = 0, Lying'Image & " plans stray off the straight path by more than the clearance and say they do not");
+      end;
+   end A_Bow_That_Is_Left_Is_Said;
 
    --  A fit belongs to an arm only while the graph has its group as that arm,
    --  carrying that eye: once the group stops being an arm, or the eye rides
@@ -5746,6 +5871,10 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.reach.turn", "a reach ends a joint that turns a whole period of its fit from "
                              & "where the arm is, the same pose as a reading that is not the nearest",
                              Reach_The_Nearest_Turn'Access);
+      Driver.Tests.Register ("robot.plan.stray", "a joints' straight line that is on the straight path at its middle and off it at its "
+                             & "quarters is taken to keep to it", Stray_Is_Seen_Off_The_Middle'Access);
+      Driver.Tests.Register ("robot.plan.bow", "a plan that strays off the straight path by more than its clearance does not "
+                             & "say so", A_Bow_That_Is_Left_Is_Said'Access);
       Driver.Tests.Register ("robot.plan.straight", "a reach given a clearance is not cut where the arm's joints would "
                              & "take the tool farther off the straight path than that, or one given none is cut",
                              Plan_Stays_Within_Its_Clearance'Access);

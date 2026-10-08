@@ -45,6 +45,7 @@ package Action_Rig is
       From, Asked : Rigid;
       Status      : Plants.Reach_Status := Plants.Unmeasured;
       Why         : Ada.Strings.Unbounded.Unbounded_String;
+      Bow         : Driver.Real := 0.0;   --  the bow the answer says the straight path leaves
    end record;
 
    package Reach_Vectors is new Ada.Containers.Vectors (Positive, Reach_Record);

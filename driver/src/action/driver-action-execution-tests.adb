@@ -420,6 +420,7 @@ package body Driver.Action.Execution.Tests is
    type Noting (W : not null access Sim.World) is limited new Plants.Plant with record
       Clearances : Real_Lists.Vector;
       Levers     : Real_Lists.Vector;
+      Bow        : Real := 0.0;   --  what it says every path kept within a clearance leaves of a bow
    end record;
 
    overriding procedure Look (P : in out Noting; S : out Snapshot);
@@ -441,7 +442,14 @@ package body Driver.Action.Execution.Tests is
       P.W.Within (During);
    end Within;
 
-   function Reach (P : Noting; Goal : Plants.Arm_Goal) return Plants.Reach_Answer is (P.W.Reach (Goal));
+   function Reach (P : Noting; Goal : Plants.Arm_Goal) return Plants.Reach_Answer is
+      Answer : Plants.Reach_Answer := P.W.Reach (Goal);
+   begin
+      if Goal.Clearance < Real'Last then
+         Answer.Bow := P.Bow;
+      end if;
+      return Answer;
+   end Reach;
 
    procedure Move (P : in out Noting; O : Plants.Order; R : out Plants.Report) is
    begin
@@ -505,6 +513,34 @@ package body Driver.Action.Execution.Tests is
          end;
       end loop;
    end Moves_Are_Given_What_They_May_Leave;
+
+   --  The engine clears the straight path to a pose, and a path the arm cannot
+   --  keep to it by what it can reach is not the one that was cleared: a body
+   --  that says every path kept within a clearance bows off the straight one is
+   --  not sent along any, neither straight nor over a wall.
+   procedure A_Way_The_Arm_Cannot_Keep_To_Is_Not_Taken is
+   begin
+      for Walled in Boolean loop
+         declare
+            W : aliased Sim.World;
+            P : Noting (W'Access);
+            R : Result;
+         begin
+            P.Bow := 1.0;
+            One_Gripper (W, Turned, 91);
+            Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.12, 0.4), Mu => 0.6);
+            if Walled then
+               Sim.Add_Thing (W, Block (0.02, 0.1, 0.1), On_Table (0.09, 0.0, 0.0), Mu => 0.6, Fixed => True);
+            end if;
+            Execute (P, Height_Want (1, True, Free), R);
+            Ada.Text_IO.Put_Line ("      " & Ending'Image (R.Final) & ": " & To_String (R.Account)
+                                  & (if Length (R.Tried) > 0 then " | tried: " & To_String (R.Tried) else ""));
+            Check (R.Final /= Free, "a bar is lifted along a path the arm cannot keep to");
+            Check (P.Clearances.Is_Empty, "the arm was sent" & P.Clearances.Length'Image
+                   & " moves along paths it cannot keep to");
+         end;
+      end loop;
+   end A_Way_The_Arm_Cannot_Keep_To_Is_Not_Taken;
 
    --  An arm that carries out only part of every move, and says it was
    --  stopped, is not blocked for good: asked again from where it got to, it
@@ -615,6 +651,8 @@ package body Driver.Action.Execution.Tests is
                 A_Fine_Arm_Puts_Down'Access);
       Register ("action.run.fine.over", "an arm much finer than the eyes stalls on the route over a block",
                 A_Fine_Arm_Goes_Over_And_Down'Access);
+      Register ("action.run.bowed", "a path the arm can reach only off the straight one it was cleared along is flown",
+                A_Way_The_Arm_Cannot_Keep_To_Is_Not_Taken'Access);
       Register ("action.run.over.noise", "a route over a block creeps on the beats the estimates of the thing carried "
                 & "lie inside the reach of the contact test, so a draw of the noise stalls it",
                 The_Route_Over_A_Block_Does_Not_Depend_On_The_Noise'Access);
