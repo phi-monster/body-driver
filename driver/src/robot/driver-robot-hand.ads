@@ -63,9 +63,12 @@ package Driver.Robot.Hand is
    --  as it stood under it:
    --    Loaded  the contact of the finger under the press, at the beat of the
    --            press the tip rests on (Tip_Beat);
-   --    Free    the finger unloaded, at the closer's reading: the loaded
-   --            contact less the slide the eye measured. Unknown until the
-   --            slide of the presses the tip rests on is measured.
+   --    Free    the finger unloaded, at the closer's reading: every press
+   --            taken with the tip it had slid to (the share of the lobe's
+   --            travel between its openings the eye measured under it).
+   --            Unknown until the lobe has a tip at each opening (the
+   --            travel is their difference) and the presses the tip rests
+   --            on have their slide measured.
 
    function Tip_In_Tool
      (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded)
@@ -77,10 +80,11 @@ package Driver.Robot.Hand is
    --  surface's normal is the contact's, and across the line of sight to the
    --  tip pixel the spread of the lobe's tip region as well as the eye's.
 
-   function Tip_Beat (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Driver.Clock.Beat;
-   --  The beat of the press the loaded tip rests on, the one among them that
-   --  gave the lowest hit: the finger as it stood then is the loaded tip's.
-   --  Zero when the tip is not known.
+   function Tip_Beat
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Driver.Clock.Beat;
+   --  The beat of the press the tip of that kind rests on, the one among them
+   --  that gave the lowest hit: the finger as it stood then is the loaded
+   --  tip's. Zero when the tip is not known.
 
    type Slide_Reading is record
       Beat           : Driver.Clock.Beat;   --  of the press
@@ -102,10 +106,13 @@ package Driver.Robot.Hand is
    --  Every press made at that opening, in the order they were made, with
    --  how far the lobe's finger had slid under it.
 
-   function Tip_Confirmed (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Boolean;
-   --  Tip_In_Tool's tip is checked: a second press, from a pose distinct from
-   --  the first's, landed on it within the noise. A tip one press fixes is a
-   --  bound the tip is not beyond, and the lowest one the presses gave.
+   function Tip_Confirmed
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Boolean;
+   --  Tip_In_Tool's tip of that kind is checked: a second press, from a pose
+   --  distinct from the first's, landed on it within the noise (the free tip's
+   --  holds the uncertainty of the slides the presses were corrected by). A tip
+   --  one press fixes is a bound the tip is not beyond, and the lowest one the
+   --  presses gave.
 
    function Press_Direction (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening)
      return Direction_Estimate;

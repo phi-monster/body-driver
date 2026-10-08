@@ -71,7 +71,8 @@ package body Driver.Robot.Hand.Touch.Tests is
                           Position_Covariance => (Pose_Sigma ** 2) * Identity3,
                           Rotation_Covariance => (Turn_Sigma ** 2) * Identity3),
               Sight   => Lobe,
-              Surface => 1);
+              Surface => 1,
+              others  => <>);
    end Make_Press;
 
    function Measured (Offset_Sigma, Offset_Error : Real) return Surface_Prior_Array is

@@ -106,24 +106,31 @@ package Driver.Robot.Hand.Tips is
    function Pressed (B : Book) return Natural;
    --  Every press kept, agreeing or not.
 
-   function Tip (B : Book; Lobe : Positive; At_Opening : Opening) return Point_Estimate;
+   function Tip (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Point_Estimate;
    --  The tip as the presses fix it: the lowest of their hits, unknown until
    --  a press stopped by the tip fixes it (Driver.Robot.Hand.Touch). One
    --  press fixes it and nothing has checked it: provisional, as long as it
-   --  is not Confirmed. It is the finger as it stood under the press (loaded:
-   --  Driver.Robot.Hand.Tip_Kind): along the surface's normal its covariance
-   --  is the contact's, and across the line of sight it is that of the lobe's
-   --  tip region (the sight's Spread) as well as the eye's.
+   --  is not Confirmed. Loaded, it is the finger as it stood under the press:
+   --  along the surface's normal its covariance is the contact's, and across
+   --  the line of sight it is that of the lobe's tip region (the sight's
+   --  Spread) as well as the eye's. Free, it is the finger as it stands at the
+   --  closer's reading: every press taken with the tip it had slid to
+   --  (Slides_Of: its share of the lobe's travel between its two openings, and
+   --  that travel is the difference of the tips at them), so unknown until the
+   --  lobe has a tip at each opening and the presses its tip rests on have
+   --  their slides measured; its covariance holds how well the slides are
+   --  known.
 
-   function Beat (B : Book; Lobe : Positive; At_Opening : Opening) return Driver.Clock.Beat;
+   function Beat (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Driver.Clock.Beat;
    --  The beat of the press that gave the tip, the one among those it rests
    --  on whose hit is the lowest; zero when the tip is not known.
 
-   function Confirmed (B : Book; Lobe : Positive; At_Opening : Opening) return Boolean;
+   function Confirmed (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Boolean;
    --  A second press, from a pose distinct from the first's, landed on the
-   --  tip within the noise.
+   --  tip within the noise (of the tip of that kind: the free tip's noise
+   --  holds the slides').
 
-   function Distance (B : Book; Lobe : Positive; At_Opening : Opening) return Estimate;
+   function Distance (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Estimate;
    --  How far along its line of sight from the eye the tip is, in the arm's
    --  own unit; unknown when the tip is.
 
@@ -131,7 +138,7 @@ package Driver.Robot.Hand.Tips is
    --  The direction into the surface at the presses the tip rests on, tool
    --  frame, averaged; its sigma is their spread.
 
-   function Agreeing (B : Book; Lobe : Positive; At_Opening : Opening) return Natural;
+   function Agreeing (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Natural;
    --  The presses the tip rests on.
 
    function Latest_Agrees (B : Book) return Boolean;
@@ -152,6 +159,8 @@ private
       Lobe    : Natural := 0;   --  0: not given to a lobe yet
       Agrees  : Boolean := False;
       Hit     : Real := 0.0;    --  as the last fit has it (Touch.Fit_Result.Hits); zero when not fitted
+      Agrees_Free : Boolean := False;   --  the same in the fit of the free finger, which has only the presses whose slide
+      Hit_Free    : Real := 0.0;        --  is measured
       Slides  : Slid_Vectors.Vector;   --  one per lobe, as measured under the press; none when it was not
    end record;
 
@@ -161,10 +170,11 @@ private
                                                                  Driver.Robot.Hand.Touch."=");
 
    type Book is record
-      Sights : Table_Holders.Holder;
-      Kept   : Kept_Vectors.Vector;
-      Table  : Driver.Geometry.Plane_Estimate;   --  the prior surface, as Set_Surface was given it
-      Fitted : Fit_Holders.Holder;
+      Sights  : Table_Holders.Holder;
+      Kept    : Kept_Vectors.Vector;
+      Table   : Driver.Geometry.Plane_Estimate;   --  the prior surface, as Set_Surface was given it
+      Fitted  : Fit_Holders.Holder;               --  the finger as it stood under each press (loaded)
+      Free    : Fit_Holders.Holder;               --  and as it stands free, of the presses whose slide is measured
    end record;
 
 end Driver.Robot.Hand.Tips;

@@ -1176,15 +1176,13 @@ package body Driver.Robot.Hand is
      (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded)
      return Point_Estimate
    is
-      Unmeasured : Point_Estimate;
    begin
-      return (case Kind is
-                 when Loaded => Driver.Robot.Hand.Tips.Tip (Found (H, Id).Book, Lobe, At_Opening),
-                 when Free   => Unmeasured);
+      return Driver.Robot.Hand.Tips.Tip (Found (H, Id).Book, Lobe, At_Opening, Kind);
    end Tip_In_Tool;
 
-   function Tip_Beat (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Driver.Clock.Beat is
-     (Driver.Robot.Hand.Tips.Beat (Found (H, Id).Book, Lobe, At_Opening));
+   function Tip_Beat
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Driver.Clock.Beat is
+     (Driver.Robot.Hand.Tips.Beat (Found (H, Id).Book, Lobe, At_Opening, Kind));
 
    function Slides (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Slide_Readings is
       Kept : constant Driver.Robot.Hand.Tips.Press_Slides :=
@@ -1200,8 +1198,9 @@ package body Driver.Robot.Hand is
                                 Fraction_Sigma => K.Slid.Fraction_Sigma)];
    end Slides;
 
-   function Tip_Confirmed (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Boolean is
-     (Driver.Robot.Hand.Tips.Confirmed (Found (H, Id).Book, Lobe, At_Opening));
+   function Tip_Confirmed
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Boolean is
+     (Driver.Robot.Hand.Tips.Confirmed (Found (H, Id).Book, Lobe, At_Opening, Kind));
 
    function Press_Direction (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening)
      return Direction_Estimate is

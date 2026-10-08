@@ -666,6 +666,41 @@ where it was raised to: the presses aim from wherever the arm stands. A19
 (8597f62) lost its first press the same way (`a press with the closer at neither
 measured opening is not used`, blocked after lowering 5.1 units).
 
+**Lesson: the free finger is the loaded fit with each press taken with the tip
+it had slid to.** A press loads its finger, and the finger gives way along its
+own axis (A16: 5 and 17.5 mm inward, the closer's reading exactly where it was).
+What a press fixes is the contact of the finger as it stood under it (the
+loaded tip), and the finger as it stands free at the closer's reading (the free
+tip, which is what a hand opened to that reading brings to a surface) is that
+less the slide. The slide of a press is a share of the lobe's travel between its
+two openings (`Slide.Measure`: positive inward, towards the closed end), and the
+travel is the difference of the lobe's tips at the two openings, so the free tip
+of a lobe is unknown until the lobe has a tip at each opening and until the
+presses its tip rests on have their slide measured (A16, A17 and A22 pressed the
+open opening first, the closed after all the open ones).
+
+The free fit is the loaded one with a vector on each press (`Touch.Press.Slide`,
+`Slide_Covariance`): the press's height above the surface is that of the tip the
+finger had slid to, `n . (R (x + s) + t)`, with `x` the free tip on its line of
+sight and `s` the share times the travel; `s` is in the equation's constant, in
+the equation's variance (`Lift' Cov Lift`, Cov the share's variance times the
+travel twice over plus the share squared times the travel's own), and in the hit
+the press gives. The travel comes from the tips of the loaded fit, each of which
+holds its own slides, and then from the free tips of the first pass: two passes,
+since the shares are of the free travel. The presses of a lobe with nothing
+measured of their slide are left out of the free fit, not taken for unslid ones.
+The free tip is confirmed (`Confirmed (Free)`) when two presses at poses apart,
+each taken with its slide, land on it within the noise the slides' uncertainty
+makes.
+
+`hand.tips.free` on two fingers that slide inward 12 and 28 per cent of their
+travel (3 and 9 mm) under every press, 12 presses a tip, at both openings: the
+loaded tips are 2.0 to 7.3 mm off the free fingers, the free tips 0.0007 to
+0.06 mm off (their sigma 0.12 to 0.16 mm), and confirmed; pressed at one
+opening only, or with nothing measured of the slides, there is a loaded tip and
+no free one. The API: `Tip_In_Tool`, `Tip_Beat` and `Tip_Confirmed` of a hand
+take `Kind` (`Loaded`, the default, or `Free`).
+
 **Lesson: a line of sight that meets the surface behind the eye is not a tip
 (A19).** A press aimed at lobe 1 (0.956 rad) and given by its direction to lobe
 2 fitted lobe 2's tip -79.4 units along its sight, a point behind the eye (`a
