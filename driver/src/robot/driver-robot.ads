@@ -17,7 +17,8 @@
 --  estimates follow from a recording of any driver. The heavier estimates
 --  (roles, kinematics) are recomputed by Observe whenever the evidence
 --  behind them has doubled, and a decider may ask for them at once with
---  Estimate_Now.
+--  Estimate_Now; the main program has them computed apart from its loop
+--  (Compute_Apart).
 --
 --  Before a quantity is measured it reads as an unmeasured body reports it,
 --  never as an exception, so callers can ask from the first beat: role
@@ -84,9 +85,28 @@ package Driver.Robot is
    procedure Estimate_Now (M : in out Model);
    --  Recomputes the heavier estimates from everything observed so far.
    --  Deciders call it between Driver.Beats.Next and Send; it can take
-   --  seconds, during which the robot holds. The call goes into the
+   --  minutes, during which the robot holds. The call goes into the
    --  recording (Driver.Recording, kind E), so a replay recomputes where
-   --  the run did.
+   --  the run did. When the estimates are computed apart (Compute_Apart),
+   --  it marks them due and waits in Driver.Beats.Wait_For_Estimates: it
+   --  returns in a later held beat, with them in the model, so a beat number
+   --  or an observation read before the call is no longer the latest after it.
+
+   procedure Compute_Apart (M : in out Model);
+   --  From now on Observe and Estimate_Now do not compute the heavier
+   --  estimates but mark them due (Estimates_Due), for whoever holds the
+   --  model to compute them (Compute_Estimates): the main program, through
+   --  Driver.Apart, gives the model to a task of its own for that and answers
+   --  the robot every beat meanwhile, and a replay computes them in place, at
+   --  the same point of the stream.
+
+   function Estimates_Due (M : Model) return Boolean;
+   --  The heavier estimates are due: the evidence behind them has doubled,
+   --  or a decider asked (Estimate_Now). Always False unless computed apart.
+
+   procedure Compute_Estimates (M : in out Model);
+   --  Computes the heavier estimates now, due or not, and they are no longer
+   --  due. The caller holds the model alone meanwhile.
 
    function Booted (M : Model) return Boolean;
    --  The kinematics of every arm that carries an eye are measured.
@@ -595,6 +615,8 @@ private
       Kinematics     : Arm_Evidence_Vectors.Vector;   --  per arm with an eye
       Fixed_Eyes     : Fixed_Fit_Vectors.Vector;     --  per eye: what is measured of it when it is fixed in the world
       Is_Booted      : Boolean := False;
+      Apart          : Boolean := False;   --  the heavier estimates are computed apart (Compute_Apart)
+      Due            : Boolean := False;   --  computed apart: they are due
       From_File      : Stored_Flags := [others => False];   --  reloaded, so not measured again (Load_Body)
       Report         : Ada.Strings.Unbounded.Unbounded_String;   --  what the last estimate found, for Describe
    end record;

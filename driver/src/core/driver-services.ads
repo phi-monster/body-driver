@@ -41,8 +41,10 @@ package Driver.Services is
 
    type Ticket is private;
 
-   --  Submit is for the estimators, which all run on the main loop; deciders
-   --  use the blocking calls.
+   --  Submit is for the estimators, which run on one task at a time (the main
+   --  loop, or the task the models are given to while their heavier
+   --  estimates are computed apart, Driver.Apart); deciders use the blocking
+   --  calls.
    function Submit (S : Service; Path : String; Request : String; Beat : Driver.Clock.Beat) return Ticket;
    function Ready (T : Ticket) return Boolean;
    function Collect (T : Ticket) return Reply

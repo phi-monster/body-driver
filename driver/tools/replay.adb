@@ -12,6 +12,9 @@
 --  even after the run rewrote the file. Every estimate a decider
 --  asked for at once is in the recording too (kind E) and is made at the
 --  same point, and so is every write a decider made into the world (kind W).
+--  Where the run computed the heavier estimates apart from its main loop
+--  (kinds K, A, B), the models are given each message where the run gave it
+--  to them (Driver.Apart), and the estimates are computed in place there.
 --  With --estimates, every beat after boot writes
 --  one JSON line with each arm's tool pose and each eye's pose (row-major 4 x 4,
 --  world frame); two last lines hold, for each eye, the lines of sight of a
@@ -32,10 +35,12 @@
 --  runs.
 
 with Ada.Command_Line;
+with Ada.Exceptions;
 with Ada.Containers.Indefinite_Ordered_Maps;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
 with Ada.Strings.Unbounded;
+with Driver.Apart;
 with Driver.Bytes;
 with Driver.Clock;
 with Driver.Commands;
@@ -102,7 +107,7 @@ procedure Replay is
    end Pose_Json;
 
    procedure Write_Beat (O : Driver.Observations.Observation) is
-      Line_Text : Unbounded_String := To_Unbounded_String ("{""beat"":" & Natural'Image (Beat) & ",""tools"":[");
+      Line_Text : Unbounded_String := To_Unbounded_String ("{""beat"":" & Natural'Image (Natural (O.Beat)) & ",""tools"":[");
    begin
       for A in 1 .. Driver.Robot.Arm_Count (Robot) loop
          Append (Line_Text, (if A > 1 then "," else "")
@@ -234,42 +239,102 @@ procedure Replay is
    end Write_Rays;
 
 
+   --  What a robot message gives the models, as in the main program: a new
+   --  episode, and an observation with the command in effect while it was
+   --  captured. The parts are given as the run gave them (Driver.Apart).
+   type Input (Observed : Boolean := False) is record
+      Reset : Boolean := False;
+      Sent  : Driver.Commands.Command := Driver.Commands.Hold;
+      case Observed is
+         when True  => O : Driver.Observations.Observation;
+         when False => null;
+      end case;
+   end record;
+
+   procedure Robot_Part (M : Input) is
+   begin
+      if M.Reset then
+         Episodes := Episodes + 1;
+         Driver.World.New_Episode (Scene);
+      end if;
+      if M.Observed then
+         Driver.Services.Replay_Beat (M.O.Beat);
+         Driver.Robot.Observe (Robot, M.O, M.Sent);
+      end if;
+   end Robot_Part;
+
+   procedure Rest (M : Input) is
+   begin
+      if M.Observed then
+         Driver.Robot.Hand.Observe (Hands, Robot, M.O, M.Sent);
+         Driver.World.Observe (Scene, Robot, Hands, M.O, M.Sent);
+         if Length (Estimates) > 0 and then Driver.Robot.Booted (Robot) then
+            Write_Beat (M.O);
+            Last_Obs := M.O;
+         end if;
+      end if;
+   end Rest;
+
+   function Due return Boolean is (Driver.Robot.Estimates_Due (Robot));
+
+   procedure Compute is
+   begin
+      Driver.Robot.Compute_Estimates (Robot);
+   end Compute;
+
+   procedure Never (E : Ada.Exceptions.Exception_Occurrence) is null;
+   --  A replay computes in place; the estimator task of the main program
+   --  never runs here.
+
+   package Apart is new Driver.Apart (Input, Robot_Part, Rest, Due, Compute, Never);
+
    procedure Robot_Message (Data : Driver.Bytes.Byte_Array) is
       Req : Driver.Protocol.Request;
       Ok  : Boolean;
-      O   : Driver.Observations.Observation;
    begin
       Driver.Protocol.Decode (Data, Req, Ok);
       if not Ok then
          Line (Core, "an undecodable robot message is skipped");
          return;
       end if;
-      if Req.Kind = Driver.Protocol.Reset then
-         Episodes := Episodes + 1;
-         Driver.World.New_Episode (Scene);
-      end if;
-      if Driver.Protocol.Has_Observation (Req) then
-         if not Known then
-            Driver.Observations.Recognize (Req.Doc, Req.Observation, Layout, Known);
-            if Known then
-               Line (Core, "layout:" & ASCII.LF & Driver.Observations.Describe (Layout));
-            end if;
-         end if;
+      if Driver.Protocol.Has_Observation (Req) and then not Known then
+         Driver.Observations.Recognize (Req.Doc, Req.Observation, Layout, Known);
          if Known then
-            Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), O);
-            Current := O;
-            Driver.Services.Replay_Beat (Driver.Clock.Beat (Beat));
-            Driver.Robot.Observe (Robot, O, Sent);
-            Driver.Robot.Hand.Observe (Hands, Robot, O, Sent);
-            Driver.World.Observe (Scene, Robot, Hands, O, Sent);
-            if Length (Estimates) > 0 and then Driver.Robot.Booted (Robot) then
-               Write_Beat (O);
-               Last_Obs := O;
-            end if;
+            Line (Core, "layout:" & ASCII.LF & Driver.Observations.Describe (Layout));
+         end if;
+      end if;
+      declare
+         Observed : constant Boolean := Driver.Protocol.Has_Observation (Req) and then Known;
+         M        : Input (Observed);
+      begin
+         M.Reset := Req.Kind = Driver.Protocol.Reset;
+         M.Sent := Sent;
+         if Observed then
+            Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), M.O);
+            Current := M.O;
             Beat := Beat + 1;
          end if;
-      end if;
+         Apart.Replay_Message (M);
+      end;
    end Robot_Message;
+
+   procedure Taken_In is
+      Ok : Boolean;
+   begin
+      Apart.Replay_Taken_In (Ok);
+      if not Ok then
+         Line (Core, "the recording gives the models a message where nothing was kept back; this code and the run disagree");
+      end if;
+   end Taken_In;
+
+   procedure Back is
+      Ok : Boolean;
+   begin
+      Apart.Replay_Back (Ok);
+      if not Ok then
+         Line (Core, "the models came back in the recording with messages never given to them; this code and the run disagree");
+      end if;
+   end Back;
 
    procedure Driver_Message (Data : Driver.Bytes.Byte_Array) is
       use Driver.Msgpack;
@@ -423,6 +488,7 @@ begin
       Ada.Text_IO.Create (Out_File, Ada.Text_IO.Out_File, To_String (Estimates));
    end if;
    Report_Services;
+   Driver.Robot.Compute_Apart (Robot);
    Driver.Services.Start_Replay (Driver.Services."not" (Live));
    Driver.Recording.Open (R, To_String (Path), Opened);
    if not Opened then
@@ -438,19 +504,23 @@ begin
          when Driver.Recording.Driver_Message => Payload.Query (Driver_Message'Access);
          when Driver.Recording.Service_Request => Payload.Query (Service_Request'Access);
          when Driver.Recording.Service_Reply   => Payload.Query (Service_Reply'Access);
-         when Driver.Recording.File_Read       => Payload.Query (File_Read'Access);
-         when Driver.Recording.Estimates_Asked => Driver.Robot.Estimate_Now (Robot);
-         when Driver.Recording.World_Written   => Payload.Query (World_Write'Access);
+         when Driver.Recording.File_Read       => Apart.Replay_Decider; Payload.Query (File_Read'Access);
+         when Driver.Recording.Estimates_Asked => Apart.Replay_Decider; Compute;
+         when Driver.Recording.World_Written   => Apart.Replay_Decider; Payload.Query (World_Write'Access);
+         when Driver.Recording.Estimates_Apart => Apart.Replay_Apart;
+         when Driver.Recording.Taken_In        => Taken_In;
+         when Driver.Recording.Estimates_Back  => Back;
          when others                          => null;
       end case;
    end loop;
    Driver.Recording.Close (R);
+   Apart.Replay_End;
    Line (Core, "replayed" & Natural'Image (Beat) & " beats," & Natural'Image (Commanded_Beats)
          & " actions," & Natural'Image (Episodes) & " episode resets");
    if Length (Body_File) > 0 then
       --  The live boot saves after a final estimate; without one here the
       --  body would miss what the last beats added (the final keyframes).
-      Driver.Robot.Estimate_Now (Robot);
+      Compute;
       Driver.Robot.Boot.Save (Robot, Hands, To_String (Body_File));
    end if;
    if Length (Estimates) > 0 then

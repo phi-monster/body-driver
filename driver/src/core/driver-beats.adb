@@ -97,6 +97,48 @@ package body Driver.Beats is
 
    function Held return Boolean is (Channel.Is_Held);
 
+   --  Estimates a decider asked for and the main loop has adopted, counted:
+   --  an adoption the decider has not yet waited for is not lost, and one
+   --  nobody asked for (the main loop's own) wakes nobody.
+   protected Estimates is
+      procedure Ask;
+      procedure Adopt;
+      entry Wait;
+   private
+      Asked, Adopted : Natural := 0;
+   end Estimates;
+
+   protected body Estimates is
+      procedure Ask is
+      begin
+         Asked := Asked + 1;
+      end Ask;
+
+      procedure Adopt is
+      begin
+         Adopted := Asked;
+      end Adopt;
+
+      entry Wait when Adopted >= Asked is
+      begin
+         null;
+      end Wait;
+   end Estimates;
+
+   procedure Wait_For_Estimates is
+      Beat : Driver.Clock.Beat;
+   begin
+      Estimates.Ask;
+      Send (Driver.Commands.Hold);
+      Estimates.Wait;
+      Next (Beat);
+   end Wait_For_Estimates;
+
+   procedure Estimates_Adopted is
+   begin
+      Estimates.Adopt;
+   end Estimates_Adopted;
+
    procedure Within_A_Beat (During : not null access procedure) is
       Beat : Driver.Clock.Beat;
    begin

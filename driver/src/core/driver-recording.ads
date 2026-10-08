@@ -7,8 +7,11 @@
 --  Kinds: R robot to driver, D driver to robot (binary messages), r and d the
 --  same for text messages, C a new robot connection, S a service request,
 --  T a service reply, F a file the driver read, E a decider's call for the
---  estimates at once (Driver.Robot.Estimate_Now, no payload) and W a
---  decider's write into the world (Driver.World.Replay_Write). A service record starts
+--  estimates at once (Driver.Robot.Estimate_Now, no payload), W a
+--  decider's write into the world (Driver.World.Replay_Write), and, while the
+--  heavier estimates are computed apart from the main loop (Driver.Apart, no
+--  payloads), K where the models went apart, A each part of a message the
+--  estimator gave them and B where the main loop took them back. A service record starts
 --  with a line naming the call: the service, its call number (which pairs a
 --  reply with its request) and, for a call an estimator submitted, "beat"
 --  and the beat it was submitted at. A request goes on with the path, LF,
@@ -25,7 +28,7 @@ package Driver.Recording is
 
    type Record_Kind is
      (Robot_Message, Driver_Message, Robot_Text, Driver_Text, Connection, Service_Request, Service_Reply,
-      File_Read, Estimates_Asked, World_Written);
+      File_Read, Estimates_Asked, World_Written, Estimates_Apart, Taken_In, Estimates_Back);
 
    type Reader is limited private;
 
