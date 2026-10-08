@@ -633,6 +633,31 @@ package body Driver.Robot.Hand.Touch is
             Result.Planes (F) := Prior (F).Plane;
          end if;
       end loop;
+      --  Each press's hit, left out or not: how far along its tip's line the
+      --  line meets the surface from the press's pose.
+      if As = On_Sight then
+         for I in Presses'Range loop
+            declare
+               S : constant Positive := Sight_Of (Presses (I));
+               F : constant Positive := Surface_Of (Presses (I));
+            begin
+               if Column_Of_Sight (S) > 0 and then Geometry.Known (Result.Planes (F)) then
+                  declare
+                     U    : constant Vec3 := Line (S).Direction.Unit_Vector;
+                     Y    : constant Vec3 := Presses (I).Tool.Pose * Tip_At (S);
+                     N    : constant Vec3 := Result.Planes (F).Normal;
+                     Over : constant Real := N * (Y - Result.Planes (F).Centre);
+                     Rate : constant Real := (Transpose (Presses (I).Tool.Pose.Rotation) * N) * U;
+                  begin
+                     --  The height changes by Rate for each unit along the line.
+                     if Rate < 0.0 then
+                        Result.Hits (I - Presses'First + 1) := Tip_Q (S) - Over / Rate;
+                     end if;
+                  end;
+               end if;
+            end;
+         end loop;
+      end if;
       return Done;
    end Fit;
 

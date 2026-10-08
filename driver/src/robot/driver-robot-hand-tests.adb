@@ -11,6 +11,7 @@ with Driver.Robot.Hand.Presses.Tests;
 with Driver.Robot.Hand.Pressing.Tests;
 with Driver.Robot.Hand.Selfsight.Tests;
 with Driver.Robot.Hand.Shape.Tests;
+with Driver.Robot.Hand.Slide.Tests;
 with Driver.Robot.Hand.Tips.Tests;
 with Driver.Robot.Hand.Sweep.Tests;
 with Driver.Robot.Hand.Touch.Tests;
@@ -194,6 +195,20 @@ package body Driver.Robot.Hand.Tests is
       Check (Over > Bound and then Over <= Last_Step,
              "(c) an obstacle the prediction misses was met with an overshoot of" & Over'Image
              & ", not by the fast step past the bound");
+      --  (e) the press that fixed the tip was stopped above the surface by something under it, so
+      --  the prediction is a bound and the surface is 10 below where it says. The band ends, the steps
+      --  double again, and the surface is met within a doubling's worth of steps more than (a) takes,
+      --  not by creeping at the band's size to the end of the room (A17's second press).
+      Predicted := 10.0;
+      Predict := True;
+      Press (10.2);
+      Check (Over > 0.0 and then Over <= Last_Step, "(e) the surface 10 below the predicted contact was not met by a step");
+      Check (Total (Steps) <= Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (10.2 / Least, 2.0)))
+                              + 2 * Natural (Real'Ceiling (Z)) + Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (10.2 / Sigma, 2.0)))
+                              + 3,
+             "(e) the press took" & Steps.Fast'Image & " fast," & Steps.Band'Image & " banded and" & Steps.Blind'Image
+             & " blind steps to reach a surface 10 below the prediction");
+      Check (Steps.Blind > 0, "(e) the steps past the band were not doubling again");
    end Press_Overshoot;
 
    procedure Eye_Room_Caps_The_Steps is
@@ -216,10 +231,13 @@ package body Driver.Robot.Hand.Tests is
       Lowest : Real := Real'Last;   --  the eye's height at its lowest
       Steps  : Descent_Steps;
       Pushes : Natural := 0;
+      Slides : Boolean := False;   --  the hand slides: its steps are reached and lower nothing
       procedure Lower (By : Real; Reached : out Boolean) is
       begin
          Pushes := Pushes + 1;
-         Tip := Tip - By;
+         if not Slides then
+            Tip := Tip - By;
+         end if;
          Lowest := Real'Min (Lowest, Tip + 0.05);
          Reached := Pushes < 40;   --  the arm gives way until the test ends it
       end Lower;
@@ -241,6 +259,16 @@ package body Driver.Robot.Hand.Tests is
       Descend (Above'Access, Least, Lower'Access, Steps);
       Check (not Steps.Spent and then Steps.Capped = 0 and then Pushes = 40,
              "with the eye's height unknown the steps were stopped: " & Pushes'Image & " pushes");
+      --  (d) steps the arm reaches, none of which lowers the eye (a hand that slides along the table
+      --  it met, as A17's did for 6000 beats): the eye's room stays, and the steps end on the schedule
+      --  that covers it, doubling from Least, a step cut to the room and one that finds none: 10 here.
+      Known_Eye := True;
+      Pushes := 0;
+      Tip := 0.2;
+      Slides := True;
+      Descend (Above'Access, Least, Lower'Access, Steps);
+      Check (Steps.Spent and then Pushes <= 10 and then Pushes >= 8,
+             "steps that did not lower the eye went on for" & Pushes'Image & " pushes, not the schedule's 10");
    end Eye_Room_Caps_The_Steps;
 
    procedure Roles_Re_Read is
@@ -352,6 +380,7 @@ package body Driver.Robot.Hand.Tests is
       Driver.Robot.Hand.Sweep.Tests.Register;
       Driver.Robot.Hand.Presses.Tests.Register;
       Driver.Robot.Hand.Pressing.Tests.Register;
+      Driver.Robot.Hand.Slide.Tests.Register;
       Driver.Robot.Hand.Touch.Tests.Register;
       Driver.Robot.Hand.Tips.Tests.Register;
       Driver.Robot.Hand.Shape.Tests.Register;

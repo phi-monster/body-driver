@@ -82,11 +82,17 @@ package Driver.Robot.Hand.Touch is
 
    type Agreement is array (Positive range <>) of Boolean;
 
+   type Hit_Array is array (Positive range <>) of Real;
+
    type Fit_Result (Presses, Sights, Surfaces : Natural) is record
       Ok      : Boolean := False;
       Tips    : Tip_Fit_Array (1 .. Sights);
       Planes  : Plane_Array (1 .. Surfaces);   --  each surface as the presses and its prior found it
       Agrees  : Agreement (1 .. Presses) := [others => False];   --  each press, in order, is one a tip rests on
+      Hits    : Hit_Array (1 .. Presses) := [others => 0.0];
+      --  each press, in order, left out or not (On_Sight): how far along its
+      --  tip's line the line meets the surface from the press's pose; zero
+      --  when its tip is not fitted
    end record;
 
    function Fit

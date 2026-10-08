@@ -21,6 +21,7 @@
 
 with Ada.Containers.Indefinite_Holders;
 with Ada.Containers.Vectors;
+with Driver.Clock;
 with Driver.Geometry;
 with Driver.Robot.Hand.Presses;
 with Driver.Robot.Hand.Touch;
@@ -28,8 +29,14 @@ with Driver.Robot.Hand.Touch;
 package Driver.Robot.Hand.Tips is
 
    type Sight_Of is record
-      Known : Boolean := False;
-      Ray   : Ray_Estimate;    --  tool frame
+      Known  : Boolean := False;
+      Ray    : Ray_Estimate;    --  tool frame
+      Spread : Real := 0.0;
+      --  How far from that line the lobe's tip lies, per axis across it, as
+      --  an angle seen from the eye: the root mean square, over the lobe's
+      --  pixels in the cap at its tip, of their distance from the tip pixel.
+      --  The tip a press gives lies on the line; the point of the lobe that
+      --  touches is somewhere in the cap.
    end record;
 
    type Lobe_Sights is array (Opening) of Sight_Of;
@@ -57,8 +64,43 @@ package Driver.Robot.Hand.Tips is
    --  and all are fitted again (Moved). A press made when the arm's pose was
    --  not known keeps the pose it has.
 
-   procedure Add (B : in out Book; Press : Driver.Robot.Hand.Presses.Event; At_Opening : Opening);
-   --  A press made with the closer at that opening.
+   type Slid is record
+      Known          : Boolean := False;
+      Pixels         : Real := 0.0;         --  how far the lobe's tip region moved in its eye, along the way it closes
+      Pixels_Sigma   : Real := Real'Last;   --  in; positive is inward
+      Fraction       : Real := 0.0;         --  and as a share of the travel between its openings in that picture
+      Fraction_Sigma : Real := Real'Last;
+   end record;
+   --  How far a lobe's finger stood from where the closer's reading puts it
+   --  at a press (Driver.Robot.Hand.Slide).
+
+   type Slid_Row is array (Positive range <>) of Slid;
+   --  One per lobe.
+
+   No_Slides : constant Slid_Row (1 .. 0) := [];
+
+   procedure Add
+     (B          : in out Book;
+      Press      : Driver.Robot.Hand.Presses.Event;
+      At_Opening : Opening;
+      Slides     : Slid_Row := No_Slides);
+   --  A press made with the closer at that opening, and how far each lobe's
+   --  finger stood from where the closer's reading puts it under it, when
+   --  that was measured.
+
+   type Press_Slide is record
+      Beat    : Driver.Clock.Beat;
+      Contact : Boolean;   --  the press went to this lobe: it was the one that pressed
+      Agrees  : Boolean;   --  and the tip rests on it
+      Slid    : Driver.Robot.Hand.Tips.Slid;
+   end record;
+
+   type Press_Slides is array (Positive range <>) of Press_Slide;
+
+   function Slides_Of (B : Book; Lobe : Positive; At_Opening : Opening) return Press_Slides;
+   --  How far the lobe's finger stood from where the closer's reading puts it
+   --  at every press made at that opening, in the order they were made: the
+   --  finger's compliance under what each press loaded it with.
 
    function Lobes (B : Book) return Natural;
    function Pressed (B : Book) return Natural;
@@ -68,7 +110,14 @@ package Driver.Robot.Hand.Tips is
    --  The tip as the presses fix it: the lowest of their hits, unknown until
    --  a press stopped by the tip fixes it (Driver.Robot.Hand.Touch). One
    --  press fixes it and nothing has checked it: provisional, as long as it
-   --  is not Confirmed.
+   --  is not Confirmed. It is the finger as it stood under the press (loaded:
+   --  Driver.Robot.Hand.Tip_Kind): along the surface's normal its covariance
+   --  is the contact's, and across the line of sight it is that of the lobe's
+   --  tip region (the sight's Spread) as well as the eye's.
+
+   function Beat (B : Book; Lobe : Positive; At_Opening : Opening) return Driver.Clock.Beat;
+   --  The beat of the press that gave the tip, the one among those it rests
+   --  on whose hit is the lowest; zero when the tip is not known.
 
    function Confirmed (B : Book; Lobe : Positive; At_Opening : Opening) return Boolean;
    --  A second press, from a pose distinct from the first's, landed on the
@@ -95,11 +144,15 @@ package Driver.Robot.Hand.Tips is
 
 private
 
+   package Slid_Vectors is new Ada.Containers.Vectors (Positive, Slid);
+
    type Kept is record
       Event   : Driver.Robot.Hand.Presses.Event;
       Opening : Hand.Opening;
       Lobe    : Natural := 0;   --  0: not given to a lobe yet
       Agrees  : Boolean := False;
+      Hit     : Real := 0.0;    --  as the last fit has it (Touch.Fit_Result.Hits); zero when not fitted
+      Slides  : Slid_Vectors.Vector;   --  one per lobe, as measured under the press; none when it was not
    end record;
 
    package Kept_Vectors is new Ada.Containers.Vectors (Positive, Kept);

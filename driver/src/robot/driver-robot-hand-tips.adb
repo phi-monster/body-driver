@@ -82,9 +82,35 @@ package body Driver.Robot.Hand.Tips is
          if Index = 0 or else not B.Fitted.Element.Tips (Index).Ok then
             return Unmeasured;
          end if;
-         return B.Fitted.Element.Tips (Index).Tip;
+         declare
+            Fitted : constant Driver.Robot.Hand.Touch.Tip_Fit := B.Fitted.Element.Tips (Index);
+            Sight  : constant Sight_Of := Sights_Of (B) (Lobe) (At_Opening);
+            U      : constant Vec3 := Sight.Ray.Direction.Unit_Vector;
+            Across : constant Real := Fitted.Distance.Value * Sight.Spread;
+         begin
+            --  The contact is somewhere in the lobe's tip region, which across the
+            --  line of sight the eye does not see the depth of.
+            return (Mean       => Fitted.Tip.Mean,
+                    Covariance => Fitted.Tip.Covariance + Across ** 2 * (Identity3 - Outer (U, U)));
+         end;
       end;
    end Tip;
+
+   function Beat (B : Book; Lobe : Positive; At_Opening : Opening) return Driver.Clock.Beat is
+      Result : Driver.Clock.Beat := 0;
+      Lowest : Real := Real'Last;
+   begin
+      if not Known (Tip (B, Lobe, At_Opening)) then
+         return 0;
+      end if;
+      for K of B.Kept loop
+         if K.Agrees and then K.Lobe = Lobe and then K.Opening = At_Opening and then K.Hit < Lowest then
+            Lowest := K.Hit;
+            Result := K.Event.Beat;
+         end if;
+      end loop;
+      return Result;
+   end Beat;
 
    function Confirmed (B : Book; Lobe : Positive; At_Opening : Opening) return Boolean is
    begin
@@ -203,6 +229,7 @@ package body Driver.Robot.Hand.Tips is
                   K : Kept := B.Kept (I);
                begin
                   K.Agrees := False;
+                  K.Hit := 0.0;
                   B.Kept.Replace_Element (I, K);
                end;
             end loop;
@@ -212,6 +239,7 @@ package body Driver.Robot.Hand.Tips is
                      K : Kept := B.Kept (Of_Kept (P));
                   begin
                      K.Agrees := F.Agrees (P);
+                     K.Hit := F.Hits (P);
                      B.Kept.Replace_Element (Of_Kept (P), K);
                   end;
                end loop;
@@ -338,10 +366,46 @@ package body Driver.Robot.Hand.Tips is
       Settle (B);
    end Set_Frame;
 
-   procedure Add (B : in out Book; Press : Driver.Robot.Hand.Presses.Event; At_Opening : Opening) is
+   procedure Add
+     (B          : in out Book;
+      Press      : Driver.Robot.Hand.Presses.Event;
+      At_Opening : Opening;
+      Slides     : Slid_Row := No_Slides)
+   is
+      Row : Slid_Vectors.Vector;
    begin
-      B.Kept.Append (Kept'(Event => Press, Opening => At_Opening, Lobe => 0, Agrees => False));
+      for S of Slides loop
+         Row.Append (S);
+      end loop;
+      B.Kept.Append (Kept'(Event => Press, Opening => At_Opening, Lobe => 0, Agrees => False, Hit => 0.0,
+                           Slides => Row));
       Settle (B);
    end Add;
+
+   function Slides_Of (B : Book; Lobe : Positive; At_Opening : Opening) return Press_Slides is
+      Total : Natural := 0;
+   begin
+      for K of B.Kept loop
+         if K.Opening = At_Opening then
+            Total := Total + 1;
+         end if;
+      end loop;
+      declare
+         Result : Press_Slides (1 .. Total);
+         Next   : Natural := 0;
+      begin
+         for K of B.Kept loop
+            if K.Opening = At_Opening then
+               Next := Next + 1;
+               Result (Next) :=
+                 (Beat    => K.Event.Beat,
+                  Contact => K.Lobe = Lobe,
+                  Agrees  => K.Agrees and then K.Lobe = Lobe,
+                  Slid    => (if Lobe <= Natural (K.Slides.Length) then K.Slides (Lobe) else Slid'(others => <>)));
+            end if;
+         end loop;
+         return Result;
+      end;
+   end Slides_Of;
 
 end Driver.Robot.Hand.Tips;

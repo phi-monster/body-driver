@@ -258,6 +258,19 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  press would be in a frame that has moved.
    --  False when the arm cannot reach it or the body does not say where down
    --  is, or the eye had no room left above the table and nothing was met.
+   --  The closer's readings are those of the opening, within their noise and not those of the other.
+   function Closer_At (R : Hand_Record; Which : Opening) return Boolean is
+      Now  : Driver.Robot.Hand.Views.Reading_Holders.Holder;
+      Seen : Opening;
+      procedure Read_Closer (O : Observation) is
+      begin
+         Now := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (O.Readings.Element (R.Group));
+      end Read_Closer;
+   begin
+      Hold_Beat (Read_Closer'Access);
+      return Opening_Of (R, M, Now.Element, Seen) and then Seen = Which;
+   end Closer_At;
+
    function Press_Once (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening; Along : Vec3) return Boolean is
       Aimed  : Driver.Robot.Hand.Pressing.Aimed;
       Plan   : Driver.Robot.Motion.Plan;
@@ -336,6 +349,18 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Driver.Robot.Motion.Follow (M, Plan, Report);
       Hold_Beat (Read_Arm'Access);
       Aim_At := Arm_Now;
+      --  The closer is at the opening the press is made at, or is brought there first: a press made
+      --  while the closer is on its way is a press at no opening (A17's first press, at 0.686 of an
+      --  opening at 1.0: the finger that held it back was off the table only once the aim turned the
+      --  hand). It is asked once more, and if it does not come, no press is made.
+      if not Closer_At (R, Which) then
+         Move_Group (R.Group, R.Readings (Which).Element);
+         if not Closer_At (R, Which) then
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the closer of lobe" & Lobe'Image & " does not come to its "
+                             & (if Which = Open then "open" else "closed") & " opening: no press is made at it");
+            return False;
+         end if;
+      end if;
       declare
          First : constant Driver.Robot.Hand.Heights := Above;
       begin
@@ -359,14 +384,22 @@ procedure Measure (H : in out Hands; M : in out Model) is
                        & Natural'Image (Driver.Robot.Hand.Total (Steps)) & " pushes,"
                        & Steps.Fast'Image & " fast and" & Steps.Band'Image
                        & " within Z sigma of the contact its presses predict," & Steps.Blind'Image
-                       & " doubling from " & Driver.Log.Image (Least, 4) & " with nothing predicting it,"
+                       & " doubling from " & Driver.Log.Image (Least, 4) & " with nothing predicting it (before a prediction, or past its band),"
                        & Steps.Capped'Image & " cut to the eye's room above the table; "
                        & (if Unplanned then "then it cannot press lower: " & Driver.Robot.Motion.Why (Plan)
-                          elsif Steps.Spent then "then the eye has no room left above the table and nothing was met, after lowering "
+                          elsif Steps.Spent then "then the eye has no room left above the table, or the steps that cover it were made,"
+                               & " and nothing was met, after lowering "
                                & Driver.Log.Image (Descended, 4)
                           else "blocked, the last push by " & Driver.Log.Image (By, 4) & " after lowering "
                                & Driver.Log.Image (Descended, 4)));
-      if Unplanned or else Steps.Spent then
+      if Unplanned then
+         return False;
+      end if;
+      if Steps.Spent then
+         --  Nothing was met and no more steps are made: the hand goes back to where the
+         --  descent began, as after a press, for the presses after it begin there.
+         Hold_Beat (Read_Arm'Access);
+         Move_Group (Arm_Is, Aim_At.Element);
          return False;
       end if;
       --  Let go: the arm held where the block left it, so the hand rests; then
