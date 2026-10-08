@@ -54,7 +54,9 @@ package body Driver.Robot.Hand.Tips is
             for S of Row loop
                if S.Known then
                   N := N + 1;
+                  --  The prior of the angles across the line: the eye's and the lobe's tip region's, together.
                   Result (N) := S.Ray;
+                  Result (N).Direction.Sigma := Sqrt (S.Ray.Direction.Sigma ** 2 + S.Spread ** 2);
                end if;
             end loop;
          end loop;
@@ -103,17 +105,10 @@ package body Driver.Robot.Hand.Tips is
       if Index = 0 then
          return Unmeasured;
       end if;
-      declare
-         Fitted : constant Driver.Robot.Hand.Touch.Tip_Fit := Fitted_Tip (B, Index, Kind);
-         Sight  : constant Sight_Of := Sights_Of (B) (Lobe) (At_Opening);
-         U      : constant Vec3 := Sight.Ray.Direction.Unit_Vector;
-         Across : constant Real := Fitted.Distance.Value * Sight.Spread;
-      begin
-         --  The contact is somewhere in the lobe's tip region, which across the
-         --  line of sight the eye does not see the depth of.
-         return (Mean       => Fitted.Tip.Mean,
-                 Covariance => Fitted.Tip.Covariance + Across ** 2 * (Identity3 - Outer (U, U)));
-      end;
+      --  The contact is somewhere in the lobe's tip region, which across the line of sight the eye does not see the
+      --  depth of: the fit took that region's spread for the prior of the tip's angles across the line, and leaves
+      --  it as far as the presses' tilts do not tell.
+      return Fitted_Tip (B, Index, Kind).Tip;
    end Tip;
 
    function Beat (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Driver.Clock.Beat is
@@ -136,6 +131,35 @@ package body Driver.Robot.Hand.Tips is
       end loop;
       return Result;
    end Beat;
+
+   function Tested (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Boolean is
+      Index : constant Natural := Fitted_Index (B, Lobe, At_Opening, Kind);
+   begin
+      return Index > 0 and then Fitted_Tip (B, Index, Kind).Tested;
+   end Tested;
+
+   function Across (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Real_Array is
+      T : constant Point_Estimate := Tip (B, Lobe, At_Opening, Kind);
+   begin
+      if not Known (T) then
+         return [0.0, 0.0];
+      end if;
+      declare
+         U    : constant Vec3 := Sights_Of (B) (Lobe) (At_Opening).Ray.Direction.Unit_Vector;
+         Axis : constant Vec3 :=
+           (if abs U (1) <= abs U (2) and then abs U (1) <= abs U (3) then [1.0, 0.0, 0.0]
+            elsif abs U (2) <= abs U (3) then [0.0, 1.0, 0.0] else [0.0, 0.0, 1.0]);
+         E1   : constant Vec3 := Unit (Cross (U, Axis));
+         E2   : constant Vec3 := Cross (U, E1);
+         A    : constant Real := E1 * (T.Covariance * E1);
+         C    : constant Real := E2 * (T.Covariance * E2);
+         Off  : constant Real := E1 * (T.Covariance * E2);
+         Mid  : constant Real := (A + C) / 2.0;
+         Gap  : constant Real := Sqrt (((A - C) / 2.0) ** 2 + Off ** 2);
+      begin
+         return [Sqrt (Real'Max (Mid - Gap, 0.0)), Sqrt (Mid + Gap)];
+      end;
+   end Across;
 
    function Confirmed (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Boolean is
       Index : constant Natural := Fitted_Index (B, Lobe, At_Opening, Kind);
@@ -275,7 +299,8 @@ package body Driver.Robot.Hand.Tips is
                            Surface          => 1,
                            Slide            => Slipped.Fraction * Travel.Mean,
                            Slide_Covariance => Slipped.Fraction_Sigma ** 2 * Outer (Travel.Mean, Travel.Mean)
-                                               + Slipped.Fraction ** 2 * Travel.Covariance);
+                                               + Slipped.Fraction ** 2 * Travel.Covariance,
+                           Slide_Angle      => 0.0);   --  a vector tells it
                         Of_Kept (N) := I;
                      end;
                   end if;
@@ -315,6 +340,25 @@ package body Driver.Robot.Hand.Tips is
       end if;
    end Refit_Free;
 
+   --  How far the lobe's finger stood from where its free pixel puts it under a press, as an angle seen from the
+   --  eye: what was measured, with its sigma, and no more than the finger's whole travel; the whole travel when the
+   --  press could not say (the finger was not found where it was looked for, or has no edge to look for). A press
+   --  with no slides at all is one made where nothing was measured: nothing is taken to have slid.
+   function Slid_Angle (K : Kept; Sight : Sight_Of) return Real is
+   begin
+      if K.Lobe > Natural (K.Slides.Length) then
+         return 0.0;
+      end if;
+      declare
+         S : constant Slid := K.Slides (K.Lobe);
+      begin
+         if not S.Known or else S.Pixels_Sigma >= Real'Last then
+            return Sight.Travel;
+         end if;
+         return Real'Min (Sight.Travel, Sight.Pitch * Sqrt (S.Pixels ** 2 + S.Pixels_Sigma ** 2));
+      end;
+   end Slid_Angle;
+
    procedure Refit (B : in out Book) is
       T     : constant Sight_Table := Sights_Of (B);
       Count : Natural := 0;
@@ -335,7 +379,8 @@ package body Driver.Robot.Hand.Tips is
             begin
                if K.Lobe > 0 and then Index_Of (T, K.Lobe, K.Opening) > 0 then
                   N := N + 1;
-                  Presses (N) := (Tool => K.Event.Tool, Sight => Index_Of (T, K.Lobe, K.Opening), Surface => 1, others => <>);
+                  Presses (N) := (Tool => K.Event.Tool, Sight => Index_Of (T, K.Lobe, K.Opening), Surface => 1,
+                                  Slide_Angle => Slid_Angle (K, T (K.Lobe) (K.Opening)), others => <>);
                   Of_Kept (N) := I;
                end if;
             end;

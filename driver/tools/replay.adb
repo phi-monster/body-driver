@@ -17,8 +17,10 @@
 --  world frame); two last lines hold, for each eye, the lines of sight of a
 --  grid of pixels in the eye's own frame, and each hand's tips in its tool
 --  frame (with the press direction that defines each tip, the closer
---  readings it belongs to, the beat of the press it rests on, the same tip of
---  the finger unloaded, and the slide each press measured), so the estimates
+--  readings it belongs to, the beat of the press it rests on, whether the
+--  presses have told it across its line of sight and by how much (the two
+--  standard deviations across it), the same tip of the finger unloaded, and
+--  the slide each press measured), so the estimates
 --  can be scored against simulator truth whatever model produced them.
 --  Nothing here decides anything; the recorded replies did.
 --
@@ -173,11 +175,16 @@ procedure Replay is
                           & (if At_Opening = Open then "open" else "closed") & """:{""tip"":"
                           & Vector_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening).Mean) & ",""covariance"":"
                           & Covariance_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening)) & ",""confirmed"":"
-                          & (if Tip_Confirmed (Hands, H, Lobe, At_Opening) then "true" else "false") & ",""beat"":"
+                          & (if Tip_Confirmed (Hands, H, Lobe, At_Opening) then "true" else "false") & ",""tested"":"
+                          & (if Tip_Tested (Hands, H, Lobe, At_Opening) then "true" else "false") & ",""across"":"
+                          & "[" & Driver.Json.Number_Image (Tip_Across (Hands, H, Lobe, At_Opening) (1)) & ","
+                          & Driver.Json.Number_Image (Tip_Across (Hands, H, Lobe, At_Opening) (2)) & "],""beat"":"
                           & Natural'Image (Natural (Tip_Beat (Hands, H, Lobe, At_Opening))) & ",""free_tip"":"
                           & Vector_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening, Free).Mean) & ",""free_covariance"":"
                           & Covariance_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening, Free)) & ",""free_confirmed"":"
                           & (if Tip_Confirmed (Hands, H, Lobe, At_Opening, Free) then "true" else "false")
+                          & ",""free_tested"":"
+                          & (if Tip_Tested (Hands, H, Lobe, At_Opening, Free) then "true" else "false")
                           & ",""free_beat"":"
                           & Natural'Image (Natural (Tip_Beat (Hands, H, Lobe, At_Opening, Free))) & ",""slides"":"
                           & Slides_Json (Slides (Hands, H, Lobe, At_Opening)) & ",""press"":"

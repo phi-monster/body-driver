@@ -11,6 +11,11 @@ package body Driver.Robot.Hand.Touch is
    Plane_Unknowns : constant := 3;
    Point_Unknowns : constant := 3;
    --  A surface's error is its offset and its two tilts; a free tip is a point.
+   Lateral : constant := 2;
+   --  A tip on its line of sight: its distance along the line and two angles across it, the lobe's tip region.
+
+   --  The smallest angle across a line that is told from none: a prior below it pins the angle.
+   Least_Angle : constant Real := Sqrt (Real'Model_Epsilon);
 
    function Pose_Known (Tool : Pose_Estimate) return Boolean is
      (Tool.Position_Covariance (1, 1) < Real'Last and then Tool.Rotation_Covariance (1, 1) < Real'Last);
@@ -88,8 +93,8 @@ package body Driver.Robot.Hand.Touch is
    is
       J : constant Natural := Sights'Length;
       K : constant Natural := Surfaces'Length;
-      W : constant Positive := (if As = On_Sight then 1 else Point_Unknowns);
-      --  The unknowns of a tip: the distance along its line, or its point.
+      W : constant Positive := (if As = On_Sight then 1 + Lateral else Point_Unknowns);
+      --  The unknowns of a tip: the distance along its line and two angles across it, or its point.
 
       Result : Result_Access := new Fit_Result (Presses => Presses'Length, Sights => J, Surfaces => K);
 
@@ -104,9 +109,45 @@ package body Driver.Robot.Hand.Touch is
       Nominal    : Plane_Array (1 .. K);
       Correction : Real_Vector (1 .. Plane_Unknowns * K) := [others => 0.0];
 
+      --  Two unit vectors across a tip's line, from the coordinate axis furthest from it: the directions its two angles
+      --  turn the line along.
+      function Across_Of (S : Positive; Which : Positive) return Vec3 is
+         U    : constant Vec3 := Line (S).Direction.Unit_Vector;
+         Axis : constant Vec3 :=
+           (if abs U (1) <= abs U (2) and then abs U (1) <= abs U (3) then [1.0, 0.0, 0.0]
+            elsif abs U (2) <= abs U (3) then [0.0, 1.0, 0.0] else [0.0, 0.0, 1.0]);
+         E1   : constant Vec3 := Unit (Cross (U, Axis));
+      begin
+         return (if Which = 1 then E1 else Cross (U, E1));
+      end Across_Of;
+
+      --  The prior of a tip's angles across its line: the eye's and the lobe's tip region's together.
+      function Across_Sigma (S : Positive) return Real is (Real'Max (Line (S).Direction.Sigma, Least_Angle));
+
+      --  The line's direction turned by the tip's two angles.
+      function Aim_At (S : Positive) return Vec3 is
+        (Line (S).Direction.Unit_Vector + Tip_Q (W * (S - 1) + 2) * Across_Of (S, 1)
+         + Tip_Q (W * (S - 1) + 3) * Across_Of (S, 2));
+
       function Tip_At (S : Positive) return Vec3 is
-        (if As = On_Sight then Line (S).Origin.Mean + Tip_Q (S) * Line (S).Direction.Unit_Vector
+        (if As = On_Sight then Line (S).Origin.Mean + Tip_Q (W * (S - 1) + 1) * Aim_At (S)
          else Vec3 (Tip_Q (W * (S - 1) + 1 .. W * S)));
+
+      --  How far a finger that slid under the press by an angle is off, at the tip's distance: along an axis nothing
+      --  tells here.
+      function Slid_Length (P : Press) return Real is
+        (if As = On_Sight then Tip_Q (W * (Sight_Of (P) - 1) + 1) * P.Slide_Angle else 0.0);
+
+      --  The noise of a press's height: its pose's, the slide's vector uncertainty along the lift, and the finger's
+      --  slide taken as noise.
+      function Noise_Of (P : Press) return Real is
+         F    : constant Positive := Surface_Of (P);
+         X    : constant Vec3 := Tip_At (Sight_Of (P)) + P.Slide;
+         N    : constant Vec3 := Nominal (F).Normal;
+         Lift : constant Vec3 := Transpose (P.Tool.Pose.Rotation) * N;
+      begin
+         return Sqrt (Pose_Sigma (P.Tool, X, N) ** 2 + Lift * (P.Slide_Covariance * Lift) + Slid_Length (P) ** 2);
+      end Noise_Of;
 
       Chosen  : Flags_Access := new Flags'(Presses'Range => True);
       Deleted : Vector_Access := new Real_Vector'(Presses'Range => 0.0);
@@ -137,6 +178,10 @@ package body Driver.Robot.Hand.Touch is
             if (for some I in Presses'Range => Chosen (I) and then Sight_Of (Presses (I)) = S) then
                Column_Of_Sight (S) := Unknowns + 1;
                Unknowns := Unknowns + W;
+               --  A tip's angles across its line each have the prior of the eye's and the lobe's region.
+               if As = On_Sight then
+                  Prior_Rows := Prior_Rows + Lateral;
+               end if;
             end if;
          end loop;
          for F in 1 .. K loop
@@ -205,8 +250,15 @@ package body Driver.Robot.Hand.Touch is
                         Press_Of_Row (Row) := I;
                         --  The height is linear in the tip's unknowns.
                         if As = On_Sight then
-                           Base (Row, C0) := Lift * Line (S).Direction.Unit_Vector;
-                           Rhs (Row) := -(H - Base (Row, C0) * Tip_Q (S));
+                           declare
+                              Dist : constant Real := Tip_Q (W * (S - 1) + 1);
+                           begin
+                              Base (Row, C0) := Lift * Aim_At (S);
+                              Base (Row, C0 + 1) := Dist * (Lift * Across_Of (S, 1));
+                              Base (Row, C0 + 2) := Dist * (Lift * Across_Of (S, 2));
+                              Rhs (Row) := -(H - (Base (Row, C0) * Dist + Base (Row, C0 + 1) * Tip_Q (W * (S - 1) + 2)
+                                                  + Base (Row, C0 + 2) * Tip_Q (W * (S - 1) + 3)));
+                           end;
                         else
                            for C in 1 .. Point_Unknowns loop
                               Base (Row, C0 + C - 1) := Lift (C);
@@ -220,7 +272,7 @@ package body Driver.Robot.Hand.Touch is
                         Base (Row, CF) := -1.0;
                         Base (Row, CF + 1) := -(Nominal (F).Tangent_1 * (Y - Nominal (F).Centre));
                         Base (Row, CF + 2) := -(Nominal (F).Tangent_2 * (Y - Nominal (F).Centre));
-                        Sigma (Row) := Sqrt (Pose_Sigma (P.Tool, X, N) ** 2 + Lift * (P.Slide_Covariance * Lift));
+                        Sigma (Row) := Noise_Of (P);
                      end;
                   end if;
                end loop;
@@ -243,6 +295,18 @@ package body Driver.Robot.Hand.Touch is
                      end;
                   end if;
                end loop;
+               --  Each tip's two angles across its line, whitened: the prior is that they are none, to the
+               --  eye's and the lobe's region's sigma.
+               if As = On_Sight then
+                  for S in 1 .. J loop
+                     if Column_Of_Sight (S) > 0 then
+                        for Axis in 1 .. Lateral loop
+                           Row := Row + 1;
+                           Base (Row, Column_Of_Sight (S) + Axis) := 1.0 / Across_Sigma (S);
+                        end loop;
+                     end if;
+                  end loop;
+               end if;
                --  Every row in units of its own sigma: the presses' is the noise
                --  their poses predict, the priors' are whitened already. The
                --  noise is not raised by how the presses scatter (see above).
@@ -420,7 +484,7 @@ package body Driver.Robot.Hand.Touch is
                return;
             end if;
             for S in 1 .. J loop
-               Tip_Q (S) := Q (S);
+               Tip_Q (W * (S - 1) + 1) := Q (S);
             end loop;
             for F in 1 .. K loop
                if not Prior (F).Measured then
@@ -446,6 +510,30 @@ package body Driver.Robot.Hand.Touch is
          end;
          Ok := True;
       end Start;
+
+      --  Whether a press's finger stood where its free pixel puts it, within its pose's own noise: the slide it
+      --  took as noise, at the tip's distance, is no more than the noise of the pose it was made at.
+      function Firm (P : Press) return Boolean is
+        (Slid_Length (P) ** 2 <= Pose_Sigma (P.Tool, Tip_At (Sight_Of (P)) + P.Slide, Nominal (Surface_Of (P)).Normal) ** 2);
+
+      --  How far the presses of a tip took its finger off the free pixel's line, together: by the weights they have in
+      --  the fit. Every press pushes the finger the same way, so averaging them does not average it out, and a tip
+      --  fitted from presses that slid is off by about this, whatever the scatter of the presses says.
+      function Common_Slide (S : Positive) return Real is
+         Weights, Total : Real := 0.0;
+      begin
+         for I in Presses'Range loop
+            if Chosen (I) and then Sight_Of (Presses (I)) = S then
+               declare
+                  Weight : constant Real := 1.0 / Noise_Of (Presses (I)) ** 2;
+               begin
+                  Weights := Weights + Weight;
+                  Total := Total + Weight * Slid_Length (Presses (I));
+               end;
+            end if;
+         end loop;
+         return (if Weights > 0.0 then Total / Weights else 0.0);
+      end Common_Slide;
 
       function Done return Fit_Result;
       --  The result, with what the fit kept per press released.
@@ -561,10 +649,16 @@ package body Driver.Robot.Hand.Touch is
                   if Chosen (I) and then Sight_Of (Presses (I)) = S then
                      Result.Tips (S).Used := Result.Tips (S).Used + 1;
                      --  Two presses land on one tip when the others fix it past what they
-                     --  could do on their own, and they come from poses apart.
-                     if Chosen_Count + Prior_Rows > Unknowns then
+                     --  could do on their own, and they come from poses apart. A press whose finger slid by more than
+                     --  its pose's own noise lands within noise of its own making, wherever the tip is, and confirms
+                     --  nothing (A22's lobe 2: five presses of a hand lying on the table with the finger 94 to 99
+                     --  per cent shut agreed, and confirmed one another).
+                     if As = On_Sight and then not Firm (Presses (I)) then
+                        null;
+                     elsif Chosen_Count + Prior_Rows > Unknowns then
                         for L in Presses'First .. I - 1 loop
                            if Chosen (L) and then Sight_Of (Presses (L)) = S
+                             and then (As /= On_Sight or else Firm (Presses (L)))
                              and then Distinct (Presses (L).Tool, Presses (I).Tool)
                            then
                               Result.Tips (S).Confirmed := True;
@@ -575,17 +669,38 @@ package body Driver.Robot.Hand.Touch is
                end loop;
                if As = On_Sight then
                   declare
-                     U     : constant Vec3 := Line (S).Direction.Unit_Vector;
-                     Dist  : constant Real := Tip_Q (S);
+                     Dist  : constant Real := Tip_Q (W * (S - 1) + 1);
                      Var_S : constant Real := Solution_Cov (C0, C0);
+                     Dir   : constant Vec3 := Aim_At (S);
+                     E1    : constant Vec3 := Across_Of (S, 1);
+                     E2    : constant Vec3 := Across_Of (S, 2);
+                     --  The tip is the origin and Dist times the direction: how it moves with the distance and the
+                     --  two angles, and the three's covariance as the presses and the priors left it.
+                     Moves : constant Mat3 :=
+                       [[Dir (1), Dist * E1 (1), Dist * E2 (1)],
+                        [Dir (2), Dist * E1 (2), Dist * E2 (2)],
+                        [Dir (3), Dist * E1 (3), Dist * E2 (3)]];
+                     Own   : constant Mat3 :=
+                       [for R in 1 .. W => [for C in 1 .. W => Solution_Cov (C0 + R - 1, C0 + C - 1)]];
+                     --  The angles' variance: the largest along any axis across the line.
+                     Mean_V : constant Real := (Own (2, 2) + Own (3, 3)) / 2.0;
+                     Spread_V : constant Real :=
+                       Mean_V + Sqrt (((Own (2, 2) - Own (3, 3)) / 2.0) ** 2 + Own (2, 3) ** 2);
+                     Prior_V : constant Real := Across_Sigma (S) ** 2;
+                     Slid_V  : constant Real := Common_Slide (S) ** 2;
                   begin
-                     Result.Tips (S).Distance := (Value => Dist, Sigma => Sqrt (Var_S), Degrees_Of_Freedom => 0);
-                     --  Along the line as the presses fixed it, across it as the eye did.
+                     Result.Tips (S).Distance := (Value => Dist, Sigma => Sqrt (Var_S + Slid_V), Degrees_Of_Freedom => 0);
+                     --  Along the line as the presses fixed it, across it as they and the eye's and the lobe's
+                     --  region's prior leave it, and off it, any way, by what the fingers slid together.
                      Result.Tips (S).Tip :=
-                       (Mean       => Line (S).Origin.Mean + Dist * U,
-                        Covariance => Line (S).Origin.Covariance
-                                      + (Dist * Line (S).Direction.Sigma) ** 2 * (Identity3 - Outer (U, U))
-                                      + Var_S * Outer (U, U));
+                       (Mean       => Line (S).Origin.Mean + Dist * Dir,
+                        Covariance => Line (S).Origin.Covariance + Moves * (Own * Transpose (Moves)) + Slid_V * Identity3);
+                     --  Tested across the line: an offset of a prior sigma along the least told axis shows above Z
+                     --  noises when the presses leave a variance of the prior's over one more than Z squared; or the
+                     --  prior there, at the tip's distance, is below the noise along the line already.
+                     Result.Tips (S).Tested :=
+                       Spread_V * (1.0 + Driver.Conventions.Z ** 2) <= Prior_V
+                       or else Dist * Across_Sigma (S) <= Sqrt (Var_S);
                   end;
                else
                   Result.Tips (S).Tip :=
@@ -595,7 +710,11 @@ package body Driver.Robot.Hand.Touch is
                --  A tip is in front of the eye. A line of sight that meets the surface at or behind it (A19: -79.4
                --  units along it) is not the line of a tip that stopped the arm on the surface: the presses fitted to
                --  it stopped on something else, or belong to another tip, and there is no tip.
-               if As = On_Sight and then Tip_Q (S) <= 0.0 then
+               if As = On_Sight then
+                  --  Confirmed along the line is not confirmed across it.
+                  Result.Tips (S).Confirmed := Result.Tips (S).Confirmed and then Result.Tips (S).Tested;
+               end if;
+               if As = On_Sight and then Tip_Q (W * (S - 1) + 1) <= 0.0 then
                   Result.Tips (S) := (Stopped => Stopped (S), Sunk => Sunk (S), others => <>);
                   for I in Presses'Range loop
                      if Sight_Of (Presses (I)) = S then
@@ -662,7 +781,7 @@ package body Driver.Robot.Hand.Touch is
                   begin
                      --  The height changes by Rate for each unit along the line.
                      if Rate < 0.0 then
-                        Result.Hits (I - Presses'First + 1) := Tip_Q (S) - Over / Rate;
+                        Result.Hits (I - Presses'First + 1) := Tip_Q (W * (S - 1) + 1) - Over / Rate;
                      end if;
                   end;
                end if;

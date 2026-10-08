@@ -37,6 +37,11 @@ package Driver.Robot.Hand.Tips is
       --  pixels in the cap at its tip, of their distance from the tip pixel.
       --  The tip a press gives lies on the line; the point of the lobe that
       --  touches is somewhere in the cap.
+      Travel : Real := 0.0;
+      --  How far the lobe's finger can have slid under a press, as an angle seen from the eye: its whole travel between
+      --  its openings in the picture, times the angle a pixel spans (Pitch). A press that cannot say how far it slid
+      --  has that much of it.
+      Pitch  : Real := 0.0;   --  the angle a pixel spans at the tip
    end record;
 
    type Lobe_Sights is array (Opening) of Sight_Of;
@@ -129,6 +134,14 @@ package Driver.Robot.Hand.Tips is
    --  A second press, from a pose distinct from the first's, landed on the
    --  tip within the noise (of the tip of that kind: the free tip's noise
    --  holds the slides').
+
+   function Tested (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Boolean;
+   --  The presses the tip rests on have told where it is across its line of sight, along both axes, as well as along
+   --  it: an offset of the lobe's tip region's size would show above their noise (Driver.Robot.Hand.Touch).
+
+   function Across (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Real_Array;
+   --  The tip's standard deviations across its line of sight, along the axis the presses told most and the one they
+   --  told least (both zero when the tip is unknown): the lobe's tip region's spread, less what their tilts told.
 
    function Distance (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Estimate;
    --  How far along its line of sight from the eye the tip is, in the arm's
