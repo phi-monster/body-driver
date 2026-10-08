@@ -11,31 +11,58 @@
 # time, so one test that does not end cannot hide the others. It prints every test that fails or
 # exceeds the limit, with what the test printed, and a count; the directory is removed at the end.
 # Exit status 0 when every test passes.
+#
+# The tests run detached on the box and are only polled from here: a connection held open for the
+# whole run was cut under load ("Operation timed out"), and merge.sh took a passing merge back out
+# for it. Box tests queue on one lock, /root/q/boxtest.lock, so the merges and the paths never run
+# two at once and no test is pushed over its limit by another run's load.
 set -u
+set -o pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COMMIT="${1:-HEAD}"
 LIMIT="${2:-1200}"
 BOX="${BOX:-vast5d}"
+SSH=(ssh -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20)
+quiet() { grep -v "Welcome\|Have fun\|authentication" || true; }
 HASH=$(git -C "$ROOT" rev-parse --short "$COMMIT") || exit 2
 D="/root/work/core/boxtest/$HASH-$$-$(date +%s)"
 NAMES=$(git -C "$ROOT" grep -h -o -E 'Register \("[A-Za-z0-9_.]+"' "$COMMIT" -- driver \
         | sed -E 's/Register \("//; s/"$//' | sort -u)
 COUNT=$(echo "$NAMES" | wc -l | tr -d ' ')
 echo "building $HASH on $BOX in $D for $COUNT tests"
-if ! git -C "$ROOT" archive --format=tar "$COMMIT" driver docs | zstd -q -c | ssh -o ConnectTimeout=20 "$BOX" "
+if ! git -C "$ROOT" archive --format=tar "$COMMIT" driver docs | zstd -q -c | "${SSH[@]}" "$BOX" "
     set -e; mkdir -p '$D'; cd '$D'
     zstd -dc | tar -x; cp -r /root/work/core/deps/alire driver/; cd driver
     PATH=/root/alire/bin:\$HOME/.alire/bin:\$PATH nice -n 5 alr -n build > ../build.log 2>&1
-    ! grep -E ': (error|warning)[: ]' ../build.log"; then
+    ! grep -E ': (error|warning)[: ]' ../build.log" 2>&1 | quiet; then
   echo "the build on the box failed: $D/build.log"; exit 3
 fi
-echo "$NAMES" | ssh -o ConnectTimeout=20 "$BOX" "cd '$D/driver' && mkdir -p ../out && \
-  xargs -P 16 -I{} sh -c 'timeout $LIMIT ./bin/selftest \"{}\\\$\" > ../out/{}.log 2>&1; echo \"{} \$?\"' \
-  > ../results.txt; awk '\$2 != 0' ../results.txt | sort > ../bad.txt; \
+# The runner waits its turn on the lock, then writes results.txt and, last, finished.
+RUNNER=$(mktemp)
+trap 'rm -f "$RUNNER"' EXIT
+cat > "$RUNNER" <<'EOF'
+#!/bin/sh
+cd "$1/driver" && mkdir -p ../out
+exec 9>/root/q/boxtest.lock
+flock 9
+xargs -P 16 -I{} sh -c 'timeout "$0" ./bin/selftest "{}\$" > ../out/{}.log 2>&1; echo "{} $?"' "$2" < ../names > ../results.txt
+awk '$2 != 0' ../results.txt | sort > ../bad.txt
+touch ../finished
+EOF
+"${SSH[@]}" "$BOX" "cat > '$D/run.sh'" < "$RUNNER" 2>&1 | quiet
+echo "$NAMES" | "${SSH[@]}" "$BOX" "cat > '$D/names'" 2>&1 | quiet
+"${SSH[@]}" "$BOX" "cd '$D' && setsid nohup sh run.sh '$D' '$LIMIT' > runner.log 2>&1 < /dev/null &" 2>&1 | quiet
+until "${SSH[@]}" "$BOX" "test -f '$D/finished'" 2>/dev/null; do
+  if "${SSH[@]}" "$BOX" "test -d '$D'" 2>/dev/null; then sleep 30; else
+    "${SSH[@]}" "$BOX" true 2>/dev/null && { echo "the box test's directory is gone: $D"; exit 4; }
+    sleep 30
+  fi
+done
+"${SSH[@]}" "$BOX" "cd '$D/driver' && \
   while read -r name status; do \
     if [ \"\$status\" = 124 ]; then echo \"TIMEOUT  \$name (over $LIMIT s)\"; else echo \"FAIL     \$name\"; fi; \
     grep -v '^\[' ../out/\$name.log | grep -v '^pass\|passed,' | head -5 | sed 's/^/         /'; \
   done < ../bad.txt; \
   echo \"\$(awk '\$2 == 0' ../results.txt | wc -l) of \$(wc -l < ../results.txt) passed\"; \
-  ok=0; [ -s ../bad.txt ] && ok=1; cd /; rm -rf '$D'; exit \$ok" 2>&1 | grep -v "Welcome\|Have fun\|authentication"
-exit "${PIPESTATUS[1]}"
+  ok=0; [ -s ../bad.txt ] && ok=1; [ \$(wc -l < ../results.txt) -eq $COUNT ] || ok=1; cd /; rm -rf '$D'; exit \$ok" 2>&1 | quiet
+exit "${PIPESTATUS[0]}"
