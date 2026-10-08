@@ -110,6 +110,29 @@ package body Driver.Robot.Hand.Touch.Tests is
       end;
    end On_Sight_With_Early_Stop;
 
+   procedure Behind_The_Eye is
+      --  A press whose line of sight to the tip points away from the surface: it meets it behind the eye, at
+      --  a negative distance (A19: a press aimed at one lobe and given to the other fitted the tip -79.4 units
+      --  along its sight). That is not the line of a tip that stopped the arm on the surface: no tip, and the
+      --  press is not one a tip rests on. The same press of the lobe turned the right way gives its tip.
+      Backwards : Press_Array (1 .. 1);
+      Forwards  : Press_Array (1 .. 1);
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 5);
+      Backwards (1) := Make_Press (1, Ada.Numerics.Pi, 0.0, 0.40, 0.10, 0.25, 0.0);
+      Forwards (1) := Make_Press (1, 0.0, 0.0, 0.40, 0.10, 0.0, 0.0);
+      declare
+         F : constant Fit_Result := Fit (Backwards, Sights (1 .. 1), Measured (2.0e-4, 0.0));
+         G : constant Fit_Result := Fit (Forwards, Sights (1 .. 1), Measured (2.0e-4, 0.0));
+      begin
+         Check (not F.Tips (1).Ok and then not F.Agrees (1),
+                "a line of sight that meets the surface behind the eye gave a tip at" & Real'Image (F.Tips (1).Distance.Value)
+                & ", which a press rests on:" & F.Agrees (1)'Image);
+         Check (G.Tips (1).Ok and then G.Agrees (1) and then G.Tips (1).Distance.Value > 0.0,
+                "the same press turned the right way gave no tip in front of the eye");
+      end;
+   end Behind_The_Eye;
+
    procedure Provisional_And_Stalls is
       --  The presses of A16's first hand, as the arm made them: the first
       --  straight along the line of sight and stopped by the tip, the other
@@ -421,6 +444,8 @@ package body Driver.Robot.Hand.Touch.Tests is
    begin
       Driver.Tests.Register ("hand.touch.on_sight", "a press that stopped on something else moves the tip",
                              On_Sight_With_Early_Stop'Access);
+      Driver.Tests.Register ("hand.touch.behind", "a line of sight that meets the surface behind the eye gives a tip",
+                             Behind_The_Eye'Access);
       Driver.Tests.Register ("hand.touch.provisional",
                              "stops on something else are taken for a tip's presses, or one press is taken for checked",
                              Provisional_And_Stalls'Access);

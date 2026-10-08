@@ -666,6 +666,15 @@ where it was raised to: the presses aim from wherever the arm stands. A19
 (8597f62) lost its first press the same way (`a press with the closer at neither
 measured opening is not used`, blocked after lowering 5.1 units).
 
+**Lesson: a line of sight that meets the surface behind the eye is not a tip
+(A19).** A press aimed at lobe 1 (0.956 rad) and given by its direction to lobe
+2 fitted lobe 2's tip -79.4 units along its sight, a point behind the eye (`a
+press at the OPEN opening ... lobe 2 provisional -79.3757 +- 0.5164 along its
+sight`), and the next prediction took it for the surface. A tip is in front of
+the eye: a fit that puts it at or behind it is not a tip, and the presses fitted
+to it stopped on something else or belong to another tip. The tip is not Ok
+then and the presses on it do not agree (`hand.touch.behind`).
+
 ## Open
 
 - A closer that follows neither way at its first push (a finger pressed so

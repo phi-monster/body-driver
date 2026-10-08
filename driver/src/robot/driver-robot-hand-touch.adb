@@ -592,6 +592,17 @@ package body Driver.Robot.Hand.Touch is
                     (Mean       => Tip_At (S),
                      Covariance => [for R in 1 .. Point_Unknowns => [for C in 1 .. Point_Unknowns => Solution_Cov (C0 + R - 1, C0 + C - 1)]]);
                end if;
+               --  A tip is in front of the eye. A line of sight that meets the surface at or behind it (A19: -79.4
+               --  units along it) is not the line of a tip that stopped the arm on the surface: the presses fitted to
+               --  it stopped on something else, or belong to another tip, and there is no tip.
+               if As = On_Sight and then Tip_Q (S) <= 0.0 then
+                  Result.Tips (S) := (Stopped => Stopped (S), Sunk => Sunk (S), others => <>);
+                  for I in Presses'Range loop
+                     if Sight_Of (Presses (I)) = S then
+                        Result.Agrees (I - Presses'First + 1) := False;
+                     end if;
+                  end loop;
+               end if;
             end;
          end if;
       end loop;
