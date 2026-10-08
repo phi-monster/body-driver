@@ -72,13 +72,13 @@ measured from:
 | `lags` | every eye's image lag, and whether it is known | the noise |
 | `responses` | every eye's cell noise at rest, what each channel's push does to each cell, each group's effect on the eye | the noise, the lags |
 | `graph` | every group's role and arm, the arms, the carrier, every eye's mount | the responses |
-| `kinematics` | every arm's fit (joints, lens, uncertainty), its table, where it stands in the world | the graph, the responses |
+| `kinematics` | every arm's fit (joints, lens, uncertainty), its table, where it stands in the world; the lens and place of every eye fixed in the world | the graph, the responses |
 
 `Driver.Robot.Load_Body` reloads a file into a model by the same rules; a
 model that has seen no robot takes the file's groups and eyes, so a measured
 body can be loaded and planned on with no robot connected.
 
-### The kinematics (method 5)
+### The kinematics (method 6)
 
 Per arm, `kinematics.arms` holds:
 
@@ -109,6 +109,30 @@ Per arm, `kinematics.arms` holds:
   own eye when that eye shows the first arm. `points` is how many of the two
   arms' table points that eye's view tied together, and `px` the noise of
   that tie in the eye's units. The first arm stands as it is (`through` 0).
+
+Per eye fixed in the world (the graph mounts it `world_fixed`), `kinematics.fixed` holds the lens and the place the
+eye was measured to have, from the first arm's tracked points and the eye's answers to where they are:
+
+- `known` says whether the points determine them. When they do not (all the points on the table, too few
+  answers, answers that leave a focal length or the turn or the centre unsure), `why` says what they leave out,
+  the eye is unknown (every answer about it carries an unknown pose and unknown lines of sight) and the numbers
+  are the fit's last state, not a result. `arm` is the arm whose points measured it (the first: the world).
+- `lens` holds the focal lengths and the principal point, in pixels, and the distortion (zero when the two
+  terms are not significant as a pair). `rotation` (row by row) and `centre` are its camera frame in the world,
+  which is the first arm's frame, in that arm's unit.
+- `covariance` (12 x 12, row by row) is that of the lens's six terms, in the order of the arms' (the logarithms
+  of the two focal lengths, the principal point, the two distortion terms; the distortion rows are zero when not
+  kept), the camera's turn about its own axes (three) and its centre in the world (three). It is the sandwich
+  of the normal equations around the spread of the gradient, as the arms' (the spatial kernel of the residuals),
+  with the spread the points' own uncertainty adds: each point's depth, and what the first arm's fit moves every
+  point by together (its covariance of 36 terms carried through the gains of every depth and, for a point on the
+  table, through the table's response, with the table's scatter). A point on the table is where its line of sight
+  meets the table, not at the depth of its own refinement: the error of a depth along the table's normal would
+  pass for the structure that fixes the lens, and a plane alone fixes none.
+- `used` of `offered` answers fit (the answers whose round trip comes back to the query, within the noise of all
+  the round trips, and whose point the arm has); `sigma_px` is the noise they show, `distorted` whether the
+  distortion terms are kept. `from_matches` and `from_sets` say what the fit rests on (the first arm's keyframes
+  with matches, the sets of its reference matched into other eyes): it is measured again when either changed.
 
 Method 4's covariance of the fit counted the sightings of a keyframe as one
 share of the gradient and the keyframes as independent. The matcher's errors
@@ -155,4 +179,4 @@ rebuilt from them. Method 2 placed the arm from its own eye's view of the
 first arm's points. When the two arms' eyes do not share a view, that is
 wrong: a dense matcher answers points an eye does not show, and those
 answers then read as an eye at the first eye's centre. A file of method 2
-or 3 is measured again, and so is a file of method 4.
+or 3 is measured again, and so are files of methods 4 and 5 (they have no fixed eyes).

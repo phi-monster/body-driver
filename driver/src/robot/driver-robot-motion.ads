@@ -183,13 +183,15 @@ package Driver.Robot.Motion is
    function Plan_Reach (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan;
    --  A joint path from the arm's configuration at O to the goal, a pose of
    --  the tool in the world (Tool_Pose), solved along the way so it never
-   --  jumps between solution branches. The path is the fitted model's,
-   --  within the readings the arm has shown or beyond them: a joint's end on
-   --  the way is met when the path is followed, and the step that meets it
-   --  ends Blocked or Short. The goal is taken into the arm's own frame by
-   --  the arm's placement and planned there (Plan_Reach_In_Arm), so a move
-   --  given relative to the tool's pose in the world is the same move
-   --  whatever the placement.
+   --  jumps between solution branches: a joint that turns is given as the
+   --  reading nearest where the last waypoint left it (Kinematics.
+   --  Nearest_Readings), not as one of the turns the solver's steps came to.
+   --  The path is the fitted model's, within the readings the arm has shown or
+   --  beyond them: a joint's end on the way is met when the path is followed,
+   --  and the step that meets it ends Blocked or Short. The goal is taken into
+   --  the arm's own frame by the arm's placement and planned there
+   --  (Plan_Reach_In_Arm), so a move given relative to the tool's pose in the
+   --  world is the same move whatever the placement.
 
    function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan;
    --  The same, the goal a pose of the tool in the arm's own frame
