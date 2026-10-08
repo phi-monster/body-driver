@@ -34,6 +34,9 @@ private with Ada.Containers.Vectors;
 
 package Driver.Robot.Hand.Selfsight is
 
+   Needed : constant := 2;
+   --  The poses of the rest of the body a deviation needs (Anchored).
+
    Capacity : constant := 8;
    --  How many keys seen from two poses or more an eye remembers: memory,
    --  one view of the eye's frame size (two reals a pixel) for each.

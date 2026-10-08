@@ -1,6 +1,7 @@
 with Driver.Beats;
 with Driver.Robot.Hand.Aims;
 with Driver.Robot.Hand.Pressing;
+with Driver.Robot.Hand.Selfsight;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 
@@ -26,6 +27,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
 
    use type Driver.Robot.Motion.Plan_Status;
    use type Driver.Robot.Motion.Step_Outcome;
+   use type Driver.Robot.Hand.Lobes.Placing;
 
    procedure Hold_Beat (Read : access procedure (O : Observation)) is
       procedure During is
@@ -190,6 +192,150 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  as many beats as the stream had when the sweep began: no wait is longer
    --  than all the waiting so far (Driver.Robot.Steps waits so).
    Longest_Formed : Natural := 0;
+
+   --  The arm moves a closer's own eye so that it sees the closer's readings as they are now from Wanted poses of
+   --  the rest of the body, which a deviation of the robot from its surroundings is taken over (Selfsight). A hand
+   --  is measured from its own arm's motion and not from what the boot did before it: the boot's sweeps gave A22's
+   --  closers dozens of poses at their start readings, and a reloaded body file gives none (A25h logged "0 poses,
+   --  two are needed" at every round). The eye is raised along the way up the body measured (Up_In_Arm), heights
+   --  above the table: first by the least move whose readings an eye can see (a plan's last readings, tried by the
+   --  body's one test of motion before anything moves), then by twice that, and so on, until the eye has the poses
+   --  or cannot be raised further.
+   procedure Gather_Own_Poses (G : Group_Id; Wanted : Positive; Reached : out Boolean) is
+      Placed : Boolean := False;   --  the closer is one an eye on an arm watches
+      Arm    : Arm_Id := 1;
+      Eye    : Eye_Id := 1;
+      Have   : Natural := 0;       --  the poses its eye has seen its readings from
+      Began  : Natural := 0;       --  the beats the stream had
+      Plan   : Driver.Robot.Motion.Plan;
+      Ready  : Boolean := False;   --  the raise is planned and its readings show
+      Why    : Ada.Strings.Unbounded.Unbounded_String;   --  when it is not, why
+      First  : Boolean := True;    --  the raise now is the first
+      By     : Real := 0.0;        --  the raise now, doubling
+      Report : Driver.Robot.Motion.Step_Report;
+      Raises : Natural;
+
+      procedure Read_Poses (O : Observation) is
+         P : constant Natural := Own_Pair (G);
+      begin
+         Began := Natural (O.Beat);
+         Placed := P > 0;
+         Have := 0;
+         if Placed then
+            Arm := H.Data.Pairs (P).Arm;
+            Eye := H.Data.Pairs (P).Eye;
+            Have := Sweeps.Poses (H.Data.Pairs (P).Sweep, O.Readings.Element (G));
+         end if;
+      end Read_Poses;
+
+      function Poses_Now return Natural is
+      begin
+         Hold_Beat (Read_Poses'Access);
+         return Have;
+      end Poses_Now;
+
+      procedure Plan_Raise (O : Observation) is
+         Up    : constant Direction_Estimate := Up_In_Arm (M, Arm);
+         Group : constant Group_Id := Arm_Group (M, Arm);
+         Now   : constant Real_Array := O.Readings.Element (Group);
+      begin
+         Ready := False;
+         Why := Ada.Strings.Unbounded.To_Unbounded_String ("where up is, in the arm's frame, is not measured");
+         if Up.Sigma = Real'Last then
+            return;
+         end if;
+         By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);
+         Why := Ada.Strings.Unbounded.To_Unbounded_String
+           ("no raise within the arm's reach moves its readings by what an eye sees");
+         for Doubling in 1 .. Real'Machine_Mantissa loop
+            Plan := Driver.Robot.Hand.Pressing.Lowered (M, Arm, O, Up.Unit_Vector, By);
+            if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
+               Why := Ada.Strings.Unbounded.To_Unbounded_String (Driver.Robot.Motion.Why (Plan));
+               exit;
+            end if;
+            declare
+               Goal : constant Real_Array := Driver.Robot.Motion.Last_Readings (Plan);
+               Step : constant Real_Array := [for I in Goal'Range => Goal (I) - Now (Now'First + I - Goal'First)];
+            begin
+               if Driver.Robot.Channels.Visible (M, Group, Step) then
+                  Ready := True;
+                  return;
+               end if;
+            end;
+            By := 2.0 * By;
+         end loop;
+      end Plan_Raise;
+
+      procedure Raise_Eye (Is_First : Boolean; Raised : out Boolean) is
+      begin
+         Raised := False;
+         First := Is_First;
+         Hold_Beat (Plan_Raise'Access);
+         if not Ready then
+            Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & ": its eye" & Eye'Image & " on arm" & Arm'Image
+                             & " cannot be raised: " & Ada.Strings.Unbounded.To_String (Why));
+            return;
+         end if;
+         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & ": its eye" & Eye'Image & " on arm" & Arm'Image
+                          & " has seen its readings from" & Have'Image & " poses of the rest of the body, and"
+                          & Natural'Image (Driver.Robot.Hand.Selfsight.Needed) & " are needed to tell the robot from its surroundings;"
+                          & " the arm raises the eye by " & Driver.Log.Image (By, 4)
+                          & (if Is_First then ", the least that its readings show" else ", twice the raise before"));
+         Driver.Robot.Motion.Follow (M, Plan, Report);
+         Raised := Report.Outcome = Driver.Robot.Motion.Reached;
+      end Raise_Eye;
+   begin
+      Hold_Beat (Read_Poses'Access);
+      Reached := Placed and then Have >= Wanted;
+      if not Placed or else Reached then
+         return;
+      end if;
+      Driver.Robot.Hand.Gather_Poses
+        (Wanted, Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began)), Poses_Now'Access,
+         Raise_Eye'Access, Raises, Reached);
+      Hold_Beat (Read_Poses'Access);
+      Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & ": after" & Raises'Image & " raises its eye has seen"
+                       & " its readings from" & Have'Image & " poses, of the" & Wanted'Image & " asked"
+                       & (if Reached then "" else "; it cannot be raised further, or its picture did not rest to keep a frame"));
+   end Gather_Own_Poses;
+
+   --  A channel whose ends the eye has seen and whose lobes were not placed gets more poses while more poses can
+   --  place them: the eye has seen the readings from fewer than a deviation needs (Unlocated), or the changed pixels
+   --  do not fall in two groups by how much they vary over the poses (Unplaced, Unseparated). The poses are asked to
+   --  double, and the estimators place the lobes again once they have (Driver.Robot.Hand.Sweep).
+   procedure Top_Up_Poses (G : Group_Id; C : Positive) is
+      Status : Sweeps.Progress := Sweeps.Measured;
+      Helps  : Boolean := False;   --  more poses could place the lobes
+      Have   : Natural := 0;
+      procedure Read_Status (O : Observation) is
+         P : constant Natural := Own_Pair (G);
+      begin
+         Status := Sweeps.Measured;
+         Helps := False;
+         if P > 0 and then C <= Sweeps.Channels (H.Data.Pairs (P).Sweep) then
+            declare
+               S : Sweeps.State renames H.Data.Pairs (P).Sweep;
+            begin
+               Status := Sweeps.Status (S, C);
+               Have := Sweeps.Poses (S, O.Readings.Element (G));
+               Helps := Status = Sweeps.Unlocated
+                 or else (Status = Sweeps.Unplaced
+                          and then Sweeps.Located_Of (S, C).How = Driver.Robot.Hand.Lobes.Unseparated);
+            end;
+         end if;
+      end Read_Status;
+      Reached : Boolean;
+   begin
+      loop
+         Hold_Beat (Read_Status'Access);
+         exit when not Helps;
+         Gather_Own_Poses (G, Positive'Max (Driver.Robot.Hand.Selfsight.Needed, 2 * Have), Reached);
+         exit when not Reached;
+         --  The estimators place again at the next beat that sees the poses doubled; one more beat to read it.
+         Hold_Beat (null);
+         Hold_Beat (null);
+      end loop;
+   end Top_Up_Poses;
 
    procedure Sweep_Channel (G : Group_Id; C : Positive) is
       Start : Real := 0.0;
@@ -658,8 +804,18 @@ begin
       begin
          Hold_Beat (Read_Group'Access);
          if Now then
+            --  The eye sees the closer's readings from the poses a deviation needs before the closer is moved, or
+            --  the arm gives it them.
+            declare
+               Enough : Boolean;
+            begin
+               Gather_Own_Poses (G, Driver.Robot.Hand.Selfsight.Needed, Enough);
+            end;
             for C in 1 .. Channels loop
                Sweep_Channel (G, C);
+            end loop;
+            for C in 1 .. Channels loop
+               Top_Up_Poses (G, C);
             end loop;
          elsif Is_One then
             Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " of arm" & Of_Arm'Image

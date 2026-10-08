@@ -24,8 +24,8 @@ package body Driver.Robot.Hand.Lowering.Tests is
    --  Readings not given: those of a tool that goes straight down, whose length is negative here.
    Straight_Down : constant Joint_Push := (Asked => False, Length => -1.0, Short => 0.0, Seen => False);
 
-   function Stand (X, Y, Z : Real; Turn : Real := 0.0; Pitch : Real := 0.0) return Pose_Estimate is
-     ((Pose                => (Rotation => Exp ([Turn, Pitch, 0.0]), Translation => [X, Y, Z]),
+   function Stand (X, Y, Z : Real; Turn : Real := 0.0; Pitch : Real := 0.0; Yaw : Real := 0.0) return Pose_Estimate is
+     ((Pose                => (Rotation => Exp ([Turn, Pitch, Yaw]), Translation => [X, Y, Z]),
        Position_Covariance => 1.0e-8 * Identity3,
        Rotation_Covariance => 1.0e-8 * Identity3));
 
@@ -261,8 +261,64 @@ package body Driver.Robot.Hand.Lowering.Tests is
              & ", share" & Said.Share'Image);
    end Rising_Is_A_Stall;
 
+   procedure Aim_About_The_Way_Down is
+      --  A22's aims (press 2 and press 5): the hand turned about the way down asks every point of it nothing
+      --  down, 2e-16 by the rounding of the turn, and the readings delivered 4.7e-8 up, which is no share of
+      --  nothing. The aim counts as a push with the share it has, and the descent after it is compared with
+      --  itself all the same: free pushes, then one that takes the hand nowhere is a stall by the points.
+      Side   : constant Points := [[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]];
+      Turned : constant Joint_Push := (Asked => True, Length => 1.48, Short => 1.0e-6, Seen => False);
+      T      : Track;
+      Height : Real := 1.0;
+      Said   : Judgment;
+   begin
+      Judge (T, Stand (0.0, 0.0, 1.0), Stand (0.0, 0.0, 1.0 - 2.0e-16, Yaw => 1.0),
+             Stand (0.0, 0.0, 1.0 + 4.7e-8, Yaw => 1.0), Into, Side, Turned, Said);
+      Check (Said.Result = Too_Few and then Said.Share < 1.0e-6,
+             "an aim about the way down was judged " & Said.Result'Image & ", share" & Said.Share'Image);
+      Free_Pushes (T, 0.0, 6, Height);
+      Said := Push (T, Height, 0.05, 0.0);
+      Check (Said.Result = Stalled and then Said.Point_Stalled and then Said.Free < 1.0e-6,
+             "a push that took the hand nowhere after an aim about the way down was judged " & Said.Result'Image
+             & ", by the points:" & Said.Point_Stalled'Image & ", against free shares up to" & Said.Free'Image);
+   end Aim_About_The_Way_Down;
+
+   procedure Let_Go_Turning is
+      --  A22's let-go after press 5: it raised one side of the hand by 0.05 and lowered the other by 0.01, the
+      --  readings falling short of the target by what free pushes do not. It asks the hand, the mean of its
+      --  points, nothing down, so the descent before it is forgotten and it is not judged; and a point asked
+      --  up that went further up, in a push that does ask the hand down, has stopped nothing.
+      Side   : constant Points := [[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]];
+      Spread : constant Points := [[0.0, 0.0, 0.0], [0.3, 0.0, 0.0], [-0.3, 0.0, 0.0]];
+      Held   : constant Joint_Push := (Asked => True, Length => 0.1, Short => 0.0, Seen => True);
+      T      : Track;
+      Height : Real := 1.0;
+      Said   : Judgment;
+   begin
+      Free_Pushes (T, 0.0, 6, Height);
+      Judge (T, Stand (0.0, 0.0, Height), Stand (0.0, 0.0, Height + 0.05, Pitch => 0.2),
+             Stand (0.0, 0.0, Height + 0.139, Pitch => 0.5182), Into, Side, (Asked => True, Length => 0.1, Short => 0.03,
+                                                                              Seen => True), Said);
+      Check (Said.Result = Not_Asked and then Pushes (T) = 0,
+             "a let-go that raised the hand was judged " & Said.Result'Image & " and left" & Pushes (T)'Image
+             & " pushes counted");
+      Free_Pushes (T, 0.0, 6, Height);
+      --  Asked down by 0.05 at the middle and 0.11 at one side, which the turn raises by 0.01 at the other; the
+      --  hand turned further than asked (by 30 degrees, the sine of which is a half), so that side rose by 0.1
+      --  and the other went down by 0.2.
+      Judge (T, Stand (0.0, 0.0, Height), Stand (0.0, 0.0, Height - 0.05, Pitch => 0.2),
+             Stand (0.0, 0.0, Height - 0.05, Pitch => 0.5235987755982988), Into, Spread, Held, Said);
+      Check (Said.Result = Lowered and then not Said.Point_Stalled,
+             "a point asked up that went further up was judged " & Said.Result'Image & ", by the points:"
+             & Said.Point_Stalled'Image & ", point" & Said.Point'Image & ", share" & Said.Share'Image);
+   end Let_Go_Turning;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.lowering.yaw", "an aim about the way down, which asks the hand nothing down, leaves "
+                             & "the descent after it with a share no push can be compared with", Aim_About_The_Way_Down'Access);
+      Driver.Tests.Register ("hand.lowering.letgo", "a let-go that raises one side as it lowers the other is judged "
+                             & "as a descent, or a point asked up that went further up is stalled", Let_Go_Turning'Access);
       Driver.Tests.Register ("hand.lowering.stall", "a hand that stops going down while the arm follows is not "
                              & "stalled at the first push that takes it nowhere", Hand_Slides'Access);
       Driver.Tests.Register ("hand.lowering.turn", "a hand turning on its finger, its origin still going down, is not "

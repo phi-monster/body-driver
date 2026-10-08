@@ -326,7 +326,9 @@ package body Driver.Robot.Hand is
          for Which in Opening loop
             Table (L) (Which) := (Known  => Made.Lobes (L).Sights (Which).Known,
                                   Ray    => Made.Lobes (L).Sights (Which).Ray,
-                                  Spread => Made.Lobes (L).Sights (Which).Spread);
+                                  Spread => Made.Lobes (L).Sights (Which).Spread,
+                                  Travel => Made.Lobes (L).Way.Reach * Made.Lobes (L).Sights (Which).Pitch,
+                                  Pitch  => Made.Lobes (L).Sights (Which).Pitch);
          end loop;
       end loop;
       for Id in D.Found.First_Index .. D.Found.Last_Index loop
@@ -376,7 +378,7 @@ package body Driver.Robot.Hand is
       is
       begin
          if not Known then
-            return (Known => False, Pixel => Px, Ray => <>, Spread => 0.0);
+            return (Known => False, Pixel => Px, Ray => <>, Spread => 0.0, Pitch => 0.0);
          end if;
          declare
             Line  : constant Ray_Estimate := Eye_Ray (M, P.Eye, Px);
@@ -392,7 +394,8 @@ package body Driver.Robot.Hand is
                     Pixel  => Px,
                     Ray    => Driver.Robot.Hand.Frames.Into (Eye_In_Tool (M, P.Eye, V.Seen), Line),
                     Spread => Pitch * Driver.Robot.Hand.Lobes.Tip_Spread
-                                        (Driver.Robot.Hand.Lobes.Tip_Cap (Region, Centre, Px), Px));
+                                        (Driver.Robot.Hand.Lobes.Tip_Cap (Region, Centre, Px), Px),
+                    Pitch  => Pitch);
          end;
       end Seen_Tip;
 
@@ -602,7 +605,8 @@ package body Driver.Robot.Hand is
    begin
       for L in 1 .. Natural (R.Lobes.Length) loop
          declare
-            Reach : constant Estimate := Driver.Robot.Hand.Tips.Distance (R.Book, L, Which);
+            Reach  : constant Estimate := Driver.Robot.Hand.Tips.Distance (R.Book, L, Which);
+            Across : constant Real_Array := Driver.Robot.Hand.Tips.Across (R.Book, L, Which);
          begin
             Append (Text, (if L > 1 then ", " else "") & "lobe" & L'Image & " "
                     & (if not Known (Reach) then "none"
@@ -610,7 +614,10 @@ package body Driver.Robot.Hand is
                             & Driver.Log.Image (Reach.Value, 4) & " +- " & Driver.Log.Image (Reach.Sigma, 4)
                             & " along its sight, on" & Driver.Robot.Hand.Tips.Agreeing (R.Book, L, Which)'Image
                             & " presses, its tip region" & Driver.Log.Image (Reach.Value * R.Lobes (L).Sights (Which).Spread, 3)
-                            & " across it"));
+                            & " wide across it, left" & Driver.Log.Image (Across (1), 3) & " and" & Driver.Log.Image (Across (2), 3)
+                            & " along the axes the tilts of the presses told most and least ("
+                            & (if Driver.Robot.Hand.Tips.Tested (R.Book, L, Which) then "tested across the sight"
+                               else "not tested across the sight") & ")"));
          end;
       end loop;
       return To_String (Text);
@@ -954,6 +961,36 @@ package body Driver.Robot.Hand is
       end loop;
    end Free_Closer;
 
+   procedure Gather_Poses
+     (Wanted       : Positive;
+      Wait_At_Most : Positive;
+      Poses        : not null access function return Natural;
+      Raise_Eye    : not null access procedure (First : Boolean; Raised : out Boolean);
+      Raises       : out Natural;
+      Reached      : out Boolean)
+   is
+      Have   : Natural;
+      Raised : Boolean;
+   begin
+      Raises := 0;
+      loop
+         Have := Poses.all;
+         exit when Have >= Wanted;
+         Raise_Eye (Raises = 0, Raised);
+         exit when not Raised;
+         Raises := Raises + 1;
+         --  The new pose's frame is kept once the eye's picture has rested from the move: asked a beat later each time.
+         declare
+            Asked : Natural := 0;
+         begin
+            while Asked < Wait_At_Most and then Poses.all <= Have loop
+               Asked := Asked + 1;
+            end loop;
+         end;
+      end loop;
+      Reached := Poses.all >= Wanted;
+   end Gather_Poses;
+
    procedure Sweep_Way
      (Way          : Real;
       Step         : Real;
@@ -1176,15 +1213,13 @@ package body Driver.Robot.Hand is
      (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded)
      return Point_Estimate
    is
-      Unmeasured : Point_Estimate;
    begin
-      return (case Kind is
-                 when Loaded => Driver.Robot.Hand.Tips.Tip (Found (H, Id).Book, Lobe, At_Opening),
-                 when Free   => Unmeasured);
+      return Driver.Robot.Hand.Tips.Tip (Found (H, Id).Book, Lobe, At_Opening, Kind);
    end Tip_In_Tool;
 
-   function Tip_Beat (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Driver.Clock.Beat is
-     (Driver.Robot.Hand.Tips.Beat (Found (H, Id).Book, Lobe, At_Opening));
+   function Tip_Beat
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Driver.Clock.Beat is
+     (Driver.Robot.Hand.Tips.Beat (Found (H, Id).Book, Lobe, At_Opening, Kind));
 
    function Slides (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Slide_Readings is
       Kept : constant Driver.Robot.Hand.Tips.Press_Slides :=
@@ -1200,8 +1235,17 @@ package body Driver.Robot.Hand is
                                 Fraction_Sigma => K.Slid.Fraction_Sigma)];
    end Slides;
 
-   function Tip_Confirmed (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Boolean is
-     (Driver.Robot.Hand.Tips.Confirmed (Found (H, Id).Book, Lobe, At_Opening));
+   function Tip_Confirmed
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Boolean is
+     (Driver.Robot.Hand.Tips.Confirmed (Found (H, Id).Book, Lobe, At_Opening, Kind));
+
+   function Tip_Tested
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Boolean is
+     (Driver.Robot.Hand.Tips.Tested (Found (H, Id).Book, Lobe, At_Opening, Kind));
+
+   function Tip_Across
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Real_Array is
+     (Driver.Robot.Hand.Tips.Across (Found (H, Id).Book, Lobe, At_Opening, Kind));
 
    function Press_Direction (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening)
      return Direction_Estimate is

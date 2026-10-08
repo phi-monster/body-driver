@@ -363,6 +363,87 @@ package body Driver.Robot.Hand.Tests is
       Check (Raises = 0 and then not There, "(d) a hand that cannot be raised was raised" & Raises'Image & " times");
    end Held_Closer;
 
+   procedure Poses_From_Raises is
+      --  A hand measured from a reloaded body file: the eye has seen the closer's readings from no pose, or one,
+      --  and a deviation needs two (A25h logged "0 poses, two are needed" at every round). The arm raises the
+      --  eye, the least that shows and twice that after it, and the pose is asked after a beat at a time:
+      --  (a) the eye has the poses already: no raise;
+      --  (b) the first pose is the eye's own at the readings, the next needs a raise that shows (the first
+      --      raise is too small: it is raised twice), and its frame is kept some beats after;
+      --  (c) more poses are more raises, each twice the one before;
+      --  (d) a frame that is not kept in as long as a view takes to form: the raise is made again, each asking
+      --      ends at that wait and not at the end of time, and it ends where the arm can raise no more;
+      --  (e) an eye that cannot be raised: no pose, and it says so.
+      Wanted    : Positive := 2;
+      Have      : Natural;
+      Shows_At  : Real;      --  the raise from which the eye's picture changes enough to keep a frame
+      Lag       : Natural;   --  beats from a raise to its kept frame
+      Since     : Natural;   --  beats since the last raise
+      Total     : Real;      --  how far the eye has been raised
+      Last      : Real;      --  the last raise
+      Limit     : Natural := 0;   --  how many raises the arm can make
+      Made      : Natural;
+      Pending   : Boolean;   --  a raise that shows has been made and its frame is not kept yet
+      Raises    : Natural;
+      Reached   : Boolean;
+      Asked     : Natural;
+      function Poses return Natural is
+      begin
+         Asked := Asked + 1;
+         Since := Since + 1;
+         if Pending and then Since >= Lag then
+            Have := Have + 1;
+            Pending := False;
+         end if;
+         return Have;
+      end Poses;
+      procedure Raise_Eye (First : Boolean; Raised : out Boolean) is
+      begin
+         Raised := Made < Limit;
+         if Raised then
+            Made := Made + 1;
+            Last := (if First then 0.01 else 2.0 * Last);
+            Total := Total + Last;
+            Since := 0;
+            Pending := Last >= Shows_At;
+         end if;
+      end Raise_Eye;
+      procedure Case_Of (Poses_Seen : Natural; Needed : Positive; Raise_Shows_At : Real; Kept_After : Natural;
+                         Wait : Positive; Can_Raise : Natural) is
+      begin
+         Wanted := Needed;
+         Have := Poses_Seen;
+         Shows_At := Raise_Shows_At;
+         Lag := Kept_After;
+         Since := 0;
+         Total := 0.0;
+         Last := 0.0;
+         Limit := Can_Raise;
+         Made := 0;
+         Pending := False;
+         Asked := 0;
+         Gather_Poses (Wanted, Wait, Poses'Access, Raise_Eye'Access, Raises, Reached);
+      end Case_Of;
+   begin
+      Case_Of (2, 2, 0.0, 3, 100, 10);
+      Check (Reached and then Raises = 0 and then Asked = 2, "(a) an eye with the poses was raised" & Raises'Image
+             & " times and asked" & Asked'Image & " times");
+      Case_Of (1, 2, 0.015, 3, 10, 10);
+      Check (Reached and then Raises = 2 and then abs (Total - 0.03) < 1.0e-12 and then Have = 2,
+             "(b) the first raise was too small to show: raised" & Raises'Image & " times by" & Real'Image (Total)
+             & ", reached:" & Reached'Image & ", poses" & Have'Image);
+      Case_Of (1, 4, 0.0, 3, 100, 10);
+      Check (Reached and then Raises = 3 and then abs (Total - 0.07) < 1.0e-12,
+             "(c) three more poses took" & Raises'Image & " raises by" & Real'Image (Total) & ", not 3 raises by 0.07");
+      Case_Of (1, 2, 0.0, 50, 10, 3);
+      Check (not Reached and then Raises = 3 and then Asked <= 3 * 11 + 3,
+             "(d) a frame never kept in the wait was asked after" & Asked'Image & " beats with" & Raises'Image
+             & " raises, reached:" & Reached'Image & ", not three waits of ten beats");
+      Case_Of (1, 2, 0.0, 3, 100, 0);
+      Check (not Reached and then Raises = 0 and then Have = 1, "(e) an eye that cannot be raised was raised"
+             & Raises'Image & " times and reached its poses:" & Reached'Image);
+   end Poses_From_Raises;
+
    procedure Roles_Re_Read is
       --  A group the body first takes for a closer of an arm whose eye sees
       --  it, then re-reads as an arm of its own (as A10's boot did with its
@@ -466,6 +547,9 @@ package body Driver.Robot.Hand.Tests is
                              & "end of its room, or is not a press", Stalled_Descent'Access);
       Driver.Tests.Register ("hand.measure.held", "a closer held by the table is not freed by raising the hand, or a closer "
                              & "nothing holds is raised for", Held_Closer'Access);
+      Driver.Tests.Register ("hand.measure.poses", "an eye that has seen a closer's readings from too few poses is raised "
+                             & "for more, or one that has enough is, or the wait for a frame is not bounded",
+                             Poses_From_Raises'Access);
       Driver.Tests.Register ("hand.measure.roles", "a group the body re-read as an arm is swept as a closer",
                              Roles_Re_Read'Access);
       Driver.Robot.Hand.Frames.Tests.Register;

@@ -54,7 +54,8 @@ package body Driver.Robot.Hand.Touch.Tests is
    --  axis at azimuth Azimuth, the tip landing at (X, Y), Lift above the
    --  table (an early stop when positive, a sunk contact when negative) plus
    --  Contact noise; the reported pose carries the arm's noise.
-   function Make_Press (Lobe : Positive; Tilt, Azimuth, X, Y, Lift, Contact : Real; Slope : Real := 0.0)
+   function Make_Press (Lobe : Positive; Tilt, Azimuth, X, Y, Lift, Contact : Real; Slope : Real := 0.0;
+                        Offset : Vec3 := Zero3)
      return Press
    is
       --  Slope tilts the table about the y axis: the table is z = -tan (Slope) x.
@@ -62,7 +63,9 @@ package body Driver.Robot.Hand.Touch.Tests is
       R : constant Mat3 := Exp (Tilt * Horizontal) * Pointing_Down (Lobe);
       Normal : constant Vec3 := [Sin (Slope), 0.0, Cos (Slope)];
       Landing : constant Vec3 := [X, Y, -Tan (Slope) * X] + (Lift + Contact * Gaussian) * Normal;
-      T : constant Vec3 := Landing - R * Tips_True (Lobe);
+      --  Offset is how far the point of the lobe that touches stands from the tip on the line of sight, in the tool
+      --  frame: the lobe's tip region is wider than the line.
+      T : constant Vec3 := Landing - R * (Tips_True (Lobe) + Offset);
       Noisy : constant Rigid :=
         (Rotation    => Exp (Turn_Sigma * [Gaussian, Gaussian, Gaussian]) * R,
          Translation => T + Pose_Sigma * [Gaussian, Gaussian, Gaussian]);
@@ -71,7 +74,8 @@ package body Driver.Robot.Hand.Touch.Tests is
                           Position_Covariance => (Pose_Sigma ** 2) * Identity3,
                           Rotation_Covariance => (Turn_Sigma ** 2) * Identity3),
               Sight   => Lobe,
-              Surface => 1);
+              Surface => 1,
+              others  => <>);
    end Make_Press;
 
    function Measured (Offset_Sigma, Offset_Error : Real) return Surface_Prior_Array is
@@ -109,6 +113,29 @@ package body Driver.Robot.Hand.Touch.Tests is
                 "the tip's distance along its line of sight is off by more than its own sigma allows");
       end;
    end On_Sight_With_Early_Stop;
+
+   procedure Behind_The_Eye is
+      --  A press whose line of sight to the tip points away from the surface: it meets it behind the eye, at
+      --  a negative distance (A19: a press aimed at one lobe and given to the other fitted the tip -79.4 units
+      --  along its sight). That is not the line of a tip that stopped the arm on the surface: no tip, and the
+      --  press is not one a tip rests on. The same press of the lobe turned the right way gives its tip.
+      Backwards : Press_Array (1 .. 1);
+      Forwards  : Press_Array (1 .. 1);
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 5);
+      Backwards (1) := Make_Press (1, Ada.Numerics.Pi, 0.0, 0.40, 0.10, 0.25, 0.0);
+      Forwards (1) := Make_Press (1, 0.0, 0.0, 0.40, 0.10, 0.0, 0.0);
+      declare
+         F : constant Fit_Result := Fit (Backwards, Sights (1 .. 1), Measured (2.0e-4, 0.0));
+         G : constant Fit_Result := Fit (Forwards, Sights (1 .. 1), Measured (2.0e-4, 0.0));
+      begin
+         Check (not F.Tips (1).Ok and then not F.Agrees (1),
+                "a line of sight that meets the surface behind the eye gave a tip at" & Real'Image (F.Tips (1).Distance.Value)
+                & ", which a press rests on:" & F.Agrees (1)'Image);
+         Check (G.Tips (1).Ok and then G.Agrees (1) and then G.Tips (1).Distance.Value > 0.0,
+                "the same press turned the right way gave no tip in front of the eye");
+      end;
+   end Behind_The_Eye;
 
    procedure Provisional_And_Stalls is
       --  The presses of A16's first hand, as the arm made them: the first
@@ -396,6 +423,132 @@ package body Driver.Robot.Hand.Touch.Tests is
       Check (not Fit (Presses (1 .. 1), Sights (1 .. 1), Unknown_Table).Ok, "a single press on an unknown table gave a tip");
    end Undetermined;
 
+   procedure Lateral_Offset_Needs_Tilts is
+      --  The point of the lobe that touches is not on the line of sight to its tip pixel but somewhere in the tip
+      --  region (0.07 rad wide here: 0.007 at that distance); here it stands 0.012 across the line. A press at a
+      --  pose turned about the eye meets the surface at a different distance for a tip off the line, by the offset
+      --  times the difference of the tangents of the tilts, so presses tell the offset along the turn between
+      --  them and nothing across it, however many there are or however far apart in place:
+      --  (a) straight presses from six places agree on the distance and tell nothing across: not Tested, not
+      --      Confirmed, and the tip is as wide across the line as the region;
+      --  (b) presses straight and tilted 0.6 rad one way tell one axis: the tip narrows along it, and is not
+      --      Tested nor Confirmed;
+      --  (c) tilted both ways, 0.6 rad about two axes, they tell both: Tested and Confirmed, and the tip is the
+      --      vertex that touched, not the line's point;
+      --  (d) tilted by a hair, 0.003 rad about both axes (thirty times the arm's turning noise, and still too
+      --      little to tell an offset of the tip region's size from the noise of the heights), they tell no more
+      --      than the straight ones.
+      Region : constant Real := 0.07;
+      U      : constant Vec3 := Direction_Of (1);
+      Across : constant Vec3 := Unit (Cross (U, [0.0, 0.0, 1.0]));
+      Along_Z : constant Vec3 := Cross (U, Across);
+      Offset : constant Vec3 := 0.012 * Across;
+      Wide   : constant Sight_Array :=
+        [1 => (Origin    => (Mean => Eye, Covariance => 1.0e-10 * Identity3),
+               Direction => (Unit_Vector => U, Sigma => Region))];
+      Prior_Length : constant Real := Distance_True (1) * Region;
+
+      --  The variances of the tip along the two axes across its line, the least and the most told.
+      procedure Across_Variances (T : Point_Estimate; Least, Most : out Real) is
+         A : constant Real := Across * (T.Covariance * Across);
+         B : constant Real := Along_Z * (T.Covariance * Along_Z);
+         C : constant Real := Across * (T.Covariance * Along_Z);
+         Mid : constant Real := (A + B) / 2.0;
+         Gap : constant Real := Sqrt (((A - B) / 2.0) ** 2 + C ** 2);
+      begin
+         Least := Mid - Gap;
+         Most := Mid + Gap;
+      end Across_Variances;
+
+      function Fitted (Tilt_1, Tilt_2 : Real; Straight, Each : Positive) return Fit_Result is
+         Presses : Press_Array (1 .. Straight + 2 * Each);
+         N       : Natural := 0;
+      begin
+         Ada.Numerics.Float_Random.Reset (Gen, 8);
+         for I in 1 .. Straight loop
+            N := N + 1;
+            Presses (N) := Make_Press (1, 0.0, 0.0, 0.40 + 0.03 * Real (I), 0.10 + 0.02 * Real (I), 0.0, 0.0, Offset => Offset);
+         end loop;
+         for I in 1 .. Each loop
+            N := N + 1;
+            Presses (N) := Make_Press (1, Tilt_1, 0.0, 0.42 + 0.03 * Real (I), 0.12 + 0.02 * Real (I), 0.0, 0.0, Offset => Offset);
+            N := N + 1;
+            Presses (N) := Make_Press (1, Tilt_2, Ada.Numerics.Pi / 2.0, 0.44 + 0.03 * Real (I), 0.14 + 0.02 * Real (I), 0.0, 0.0,
+                                       Offset => Offset);
+         end loop;
+         return Fit (Presses, Wide, Measured (2.0e-4, 0.0));
+      end Fitted;
+   begin
+      --  (a)
+      declare
+         F : constant Fit_Result := Fitted (0.0, 0.0, 6, 1);
+         Least, Most : Real;
+      begin
+         Check (F.Ok and then F.Tips (1).Ok, "straight presses gave no tip");
+         if F.Tips (1).Ok then
+            Across_Variances (F.Tips (1).Tip, Least, Most);
+            Check (not F.Tips (1).Tested and then not F.Tips (1).Confirmed,
+                   "presses all straight along the line, from distinct places, tested the tip across it:"
+                   & F.Tips (1).Tested'Image & " confirmed:" & F.Tips (1).Confirmed'Image);
+            Check (Least > 0.8 * Prior_Length ** 2,
+                   "straight presses narrowed the tip across its line to" & Real'Image (Sqrt (Least)) & " from" & Real'Image (Prior_Length));
+         end if;
+      end;
+      --  (b) Tilted about one axis only (the second tilt is none).
+      declare
+         F : constant Fit_Result := Fitted (0.6, 0.0, 2, 3);
+         Least, Most : Real;
+      begin
+         if F.Tips (1).Ok then
+            Across_Variances (F.Tips (1).Tip, Least, Most);
+            Check (Most > 0.8 * Prior_Length ** 2 and then Least < 0.02 * Prior_Length ** 2,
+                   "tilts about one axis did not narrow the tip along it and only it: across" & Real'Image (Sqrt (Least))
+                   & " and" & Real'Image (Sqrt (Most)) & " of a prior" & Real'Image (Prior_Length));
+            Check (not F.Tips (1).Tested and then not F.Tips (1).Confirmed,
+                   "tilts about one axis tested the tip across the line:" & F.Tips (1).Tested'Image);
+         else
+            Check (False, "tilts about one axis gave no tip");
+         end if;
+      end;
+      --  (c)
+      declare
+         F : constant Fit_Result := Fitted (0.6, 0.6, 2, 3);
+         Least, Most : Real;
+      begin
+         Check (F.Ok and then F.Tips (1).Ok, "tilts about two axes gave no tip");
+         if F.Tips (1).Ok then
+            Across_Variances (F.Tips (1).Tip, Least, Most);
+            Check (F.Tips (1).Tested and then F.Tips (1).Confirmed,
+                   "tilts about both axes did not test and confirm the tip: tested " & F.Tips (1).Tested'Image
+                   & ", confirmed " & F.Tips (1).Confirmed'Image & ", across" & Real'Image (Sqrt (Least)) & " and"
+                   & Real'Image (Sqrt (Most)) & " of a prior" & Real'Image (Prior_Length));
+            declare
+               D : constant Vec3 := F.Tips (1).Tip.Mean - (Tips_True (1) + Offset);
+               Mahalanobis : constant Real := D * (Inverse (F.Tips (1).Tip.Covariance) * D);
+               Line_Point : constant Vec3 := Tips_True (1);
+            begin
+               Check (Mahalanobis < 14.2, "the tip is not the vertex that touched: off by" & Real'Image (abs D)
+                      & ", Mahalanobis" & Real'Image (Mahalanobis) & ", the line's point is off by" & Real'Image (abs Offset));
+               Check (abs D < 0.5 * abs (Offset) and then abs (F.Tips (1).Tip.Mean - Line_Point) > 0.5 * abs Offset,
+                      "the tip did not move off the line to the vertex that touched:" & Real'Image (abs D));
+            end;
+         end if;
+      end;
+      --  (d)
+      declare
+         F : constant Fit_Result := Fitted (0.003, 0.003, 2, 3);
+         Least, Most : Real := 0.0;
+      begin
+         if F.Tips (1).Ok then
+            Across_Variances (F.Tips (1).Tip, Least, Most);
+         end if;
+         Check (F.Ok and then F.Tips (1).Ok and then not F.Tips (1).Tested and then not F.Tips (1).Confirmed,
+                "presses tilted by a hair tested the tip across its line: across" & Real'Image (Sqrt (Least)) & " and"
+                & Real'Image (Sqrt (Most)) & " of a prior" & Real'Image (Prior_Length) & ", along "
+                & Real'Image (F.Tips (1).Distance.Sigma));
+      end;
+   end Lateral_Offset_Needs_Tilts;
+
    procedure Poses_Apart is
       --  Two poses are apart when their positions or their turns are by more
       --  than their uncertainty tells them from.
@@ -421,6 +574,8 @@ package body Driver.Robot.Hand.Touch.Tests is
    begin
       Driver.Tests.Register ("hand.touch.on_sight", "a press that stopped on something else moves the tip",
                              On_Sight_With_Early_Stop'Access);
+      Driver.Tests.Register ("hand.touch.behind", "a line of sight that meets the surface behind the eye gives a tip",
+                             Behind_The_Eye'Access);
       Driver.Tests.Register ("hand.touch.provisional",
                              "stops on something else are taken for a tip's presses, or one press is taken for checked",
                              Provisional_And_Stalls'Access);
@@ -440,6 +595,9 @@ package body Driver.Robot.Hand.Touch.Tests is
                              Undetermined'Access);
       Driver.Tests.Register ("hand.touch.apart", "two poses are told apart that the uncertainty cannot, or the reverse",
                              Poses_Apart'Access);
+      Driver.Tests.Register ("hand.touch.lateral", "presses straight or tilted by a hair confirm a tip across its line, "
+                             & "or tilts about one axis do, or tilts about two do not move it to the vertex that touched",
+                             Lateral_Offset_Needs_Tilts'Access);
    end Register;
 
 end Driver.Robot.Hand.Touch.Tests;

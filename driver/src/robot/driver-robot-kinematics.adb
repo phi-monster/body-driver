@@ -1395,7 +1395,12 @@ package body Driver.Robot.Kinematics is
                        (Driver.Log.Robot, "kinematics: eye" & E'Image & " fixed in the world: "
                         & (if Report.Determined then "placed" else "not placed") & " from" & Kept'Image
                         & " answers of" & Q'Image & " points," & Report.Used'Image & " fit, noise "
-                        & Driver.Log.Image (Report.Sigma_Px, 3) & " px; " & Lens_Text & "; " & Pose_Text
+                        & Driver.Log.Image (Report.Sigma_Px, 3) & " px"
+                        & (if Report.Linear_To < Real'Last
+                           then ", its cost quadratic over " & Driver.Log.Image (Report.Linear_To, 1) & " of "
+                                & Driver.Log.Image (Driver.Conventions.Z, 0) & " sigmas"
+                           else "")
+                        & "; " & Lens_Text & "; " & Pose_Text
                         & (if Report.Determined then "" else ": " & To_String (Report.Why)));
                   end;
                end if;

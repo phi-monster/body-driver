@@ -30,13 +30,26 @@
 --  hundredth moves the eye's terms by what that does, not by what the
 --  matcher's errors do.
 --
+--  The covariance is never below the noise's own: in the frame where the normal
+--  equations are the identity no direction has less spread than the level of
+--  the residuals themselves (the Cramer-Rao bound), however few sightings its
+--  estimate rests on. And it is judged where the cost says its linearisation
+--  reaches: along each principal direction of the covariance, either way, a
+--  displacement of Z sigmas of the normal equations raises a quadratic cost by
+--  Z^2 / 2, and the square root of twice the rise it has is Linear_To (Z where
+--  the cost is quadratic); one sigma is the standard deviation of a
+--  significance, so a cost that rises as though the displacement were fewer
+--  than Z - 1 sigmas shows the covariance out of its range.
+--
 --  The eye is determined when its normal equations are positive definite, its
---  covariance finite, both focal lengths significant against their own
---  sigma, its turn known to a cone within a quarter turn at Z sigmas and its
---  centre known. Else it is not, and Why says which. Points of one plane fix
---  the eye only up to one term (the focal length trades against the pose):
---  the points' own uncertainty then leaves the focal length with a sigma as
---  large as itself, and the eye is not determined.
+--  covariance finite and the cost quadratic over it (above), both focal
+--  lengths significant against their own sigma, its principal point located
+--  within half the picture at Z sigmas, its turn known to a cone within a
+--  quarter turn at Z sigmas and its centre known. Else it is not, and Why gives
+--  every one of these it fails, the covariance's own first (the other sigmas are
+--  read from it). Points of one plane fix the eye only up to one term (the focal
+--  length trades against the pose): the points' own uncertainty then leaves the
+--  focal length with a sigma as large as itself, and the eye is not determined.
 --
 --  Start finds where to begin from the plane some of the points lie on and
 --  the points off it: the homography of that plane's coordinates into the
@@ -45,8 +58,10 @@
 --  pixel, with e the camera's own third column in H's scale, linear in the
 --  pixels), which completes the camera's matrix and with it the focal lengths,
 --  the principal point and the pose, wherever the principal point is and
---  however little the plane is tilted. That is a start only: the fit moves
---  every term of the lens.
+--  however little the plane is tilted. e is found as the homography is: by
+--  the least median of the misses over samples of two off-plane sightings (any
+--  half of them may be wrong answers), then refitted once on those that agree.
+--  That is a start only: the fit moves every term of the lens.
 
 with Ada.Strings.Unbounded;
 with Driver.Numerics;
@@ -79,7 +94,7 @@ package Driver.Robot.Kinematics.Fixed is
 
    type Fit_Report is record
       Determined  : Boolean := False;
-      Why         : Ada.Strings.Unbounded.Unbounded_String;
+      Why         : Ada.Strings.Unbounded.Unbounded_String;   --  when not Determined: each criterion it fails
       L           : Fit.Lens;
       Pose        : Rigid := Driver.Numerics.Identity;   --  the eye in the world
       Covariance  : Fit.Real_Lists.Vector;               --  Terms x Terms, row by row (zeros for the terms not kept)
@@ -87,6 +102,10 @@ package Driver.Robot.Kinematics.Fixed is
       Used        : Natural := 0;                        --  the sightings that fit
       Offered     : Natural := 0;
       Distorted   : Boolean := False;                    --  the distortion terms are kept
+      Linear_To   : Real := Real'Last;                   --  the least, over the covariance's principal directions
+                                                         --  and both ways, of how many sigmas of the cost itself a
+                                                         --  displacement of Z sigmas of the normal equations is:
+                                                         --  Z where the cost is quadratic over it (Fit_Eye)
    end record;
 
    procedure Fit_Eye
