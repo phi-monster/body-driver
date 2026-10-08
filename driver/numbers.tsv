@@ -692,7 +692,9 @@ driver-robot-boot.adb	G : Group_Id := 1;	1	structure	a group number before the a
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	2_147_483_647	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	48_271	math	Park and Miller's minimal standard generator: the multiplier
 driver-robot-boot.adb	Group : Group_Id := 1;	1	structure	a placeholder, set before it is read
+driver-robot-boot.adb	Last : Count_Grid := [others => [others => -1]];	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Level : Positive := 1;	1	structure	levels are counted from the first
+driver-robot-boot.adb	Now (G, E) := -1;	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Offset := 2.0 * Offset;	2.0	math	the sweep doubles its step
 driver-robot-boot.adb	Order (Count + 1) := (Channel => C, Sign => 1.0);	1.0	math	the two directions of a push
 driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	1.0	math	the two directions of a push

@@ -198,7 +198,12 @@ package body Driver.Robot.Tests is
       Closer, Part, Idle : Real := 0.0;
    end record;
 
-   function Render (Eye : Positive; S : Rig_State) return Driver.Images.Image is
+   --  Eye 2 shows arm 2's motion by Near times the pixels a reading unit moves its view in the right quarter of the
+   --  view (a near object), by Mid times them in the middle half (a middle distance) and by Far times them in the left
+   --  quarter (the far background); all 1 is the same everywhere. An eye on a turning joint sees different amounts in
+   --  different cells, by depth and by perspective.
+   function Render (Eye : Positive; S : Rig_State; Near : Real := 1.0; Mid : Real := 1.0; Far : Real := 1.0)
+     return Driver.Images.Image is
       use type Driver.Bytes.Offset;
       Data : Driver.Bytes.Byte_Array (1 .. 3 * Rig_Width * Rig_Height);
    begin
@@ -217,7 +222,14 @@ package body Driver.Robot.Tests is
                         L := Texture (Xr + Px_Per_Unit * S.Arm_1 (1), Yr + Px_Per_Unit * S.Arm_1 (2));
                      end if;
                   when 2 =>
-                     L := Texture (Xr + Px_Per_Unit * S.Arm_2 (1), Yr + Px_Per_Unit * S.Arm_2 (2), 2.0);
+                     declare
+                        Gain : constant Real :=
+                          (if Xr >= 0.75 * Real (Rig_Width) then Near
+                           elsif Xr >= 0.25 * Real (Rig_Width) then Mid else Far);
+                     begin
+                        L := Texture (Xr + Px_Per_Unit * Gain * S.Arm_2 (1), Yr + Px_Per_Unit * Gain * S.Arm_2 (2),
+                                      2.0);
+                     end;
                   when others =>
                      if Y < 16 and then X < 16 then
                         L := Texture (Xr + Px_Per_Unit * S.Arm_1 (1), Yr + Px_Per_Unit * S.Arm_1 (2), 3.0);
@@ -2304,6 +2316,7 @@ package body Driver.Robot.Tests is
    procedure Boot_On_Rig
      (M : in out Model; Settling : Boolean; Done, Ok : out Boolean; Beats : out Natural; Still_Poses : out Natural;
       Arm_2_Poses : out Natural; Eye_2_Noise : Real := 0.0; Eye_2_Lag : Positive := 1;
+      Eye_2_Near : Real := 1.0; Eye_2_Mid : Real := 1.0; Eye_2_Far : Real := 1.0;
       File : String := ""; Stop_Once_Kept : Boolean := False)
    is
       --  File is the body file the boot is given. With Stop_Once_Kept, the main
@@ -2370,7 +2383,9 @@ package body Driver.Robot.Tests is
                for E in 1 .. 3 loop
                   declare
                      Picture : Driver.Images.Image :=
-                       Render (E, (if E = 2 and then Eye_2_Lag > 1 then History (B mod Eye_2_Lag) else Drawn));
+                       Render (E, (if E = 2 and then Eye_2_Lag > 1 then History (B mod Eye_2_Lag) else Drawn),
+                               (if E = 2 then Eye_2_Near else 1.0), (if E = 2 then Eye_2_Mid else 1.0),
+                               (if E = 2 then Eye_2_Far else 1.0));
                   begin
                      if Settling and then E = 1 and then Since < Natural'Last then
                         declare
@@ -2555,6 +2570,49 @@ package body Driver.Robot.Tests is
              & Eye_Mount (M, 2).Kind'Image);
       Check (Poses_2 > 0, "arm 2 was never swept with its noisy eye");
    end Boot_With_An_Undecided_Eye;
+
+   --  An eye that rides on a turning joint sees its view move by different amounts in different cells (by depth, by
+   --  perspective). The rig's eye 2 shows a near object, the right quarter of its view, move about seventeen times as
+   --  much as a middle distance (the middle half) and a hundred times as much as the far background (the rest).
+   --  Pushed by the amount some eye first sees arm 2 at, only the cells that move most respond (13 of 48), and the
+   --  eye shows a patch of its view; pushed harder, the middle distance and then the background do too, until it is
+   --  the whole. The boot must not take the patch for an answer, as it did A17's right arm: the same first push gave
+   --  134 of 525 cells, undecided, in A16 and 132, a patch, in A17; A16's arm was pushed again and came to 282, the
+   --  whole, while A17's was left a part and never swept. A patch that grows with the push is pushed on.
+   procedure Boot_With_A_Patch_That_Grows is
+      M     : Model;
+      Done  : Boolean;
+      Ok    : Boolean;
+      Beats : Natural;
+      Poses, Poses_2 : Natural;
+   begin
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, Eye_2_Mid => 0.06, Eye_2_Far => 0.01);
+      Check (Done, "the boot did not finish");
+      Driver.Log.Line (Driver.Log.Robot, "boot with a patch that grows: eye 2 shows arm 2 as "
+                       & Response (M, 2, 2)'Image & ", " & Responding (M, 2, 2)'Image & " of"
+                       & Textured_Cells (M, 2, 2)'Image & " cells, arm 2 swept at" & Poses_2'Image & " poses");
+      Check (Role (M, 2) = Arm and then Eye_Mount (M, 2).Kind = Arm_Carried and then Eye_Mount (M, 2).Arm = 2,
+             "arm 2 carrying an eye whose view moves by different amounts is not recognized: " & Role (M, 2)'Image
+             & ", eye 2 " & Eye_Mount (M, 2).Kind'Image & ", " & Response (M, 2, 2)'Image & " "
+             & Responding (M, 2, 2)'Image & " of" & Textured_Cells (M, 2, 2)'Image);
+      Check (Poses_2 > 0, "arm 2 was never swept with its eye");
+   end Boot_With_A_Patch_That_Grows;
+
+   --  When the cells that respond have grown. A patch of 13 of 48 cells that is 17 after the push is doubled has: the
+   --  four new are more than the false alarms among the 35 that did not respond could make; 15 has not (two are).
+   --  A16's arm 2 in eye 3, 134 of 525 undecided, was 282 pushed again; 132 and 135 is a patch that is one. A count
+   --  that falls, or does not change, or fills the eye, has not grown beyond what there was room for.
+   procedure Growth_Of_The_Responding_Cells is
+   begin
+      Check (Boot.Grew (13, 17, 48), "13 of 48 cells become 17 and have not grown");
+      Check (not Boot.Grew (13, 15, 48), "13 of 48 cells become 15 and have grown");
+      Check (Boot.Grew (134, 282, 525), "134 of 525 cells become 282 and have not grown");
+      Check (not Boot.Grew (132, 135, 525), "132 of 525 cells become 135 and have grown");
+      Check (Boot.Grew (13, 48, 48), "13 of 48 cells become all 48 and have not grown");
+      Check (not Boot.Grew (4, 4, 48), "4 of 48 cells stay 4 and have grown");
+      Check (not Boot.Grew (17, 13, 48), "17 of 48 cells become 13 and have grown");
+      Check (not Boot.Grew (48, 48, 48), "all 48 of 48 cells have grown");
+   end Growth_Of_The_Responding_Cells;
 
    --  The rig's boot with arm 2's eye ten beats behind its readings, more
    --  than the stretch between pushes at first: until the lag can be told,
@@ -5646,6 +5704,12 @@ package body Driver.Robot.Tests is
                              & "recognize the rig's groups when it pushes them itself", Boot_From_Zero'Access);
       Driver.Tests.Register ("robot.boot.undecided", "an arm whose eye is undecided after the first pushes is left "
                              & "unswept: the boot reads the body before the eye decides", Boot_With_An_Undecided_Eye'Access);
+      Driver.Tests.Register ("robot.boot.patch", "an arm whose eye shows only a patch of its view after the first "
+                             & "pushes, the cells that move most, is taken for a part and left unswept",
+                             Boot_With_A_Patch_That_Grows'Access);
+      Driver.Tests.Register ("robot.boot.grew", "the cells that respond to a push are found to have grown by no more "
+                             & "than the false alarms among those that did not, or not to have when they grew by more",
+                             Growth_Of_The_Responding_Cells'Access);
       Driver.Tests.Register ("robot.boot.reread", "an arm the estimate finds carrying its eye only after the body "
                              & "was first read is never swept with it", Boot_With_A_Late_Mount'Access);
       Driver.Tests.Register ("robot.boot.settling", "a sweep level whose eye's picture keeps changing for beats after "
