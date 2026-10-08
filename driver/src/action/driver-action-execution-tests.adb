@@ -288,6 +288,40 @@ package body Driver.Action.Execution.Tests is
              "a bar put onto a block by an arm finer than the eyes does not rest on it, let go");
    end A_Fine_Arm_Goes_Over_And_Down;
 
+   --  The route over a block keeps the thing clear of it by the reach of the
+   --  contact test ahead and as much again for the noise of the estimates the
+   --  test is made on; kept to the reach alone, the estimate of a thing carried
+   --  across lies inside it on half the beats, and each of those beats is a
+   --  step no longer than the band of a contact, so the thing creeps (a run
+   --  that took 13 steps on one machine took 60 and timed out on another). It
+   --  does not depend on the noise that happens to be drawn.
+   procedure The_Route_Over_A_Block_Does_Not_Depend_On_The_Noise is
+      Seeds : constant Natural := 12;
+      Slow  : Natural := 0;
+      Worst : Natural := 0;
+   begin
+      for Seed in 1 .. Seeds loop
+         declare
+            W : Sim.World;
+            R : Result;
+         begin
+            Fine_Gripper (W, Turned, 200 + Seed);
+            Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.05, 0.4), Mu => 0.6);
+            Sim.Add_Thing (W, Block (0.08, 0.08, 0.05), On_Table (-0.12, 0.08, 0.2), Mu => 0.6);
+            W.Last_Beat := Finer;
+            Execute (W, Interval_Want (Thing_Of (1), Onto, Thing_Of (2), Touched), R);
+            Worst := Natural'Max (Worst, W.Beat);
+            if R.Final /= Touched then
+               Slow := Slow + 1;
+               Ada.Text_IO.Put_Line ("      seed" & Integer'Image (200 + Seed) & ": " & Ending'Image (R.Final) & " after"
+                                     & W.Beat'Image & " beats");
+            end if;
+         end;
+      end loop;
+      Check (Slow = 0, Integer'Image (Slow) & " of" & Integer'Image (Seeds) & " noise draws did not put a bar onto a block "
+             & "within as many beats as the arm is finer than the eyes");
+   end The_Route_Over_A_Block_Does_Not_Depend_On_The_Noise;
+
    --  An arm is the less sure of its pose the farther it has gone from where it
    --  was measured. The search finds where to take hold of a thing clear of
    --  everything by the margin the arm's uncertainty at the start asks; a way
@@ -581,6 +615,9 @@ package body Driver.Action.Execution.Tests is
                 A_Fine_Arm_Puts_Down'Access);
       Register ("action.run.fine.over", "an arm much finer than the eyes stalls on the route over a block",
                 A_Fine_Arm_Goes_Over_And_Down'Access);
+      Register ("action.run.over.noise", "a route over a block creeps on the beats the estimates of the thing carried "
+                & "lie inside the reach of the contact test, so a draw of the noise stalls it",
+                The_Route_Over_A_Block_Does_Not_Depend_On_The_Noise'Access);
       Register ("action.run.fine.heading", "a step of heading is only the finest turn the arm can tell",
                 A_Step_Of_Heading_Is_A_Turn'Access);
       Register ("action.run.again", "a push that moved some and stopped short is taken for a block at once",

@@ -72,7 +72,8 @@ driver-action-contact.adb	Low : Positive := 1;	1	structure	the first coordinate 
 driver-action-contact.adb	Seed (Low) := 1.0;	1.0	math	the seed is a unit coordinate axis
 driver-action-contact.adb	for K in 2 .. 3 loop	2	structure	the remaining coordinate axes, second and third
 driver-action-contact.adb	for K in 2 .. 3 loop	3	structure	the remaining coordinate axes, second and third
-driver-action-execution.adb	(Object_Pitch / 2.0 + Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
+driver-action-execution.adb	(Object_Pitch / 2.0 + 2.0 * Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
+driver-action-execution.adb	(Object_Pitch / 2.0 + 2.0 * Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)	2.0	math	the reach of the contact test ahead, and as much again for the noise of the estimates it is made on
 driver-action-execution.adb	(Z * Sqrt (Sigma ** 2 + T.Sigma ** 2) + T.Pitch / 2.0);	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
 driver-action-execution.adb	(if Margin < 2.0 * Lever then 2.0 * Arccos (1.0 - Margin / Lever) else Pi);	2.0	math	a turn is twice its half, the angle whose cosine is one minus the margin over the lever
 driver-action-execution.adb	(if Margin < 2.0 * Lever then 2.0 * Arccos (1.0 - Margin / Lever) else Pi);	2.0	math	the tool's straight path leaves the arc by the lever times one minus the cosine of half the turn: a margin of twice the lever or more allows any turn up to the half circle

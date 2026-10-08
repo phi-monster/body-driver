@@ -1272,9 +1272,12 @@ package body Driver.Action.Execution is
                           Object_Pitch : Real; R : Goals.Pair_Relation; W : Want; Final : out Ending)
    is
       --  What the mover needs to pass over without meeting it: the reach of
-      --  the contact test ahead, and the arm's own resolution on top.
+      --  the contact test ahead, as much again for the noise of the estimates
+      --  the test is made on (kept to the reach alone the mover is found
+      --  inside it on half the beats, and each of those is a step no longer
+      --  than a contact's band), and the arm's own resolution on top.
       function Margin (S : Snapshot) return Real is
-        (Object_Pitch / 2.0 + Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)
+        (Object_Pitch / 2.0 + 2.0 * Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)
          + Arm (S, G.Arm).Step.Value);
       Route   : Goals.Plan := Goals.Over_Plan (X.S, Subject_Of (X.S), Object_Of (X.S), R, Margin (X.S));
       Planned : Point_Estimate := Object_Of (X.S).Centre;
@@ -1284,12 +1287,14 @@ package body Driver.Action.Execution is
          Fine : constant Real := Arm (S, G.Arm).Step.Value;
          --  The subject is at a point of the route as far as it can tell:
          --  within the arm's smallest step of it, or not significantly away
-         --  given the subject's own uncertainty (a thing seen by an eye is
-         --  never found at the very point the arm took it to).
+         --  given the subject's own uncertainty and that of the object the
+         --  route was made over (a thing seen by an eye is never found at the
+         --  very point the arm took it to, and the point is only as sure as
+         --  the object it was laid from).
          function Is_At (Point : Vec3) return Boolean is
            (abs (Point - Subject_Of (S).Centre.Mean) <= Fine
             or else not Significant (Subject_Of (S).Centre,
-                                     Point_Estimate'(Mean => Point, Covariance => [others => [others => 0.0]])));
+                                     Point_Estimate'(Mean => Point, Covariance => Object_Of (S).Centre.Covariance)));
       begin
          if Significant (Planned, Object_Of (S).Centre) then
             Route := Goals.Over_Plan (S, Subject_Of (S), Object_Of (S), R, Margin (S));
