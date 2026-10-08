@@ -370,10 +370,12 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Arm_Is : Group_Id;
       Arm_Now : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  the arm's readings at the last Read_Arm
       Aim_At  : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  and where the descent began
+      Stalls  : Natural := 0;   --  the pushes the watcher had judged stalled when the step now under way began
 
       procedure Read_Aim (O : Observation) is
       begin
          Driver.Robot.Hand.Pressing.Aim (M, R.Arm, R.Eye, O, Along, Aimed);
+         Stalls := H.Data.Found (Id).Stalls;
       end Read_Aim;
 
       Least : Real;   --  the least push, where the aim leaves the tool, kept above zero so that the doubling begins
@@ -382,38 +384,22 @@ procedure Measure (H : in out Hands; M : in out Model) is
       procedure Read_Lower (O : Observation) is
       begin
          Plan := Driver.Robot.Hand.Pressing.Lowered (M, R.Arm, O, Aimed.Into, By);
+         Stalls := H.Data.Found (Id).Stalls;
       end Read_Lower;
 
       Unplanned : Boolean := False;   --  a step could not be planned
-      Stalls    : Natural := 0;       --  the pushes the watcher judged stalled when the step began, and after it
-      procedure Read_Stalls (O : Observation) is
-         pragma Unreferenced (O);
-      begin
-         Stalls := H.Data.Found (Id).Stalls;
-      end Read_Stalls;
-
-      procedure Lower (Step : Real; Result : out Driver.Robot.Hand.Push_Result) is
-         Before : Natural;
+      procedure Lower (Step : Real; Reached : out Boolean) is
       begin
          By := Step;
          Hold_Beat (Read_Lower'Access);
          if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
             Unplanned := True;
-            Result := Driver.Robot.Hand.Stopped;
+            Reached := False;
             return;
          end if;
-         Hold_Beat (Read_Stalls'Access);
-         Before := Stalls;
          Driver.Robot.Motion.Follow (M, Plan, Report);
-         --  The watcher judges the push from the stream (Driver.Robot.Hand.Lowering), as the press is found: one
-         --  verdict, here as in a replay. A push that was Blocked is a stop whatever it said.
-         Hold_Beat (Read_Stalls'Access);
-         if Report.Outcome /= Driver.Robot.Motion.Reached then
-            Result := Driver.Robot.Hand.Stopped;
-         elsif Stalls > Before then
-            Result := Driver.Robot.Hand.Stalled;
-         else
-            Result := Driver.Robot.Hand.Lowered;
+         Reached := Report.Outcome = Driver.Robot.Motion.Reached;
+         if Reached then
             Descended := Descended + Step;
          end if;
       end Lower;
@@ -430,6 +416,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Result.Tip := Driver.Robot.Hand.Pressing.Gap
               (M, R.Arm, O, Driver.Robot.Hand.Tips.Tip (B, Lobe, Which), Driver.Robot.Hand.Tips.Surface (B), Aimed.Into);
             Result.Eye := Driver.Robot.Hand.Pressing.Gap (M, R.Arm, O, Eye, Table_In_Arm (M, R.Arm), Aimed.Into);
+            --  The watcher judges every push from the stream (Driver.Robot.Hand.Lowering), as the press is found:
+            --  one verdict, here as in a replay. It has judged the step before this one stalled.
+            Result.Stalled := H.Data.Found (Id).Stalls > Stalls;
          end Read_Above;
       begin
          Hold_Beat (Read_Above'Access);
@@ -486,6 +475,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
                              else "; the eye's height above the table unknown"));
       end;
       Driver.Robot.Hand.Descend (Above'Access, Least, Lower'Access, Steps);
+      if Steps.Stalled then
+         --  The last step was followed and took the hand nowhere: it is not part of the lowering.
+         Descended := Descended - By;
+      end if;
       --  One line a press, for the boot's account of where its time went:
       --  how many pushes, and why each was as long as it was.
       Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": press of lobe" & Lobe'Image & " at "

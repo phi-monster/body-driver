@@ -145,22 +145,21 @@ package body Driver.Robot.Hand.Tests is
       Predict   : Boolean := True;
       Last_Step : Real := 0.0;
       Steps     : Descent_Steps;
-      procedure Lower (By : Real; Result : out Push_Result) is
+      procedure Lower (By : Real; Reached : out Boolean) is
          Target : constant Real := Tip - By;
       begin
          Last_Step := By;
-         if Target >= 0.0 then
-            Result := Lowered;
+         Reached := Target >= 0.0;
+         if Reached then
             Tip := Target;
          else
-            Result := Stopped;
             Over := -Target;
             Tip := Target / (1.0 + Stiffer);
          end if;
       end Lower;
       function Above return Heights is
         ((Tip => (if Predict then (Value => Tip - Predicted, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown),
-          Eye => Unknown));
+          Eye => Unknown, others => <>));
       procedure Press (From : Real) is
       begin
          Tip := From;
@@ -234,18 +233,19 @@ package body Driver.Robot.Hand.Tests is
       Steps  : Descent_Steps;
       Pushes : Natural := 0;
       Slides : Boolean := False;   --  the hand slides: its steps are reached and lower nothing
-      procedure Lower (By : Real; Result : out Push_Result) is
+      procedure Lower (By : Real; Reached : out Boolean) is
       begin
          Pushes := Pushes + 1;
          if not Slides then
             Tip := Tip - By;
          end if;
          Lowest := Real'Min (Lowest, Tip + 0.05);
-         Result := (if Pushes < 40 then Lowered else Stopped);   --  the arm gives way until the test ends it
+         Reached := Pushes < 40;   --  the arm gives way until the test ends it
       end Lower;
       function Above return Heights is
         ((Tip => Unknown,
-          Eye => (if Known_Eye then (Value => Tip + 0.05, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown)));
+          Eye => (if Known_Eye then (Value => Tip + 0.05, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown),
+          others => <>));
    begin
       Tip := 0.2;
       Descend (Above'Access, Least, Lower'Access, Steps);
@@ -284,19 +284,21 @@ package body Driver.Robot.Hand.Tests is
       Tip    : Real := 0.34;   --  its height above the table
       Pushes : Natural := 0;
       Steps  : Descent_Steps;
-      procedure Lower (By : Real; Result : out Push_Result) is
+      Stalled : Boolean := False;   --  the last step was followed and took the hand nowhere
+      procedure Lower (By : Real; Reached : out Boolean) is
       begin
          Pushes := Pushes + 1;
+         Reached := True;   --  the arm follows every step
          if Tip - By >= 0.0 then
             Tip := Tip - By;
-            Result := Lowered;
          else
-            Result := Stalled;
+            Stalled := True;
          end if;
       end Lower;
       function Above return Heights is
-        ((Tip => (Value => Tip, Sigma => Sigma, Degrees_Of_Freedom => 0),
-          Eye => (Value => Tip + 2.0, Sigma => 0.001, Degrees_Of_Freedom => 0)));
+        ((Tip     => (Value => Tip, Sigma => Sigma, Degrees_Of_Freedom => 0),
+          Eye     => (Value => Tip + 2.0, Sigma => 0.001, Degrees_Of_Freedom => 0),
+          Stalled => Stalled));
    begin
       Descend (Above'Access, Least, Lower'Access, Steps);
       Check (Steps.Stalled and then not Steps.Spent, "the descent of a hand that stopped going down ended stalled:"

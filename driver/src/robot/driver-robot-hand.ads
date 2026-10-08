@@ -298,22 +298,21 @@ private
       Stalled : Boolean := False;   --  ended by a step the arm followed and the hand did not go down with
    end record;
 
-   type Push_Result is
-     (Lowered,   --  the arm followed the step and the hand went down with it
-      Stopped,   --  the arm did not follow: it met something, or cannot go there
-      Stalled);  --  the arm followed and the hand did not go down (Driver.Robot.Hand.Lowering)
-
    function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Blind);
 
    type Heights is record
-      Tip : Estimate := Unknown;   --  the tip above the contact predicted under it, along the way down
-      Eye : Estimate := Unknown;   --  the eye above the surface, along the way down
+      Tip     : Estimate := Unknown;   --  the tip above the contact predicted under it, along the way down
+      Eye     : Estimate := Unknown;   --  the eye above the surface, along the way down
+      Stalled : Boolean := False;      --  the step before was followed by the arm and the hand did not go down with it
    end record;
+   --  Stalled is read with the heights, from the judgment of the push the stream gave
+   --  (Driver.Robot.Hand.Lowering): the arm's readings went where the step asked and the
+   --  hand lies on what it met.
 
    procedure Descend
      (Above : not null access function return Heights;
       Least : Real;
-      Lower : not null access procedure (By : Real; Result : out Push_Result);
+      Lower : not null access procedure (By : Real; Reached : out Boolean);
       Steps : out Descent_Steps)
      with Pre => Least > 0.0;
    --  A press's descent: each step lowers the tool By, until one does not

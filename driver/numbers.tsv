@@ -1072,7 +1072,6 @@ driver-robot-hand-views.adb	if Driver.Pixels.Frames (V.Frames) >= 2 then	2	stati
 driver-robot-hand-views.adb	or else (Driver.Pixels.Frames (V.Frames) >= 2 and then not Comparable (T, P.Low.Element, V, C, Rest_Moved))	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
-driver-robot-hand.adb	& "" & (if Said.Point = 1 then "" else ""	1	structure	the first point of the hand is the tool's origin
 driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Said.Free, 3) & "");	100.0	format	a share printed as a percentage
 driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Said.Free, 3) & "");	3	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Said.Share, 1) & ""	1	format	digits printed in a log line or a message
@@ -1083,6 +1082,10 @@ driver-robot-hand.adb	& "" & Driver.Log.Image (G.Value, 4)	4	format	digits print
 driver-robot-hand.adb	& "" & Driver.Log.Image (Reach.Value * R.Lobes (L).Sights (Which).Spread, 3)	3	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (Said.Asked, 4) & "" & Driver.Log.Image (Said.Went, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (Said.Asked, 4) & "" & Driver.Log.Image (Said.Went, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand.adb	& Driver.Log.Image (100.0 * Said.Joint_Free, 3) & "");	100.0	format	a share printed as a percentage
+driver-robot-hand.adb	& Driver.Log.Image (100.0 * Said.Joint_Free, 3) & "");	3	format	digits printed in a log line or a message
+driver-robot-hand.adb	& Driver.Log.Image (100.0 * Said.Joint_Share, 1) & "" & Pushes	1	format	digits printed in a log line or a message
+driver-robot-hand.adb	& Driver.Log.Image (100.0 * Said.Joint_Share, 1) & "" & Pushes	100.0	format	a share printed as a percentage
 driver-robot-hand.adb	& Driver.Log.Image (Driver.Robot.Hand.Shape.Scatter (R.Lobes (L).Shape), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Lobe.Way.Reach, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Reach.Value, 4) & "" & Driver.Log.Image (Reach.Sigma, 4)	4	format	digits printed in a log line or a message
@@ -1098,6 +1101,7 @@ driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Dr
 driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Driver.Log.Image (E.Sigma, 4) else "");	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	Allowed := Allowed + 2 * Natural (Real'Ceiling (Threshold (Scalar_Gate (G.Degrees_Of_Freedom)))) + 1	2	structure	a band is two Z sigma wide, in steps of one sigma
 driver-robot-hand.adb	Allowed := Doublings (Room, Least) + 2;	2	structure	the step cut to the room, and the one that finds none left
+driver-robot-hand.adb	Append (Said_By, "" & (if Said.Point = 1 then "" else ""	1	structure	the first point of the hand is the tool's origin
 driver-robot-hand.adb	Append (Text, "" & Driver.Log.Image (Shift.By, 2) & "" & Driver.Log.Image (Shift.Sigma, 2)	2	format	digits printed in a log line or a message
 driver-robot-hand.adb	Append (Text, "" & Driver.Log.Image (Shift.By, 2) & "" & Driver.Log.Image (Shift.Sigma, 2)	2	format	digits printed in a log line or a message
 driver-robot-hand.adb	Append (Text, "" & Driver.Log.Image (Shift.By, 2) & "");	2	format	digits printed in a log line or a message

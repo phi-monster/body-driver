@@ -12,35 +12,58 @@ package body Driver.Robot.Hand.Lowering.Tests is
    Tip   : constant Vec3 := [0.0, 0.0, -0.3];
    Both  : constant Points := [[0.0, 0.0, 0.0], Tip];
    Alone : constant Points := [1 => [0.0, 0.0, 0.0]];
-   Least : constant Real := 0.005;
+
+   --  What the one test of motion sees of a push of these tests: a move of this much or more.
+   Seen_From : constant Real := 0.005;
+
+   --  What the readings did in A17's pushes (beats 7044 and 9009): a free push of 5.8 mrad stopped 1.8 microradians
+   --  short of its target, the crawl's push of 11.6 mrad 3.4 mrad short of it, 29 per cent of its length.
+   Free_Joints  : constant Joint_Push := (Asked => True, Length => 5.8e-3, Short => 1.8e-6, Seen => False);
+   Crawl_Joints : constant Joint_Push := (Asked => True, Length => 1.16e-2, Short => 3.4e-3, Seen => True);
+
+   --  Readings not given: those of a tool that goes straight down, whose length is negative here.
+   Straight_Down : constant Joint_Push := (Asked => False, Length => -1.0, Short => 0.0, Seen => False);
 
    function Stand (X, Y, Z : Real; Turn : Real := 0.0) return Pose_Estimate is
      ((Pose                => (Rotation => Exp ([Turn, 0.0, 0.0]), Translation => [X, Y, Z]),
        Position_Covariance => 1.0e-8 * Identity3,
        Rotation_Covariance => 1.0e-8 * Identity3));
 
+   --  The readings of a push that asked Ask and delivered Got along the way down, as the joints of a tool that
+   --  goes straight down would show it: what it asked is seen from Seen_From on, and so is how far it fell short.
+   function Straight (Ask, Got : Real) return Joint_Push is
+     ((Asked => Ask >= Seen_From, Length => Ask, Short => abs (Ask - Got), Seen => abs (Ask - Got) >= Seen_From));
+
    --  One push from a height, asked down by Ask and delivered down by Got, the tool's place across kept.
+   --  The readings are those of a tool going straight down unless they are given.
    function Push
      (T      : in out Track;
       Height : Real;
       Ask    : Real;
       Got    : Real;
-      Where  : Points := Both) return Judgment
+      Where  : Points := Both;
+      Joints : Joint_Push := Straight_Down) return Judgment
    is
       Said : Judgment;
    begin
       Judge (T, Stand (0.0, 0.0, Height), Stand (0.0, 0.0, Height - Ask), Stand (0.0, 0.0, Height - Got), Into, Where,
-             Least, Said);
+             (if Joints.Length < 0.0 then Straight (Ask, Got) else Joints), Said);
       return Said;
    end Push;
 
    --  Free pushes of the sizes a descent makes, each falling short by the same share of its size.
-   procedure Free_Pushes (T : in out Track; Share : Real; Count : Positive; Height : in out Real) is
-      Ask : Real := Least;
+   procedure Free_Pushes
+     (T      : in out Track;
+      Share  : Real;
+      Count  : Positive;
+      Height : in out Real;
+      Joints : Joint_Push := Straight_Down)
+   is
+      Ask : Real := Seen_From;
    begin
       for K in 1 .. Count loop
          declare
-            Said : constant Judgment := Push (T, Height, Ask, Ask * (1.0 - Share));
+            Said : constant Judgment := Push (T, Height, Ask, Ask * (1.0 - Share), Both, Joints);
          begin
             Check (Said.Result /= Stalled and then Said.Result /= Not_Asked,
                    "a free push of" & Ask'Image & " that fell short by a share" & Share'Image & " was judged"
@@ -61,22 +84,26 @@ package body Driver.Robot.Hand.Lowering.Tests is
    begin
       Free_Pushes (T, 0.0, 6, Height);
       Check (Pushes (T) = 6, "the free pushes counted were" & Pushes (T)'Image & ", not 6");
-      Judge (T, Stand (0.0, 0.0, Height), Stand (0.0, 0.0, Height - 0.05), Stand (0.04, 0.0, Height), Into, Both, Least,
-             Said);
+      Judge (T, Stand (0.0, 0.0, Height), Stand (0.0, 0.0, Height - 0.05), Stand (0.04, 0.0, Height), Into, Both,
+             Straight (0.05, 0.0), Said);
       Check (Said.Result = Stalled, "a push that took the hand along the table was judged " & Said.Result'Image);
       Check (abs (Said.Asked - 0.05) < 1.0e-12 and then abs Said.Went < 1.0e-12 and then abs (Said.Share - 1.0) < 1.0e-9,
              "the stall was said as asked" & Said.Asked'Image & ", went" & Said.Went'Image & ", share" & Said.Share'Image);
+      Check (Said.Point_Stalled and then Said.Joint_Stalled, "the stall was said by the points:" & Said.Point_Stalled'Image
+             & " and by the readings:" & Said.Joint_Stalled'Image);
       Check (Pushes (T) = 6, "a stalled push was counted among the free ones");
    end Hand_Slides;
 
    procedure Hand_Turns_On_Its_Finger is
       --  The finger stands on the table and the hand turns about it as the arm pushes: the origin still goes
       --  down, by 95 per cent of the ask, as free pushes fall short by 3 per cent, and the tip, which the turn
-      --  of 0.4 raises by 0.3 (1 - cos 0.4), has stopped. Only the tip tells.
+      --  of 0.4 raises by 0.3 (1 - cos 0.4), has stopped. The readings stopped short by 5 per cent, which free
+      --  pushes do not by more than 9 per cent. Only the tip tells.
       T      : Track;
       Height : Real := 1.0;
       Ask    : constant Real := 0.05;
       Said   : Judgment;
+      Joints : constant Joint_Push := (Asked => True, Length => Ask, Short => 0.05 * Ask, Seen => True);
    begin
       Free_Pushes (T, 0.03, 6, Height);
       declare
@@ -84,15 +111,46 @@ package body Driver.Robot.Hand.Lowering.Tests is
          Both_Points : Track := T;
          Turned : constant Pose_Estimate := Stand (0.0, 0.0, Height - 0.95 * Ask, Turn => 0.4);
       begin
-         Judge (Origin, Stand (0.0, 0.0, Height), Stand (0.0, 0.0, Height - Ask), Turned, Into, Alone, Least, Said);
+         Judge (Origin, Stand (0.0, 0.0, Height), Stand (0.0, 0.0, Height - Ask), Turned, Into, Alone, Joints, Said);
          Check (Said.Result = Lowered, "the origin of a hand that turned was judged " & Said.Result'Image & ", share"
                 & Said.Share'Image & " against the free pushes'" & Said.Free'Image);
-         Judge (Both_Points, Stand (0.0, 0.0, Height), Stand (0.0, 0.0, Height - Ask), Turned, Into, Both, Least, Said);
-         Check (Said.Result = Stalled and then Said.Point = 2,
+         Judge (Both_Points, Stand (0.0, 0.0, Height), Stand (0.0, 0.0, Height - Ask), Turned, Into, Both, Joints, Said);
+         Check (Said.Result = Stalled and then Said.Point = 2 and then Said.Point_Stalled and then not Said.Joint_Stalled,
                 "the tip of a hand that turned on its finger was judged " & Said.Result'Image & " at point"
                 & Said.Point'Image & ", went" & Said.Went'Image & " of" & Said.Asked'Image);
       end;
    end Hand_Turns_On_Its_Finger;
+
+   procedure Hand_Deflected is
+      --  The readings tell what the hand's points do not (a hand with no tip measured yet, its origin going on
+      --  down): free pushes stop short of their targets by 0.03 per cent of their length, then a push stops
+      --  short of its target by 29 per cent of it, a motion the one test of motion sees, while the tool goes
+      --  down as asked. It is a stall at once, by the readings; the same shortfall below what that test sees
+      --  is not; and with the points stalled too (A17's crawl) both say so.
+      T      : Track;
+      Height : Real := 1.0;
+   begin
+      Free_Pushes (T, 0.0, 6, Height, Free_Joints);
+      declare
+         Deflected : Track := T;
+         Unseen    : Track := T;
+         Both_Say  : Track := T;
+         Said      : constant Judgment := Push (Deflected, Height, 0.05, 0.05, Alone, Crawl_Joints);
+         Hidden    : constant Judgment :=
+           Push (Unseen, Height, 0.05, 0.05, Alone, (Asked => True, Length => 1.16e-2, Short => 3.4e-3, Seen => False));
+         Crawl     : constant Judgment := Push (Both_Say, Height, 0.05, 0.0, Both, Crawl_Joints);
+      begin
+         Check (Said.Result = Stalled and then Said.Joint_Stalled and then not Said.Point_Stalled,
+                "a push deflected across its ask, the tool going down as asked, was judged " & Said.Result'Image
+                & ", by the readings:" & Said.Joint_Stalled'Image & ", by the points:" & Said.Point_Stalled'Image);
+         Check (abs (Said.Joint_Share - 3.4e-3 / 1.16e-2) < 1.0e-12 and then Said.Joint_Free < 1.0e-3,
+                "the readings' share was said as" & Said.Joint_Share'Image & " against" & Said.Joint_Free'Image);
+         Check (Hidden.Result = Lowered, "a deflection the one test of motion does not see was judged " & Hidden.Result'Image);
+         Check (Crawl.Result = Stalled and then Crawl.Joint_Stalled and then Crawl.Point_Stalled,
+                "the crawl was judged " & Crawl.Result'Image & ", by the readings:" & Crawl.Joint_Stalled'Image
+                & ", by the points:" & Crawl.Point_Stalled'Image);
+      end;
+   end Hand_Deflected;
 
    procedure Sagging_Pushes is
       --  A body whose free pushes all fall short by 4 per cent of their size, from the least to the largest a
@@ -145,9 +203,9 @@ package body Driver.Robot.Hand.Lowering.Tests is
    end Retreat_Forgets;
 
    procedure Hairs_Are_Not_Stalls is
-      --  Free pushes that fall short by nothing a float tells, then a push whose shortfall is a hair beside the
-      --  tool's noise: a large share of a small push and not a stall, since no move of the tool that small
-      --  is told from its noise. A push of less than the noise is not judged at all, and does not forget.
+      --  Free pushes that fall short by nothing a float tells, then a push whose shortfall is a hair beside what
+      --  the one test of motion sees: a large share of a small push and not a stall, since no move that small is
+      --  told. A push of less than that test sees is not judged at all, and does not forget.
       T      : Track;
       Height : Real := 1.0;
       Said   : Judgment;
@@ -155,8 +213,8 @@ package body Driver.Robot.Hand.Lowering.Tests is
       Free_Pushes (T, 0.0, 6, Height);
       Said := Push (T, Height, 0.01, 0.01 - 1.0e-7);
       Check (Said.Result = Lowered, "a hair's shortfall was judged " & Said.Result'Image);
-      Said := Push (T, Height, 0.5 * Least, 0.0);
-      Check (Said.Result = Not_Asked and then Pushes (T) = 7, "a push of less than the noise was judged "
+      Said := Push (T, Height, 0.5 * Seen_From, 0.0);
+      Check (Said.Result = Not_Asked and then Pushes (T) = 7, "a push of less than the test sees was judged "
              & Said.Result'Image & " and left" & Pushes (T)'Image & " pushes counted");
    end Hairs_Are_Not_Stalls;
 
@@ -179,14 +237,17 @@ package body Driver.Robot.Hand.Lowering.Tests is
                              & "stalled at the first push that takes it nowhere", Hand_Slides'Access);
       Driver.Tests.Register ("hand.lowering.turn", "a hand turning on its finger, its origin still going down, is not "
                              & "stalled at the tip", Hand_Turns_On_Its_Finger'Access);
+      Driver.Tests.Register ("hand.lowering.across", "a push deflected across its ask, the hand's points going down as "
+                             & "asked, is not a stall by the readings, or one the test of motion does not see is",
+                             Hand_Deflected'Access);
       Driver.Tests.Register ("hand.lowering.sag", "a body whose free pushes fall short by a share is stalled by them, "
                              & "or a push that delivers a part is not", Sagging_Pushes'Access);
       Driver.Tests.Register ("hand.lowering.early", "a stall among the first pushes is judged against nothing",
                              Early_Stalls'Access);
       Driver.Tests.Register ("hand.lowering.retreat", "a retreat does not end a descent's comparison with itself",
                              Retreat_Forgets'Access);
-      Driver.Tests.Register ("hand.lowering.hair", "a shortfall below the tool's noise is a stall, or a push below it "
-                             & "is judged", Hairs_Are_Not_Stalls'Access);
+      Driver.Tests.Register ("hand.lowering.hair", "a shortfall below what the test of motion sees is a stall, or a "
+                             & "push below it is judged", Hairs_Are_Not_Stalls'Access);
       Driver.Tests.Register ("hand.lowering.rise", "a point that goes up under a push down is not stalled",
                              Rising_Is_A_Stall'Access);
    end Register;

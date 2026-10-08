@@ -8,7 +8,6 @@ with Driver.Robot.Hand.Frames;
 with Driver.Robot.Hand.Lobes;
 with Driver.Robot.Hand.Lowering;
 with Driver.Robot.Hand.Presses;
-with Driver.Robot.Hand.Pressing;
 with Driver.Robot.Hand.Shape;
 with Driver.Robot.Hand.Slide;
 with Driver.Robot.Hand.Sweep;
@@ -716,6 +715,25 @@ package body Driver.Robot.Hand is
                return Then_Read;
             end Seen_At;
 
+            function Norm (V : Real_Array) return Real is
+               Sum : Real := 0.0;
+            begin
+               for X of V loop
+                  Sum := Sum + X * X;
+               end loop;
+               return Sqrt (Sum);
+            end Norm;
+
+            --  What the readings did: how long the push asked, and how far short of its target they stopped, the
+            --  whole vector and not only the part along the ask.
+            Ask_Vec   : constant Real_Array := [for C in 1 .. Size => Asked (C) - Before (C)];
+            Short_Vec : constant Real_Array := [for C in 1 .. Size => Asked (C) - After (C)];
+            Joints    : constant Driver.Robot.Hand.Lowering.Joint_Push :=
+              (Asked  => Norm (Ask_Vec) > 0.0 and then Driver.Robot.Channels.Visible (M, Arm_Is, Ask_Vec),
+               Length => Norm (Ask_Vec),
+               Short  => Norm (Short_Vec),
+               Seen   => Driver.Robot.Channels.Visible (M, Arm_Is, Short_Vec));
+
             From   : constant Pose_Estimate := Tool_In_Arm (M, R.Arm, Seen_At (Before));
             Target : constant Pose_Estimate := Tool_In_Arm (M, R.Arm, Seen_At (Asked));
             To     : constant Pose_Estimate := Tool_In_Arm (M, R.Arm, Seen_At (After));
@@ -751,20 +769,32 @@ package body Driver.Robot.Hand is
                   end loop;
                end if;
                Driver.Robot.Hand.Lowering.Judge
-                 (R.Lowering, From, Target, To, -Up.Unit_Vector, Where (1 .. Count),
-                  Driver.Robot.Hand.Pressing.Least_Push (M, R.Arm, Seen_At (After)), Said);
+                 (R.Lowering, From, Target, To, -Up.Unit_Vector, Where (1 .. Count), Joints, Said);
                if Said.Result = Driver.Robot.Hand.Lowering.Stalled then
                   R.Stalled := E.Start;
                   R.Stalls := R.Stalls + 1;
-                  Driver.Log.Line
-                    (Driver.Log.Robot,
-                     "hand" & Id'Image & ": the arm followed the push that began at beat" & E.Start'Image & " and the hand did not"
-                     & " go down with it: asked to take " & (if Said.Point = 1 then "the tool's origin" else "the tip of lobe"
-                                                            & Whose (Said.Point)'Image)
-                     & " down" & Driver.Log.Image (Said.Asked, 4) & ", it went down" & Driver.Log.Image (Said.Went, 4)
-                     & ", short by " & Driver.Log.Image (100.0 * Said.Share, 1) & " % of the ask, where the"
-                     & Driver.Robot.Hand.Lowering.Pushes (R.Lowering)'Image & " pushes of this descent before it fell short by at"
-                     & " most " & Driver.Log.Image (100.0 * Said.Free, 3) & " %: it has stopped lowering the hand");
+                  declare
+                     Pushes  : constant String := Driver.Robot.Hand.Lowering.Pushes (R.Lowering)'Image;
+                     Said_By : Unbounded_String;
+                  begin
+                     if Said.Joint_Stalled then
+                        Append (Said_By, " its readings stopped short of the push's target by "
+                                & Driver.Log.Image (100.0 * Said.Joint_Share, 1) & " % of its length, where the" & Pushes
+                                & " pushes of this descent before it stopped short by at most "
+                                & Driver.Log.Image (100.0 * Said.Joint_Free, 3) & " %;");
+                     end if;
+                     if Said.Point_Stalled then
+                        Append (Said_By, " asked to take " & (if Said.Point = 1 then "the tool's origin" else "the tip of lobe"
+                                                              & Whose (Said.Point)'Image)
+                                & " down" & Driver.Log.Image (Said.Asked, 4) & ", it went down" & Driver.Log.Image (Said.Went, 4)
+                                & ", short by " & Driver.Log.Image (100.0 * Said.Share, 1) & " % of the ask, where the pushes"
+                                & " before it fell short by at most " & Driver.Log.Image (100.0 * Said.Free, 3) & " %;");
+                     end if;
+                     Driver.Log.Line
+                       (Driver.Log.Robot,
+                        "hand" & Id'Image & ": the arm followed the push that began at beat" & E.Start'Image
+                        & " and the hand did not go down with it:" & To_String (Said_By) & " it has stopped lowering the hand");
+                  end;
                end if;
             end;
          end;
@@ -985,12 +1015,12 @@ package body Driver.Robot.Hand is
    procedure Descend
      (Above : not null access function return Heights;
       Least : Real;
-      Lower : not null access procedure (By : Real; Result : out Push_Result);
+      Lower : not null access procedure (By : Real; Reached : out Boolean);
       Steps : out Descent_Steps)
    is
       Fast    : Real := Least;   --  the next step of the fast part, doubling
       Past    : Real := 0.0;     --  the last step past the band, doubling
-      Pushed  : Push_Result;
+      Reached : Boolean;
       Allowed : Natural := Natural'Last;   --  the steps the schedule takes to cover the eye's room: no more are made
       First   : Boolean := True;
 
@@ -1007,6 +1037,12 @@ package body Driver.Robot.Hand is
             By   : Real := Least;
             How  : Kind := Blind;
          begin
+            --  The arm followed the step before and the hand did not go down with it: the hand lies on what it met,
+            --  and the descent is the press, a bound or a contact, not spent.
+            if Seen.Stalled then
+               Steps.Stalled := True;
+               exit;
+            end if;
             if First then
                First := False;
                if Known (Seen.Eye) then
@@ -1090,14 +1126,8 @@ package body Driver.Robot.Hand is
                when Banded   => Steps.Band := Steps.Band + 1;
                when Blind    => Steps.Blind := Steps.Blind + 1;
             end case;
-            Lower (By, Pushed);
-            case Pushed is
-               when Lowered => null;
-               when Stopped => exit;
-               when Stalled =>
-                  Steps.Stalled := True;
-                  exit;
-            end case;
+            Lower (By, Reached);
+            exit when not Reached;
          end;
       end loop;
    end Descend;
