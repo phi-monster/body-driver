@@ -249,6 +249,10 @@ package Driver.Robot is
    --  How many of the eye's textured cells the verdict found responding to
    --  the group's push.
 
+   function Textured_Cells (M : Model; G : Group_Id; E : Eye_Id) return Natural;
+   --  How many cells of the eye the verdict was reached over: those with the
+   --  texture to show a displacement. Zero while there is no verdict.
+
    function Image_Lag (M : Model; E : Eye_Id) return Integer;
    --  How many beats the eye's images trail the readings they belong to:
    --  the image of beat B shows the body as read at beat B - Image_Lag; 0

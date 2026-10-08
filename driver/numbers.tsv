@@ -692,7 +692,9 @@ driver-robot-boot.adb	G : Group_Id := 1;	1	structure	a group number before the a
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	2_147_483_647	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	48_271	math	Park and Miller's minimal standard generator: the multiplier
 driver-robot-boot.adb	Group : Group_Id := 1;	1	structure	a placeholder, set before it is read
+driver-robot-boot.adb	Last : Count_Grid := [others => [others => -1]];	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Level : Positive := 1;	1	structure	levels are counted from the first
+driver-robot-boot.adb	Now (G, E) := -1;	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Offset := 2.0 * Offset;	2.0	math	the sweep doubles its step
 driver-robot-boot.adb	Order (Count + 1) := (Channel => C, Sign => 1.0);	1.0	math	the two directions of a push
 driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	1.0	math	the two directions of a push
@@ -1577,8 +1579,7 @@ driver-robot-kinematics-fixed.adb	Difference_Step * Real'Max (1.0, abs Points (S
 driver-robot-kinematics-fixed.adb	Difference_Step : constant Real := Real'Model_Epsilon ** (1.0 / 3.0);	1.0	numerics	a central difference at the cube root of the float's resolution
 driver-robot-kinematics-fixed.adb	Difference_Step : constant Real := Real'Model_Epsilon ** (1.0 / 3.0);	3.0	numerics	a central difference at the cube root of the float's resolution
 driver-robot-kinematics-fixed.adb	E (Q) := 1.0;	1.0	math	the unit vector along term Q
-driver-robot-kinematics-fixed.adb	Extra (2 * K - 1 + C) := Extra (2 * K - 1 + C) + Slope (X, C) * Own (X, Y) * Slope (Y, C);	2	structure	two residual components per sighting
-driver-robot-kinematics-fixed.adb	Extra (2 * K - 1 + C) := Extra (2 * K - 1 + C) + Slope (X, C) * Own (X, Y) * Slope (Y, C);	2	structure	two residual components per sighting
+driver-robot-kinematics-fixed.adb	Extra (2 * K - 1 + C) := Along * Along;	2	structure	two residual components per sighting
 driver-robot-kinematics-fixed.adb	Extra : Real_Access := new Real_Array (1 .. 2 * N);	2	structure	two residual components per sighting
 driver-robot-kinematics-fixed.adb	Foot : constant Vec3 := [Along_1 (J), Along_2 (J), 1.0];	1.0	math	the homogeneous coordinate of a point of the plane
 driver-robot-kinematics-fixed.adb	Hx : constant Vec3 := H * [Along_1 (J), Along_2 (J), 1.0];	1.0	math	the homogeneous coordinate of a point of the plane
@@ -1661,6 +1662,7 @@ driver-robot-kinematics-fixed.adb	and then not Driver.Uncertain.Significant (R (
 driver-robot-kinematics-fixed.adb	else Driver.Conventions.Z * (abs Value - 0.5 * Driver.Conventions.Z));	0.5	math	Huber's cost beyond Z is linear: Z times the distance less half Z
 driver-robot-kinematics-fixed.adb	elsif Used * 2 <= Terms then	2	structure	two residual components per sighting, against the terms they must determine
 driver-robot-kinematics-fixed.adb	elsif not (Driver.Conventions.Z * Sqrt (Turn_Var) < Ada.Numerics.Pi / 2.0) then	2.0	math	a quarter turn
+driver-robot-kinematics-fixed.adb	for A in 1 .. 3 loop	3	structure	three coordinates, three eigenvalues
 driver-robot-kinematics-fixed.adb	for Axis in 1 .. 3 loop	3	structure	three axes
 driver-robot-kinematics-fixed.adb	for Axis in 1 .. 3 loop	3	structure	three axes
 driver-robot-kinematics-fixed.adb	for C in 0 .. 1 loop	1	structure	the two pixel components, 0 and 1
@@ -1669,9 +1671,8 @@ driver-robot-kinematics-fixed.adb	for C in 0 .. 1 loop	1	structure	the two pixel
 driver-robot-kinematics-fixed.adb	for C in 0 .. 1 loop	1	structure	the two pixel components, 0 and 1
 driver-robot-kinematics-fixed.adb	for I in 1 .. 2 * N loop	2	structure	two residual components per sighting
 driver-robot-kinematics-fixed.adb	for I in 1 .. 2 * N loop	2	structure	two residual components per sighting
+driver-robot-kinematics-fixed.adb	for K in 1 .. 3 loop	3	structure	three coordinates, three eigenvalues
 driver-robot-kinematics-fixed.adb	for X in 1 .. 3 loop	3	structure	three coordinates
-driver-robot-kinematics-fixed.adb	for X in 1 .. 3 loop	3	structure	three coordinates
-driver-robot-kinematics-fixed.adb	for Y in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics-fixed.adb	function Scale_Of (I : Positive) return Real is (Sqrt (1.0 + Extra (I) / Sigma ** 2));	1.0	math	the noise's variance plus the point's, over the noise's
 driver-robot-kinematics-fixed.adb	if 2 * Visible <= Terms then	2	structure	two residual components per sighting, against the terms they must determine
 driver-robot-kinematics-fixed.adb	if Count <= 4 then	4	structure	a plane's homography has eight terms: four points give eight equations

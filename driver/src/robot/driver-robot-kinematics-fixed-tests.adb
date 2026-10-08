@@ -402,6 +402,40 @@ package body Driver.Robot.Kinematics.Fixed.Tests is
       end if;
    end Points_On_A_Link;
 
+   --  A track the arm fit leaves with no depth at all has an own covariance whose quadratic form, summed term by term,
+   --  is rounding (A17's first fit had one at 1.7E97 units, its log depth uncertain by 2.5E6: the variance it made of
+   --  a pixel came out minus four, and the square root of the scale it made of the residual raised); and one with a
+   --  negative eigenvalue (the arm fit's own errors can make it) makes a negative one. A dozen of the points off the
+   --  table have the one or the other here; the eye is measured all the same, from the rest, within Z of its
+   --  covariance.
+   procedure Points_Of_Great_Or_Negative_Covariance is
+      G : Generator;
+      S : Scene := Draw (G, Table => 90, Box => 70, Wrong_Share => 0.2, Noise => 0.3, Own_Sigma => 0.002);
+      R : Fit_Report;
+      Start_Lens : Fit.Lens;
+      Found : Boolean;
+      Changed : Natural := 0;
+   begin
+      for I in S.Points'Range loop
+         if not S.On_Table (I) and then Changed < 12 then
+            Changed := Changed + 1;
+            S.Points (I).Own :=
+              (if Changed mod 2 = 0
+               then [[-0.01, 0.0, 0.0], [0.0, -0.01, 0.0], [0.0, 0.0, -0.01]]
+               else 1.0e18 * Driver.Numerics.Outer (S.Points (I).Position, S.Points (I).Position));
+         end if;
+      end loop;
+      Check (Changed = 12, "fewer than a dozen points off the table to give a covariance to:" & Changed'Image);
+      Measure (S, R, Start_Lens, Found);
+      Say ("great and negative covariances", R, Eye_Lens, Eye_Pose);
+      Check (Found, "no start from the table's view");
+      Check (R.Determined, "the eye is not determined: " & Image (R));
+      if R.Determined then
+         Check (Deviate (R, Eye_Lens, Eye_Pose) <= Driver.Conventions.Z,
+                "the eye is" & Real'Image (Deviate (R, Eye_Lens, Eye_Pose)) & " sigmas off the truth: " & Image (R));
+      end if;
+   end Points_Of_Great_Or_Negative_Covariance;
+
    procedure Register is
    begin
       Register ("robot.fixed.recover",
@@ -423,6 +457,10 @@ package body Driver.Robot.Kinematics.Fixed.Tests is
       Register ("robot.fixed.link",
                 "an eye is not measured from points that ride on a link of an arm, seen at several poses of it",
                 Points_On_A_Link'Access);
+      Register ("robot.fixed.psd",
+                "a point whose own covariance has a negative eigenvalue, or is so great that its quadratic form is "
+                & "rounding, stops the fit of an eye (the scale of its residual is a square root of a negative number)",
+                Points_Of_Great_Or_Negative_Covariance'Access);
    end Register;
 
 end Driver.Robot.Kinematics.Fixed.Tests;

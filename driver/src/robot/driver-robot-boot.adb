@@ -4,10 +4,13 @@ with Ada.Strings.Fixed;
 with Ada.Text_IO;
 with Driver.Beats;
 with Driver.Commands;
+with Driver.Conventions;
+with Driver.Distributions;
 with Driver.Log;
 with Driver.Robot.Body_File;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
+with Driver.Robot.Regression;
 
 package body Driver.Robot.Boot is
 
@@ -23,6 +26,11 @@ package body Driver.Robot.Boot is
       Real_IO.Put (S, X, Aft => 2, Exp => 3);
       return Ada.Strings.Fixed.Trim (S, Ada.Strings.Both);
    end Scientific;
+
+   function Grew (Before, After, Cells : Integer) return Boolean is
+     (After > Before and then Cells >= After
+      and then Driver.Robot.Regression.Count_Significant
+                 (After - Before, Cells - Before, Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z)));
 
    --  A repeatable uniform generator (Park and Miller's minimal standard),
    --  for push orders that no other group's repeats.
@@ -533,11 +541,19 @@ package body Driver.Robot.Boot is
                         end if;
                      end loop;
                      Driver.Beats.Within_A_Beat (Estimate'Access);
-                     --  An undecided verdict is too little evidence, not an answer: a
-                     --  group some eye is undecided about is pushed again, at twice
-                     --  the amounts of its last round, until every eye has decided, or
-                     --  a round leaves the cells each undecided eye found responding
-                     --  no more than they were (the evidence stopped growing).
+                     --  A push at the smallest amount some eye saw is little evidence,
+                     --  and an eye that is undecided, or that shows a patch, has not
+                     --  answered: an eye on a turning joint sees its view move by
+                     --  different amounts in different cells (by depth, by perspective),
+                     --  so at that amount only the cells that move most respond and the
+                     --  whole picture reads as a patch; pushed harder more cells
+                     --  respond, where a patch that is one does not grow. A group some
+                     --  such eye is open about is pushed again, at twice the amounts of
+                     --  its last round, until every eye has answered (the whole picture
+                     --  moves, or nothing does), or a round leaves the cells each open
+                     --  eye found responding no more than chance explains: not
+                     --  significantly more, at Z and the per-cell false alarm, among
+                     --  the cells that did not respond before.
                      declare
                         Eyes : Natural := 0;
                         procedure Read_Eyes is
@@ -547,33 +563,57 @@ package body Driver.Robot.Boot is
                      begin
                         Driver.Beats.Within_A_Beat (Read_Eyes'Access);
                         declare
-                           type Count_Grid is array (1 .. Count, 1 .. Eyes) of Natural;
-                           Last   : Count_Grid := [others => [others => 0]];
+                           --  The cells each open eye found responding after the group's
+                           --  last push; -1 for an eye that was not open then.
+                           type Count_Grid is array (1 .. Count, 1 .. Eyes) of Integer;
+                           Last   : Count_Grid := [others => [others => -1]];
                            Now    : Count_Grid;
+                           Cells  : Count_Grid;   --  the cells it was reached over
+                           Shows  : array (1 .. Count, 1 .. Eyes) of Eye_Response;
                            Factor : array (1 .. Count) of Real := [others => 1.0];
                            Again  : array (1 .. Count) of Boolean;
-                           procedure Read_Undecided is
+
+                           procedure Read_Open is
                            begin
                               for G in 1 .. Count loop
                                  Again (G) := False;
                                  for E in 1 .. Eyes loop
-                                    Now (G, E) := 0;
-                                    if Commandable (G) and then Response (M, Group_Id (G), Eye_Id (E)) = Undecided then
+                                    Now (G, E) := -1;
+                                    if Commandable (G)
+                                      and then Response (M, Group_Id (G), Eye_Id (E)) in Undecided | Patch
+                                    then
                                        Now (G, E) := Responding (M, Group_Id (G), Eye_Id (E));
-                                       Again (G) := Again (G) or else Now (G, E) > Last (G, E);
+                                       Cells (G, E) := Textured_Cells (M, Group_Id (G), Eye_Id (E));
+                                       Shows (G, E) := Response (M, Group_Id (G), Eye_Id (E));
+                                       Again (G) := Again (G) or else Last (G, E) < 0
+                                         or else Grew (Last (G, E), Now (G, E), Cells (G, E));
                                     end if;
                                  end loop;
                               end loop;
-                           end Read_Undecided;
+                           end Read_Open;
                         begin
                            loop
-                              Driver.Beats.Within_A_Beat (Read_Undecided'Access);
+                              Driver.Beats.Within_A_Beat (Read_Open'Access);
+                              for G in 1 .. Count loop
+                                 for E in 1 .. Eyes loop
+                                    if Now (G, E) >= 0 then
+                                       Driver.Log.Line
+                                         (Driver.Log.Robot, "boot: group" & G'Image & " eye" & E'Image & " is "
+                                          & (if Shows (G, E) = Patch then "a patch" else "undecided") & " at"
+                                          & Integer'Image (Integer (Factor (G))) & " times the amounts:"
+                                          & Now (G, E)'Image & " of" & Cells (G, E)'Image & " cells respond"
+                                          & (if Last (G, E) >= 0 then ", " & Integer'Image (Last (G, E))
+                                             & " before" else ""));
+                                    end if;
+                                 end loop;
+                              end loop;
                               exit when (for all G in Again'Range => not Again (G));
                               for G in Again'Range loop
                                  if Again (G) then
                                     Factor (G) := 2.0 * Factor (G);
                                     Driver.Log.Line
-                                      (Driver.Log.Robot, "boot: group" & G'Image & " leaves an eye undecided;"
+                                      (Driver.Log.Robot, "boot: group" & G'Image
+                                       & " leaves an eye undecided or showing a patch that may grow;"
                                        & " pushed again at" & Integer'Image (Integer (Factor (G)))
                                        & " times its amounts");
                                     Push_Both_Ways (Group_Id (G), Sizes (G), Factor (G));

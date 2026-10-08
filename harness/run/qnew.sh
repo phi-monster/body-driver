@@ -47,7 +47,10 @@ ss -ltn | grep -q ":8077 " || (cd /root/instruments && bash run.sh) || { echo "i
   echo "body ${BODY:-none}"; echo "start $(date +%FT%T)"; } > "$R/meta.txt"
 
 mkfifo "$R/run.rec.fifo"
-zstd -q -T2 -o "$R/run.rec.zst" < "$R/run.rec.fifo" &
+# Level 17 finds each picture in the one a beat before it: a recording takes a seventh of the room
+# level 3 took (a 2-hour boot 30 GB before), and eight threads still compress six times as fast as a
+# run records, so the FIFO never holds the driver up. Any zstd reads it back without options.
+zstd -q -T8 -17 -o "$R/run.rec.zst" < "$R/run.rec.fifo" &
 ZST=$!
 BL_BRAIN_SAMPLING="${BL_BRAIN_SAMPLING:-$QWEN_CARD}" setsid nohup "$BIN" --listen "$PORT" --eye 127.0.0.1:8078 \
   --inst 127.0.0.1:8077 ${BODY:+--body "$BODY"} --record "$R/run.rec.fifo" </dev/null >"$R/driver.log" 2>&1 &
