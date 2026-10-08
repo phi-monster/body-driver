@@ -238,7 +238,7 @@ package body Driver.Action.Plants.Live.Tests is
    procedure Used (Answer : Boolean) is null;
 
    procedure Windows_Script (P : in out Live) is
-      Goal : constant Arm_Goal := (Arm => 1, Tool => Identity, Position_Only => False);
+      Goal : constant Arm_Goal := (Arm => 1, Tool => Identity, Position_Only => False, others => <>);
       Spot : constant Vec3 := [0.0, 0.0, 1.0];
 
       procedure Ask is

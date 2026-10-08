@@ -40,7 +40,15 @@ package body Action_Rig is
          --  uncertainty and the step its eye can see.
          for K in 1 .. Natural (S.Arms.Length) loop
             if Natural (S.Arms (K).Id) <= Driver.Robot.Arm_Count (P.Robot.all) then
-               S.Arms.Replace_Element (K, Driver.Action.Plants.Live.Arm_Of (P.Robot.all, S.Arms (K).Id, P.Last));
+               declare
+                  Plate : constant Driver.Action.Snapshots.Sample_Vectors.Vector := S.Arms (K).Surface;
+                  Mine  : Driver.Action.Snapshots.Arm_State :=
+                    Driver.Action.Plants.Live.Arm_Of (P.Robot.all, S.Arms (K).Id, P.Last);
+               begin
+                  --  The plate on the arm is the world's (the live plant measures no surface of an arm).
+                  Mine.Surface := Plate;
+                  S.Arms.Replace_Element (K, Mine);
+               end;
             end if;
          end loop;
          S.Up := Driver.Robot.Up (P.Robot.all);
@@ -80,14 +88,21 @@ package body Action_Rig is
       declare
          Plan : constant Motion.Plan :=
            Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only));
+         Answer : constant Plants.Reach_Answer :=
+           (case Motion.Status (Plan) is
+               when Motion.Planned     => (Status => Plants.Reachable, Why => Null_Unbounded_String),
+               when Motion.Unreachable =>
+                 (Status => Plants.Unreachable, Why => To_Unbounded_String (Motion.Why (Plan))),
+               when Motion.Unmeasured  =>
+                 (Status => Plants.Unmeasured, Why => To_Unbounded_String (Motion.Why (Plan))));
       begin
-         case Motion.Status (Plan) is
-            when Motion.Planned     => return (Status => Plants.Reachable, Why => Null_Unbounded_String);
-            when Motion.Unreachable =>
-               return (Status => Plants.Unreachable, Why => To_Unbounded_String (Motion.Why (Plan)));
-            when Motion.Unmeasured  =>
-               return (Status => Plants.Unmeasured, Why => To_Unbounded_String (Motion.Why (Plan)));
-         end case;
+         if Trace then
+            Reach_Log.Append (Reach_Record'(From   => Driver.Robot.Tool_Pose (P.Robot.all, Goal.Arm, P.Last).Pose,
+                                            Asked  => Goal.Tool,
+                                            Status => Answer.Status,
+                                            Why    => Answer.Why));
+         end if;
+         return Answer;
       end;
    end Reach;
 
@@ -119,7 +134,8 @@ package body Action_Rig is
             begin
                P.Last := Driver.Beats.Latest.all;
                Plan := Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last,
-                                          (Pose => G.Tool, Position_Only => G.Position_Only));
+                                          (Pose => G.Tool, Position_Only => G.Position_Only),
+                                          Clearance => G.Clearance, Lever => G.Lever);
             end Planning;
             procedure Arrived is
             begin
@@ -252,6 +268,7 @@ package body Action_Rig is
                      Pieces : constant Positive := Positive'Max (1, Natural (Real'Ceiling (Span / (W.Pitch / 2.0))));
                      Good   : Real_Array := Q0;
                      Stop   : Boolean := False;
+                     Rec    : Beat_Record := (From => From, To => To, At_Stop => From, others => <>);
                   begin
                      for K in 1 .. Pieces loop
                         declare
@@ -260,12 +277,27 @@ package body Action_Rig is
                            for C in Q'Range loop
                               Q (C) := Q0 (C) + (Real (K) / Real (Pieces)) * (Q1 (C - Q'First + Q1'First) - Q0 (C));
                            end loop;
-                           Sim.Put_Tool (W, Arm, Tool_At (Q), Stop);
+                           declare
+                              Share : constant Real := Real (K) / Real (Pieces);
+                              Joint : constant Rigid := Tool_At (Q);
+                              Line  : constant Rigid :=
+                                (Rotation    => From.Rotation * Exp (Share * Log (Transpose (From.Rotation) * To.Rotation)),
+                                 Translation => (1.0 - Share) * From.Translation + Share * To.Translation);
+                              Tool  : constant Rigid := (if Cartesian then Line else Joint);
+                           begin
+                              Rec.Bow := Real'Max (Rec.Bow, abs (Joint.Translation - Line.Translation));
+                              Sim.Put_Tool (W, Arm, Tool, Stop);
+                              Rec.Stopped := Stop;
+                           end;
                            exit when Stop;
                            Good := Q;
                         end;
                      end loop;
                      Readings.Replace_Element (Id, Good);
+                     if Trace then
+                        Rec.At_Stop := Tool_At (Good);
+                        Beat_Log.Append (Rec);
+                     end if;
                   end;
                else
                   Readings.Replace_Element (Id, Driver.Commands.Target (Command, Id));

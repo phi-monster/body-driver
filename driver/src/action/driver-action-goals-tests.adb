@@ -148,6 +148,36 @@ package body Driver.Action.Goals.Tests is
       Check (not Toward (S, 1, 2, Nearer).Ok, "nearer is judged by an eye that rides an arm");
    end As_The_Still_Eye_Sees_Them;
 
+   --  A direction taken from the image is never exactly level: a thing a little
+   --  off the eye's middle column is carried along the image's columns, which
+   --  there rise a little off the table. A thing that lies on the table goes
+   --  along it unless the way leaves it by more than that direction and the
+   --  table's normal, between them, can tell from level; the footing of a
+   --  thing that is lifted, however little, bears nothing.
+   procedure A_Slide_Stays_On_The_Table_Within_What_Is_Known is
+      S : Snapshot := Base_Scene;
+   begin
+      Add (S, 1, Block (0.04, 0.04, 0.04), On_Table (0.002, 0.0, 0.0, 0.0));
+      Add (S, 2, Block (0.06, 0.06, 0.06), On_Table (0.2, 0.1, 0.0, 0.0));
+      declare
+         R : constant Answer := Toward (S, 1, 2, Right);
+      begin
+         Check (R.Ok and then not R.Done and then R.Motion.Linear * Table_X > 0.0,
+                "right does not go toward the image's right");
+         Check (abs (R.Motion.Linear * Table_Up) < 1.0e-9,
+                "right takes a thing a little off the middle column up off the table it lies on");
+      end;
+      --  Far off the middle column the columns do leave the table: that is a way up, and it is taken.
+      S.Things.Delete_First;
+      Add (S, 1, Block (0.04, 0.04, 0.04), On_Table (0.15, 0.0, 0.0, 0.0));
+      declare
+         R : constant Answer := Toward (S, 1, 2, Right);
+      begin
+         Check (R.Ok and then R.Motion.Linear * Table_Up > 1.0e-4,
+                "right on a thing far off the middle column does not go up with the columns");
+      end;
+   end A_Slide_Stays_On_The_Table_Within_What_Is_Known;
+
    procedure Onto_Goes_Up_Over_And_Down is
       S : Snapshot := Base_Scene;
    begin
@@ -227,7 +257,9 @@ package body Driver.Action.Goals.Tests is
                 Tilt_Leans_Away_From_The_Still_Eye'Access);
       Register ("action.goals.eye", "nearer, farther, left and right are judged other than as the still eye sees",
                 As_The_Still_Eye_Sees_Them'Access);
-      Register ("action.goals.onto", "onto knocks into the other, or does not come down on it",
+      Register ("action.goals.level", "a thing a little off the eye's middle column is taken up off the table it lies on",
+                A_Slide_Stays_On_The_Table_Within_What_Is_Known'Access);
+      Register ("action.goals.onto","onto knocks into the other, or does not come down on it",
                 Onto_Goes_Up_Over_And_Down'Access);
       Register ("action.goals.surface", "a thing is moved into the surface it lies on", Never_Into_Its_Surface'Access);
       Register ("action.goals.facing", "facing turns the far end, or a thing already facing is turned",

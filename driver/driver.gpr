@@ -19,7 +19,7 @@ project Driver is
    for Create_Missing_Dirs use "True";
    for Main use ("body_driver.adb", "selftest.adb", "replay.adb", "frame.adb", "score.adb", "numbers.adb", "deadcode.adb", "proxy.adb",
                  "feed.adb", "brain_measure.adb", "brain_scene.adb", "fake_brain.adb", "world_check.adb",
-                 "action_matrix.adb");
+                 "action_matrix.adb", "contact_matrix.adb");
 
    Common_Switches := ("-gnat2022", "-gnata", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g");
 
