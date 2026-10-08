@@ -954,6 +954,36 @@ package body Driver.Robot.Hand is
       end loop;
    end Free_Closer;
 
+   procedure Gather_Poses
+     (Wanted       : Positive;
+      Wait_At_Most : Positive;
+      Poses        : not null access function return Natural;
+      Raise_Eye    : not null access procedure (First : Boolean; Raised : out Boolean);
+      Raises       : out Natural;
+      Reached      : out Boolean)
+   is
+      Have   : Natural;
+      Raised : Boolean;
+   begin
+      Raises := 0;
+      loop
+         Have := Poses.all;
+         exit when Have >= Wanted;
+         Raise_Eye (Raises = 0, Raised);
+         exit when not Raised;
+         Raises := Raises + 1;
+         --  The new pose's frame is kept once the eye's picture has rested from the move: asked a beat later each time.
+         declare
+            Asked : Natural := 0;
+         begin
+            while Asked < Wait_At_Most and then Poses.all <= Have loop
+               Asked := Asked + 1;
+            end loop;
+         end;
+      end loop;
+      Reached := Poses.all >= Wanted;
+   end Gather_Poses;
+
    procedure Sweep_Way
      (Way          : Real;
       Step         : Real;

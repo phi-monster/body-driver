@@ -675,6 +675,30 @@ where it was raised to: the presses aim from wherever the arm stands. A19
 (8597f62) lost its first press the same way (`a press with the closer at neither
 measured opening is not used`, blocked after lowering 5.1 units).
 
+**Lesson: a hand is measured from its own arm's motion, not from what the boot
+did (A25h).** A closer's lobes are found from what the arm's motion does to its
+eye's picture: the robot stays where it is in the picture while the world moves,
+so the deviation of a pixel over the poses of the rest of the body is small
+where the robot is (`Hand.Selfsight`). A22's closers had the poses from the
+boot, which moved both arms for fifteen minutes with the closers at their start
+readings; a run that reloads a body file goes from the file to the hands with no
+arm motion, and A25h logged "the arm has not moved the eye against its
+surroundings ... 0 poses, two are needed" at every round. `Measure` now sees to
+the poses itself (`Gather_Own_Poses`), before a closer is moved and again after
+its sweep when its lobes were not placed for want of them (Unlocated, or Unplaced
+with the changed pixels Unseparated by the poses): the arm raises the eye along
+the way up (`Up_In_Arm`), first by the least move whose readings the body's one
+test of motion sees (the last readings of the plan, tried before anything moves,
+doubled until they show), then by twice that, a pose each, until the eye has
+seen the closer's readings from the poses asked (`Selfsight.Needed`, two; after
+a sweep that did not place, twice what it has) or cannot be raised. A pose's
+frame is kept once the eye's picture has rested, and the wait for it is as long
+as a view takes to form. Nothing is raised when the eye has the poses, so a run
+from zero is as it was. The poses are taken at the closer's start reading, which
+is an end of its travel in every body met (A17, A19, A22 start open); a closer
+that starts between its ends would need them at an end. (`Gather_Poses`,
+`hand.measure.poses`.)
+
 **Lesson: the free finger is the loaded fit with each press taken with the tip
 it had slid to.** A press loads its finger, and the finger gives way along its
 own axis (A16: 5 and 17.5 mm inward, the closer's reading exactly where it was).

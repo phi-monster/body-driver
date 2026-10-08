@@ -893,6 +893,7 @@ driver-robot-hand-lobes.adb	return (if Region = 0 then 0.0 else Sqrt (Sum / (2.0
 driver-robot-hand-lobes.ads	and then Driver.Pixels.Frames (Anchor) >= 2;	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-lowering.adb	Enough : constant Boolean := T.Count > 2;	2	statistics	a scatter of shares needs more than two pushes before it, as a shortfall's does in the step tracker
 driver-robot-hand-lowering.adb	Lowering := Lowering / Real (Natural'Max (1, Where'Length));	1	structure	a hand has a point at the least (the tool's origin), so a mean never divides by nothing
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
@@ -908,10 +909,16 @@ driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Im
 driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (Bound, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	(Wanted, Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began)), Poses_Now'Access,	1	structure	a wait is one beat at the least
 driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
+driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	the first arm until the closer's pair is read: a closer an eye on an arm watches has its own
 driver-robot-hand-measure.adb	Bound : Real := Ada.Numerics.Pi / 2.0;	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
 driver-robot-hand-measure.adb	By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);	2.0	structure	each raise twice the one before, so that the smallest raise that frees the closer is found within a doubling of it
+driver-robot-hand-measure.adb	By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);	2.0	numerics	doubling search: the raise that shows is reached within a factor two in a number of raises logarithmic in it
+driver-robot-hand-measure.adb	By := 2.0 * By;	2.0	numerics	doubling search: the raise that shows is reached within a factor two in a number of raises logarithmic in it
 driver-robot-hand-measure.adb	Eye : Eye_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
+driver-robot-hand-measure.adb	Eye : Eye_Id := 1;	1	structure	the first eye until the closer's pair is read: a closer an eye on an arm watches has its own
+driver-robot-hand-measure.adb	Gather_Own_Poses (G, Positive'Max (Driver.Robot.Hand.Selfsight.Needed, 2 * Have), Reached);	2	statistics	the poses are asked to double: the estimators place the lobes again once they have (Sweep.Ends_Moved)
 driver-robot-hand-measure.adb	Lean : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;	4.0	math	half-way between away from the other lobes and across from them
 driver-robot-hand-measure.adb	Noise := Sqrt (2.0) * Reading_Noise (M, G, C);	2.0	statistics	the difference of two readings carries the channel's noise twice over
 driver-robot-hand-measure.adb	Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began));	1	structure	at least one asking: a view is asked for once it is pushed
@@ -932,6 +939,7 @@ driver-robot-hand-selfsight.adb	if M.Settings (I).Poses < 2 then	2	statistics	a 
 driver-robot-hand-selfsight.adb	if M.Settings (I).Poses >= 2	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-selfsight.adb	if S.Poses = 1 then	1	structure	a setting seen from one pose holds that one frame, not yet a view
 driver-robot-hand-selfsight.ads	Capacity : constant := 8;	8	structure	memory: how many settings seen from two poses or more an eye remembers
+driver-robot-hand-selfsight.ads	Needed : constant := 2;	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-shape.adb	& "" & Driver.Log.Image (Thick.Value, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-shape.adb	& Driver.Log.Image (Depth.Value, 4) & "" & Driver.Log.Image (Depth.Sigma, 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand-shape.adb	& Driver.Log.Image (Depth.Value, 4) & "" & Driver.Log.Image (Depth.Sigma, 4) & "");	4	format	digits printed in a log line or a message
@@ -1038,8 +1046,8 @@ driver-robot-hand-sweep.adb	or else (High >= 2 and then High >= 2 * Was.Element 
 driver-robot-hand-sweep.adb	or else (High >= 2 and then High >= 2 * Was.Element (Channel).Poses_High);	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
 driver-robot-hand-sweep.adb	return (Low >= 2 and then Low >= 2 * Was.Element (Channel).Poses_Low)	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
 driver-robot-hand-sweep.adb	return (Low >= 2 and then Low >= 2 * Was.Element (Channel).Poses_Low)	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
-driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);	1	structure	the presses of a hand are fitted on one surface
 driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);	1	structure	a hand's presses are fitted on one surface
+driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);	1	structure	the presses of a hand are fitted on one surface
 driver-robot-hand-tips.adb	Presses (N) := (Tool => K.Event.Tool, Sight => Index_Of (T, K.Lobe, K.Opening), Surface => 1, others => <>);	1	structure	a hand's presses are fitted on one surface
 driver-robot-hand-tips.adb	Spread := Spread + (Across * Across) / 2.0;	2.0	math	the mean of the squared angle about the two axes across the direction
 driver-robot-hand-tips.adb	Surface => 1,	1	structure	a hand's presses are fitted on one surface

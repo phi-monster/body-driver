@@ -62,6 +62,11 @@ package Driver.Robot.Hand.Sweep is
    function Gathered (S : State) return Boolean;
    --  The view being gathered can be judged (Views).
 
+   function Poses (S : State; Key : Real_Array) return Natural;
+   --  How many poses of the rest of the body the eye saw the closer's readings
+   --  Key from, still (Selfsight.Poses): the two a deviation needs, and the
+   --  more, the better it is.
+
    function Has_Ends (S : State; Channel : Positive) return Boolean;
    --  Both ends of the channel's travel are seen, still, each from two frames or more (Views).
 

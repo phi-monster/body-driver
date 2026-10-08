@@ -289,6 +289,28 @@ private
    --  its reading has not moved (Moved) was not what held it, and the hand is
    --  raised no more. Raises is how many raises were made.
 
+   procedure Gather_Poses
+     (Wanted       : Positive;
+      Wait_At_Most : Positive;
+      Poses        : not null access function return Natural;
+      Raise_Eye    : not null access procedure (First : Boolean; Raised : out Boolean);
+      Raises       : out Natural;
+      Reached      : out Boolean);
+   --  The arm moves the eye so that it sees a closer's readings from Wanted
+   --  poses of the rest of the body (Selfsight: what a deviation of the robot
+   --  from its surroundings is taken over). A hand is measured from its own
+   --  arm's motion and not from what the boot did before it: the boot's sweeps
+   --  gave A22's closers dozens of poses at their start readings, and a body
+   --  file that is reloaded gives none (A25h logged "0 poses, two are needed"
+   --  at every round). While the eye has fewer, the eye is raised (Raise_Eye,
+   --  the first raise the least that shows, each after it twice the one before;
+   --  Raised False when it cannot be raised) and the pose is asked after, a beat
+   --  later each time, until the eye's picture has rested and its frame is kept
+   --  (Poses grew), or Wait_At_Most beats went by (the caller measures how long
+   --  a view takes to form). Poses is read inside a held beat, so each asking
+   --  is a beat. Raises is how many raises were made, Reached whether the eye
+   --  has Wanted poses at the end.
+
    function Seen_By (Shift : Real) return Real is (if Shift /= 0.0 then 1.0 / abs Shift else 0.0);
    --  The push that moves an eye's view by one pixel when the channel moves
    --  it Shift pixels a reading unit (Driver.Robot.Lockin.Shift): a whole
