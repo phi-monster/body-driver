@@ -75,6 +75,7 @@ package Driver.Action.Goals is
       Samples : Sample_Vectors.Vector;   --  its measured surface; empty for a point
       Sigma   : Real := Real'Last;       --  of a sample
       Up      : Vec3 := Zero3;           --  away from what it rests on; zero when it rests on nothing
+      Up_Sigma : Real := 0.0;            --  angular, of Up; Real'Last when it is not known
       Eye     : Natural := 0;            --  the still eye that sees it best; 0 when none does
    end record;
    --  One side of a relation: a thing, a remembered place, or a part of the

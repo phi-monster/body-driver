@@ -149,19 +149,24 @@ package body Driver.Action.Goals is
    function Item_Of (S : Snapshot; T : Thing_Id) return Item is
       X : constant Thing_State := Thing (S, T);
    begin
-      return (Centre  => X.Centre,
-              Samples => X.Samples,
-              Sigma   => X.Sigma,
-              Up      => (if X.Support /= 0 then Up_Of (S, T) else Zero3),
-              Eye     => X.Best_Eye);
+      return (Centre   => X.Centre,
+              Samples  => X.Samples,
+              Sigma    => X.Sigma,
+              Up       => (if X.Support /= 0 then Up_Of (S, T) else Zero3),
+              Up_Sigma => (if X.Support = 0 then 0.0
+                           elsif Has_Surface (S, X.Support) and then abs Surface (S, X.Support).Normal.Unit_Vector > 0.0
+                           then Surface (S, X.Support).Normal.Sigma
+                           else S.Up.Sigma),
+              Eye      => X.Best_Eye);
    end Item_Of;
 
    function Point_Item (P : Point_Estimate) return Item is
-     ((Centre  => P,
-       Samples => Sample_Vectors.Empty_Vector,
-       Sigma   => Sqrt (Real'Max (P.Covariance (1, 1), Real'Max (P.Covariance (2, 2), P.Covariance (3, 3)))),
-       Up      => Zero3,
-       Eye     => 0));
+     ((Centre   => P,
+       Samples  => Sample_Vectors.Empty_Vector,
+       Sigma    => Sqrt (Real'Max (P.Covariance (1, 1), Real'Max (P.Covariance (2, 2), P.Covariance (3, 3)))),
+       Up       => Zero3,
+       Up_Sigma => 0.0,
+       Eye      => 0));
 
    --  The item's highest or lowest extent along N.
    function Extent (X : Item; N : Vec3; Highest : Boolean) return Real is
@@ -191,23 +196,36 @@ package body Driver.Action.Goals is
       function Gap_Of (Value : Real) return Estimate is ((Value => Value, Sigma => Sigma, Degrees_Of_Freedom => 0));
 
       --  A subject lying on a surface goes along it: the part of D into the
-      --  surface is dropped, unless D, known to Angle_Sigma, goes straight in.
+      --  surface is dropped, unless D, known to Angle_Sigma, goes straight in;
+      --  and the part out of it is dropped too, unless D leaves the surface by
+      --  more than its own direction and the surface's normal, between them,
+      --  can tell from along it (a direction taken from an eye is never
+      --  exactly level, and a footing that is left, however little, bears
+      --  nothing).
       function Along (D : Vec3; Angle_Sigma : Real; Gap : Estimate; Why : String := ""; Leg : Real := Real'Last)
         return Answer
       is
          U : constant Vec3 := Subject.Up;
       begin
-         if abs U > 0.0 and then Real'(D * U) < 0.0 then
+         if abs U > 0.0 then
             declare
-               F : constant Vec3 := D - Real'(D * U) * U;
+               Out_Of : constant Real := Real'(D * U);   --  the sine of the angle above the surface; below it, minus
+               Above  : constant Real := Arcsin (Real'Max (-1.0, Real'Min (1.0, Out_Of)));
+               Within : constant Real :=
+                 (if Angle_Sigma = Real'Last or else Subject.Up_Sigma = Real'Last then Real'Last
+                  else Sqrt (Angle_Sigma ** 2 + Subject.Up_Sigma ** 2));
+               F      : constant Vec3 := D - Out_Of * U;
             begin
-               if not (abs F > 0.0) or else not Significant (Arccos (Real'Min (1.0, -Real'(D * U))), Angle_Sigma)
-               then
-                  return (Ok => False, Motion => Contact.Still (Subject.Centre.Mean), Gap => Gap, Leg => Real'Last,
-                          Done => False,
-                          Why => To_Unbounded_String ("the only way to do that goes into the surface it lies on"));
+               if Out_Of < 0.0 then
+                  if not (abs F > 0.0) or else not Significant (Arccos (Real'Min (1.0, -Out_Of)), Angle_Sigma) then
+                     return (Ok => False, Motion => Contact.Still (Subject.Centre.Mean), Gap => Gap, Leg => Real'Last,
+                             Done => False,
+                             Why => To_Unbounded_String ("the only way to do that goes into the surface it lies on"));
+                  end if;
+                  return Moving (Contact.Slide (Unit (F)), Gap, "it lies on a surface, so it goes along it");
+               elsif abs F > 0.0 and then not Significant (Above, Within) then
+                  return Moving (Contact.Slide (Unit (F)), Gap, Why, Leg);
                end if;
-               return Moving (Contact.Slide (Unit (F)), Gap, "it lies on a surface, so it goes along it");
             end;
          end if;
          return Moving (Contact.Slide (Unit (D)), Gap, Why, Leg);

@@ -73,6 +73,7 @@ package Driver.Action.Plants.Tests is
       Delivery_Low  : Real := 1.0;
       Delivery_High : Real := 1.0;
       Plate_Radius  : Real := 0.0;         --  a lobeless arm ends in a disc of this radius facing the tool's z
+      Reading_Sigma : Real := Real'Last;   --  of the arm's own readings; Real'Last: as noisy as the eyes
       Pending       : Command_Vectors.Vector;
       Start         : Rigid := Identity;
       Target        : Rigid := Identity;
@@ -129,8 +130,10 @@ package Driver.Action.Plants.Tests is
    --  gravity along Place's z, a still eye in front of the table.
 
    procedure Add_Arm (W : in out World; Base : Vec3; Reach : Real; Tool : Rigid; Lag : Natural; Rate : Real;
-                      Delivery_Low, Delivery_High : Real; Wrist, Tilt : Real; Plate_Radius : Real := 0.0);
-   --  In the table's frame.
+                      Delivery_Low, Delivery_High : Real; Wrist, Tilt : Real; Plate_Radius : Real := 0.0;
+                      Reading_Sigma : Real := Real'Last);
+   --  In the table's frame. Reading_Sigma is the sigma of the arm's own
+   --  readings (its tool, its step); left out, they are as noisy as the eyes'.
 
    procedure Add_Gripper (W : in out World; Arm : Arm_Id; Opening, Width, Thickness, Depth : Real);
 

@@ -1,3 +1,4 @@
+with Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Action.Contact;
 with Driver.Action.Contact.Search;
@@ -28,7 +29,8 @@ package body Driver.Action.Execution is
    package Search renames Driver.Action.Contact.Search;
    package Wrench renames Driver.Action.Contact.Wrench;
 
-   Z : constant Real := Driver.Conventions.Z;
+   Z  : constant Real := Driver.Conventions.Z;
+   Pi : constant := Ada.Numerics.Pi;
 
    function Img (X : Real) return String is (Driver.Log.Image (X, 3));
    function Img (N : Integer) return String is (Driver.Log.Image (N));
@@ -129,9 +131,22 @@ package body Driver.Action.Execution is
                      Look (P, X);
                      return;
                   when Blocked =>
-                     Outcome := Blocked;
+                     --  A push that stopped short after moving some may have
+                     --  delivered only part of what was asked, as a body that
+                     --  does not carry out all of it does; asked again from
+                     --  where it got to, it either goes on or moves nothing,
+                     --  and only that is a block.
                      Look (P, X);
-                     return;
+                     if At_Goal (Arm (X.S, A), Goal) then
+                        Outcome := Reached;
+                        return;
+                     elsif not (Known (Res.Delivered) and then Res.Delivered.Value > 0.0
+                                and then Significant (Res.Delivered.Value, Res.Delivered.Sigma,
+                                                      Res.Delivered.Degrees_Of_Freedom))
+                     then
+                        Outcome := Blocked;
+                        return;
+                     end if;
                   when Reached =>
                      Outcome := Reached;
                      Look (P, X);
@@ -369,7 +384,12 @@ package body Driver.Action.Execution is
                return;
             end if;
             declare
-               Lift : Real := E.Depth + E.Sigma;
+               --  The way over runs at one level, up from where the arm is,
+               --  across, and down to the goal: the higher of the two to begin
+               --  with (a hand already above what is in the way needs no
+               --  rise), then raised by its own reach, doubled.
+               Base_Level : constant Real := Real'Max (From.Translation * Up, Goal.Translation * Up);
+               Lift : Real := 0.0;
                Via_1, Via_2 : Rigid;
                Found : Boolean := False;
                --  Raised until the way over is clear or out of reach, where the
@@ -377,8 +397,10 @@ package body Driver.Action.Execution is
                procedure Over_The_Top is
                begin
                   loop
-                     Via_1 := (Rotation => From.Rotation, Translation => From.Translation + Lift * Up);
-                     Via_2 := (Rotation => Goal.Rotation, Translation => Goal.Translation + Lift * Up);
+                     Via_1 := (Rotation    => From.Rotation,
+                               Translation => From.Translation + (Base_Level + Lift - From.Translation * Up) * Up);
+                     Via_2 := (Rotation    => Goal.Rotation,
+                               Translation => Goal.Translation + (Base_Level + Lift - Goal.Translation * Up) * Up);
                      exit when P.Reach ((Arm => A, Tool => Via_1, Position_Only => False)).Status /= Reachable
                        or else P.Reach ((Arm => A, Tool => Via_2, Position_Only => False)).Status /= Reachable;
                      if Clear_Way (X.S, E, From, Via_1, Held, Near)
@@ -388,7 +410,7 @@ package body Driver.Action.Execution is
                         Found := True;
                         exit;
                      end if;
-                     Lift := 2.0 * Lift;
+                     Lift := (if Lift > 0.0 then 2.0 * Lift else Real'Max (E.Depth + E.Sigma, Now.Step.Value));
                   end loop;
                end Over_The_Top;
             begin
@@ -396,7 +418,7 @@ package body Driver.Action.Execution is
                if not Found then
                   Outcome := Refused;
                   Why := To_Unbounded_String ("no clear way there: straight is blocked and every way over the top "
-                                              & "up to " & Img (Lift) & " high is out of reach");
+                                              & "up to " & Img (Lift) & " above the higher of the two ends is out of reach");
                   return;
                end if;
                --  The first leg not done yet.
@@ -702,8 +724,16 @@ package body Driver.Action.Execution is
                         In_Rate : constant Real := -Real'(V * N);
                         H       : constant Real := (Q0 - F.Point.Mean) * N;
                         B       : constant Real := Z * Sqrt (Sigma ** 2 + Largest_Sigma (F.Point.Covariance) ** 2);
+                        --  The motion goes into the surface only by more than the surface's orientation, known to
+                        --  its angular sigma and never better than rounding, allows it to go along it: a rotation
+                        --  about its normal, or a slide along it, does not approach it, and a rate that is not told
+                        --  from none would put the contact anywhere from here to infinity.
+                        Approach : constant Boolean :=
+                          In_Rate > 0.0
+                          and then (F.Normal.Sigma = Real'Last
+                                    or else Significant (In_Rate, Sqrt (VV) * Real'Max (F.Normal.Sigma, Real (Vec3'Length) * Real'Epsilon)));
                      begin
-                        if In_Rate > 0.0 and then H > -B and then Real'Max (0.0, H) / In_Rate < Ahead then
+                        if Approach and then H > -B and then Real'Max (0.0, H) / In_Rate < Ahead then
                            Ahead := Real'Max (0.0, H) / In_Rate;
                            Band := B / In_Rate;
                         end if;
@@ -833,11 +863,16 @@ package body Driver.Action.Execution is
                     .Status = Reachable
                   and then P.In_View (Contact.Apply (Contact.Scaled (Goal.Motion, S), Centre.Mean)));
             begin
+               --  The contact is somewhere in its band ahead: a step goes up to
+               --  the band's near end; from there one step crosses the band,
+               --  since being stopped anywhere in it is the touch that was
+               --  expected (the finest step, over a band that is thousands of
+               --  them wide, would take thousands of steps to find it).
                if Ahead < Real'Last then
-                  Limit := Real'Max (Fine, Ahead - Band);
+                  Limit := (if Ahead - Band > Fine then Ahead - Band else Real'Max (Fine, Ahead + Band));
                end if;
                if Pushing then
-                  Limit := Fine;
+                  Limit := (if Ahead < Real'Last then Real'Max (Fine, Ahead + Band) else Fine);
                elsif Known (Goal.Gap) then
                   Limit := Real'Min (Limit, Real'Max (Fine, Real'Min (Goal.Gap.Value, Goal.Leg)));
                elsif Goal.Leg < Real'Last then
@@ -847,6 +882,26 @@ package body Driver.Action.Execution is
                   --  The rise is judged against its own noise: go just far enough for that.
                   Limit := Real'Min (Limit, Real'Max (Fine, Z * Sqrt (2.0) * Largest_Sigma (Start.Covariance)
                                                        - Real'((Centre.Mean - Start.Mean) * Up0)));
+               end if;
+               --  A move turns no more than half a circle (past it the same
+               --  pose is nearer the other way, and the pose after a whole
+               --  circle fits wherever the pose before it did), and no more
+               --  than keeps the tool's straight path within the margin of the
+               --  arc the thing is to follow: the tool goes along the chord
+               --  while it turns, which leaves the arc by the lever times one
+               --  minus the cosine of half the turn.
+               if abs Goal.Motion.Angular > 0.0 then
+                  declare
+                     Axis   : constant Vec3 := Unit (Goal.Motion.Angular);
+                     Apart  : constant Vec3 := Now.Tool.Pose.Translation - Goal.Motion.Pivot;
+                     Lever  : constant Real := abs (Apart - Real'(Apart * Axis) * Axis);
+                     Margin : constant Real :=
+                       Z * Sigma + (if Finest_Pitch (X.S) < Real'Last then Finest_Pitch (X.S) / 2.0 else 0.0);
+                     Turn   : constant Real :=
+                       (if Margin < 2.0 * Lever then 2.0 * Arccos (1.0 - Margin / Lever) else Pi);
+                  begin
+                     Limit := Real'Min (Limit, Real'Min (Pi, Turn) / abs Goal.Motion.Angular);
+                  end;
                end if;
                if Limit < Real'Last and then Fits (Limit) then
                   Step := Limit;
@@ -1148,6 +1203,14 @@ package body Driver.Action.Execution is
 
       function Next (S : Snapshot) return Goals.Answer is
          Fine : constant Real := Arm (S, G.Arm).Step.Value;
+         --  The subject is at a point of the route as far as it can tell:
+         --  within the arm's smallest step of it, or not significantly away
+         --  given the subject's own uncertainty (a thing seen by an eye is
+         --  never found at the very point the arm took it to).
+         function Is_At (Point : Vec3) return Boolean is
+           (abs (Point - Subject_Of (S).Centre.Mean) <= Fine
+            or else not Significant (Subject_Of (S).Centre,
+                                     Point_Estimate'(Mean => Point, Covariance => [others => [others => 0.0]])));
       begin
          if Significant (Planned, Object_Of (S).Centre) then
             Route := Goals.Over_Plan (S, Subject_Of (S), Object_Of (S), R, Margin (S));
@@ -1160,7 +1223,7 @@ package body Driver.Action.Execution is
          declare
             C : constant Vec3 := Subject_Of (S).Centre.Mean;
          begin
-            while K < Route.Count and then abs (Route.Points (K) - C) <= Fine loop
+            while K < Route.Count and then Is_At (Route.Points (K)) loop
                K := K + 1;
             end loop;
             declare
@@ -1171,7 +1234,7 @@ package body Driver.Action.Execution is
                for J in K + 1 .. Route.Count loop
                   Rest := Rest + abs (Route.Points (J) - Route.Points (J - 1));
                end loop;
-               if K = Route.Count and then abs D <= Fine then
+               if K = Route.Count and then Is_At (Route.Points (K)) then
                   return (Ok => True, Done => True, Leg => Real'Last, Why => Null_Unbounded_String,
                           Gap => (Value => 0.0, Sigma => Subject_Of (S).Sigma, Degrees_Of_Freedom => 0),
                           Motion => (if abs Last > 0.0 then Contact.Slide (Unit (Last)) else Contact.Still (C)));
