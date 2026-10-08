@@ -1166,8 +1166,10 @@ package body Driver.Robot.Hand is
                   Room : constant Real := G.Value - Spread;
                begin
                   if Room >= Least then
-                     By := Real'Min (Fast, Room);
-                     Fast := 2.0 * Fast;
+                     --  The prediction says where the contact is: the first push goes to Z sigma above it, in
+                     --  one (the steps used to double from Least over it, thirteen pushes of ten beats to cover
+                     --  A22's 4.5 units, and a stop of the arm's own in the air showed at the sixth of them).
+                     By := Room;
                      How := Doubling;
                   elsif G.Value + Spread > 0.0 then
                      By := Real'Max (G.Sigma, Least);

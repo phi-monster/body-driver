@@ -178,6 +178,9 @@ package body Driver.Robot.Hand.Tests is
              and then Steps.Blind = 0 and then Steps.Fast > 0 and then Steps.Band > 0,
              "(a) the press took" & Steps.Fast'Image & " fast," & Steps.Band'Image & " banded and" & Steps.Blind'Image
              & " blind steps");
+      Check (Steps.Fast = 1 and then Total (Steps) <= 2 * Natural (Real'Ceiling (Z)) + 2,
+             "(a) the press took" & Steps.Fast'Image & " fast and" & Total (Steps)'Image
+             & " steps in all, not one to cover the descent and the band's");
       Check (abs Tip <= Bound, "(d) the tip read at contact lies" & Real'Image (abs Tip) & " from the surface");
       Predict := False;
       Press (0.2);

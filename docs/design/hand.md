@@ -489,8 +489,10 @@ A press turns the hand about the eye, so the eye keeps its view, until the
 lobe's line of sight, tilted, points into the table its arm's own eye saw
 (`Up_In_Arm`), then lowers the hand with doubling steps from the smallest move
 that tells from the arm's own noise until the arm is blocked, lets go, and
-lifts back. Once the presses so far fix the lobe's tip, the steps stop
-doubling Z sigma above the contact they predict and go on by that sigma. The
+lifts back. Once the presses so far fix the lobe's tip, the first push goes to Z sigma
+above the contact they predict in one (it doubled from the least move over it:
+thirteen pushes of ten beats for A22's 4.5 units, 59 per cent of a press of 131
+beats) and the steps after it are that sigma each. The
 first press is straight along the line of sight; then the line is tilted away
 from the other lobes, on either side, by the angle to the nearest other lobe's
 line (a lone lobe: the angle it travels through between the openings), doubled

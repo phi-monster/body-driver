@@ -342,7 +342,7 @@ private
    --  change none. Zero, no blind push, when the shift is not measured.
 
    type Descent_Steps is record
-      Fast    : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
+      Fast    : Natural := 0;   --  the push to Z sigma above the predicted contact (one, and cut to the eye's room)
       Band    : Natural := 0;   --  within that band, each the larger of the sigma and Least
       Blind   : Natural := 0;   --  doubling, nothing predicting the contact (before a prediction, or past its band)
       Capped  : Natural := 0;   --  of those, the steps cut to the eye's room above the surface
@@ -373,9 +373,10 @@ private
    --  contact, whichever the presses tell, and the descent is not spent). Above
    --  is read before each step. Tip is the tip's height above the contact
    --  predicted under it, with its sigma, Unknown when nothing predicts it.
-   --  With a prediction, the steps double from Least for as long as each ends
-   --  Z sigma or more above the predicted contact, the last cut to end there;
-   --  within that band each step is the larger of the sigma and Least, so the
+   --  With a prediction the first push goes to Z sigma above the predicted
+   --  contact in one (it used to double from Least over it: thirteen pushes to
+   --  cover A22's 4.5 units, a stop of the arm's own in the air showing at the
+   --  sixth); within that band each step is the larger of the sigma and Least, so the
    --  tip meets the surface at most that far short of a step's end: the
    --  overshoot the prediction already admits, and less force and less sinking
    --  in where the tip is read. The band is as wide as the prediction says, Z
