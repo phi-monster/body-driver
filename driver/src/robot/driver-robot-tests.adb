@@ -2900,13 +2900,21 @@ package body Driver.Robot.Tests is
       Check (not GNAT.OS_Lib.Is_Regular_File (Name.all & ".part"), "a write left its half behind");
    end Boot_Keeps_What_It_Measured;
 
-   --  A probe of a joint read exactly (noise 1e-13) whose reading settles a
+   --  The rig of a joint read exactly (noise 1e-13) whose reading settles a
    --  hair off its target, the more the further it goes (by the square of the
    --  offset, as a joint held against a spring does), and that stops at 1e-3:
    --  the fraction of each offset it delivers shrinks with every doubling,
-   --  though it follows each one. The probe must double until the joint stops,
-   --  not call the second doubling its end. No eye sees the joint.
-   procedure Probe_A_Drooping_Joint is
+   --  though it follows each one. No eye sees the joint. It is probed from
+   --  First (0: from the smallest step its noise tells) after the estimates
+   --  have measured its noise, with one more held beat before the probe when
+   --  Before says so, in which the model loses the noise (Lost: the probe
+   --  measures it again as it begins) or keeps it (Idle_Beat: the same beats
+   --  as Lost).
+   type Noise_Before is (As_Measured, Idle_Beat, Lost_Noise);
+
+   procedure Probe_Drooping_Joint
+     (First : Real; Before : Noise_Before; Taken : out Natural; Finished : out Boolean)
+   is
       M     : Model;
       Done  : Boolean := False with Atomic;
       Steps : Natural := 0 with Atomic;
@@ -2920,6 +2928,19 @@ package body Driver.Robot.Tests is
          begin
             Estimate_Now (M);
          end Estimate;
+         procedure Keep_Noise is
+         begin
+            null;
+         end Keep_Noise;
+         procedure Lose_Noise is
+            Index : Natural := 0;   --  group 5's channel after every channel of the groups before it
+         begin
+            for G in 1 .. 4 loop
+               Index := Index + Group_Size (M, Group_Id (G));
+            end loop;
+            M.Noise.Replace_Element (Index, Real'Last);
+            M.Noise_Freedom.Replace_Element (Index, 0);
+         end Lose_Noise;
       begin
          --  Long enough at rest for the readings' noise to be measured, and
          --  a few pushes for the joint's delay and the eyes' lag: the probe
@@ -2943,9 +2964,12 @@ package body Driver.Robot.Tests is
          end loop;
          Driver.Beats.Within_A_Beat (Estimate'Access);
          Driver.Robot.Motion.Gather_Rest (M, 2);
-         --  From an offset of 1e-5, as a group's probe starts from the amount
-         --  the probe of every channel together was first seen at.
-         Driver.Robot.Motion.Probe_Together (M, [1 => (Group => 5, Channel => 1)], 1.0, 1.0e-5, R);
+         case Before is
+            when As_Measured => null;
+            when Idle_Beat   => Driver.Beats.Within_A_Beat (Keep_Noise'Access);
+            when Lost_Noise  => Driver.Beats.Within_A_Beat (Lose_Noise'Access);
+         end case;
+         Driver.Robot.Motion.Probe_Together (M, [1 => (Group => 5, Channel => 1)], 1.0, First, R);
          Steps := R.Steps;
          Done := True;
       exception
@@ -3019,11 +3043,47 @@ package body Driver.Robot.Tests is
       if not Done then
          abort Decider;
       end if;
-      Check (Done, "the probe did not finish");
+      Finished := Done;
+      Taken := Steps;
+   end Probe_Drooping_Joint;
+
+   --  The probe must double until the joint stops, not call the second
+   --  doubling its end.
+   procedure Probe_A_Drooping_Joint is
+      Steps    : Natural;
+      Finished : Boolean;
+   begin
+      --  From an offset of 1e-5, as a group's probe starts from the amount
+      --  the probe of every channel together was first seen at.
+      Probe_Drooping_Joint (1.0e-5, As_Measured, Steps, Finished);
+      Check (Finished, "the probe did not finish");
       --  From 1e-5 the joint follows seven doublings, to 1.28e-3, and stops at
       --  1e-3: the ninth level is the first that takes it no further.
       Check (Steps = 9, "the probe called the joint's end after" & Steps'Image & " levels, not 9");
    end Probe_A_Drooping_Joint;
+
+   --  A probe that begins at the smallest step its channel's noise tells takes
+   --  that step from the noise the estimates have measured when it begins,
+   --  also when the model had lost it and the probe measures it again before
+   --  it reads anything. Read first, the step came from the readings'
+   --  resolution (a float's epsilon of a reading of 1e-13: 1e-29), and the
+   --  probe doubled it as many times as a float has bits without the joint
+   --  ever being seen to follow; after the estimates the step is a few times
+   --  the noise (5e-13) and the probe reaches the joint's end.
+   procedure Probe_Reads_After_It_Measures is
+      Kept, Lost         : Natural;
+      Kept_Done, Lost_Done : Boolean;
+   begin
+      Probe_Drooping_Joint (0.0, Idle_Beat, Kept, Kept_Done);
+      Probe_Drooping_Joint (0.0, Lost_Noise, Lost, Lost_Done);
+      Check (Kept_Done and then Lost_Done, "a probe from the smallest step the noise tells did not finish");
+      Check (Kept < Real'Machine_Mantissa,
+             "the probe from the measured noise doubled as many times as a float has bits (" & Kept'Image
+             & " levels) and did not reach the joint's end");
+      Check (abs (Integer (Lost) - Integer (Kept)) <= 1,
+             "the probe whose noise was lost took" & Lost'Image & " levels, the same probe with its noise kept"
+             & Kept'Image & ": its first step was taken before the noise was measured again");
+   end Probe_Reads_After_It_Measures;
 
    --  ── Probing a channel both ways ──
    --
@@ -6308,6 +6368,9 @@ package body Driver.Robot.Tests is
                              Probe_Limits_And_Deadbands'Access);
       Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
+      Driver.Tests.Register ("robot.probe.lost", "a probe whose channel's noise was lost measures it again before "
+                             & "it reads anything and takes its first step from it",
+                             Probe_Reads_After_It_Measures'Access);
       Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found",
                              Reach_A_Pose'Access);
       Driver.Tests.Register ("robot.reach.turn", "a reach ends a joint that turns a whole period of its fit from "
