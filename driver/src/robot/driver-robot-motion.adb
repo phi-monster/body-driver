@@ -392,7 +392,11 @@ package body Driver.Robot.Motion is
    --  Where every listed channel is held and reads, read in a held beat:
    --  which channels can take part, their readings, their noise (measured
    --  again first when some channel's is not), the hold every listed group is
-   --  moved from, and the first step when First is 0.
+   --  moved from, and the first step when First is 0. The estimates can come
+   --  back beats after they were asked (Estimate_Now returns in the beat they
+   --  are in the model), so nothing is read before them: the beat the probe
+   --  begins at, the readings it starts from, the holds and the first step are
+   --  all those of the beat they return in.
    procedure Begin_Probe
      (M        : in out Model;
       Listed   : Channel_Refs;
@@ -406,6 +410,13 @@ package body Driver.Robot.Motion is
       Unlooked : out Natural)
    is
       B : Driver.Clock.Beat;
+
+      --  Whether the listed channel can take part: its group takes commands,
+      --  has the channel and has a reading at the last beat.
+      function Takes_Part (I : Positive) return Boolean is
+        (Natural (Listed (I).Group) <= Group_Count (M) and then Is_Commandable (M, Listed (I).Group)
+         and then Listed (I).Channel <= Group_Size (M, Listed (I).Group)
+         and then Channels.Has_Reading (M, Listed (I).Group, M.Beats - 1));
    begin
       Usable := [others => False];
       Start := [others => 0.0];
@@ -414,16 +425,25 @@ package body Driver.Robot.Motion is
       Base := Driver.Commands.Hold;
       Amount := First;
       Driver.Beats.Next (B);
+      --  A reading whose noise is unmeasured tells nothing of whether it
+      --  followed (Further). What the model had when it last measured was
+      --  not enough to find a rest for its group, and the beats since may
+      --  be: the noise is measured again from every one of them, before
+      --  anything is read.
+      if M.Beats > 0
+        and then (for some I in Listed'Range =>
+                    Takes_Part (I) and then Reading_Noise (M, Listed (I).Group, Listed (I).Channel) >= Real'Last)
+      then
+         Estimate_Now (M);
+      end if;
       Unlooked := M.Beats;
       if M.Beats > 0 then
          for I in Listed'Range loop
-            declare
-               G : constant Group_Id := Listed (I).Group;
-               C : constant Positive := Listed (I).Channel;
-            begin
-               if Natural (G) <= Group_Count (M) and then Is_Commandable (M, G) and then C <= Group_Size (M, G)
-                 and then Channels.Has_Reading (M, G, M.Beats - 1)
-               then
+            if Takes_Part (I) then
+               declare
+                  G : constant Group_Id := Listed (I).Group;
+                  C : constant Positive := Listed (I).Channel;
+               begin
                   Usable (I) := True;
                   Start (I) := Channels.Reading (M, G, M.Beats - 1, C);
                   Noise (I) := Reading_Noise (M, G, C);
@@ -442,22 +462,9 @@ package body Driver.Robot.Motion is
                      --  The smallest step every listed reading can tell.
                      Amount := Real'Max (Amount, Smallest_Step (M, G, C));
                   end if;
-               end if;
-            end;
+               end;
+            end if;
          end loop;
-         --  A reading whose noise is unmeasured tells nothing of whether it
-         --  followed (Further). What the model had when it last measured was
-         --  not enough to find a rest for its group, and the beats since may
-         --  be: the noise is measured again from every one of them.
-         if (for some I in Listed'Range => Usable (I) and then Noise (I) >= Real'Last) then
-            Estimate_Now (M);
-            for I in Listed'Range loop
-               if Usable (I) then
-                  Noise (I) := Reading_Noise (M, Listed (I).Group, Listed (I).Channel);
-                  Freedom (I) := Channels.Noise_Freedom (M, Listed (I).Group, Listed (I).Channel);
-               end if;
-            end loop;
-         end if;
       end if;
       Driver.Beats.Send (Driver.Commands.Hold);
    end Begin_Probe;
