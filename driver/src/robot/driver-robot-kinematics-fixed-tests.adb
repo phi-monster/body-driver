@@ -436,6 +436,42 @@ package body Driver.Robot.Kinematics.Fixed.Tests is
       end if;
    end Points_Of_Great_Or_Negative_Covariance;
 
+   --  A fit whose cost is not quadratic over its own sigma has a covariance that does not stand, however small
+   --  every sigma it states: it must find that out itself and say so. At three pixels of noise on the answers (ten
+   --  times the noise the other scenes have, every answer true), some of the scenes drawn in turn come out with every
+   --  criterion that rests on the sigmas passing, and the cost still rising by less than Z - 1 sigmas' worth where
+   --  the covariance puts Z of them: such a fit is not determined, and says that is why.
+   procedure Quadratic_Over_Its_Own_Sigma is
+      G : Generator;
+      Rejected : Natural := 0;
+   begin
+      for Scene_Number in 1 .. 30 loop
+         declare
+            S : constant Scene :=
+              Draw (G, Table => 90, Box => 70, Wrong_Share => 0.0, Noise => 3.0, Own_Sigma => 0.002);
+            R : Fit_Report;
+            Start_Lens : Fit.Lens;
+            Found : Boolean;
+         begin
+            Measure (S, R, Start_Lens, Found);
+            if Found and then not R.Covariance.Is_Empty then
+               Check (not R.Determined or else R.Linear_To >= Driver.Conventions.Z - 1.0,
+                      "scene" & Scene_Number'Image & " is determined though its cost rises as for"
+                      & Real'Image (R.Linear_To) & " sigmas where its covariance puts Z");
+               --  Rejected for that reason alone: the only reason the fit gives (every criterion that rests on
+               --  its sigmas passed, and the old fit would have been called determined).
+               if Ada.Strings.Unbounded.Index (R.Why, "the fit is not quadratic") = 1
+                 and then Ada.Strings.Unbounded.Index (R.Why, "; ") = 0
+               then
+                  Rejected := Rejected + 1;
+                  Check (not R.Determined, "scene" & Scene_Number'Image & " is rejected and determined");
+               end if;
+            end if;
+         end;
+      end loop;
+      Check (Rejected > 0, "no fit of thirty at three pixels was found not quadratic over its own sigma");
+   end Quadratic_Over_Its_Own_Sigma;
+
    procedure Register is
    begin
       Register ("robot.fixed.recover",
@@ -461,6 +497,9 @@ package body Driver.Robot.Kinematics.Fixed.Tests is
                 "a point whose own covariance has a negative eigenvalue, or is so great that its quadratic form is "
                 & "rounding, stops the fit of an eye (the scale of its residual is a square root of a negative number)",
                 Points_Of_Great_Or_Negative_Covariance'Access);
+      Register ("robot.fixed.quadratic",
+                "a fit whose cost is not quadratic over its own sigma is called determined, though its covariance "
+                & "does not stand", Quadratic_Over_Its_Own_Sigma'Access);
    end Register;
 
 end Driver.Robot.Kinematics.Fixed.Tests;

@@ -213,7 +213,8 @@ package Driver.Robot.Kinematics.Fit is
      (Inverse, Meat : Driver.Numerics.Arrays.Real_Matrix;
       Covariance    : out Driver.Numerics.Arrays.Real_Matrix;
       Clipped       : out Real;
-      Ok            : out Boolean)
+      Ok            : out Boolean;
+      Floor         : Real := 0.0)
      with Pre => Inverse'Length (1) = Inverse'Length (2) and then Meat'Length (1) = Inverse'Length (1)
                  and then Meat'Length (2) = Inverse'Length (1) and then Covariance'Length (1) = Inverse'Length (1)
                  and then Covariance'Length (2) = Inverse'Length (1);
@@ -224,8 +225,11 @@ package Driver.Robot.Kinematics.Fit is
    --  Inverse is the identity, so that the units of the terms do not matter
    --  (Cameron, Gelbach and Miller). Clipped is what that took away: the
    --  negative eigenvalues over the sum of all, in size; 0 when the spread
-   --  was positive semi-definite. Ok is False, and Covariance zero, when
-   --  Inverse is not positive definite.
+   --  was positive semi-definite. Floor, in that same frame, is the least any
+   --  eigenvalue of the spread may have: the level of the noise itself when
+   --  the errors are independent (the Cramer-Rao bound), under which no
+   --  estimate of the spread from a few sightings can put a direction. Ok is
+   --  False, and Covariance zero, when Inverse is not positive definite.
 
    ---------------------------------------------------------------------------
    --  Consensus. A plane holds only some of a view's points, and a dense
@@ -240,6 +244,19 @@ package Driver.Robot.Kinematics.Fit is
      with Pre => Fraction > 0.0 and then Fraction <= 1.0;
    --  How many samples of Minimal points that takes when that Fraction of the
    --  points agree.
+
+   type Count_Array is array (Positive range <>) of Natural;
+
+   type Sampler is private;
+   --  A repeatable generator of samples (Park and Miller's minimal standard, from the same state every time).
+
+   procedure Pick (S : in out Sampler; N : Positive; Into : out Count_Array)
+     with Pre => Into'Length <= N;
+   --  Into'Length distinct numbers of 1 .. N, the next of the generator's.
+
+   function Rayleigh_Median return Real;
+   --  The median of the length of a vector of two components that are Gaussian with the same sigma, over that
+   --  sigma: the sigma of what a least median of lengths found.
 
    type Flag_Array is array (Positive range <>) of Boolean;
 
@@ -442,5 +459,11 @@ package Driver.Robot.Kinematics.Fit is
    --  link left them. Covariance (7 x 7, row by row) is that of the turn (a
    --  rotation vector in the first frame), the centre and the log of the
    --  scale, carried from the link's.
+
+private
+
+   type Sampler is record
+      State : Long_Long_Integer := 1;
+   end record;
 
 end Driver.Robot.Kinematics.Fit;

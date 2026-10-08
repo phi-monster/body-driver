@@ -21,7 +21,6 @@ package body Driver.Robot.Kinematics.Fit is
    type Flags is array (Positive range <>) of Boolean;
    type Flags_Access is access Flags;
    procedure Free is new Ada.Unchecked_Deallocation (Flags, Flags_Access);
-   type Count_Array is array (Positive range <>) of Natural;
    type Count_Access is access Count_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Count_Array, Count_Access);
    type Natural_Access is access Natural_Array;
@@ -328,7 +327,8 @@ package body Driver.Robot.Kinematics.Fit is
      (Inverse, Meat : Driver.Numerics.Arrays.Real_Matrix;
       Covariance    : out Driver.Numerics.Arrays.Real_Matrix;
       Clipped       : out Real;
-      Ok            : out Boolean)
+      Ok            : out Boolean;
+      Floor         : Real := 0.0)
    is
       N       : constant Natural := Inverse'Length (1);
       Factor  : Real_Matrix (1 .. N, 1 .. N);
@@ -356,6 +356,7 @@ package body Driver.Robot.Kinematics.Fit is
                Taken := Taken - Values (E);
                Values (E) := 0.0;
             end if;
+            Values (E) := Real'Max (Values (E), Floor);
          end loop;
          Clipped := (if All_Of > 0.0 then Taken / All_Of else 0.0);
       end;
@@ -2291,11 +2292,7 @@ package body Driver.Robot.Kinematics.Fit is
       return (if N >= Real (Positive'Last) then Positive'Last else Positive (Real'Max (1.0, N)));
    end Consensus_Samples;
 
-   --  A repeatable uniform generator: Park and Miller's minimal standard.
-   type Sampler is record
-      State : Long_Long_Integer := 1;
-   end record;
-
+   --  The generator steps by Park and Miller's minimal standard.
    function Draw (S : in out Sampler; N : Positive) return Positive is
    begin
       S.State := (S.State * 48_271) mod 2_147_483_647;
@@ -2303,9 +2300,7 @@ package body Driver.Robot.Kinematics.Fit is
    end Draw;
 
    --  Into'Length distinct numbers of 1 .. N.
-   procedure Pick (S : in out Sampler; N : Positive; Into : out Count_Array)
-     with Pre => Into'Length <= N
-   is
+   procedure Pick (S : in out Sampler; N : Positive; Into : out Count_Array) is
    begin
       Into := [others => 0];
       for K in Into'Range loop
@@ -2666,7 +2661,7 @@ package body Driver.Robot.Kinematics.Fit is
 
    --  The median of the lengths of two-coordinate residuals of Gaussian noise
    --  is sigma times the root of 2 ln 2.
-   Rayleigh_Median : constant Real := Sqrt (2.0 * Ln (2.0));
+   function Rayleigh_Median return Real is (Sqrt (2.0 * Ln (2.0)));
 
    --  H applied to a plane point; Ahead is False on the line at infinity.
    procedure Apply (H : Mat3; X, Y : Real; U, V : out Real; Ahead : out Boolean) is
