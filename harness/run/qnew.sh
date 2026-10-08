@@ -16,7 +16,8 @@
 # Two runs can go at once, each in its own slot: BD_SLOT=0 (the default) is the first card and port
 # 9080, BD_SLOT=1 the second card and port 9081. The second card holds the brain, so a slot-1 run
 # needs the brain stopped and is for runs that do not ask it (a boot); each slot queues on its own
-# lock and clears only its own leftovers.
+# lock and clears only its own leftovers. Nothing it starts keeps the lock open (9>&-): the instrument
+# service it once started held slot 1's lock for hours, and the next run there never began.
 set -u
 K=$1; TASK=$2; CFG=$3; SEED=$4; LIM=$5; BIN=$6; BODY=${7:-}
 R=/root/runs/$K
@@ -24,7 +25,7 @@ R=/root/runs/$K
 mkdir -p "$R"
 SLOT="${BD_SLOT:-0}"; PORT=$((9080 + SLOT))
 LOCK=/root/q/sim.lock; NOW=/root/q/now.txt
-[ "$SLOT" = 0 ] || { LOCK=/root/q/sim$SLOT.lock; NOW=/root/q/now$SLOT.txt; }
+[ "$SLOT" = 0 ] || { LOCK=/root/q/slot$SLOT.lock; NOW=/root/q/now$SLOT.txt; }
 if [ "$SLOT" != 0 ] && ss -ltn | grep -q ":8078 "; then
   echo "the brain is serving on the card of slot $SLOT; stop it first (or run in slot 0)"; rmdir "$R"; exit 6
 fi
@@ -41,7 +42,10 @@ echo "new $K $(date +%s)" > "$NOW"
 U1="ws://127.0.0.1"; U2=":$PORT"; L1=--lis; L2="ten $PORT"
 pkill -9 -f "$U1$U2" 2>/dev/null; pkill -9 -f -- "$L1$L2" 2>/dev/null
 sleep 4
-ss -ltn | grep -q ":8077 " || (cd /root/instruments && bash run.sh) || { echo "instrument service did not start"; exit 2; }
+# A loaded box can take minutes to load the instrument's models: wait while its process lives.
+ss -ltn | grep -q ":8077 " || (cd /root/instruments && bash run.sh 9>&-) || {
+  while pgrep -f "venv_inst/bin/python serve" > /dev/null && ! ss -ltn | grep -q ":8077 "; do sleep 5; done
+  ss -ltn | grep -q ":8077 " || { echo "instrument service did not start"; exit 2; }; }
 
 { echo "task $TASK"; echo "cfg $CFG"; echo "seed $SEED"; echo "driver $(md5sum "$BIN" | cut -d' ' -f1)";
   echo "body ${BODY:-none}"; echo "start $(date +%FT%T)"; } > "$R/meta.txt"
@@ -50,17 +54,17 @@ mkfifo "$R/run.rec.fifo"
 # Level 17 finds each picture in the one a beat before it: a recording takes a seventh of the room
 # level 3 took (a 2-hour boot 30 GB before), and eight threads still compress six times as fast as a
 # run records, so the FIFO never holds the driver up. Any zstd reads it back without options.
-zstd -q -T8 -17 -o "$R/run.rec.zst" < "$R/run.rec.fifo" &
+zstd -q -T8 -17 -o "$R/run.rec.zst" < "$R/run.rec.fifo" 9>&- &
 ZST=$!
 BL_BRAIN_SAMPLING="${BL_BRAIN_SAMPLING:-$QWEN_CARD}" setsid nohup "$BIN" --listen "$PORT" --eye 127.0.0.1:8078 \
-  --inst 127.0.0.1:8077 ${BODY:+--body "$BODY"} --record "$R/run.rec.fifo" </dev/null >"$R/driver.log" 2>&1 &
+  --inst 127.0.0.1:8077 ${BODY:+--body "$BODY"} --record "$R/run.rec.fifo" </dev/null >"$R/driver.log" 2>&1 9>&- &
 sleep 2
 cd /root/RoboDojo
 BD_TRUTH="$R/truth.jsonl" BD_TRUTH_GEOMETRY=/root/rec/geometry OMNI_KIT_ACCEPT_EULA=YES PATH=/venv/RoboDojo/bin:$PATH \
   BD_STEP_LIM="${BD_STEP_LIM:-3000}" setsid nohup \
   bash scripts/eval_policy.sh --root_dir /root/RoboDojo --task_name "$TASK" --env_cfg_type "$CFG" --device_id "$SLOT" \
   --policy_name l3_link --port "$PORT" --protocol ws --policy_server_url "ws://127.0.0.1:$PORT" --seed "$SEED" \
-  --host 127.0.0.1 --enable_cameras --headless </dev/null >"$R/sim.log" 2>&1 &
+  --host 127.0.0.1 --enable_cameras --headless </dev/null >"$R/sim.log" 2>&1 9>&- &
 
 end=$(( $(date +%s) + LIM * 60 )); why=limit
 while [ "$(date +%s)" -lt $end ]; do

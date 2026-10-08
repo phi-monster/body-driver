@@ -23,12 +23,16 @@ package Driver.Action.Plants is
    type Reach_Answer is record
       Status : Reach_Status := Unmeasured;
       Why    : Unbounded_String;   --  for Unreachable: which limit, joint or distance
+      Bow    : Real := 0.0;        --  for Reachable: how far above the goal's Clearance the arm must stray from the
+                                   --  straight path there, because that path leaves what it can reach; zero if it need not
    end record;
 
    type Arm_Goal is record
       Arm           : Arm_Id;
       Tool          : Rigid;
       Position_Only : Boolean := False;   --  the tool's orientation is free
+      Clearance     : Real := Real'Last;  --  how far the tool may leave the straight path there; not bounded
+      Lever         : Real := 0.0;        --  how far the arm's parts and what it holds lie from the tool
    end record;
 
    package Arm_Goal_Vectors is new Ada.Containers.Vectors (Positive, Arm_Goal);
@@ -102,7 +106,10 @@ package Driver.Action.Plants is
    --  Within.
 
    procedure Move (P : in out Plant; O : Order; R : out Report) is abstract;
-   --  One step of every arm and closer in O, together.
+   --  One step of every arm and closer in O, together. An arm goal's
+   --  Clearance bounds how far the arm may take the tool from the straight
+   --  path to it on the way, the body out to the goal's Lever included: the
+   --  path the engine cleared of obstacles is the straight one.
 
    function Predicted (P : Plant; T : Thing_Id; Beats : Natural) return Driver.Uncertain.Point_Estimate is abstract;
    --  Where the thing's centre will be that many beats from now, from its

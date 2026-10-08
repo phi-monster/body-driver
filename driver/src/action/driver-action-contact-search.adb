@@ -858,8 +858,11 @@ package body Driver.Action.Contact.Search is
                                     Undo  : constant Rigid := Inverse (E.Repeat);
                                  begin
                                     for Variant in 1 .. E.Repeats loop
-                                       if Reachable (Tool) and then Reachable (Hover)
-                                         and then Can_Travel (Hover, To_Vector (Before))
+                                       --  The way in first: it is geometry, and a reach is an
+                                       --  inverse kinematics solve many times dearer; all three
+                                       --  must hold whatever the order.
+                                       if Can_Travel (Hover, To_Vector (Before))
+                                         and then Reachable (Tool) and then Reachable (Hover)
                                        then
                                           Out_C := (Tool => Tool, Hover => Hover, Before => To_Vector (Before),
                                                     At_Touch => To_Vector (Stops), Touches => G.Touches,
@@ -966,8 +969,8 @@ package body Driver.Action.Contact.Search is
                                  Tool  : constant Rigid := (Rotation => R, Translation => X);
                                  Hover : constant Rigid := (Rotation => R, Translation => X + (Clear + Z * Sig) * N);
                               begin
-                                 if Reachable (Tool) and then Reachable (Hover)
-                                   and then Can_Travel (Hover, Now_Closers)
+                                 if Can_Travel (Hover, Now_Closers)
+                                   and then Reachable (Tool) and then Reachable (Hover)
                                  then
                                     Out_C := (Tool => Tool, Hover => Hover, Before => Now_Closers,
                                               At_Touch => Now_Closers, Touches => G.Touches,

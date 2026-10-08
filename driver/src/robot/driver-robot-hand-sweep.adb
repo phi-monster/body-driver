@@ -130,6 +130,8 @@ package body Driver.Robot.Hand.Sweep is
 
    function Gathered (S : State) return Boolean is (Driver.Robot.Hand.Views.Gathered (S.Views));
 
+   function Poses (S : State; Key : Real_Array) return Natural is (Driver.Robot.Hand.Selfsight.Poses (S.Memory, Key));
+
    function Low_End (S : State; Channel : Positive) return Driver.Robot.Hand.Views.View is
      (Driver.Robot.Hand.Views.Low_End (S.Views, Channel));
 

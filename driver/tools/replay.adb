@@ -16,10 +16,13 @@
 --  one JSON line with each arm's tool pose and each eye's pose (row-major 4 x 4,
 --  world frame); two last lines hold, for each eye, the lines of sight of a
 --  grid of pixels in the eye's own frame, and each hand's tips in its tool
---  frame (with the press direction that defines each tip and the closer
---  readings it belongs to), so the estimates can be scored against simulator
---  truth whatever model produced them. Nothing here decides
---  anything; the recorded replies did.
+--  frame (with the press direction that defines each tip, the closer
+--  readings it belongs to, the beat of the press it rests on, whether the
+--  presses have told it across its line of sight and by how much (the two
+--  standard deviations across it), the same tip of the finger unloaded, and
+--  the slide each press measured), so the estimates
+--  can be scored against simulator truth whatever model produced them.
+--  Nothing here decides anything; the recorded replies did.
 --
 --  The estimators' service calls are answered as Driver.Services describes
 --  for a replay: by the live service when --inst or --eye names one (a
@@ -115,8 +118,12 @@ procedure Replay is
 
    procedure Write_Hands is
       --  Each hand's tips in its arm's tool frame, with their covariance (null
-      --  while unknown), whether a second press confirmed them, the press
-      --  direction that defines them and the closer readings they belong to.
+      --  while unknown), whether a second press confirmed them, the beat of the
+      --  press the tip rests on (0 while unknown), the press direction that
+      --  defines them and the closer readings they belong to; the same three
+      --  for the tip of the finger unloaded ("free_"), unknown until both
+      --  openings of the lobe have a tip and the slides are measured; and the
+      --  slide of each press made at the opening.
       use Driver.Robot.Hand;
       Line_Text : Unbounded_String := To_Unbounded_String ("{""hands"":[");
 
@@ -138,6 +145,22 @@ procedure Replay is
          end loop;
          return To_String (R) & "]";
       end Readings_Json;
+
+      function Slides_Json (S : Slide_Readings) return String is
+         R : Unbounded_String := To_Unbounded_String ("[");
+
+         function Flag (B : Boolean) return String is (if B then "true" else "false");
+      begin
+         for I in S'Range loop
+            Append (R, (if I = S'First then "" else ",") & "{""beat"":" & Natural'Image (Natural (S (I).Beat))
+                    & ",""contact"":" & Flag (S (I).Contact) & ",""rests"":" & Flag (S (I).Tip_Rests)
+                    & ",""known"":" & Flag (S (I).Known) & ",""pixels"":" & Driver.Json.Number_Image (S (I).Pixels)
+                    & ",""pixels_sigma"":" & Driver.Json.Number_Image (S (I).Pixels_Sigma) & ",""fraction"":"
+                    & Driver.Json.Number_Image (S (I).Fraction) & ",""fraction_sigma"":"
+                    & Driver.Json.Number_Image (S (I).Fraction_Sigma) & "}");
+         end loop;
+         return To_String (R) & "]";
+      end Slides_Json;
    begin
       for Id in 1 .. Hand_Count (Hands) loop
          declare
@@ -152,7 +175,19 @@ procedure Replay is
                           & (if At_Opening = Open then "open" else "closed") & """:{""tip"":"
                           & Vector_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening).Mean) & ",""covariance"":"
                           & Covariance_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening)) & ",""confirmed"":"
-                          & (if Tip_Confirmed (Hands, H, Lobe, At_Opening) then "true" else "false") & ",""press"":"
+                          & (if Tip_Confirmed (Hands, H, Lobe, At_Opening) then "true" else "false") & ",""tested"":"
+                          & (if Tip_Tested (Hands, H, Lobe, At_Opening) then "true" else "false") & ",""across"":"
+                          & "[" & Driver.Json.Number_Image (Tip_Across (Hands, H, Lobe, At_Opening) (1)) & ","
+                          & Driver.Json.Number_Image (Tip_Across (Hands, H, Lobe, At_Opening) (2)) & "],""beat"":"
+                          & Natural'Image (Natural (Tip_Beat (Hands, H, Lobe, At_Opening))) & ",""free_tip"":"
+                          & Vector_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening, Free).Mean) & ",""free_covariance"":"
+                          & Covariance_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening, Free)) & ",""free_confirmed"":"
+                          & (if Tip_Confirmed (Hands, H, Lobe, At_Opening, Free) then "true" else "false")
+                          & ",""free_tested"":"
+                          & (if Tip_Tested (Hands, H, Lobe, At_Opening, Free) then "true" else "false")
+                          & ",""free_beat"":"
+                          & Natural'Image (Natural (Tip_Beat (Hands, H, Lobe, At_Opening, Free))) & ",""slides"":"
+                          & Slides_Json (Slides (Hands, H, Lobe, At_Opening)) & ",""press"":"
                           & Vector_Json (Press_Direction (Hands, H, Lobe, At_Opening).Unit_Vector) & ",""reading"":"
                           & Readings_Json (Closer_Reading (Hands, H, At_Opening)) & "}");
                end loop;

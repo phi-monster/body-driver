@@ -180,7 +180,8 @@ package Driver.Robot.Motion is
 
    type Plan is private;
 
-   function Plan_Reach (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan;
+   function Plan_Reach (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal;
+                        Clearance : Real := Real'Last; Lever : Real := 0.0) return Plan;
    --  A joint path from the arm's configuration at O to the goal, a pose of
    --  the tool in the world (Tool_Pose), solved along the way so it never
    --  jumps between solution branches: a joint that turns is given as the
@@ -192,11 +193,36 @@ package Driver.Robot.Motion is
    --  the arm's own frame by the arm's placement and planned there
    --  (Plan_Reach_In_Arm), so a move given relative to the tool's pose in the
    --  world is the same move whatever the placement.
+   --
+   --  The arm is taken from one waypoint to the next along the joints' own
+   --  straight line, which bows from the tool's straight line (A17's left
+   --  arm bowed by up to a fifth of a move). Clearance is how far the tool
+   --  may leave the straight path to the goal (straight in position, about
+   --  one axis in turn), and with its turn the body out to Lever from it,
+   --  in the unit of the goal's pose (Real'Last: not bounded): a segment is
+   --  cut in two until the tool, at the quarter, the middle and the three
+   --  quarters of the joints' straight line, is within the clearance of where
+   --  the straight path has it. A segment the solver cannot close is cut in
+   --  two only while it is longer than the fit can tell apart (its
+   --  Angle_Sigma): shorter, cutting it again learns nothing, and the goal is
+   --  called unreachable there. A bow that cannot be cut away because the
+   --  straight path leaves what the arm can reach is left: the joints' own
+   --  line, which does reach, is taken, and the plan says how large it is
+   --  (Worst_Bow).
+   --
+   --  The segments of a chain are solved one from where the last ended, so
+   --  the chain is continuous: with a clearance, a joint that the straight
+   --  tool path winds can end a whole period from where one solve for the
+   --  goal would put it. The driver knows no joint limits (a limit is met as
+   --  Blocked or Short), so a wrist limited to plus or minus pi, asked for a
+   --  straight path that winds it, stops at its end. That is the trade a
+   --  caller makes by asking for a clearance.
 
-   function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan;
+   function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal;
+                               Clearance : Real := Real'Last; Lever : Real := 0.0) return Plan;
    --  The same, the goal a pose of the tool in the arm's own frame
    --  (Tool_In_Arm): it needs only the arm's kinematics, not its placement in
-   --  the world.
+   --  the world; the Clearance and the Lever are in the arm's own unit.
 
    function Status (P : Plan) return Plan_Status;
    function Why (P : Plan) return String;
@@ -206,6 +232,35 @@ package Driver.Robot.Motion is
    function Last_Readings (P : Plan) return Real_Array
      with Pre => Status (P) = Planned;
    --  The readings the plan ends at: where the fitted model puts the goal.
+
+   function Waypoint_Count (P : Plan) return Natural;
+   function Waypoint (P : Plan; K : Positive) return Real_Array
+     with Pre => K <= Waypoint_Count (P);
+   --  The arm's targets in turn, the goal last: what Follow sends.
+
+   function Solve_Count (P : Plan) return Natural;
+   --  How many times the solver was asked to close a segment of the path:
+   --  what planning cost, whether it ended Planned or Unreachable.
+
+   function Stray
+     (M : Model; A : Arm_Id; From, To : Rigid; Q0, Q1 : Real_Array; Lever : Real := 0.0; Position_Only : Boolean := False)
+      return Real
+     with Pre => Q0'Length = Q1'Length and then Q0'First = Q1'First;
+   --  How far the tool strays from the straight path from From to To (straight
+   --  in position, about one axis in turn, in the arm's own frame and unit)
+   --  when the arm goes from the readings Q0 to Q1 along the joints' straight
+   --  line: at its quarter, its middle and its three quarters (a bow that goes
+   --  out one side and back across has no stray at its middle), the largest
+   --  distance of the tool from where the straight path has it at the same
+   --  share of the way, and with a turn the body out to Lever from the tool.
+   --  What Plan_Reach cuts a segment by.
+
+   function Worst_Bow (P : Plan) return Real;
+   --  The largest bow a segment of the plan is left with above the clearance
+   --  it was asked for, because the straight path there leaves what the arm
+   --  can reach: how far the tool may stray from the straight path, in the
+   --  goal's unit (the arm's own for Plan_Reach_In_Arm). Zero when every
+   --  segment keeps within the clearance, or none was asked.
 
    procedure Follow (M : in out Model; P : Plan; Report : out Step_Report)
      with Pre => Status (P) = Planned;
@@ -220,6 +275,8 @@ private
       Reason    : Unbounded_String;
       Group     : Group_Id := 1;
       Waypoints : Waypoint_Vectors.Vector;   --  the arm's targets in turn, the goal last
+      Solves    : Natural := 0;              --  segments the solver was asked to close
+      Bow       : Real := 0.0;               --  the largest bow left above the clearance
    end record;
 
 end Driver.Robot.Motion;

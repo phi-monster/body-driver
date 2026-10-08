@@ -316,12 +316,16 @@ package body Driver.Action.Plants.Live is
       Must_Be_Inside (P, "a reach");
       declare
          Plan : constant Motion.Plan :=
-           Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only));
+           Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only),
+                              Clearance => Goal.Clearance, Lever => Goal.Lever);
       begin
          case Motion.Status (Plan) is
-            when Motion.Planned     => return (Status => Reachable, Why => Null_Unbounded_String);
-            when Motion.Unreachable => return (Status => Unreachable, Why => To_Unbounded_String (Motion.Why (Plan)));
-            when Motion.Unmeasured  => return (Status => Unmeasured, Why => To_Unbounded_String (Motion.Why (Plan)));
+            when Motion.Planned     =>
+               return (Status => Reachable, Why => Null_Unbounded_String, Bow => Motion.Worst_Bow (Plan));
+            when Motion.Unreachable =>
+               return (Status => Unreachable, Why => To_Unbounded_String (Motion.Why (Plan)), Bow => 0.0);
+            when Motion.Unmeasured  =>
+               return (Status => Unmeasured, Why => To_Unbounded_String (Motion.Why (Plan)), Bow => 0.0);
          end case;
       end;
    end Reach;
@@ -357,7 +361,8 @@ package body Driver.Action.Plants.Live is
             begin
                P.Last := Driver.Beats.Latest.all;
                Plan := Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last,
-                                          (Pose => G.Tool, Position_Only => G.Position_Only));
+                                          (Pose => G.Tool, Position_Only => G.Position_Only),
+                                          Clearance => G.Clearance, Lever => G.Lever);
             end Planning;
          begin
             Driver.Beats.Within_A_Beat (Planning'Access);

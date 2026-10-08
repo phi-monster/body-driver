@@ -52,12 +52,14 @@ package body Driver.Robot.Hand.Tips.Tests is
    function Line (L : Positive; O : Opening) return Vec3 is (Unit (Tips_True (L, O) - Eye));
 
    --  The lobes' lines of sight, each with the spread of its tip region across it (an angle).
-   function Sights (Spread : Real := 0.0) return Sight_Table is
+   function Sights (Spread : Real := 0.0; Pitch : Real := 0.0; Travel : Real := 0.0) return Sight_Table is
      ([for L in 1 .. 2 =>
          [for O in Opening => (Known  => True,
                                Ray    => (Origin    => (Mean => Eye, Covariance => 1.0e-10 * Identity3),
                                           Direction => (Unit_Vector => Line (L, O), Sigma => 1.0e-5)),
-                               Spread => Spread)]]);
+                               Spread => Spread,
+                               Travel => Travel,
+                               Pitch  => Pitch)]]);
 
    Down : constant Vec3 := [0.0, 0.0, -1.0];
 
@@ -72,11 +74,11 @@ package body Driver.Robot.Hand.Tips.Tests is
    --  arm's noise, and was pressing straight down. Lift is how far above the
    --  table the tip stopped: the arm stopped on something else.
    procedure Press_At (L : Positive; O : Opening; Tilt, Azimuth, X, Y : Real; Made : out Boolean;
-                       Press : out Driver.Robot.Hand.Presses.Event; Lift : Real := 0.0)
+                       Press : out Driver.Robot.Hand.Presses.Event; Lift : Real := 0.0; Slide : Vec3 := Zero3)
    is
       R       : constant Mat3 := Exp (Tilt * [Cos (Azimuth), Sin (Azimuth), 0.0]) * Pointing_Down (L, O);
       Landing : constant Vec3 := [X, Y, Lift + Contact_Sigma * Gaussian];
-      T       : constant Vec3 := Landing - R * Tips_True (L, O);
+      T       : constant Vec3 := Landing - R * (Tips_True (L, O) + Slide);   --  the finger slid by Slide under the press
       Other   : constant Positive := 3 - L;
       Beside  : constant Vec3 := R * Tips_True (Other, O) + T;
    begin
@@ -297,7 +299,10 @@ package body Driver.Robot.Hand.Tips.Tests is
       --  A tip lies on its line of sight at the distance a press put it; the
       --  lobe's tip region lies within a spread of that line, so across the
       --  line the tip's covariance grows by that spread at that distance, and
-      --  along the line it does not.
+      --  along the line it does only as far as the one press that fixed the tip
+      --  was tilted to the line (a press straight along it tells the distance
+      --  whatever the offset across; a tilted one tells the sum of the two, and
+      --  this one stood two ten-thousandths of a radian off, the arm's turning noise).
       Spread : constant Real := 0.05;
       Narrow, Wide : Point_Estimate;
       Distance_Of_Wide : Real := 0.0;
@@ -329,7 +334,7 @@ package body Driver.Robot.Hand.Tips.Tests is
          Across : constant Real := V * (Wide.Covariance * V) - V * (Narrow.Covariance * V);
       begin
          Check (Known (Narrow) and then Known (Wide) and then Narrow.Mean = Wide.Mean, "the spread moved the tip");
-         Check (abs Along < 1.0e-12, "the spread widened the tip along its line of sight by" & Real'Image (Along));
+         Check (abs Along < 1.0e-6 * Across, "the spread widened the tip along its line of sight by" & Real'Image (Along));
          Check (abs (Across - (Distance_Of_Wide * Spread) ** 2) < 1.0e-9 * (Distance_Of_Wide * Spread) ** 2 + 1.0e-15,
                 "the spread widened the tip across its line by" & Real'Image (Across) & " against"
                 & Real'Image ((Distance_Of_Wide * Spread) ** 2));
@@ -378,8 +383,162 @@ package body Driver.Robot.Hand.Tips.Tests is
       end;
    end Slides_Kept_With_Their_Presses;
 
+   --  The share of its travel between the openings each lobe's finger slides inward by under a press.
+   Slid_By : constant array (1 .. 2) of Real := [0.12, 0.28];
+
+   function Travel (L : Positive) return Vec3 is (Tips_True (L, Closed_Empty) - Tips_True (L, Open));
+
+   --  What the eye measured of the slide under a press of lobe L: its own, and nothing of the other's.
+   function Measured_Slide (L : Positive; Known_Slide : Boolean := True) return Slid_Row is
+     ([for Which in 1 .. 2 => (if Which = L and then Known_Slide
+                               then Slid'(Known => True, Pixels => 0.0, Pixels_Sigma => 1.0, Fraction => Slid_By (L),
+                                         Fraction_Sigma => 0.01)
+                               else Slid'(others => <>))]);
+
+   --  Presses at both openings, or at the open one only, the fingers sliding by their shares under each, the
+   --  slides measured or not.
+   function Book_With_Slides (Openings : Boolean; Measured : Boolean) return Book is
+      B     : Book;
+      Moved : Boolean;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 53);
+      Set_Sights (B, Sights);
+      Set_Frame (B, Table, No_Pose'Access, Moved);
+      for L in 1 .. 2 loop
+         for O in Opening loop
+            if O = Open or else Openings then
+               for K in 0 .. 11 loop
+                  declare
+                     Made  : Boolean;
+                     Press : Driver.Robot.Hand.Presses.Event;
+                  begin
+                     Press_At (L, O, 0.3 * Real (K mod 3), Ada.Numerics.Pi * Real (K mod 4) / 2.0,
+                               0.4 + 0.02 * Real (K), 0.1 + 0.03 * Real (L) + 0.01 * Real (K mod 5), Made, Press,
+                               Slide => Slid_By (L) * Travel (L));
+                     if Made then
+                        Add (B, Press, O, Measured_Slide (L, Measured));
+                     end if;
+                  end;
+               end loop;
+            end if;
+         end loop;
+      end loop;
+      return B;
+   end Book_With_Slides;
+
+   procedure Pushed_Shut_Fingers_Confirm_Nothing is
+      --  A22's lobe 2: five presses of a hand lying on the table with the finger 94 to 99 per cent shut, from
+      --  poses apart, each agreeing with the others (the same hand, the same shut finger) and so confirming one
+      --  another, a tip "confirmed" 19 mm from the support point. A press whose finger slid takes how far as noise
+      --  at the tip's distance, along any axis, up to the finger's whole travel: presses with the finger pushed
+      --  shut say nothing of the tip, and cannot confirm one; the same presses with the finger where the closer's
+      --  reading puts it (0.7 per cent, A22's lobe 1 at the press that gave its tip) confirm it as before, and
+      --  a press that could not say how far the finger slid is taken for one that slid it all.
+      Pitch  : constant Real := 1.6e-3;                  --  the angle a pixel spans: the finger's travel (0.0335 at 0.103 from the eye) is 203 of them
+      Reach  : constant Real := 203.0;                  --  the finger's travel between its openings, in pixels
+      Slid_By_Share : constant array (1 .. 3) of Real := [0.0007, 0.94, 0.94];   --  third: slid, and not measured
+
+      function Pressed (Share : Real; Measured : Boolean) return Book is
+         B     : Book;
+         Moved : Boolean;
+         Row   : constant Slid_Row :=
+           (if Measured
+            then [1 => Slid'(Known => True, Pixels => Share * Reach, Pixels_Sigma => 0.1,
+                             Fraction => Share, Fraction_Sigma => 0.002),
+                  2 => Slid'(others => <>)]
+            else [1 => Slid'(others => <>), 2 => Slid'(others => <>)]);
+      begin
+         Ada.Numerics.Float_Random.Reset (Gen, 67);
+         Set_Sights (B, Sights (0.0, Pitch, Reach * Pitch));
+         Set_Frame (B, Table, No_Pose'Access, Moved);
+         for K in 0 .. 11 loop
+            declare
+               Made  : Boolean;
+               Press : Driver.Robot.Hand.Presses.Event;
+            begin
+               Press_At (1, Open, 0.3 * Real (K mod 3), Ada.Numerics.Pi * Real (K mod 4) / 2.0,
+                         0.4 + 0.02 * Real (K), 0.1 + 0.01 * Real (K mod 5), Made, Press, Slide => Share * Travel (1));
+               if Made then
+                  Add (B, Press, Open, Row);
+               end if;
+            end;
+         end loop;
+         return B;
+      end Pressed;
+
+      Free_Finger : constant Book := Pressed (Slid_By_Share (1), Measured => True);
+      Shut        : constant Book := Pressed (Slid_By_Share (2), Measured => True);
+      Unsaid      : constant Book := Pressed (Slid_By_Share (3), Measured => False);
+   begin
+      Check (Known (Tip (Free_Finger, 1, Open)) and then Confirmed (Free_Finger, 1, Open),
+             "presses with the finger where the closer's reading puts it did not confirm the tip");
+      Check (abs (Tip (Free_Finger, 1, Open).Mean - Tips_True (1, Open)) < 0.02,
+             "the tip from presses with the finger in place is off by" & Real'Image (abs (Tip (Free_Finger, 1, Open).Mean - Tips_True (1, Open))));
+      for Case_Of in 1 .. 2 loop
+         declare
+            B : constant Book := (if Case_Of = 1 then Shut else Unsaid);
+         begin
+            Check (not Confirmed (B, 1, Open),
+                   "presses with the finger pushed " & (if Case_Of = 1 then "shut" else "somewhere") & " confirmed the tip");
+            --  Not fixed to better than the slide: every press pushed the finger the same way, so there is no averaging
+            --  it out, and the tip is off by about the slide (0.0315 here), within the sigma it states.
+            Check (not Known (Tip (B, 1, Open))
+                   or else (Distance (B, 1, Open).Sigma > 0.015
+                            and then (Tip (B, 1, Open).Mean - Tips_True (1, Open))
+                                     * (Inverse (Tip (B, 1, Open).Covariance) * (Tip (B, 1, Open).Mean - Tips_True (1, Open))) < 14.2),
+                   "presses with the finger pushed " & (if Case_Of = 1 then "shut" else "somewhere") & " fixed the tip to"
+                   & Real'Image (Distance (B, 1, Open).Sigma) & ", off by" & Real'Image (abs (Tip (B, 1, Open).Mean - Tips_True (1, Open))));
+         end;
+      end loop;
+   end Pushed_Shut_Fingers_Confirm_Nothing;
+
+   procedure Free_Tips_From_Slides is
+      --  Two fingers slide inward under every press by 12 and 28 per cent of their travel (3 to 9 mm). The
+      --  loaded tips are those of the fingers as they stood under the presses, off the free fingers by that;
+      --  the free tips, from the presses taken with the tips they slid to, are the fingers as they stand free,
+      --  and confirmed. They are unknown until both openings of a lobe have a tip and the presses have their
+      --  slides measured: pressed at one opening only, or with nothing measured of the slides, there is none.
+      Both : constant Book := Book_With_Slides (Openings => True, Measured => True);
+   begin
+      for L in 1 .. 2 loop
+         for O in Opening loop
+            declare
+               Free_Tip   : constant Point_Estimate := Tip (Both, L, O, Free);
+               Loaded_Tip : constant Point_Estimate := Tip (Both, L, O, Loaded);
+            begin
+               Check (Known (Free_Tip), "lobe" & L'Image & " " & O'Image & ": no free tip");
+               if Known (Free_Tip) and then Known (Loaded_Tip) then
+                  declare
+                     D : constant Vec3 := Free_Tip.Mean - Tips_True (L, O);
+                  begin
+                     Check (abs D < 1.0e-3, "lobe" & L'Image & " " & O'Image & ": the free tip is off by" & Real'Image (abs D));
+                     Check (abs (Loaded_Tip.Mean - Tips_True (L, O)) > 2.0 * abs D,
+                            "lobe" & L'Image & " " & O'Image & ": the loaded tip is off by" & Real'Image (abs (Loaded_Tip.Mean - Tips_True (L, O)))
+                            & ", the free tip by" & Real'Image (abs D));
+                  end;
+                  Check (Confirmed (Both, L, O, Free), "lobe" & L'Image & " " & O'Image & ": the free tip is not confirmed");
+                  Check (Beat (Both, L, O, Free) > 0 or else Pressed (Both) > 0, "the free tip rests on no press");
+               end if;
+            end;
+         end loop;
+      end loop;
+      declare
+         One_Opening : constant Book := Book_With_Slides (Openings => False, Measured => True);
+         Unmeasured  : constant Book := Book_With_Slides (Openings => True, Measured => False);
+      begin
+         Check (Known (Tip (One_Opening, 1, Open)) and then not Known (Tip (One_Opening, 1, Open, Free)),
+                "a lobe pressed at one opening only has a free tip, or no loaded one");
+         Check (Known (Tip (Unmeasured, 1, Open)) and then not Known (Tip (Unmeasured, 1, Open, Free)),
+                "presses whose slides nothing measured give a free tip, or no loaded one");
+      end;
+   end Free_Tips_From_Slides;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.tips.shut", "presses with the finger pushed shut, or with no word of how far it slid, "
+                             & "confirm a tip, or fix it", Pushed_Shut_Fingers_Confirm_Nothing'Access);
+      Driver.Tests.Register ("hand.tips.free","a finger that slid under its presses has its free tip off, or unknown when "
+                             & "it can be told", Free_Tips_From_Slides'Access);
       Driver.Tests.Register ("hand.tips.slides", "the slides of a press are not kept with it, or not given by lobe "
                              & "and opening", Slides_Kept_With_Their_Presses'Access);
       Driver.Tests.Register ("hand.tips.book", "presses go to the wrong lobe, or the tips they give are off",

@@ -641,9 +641,18 @@ first version had the tool's `Least_Push` for a floor, the tool's uncertainty at
 the pose it stands at; it is the uncertainty of a fit, common to the two poses a
 push is the difference of, and it grew with the descent: A17's pushes were 0.0561
 units, and from beat 7502 the lowered tool's was more, so nothing was judged after
-it, the contact included. The pushes are forgotten when a push asks nothing down
-(a retreat, a hold), so a descent is compared with itself, and a stall among the
-first three pushes is taken for what free pushes do. The verdict is read from the
+it, the contact included. The pushes are forgotten when a push asks the hand
+nothing down (the mean of its points: a retreat, a hold, a let-go that raises one
+side as it lowers the other), so a descent is compared with itself, and a stall
+among the first three pushes is taken for what free pushes do. A share is of the
+farthest any point was asked to go, not of what was asked down: A22's aims at
+presses 2 and 5 turned the hand about the way down, asked every point of it 2e-16
+down by the rounding of the turn, and 4.7e-8 came back up, a share of 2.1e8 that
+stood as the largest free share of the descent and blinded the points' measure
+for the pushes after it (the readings' measure, which has its own, went on); the
+let-go after press 5 (one point asked up 0.0525 that went up 0.139, the other
+asked down) was judged a descent push and a stall by the readings. Only a point
+asked to go down can have stopped going down. The verdict is read from the
 stream by the estimators as the press is, so the same push is a block for the
 watcher that finds the press (the verdict stands until the next push begins, as a
 Blocked one does), and it is read with the heights before the next step, not by a
@@ -665,6 +674,140 @@ stands above the table (`Free_Closer`; `hand.measure.held`). The hand stays
 where it was raised to: the presses aim from wherever the arm stands. A19
 (8597f62) lost its first press the same way (`a press with the closer at neither
 measured opening is not used`, blocked after lowering 5.1 units).
+
+**Lesson: a hand is measured from its own arm's motion, not from what the boot
+did (A25h).** A closer's lobes are found from what the arm's motion does to its
+eye's picture: the robot stays where it is in the picture while the world moves,
+so the deviation of a pixel over the poses of the rest of the body is small
+where the robot is (`Hand.Selfsight`). A22's closers had the poses from the
+boot, which moved both arms for fifteen minutes with the closers at their start
+readings; a run that reloads a body file goes from the file to the hands with no
+arm motion, and A25h logged "the arm has not moved the eye against its
+surroundings ... 0 poses, two are needed" at every round. `Measure` now sees to
+the poses itself (`Gather_Own_Poses`), before a closer is moved and again after
+its sweep when its lobes were not placed for want of them (Unlocated, or Unplaced
+with the changed pixels Unseparated by the poses): the arm raises the eye along
+the way up (`Up_In_Arm`), first by the least move whose readings the body's one
+test of motion sees (the last readings of the plan, tried before anything moves,
+doubled until they show), then by twice that, a pose each, until the eye has
+seen the closer's readings from the poses asked (`Selfsight.Needed`, two; after
+a sweep that did not place, twice what it has) or cannot be raised. A pose's
+frame is kept once the eye's picture has rested, and the wait for it is as long
+as a view takes to form. Nothing is raised when the eye has the poses, so a run
+from zero is as it was. The poses are taken at the closer's start reading, which
+is an end of its travel in every body met (A17, A19, A22 start open); a closer
+that starts between its ends would need them at an end. (`Gather_Poses`,
+`hand.measure.poses`.)
+
+**Lesson: a sweep waited for a rule, not for the picture (A22).** After each
+push of the closer, A22's hand-1 sweep idled for 1,240 of its 1,444 beats, ten
+minutes: the next push came 240, 29, 99, 53, 48, 107, 32, 176, 93, 74 and 337
+beats after the one before, with every group still (none moved by more than 1e-9
+after the first eight beats) and the hand eye's picture back to noise in five to
+thirty (after the push of 4e-4 at beat 11870: 205 changed pixels, 104, 34, 9,
+then noise; after the 0.42 push at 12821: mean luma change 15.5 to 0.05 in thirty
+beats). The wait was the eye's stop rule (`Stillness.Watch`; a view forms only
+while `Eye_Settled`). Its last term weighed the change over two beats against
+the change over one, "a picture that only flickers adds to once, a drift to
+twice", and a rendered picture's noise is neither: each pixel wanders, and the
+change over two beats was 1.43 to 1.46 times the change over one in all three
+eyes at rest (quartiles 1.37 to 1.53; 859, 46 and 853 quiet beats). So at the
+noise floor the term failed at every beat but those where the change happened to
+differ from the last by a third of the excess, and the eye stayed unsettled for as
+long as luck took, a geometric wait. An instrumented replay of A22 (the watch's
+change, peak and verdict at every beat from 11700 to 13400) gave the sweep's
+waits to within the five beats of the push and its lag: the eye 235, 24, 94, 48,
+43, 102, 27, 171, 88, 69 and 332 beats to settle. Changes that do not push the
+same way add as roots of squares, to the square root of two at the most for any
+noise that stays about its mean, and a drift adds them all, to twice; the rule
+now weighs the two against the square root of two times one. Run again over the
+logged values (three decimals), the eye settles in 3 to 23 beats after every push
+of the hand's eye (156 beats in all against 1,405 for the pushes both finished),
+and the boot's waits for an eye, which are the same rule, shorten with it.
+(`robot.stillness.watch`: wandering and flickering pictures stop within twelve
+beats of a move, a drift never does, a move that decays does not until it has.)
+
+**Lesson: a tip is confirmed across its line of sight only by tilts, and a
+finger pushed shut confirms nothing (A22).** A22's lobe 1 was confirmed, with the
+tip 1.35 mm from the support point along the press (1.3 of its sigma) and 7.1 mm
+from it across: the tip is on the line of sight to its tip pixel, and the point
+of the lobe that touches is somewhere in the region at its tip, 0.391 units
+(7.5 mm) wide per axis, which no distance along the line tells. A press at a
+pose turned about the eye meets the surface at a different distance for a tip
+that is off the line, by the offset times the difference of the tangents of the
+angles its tool stood at to the surface's normal (the aim turns the hand about
+the eye, so the first press stands at none); two presses tell the offset along
+the turn between them to the noise of the difference over that difference, and
+nothing of it across the turn, however many presses and from however many
+places. So the tip is a distance and two angles across its line, the region's
+spread (with the eye's) their prior, and the presses leave the variance of each
+axis the tilts told: `Touch.Fit` has them as unknowns, `Tested` is true when the
+variance left along the least told axis is the prior's over one more than Z
+squared (an offset of a prior sigma shows above Z noises: tilts of atan (Z noise
+over spread) at the least, 0.75 rad for lobe 1) or the prior is below the noise
+already, and Confirmed is a second press from another pose landing on the tip and
+Tested. The truth gave A22's pairs: the tilts from the first press, from the
+arm's last link at the press beats, were 0.943 rad (13840), 0.467 (13952) and 0.957
+(14057, the confirming one, tan 1.4): that pair pinned one lateral axis to
+about 1.7 mm and left the other at the prior, which is where the 7.1 mm lay; the
+other side's presses, about another axis, stopped short of the table. Lobe 2's
+first press (14217) found the finger "not at 177.71 pixels": 87 per cent shut, and
+five presses of the crawl had it 94 to 99 per cent shut; they agreed (the same
+hand on the table) and confirmed one another, 19 mm off. A press whose finger
+slid under it, by what the picture measured or the whole of its travel when it
+could not say, takes that, at the tip's distance and in every direction, as
+noise (`Slide_Angle`; the loaded fit has no vector for it, the free one does); it
+confirms nothing unless the slide is below its pose's own noise (`Firm`); and
+the tip carries, whatever the scatter of the presses, the slide they took
+together, since every press pushes the finger the same way and averaging does
+not average it out. Presses of a hand lying on the table with the finger pushed
+shut now give a tip as wide as the slide, unconfirmed; with the finger in place
+(0.7 per cent, A22's lobe 1 at the press that gave its tip) as before.
+(`hand.touch.lateral`, `hand.tips.shut`.)
+
+**Lesson: the free finger is the loaded fit with each press taken with the tip
+it had slid to.** A press loads its finger, and the finger gives way along its
+own axis (A16: 5 and 17.5 mm inward, the closer's reading exactly where it was).
+What a press fixes is the contact of the finger as it stood under it (the
+loaded tip), and the finger as it stands free at the closer's reading (the free
+tip, which is what a hand opened to that reading brings to a surface) is that
+less the slide. The slide of a press is a share of the lobe's travel between its
+two openings (`Slide.Measure`: positive inward, towards the closed end), and the
+travel is the difference of the lobe's tips at the two openings, so the free tip
+of a lobe is unknown until the lobe has a tip at each opening and until the
+presses its tip rests on have their slide measured (A16, A17 and A22 pressed the
+open opening first, the closed after all the open ones).
+
+The free fit is the loaded one with a vector on each press (`Touch.Press.Slide`,
+`Slide_Covariance`): the press's height above the surface is that of the tip the
+finger had slid to, `n . (R (x + s) + t)`, with `x` the free tip on its line of
+sight and `s` the share times the travel; `s` is in the equation's constant, in
+the equation's variance (`Lift' Cov Lift`, Cov the share's variance times the
+travel twice over plus the share squared times the travel's own), and in the hit
+the press gives. The travel comes from the tips of the loaded fit, each of which
+holds its own slides, and then from the free tips of the first pass: two passes,
+since the shares are of the free travel. The presses of a lobe with nothing
+measured of their slide are left out of the free fit, not taken for unslid ones.
+The free tip is confirmed (`Confirmed (Free)`) when two presses at poses apart,
+each taken with its slide, land on it within the noise the slides' uncertainty
+makes.
+
+`hand.tips.free` on two fingers that slide inward 12 and 28 per cent of their
+travel (3 and 9 mm) under every press, 12 presses a tip, at both openings: the
+loaded tips are 2.0 to 7.3 mm off the free fingers, the free tips 0.0007 to
+0.06 mm off (their sigma 0.12 to 0.16 mm), and confirmed; pressed at one
+opening only, or with nothing measured of the slides, there is a loaded tip and
+no free one. The API: `Tip_In_Tool`, `Tip_Beat` and `Tip_Confirmed` of a hand
+take `Kind` (`Loaded`, the default, or `Free`).
+
+**Lesson: a line of sight that meets the surface behind the eye is not a tip
+(A19).** A press aimed at lobe 1 (0.956 rad) and given by its direction to lobe
+2 fitted lobe 2's tip -79.4 units along its sight, a point behind the eye (`a
+press at the OPEN opening ... lobe 2 provisional -79.3757 +- 0.5164 along its
+sight`), and the next prediction took it for the surface. A tip is in front of
+the eye: a fit that puts it at or behind it is not a tip, and the presses fitted
+to it stopped on something else or belong to another tip. The tip is not Ok
+then and the presses on it do not agree (`hand.touch.behind`).
 
 ## Open
 

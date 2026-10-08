@@ -1,6 +1,8 @@
+with Ada.Containers.Vectors;
 with Ada.Numerics;
 with Ada.Text_IO;
 with Driver.Action.Goals;
+with Driver.Action.Plants;
 with Driver.Action.Plants.Tests;
 with Driver.Action.Snapshots;
 with Driver.Action.Snapshots.Tests;
@@ -8,6 +10,7 @@ with Driver.Clock;
 with Driver.Log;
 with Driver.Numerics;
 with Driver.Tests;
+with Driver.Uncertain;
 
 package body Driver.Action.Execution.Tests is
 
@@ -19,6 +22,7 @@ package body Driver.Action.Execution.Tests is
    use type Driver.Action.Snapshots.Hand_Id;
    use type Driver.Action.Snapshots.Arm_Id;
 
+   package Plants renames Driver.Action.Plants;
    package Sim renames Driver.Action.Plants.Tests;
 
    Pi : constant := Ada.Numerics.Pi;
@@ -186,6 +190,23 @@ package body Driver.Action.Execution.Tests is
              "the wall was moved");
    end Over_An_Obstacle;
 
+   --  A hand that starts at the top of what its arm can reach cannot rise any
+   --  further; it goes over the wall at the height it has, across and down.
+   procedure A_Hand_At_The_Top_Of_Its_Reach_Goes_Over is
+      W : Sim.World;
+      R : Result;
+   begin
+      Sim.Start (W, Turned, Sigma, Pitch, 89);
+      Sim.Add_Arm (W, Base => [0.05, 0.0, -0.1], Reach => 0.38, Tool => Down_At (0.0, -0.1, 0.25), Lag => 2,
+                   Rate => 0.5, Delivery_Low => 0.7, Delivery_High => 0.85, Wrist => Pi, Tilt => Pi / 2.0);
+      Sim.Add_Gripper (W, 1, Opening => 0.08, Width => 0.015, Thickness => 0.01, Depth => 0.04);
+      Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.12, 0.4), Mu => 0.6);
+      Sim.Add_Thing (W, Block (0.3, 0.02, 0.2), On_Table (0.05, 0.02, 0.0), Mu => 0.6, Fixed => True);
+      Run (W, Height_Want (1, True, Free), R);
+      Check (R.Final = Free, "a bar behind a wall is not lifted by a hand that cannot rise above where it starts");
+      Check (Sim.Truth (W, 2).Pose.Translation = Sim.Table_Frame (W) * [0.05, 0.02, 0.0], "the wall was moved");
+   end A_Hand_At_The_Top_Of_Its_Reach_Goes_Over;
+
    --  How far the thing has turned about the table's up since Before.
    function Turned_About_Up (W : Sim.World; T : Thing_Id; Before : Rigid) return Real is
       Up  : constant Vec3 := Rotate (Sim.Table_Frame (W), [0.0, 0.0, 1.0]);
@@ -214,6 +235,328 @@ package body Driver.Action.Execution.Tests is
          end;
       end loop;
    end Long_Shapes_Turned;
+
+   --  An arm whose joints are read far more finely than anything an eye sees:
+   --  the fitted arms of the measured bodies are read a thousand times finer
+   --  than their eyes place a thing, so its smallest step is a tiny share of
+   --  the uncertainty of where a thing is.
+   Finer : constant := 1000;
+   Reading : constant Real := Sigma / Real (Finer);
+
+   procedure Fine_Gripper (W : in out Sim.World; Place : Rigid; Seed : Integer) is
+   begin
+      Sim.Start (W, Place, Sigma, Pitch, Seed);
+      Sim.Add_Arm (W, Base => [0.0, -0.3, 0.0], Reach => 0.8, Tool => Down_At (0.0, -0.1, 0.25), Lag => 2,
+                   Rate => 0.5, Delivery_Low => 0.7, Delivery_High => 0.85, Wrist => Pi, Tilt => Pi / 2.0,
+                   Reading_Sigma => Reading);
+      Sim.Add_Gripper (W, 1, Opening => 0.08, Width => 0.015, Thickness => 0.01, Depth => 0.04);
+   end Fine_Gripper;
+
+   --  Where the thing is known to Sigma and the table to as much, a contact is
+   --  somewhere in a band several sigmas wide ahead of a thing brought down;
+   --  found by steps of the arm's smallest size, it takes as many of them as
+   --  the arm is finer than that band is wide, a beat or more each.
+   procedure A_Fine_Arm_Puts_Down is
+      W : Sim.World;
+      R : Result;
+   begin
+      Fine_Gripper (W, Turned, 81);
+      Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.05, 0.3), Mu => 0.6);
+      Run (W, Height_Want (1, True, Free), R);
+      Check (R.Final = Free, "a bar is not lifted by an arm finer than the eyes");
+      W.Last_Beat := W.Beat + Finer;
+      Run (W, Height_Want (1, False, Touched), R);
+      Check (R.Final = Touched, "a bar is not found to touch the table within as many beats as the arm is finer than the eyes");
+      Check (abs Sim.Lowest (W, 1) < Pitch and then Sim.Truth (W, 1).Held_By = 0,
+             "a bar put down by an arm finer than the eyes is not on the table, let go");
+   end A_Fine_Arm_Puts_Down;
+
+   --  The route over a block is up, across and down; the thing is never found
+   --  at the very point the arm took it to, only near it, as near as an eye
+   --  sees, so a point is reached when the thing is not significantly away.
+   procedure A_Fine_Arm_Goes_Over_And_Down is
+      W : Sim.World;
+      R : Result;
+   begin
+      Fine_Gripper (W, Turned, 83);
+      Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.05, 0.4), Mu => 0.6);
+      Sim.Add_Thing (W, Block (0.08, 0.08, 0.05), On_Table (-0.12, 0.08, 0.2), Mu => 0.6);
+      W.Last_Beat := Finer;
+      Run (W, Interval_Want (Thing_Of (1), Onto, Thing_Of (2), Touched), R);
+      Check (R.Final = Touched, "a bar is not put onto a block by an arm finer than the eyes");
+      Check (Sim.Rests_On (W, 1, 2) and then Sim.Truth (W, 1).Held_By = 0,
+             "a bar put onto a block by an arm finer than the eyes does not rest on it, let go");
+   end A_Fine_Arm_Goes_Over_And_Down;
+
+   --  The route over a block keeps the thing clear of it by the reach of the
+   --  contact test ahead and as much again for the noise of the estimates the
+   --  test is made on; kept to the reach alone, the estimate of a thing carried
+   --  across lies inside it on half the beats, and each of those beats is a
+   --  step no longer than the band of a contact, so the thing creeps (a run
+   --  that took 13 steps on one machine took 60 and timed out on another). It
+   --  does not depend on the noise that happens to be drawn.
+   procedure The_Route_Over_A_Block_Does_Not_Depend_On_The_Noise is
+      Seeds : constant Natural := 12;
+      Slow  : Natural := 0;
+      Worst : Natural := 0;
+   begin
+      for Seed in 1 .. Seeds loop
+         declare
+            W : Sim.World;
+            R : Result;
+         begin
+            Fine_Gripper (W, Turned, 200 + Seed);
+            Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.05, 0.4), Mu => 0.6);
+            Sim.Add_Thing (W, Block (0.08, 0.08, 0.05), On_Table (-0.12, 0.08, 0.2), Mu => 0.6);
+            W.Last_Beat := Finer;
+            Execute (W, Interval_Want (Thing_Of (1), Onto, Thing_Of (2), Touched), R);
+            Worst := Natural'Max (Worst, W.Beat);
+            if R.Final /= Touched then
+               Slow := Slow + 1;
+               Ada.Text_IO.Put_Line ("      seed" & Integer'Image (200 + Seed) & ": " & Ending'Image (R.Final) & " after"
+                                     & W.Beat'Image & " beats");
+            end if;
+         end;
+      end loop;
+      Check (Slow = 0, Integer'Image (Slow) & " of" & Integer'Image (Seeds) & " noise draws did not put a bar onto a block "
+             & "within as many beats as the arm is finer than the eyes");
+   end The_Route_Over_A_Block_Does_Not_Depend_On_The_Noise;
+
+   --  An arm is the less sure of its pose the farther it has gone from where it
+   --  was measured. The search finds where to take hold of a thing clear of
+   --  everything by the margin the arm's uncertainty at the start asks; a way
+   --  judged on the way by the larger uncertainty where the arm has come to
+   --  would refuse the very pose it is going to.
+   procedure A_Travel_Keeps_The_Margin_It_Was_Cleared_By is
+      W : Sim.World;
+      R : Result;
+   begin
+      Sim.Start (W, Turned, Sigma, Pitch, 91);
+      Sim.Add_Arm (W, Base => [0.0, -0.3, 0.0], Reach => 0.8, Tool => Down_At (0.0, -0.1, 0.25), Lag => 2,
+                   Rate => 0.5, Delivery_Low => 0.7, Delivery_High => 0.85, Wrist => Pi, Tilt => Pi / 2.0,
+                   Reading_Sigma => Reading, Spread => 0.007);
+      Sim.Add_Gripper (W, 1, Opening => 0.08, Width => 0.015, Thickness => 0.01, Depth => 0.04);
+      Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.12, 0.4), Mu => 0.6);
+      --  A wall between the hand and the bar, so the way there is over the top, in legs, each judged anew.
+      Sim.Add_Thing (W, Block (0.3, 0.02, 0.2), On_Table (0.05, 0.02, 0.0), Mu => 0.6, Fixed => True);
+      Run (W, Height_Want (1, True, Free), R);
+      Check (R.Final = Free, "a bar behind a wall is not lifted by an arm that is less sure of its pose where it has gone");
+   end A_Travel_Keeps_The_Margin_It_Was_Cleared_By;
+
+   --  A step of a heading goes as far as the arm can turn it, not the finest
+   --  turn it can tell: round the thing's own axis nothing is ahead to meet,
+   --  though the table is under it and the axis is square to the table within
+   --  rounding, and the hand's straight path leaves the arc the thing follows
+   --  by no more than the margin it keeps.
+   procedure A_Step_Of_Heading_Is_A_Turn is
+      W      : Sim.World;
+      R      : Result;
+      S      : Snapshot;
+      Before : Rigid;
+   begin
+      Fine_Gripper (W, Turned, 85);
+      Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.05, 0.05, 0.4), Mu => 0.6);
+      W.Look (S);
+      Before := Sim.Truth (W, 1).Pose;
+      Run (W, (Kind => Change, Until_Endings => Endings (Timeout), Max_Steps => 1, Eye => Any_Eye, Anyway => False,
+               Thing => 1, Quantity => 2, Increase => True), R);
+      Check (Turned_About_Up (W, 1, Before) > 100.0 * S.Arms (1).Turn_Step.Value,
+             "a step of heading is not many times the smallest turn the arm can tell");
+      Check (abs Sim.Lowest (W, 1) < Pitch, "turning its heading took it off the table");
+   end A_Step_Of_Heading_Is_A_Turn;
+
+   --  A body whose pushes that stopped short are all said to be blocked, as
+   --  the live one's are, whether they moved some or none.
+   type Stalling (W : not null access Sim.World) is limited new Plants.Plant with null record;
+
+   overriding procedure Look (P : in out Stalling; S : out Snapshot);
+   overriding procedure Within (P : in out Stalling; During : not null access procedure);
+   overriding function Reach (P : Stalling; Goal : Plants.Arm_Goal) return Plants.Reach_Answer;
+   overriding procedure Move (P : in out Stalling; O : Plants.Order; R : out Plants.Report);
+   overriding function Predicted (P : Stalling; T : Thing_Id; Beats : Natural) return Driver.Uncertain.Point_Estimate;
+   overriding procedure Learn (P : in out Stalling; L : Plants.Lesson);
+   overriding function Episode_Over (P : Stalling) return Boolean;
+   overriding function In_View (P : Stalling; Point : Vec3) return Boolean;
+
+   procedure Look (P : in out Stalling; S : out Snapshot) is
+   begin
+      P.W.Look (S);
+   end Look;
+
+   procedure Within (P : in out Stalling; During : not null access procedure) is
+   begin
+      P.W.Within (During);
+   end Within;
+
+   function Reach (P : Stalling; Goal : Plants.Arm_Goal) return Plants.Reach_Answer is (P.W.Reach (Goal));
+
+   procedure Move (P : in out Stalling; O : Plants.Order; R : out Plants.Report) is
+      use type Plants.Step_Outcome;
+   begin
+      P.W.Move (O, R);
+      for K in 1 .. Natural (R.Arms.Length) loop
+         if R.Arms (K).Outcome = Plants.Short then
+            R.Arms (K).Outcome := Plants.Blocked;
+         end if;
+      end loop;
+   end Move;
+
+   function Predicted (P : Stalling; T : Thing_Id; Beats : Natural) return Driver.Uncertain.Point_Estimate
+   is (P.W.Predicted (T, Beats));
+
+   procedure Learn (P : in out Stalling; L : Plants.Lesson) is
+   begin
+      P.W.Learn (L);
+   end Learn;
+
+   function Episode_Over (P : Stalling) return Boolean is (P.W.Episode_Over);
+
+   function In_View (P : Stalling; Point : Vec3) return Boolean is (P.W.In_View (Point));
+
+   --  A body that notes the clearance and the lever of every arm goal it is
+   --  sent, and moves as the simulated one does.
+   package Real_Lists is new Ada.Containers.Vectors (Positive, Real);
+
+   type Noting (W : not null access Sim.World) is limited new Plants.Plant with record
+      Clearances : Real_Lists.Vector;
+      Levers     : Real_Lists.Vector;
+      Bow        : Real := 0.0;   --  what it says every path kept within a clearance leaves of a bow
+   end record;
+
+   overriding procedure Look (P : in out Noting; S : out Snapshot);
+   overriding procedure Within (P : in out Noting; During : not null access procedure);
+   overriding function Reach (P : Noting; Goal : Plants.Arm_Goal) return Plants.Reach_Answer;
+   overriding procedure Move (P : in out Noting; O : Plants.Order; R : out Plants.Report);
+   overriding function Predicted (P : Noting; T : Thing_Id; Beats : Natural) return Driver.Uncertain.Point_Estimate;
+   overriding procedure Learn (P : in out Noting; L : Plants.Lesson);
+   overriding function Episode_Over (P : Noting) return Boolean;
+   overriding function In_View (P : Noting; Point : Vec3) return Boolean;
+
+   procedure Look (P : in out Noting; S : out Snapshot) is
+   begin
+      P.W.Look (S);
+   end Look;
+
+   procedure Within (P : in out Noting; During : not null access procedure) is
+   begin
+      P.W.Within (During);
+   end Within;
+
+   function Reach (P : Noting; Goal : Plants.Arm_Goal) return Plants.Reach_Answer is
+      Answer : Plants.Reach_Answer := P.W.Reach (Goal);
+   begin
+      if Goal.Clearance < Real'Last then
+         Answer.Bow := P.Bow;
+      end if;
+      return Answer;
+   end Reach;
+
+   procedure Move (P : in out Noting; O : Plants.Order; R : out Plants.Report) is
+   begin
+      for G of O.Arms loop
+         P.Clearances.Append (G.Clearance);
+         P.Levers.Append (G.Lever);
+      end loop;
+      P.W.Move (O, R);
+   end Move;
+
+   function Predicted (P : Noting; T : Thing_Id; Beats : Natural) return Driver.Uncertain.Point_Estimate
+   is (P.W.Predicted (T, Beats));
+
+   procedure Learn (P : in out Noting; L : Plants.Lesson) is
+   begin
+      P.W.Learn (L);
+   end Learn;
+
+   function Episode_Over (P : Noting) return Boolean is (P.W.Episode_Over);
+
+   function In_View (P : Noting; Point : Vec3) return Boolean is (P.W.In_View (Point));
+
+   --  The engine clears the straight path of an arm's move by a margin, and
+   --  the arm may leave that path only by as much as it was cleared by: every
+   --  goal is sent with the clearance of its path (not unbounded) and the lever
+   --  of the body about the tool. A move up from a place with nothing near is
+   --  allowed far more than one that ends beside the thing, over a wall.
+   procedure Moves_Are_Given_What_They_May_Leave is
+   begin
+      for Walled in Boolean loop
+         declare
+            W : aliased Sim.World;
+            P : Noting (W'Access);
+            R : Result;
+         begin
+            One_Gripper (W, Turned, 91);
+            Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.12, 0.4), Mu => 0.6);
+            if Walled then
+               --  A wall that stands in the way from the hand to the bar, which it goes up over.
+               Sim.Add_Thing (W, Block (0.02, 0.1, 0.1), On_Table (0.09, 0.0, 0.0), Mu => 0.6, Fixed => True);
+            end if;
+            Execute (P, Height_Want (1, True, Free), R);
+            Check (R.Final = Free, "a bar is not lifted" & (if Walled then " behind a wall" else ""));
+            Check (not P.Clearances.Is_Empty, "no arm goal was sent");
+            Check ((for all C of P.Clearances => C < Real'Last), "an arm goal was sent with no bound on its path");
+            Check ((for all L of P.Levers => L > 0.0), "an arm goal was sent with no lever");
+            if Walled and then not P.Clearances.Is_Empty then
+               declare
+                  Least    : Real := Real'Last;
+                  Greatest : Real := 0.0;
+               begin
+                  for C of P.Clearances loop
+                     Least := Real'Min (Least, C);
+                     Greatest := Real'Max (Greatest, C);
+                  end loop;
+                  Check (Greatest > 10.0 * Least,
+                         "the way up over a wall is allowed no more off its path than the way in beside the bar ("
+                         & Driver.Log.Image (Greatest, 4) & " against" & Driver.Log.Image (Least, 4) & ")");
+               end;
+            end if;
+         end;
+      end loop;
+   end Moves_Are_Given_What_They_May_Leave;
+
+   --  The engine clears the straight path to a pose, and a path the arm cannot
+   --  keep to it by what it can reach is not the one that was cleared: a body
+   --  that says every path kept within a clearance bows off the straight one is
+   --  not sent along any, neither straight nor over a wall.
+   procedure A_Way_The_Arm_Cannot_Keep_To_Is_Not_Taken is
+   begin
+      for Walled in Boolean loop
+         declare
+            W : aliased Sim.World;
+            P : Noting (W'Access);
+            R : Result;
+         begin
+            P.Bow := 1.0;
+            One_Gripper (W, Turned, 91);
+            Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.12, 0.4), Mu => 0.6);
+            if Walled then
+               Sim.Add_Thing (W, Block (0.02, 0.1, 0.1), On_Table (0.09, 0.0, 0.0), Mu => 0.6, Fixed => True);
+            end if;
+            Execute (P, Height_Want (1, True, Free), R);
+            Ada.Text_IO.Put_Line ("      " & Ending'Image (R.Final) & ": " & To_String (R.Account)
+                                  & (if Length (R.Tried) > 0 then " | tried: " & To_String (R.Tried) else ""));
+            Check (R.Final /= Free, "a bar is lifted along a path the arm cannot keep to");
+            Check (P.Clearances.Is_Empty, "the arm was sent" & P.Clearances.Length'Image
+                   & " moves along paths it cannot keep to");
+         end;
+      end loop;
+   end A_Way_The_Arm_Cannot_Keep_To_Is_Not_Taken;
+
+   --  An arm that carries out only part of every move, and says it was
+   --  stopped, is not blocked for good: asked again from where it got to, it
+   --  goes on, and only a push that moves nothing is a block.
+   procedure A_Push_That_Stopped_Short_Is_Asked_Again is
+      W : aliased Sim.World;
+      P : Stalling (W'Access);
+      R : Result;
+   begin
+      One_Gripper (W, Turned, 87);
+      Sim.Add_Thing (W, Bar (0.2, 0.02, 0.02), On_Table (0.1, 0.05, 0.4), Mu => 0.6);
+      Execute (P, Height_Want (1, True, Free), R);
+      Ada.Text_IO.Put_Line ("      " & Ending'Image (R.Final) & ": " & To_String (R.Account)
+                            & (if Length (R.Tried) > 0 then " | tried: " & To_String (R.Tried) else ""));
+      Check (R.Final = Free, "a bar is not lifted by a body whose partly carried out moves are said to be blocked");
+   end A_Push_That_Stopped_Short_Is_Asked_Again;
 
    procedure Usable_By_What_Is_Measured is
       W : Sim.World;
@@ -297,6 +640,26 @@ package body Driver.Action.Execution.Tests is
                 Long_Shapes_Turned'Access);
       Register ("action.run.touch", "touching a thing does not stop at the touch", Touch_A_Bar'Access);
       Register ("action.run.detour", "the hand goes through a wall instead of over it", Over_An_Obstacle'Access);
+      Register ("action.run.detour.top", "a hand that cannot rise above where it starts is refused a way over a wall",
+                A_Hand_At_The_Top_Of_Its_Reach_Goes_Over'Access);
+      Register ("action.run.margin", "a way is judged by the larger uncertainty where the arm has come to, and refuses "
+                & "the pose the search cleared by the one at the start", A_Travel_Keeps_The_Margin_It_Was_Cleared_By'Access);
+      Register ("action.run.clearance", "an arm goal is sent with no bound on how far the arm may leave the straight path, "
+                & "or a move beside a wall is allowed as much as one in the open",
+                Moves_Are_Given_What_They_May_Leave'Access);
+      Register ("action.run.fine.down", "an arm much finer than the eyes creeps to the table by its smallest steps",
+                A_Fine_Arm_Puts_Down'Access);
+      Register ("action.run.fine.over", "an arm much finer than the eyes stalls on the route over a block",
+                A_Fine_Arm_Goes_Over_And_Down'Access);
+      Register ("action.run.bowed", "a path the arm can reach only off the straight one it was cleared along is flown",
+                A_Way_The_Arm_Cannot_Keep_To_Is_Not_Taken'Access);
+      Register ("action.run.over.noise", "a route over a block creeps on the beats the estimates of the thing carried "
+                & "lie inside the reach of the contact test, so a draw of the noise stalls it",
+                The_Route_Over_A_Block_Does_Not_Depend_On_The_Noise'Access);
+      Register ("action.run.fine.heading", "a step of heading is only the finest turn the arm can tell",
+                A_Step_Of_Heading_Is_A_Turn'Access);
+      Register ("action.run.again", "a push that moved some and stopped short is taken for a block at once",
+                A_Push_That_Stopped_Short_Is_Asked_Again'Access);
    end Register;
 
 end Driver.Action.Execution.Tests;

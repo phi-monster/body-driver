@@ -700,7 +700,34 @@ package body Driver.Robot.Motion is
    function Refused (State : Plan_Status; Why : String) return Plan is
      ((State => State, Reason => To_Unbounded_String (Why), others => <>));
 
-   function Plan_Reach (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan is
+   function Stray
+     (M : Model; A : Arm_Id; From, To : Rigid; Q0, Q1 : Real_Array; Lever : Real := 0.0; Position_Only : Boolean := False)
+      return Real
+   is
+      use Driver.Numerics.Arrays;
+      Worst : Real := 0.0;
+   begin
+      for K in 1 .. 3 loop
+         declare
+            Share : constant Real := Real (K) / 4.0;
+            Here  : constant Real_Array (Q0'Range) := [for I in Q0'Range => Q0 (I) + Share * (Q1 (I) - Q0 (I))];
+            Is_At : constant Rigid := Kinematics.Eye_In_Reference (M, A, Here);
+            Want  : constant Rigid :=
+              (Rotation    => From.Rotation
+                                * Driver.Numerics.Exp (Share * Driver.Numerics.Log (Transpose (From.Rotation) * To.Rotation)),
+               Translation => (1.0 - Share) * From.Translation + Share * To.Translation);
+         begin
+            Worst := Real'Max (Worst, abs (Is_At.Translation - Want.Translation));
+            if not Position_Only then
+               Worst := Real'Max (Worst, Driver.Numerics.Angle (Transpose (Is_At.Rotation) * Want.Rotation) * Lever);
+            end if;
+         end;
+      end loop;
+      return Worst;
+   end Stray;
+
+   function Plan_Reach (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal;
+                        Clearance : Real := Real'Last; Lever : Real := 0.0) return Plan is
       use Driver.Numerics.Arrays;
       Placement : Rigid;
       Scale     : Real;
@@ -715,17 +742,23 @@ package body Driver.Robot.Motion is
       end if;
       --  X_world = Placement * (Scale * X_arm).
       declare
-         Back : constant Mat3 := Transpose (Placement.Rotation);
+         Back   : constant Mat3 := Transpose (Placement.Rotation);
+         Result : Plan :=
+           Plan_Reach_In_Arm
+             (M, A, O,
+              (Pose          => (Rotation    => Back * Goal.Pose.Rotation,
+                                 Translation => (1.0 / Scale) * (Back * (Goal.Pose.Translation - Placement.Translation))),
+               Position_Only => Goal.Position_Only),
+              Clearance => (if Clearance < Real'Last then Clearance / Scale else Real'Last),
+              Lever     => Lever / Scale);
       begin
-         return Plan_Reach_In_Arm
-           (M, A, O,
-            (Pose          => (Rotation    => Back * Goal.Pose.Rotation,
-                               Translation => (1.0 / Scale) * (Back * (Goal.Pose.Translation - Placement.Translation))),
-             Position_Only => Goal.Position_Only));
+         Result.Bow := Scale * Result.Bow;   --  the bow left, in the goal's unit
+         return Result;
       end;
    end Plan_Reach;
 
-   function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal) return Plan is
+   function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal;
+                               Clearance : Real := Real'Last; Lever : Real := 0.0) return Plan is
       use Driver.Numerics.Arrays;
    begin
       if Natural (A) > Arm_Count (M) or else not Kinematics.Fitted (M, A) then
@@ -757,21 +790,67 @@ package body Driver.Robot.Motion is
                                                                                    * Goal.Pose.Rotation)),
                 Translation => (1.0 - S) * From.Translation + S * Goal.Pose.Translation));
 
+            --  How far the whole path goes, in position and in turn: a segment
+            --  of it shorter than the fit can tell apart (Sigma) is not cut
+            --  again, for what it would learn is nothing.
+            Total : constant Real :=
+              Real'Max (abs (Goal.Pose.Translation - From.Translation),
+                        Driver.Numerics.Angle (Transpose (From.Rotation) * Goal.Pose.Rotation));
+
+            function Can_Cut (A_Of, B_Of : Real; Depth : Natural) return Boolean is
+              (Depth < Real'Machine_Mantissa and then (B_Of - A_Of) * Total > Sigma);
+
             --  Solves the path from Fraction A (readings Q) to B; a segment the
-            --  solver cannot close from where the last one ended is halved, at
-            --  most as many times as a float has bits.
+            --  solver cannot close from where the last one ended is halved,
+            --  and so is one it closes along a bow above the clearance, while
+            --  it is longer than the fit can tell apart, at most as many times
+            --  as a float has bits. A bow that is left is noted.
             procedure Reach (A_Of, B_Of : Real; Q : in out Real_Array; Depth : Natural) is
                Next : Real_Array (1 .. Size);
                Position_Off, Turn_Off : Real;
             begin
+               Result.Solves := Result.Solves + 1;
                Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only and then B_Of = 1.0,
                                       Next, Position_Off, Turn_Off);
                if not Driver.Uncertain.Significant (Position_Off, Sigma)
                  and then not Driver.Uncertain.Significant (Turn_Off, Sigma)
                then
-                  Result.Waypoints.Append (Next);
-                  Q := Next;
-               elsif Depth < Real'Machine_Mantissa then
+                  declare
+                     Bow : constant Real :=
+                       (if Clearance < Real'Last
+                        then Stray (M, A, Along (A_Of), Along (B_Of), Q, Next, Lever, Goal.Position_Only)
+                        else 0.0);
+                  begin
+                     if Bow > Clearance and then Can_Cut (A_Of, B_Of, Depth) then
+                        declare
+                           Kept     : constant Natural := Natural (Result.Waypoints.Length);
+                           Kept_Bow : constant Real := Result.Bow;
+                        begin
+                           Reach (A_Of, (A_Of + B_Of) / 2.0, Q, Depth + 1);
+                           if not Failed then
+                              Reach ((A_Of + B_Of) / 2.0, B_Of, Q, Depth + 1);
+                           end if;
+                           if Failed then
+                              --  The straight path cannot be followed all the way (it crosses what
+                              --  the arm cannot reach): the joints' own line, which does, is taken,
+                              --  with the bow it has.
+                              Failed := False;
+                              Result.Waypoints.Delete_Last
+                                (Ada.Containers.Count_Type (Natural (Result.Waypoints.Length) - Kept));
+                              Result.Waypoints.Append (Next);
+                              Result.Bow := Real'Max (Kept_Bow, Bow);
+                              Q := Next;
+                           end if;
+                        end;
+                     else
+                        Result.Waypoints.Append (Next);
+                        if Bow > Clearance then
+                           Result.Bow := Real'Max (Result.Bow, Bow);
+                        end if;
+                        Q := Next;
+                     end if;
+                  end;
+               elsif Can_Cut (A_Of, B_Of, Depth) then
                   Reach (A_Of, (A_Of + B_Of) / 2.0, Q, Depth + 1);
                   if not Failed then
                      Reach ((A_Of + B_Of) / 2.0, B_Of, Q, Depth + 1);
@@ -790,9 +869,11 @@ package body Driver.Robot.Motion is
             end if;
             Reach (0.0, 1.0, Q, 0);
             if Failed then
-               return Refused (Unreachable, "the arm's fitted model leaves the goal"
-                               & Real'Image (Worst_Position) & " model units and" & Real'Image (Worst_Turn)
-                               & " rad away");
+               return (State => Unreachable,
+                       Reason => To_Unbounded_String ("the arm's fitted model leaves the goal"
+                                                      & Real'Image (Worst_Position) & " model units and"
+                                                      & Real'Image (Worst_Turn) & " rad away"),
+                       Solves => Result.Solves, others => <>);
             end if;
             return Result;
          end;
@@ -802,6 +883,10 @@ package body Driver.Robot.Motion is
    function Status (P : Plan) return Plan_Status is (P.State);
    function Why (P : Plan) return String is (To_String (P.Reason));
    function Last_Readings (P : Plan) return Real_Array is (P.Waypoints.Last_Element);
+   function Waypoint_Count (P : Plan) return Natural is (Natural (P.Waypoints.Length));
+   function Waypoint (P : Plan; K : Positive) return Real_Array is (P.Waypoints (K));
+   function Solve_Count (P : Plan) return Natural is (P.Solves);
+   function Worst_Bow (P : Plan) return Real is (P.Bow);
 
    procedure Follow (M : in out Model; P : Plan; Report : out Step_Report) is
    begin

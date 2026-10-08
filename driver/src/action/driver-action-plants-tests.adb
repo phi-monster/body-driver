@@ -383,12 +383,24 @@ package body Driver.Action.Plants.Tests is
       return T;
    end Grip_Touches;
 
+   --  The least an arm's tool can be told to have moved: its own readings'
+   --  sigma, else the eyes'.
+   function Resolution (W : World; Arm : Sim_Arm) return Real is
+     (if Arm.Reading_Sigma < Real'Last then Arm.Reading_Sigma else W.Sigma);
+
    --  Moves arm A's tool to Next if nothing stops it: the table and things
    --  that cannot give way stop it; loose things are pushed along the table;
    --  a held thing comes along while its grip carries it, or moves only along
    --  its joint and takes the hand with it.
    procedure Try_Pose (W : in out World; A : Positive; Next : Rigid; Blocked : out Boolean) is
       Now    : constant Rigid := W.Arms (A).Tool;
+      Place  : Rigid := Next;   --  where the tool ends up: Next, or Next with what the table gave
+      --  A thing held down on the table by less than the arm's own readings
+      --  can tell from none (the pose it is told to go to carries their
+      --  noise) is not pressed into it: the table holds it up, and the hand
+      --  with it.
+      Slack  : constant Real :=
+        Real'Max (Touching, Driver.Conventions.Z * Resolution (W, W.Arms (A)));
       Points : constant Contact.Point_Vectors.Vector := Body_Points (W, A);
       Held   : constant Natural := Held_By_Arm (W, A);
       H      : constant Natural := Hand_Of_Arm (W, W.Arms (A).Id);
@@ -462,7 +474,7 @@ package body Driver.Action.Plants.Tests is
                end;
             end if;
             declare
-               New_Pose : constant Rigid := Next * T.Grip;
+               New_Pose : Rigid := Next * T.Grip;
                Low      : constant Real :=
                  -Extreme (T.Shape, New_Pose, -W.Up) - W.Table.Translation * W.Up;
                Middle   : constant Vec3 := New_Pose * Centre (T.Shape);
@@ -478,8 +490,12 @@ package body Driver.Action.Plants.Tests is
                   end if;
                end loop;
                if Low < -Touching then
-                  Blocked := True;
-                  return;
+                  if -Low > Slack then
+                     Blocked := True;
+                     return;
+                  end if;
+                  New_Pose.Translation := New_Pose.Translation - Low * W.Up;
+                  Place.Translation := Place.Translation - Low * W.Up;
                end if;
                declare
                   Old_Centre : constant Vec3 := Centre_Of (W, Held);
@@ -503,8 +519,50 @@ package body Driver.Action.Plants.Tests is
             end;
          end;
       end if;
-      W.Arms (A).Tool := Next;
+      W.Arms (A).Tool := Place;
    end Try_Pose;
+
+   --  Takes arm A's tool from where it is to Pose, in pieces of half a sample
+   --  spacing, and then on up to the contact within the piece that was
+   --  stopped, found to what the arm's own readings can tell apart: an arm
+   --  stops where the contact is, not at the last piece before it. Lever is
+   --  how far from the tool a turn of it carries the body and what it holds.
+   procedure Move_Through (W : in out World; A : Positive; Pose : Rigid; Lever : Real; Blocked : out Boolean) is
+      From   : constant Rigid := W.Arms (A).Tool;
+      Length : constant Real :=
+        abs (Pose.Translation - From.Translation) + Angle (Transpose (From.Rotation) * Pose.Rotation) * Lever;
+      Pieces : constant Positive := Positive'Max (1, Natural (Real'Ceiling (Length / (W.Pitch / 2.0))));
+      Least  : constant Real := Resolution (W, W.Arms (A));
+   begin
+      Blocked := False;
+      for I in 1 .. Pieces loop
+         Try_Pose (W, A, Between (From, Pose, Real (I) / Real (Pieces)), Blocked);
+         if Blocked then
+            declare
+               Free    : Real := Real (I - 1) / Real (Pieces);   --  as far as it is known to go
+               Stopped : Real := Real (I) / Real (Pieces);       --  where it was stopped
+               Again   : Boolean;
+            begin
+               for Bit in 1 .. Real'Machine_Mantissa loop
+                  exit when (Stopped - Free) * Length <= Least;
+                  declare
+                     Middle : constant Real := (Free + Stopped) / 2.0;
+                  begin
+                     Try_Pose (W, A, Between (From, Pose, Middle), Again);
+                     if Again then
+                        Stopped := Middle;
+                     else
+                        Free := Middle;
+                        W.Moved := True;
+                     end if;
+                  end;
+               end loop;
+            end;
+            return;
+         end if;
+         W.Moved := True;
+      end loop;
+   end Move_Through;
 
    procedure Step_Arm (W : in out World; A : Positive) is
       Arm : constant Sim_Arm := W.Arms (A);
@@ -525,24 +583,26 @@ package body Driver.Action.Plants.Tests is
             Reach_Of_Body := Reach_Of_Body + Radius_Of (W, Held_By_Arm (W, A))
               + abs (Centre_Of (W, Held_By_Arm (W, A)) - Arm.Tool.Translation);
          end if;
-         if Shift + Turn * Reach_Of_Body <= W.Sigma then
+         if Shift + Turn * Reach_Of_Body <= Resolution (W, Arm) then
             W.Arms (A).Active := False;
             return;
          end if;
          declare
-            Pieces : constant Positive :=
-              Positive'Max (1, Natural (Real'Ceiling ((Shift + Turn * Reach_Of_Body) / (W.Pitch / 2.0))));
             From   : constant Rigid := Arm.Tool;
             Stop   : Boolean := False;
          begin
-            for I in 1 .. Pieces loop
-               Try_Pose (W, A, Between (From, Next, Real (I) / Real (Pieces)), Stop);
-               if Stop then
-                  W.Arms (A).Blocked := True;
-                  exit;
-               end if;
-               W.Moved := True;
-            end loop;
+            Move_Through (W, A, Next, Reach_Of_Body, Stop);
+            if Stop then
+               W.Arms (A).Blocked := True;
+            end if;
+            --  Held up by the table, it goes no further: it rests.
+            if not W.Arms (A).Blocked
+              and then abs (W.Arms (A).Tool.Translation - From.Translation)
+                       + Angle (Transpose (From.Rotation) * W.Arms (A).Tool.Rotation) * Reach_Of_Body
+                       <= Resolution (W, Arm)
+            then
+               W.Arms (A).Active := False;
+            end if;
          end;
       end;
    end Step_Arm;
@@ -680,7 +740,8 @@ package body Driver.Action.Plants.Tests is
    end Start;
 
    procedure Add_Arm (W : in out World; Base : Vec3; Reach : Real; Tool : Rigid; Lag : Natural; Rate : Real;
-                      Delivery_Low, Delivery_High : Real; Wrist, Tilt : Real; Plate_Radius : Real := 0.0)
+                      Delivery_Low, Delivery_High : Real; Wrist, Tilt : Real; Plate_Radius : Real := 0.0;
+                      Reading_Sigma : Real := Real'Last; Spread : Real := 0.0)
    is
       T : constant Rigid := W.Table * Tool;
    begin
@@ -696,6 +757,9 @@ package body Driver.Action.Plants.Tests is
                       Delivery_Low  => Delivery_Low,
                       Delivery_High => Delivery_High,
                       Plate_Radius  => Plate_Radius,
+                      Reading_Sigma => Reading_Sigma,
+                      Spread        => Spread,
+                      Home          => T.Translation,
                       Pending       => Command_Vectors.Empty_Vector,
                       Start         => T,
                       Target        => T,
@@ -779,10 +843,17 @@ package body Driver.Action.Plants.Tests is
          declare
             Surface : Sample_Vectors.Vector;
             Lever   : Real := 0.0;
+            --  The arm's own readings are as noisy as the eyes' unless it was
+            --  given a sigma of its own (a real arm's joints are read far
+            --  more finely than anything an eye sees).
+            Reading : constant Real := Resolution (W, A);
+            --  Its pose is the less certain the farther it has gone from where it began.
+            Pose_Sigma : constant Real := Reading + A.Spread * abs (A.Tool.Translation - A.Home);
+            Own_Cov : constant Mat3 := (Pose_Sigma * Pose_Sigma) * Identity3;
             --  It does not move once a beat would move it by no more than
             --  its noise, and a step has to stand out of two noisy readings.
-            Least   : constant Real := Real'Max (Driver.Conventions.Z * Sqrt (2.0) * Sigma,
-                                                 Sigma / (A.Rate * A.Delivery_Low));
+            Least   : constant Real := Real'Max (Driver.Conventions.Z * Sqrt (2.0) * Reading,
+                                                 Reading / (A.Rate * A.Delivery_Low));
          begin
             for P of Body_Points (W, Arm_Index (W, A.Id)) loop
                Lever := Real'Max (Lever, abs P);
@@ -792,12 +863,12 @@ package body Driver.Action.Plants.Tests is
             end loop;
             S.Arms.Append (Arm_State'(Id          => A.Id,
                             Tool        => (Pose => (Rotation => A.Tool.Rotation,
-                                                     Translation => Noisy (W, A.Tool.Translation, Sigma)),
-                                            Position_Covariance => Cov, Rotation_Covariance => Cov),
-                            Step        => (Value => Least, Sigma => Sigma, Degrees_Of_Freedom => 0),
-                            Turn_Step   => (Value => Least / Lever, Sigma => Sigma, Degrees_Of_Freedom => 0),
-                            Lag         => (Value => Real (A.Lag), Sigma => Sigma, Degrees_Of_Freedom => 0),
-                            Rate        => (Value => A.Rate, Sigma => Sigma, Degrees_Of_Freedom => 0),
+                                                     Translation => Noisy (W, A.Tool.Translation, Reading)),
+                                            Position_Covariance => Own_Cov, Rotation_Covariance => Own_Cov),
+                            Step        => (Value => Least, Sigma => Reading, Degrees_Of_Freedom => 0),
+                            Turn_Step   => (Value => Least / Lever, Sigma => Reading, Degrees_Of_Freedom => 0),
+                            Lag         => (Value => Real (A.Lag), Sigma => Reading, Degrees_Of_Freedom => 0),
+                            Rate        => (Value => A.Rate, Sigma => Reading, Degrees_Of_Freedom => 0),
                             Surface     => Surface,
                             Carries_Eye => False,
                             Carries_All => False));
@@ -861,9 +932,9 @@ package body Driver.Action.Plants.Tests is
       A : constant Sim_Arm := W.Arms (Arm_Index (W, Goal.Arm));
    begin
       if abs (Goal.Tool.Translation - A.Base) > A.Reach then
-         return (Status => Unreachable, Why => To_Unbounded_String ("too far from its base"));
+         return (Status => Unreachable, Why => To_Unbounded_String ("too far from its base"), Bow => 0.0);
       elsif Goal.Position_Only then
-         return (Status => Reachable, Why => Null_Unbounded_String);
+         return (Status => Reachable, Why => Null_Unbounded_String, Bow => 0.0);
       end if;
       declare
          Rel  : constant Mat3 := Transpose (A.Neutral) * Goal.Tool.Rotation;
@@ -874,12 +945,12 @@ package body Driver.Action.Plants.Tests is
          Twist : constant Vec3 := Log (Transpose (Swing) * Rel);
       begin
          if Bend > A.Tilt then
-            return (Status => Unreachable, Why => To_Unbounded_String ("the wrist bends no further"));
+            return (Status => Unreachable, Why => To_Unbounded_String ("the wrist bends no further"), Bow => 0.0);
          elsif abs Twist (3) > A.Wrist then
-            return (Status => Unreachable, Why => To_Unbounded_String ("the wrist turns no further"));
+            return (Status => Unreachable, Why => To_Unbounded_String ("the wrist turns no further"), Bow => 0.0);
          end if;
       end;
-      return (Status => Reachable, Why => Null_Unbounded_String);
+      return (Status => Reachable, Why => Null_Unbounded_String, Bow => 0.0);
    end Reach_Of;
 
    overriding function Reach (W : World; Goal : Arm_Goal) return Reach_Answer is
@@ -891,11 +962,8 @@ package body Driver.Action.Plants.Tests is
    procedure Put_Tool (W : in out World; Arm : Arm_Id; Pose : Rigid; Blocked : out Boolean) is
       A     : constant Positive := Arm_Index (W, Arm);
       From  : constant Rigid := W.Arms (A).Tool;
-      Shift : constant Real := abs (Pose.Translation - From.Translation);
-      Turn  : constant Real := Angle (Transpose (From.Rotation) * Pose.Rotation);
       Reach_Of_Body : Real := 0.0;
    begin
-      Blocked := False;
       for P of Body_Points (W, A) loop
          Reach_Of_Body := Real'Max (Reach_Of_Body, abs P);
       end loop;
@@ -903,16 +971,7 @@ package body Driver.Action.Plants.Tests is
          Reach_Of_Body := Reach_Of_Body + Radius_Of (W, Held_By_Arm (W, A))
            + abs (Centre_Of (W, Held_By_Arm (W, A)) - From.Translation);
       end if;
-      declare
-         Pieces : constant Positive :=
-           Positive'Max (1, Natural (Real'Ceiling ((Shift + Turn * Reach_Of_Body) / (W.Pitch / 2.0))));
-      begin
-         for I in 1 .. Pieces loop
-            Try_Pose (W, A, Between (From, Pose, Real (I) / Real (Pieces)), Blocked);
-            exit when Blocked;
-            W.Moved := True;
-         end loop;
-      end;
+      Move_Through (W, A, Pose, Reach_Of_Body, Blocked);
    end Put_Tool;
 
    procedure Tick (W : in out World) is
@@ -988,8 +1047,8 @@ package body Driver.Action.Plants.Tests is
             if not Rejected (I) then
                R.Arms.Append (Arm_Result'(Arm       => G.Arm,
                                Outcome   => (if A.Blocked then Blocked
-                                             elsif not Significant (Off, W.Sigma) then Reached else Short),
-                               Delivered => (Value => Share, Sigma => W.Sigma / Real'Max (abs D, W.Sigma),
+                                             elsif not Significant (Off, Resolution (W, A)) then Reached else Short),
+                               Delivered => (Value => Share, Sigma => Resolution (W, A) / Real'Max (abs D, Resolution (W, A)),
                                              Degrees_Of_Freedom => 0),
                                Why       => Null_Unbounded_String));
             end if;

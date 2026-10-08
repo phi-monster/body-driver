@@ -72,16 +72,19 @@ driver-action-contact.adb	Low : Positive := 1;	1	structure	the first coordinate 
 driver-action-contact.adb	Seed (Low) := 1.0;	1.0	math	the seed is a unit coordinate axis
 driver-action-contact.adb	for K in 2 .. 3 loop	2	structure	the remaining coordinate axes, second and third
 driver-action-contact.adb	for K in 2 .. 3 loop	3	structure	the remaining coordinate axes, second and third
-driver-action-execution.adb	((Arms => Arm_Goal_Vectors.To_Vector ((Arm => A, Tool => Tool, Position_Only => False), 1),	1	structure	an order for one arm holds one goal
-driver-action-execution.adb	(Object_Pitch / 2.0 + Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
+driver-action-execution.adb	((Arms => Arm_Goal_Vectors.To_Vector (Bounded_Goal (S, A, Tool, Slack), 1),	1	structure	an order for one arm holds one goal
+driver-action-execution.adb	((Object_Pitch + Moving_Pitch (S, T)) / 2.0 + 2.0 * Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample, of either surface: the half of each
+driver-action-execution.adb	((Object_Pitch + Moving_Pitch (S, T)) / 2.0 + 2.0 * Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)	2.0	math	the reach of the contact test ahead, and as much again for the noise of the estimates it is made on
 driver-action-execution.adb	(Z * Sqrt (Sigma ** 2 + T.Sigma ** 2) + T.Pitch / 2.0);	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
+driver-action-execution.adb	(if Margin < 2.0 * Lever then 2.0 * Arccos (1.0 - Margin / Lever) else Pi);	2.0	math	a turn is twice its half, the angle whose cosine is one minus the margin over the lever
+driver-action-execution.adb	(if Margin < 2.0 * Lever then 2.0 * Arccos (1.0 - Margin / Lever) else Pi);	2.0	math	the tool's straight path leaves the arc by the lever times one minus the cosine of half the turn: a margin of twice the lever or more allows any turn up to the half circle
 driver-action-execution.adb	Closers => Closer_Goal_Vectors.To_Vector ((Hand => H, Fraction => Fraction), 1),	1	structure	an order for one closer holds one goal
 driver-action-execution.adb	High := (Low + High) / 2.0;	2.0	numerics	bisection halves the interval
 driver-action-execution.adb	High := 2.0 * High;	2.0	numerics	doubling search: the bound is found within a factor two in a number of tries logarithmic in it
 driver-action-execution.adb	K : Positive := 1;	1	structure	a plan is followed from its first point
 driver-action-execution.adb	K := 1;	1	structure	a new plan is followed from its first point
 driver-action-execution.adb	Last : constant Vec3 := (if K > 1 then Route.Points (K) - Route.Points (K - 1) else D);	1	structure	the leg into point K starts at the point before it, when there is one
-driver-action-execution.adb	Lift := 2.0 * Lift;	2.0	numerics	doubling search: the height needed is found within a factor two in a number of tries logarithmic in it
+driver-action-execution.adb	Lift := (if Lift > 0.0 then 2.0 * Lift else Real'Max (E.Depth + E.Sigma, Now.Step.Value));	2.0	numerics	doubling search: the lift is found within a factor two in a number of tries logarithmic in it
 driver-action-execution.adb	Limit := Real'Min (Limit, Real'Max (Fine, Z * Sqrt (2.0) * Largest_Sigma (Start.Covariance)	2.0	statistics	a rise is the difference of two readings: its sigma is root two times theirs
 driver-action-execution.adb	Low := (Low + High) / 2.0;	2.0	numerics	bisection halves the interval
 driver-action-execution.adb	NL : constant Positive := Positive'Max (1, Natural (Real'Ceiling (E.Depth / Spacing)));	1	structure	at least one interval, so both ends are sampled
@@ -90,7 +93,7 @@ driver-action-execution.adb	NW : constant Positive := Positive'Max (1, Natural (
 driver-action-execution.adb	Pieces : constant Positive := Positive'Max (1, Natural (Real'Ceiling ((Shift + Turn * Lever) / Spacing)));	1	structure	at least one piece, so the end of the way is checked
 driver-action-execution.adb	Q : constant Vec3 := C + (2.0 * Real (I) / Real (NW) - 1.0) * Pd.Half_Width * Wd	1.0	math	from minus one to one half widths across the face
 driver-action-execution.adb	Q : constant Vec3 := C + (2.0 * Real (I) / Real (NW) - 1.0) * Pd.Half_Width * Wd	2.0	math	from minus one to one half widths across the face
-driver-action-execution.adb	Reach_Of : constant Real := O.Pitch / 2.0 + B;	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
+driver-action-execution.adb	Reach_Of : constant Real := (O.Pitch + Pitch) / 2.0 + B;	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample, of either surface: the half of each
 driver-action-execution.adb	Set_Closer (P, X, C.Hand, 0.0, Out_Come);	0.0	math	a closer's fraction: zero is open
 driver-action-execution.adb	Set_Closer (P, X, C.Hand, 0.0, Out_Come);	0.0	math	a closer's fraction: zero is open
 driver-action-execution.adb	Set_Closer (P, X, E.Closers (K).Hand, 1.0, Out_Come);	1.0	math	a closer's fraction: one is closed on nothing, so it closes until it stops on the thing
@@ -98,9 +101,12 @@ driver-action-execution.adb	Set_Closer (P, X, H.Hand, 0.0, Out_Come);	0.0	math	a
 driver-action-execution.adb	Set_Closer (P, X, H.Hand, 1.0, Out_Come);	1.0	math	a closer's fraction: one is closed on nothing, so it closes until it stops on something
 driver-action-execution.adb	Several : constant Boolean := Natural (Best.Touches.Length) > 1;	1	math	more than one touch is a set that closes on the thing; one touch alone presses
 driver-action-execution.adb	Sigma => Sqrt (2.0) * Largest_Sigma (Start.Covariance), Degrees_Of_Freedom => 0);	2.0	statistics	a rise is the difference of two readings: its sigma is root two times theirs
+driver-action-execution.adb	else Z * Sigma + (if Finest_Pitch (S) < Real'Last then Finest_Pitch (S) / 2.0 else 0.0));	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
 driver-action-execution.adb	function Img (X : Real) return String is (Driver.Log.Image (X, 3));	3	format	digits printed in a log line or a message
 driver-action-execution.adb	if Fits ((Low + High) / 2.0) then	2.0	numerics	bisection tries the middle
 driver-action-execution.adb	or else not Significant (Vector_Gate (3), Turn, Largest_Sigma (A.Tool.Rotation_Covariance)));	3	structure	a turn is a rotation vector of three components
+driver-action-goals.adb	Above : constant Real := Arcsin (Real'Max (-1.0, Real'Min (1.0, Out_Of)));	1.0	numerics	a sine rounded above one is one, where Arcsin is defined
+driver-action-goals.adb	Above : constant Real := Arcsin (Real'Max (-1.0, Real'Min (1.0, Out_Of)));	1.0	numerics	a sine rounded below minus one is minus one, where Arcsin is defined
 driver-action-goals.adb	Grow : constant Vec3 := P.Rotation * [1.0, 0.0, -U_S];	1.0	math	the image column x / z grows as 1 / z along the eye's x and as -u / z along its z
 driver-action-goals.adb	Half_Gap : constant Real := Sqrt (((Sxx - Syy) / 2.0) ** 2 + Sxy ** 2);	2.0	math	eigenvalues of a symmetric two by two matrix: half their difference
 driver-action-goals.adb	Larger : constant Real := (Sxx + Syy) / 2.0 + Half_Gap;	2.0	math	eigenvalues of a symmetric two by two matrix: their mean
@@ -113,7 +119,7 @@ driver-action-goals.adb	Sign : constant Real := (if Increase then 1.0 else -1.0)
 driver-action-goals.adb	Sign : constant Real := (if Increase then 1.0 else -1.0);	1.0	math	up is the positive sense of a quantity
 driver-action-goals.adb	Theta : constant Real := Arctan (2.0 * Sxy, Sxx - Syy) / 2.0;	2.0	math	the principal axis of a two by two covariance lies at half the angle of (Sxx - Syy, 2 Sxy)
 driver-action-goals.adb	Theta : constant Real := Arctan (2.0 * Sxy, Sxx - Syy) / 2.0;	2.0	math	the principal axis of a two by two covariance lies at half the angle of (Sxx - Syy, 2 Sxy)
-driver-action-goals.adb	if not (abs F > 0.0) or else not Significant (Arccos (Real'Min (1.0, -Real'(D * U))), Angle_Sigma)	1.0	numerics	a cosine rounded above one is one, where Arccos is defined
+driver-action-goals.adb	if not (abs F > 0.0) or else not Significant (Arccos (Real'Min (1.0, -Out_Of)), Angle_Sigma) then	1.0	numerics	a cosine rounded above one is one, where Arccos is defined
 driver-action-goals.adb	if not Significant (Pi / 2.0, Sigma) then	2.0	math	an axis is itself after a half turn, so a quarter turn is as far off as it can be
 driver-action-goals.adb	if not Significant (Vector_Gate (2), abs Flat, Sigma) then	2	structure	a separation within a plane has two dimensions
 driver-action-goals.adb	if not Significant (Vector_Gate (2), abs H, X.Sigma) then	2	structure	a separation within a plane has two dimensions
@@ -893,6 +899,8 @@ driver-robot-hand-lobes.adb	return (Last >= Doubts.First_Index + 2 and then Stil
 driver-robot-hand-lobes.adb	return (if Region = 0 then 0.0 else Sqrt (Sum / (2.0 * Real (Region))));	2.0	statistics	the mean over the two axes of the squared distance
 driver-robot-hand-lobes.ads	and then Driver.Pixels.Frames (Anchor) >= 2;	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-lowering.adb	Enough : constant Boolean := T.Count > 2;	2	statistics	a scatter of shares needs more than two pushes before it, as a shortfall's does in the step tracker
+driver-robot-hand-lowering.adb	Lowering := Lowering / Real (Natural'Max (1, Where'Length));	1	structure	a hand has a point at the least (the tool's origin), so a mean never divides by nothing
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
@@ -908,10 +916,16 @@ driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Im
 driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (Bound, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	(Wanted, Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began)), Poses_Now'Access,	1	structure	a wait is one beat at the least
 driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
+driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	the first arm until the closer's pair is read: a closer an eye on an arm watches has its own
 driver-robot-hand-measure.adb	Bound : Real := Ada.Numerics.Pi / 2.0;	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
+driver-robot-hand-measure.adb	By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);	2.0	numerics	doubling search: the raise that shows is reached within a factor two in a number of raises logarithmic in it
 driver-robot-hand-measure.adb	By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);	2.0	structure	each raise twice the one before, so that the smallest raise that frees the closer is found within a doubling of it
+driver-robot-hand-measure.adb	By := 2.0 * By;	2.0	numerics	doubling search: the raise that shows is reached within a factor two in a number of raises logarithmic in it
 driver-robot-hand-measure.adb	Eye : Eye_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
+driver-robot-hand-measure.adb	Eye : Eye_Id := 1;	1	structure	the first eye until the closer's pair is read: a closer an eye on an arm watches has its own
+driver-robot-hand-measure.adb	Gather_Own_Poses (G, Positive'Max (Driver.Robot.Hand.Selfsight.Needed, 2 * Have), Reached);	2	statistics	the poses are asked to double: the estimators place the lobes again once they have (Sweep.Ends_Moved)
 driver-robot-hand-measure.adb	Lean : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;	4.0	math	half-way between away from the other lobes and across from them
 driver-robot-hand-measure.adb	Noise := Sqrt (2.0) * Reading_Noise (M, G, C);	2.0	statistics	the difference of two readings carries the channel's noise twice over
 driver-robot-hand-measure.adb	Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began));	1	structure	at least one asking: a view is asked for once it is pushed
@@ -932,6 +946,7 @@ driver-robot-hand-selfsight.adb	if M.Settings (I).Poses < 2 then	2	statistics	a 
 driver-robot-hand-selfsight.adb	if M.Settings (I).Poses >= 2	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-selfsight.adb	if S.Poses = 1 then	1	structure	a setting seen from one pose holds that one frame, not yet a view
 driver-robot-hand-selfsight.ads	Capacity : constant := 8;	8	structure	memory: how many settings seen from two poses or more an eye remembers
+driver-robot-hand-selfsight.ads	Needed : constant := 2;	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-shape.adb	& "" & Driver.Log.Image (Thick.Value, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-shape.adb	& Driver.Log.Image (Depth.Value, 4) & "" & Driver.Log.Image (Depth.Sigma, 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand-shape.adb	& Driver.Log.Image (Depth.Value, 4) & "" & Driver.Log.Image (Depth.Sigma, 4) & "");	4	format	digits printed in a log line or a message
@@ -1038,9 +1053,19 @@ driver-robot-hand-sweep.adb	or else (High >= 2 and then High >= 2 * Was.Element 
 driver-robot-hand-sweep.adb	or else (High >= 2 and then High >= 2 * Was.Element (Channel).Poses_High);	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
 driver-robot-hand-sweep.adb	return (Low >= 2 and then Low >= 2 * Was.Element (Channel).Poses_Low)	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
 driver-robot-hand-sweep.adb	return (Low >= 2 and then Low >= 2 * Was.Element (Channel).Poses_Low)	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
+driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);	1	structure	a hand's presses are fitted on one surface
 driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);	1	structure	the presses of a hand are fitted on one surface
-driver-robot-hand-tips.adb	Presses (N) := (Tool => K.Event.Tool, Sight => Index_Of (T, K.Lobe, K.Opening), Surface => 1);	1	structure	a hand's presses are fitted on one surface
+driver-robot-hand-tips.adb	Gap : constant Real := Sqrt (((A - C) / 2.0) ** 2 + Off ** 2);	2.0	math	the middle and the half gap of a two by two covariance, whose roots are the middle plus and minus the root of the half gap squared and the cross term squared
+driver-robot-hand-tips.adb	Mid : constant Real := (A + C) / 2.0;	2.0	math	the middle and the half gap of a two by two covariance, whose roots are the middle plus and minus the root of the half gap squared and the cross term squared
+driver-robot-hand-tips.adb	Presses (N) := (Tool => K.Event.Tool, Sight => Index_Of (T, K.Lobe, K.Opening), Surface => 1,	1	structure	the presses of a hand are fitted on one surface
 driver-robot-hand-tips.adb	Spread := Spread + (Across * Across) / 2.0;	2.0	math	the mean of the squared angle about the two axes across the direction
+driver-robot-hand-tips.adb	Surface => 1,	1	structure	a hand's presses are fitted on one surface
+driver-robot-hand-touch.adb	(Line (S).Direction.Unit_Vector + Tip_Q (W * (S - 1) + 2) * Across_Of (S, 1)	1	structure	the first axis across a line
+driver-robot-hand-touch.adb	(Line (S).Direction.Unit_Vector + Tip_Q (W * (S - 1) + 2) * Across_Of (S, 1)	2	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
+driver-robot-hand-touch.adb	+ Base (Row, C0 + 2) * Tip_Q (W * (S - 1) + 3)));	2	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
+driver-robot-hand-touch.adb	+ Base (Row, C0 + 2) * Tip_Q (W * (S - 1) + 3)));	3	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
+driver-robot-hand-touch.adb	+ Tip_Q (W * (S - 1) + 3) * Across_Of (S, 2));	2	structure	the second axis across a line
+driver-robot-hand-touch.adb	+ Tip_Q (W * (S - 1) + 3) * Across_Of (S, 2));	3	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
 driver-robot-hand-touch.adb	A (R, J + F) := -1.0;	1.0	math	a higher surface lowers the height by as much
 driver-robot-hand-touch.adb	Base (Row + 1, CF) := 1.0 / P.Offset_Sigma;	1.0	math	a prior's row is whitened by its own sigma
 driver-robot-hand-touch.adb	Base (Row + 2, CF + 1) := 1.0 / L11;	1.0	math	the inverse of the tilt covariance's Cholesky factor
@@ -1049,21 +1074,33 @@ driver-robot-hand-touch.adb	Base (Row + 3, CF + 1) := -L21 / (L11 * L22);	3	stru
 driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	1.0	math	the inverse of the tilt covariance's Cholesky factor
 driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	3	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Base (Row, C0 + 1) := Dist * (Lift * Across_Of (S, 1));	1	structure	the first axis across a line
+driver-robot-hand-touch.adb	Base (Row, C0 + 2) := Dist * (Lift * Across_Of (S, 2));	2	structure	the second axis across a line
+driver-robot-hand-touch.adb	Base (Row, C0 + 2) := Dist * (Lift * Across_Of (S, 2));	2	structure	the second axis across a line
 driver-robot-hand-touch.adb	Base (Row, CF + 2) := -(Nominal (F).Tangent_2 * (Y - Nominal (F).Centre));	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-touch.adb	Base (Row, CF) := -1.0;	1.0	math	a higher surface lowers the height by as much
+driver-robot-hand-touch.adb	Base (Row, Column_Of_Sight (S) + Axis) := 1.0 / Across_Sigma (S);	1.0	math	a prior whitened: one over its sigma
 driver-robot-hand-touch.adb	C13 : constant Real := Solution_Cov (CF, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	E1 : constant Vec3 := Across_Of (S, 1);	1	structure	the first axis across a line
+driver-robot-hand-touch.adb	E2 : constant Vec3 := Across_Of (S, 2);	2	structure	the second axis across a line
+driver-robot-hand-touch.adb	Lateral : constant := 2;	2	structure	two angles across a line of sight
+driver-robot-hand-touch.adb	Mean_V + Sqrt (((Own (2, 2) - Own (3, 3)) / 2.0) ** 2 + Own (2, 3) ** 2);	2.0	math	the middle and the half gap of the two by two covariance of the tip's angles across its line, whose largest root is the middle plus the root of the half gap squared and the cross term squared
+driver-robot-hand-touch.adb	Mean_V : constant Real := (Own (2, 2) + Own (3, 3)) / 2.0;	2.0	math	the middle and the half gap of the two by two covariance of the tip's angles across its line, whose largest root is the middle plus the root of the half gap squared and the cross term squared
 driver-robot-hand-touch.adb	Nominal (F) := Moved (Nominal (F), Solution_Q (CF), Solution_Q (CF + 1), Solution_Q (CF + 2));	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-touch.adb	P.Scatter := (if Prior (F).Measured then Prior (F).Plane.Scatter else 1.0);	1.0	statistics	the scatter of a surface the presses found alone is the noise they predict
 driver-robot-hand-touch.adb	Pinned (Rows + C, C) := 1.0;	1.0	math	an unknown nothing bears on is pinned by a unit row
 driver-robot-hand-touch.adb	Plane_Unknowns : constant := 3;	3	structure	a surface's error is its offset and its two tilts
 driver-robot-hand-touch.adb	Point_Unknowns : constant := 3;	3	structure	a point has three coordinates
+driver-robot-hand-touch.adb	Rhs (Row) := -(H - (Base (Row, C0) * Dist + Base (Row, C0 + 1) * Tip_Q (W * (S - 1) + 2)	2	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
 driver-robot-hand-touch.adb	Sigma : Vector_Access := new Real_Vector'(1 .. Rows => 1.0);	1.0	math	a prior's rows are whitened already
+driver-robot-hand-touch.adb	Spread_V * (1.0 + Driver.Conventions.Z ** 2) <= Prior_V	1.0	statistics	an offset of a prior sigma shows above Z noises when the variance the presses leave is the prior's over one more than Z squared
 driver-robot-hand-touch.adb	T12 : constant Real := Solution_Cov (CF + 1, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-touch.adb	T22 : constant Real := Solution_Cov (CF + 2, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-touch.adb	T22 : constant Real := Solution_Cov (CF + 2, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
-driver-robot-hand-touch.adb	W : constant Positive := (if As = On_Sight then 1 else Point_Unknowns);	1	structure	a tip on its line has one unknown, the distance along it
+driver-robot-hand-touch.adb	Weight : constant Real := 1.0 / Noise_Of (Presses (I)) ** 2;	1.0	math	a weight is one over a variance
 driver-robot-hand-touch.adb	if Chosen (I) and then Deleted (I) < 0.0 and then Significant (Deleted (I), 1.0) then	1.0	math	a residual already in units of its own sigma
 driver-robot-hand-touch.adb	if Chosen (I) and then Deleted (I) > 0.0 and then Significant (Deleted (I), 1.0)	1.0	math	a residual already in units of its own sigma
+driver-robot-hand-touch.adb	return (if Which = 1 then E1 else Cross (U, E1));	1	structure	the first axis across a line is the one found, the second is across both
 driver-robot-hand-touch.adb	then Moved (Prior (F).Plane, Correction (Plane_Unknowns * F - 2), Correction (Plane_Unknowns * F - 1),	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-views.adb	(not T.Current.Is_Empty and then Driver.Pixels.Frames (T.Current.Constant_Reference.Element.Frames) >= 2);	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + C - 1);	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
@@ -1083,6 +1120,8 @@ driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Said.Share, 1) & ""	1	for
 driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Said.Share, 1) & ""	100.0	format	a share printed as a percentage
 driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Shift.By / Lobe.Way.Reach, 2) & ""	100.0	format	a share of the travel is said in per cent
 driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Shift.By / Lobe.Way.Reach, 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-hand.adb	& "" & Driver.Log.Image (Across (1), 3) & "" & Driver.Log.Image (Across (2), 3)	3	format	digits printed in a log line or a message
+driver-robot-hand.adb	& "" & Driver.Log.Image (Across (1), 3) & "" & Driver.Log.Image (Across (2), 3)	3	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (G.Value, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (Reach.Value * R.Lobes (L).Sights (Which).Spread, 3)	3	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (Said.Asked, 4) & "" & Driver.Log.Image (Said.Went, 4)	4	format	digits printed in a log line or a message
@@ -1904,10 +1943,13 @@ driver-robot-motion.adb	Offsets : constant Real_Array (1 .. 1) := [1 => Signs (W
 driver-robot-motion.adb	Probe_Together (M, [1 => (Group => G, Channel => Channel)], Direction, 0.0, Report);	0.0	structure	from zero: the first step is the smallest the reading can tell
 driver-robot-motion.adb	Probe_Together (M, [1 => (Group => G, Channel => Channel)], Direction, 0.0, Report);	1	structure	one channel
 driver-robot-motion.adb	Reach ((A_Of + B_Of) / 2.0, B_Of, Q, Depth + 1);	2.0	structure	the path from its start (0) to its goal (1), halved where it cannot be closed
+driver-robot-motion.adb	Reach ((A_Of + B_Of) / 2.0, B_Of, Q, Depth + 1);	2.0	structure	the path halved again where the joints' straight line bows from it
 driver-robot-motion.adb	Reach (0.0, 1.0, Q, 0);	0.0	structure	the path from its start (0) to its goal (1), halved where it cannot be closed
 driver-robot-motion.adb	Reach (0.0, 1.0, Q, 0);	1.0	structure	the path from its start (0) to its goal (1), halved where it cannot be closed
 driver-robot-motion.adb	Reach (A_Of, (A_Of + B_Of) / 2.0, Q, Depth + 1);	2.0	structure	the path from its start (0) to its goal (1), halved where it cannot be closed
+driver-robot-motion.adb	Reach (A_Of, (A_Of + B_Of) / 2.0, Q, Depth + 1);	2.0	structure	the path halved again where the joints' straight line bows from it
 driver-robot-motion.adb	Run : Natural := 1;	1	structure	the first seen move starts the run
+driver-robot-motion.adb	Share : constant Real := Real (K) / 4.0;	4.0	numerics	the quarter, the middle and the three quarters of a segment: a bow that goes out one side and back across is on the path at its middle
 driver-robot-motion.adb	Sign : constant Real := (if Direction > 0.0 then 1.0 else -1.0);	1.0	math	the two directions of a probe
 driver-robot-motion.adb	Sign : constant Real := (if Direction > 0.0 then 1.0 else -1.0);	1.0	math	the two directions of a probe
 driver-robot-motion.adb	Signs : constant array (Sense) of Real := [Increasing => 1.0, Decreasing => -1.0];	1.0	math	the two directions of a push
@@ -1920,6 +1962,7 @@ driver-robot-motion.adb	Window : Natural := 2;	2	structure	the beat of the move 
 driver-robot-motion.adb	Window := Natural'Max (Window, 2 + Natural'Max (0, Image_Lag (M, Eye_Id (E))));	2	structure	the beat of the move and the beat it shows in the readings
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom);	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	elsif Chance >= 1.0 then	1.0	math	a chance of one or more cannot be beaten by any run
+driver-robot-motion.adb	for K in 1 .. 3 loop	3	numerics	the three shares K over four, the quarter, the middle and the three quarters
 driver-robot-motion.adb	return (if K >= Real (Natural'Last) then Natural'Last else Natural'Max (1, Natural (K)));	1	structure	at least one move
 driver-robot-motion.adb	return 1;	1	structure	one move suffices when false alarms cannot happen
 driver-robot-motion.adb	then "" & Driver.Log.Image (E.Delivered.Value, 3) & ""	3	format	digits printed in a log line or a message
@@ -1942,6 +1985,7 @@ driver-robot-steps.adb	(E.Followed < 2	2	structure	a scatter needs two beats; wi
 driver-robot-steps.adb	(Gain, Sqrt (2.0 * E.Spread_Along / Real (E.Followed - 1)), E.Followed - 1));	2.0	math	a gain is the difference of two beats' progress, whose variance is twice one beat's
 driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
 driver-robot-steps.adb	if Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
+driver-robot-stillness.adb	Adds_Up : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0);	2.0	math	changes that do not push the same way add as roots of squares: over two beats a picture that only makes noise changes by the square root of two times what it changes over one, a drift by twice
 driver-robot-stillness.adb	S.Change_1 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	S.Change_2 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
