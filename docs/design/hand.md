@@ -545,10 +545,11 @@ the one that met the table.
 **Lesson: the band about a predicted contact has two edges, and a press that
 stopped in the air fixes only a bound (A17).** A17's first press that the hand
 kept (beat 6998, the closer at its open reading) stopped the arm in the air: at
-the rest after its let-go no link of either finger was within 62 mm of the table
-(robot0's lowest links after the base were link2 at 42.9 mm, link3 at 53.4 mm,
-link1 at 60.5 mm), and link 2 lay within 8 mm of link 4, as A16's stops had
-(A16: link 2 within 6.3 mm of link 4). The line of sight through the tip meets
+the rest after its let-go the lowest vertex of link 7 was 86.2 mm above the table
+(92.1 mm at beat 6975, where the arm stopped) and that of link 8 187.4 mm, and
+link 2 lay within 8 mm of link 4, as A16's stops had (A16: link 2 within 6.3 mm
+of link 4). The press before it, the one the closer was not at an opening for,
+stopped with link 7 105 mm above the table (beat 6921). The line of sight through the tip meets
 the table 17.87 units from the eye from that pose (266 mm: the arm's unit was
 14.9 mm in A17), and the finger was not on the table there. One press fixes a
 provisional tip, and a provisional tip is the hit, the farthest the tip can be:
