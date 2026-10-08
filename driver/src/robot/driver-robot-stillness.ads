@@ -52,14 +52,21 @@ private package Driver.Robot.Stillness is
    --  eye is first judged) no longer shrinks against the last beat's by more than
    --  the unchanged fraction of it (Driver.Conventions.Unchanged_Fraction), or
    --  has fallen below that fraction of the largest change since the body
-   --  began to move; and the change over two beats exceeds this beat's by no
-   --  more than Z times how much this beat's change differs from the last one.
-   --  A uniform drift changes the picture as much every beat, so it stops
-   --  shrinking but adds up over two beats; a picture that only flickers does
-   --  not. There is no floor: a tail that decays slowly ends when it stops
-   --  decaying, and a picture with something moving elsewhere in view settles
-   --  at that level. Once stopped it stays stopped until the body next begins
-   --  to move.
+   --  began to move; and the change over two beats exceeds the square root of
+   --  two times this beat's by no more than Z times how much this beat's change
+   --  differs from the last one. A uniform drift changes the picture as much
+   --  every beat, so it stops shrinking but adds up over two beats, to twice
+   --  one beat's; changes that do not push the same way add as roots of squares,
+   --  to the square root of two times one beat's at the most, whether the
+   --  picture only flickers or its pixels wander (a rendered view's noise
+   --  does: A22's three eyes at rest changed over two beats by 1.43 to 1.46
+   --  times what they changed over one, and the rule that weighed the two
+   --  against each other once, for flicker, kept the hand's eye unsettled for
+   --  235, 94, 102, 171 and 332 beats after pushes whose pictures were quiet in
+   --  five to thirty: the closer's sweep waited ten minutes for it). There is
+   --  no floor: a tail that decays slowly ends when it stops decaying, and a
+   --  picture with something moving elsewhere in view settles at that level.
+   --  Once stopped it stays stopped until the body next begins to move.
 
    procedure Watch (S : in out Eye_Stream; Began_Moving : Boolean);
    --  One beat of the eye, after its frames moved on (Current this beat's,

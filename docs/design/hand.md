@@ -699,6 +699,34 @@ is an end of its travel in every body met (A17, A19, A22 start open); a closer
 that starts between its ends would need them at an end. (`Gather_Poses`,
 `hand.measure.poses`.)
 
+**Lesson: a sweep waited for a rule, not for the picture (A22).** After each
+push of the closer, A22's hand-1 sweep idled for 1,240 of its 1,444 beats, ten
+minutes: the next push came 240, 29, 99, 53, 48, 107, 32, 176, 93, 74 and 337
+beats after the one before, with every group still (none moved by more than 1e-9
+after the first eight beats) and the hand eye's picture back to noise in five to
+thirty (after the push of 4e-4 at beat 11870: 205 changed pixels, 104, 34, 9,
+then noise; after the 0.42 push at 12821: mean luma change 15.5 to 0.05 in thirty
+beats). The wait was the eye's stop rule (`Stillness.Watch`; a view forms only
+while `Eye_Settled`). Its last term weighed the change over two beats against
+the change over one, "a picture that only flickers adds to once, a drift to
+twice", and a rendered picture's noise is neither: each pixel wanders, and the
+change over two beats was 1.43 to 1.46 times the change over one in all three
+eyes at rest (quartiles 1.37 to 1.53; 859, 46 and 853 quiet beats). So at the
+noise floor the term failed at every beat but those where the change happened to
+differ from the last by a third of the excess, and the eye stayed unsettled for as
+long as luck took, a geometric wait. An instrumented replay of A22 (the watch's
+change, peak and verdict at every beat from 11700 to 13400) gave the sweep's
+waits to within the five beats of the push and its lag: the eye 235, 24, 94, 48,
+43, 102, 27, 171, 88, 69 and 332 beats to settle. Changes that do not push the
+same way add as roots of squares, to the square root of two at the most for any
+noise that stays about its mean, and a drift adds them all, to twice; the rule
+now weighs the two against the square root of two times one. Run again over the
+logged values (three decimals), the eye settles in 3 to 23 beats after every push
+of the hand's eye (156 beats in all against 1,405 for the pushes both finished),
+and the boot's waits for an eye, which are the same rule, shorten with it.
+(`robot.stillness.watch`: wandering and flickering pictures stop within twelve
+beats of a move, a drift never does, a move that decays does not until it has.)
+
 **Lesson: the free finger is the loaded fit with each press taken with the tip
 it had slid to.** A press loads its finger, and the finger gives way along its
 own axis (A16: 5 and 17.5 mm inward, the closer's reading exactly where it was).

@@ -1154,6 +1154,104 @@ package body Driver.Robot.Tests is
       end loop;
    end Eye_Stillness;
 
+   --  The one stop rule on pictures of three kinds, each after a move that began the watch: noise that wanders
+   --  (every pixel a random walk, as A22's three eyes were at rest: a change over two beats 1.43 to 1.46 times one
+   --  over one beat), noise that flickers (every frame its own), and a drift (a texture moved a little further every
+   --  beat). The pictures that only make noise must be taken for at rest within a few beats of their move, whichever
+   --  way their noise is; the drift never. A22's hand eye kept 235, 94, 102, 171 and 332 beats waiting for a picture
+   --  that wandered. And a move that really decays is not at rest until it has.
+   procedure Eye_Watch_Stops_On_Noise_Not_On_Drift is
+      N     : constant := 2000;
+      Level : constant Real := 100.0;   --  a pixel's luma variance over the longest run it has rested through
+      Rng   : Generator;
+      S     : Eye_Stream;
+      Walk  : Real_Array (1 .. N) := [others => 0.0];
+      type Picture is (Wandering, Flickering, Drifting);
+
+      --  The next frame of a picture, Beat beats into the run and Bump levels of a move that decays by half a beat.
+      procedure Next (Kind : Picture; Beat : Natural; Bump : Real) is
+         Spare : constant Luma_Access := S.Before;
+      begin
+         for I in 1 .. N loop
+            declare
+               Base : constant Real := 128.0 + 40.0 * Sin (0.37 * Real (I));
+            begin
+               case Kind is
+                  when Wandering =>
+                     Walk (I) := Walk (I) + Gaussian (Rng);
+                     S.Current (I) := Base + Walk (I);
+                  when Flickering =>
+                     S.Current (I) := Base + Gaussian (Rng);
+                  when Drifting =>
+                     S.Current (I) := 128.0 + 40.0 * Sin (0.37 * (Real (I) - 0.2 * Real (Beat)));
+               end case;
+               if I <= N / 10 then
+                  S.Current (I) := S.Current (I) + Bump;
+               end if;
+            end;
+         end loop;
+         Stillness.Watch (S, Began_Moving => False);
+         S.Before := S.Previous;
+         S.Previous := S.Current;
+         S.Current := Spare;
+         S.Has_Before := S.Has_Previous;
+         S.Has_Previous := True;
+      end Next;
+
+      --  How many beats after a move that began at Beat the watch took to stop, at most Within.
+      function Stops_After (Kind : Picture; Beat : Natural; Bump : Real; Within : Natural) return Natural is
+         Taken : Natural := 0;
+         Level_Now : Real := Bump;
+      begin
+         S.Watch_Done := False;
+         S.Watch_Have := False;
+         S.Watch_Peak := 0.0;
+         while Taken < Within loop
+            Next (Kind, Beat + Taken, Level_Now);
+            Taken := Taken + 1;
+            Level_Now := Level_Now / 2.0;
+            exit when S.Watch_Done;
+         end loop;
+         return (if S.Watch_Done then Taken else Natural'Last);
+      end Stops_After;
+   begin
+      S.Current := new Real_Array'(1 .. N => 0.0);
+      S.Previous := new Real_Array'(1 .. N => 0.0);
+      S.Before := new Real_Array'(1 .. N => 0.0);
+      S.Variances := new Real_Array'(1 .. N => Level);
+      S.Has_Judged := True;
+      for Kind in Picture loop
+         declare
+            Taken : Natural;
+         begin
+            Next (Kind, 0, 0.0);
+            Next (Kind, 1, 0.0);
+            Next (Kind, 2, 0.0);
+            for Move in 1 .. 6 loop
+               Taken := Stops_After (Kind, 3 + 100 * Move, 0.0, (if Kind = Drifting then 60 else 12));
+               if Kind = Drifting then
+                  Check (Taken = Natural'Last, "a picture that drifts was taken for at rest after" & Taken'Image & " beats");
+               else
+                  Check (Taken <= 12, "a " & Kind'Image & " picture was still unsettled 12 beats after move" & Move'Image);
+               end if;
+            end loop;
+         end;
+      end loop;
+      --  A change that decays by half every beat from a thousand levels: not at rest while it is as large as the
+      --  noise, at rest within a few beats of its falling to it.
+      declare
+         Early : Natural;
+         Late  : Natural;
+      begin
+         Next (Wandering, 0, 0.0);
+         Early := Stops_After (Wandering, 900, 1000.0, 3);
+         Check (Early = Natural'Last, "a move still a hundred levels large was settled after" & Early'Image & " beats");
+         Late := Stops_After (Wandering, 1000, 1000.0, 40);
+         Check (Late >= 8 and then Late <= 30, "a move decaying from a thousand levels was settled after" & Late'Image
+                & " beats, not between 8 and 30");
+      end;
+   end Eye_Watch_Stops_On_Noise_Not_On_Drift;
+
    --  A joint held away from where it rested can jitter far more than it did
    --  at rest (a live x5 arm: 7e-18 at rest, 8e-17 held 1.5e-5 away, flipping
    --  its last bits each beat). Its push must still end once what remains of
@@ -5816,6 +5914,9 @@ package body Driver.Robot.Tests is
                              & "answer is not the measured delay", Step_Responses'Access);
       Driver.Tests.Register ("robot.stillness", "an eye with ordinary camera noise never comes to rest, or a moving "
                              & "patch goes unnoticed", Eye_Stillness'Access);
+      Driver.Tests.Register ("robot.stillness.watch", "a picture whose noise wanders from beat to beat, or flickers, is "
+                             & "not at rest within a few beats of a move, or a drift is, or a move that decays is before "
+                             & "it has", Eye_Watch_Stops_On_Noise_Not_On_Drift'Access);
       Driver.Tests.Register ("robot.roles", "a group is given the wrong role, an eye the wrong mount or lag, an arm "
                              & "is credited with a lockstep partner's eye, a reaction to another push is taken for "
                              & "a push, the tail of a slow response is taken for rest, or the step an eye can see is "

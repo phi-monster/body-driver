@@ -913,8 +913,8 @@ driver-robot-hand-measure.adb	(Wanted, Positive'Max (1, (if Longest_Formed > 0 t
 driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
 driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	the first arm until the closer's pair is read: a closer an eye on an arm watches has its own
 driver-robot-hand-measure.adb	Bound : Real := Ada.Numerics.Pi / 2.0;	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
-driver-robot-hand-measure.adb	By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);	2.0	structure	each raise twice the one before, so that the smallest raise that frees the closer is found within a doubling of it
 driver-robot-hand-measure.adb	By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);	2.0	numerics	doubling search: the raise that shows is reached within a factor two in a number of raises logarithmic in it
+driver-robot-hand-measure.adb	By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);	2.0	structure	each raise twice the one before, so that the smallest raise that frees the closer is found within a doubling of it
 driver-robot-hand-measure.adb	By := 2.0 * By;	2.0	numerics	doubling search: the raise that shows is reached within a factor two in a number of raises logarithmic in it
 driver-robot-hand-measure.adb	Eye : Eye_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
 driver-robot-hand-measure.adb	Eye : Eye_Id := 1;	1	structure	the first eye until the closer's pair is read: a closer an eye on an arm watches has its own
@@ -1935,6 +1935,7 @@ driver-robot-steps.adb	(E.Followed < 2	2	structure	a scatter needs two beats; wi
 driver-robot-steps.adb	(Gain, Sqrt (2.0 * E.Spread_Along / Real (E.Followed - 1)), E.Followed - 1));	2.0	math	a gain is the difference of two beats' progress, whose variance is twice one beat's
 driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
 driver-robot-steps.adb	if Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
+driver-robot-stillness.adb	Adds_Up : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0);	2.0	math	changes that do not push the same way add as roots of squares: over two beats a picture that only makes noise changes by the square root of two times what it changes over one, a drift by twice
 driver-robot-stillness.adb	S.Change_1 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	S.Change_2 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
