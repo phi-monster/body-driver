@@ -594,7 +594,8 @@ package body Driver.Robot.Hand.Pressing.Tests is
    --  Drop in every part of the run, the descents of the press among them. The
    --  decider must end, the hand pressed or not, and never raise.
    procedure Run_Dropping_At
-     (Drop : Natural; Beats : out Natural; Finished, Raised, Dropped : out Boolean)
+     (Drop : Natural; Beats : out Natural; Finished, Raised, Dropped : out Boolean;
+      Turns_Stop_At : Real := Real'Last; Kept : out Natural; Left_At : out Real)
    is
       M      : Model;
       H      : Hands;
@@ -624,6 +625,17 @@ package body Driver.Robot.Hand.Pressing.Tests is
       Build (M, Placed);
       --  Everything the rig measured stands; a recompute from this stream would find nothing.
       M.From_File := [others => True];
+      --  The arm's pushes are judged as a boot leaves them judged: a delay the pushes show, and the shortfalls of free
+      --  pushes the body has seen.
+      for G in 1 .. 4 loop
+         M.Groups (Group_Id (G)).Delay_Beats := 2;
+         M.Groups (Group_Id (G)).Delay_Known := True;
+         M.Groups (Group_Id (G)).Free_Shortfalls.Append (0.0125);
+         M.Groups (Group_Id (G)).Free_Shortfalls.Append (1.0 / 300.0);
+         for K in 1 .. 4 loop
+            M.Groups (Group_Id (G)).Free_Shortfalls.Append (0.0);
+         end loop;
+      end loop;
       for G in 1 .. 4 loop
          Driver.Commands.Set_Target (Sent, Group_Id (G), (if G = 1 then Arm_At elsif G = 3 then Pinch
                                                           elsif G = 2 then Idle else Real_Array'[1 => 0.0]));
@@ -668,6 +680,10 @@ package body Driver.Robot.Hand.Pressing.Tests is
                if Driver.Commands.Has_Target (Pending, 1) then
                   Driver.Commands.Set_Target (Sent, 1, Driver.Commands.Target (Pending, 1));
                   Arm_At := Driver.Commands.Target (Sent, 1);
+                  --  A joint that turns the tool stops where it stops, whatever it was sent.
+                  for J in 4 .. Joint_Count loop
+                     Arm_At (J) := Real'Max (-Turns_Stop_At, Real'Min (Turns_Stop_At, Arm_At (J)));
+                  end loop;
                end if;
                if Driver.Commands.Has_Target (Pending, 3) then
                   Driver.Commands.Set_Target (Sent, 3, Driver.Commands.Target (Pending, 3));
@@ -679,21 +695,68 @@ package body Driver.Robot.Hand.Pressing.Tests is
             abort Decider;
          end if;
       end;
+      Kept := (if Exists (H, 1) then Presses_Kept (H, 1) else 0);
+      Left_At := 0.0;
+      for X of Arm_At loop
+         Left_At := Left_At + abs X;
+      end loop;
       Finished := Done;
       Raised := Died;
    end Run_Dropping_At;
+
+   --  A block is a press only when the push that was blocked asked a translation,
+   --  as the steps of a descent do (Pressing.Lowered keeps the tool's rotation)
+   --  and the turn of an aim about the eye does not: A27's first press of hand 2
+   --  was an aim the arm itself stopped, and the stream's watcher took it for one.
+   --  The rig's first three joints slide the tool, the last three turn it.
+   procedure A_Turn_Is_Not_A_Lowering is
+      M : Model;
+      From : constant Real_Array (1 .. Joint_Count) := [0.01, -0.02, 0.03, 0.1, -0.1, 0.05];
+      function Moved (By : Real_Array) return Real_Array is
+      begin
+         return [for J in 1 .. Joint_Count => From (J) + By (J)];
+      end Moved;
+   begin
+      Build (M, Placed);
+      Check (Asks_A_Translation (M, 1, From, Moved ([0.3, 0.2, -0.4, 0.0, 0.0, 0.0])),
+             "a push that slid the tool and did not turn it is not a translation");
+      Check (not Asks_A_Translation (M, 1, From, Moved ([0.0, 0.0, 0.0, 0.5, 0.0, 0.0])),
+             "a turn of the tool by half a radian is a translation");
+      Check (not Asks_A_Translation (M, 1, From, Moved ([0.3, 0.2, -0.4, 0.0, 0.2, 0.0])),
+             "a slide with a turn of a fifth of a radian is a translation");
+      Check (Asks_A_Translation (M, 1, From, Moved ([0.3, 0.2, -0.4, 0.0, 0.0, 1.0e-6])),
+             "a turn of a millionth of a radian, under what the fit can tell, is not a translation");
+   end A_Turn_Is_Not_A_Lowering;
+
+   --  The arm's turning joints stop a tenth of a radian from their start, whatever they are sent: the aim of the
+   --  first press, half a radian, is a turn the arm cannot make. The stream's watcher took the block of an aim
+   --  for a press (A27) and a tip came to be fitted to it; the decider lowered the hand from where the arm
+   --  stopped. Now the aim is a push that asked a turn, which no press is, and    --  aim and halves the tilt; no tip is known from it.
+   procedure A_Blocked_Aim_Is_Not_A_Press is
+      Beats : Natural;
+      Finished, Raised, Dropped : Boolean;
+      Kept_Presses : Natural;
+      Left_Where : Real;
+   begin
+      Run_Dropping_At (0, Beats, Finished, Raised, Dropped, Turns_Stop_At => 0.1, Kept => Kept_Presses, Left_At => Left_Where);
+      Check (Finished and then not Raised, "the decider did not end on a rig whose turning joints stop a tenth of a radian out");
+      Check (Kept_Presses = 0, "the block of an aim the arm could not complete was kept for a press:" & Kept_Presses'Image & " kept");
+      Check (Left_Where < 1.0e-9, "the arm was left" & Left_Where'Image & " rad from where it began, where the aims stopped it: it was not taken back");
+   end A_Blocked_Aim_Is_Not_A_Press;
 
    procedure Hand_Dropped_Mid_Press is
       Beats, Ignored : Natural;
       Finished, Raised, Dropped : Boolean;
       Pressed : Natural;
+      Kept_Presses : Natural;
+      Left_Where : Real;
    begin
-      Run_Dropping_At (0, Beats, Finished, Raised, Dropped);
+      Run_Dropping_At (0, Beats, Finished, Raised, Dropped, Kept => Kept_Presses, Left_At => Left_Where);
       Check (Finished and then not Raised, "the decider did not end on the rig with no hand dropped");
       Check (Beats > 100, "the rig's press ended in" & Beats'Image & " beats: the descents are not under test");
       Pressed := Beats;
       for Part in 1 .. 19 loop
-         Run_Dropping_At (Pressed * Part / 20, Ignored, Finished, Raised, Dropped);
+         Run_Dropping_At (Pressed * Part / 20, Ignored, Finished, Raised, Dropped, Kept => Kept_Presses, Left_At => Left_Where);
          Check (Dropped, "no hand was dropped at part" & Part'Image & " of the run");
          Check (Finished and then not Raised,
                 "the decider " & (if Raised then "raised" else "did not end") & " when the hand was dropped at part"
@@ -703,6 +766,12 @@ package body Driver.Robot.Hand.Pressing.Tests is
 
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.measure.aim",
+                             "the block of an aim the arm could not complete is taken for a press and a tip is fitted to it",
+                             A_Blocked_Aim_Is_Not_A_Press'Access);
+      Driver.Tests.Register ("hand.press.turn",
+                             "a block of an aim, a turn of the hand about its eye, is taken for a press into the table",
+                             A_Turn_Is_Not_A_Lowering'Access);
       Driver.Tests.Register ("hand.measure.dropped",
                              "a hand dropped by the estimators in the middle of a descent makes the decider raise",
                              Hand_Dropped_Mid_Press'Access);

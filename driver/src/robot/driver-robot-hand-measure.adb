@@ -77,6 +77,11 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  Set by a read that found the hand under measure gone: the press in progress ends, the arm let go and taken
    --  back, and nothing more of that hand is pressed. Cleared where the next hand begins.
 
+   Aim_Short : Boolean := False;
+   --  Set by a press that did not begin because the arm did not reach the pose it was aimed at (blocked by
+   --  something of its own, or short of it): a tilt this arm cannot make from where it stands, and not a press that
+   --  stopped short of the table. Set afresh by each press.
+
    package Group_Lists is new Ada.Containers.Vectors (Positive, Group_Id);
 
    procedure Move_Group (G : Group_Id; Target : Real_Array; Followed : out Boolean) is
@@ -565,6 +570,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Arm_Is : Group_Id;
       Arm_Now : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  the arm's readings at the last Read_Arm
       Aim_At  : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  and where the descent began
+      Began   : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  and where the aim began
       Stalls  : Natural := 0;   --  the pushes the watcher had judged stalled when the step now under way began
 
       procedure Read_Aim (O : Observation) is
@@ -575,6 +581,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          end if;
          Driver.Robot.Hand.Pressing.Aim (M, R.Arm, R.Eye, O, Along, Aimed);
          Arm_Is := Arm_Group (M, R.Arm);
+         Began := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (O.Readings.Element (Arm_Is));
          Stalls := H.Data.Found (Id).Stalls;
       end Read_Aim;
 
@@ -663,6 +670,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          end if;
       end End_Lost;
    begin
+      Aim_Short := False;
       Hold_Beat (Read_Aim'Access);
       if Lost then
          End_Lost (Moved => False);
@@ -681,6 +689,19 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end if;
       Driver.Robot.Motion.Follow (M, Plan, Report);
       Hold_Beat (Read_Arm'Access);
+      --  An aim the arm did not complete is not a press: it stopped on something of its own or short of the pose,
+      --  and lowering the hand from where it stands would press at no pose this aim chose (A27's first press of
+      --  hand 2, the third joint at +0.07 for the -0.05 asked, lowered from there and fitted as the tip, 12.39 from
+      --  the eye). The arm goes back to where the aim began, and the caller is told a tilt cannot be made.
+      if Report.Outcome /= Driver.Robot.Motion.Reached then
+         Aim_Short := True;
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the arm did not reach the aim of a press of lobe" & Lobe'Image
+                          & " at " & (if Which = Open then "open" else "closed") & ", turning the hand "
+                          & Driver.Log.Image (Aimed.Turn, 4) & " rad (" & Ada.Strings.Unbounded.To_String (Report.Detail)
+                          & "): no press is made from where it stopped, and the arm is taken back to where the aim began");
+         Move_Group (Arm_Is, Began.Element);
+         return False;
+      end if;
       Aim_At := Arm_Now;
       --  The closer is at the opening the press is made at, or is brought there first: a press made
       --  while the closer is on its way is a press at no opening (A17's first press, at 0.686 of an
@@ -849,22 +870,28 @@ procedure Measure (H : in out Hands; M : in out Model) is
                      if Lost then
                         return;   --  Press_Once said so
                      end if;
-                     Why := Ada.Strings.Unbounded.To_Unbounded_String ("a press could not be made");
-                     exit;
+                     if not Aim_Short then
+                        Why := Ada.Strings.Unbounded.To_Unbounded_String ("a press could not be made");
+                        exit;
+                     end if;
+                     --  The arm could not be taken to the tilt: one it cannot make from here, as a press that stopped
+                     --  short of the table says (it was not pressed, which is what it costs): half of it is tried.
+                     Driver.Robot.Hand.Aims.Next_Tilt (Tilt, Stalled => True, Bound => Bound, Least => Least);
+                  else
+                     Made := Made + 1;
+                     Hold_Beat (Read_Agreed'Access);
+                     if Lost then
+                        Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image
+                                         & " is pressed no more: the hand is gone");
+                        return;
+                     end if;
+                     if Checked then
+                        Why := Ada.Strings.Unbounded.To_Unbounded_String
+                          ("the tip is confirmed: a press from another pose landed on it");
+                        exit;
+                     end if;
+                     Driver.Robot.Hand.Aims.Next_Tilt (Tilt, Stalled => not Agreed, Bound => Bound, Least => Least);
                   end if;
-                  Made := Made + 1;
-                  Hold_Beat (Read_Agreed'Access);
-                  if Lost then
-                     Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image
-                                      & " is pressed no more: the hand is gone");
-                     return;
-                  end if;
-                  if Checked then
-                     Why := Ada.Strings.Unbounded.To_Unbounded_String
-                       ("the tip is confirmed: a press from another pose landed on it");
-                     exit;
-                  end if;
-                  Driver.Robot.Hand.Aims.Next_Tilt (Tilt, Stalled => not Agreed, Bound => Bound, Least => Least);
                end loop;
                if Bound < Ada.Numerics.Pi / 2.0 and then not Checked and then Tilt = 0.0 then
                   Why := Ada.Strings.Unbounded.To_Unbounded_String

@@ -817,6 +817,39 @@ the eye: a fit that puts it at or behind it is not a tip, and the presses fitted
 to it stopped on something else or belong to another tip. The tip is not Ok
 then and the presses on it do not agree (`hand.touch.behind`).
 
+**Lesson: an aim the arm did not complete is not the start of a press (A27).**
+A27's hand 2 (the right arm) pressed lobe 1 first, straight: the aim, a turn of
+1.0762 rad about the eye, stopped the arm at the third joint +0.0705 for the
+-0.0485 asked (the second and fourth joints 0.014 and 0.012 short), 16 beats
+after it began; the decider went on, planned a lowering from where the arm had
+stopped (the planner took another branch: the third joint to +0.665, the
+fourth to -1.006), and the stream's watcher, which takes a block, a let-go and a
+rest for a press, found one at the pose the arm stopped at in the air: the eye
+12.39 above the table, a tip 12.3934 from the eye fitted to it, "a tip rests
+on it"; the tilted presses that followed, stopped in the air by the same
+joint (-0.0368 asked -0.1016; +0.0194 asked -0.0273), agreed with it within the
+tip's lateral freedom, and the tip was confirmed at 18.7 (the old model) or
+held at 12.4 for three presses (the lateral one). Of the seven pushes
+of that hand's first 550 beats that stopped short by more than 5 mrad, three were
+the arm's third joint at its low end or against its own forearm (one joint far
+short of the rest), two the table (the shortfall spread over four joints, or a
+share of one) and two residues of 6 and 9 mrad.
+Two things were wrong. The decider ignored how its aim ended: `Follow` says
+Blocked or Short, and the press, a lowering planned from the readings where the
+arm stood, was made anyway; an aim not reached is a tilt the arm cannot make from
+there, and the press is not made (the arm goes back to where the aim began, the
+tilt is halved as for a press that stopped short of the table:
+`hand.measure.aim`). And the stream took the block of any push for a press: a
+press is the block of a push that lowered the hand, and a lowering step is a
+translation of the tool along the way down (`Pressing.Lowered` keeps its
+rotation) where an aim turns it about the eye; `Asks_A_Translation` compares
+the rotation of the push's target pose with that of the pose it began at, to
+Z times what the fit can tell (`Angle_Sigma`, the planner's own floor), and a
+block of a push that turned the tool counts toward no press (the same filter
+keeps pushes against things on the table, which are not into it, out of the
+tips: `hand.press.turn`; with it removed the rig keeps four presses of four
+blocked aims).
+
 **Lesson: what the decider holds from one beat to the next may be gone at the
 next (A29).** The estimates are recomputed apart from the decider, between two of
 its held beats. After the recompute at 8,136 beats A29's roles changed (groups 5
