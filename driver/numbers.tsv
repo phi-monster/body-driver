@@ -892,6 +892,7 @@ driver-robot-hand-lobes.adb	return (Last >= Doubts.First_Index + 2 and then Stil
 driver-robot-hand-lobes.adb	return (if Region = 0 then 0.0 else Sqrt (Sum / (2.0 * Real (Region))));	2.0	statistics	the mean over the two axes of the squared distance
 driver-robot-hand-lobes.ads	and then Driver.Pixels.Frames (Anchor) >= 2;	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-lowering.adb	Enough : constant Boolean := T.Count > 2;	2	statistics	a scatter of shares needs more than two pushes before it, as a shortfall's does in the step tracker
+driver-robot-hand-lowering.adb	Lowering := Lowering / Real (Natural'Max (1, Where'Length));	1	structure	a hand has a point at the least (the tool's origin), so a mean never divides by nothing
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
