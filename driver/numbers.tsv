@@ -675,6 +675,7 @@ driver-robot-body_file.ads	Noise_Method : constant := 1;	1	format	the first vers
 driver-robot-body_file.ads	Steps_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log names
+driver-robot-boot.adb	& "" & Driver.Log.Image (Rests (G, E), 2)	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (S) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * Half / (Real (N) * Per_Unit (Swept (K)));	1.0	structure	a Hadamard entry is plus or minus one
@@ -683,6 +684,7 @@ driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * Half / (Real (N
 driver-robot-boot.adb	/ 2.0;	2.0	structure	a view keeps half of itself in sight while turning by half
 driver-robot-boot.adb	Col := Col / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
+driver-robot-boot.adb	Doubled : constant Real := 2.0 ** 2;	2.0	math	a doubled push makes four times the energy: energy grows with the square of the push
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	0.0	structure	from zero: the first step is the smallest every reading can tell
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	1.0	structure	the positive direction for every channel
 driver-robot-boot.adb	Eye : Eye_Id := 1;	1	structure	a placeholder, set before it is read
@@ -701,7 +703,7 @@ driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	1.0	mat
 driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
-driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0);	1.0	structure	the first round pushes by the amounts the probes found
+driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved);	1.0	structure	the first round pushes by the amounts the probes found, once
 driver-robot-boot.adb	R := R / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	2	format	two digits after the point in the log
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	3	format	three exponent digits in the log
@@ -1776,6 +1778,8 @@ driver-robot-lockin.adb	S.Rest_Counts_Known := Rest > 1;	1	statistics	a spread t
 driver-robot-lockin.adb	S.Shifts.Append (0.0);	0.0	math	a cell that does not respond moves no pixels
 driver-robot-lockin.adb	S.Shifts.Append (0.0, Ada.Containers.Count_Type (Kept));	0.0	math	a cell that cannot show a displacement moves no pixels
 driver-robot-lockin.adb	Sigma : constant Real := 1.0 / Sqrt (Weights);	1.0	math	the standard error of a mean weighted by inverse variances is one over the root of the weights' sum
+driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Dof (Cell, G)) * Noise (Cell - 1) ** 4);	1.0	math	the weight of an estimate is the inverse of its variance
+driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Dof (Cell, G)) * Noise (Cell - 1) ** 4);	2.0	math	a chi-square has a variance of twice its degrees of freedom
 driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Freedom) * Var ** 2 + 4.0 * Var * Typical);	1.0	math	the weight of an estimate is the inverse of its variance
 driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Freedom) * Var ** 2 + 4.0 * Var * Typical);	2.0	math	the variance of a chi-square statistic is twice its degrees of freedom
 driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Freedom) * Var ** 2 + 4.0 * Var * Typical);	4.0	math	the variance of a non-central chi-square statistic adds four times its non-centrality

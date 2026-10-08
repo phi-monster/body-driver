@@ -249,6 +249,14 @@ package Driver.Robot is
    --  How many of the eye's textured cells the verdict found responding to
    --  the group's push.
 
+   function Resting_Motion (M : Model; G : Group_Id; E : Eye_Id) return Real;
+   --  How many sigmas the cells that did not respond to the group's push move together: the inverse-variance sum
+   --  of their displacement energies over the root of the sum of their weights. Each cell's energy is an unbiased
+   --  estimate of the motion it shows, however little (a cell that moves a tenth of what it takes to respond
+   --  does not respond, and its energy is still a tenth), so a view whose far part moves less than any cell can
+   --  tell, but moves, shows it here when it shows it nowhere else. About a standard normal when none moves;
+   --  zero while there is no verdict.
+
    function Textured_Cells (M : Model; G : Group_Id; E : Eye_Id) return Natural;
    --  How many cells of the eye the verdict was reached over: those with the
    --  texture to show a displacement. Zero while there is no verdict.
@@ -400,6 +408,7 @@ private
       Responding : Natural := 0;   --  cells whose displacement follows the group
       Textured   : Natural := 0;   --  cells that can show a displacement
       Fraction   : Estimate;       --  Responding / Textured, with its binomial sigma
+      Resting    : Real := 0.0;    --  the motion of the cells that did not respond, together, in sigmas (Lockin)
    end record;
 
    package Effect_Vectors is new Ada.Containers.Vectors (Positive, Eye_Effect);

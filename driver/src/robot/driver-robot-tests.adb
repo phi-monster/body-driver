@@ -455,10 +455,10 @@ package body Driver.Robot.Tests is
       M : Model;
       Undecided_Third : constant Eye_Effect :=
         (Verdict => Undecided, Responding => 24, Textured => 48,
-         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0));
+         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0);
       Nothing_Third : constant Eye_Effect :=
         (Verdict => Nothing, Responding => 0, Textured => 48,
-         Fraction => (Value => 0.0, Sigma => 0.0, Degrees_Of_Freedom => 0));
+         Fraction => (Value => 0.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0);
    begin
       Exercise_Rig (M);
       Check (Role (M, 3) = Closer, "the closer is a closer, got " & Role (M, 3)'Image);
@@ -600,7 +600,7 @@ package body Driver.Robot.Tests is
       M.Graph.Effects.Replace_Element
         ((3 - 1) * Eye_Count (M) + 1,
          (Verdict => Patch, Responding => 8, Textured => 48,
-          Fraction => (Value => 8.0 / 48.0, Sigma => 0.05, Degrees_Of_Freedom => 0)));
+          Fraction => (Value => 8.0 / 48.0, Sigma => 0.05, Degrees_Of_Freedom => 0), Resting => 0.0));
       Driver.Robot.Graph.Derive (M);
       Check (Role (M, 3) = Unclassified, "the closer pushed only with arm 1 is " & Role (M, 3)'Image);
       Check (Closer_Arm (M, 3) = 0, "the closer pushed only with arm 1 is given arm" & Closer_Arm (M, 3)'Image);
@@ -1008,7 +1008,7 @@ package body Driver.Robot.Tests is
       procedure Credit (M : in out Model; Gain : Real) is
          Effect : constant Eye_Effect :=
            (Verdict => Patch, Responding => 1, Textured => 1,
-            Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0));
+            Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0);
       begin
          M.Eyes (1).Kept_Groups.Append (1);
          M.Eyes (1).Kept_Channels.Append (1);
@@ -1185,7 +1185,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
             end;
          end if;
          if B > 40 then
@@ -1358,7 +1358,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
             end;
          end if;
          if B in 40 | 46 | 52 | 58 then
@@ -1441,7 +1441,7 @@ package body Driver.Robot.Tests is
       end loop;
       M.Graph.Effects.Replace_Element
         (1, (Verdict => Whole, Responding => 1, Textured => 1,
-             Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+             Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
    end Put_Eye;
 
    --  A joint pressed into a table moves about against it (A16's arm 1,
@@ -1646,7 +1646,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
             end;
          end if;
          --  Pushes 1 to 8, then (once an estimate has measured how long the
@@ -1727,7 +1727,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
             end;
          end if;
          if B in 66 .. 110 then
@@ -1819,7 +1819,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
             end;
          end if;
          if B in 66 .. 105 then
@@ -1896,7 +1896,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
             end;
          end if;
          if B in 66 .. 110 then
@@ -1976,7 +1976,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
             end;
          end if;
          if B in 66 .. 310 then
@@ -2059,7 +2059,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
             end;
          end if;
          if B in 66 .. 105 then
@@ -2135,7 +2135,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
             end;
          end if;
          if B in 66 .. 105 then
@@ -2598,6 +2598,33 @@ package body Driver.Robot.Tests is
       Check (Poses_2 > 0, "arm 2 was never swept with its eye");
    end Boot_With_A_Patch_That_Grows;
 
+   --  A view whose far part moves twenty times less than its near part, with nothing between. Pushed by the amount some
+   --  eye first sees arm 2 at, 13 of the rig's 48 cells respond (the near object, a quarter of the view); pushed at
+   --  twice that, 15: two more than the false alarms among the 35 that did not could make is not growth (p 0.004
+   --  against 0.0027), and the far part shows itself in a cell only at four times the amounts. The cells that did not
+   --  respond move all the same, and together they show it at the first push (Resting_Motion): the boot pushes on,
+   --  finds the whole at four times and sweeps arm 2. Without that test (the growth of the responding cells alone) it
+   --  stopped at 15 with arm 2 a part.
+   procedure Boot_With_A_Step_Wider_Than_A_Doubling is
+      M     : Model;
+      Done  : Boolean;
+      Ok    : Boolean;
+      Beats : Natural;
+      Poses, Poses_2 : Natural;
+   begin
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, Eye_2_Mid => 0.05, Eye_2_Far => 0.05);
+      Check (Done, "the boot did not finish");
+      Driver.Log.Line (Driver.Log.Robot, "boot with a step wider than a doubling: eye 2 shows arm 2 as "
+                       & Response (M, 2, 2)'Image & ", " & Responding (M, 2, 2)'Image & " of"
+                       & Textured_Cells (M, 2, 2)'Image & " cells, the rest moving together by"
+                       & Real'Image (Resting_Motion (M, 2, 2)) & " sigmas, arm 2 swept at" & Poses_2'Image & " poses");
+      Check (Role (M, 2) = Arm and then Eye_Mount (M, 2).Kind = Arm_Carried and then Eye_Mount (M, 2).Arm = 2,
+             "arm 2 carrying an eye whose far part moves twenty times less is not recognized: " & Role (M, 2)'Image
+             & ", eye 2 " & Eye_Mount (M, 2).Kind'Image & ", " & Response (M, 2, 2)'Image & " "
+             & Responding (M, 2, 2)'Image & " of" & Textured_Cells (M, 2, 2)'Image);
+      Check (Poses_2 > 0, "arm 2 was never swept with its eye");
+   end Boot_With_A_Step_Wider_Than_A_Doubling;
+
    --  When the cells that respond have grown. A patch of 13 of 48 cells that is 17 after the push is doubled has: the
    --  four new are more than the false alarms among the 35 that did not respond could make; 15 has not (two are).
    --  A16's arm 2 in eye 3, 134 of 525 undecided, was 282 pushed again; 132 and 135 is a patch that is one. A count
@@ -2922,7 +2949,7 @@ package body Driver.Robot.Tests is
             M.Graph.Effects.Replace_Element
               ((5 - 1) * Eyes + 1,
                (Verdict => Patch, Responding => 1, Textured => 1,
-                Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0)));
+                Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0));
             M.From_File (Stored_Responses) := True;
          end Credit_Step;
       begin
@@ -5724,6 +5751,10 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.boot.patch", "an arm whose eye shows only a patch of its view after the first "
                              & "pushes, the cells that move most, is taken for a part and left unswept",
                              Boot_With_A_Patch_That_Grows'Access);
+      Driver.Tests.Register ("robot.boot.step", "an arm whose eye shows a near object and a far part that moves twenty "
+                             & "times less is left a part: the cells that respond do not grow by a doubling, though "
+                             & "those that do not respond move together",
+                             Boot_With_A_Step_Wider_Than_A_Doubling'Access);
       Driver.Tests.Register ("robot.boot.grew", "the cells that respond to a push are found to have grown by no more "
                              & "than the false alarms among those that did not, or not to have when they grew by more",
                              Growth_Of_The_Responding_Cells'Access);
