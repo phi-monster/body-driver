@@ -114,14 +114,21 @@ procedure Replay is
    end Write_Beat;
 
    procedure Write_Hands is
-      --  Each hand's tips in its arm's tool frame, with the press direction
-      --  that defines them and the closer readings they belong to.
+      --  Each hand's tips in its arm's tool frame, with their covariance (null
+      --  while unknown), whether a second press confirmed them, the press
+      --  direction that defines them and the closer readings they belong to.
       use Driver.Robot.Hand;
       Line_Text : Unbounded_String := To_Unbounded_String ("{""hands"":[");
 
       function Vector_Json (V : Driver.Numerics.Vec3) return String is
         ("[" & Driver.Json.Number_Image (V (1)) & "," & Driver.Json.Number_Image (V (2)) & ","
          & Driver.Json.Number_Image (V (3)) & "]");
+
+      function Covariance_Json (P : Driver.Uncertain.Point_Estimate) return String is
+        (if not Driver.Uncertain.Known (P) then "null"
+         else "[" & Vector_Json ([P.Covariance (1, 1), P.Covariance (1, 2), P.Covariance (1, 3)]) & ","
+              & Vector_Json ([P.Covariance (2, 1), P.Covariance (2, 2), P.Covariance (2, 3)]) & ","
+              & Vector_Json ([P.Covariance (3, 1), P.Covariance (3, 2), P.Covariance (3, 3)]) & "]");
 
       function Readings_Json (X : Driver.Real_Array) return String is
          R : Unbounded_String := To_Unbounded_String ("[");
@@ -143,7 +150,9 @@ procedure Replay is
                for At_Opening in Opening loop
                   Append (Line_Text, (if At_Opening = Opening'First then "" else ",") & """"
                           & (if At_Opening = Open then "open" else "closed") & """:{""tip"":"
-                          & Vector_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening).Mean) & ",""press"":"
+                          & Vector_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening).Mean) & ",""covariance"":"
+                          & Covariance_Json (Tip_In_Tool (Hands, H, Lobe, At_Opening)) & ",""confirmed"":"
+                          & (if Tip_Confirmed (Hands, H, Lobe, At_Opening) then "true" else "false") & ",""press"":"
                           & Vector_Json (Press_Direction (Hands, H, Lobe, At_Opening).Unit_Vector) & ",""reading"":"
                           & Readings_Json (Closer_Reading (Hands, H, At_Opening)) & "}");
                end loop;
