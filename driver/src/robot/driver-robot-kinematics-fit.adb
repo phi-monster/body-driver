@@ -207,7 +207,7 @@ package body Driver.Robot.Kinematics.Fit is
       R0     : Real_Access := new Real_Array (1 .. Residuals);
       Rn     : Real_Access := new Real_Array (1 .. Residuals);
       J      : Matrix_Access := new Real_Matrix (1 .. Residuals, 1 .. Parameters);
-      Lambda : Real := Real'Model_Epsilon;
+      Lambda : Real := Driver.Conventions.Initial_Damping;
       Cost0  : Real;
 
       function Cost (R : Real_Array) return Real is

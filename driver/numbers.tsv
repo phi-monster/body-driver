@@ -180,6 +180,7 @@ driver-brain-service.adb	Thousandths : constant := 1000.0;	1000.0	format	boxes a
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
 driver-clock.adb	function Nanoseconds_Of (S : Duration) return Long_Long_Integer is (Long_Long_Integer (Real (S) * 1.0e9));	1.0e9	format	nanoseconds per second (the recording format counts nanoseconds)
+driver-conventions.ads	Initial_Damping : constant := 1.0;	1.0	numerics	a fit starts with its damping as large as the curvature itself: a first step is at most half the Gauss-Newton step
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
 driver-conventions.ads	Z : constant := 3.0;	3.0	statistics	the significance level of the one test (documented in Conventions)
 driver-distributions.adb	(Bernoulli (K) / (Real (2 * K * (2 * K - 1)) * Y ** (2 * K - 1)));	2	math	the Bernoulli numbers B_2 to B_18 of Stirling's series (eight summed, the next bounds what is left)

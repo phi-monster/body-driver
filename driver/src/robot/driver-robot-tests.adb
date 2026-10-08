@@ -5721,6 +5721,93 @@ package body Driver.Robot.Tests is
       Synthetic_Sweep (1.0, Expect_Fit => True, Frame_Error => 0.15, Track_Error => 0.35, Local_Error => 0.20);
    end Kinematics_With_Spreading_Errors;
 
+   --  The fit of an arm on the inputs of a recording of the simulator (tests/data: the readings' changes at each
+   --  keyframe, every sighting, the picture, and the number of keyframes the unit rests on). The camera's true focal
+   --  length is 397.04 pixels and its principal point the middle of the picture; the fit must come out fitted, within
+   --  a percent of both and keeping three quarters of its sightings.
+   procedure Fit_Of_A_Recording (Path : String) is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      package Real_IO is new Ada.Text_IO.Float_IO (Real);
+      package Int_IO is new Ada.Text_IO.Integer_IO (Integer);
+      F    : Ada.Text_IO.File_Type;
+      N, Frames, S, Width, Height, Unit : Integer;
+   begin
+      begin
+         Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+      exception
+         when Ada.Text_IO.Name_Error =>
+            Check (False, "the recorded inputs of an arm's fit are not at " & Path
+                          & " (the tests run from the driver's directory)");
+            return;
+      end;
+      Int_IO.Get (F, N);
+      Int_IO.Get (F, Frames);
+      Int_IO.Get (F, S);
+      Int_IO.Get (F, Width);
+      Int_IO.Get (F, Height);
+      Int_IO.Get (F, Unit);
+      declare
+         Visible   : Real_Array (1 .. N);
+         Changes   : Real_Matrix (1 .. Frames, 1 .. N);
+         type Sighting_Access is access Fit.Sighting_Array;
+         Seen      : constant Sighting_Access := new Fit.Sighting_Array (1 .. S);
+         Joints    : Fit.Joint_Array (1 .. N);
+         Found     : Fit.Lens;
+         Report    : Fit.Fit_Report;
+         Truth     : constant Real := 397.04;
+      begin
+         for J in 1 .. N loop
+            Real_IO.Get (F, Visible (J));
+         end loop;
+         for Frame in 1 .. Frames loop
+            for J in 1 .. N loop
+               Real_IO.Get (F, Changes (Frame, J));
+            end loop;
+         end loop;
+         for I in 1 .. S loop
+            declare
+               Frame, Track : Integer;
+            begin
+               Int_IO.Get (F, Frame);
+               Int_IO.Get (F, Track);
+               Seen (I).Frame := Frame;
+               Seen (I).Track := Track;
+               Real_IO.Get (F, Seen (I).U0);
+               Real_IO.Get (F, Seen (I).V0);
+               Real_IO.Get (F, Seen (I).U);
+               Real_IO.Get (F, Seen (I).V);
+            end;
+         end loop;
+         Ada.Text_IO.Close (F);
+         Fit.Fit (Changes, Visible, Seen.all, Width, Height, Unit, Joints, Found, Report);
+         Driver.Log.Line (Driver.Log.Robot, "kinematics test (recorded fit of" & Frames'Image & " keyframes): focal"
+                          & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy) & ", centre" & Real'Image (Found.Cx)
+                          & "," & Real'Image (Found.Cy) & ", kept" & Report.Used'Image & " of" & S'Image
+                          & ", noise" & Real'Image (Report.Sigma_Px) & " px");
+         Check (Report.Fitted and then Report.Determined,
+                "the fit of the recorded arm is not determined: stage" & Report.Stage'Image & ", "
+                & Ada.Strings.Unbounded.To_String (Report.Why));
+         Check (abs (Found.Fx - Truth) <= 0.01 * Truth and then abs (Found.Fy - Truth) <= 0.01 * Truth,
+                "the focal length is" & Real'Image (Found.Fx) & " by" & Real'Image (Found.Fy)
+                & " pixels where the camera's is" & Real'Image (Truth));
+         Check (abs (Found.Cx - Real (Width) / 2.0) <= 0.01 * Real (Width)
+                and then abs (Found.Cy - Real (Height) / 2.0) <= 0.01 * Real (Height),
+                "the principal point is" & Real'Image (Found.Cx) & "," & Real'Image (Found.Cy)
+                & " where the camera's is the middle of the picture");
+         Check (4 * Report.Used >= 3 * S, "the fit keeps only" & Report.Used'Image & " of" & S'Image & " sightings");
+      end;
+   end Fit_Of_A_Recording;
+
+   --  An arm's refit when its hand has pressed (A17): the 78 keyframes of the sweep and 56 of the presses, the arm
+   --  up to 1.4 radians from where it was swept, with 1 to 48 sightings each and some of them wrong. The stages
+   --  before the track refinement crossed the flat valley between the focal lengths, the centre and the distortion
+   --  in jumps from a damping of the float's epsilon, and the fit ended with a noise of 1.6 pixels, no joint
+   --  determined, and its normal equations singular.
+   procedure Kinematics_On_A_Recorded_Refit is
+   begin
+      Fit_Of_A_Recording ("tests/data/refit_with_presses.txt");
+   end Kinematics_On_A_Recorded_Refit;
+
    --  The final refinement takes a step when it moves some combination of the
    --  parameters by more than Unchanged_Fraction of its standard error,
    --  whatever the cost: stopped by a hundredth of the cost, A10's and A11's
@@ -5775,6 +5862,9 @@ package body Driver.Robot.Tests is
                              & "sigmas when the matcher's errors are smooth fields over the picture, a point's in "
                              & "all its keyframes and a keyframe's own, and a shift of each keyframe",
                              Kinematics_With_Spreading_Errors'Access);
+      Driver.Tests.Register ("robot.kinematics.pressed", "an arm's refit with the keyframes of its hand's presses, "
+                             & "from the inputs of a recording, is not determined or not within a percent of the "
+                             & "camera's focal length and centre", Kinematics_On_A_Recorded_Refit'Access);
       Driver.Tests.Register ("robot.kinematics.resolution", "the final refinement stops while a step still moves a "
                              & "combination of the parameters by more than Unchanged_Fraction of its standard error, "
                              & "because the step is a small part of the cost",
