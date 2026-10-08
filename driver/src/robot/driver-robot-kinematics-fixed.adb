@@ -432,6 +432,7 @@ package body Driver.Robot.Kinematics.Fixed is
          L    : Real_Matrix (1 .. P, 1 .. P);
          Pd   : Boolean;
          Meat : Real_Matrix (1 .. P, 1 .. P) := [others => [others => 0.0]];
+         White : Real := 0.0;   --  the level of the noise itself, in units of the noise (the mean square of a residual)
 
          --  How far apart the arm's own eye saw two sightings' points.
          function Apart (K, M : Positive) return Real is
@@ -462,6 +463,7 @@ package body Driver.Robot.Kinematics.Fixed is
                end if;
             end loop;
             Own := Own / Real (Count);
+            White := Own;
             declare
                Bins   : constant Positive := Natural (Real'Ceiling (Longest)) + 1;
                Mean   : Real_Array (1 .. Bins) := [others => 0.0];
@@ -626,7 +628,7 @@ package body Driver.Robot.Kinematics.Fixed is
                if Shared > 0 then
                   Add_Common_Spread;
                end if;
-               Fit.Sandwich (Inverse_A, Meat, Spread, Clipped, Sandwiched);
+               Fit.Sandwich (Inverse_A, Meat, Spread, Clipped, Sandwiched, Floor => White);
                Ok := Sandwiched;
                for A1 in 1 .. P loop
                   for B1 in 1 .. P loop
@@ -638,6 +640,79 @@ package body Driver.Robot.Kinematics.Fixed is
          Free (R);
          Free (J);
       end Covariance_At;
+
+      --  Whether the cost is quadratic over the range the covariance gives the terms. In the frame where the normal
+      --  equations are the identity (the terms taken through L^T, with A = L L^T) the covariance's principal
+      --  directions are the eigenvectors of L^T Sigma L, and a displacement of Z sigmas of the normal equations along
+      --  one, either way, raises a quadratic cost by Z^2 / 2. Least is the smallest of the square roots of twice the
+      --  rise the cost has there: how many sigmas of the cost itself that displacement is, which is Z wherever the
+      --  cost is quadratic over it (the covariance, which rests on the cost being so, stands) and fewer where it
+      --  flattens (the terms are known less well than it says). Real'Last when there are no free terms or the
+      --  normal equations are not positive definite.
+      procedure Linearity (S : State; Which : Free_Terms; Cov : Real_Matrix; Least : out Real) is
+         P    : constant Natural := Which'Length;
+         R    : Real_Access := new Real_Array (1 .. 2 * N);
+         J    : Matrix_Access := new Real_Matrix (1 .. 2 * N, 1 .. P);
+         A    : Real_Matrix (1 .. P, 1 .. P);
+         G    : Real_Vector (1 .. P);
+         Cost : Real;
+         L    : Real_Matrix (1 .. P, 1 .. P);
+         Pd   : Boolean;
+      begin
+         Least := Real'Last;
+         Linearize (S, Which, R.all, J.all);
+         Normal_Equations (R.all, J.all, A, G, Cost);
+         Driver.Numerics.Dense.Cholesky (A, L, Pd);
+         if Pd then
+            declare
+               Sub     : Real_Matrix (1 .. P, 1 .. P);
+               Values  : Real_Vector (1 .. P);
+               Vectors : Real_Matrix (1 .. P, 1 .. P);
+               Base    : constant Real := Cost_At (S);
+            begin
+               for A1 in 1 .. P loop
+                  for B1 in 1 .. P loop
+                     Sub (A1, B1) := Cov (Which (Which'First + A1 - 1), Which (Which'First + B1 - 1));
+                  end loop;
+               end loop;
+               declare
+                  W : constant Real_Matrix := Transpose (L) * Sub * L;
+               begin
+                  Eigensystem (0.5 * (W + Transpose (W)), Values, Vectors);
+               end;
+               for K in 1 .. P loop
+                  for Way in 0 .. 1 loop
+                     declare
+                        Whitened : Real_Vector (1 .. P);
+                        Step     : Real_Vector (1 .. P) := [others => 0.0];
+                        X        : Real_Array (1 .. Terms) := [others => 0.0];
+                     begin
+                        for A1 in 1 .. P loop
+                           Whitened (A1) := (if Way = 0 then 1.0 else -1.0) * Driver.Conventions.Z * Vectors (A1, K);
+                        end loop;
+                        --  The displacement in the terms: L^T Step = Whitened, L being lower triangular.
+                        for A1 in reverse 1 .. P loop
+                           declare
+                              Rest : Real := Whitened (A1);
+                           begin
+                              for B1 in A1 + 1 .. P loop
+                                 Rest := Rest - L (B1, A1) * Step (B1);
+                              end loop;
+                              Step (A1) := Rest / L (A1, A1);
+                           end;
+                        end loop;
+                        for A1 in 1 .. P loop
+                           X (Which (Which'First + A1 - 1)) := Step (A1);
+                        end loop;
+                        Least := Real'Min (Least, Sqrt (2.0 * Real'Max (0.0, Cost_At (Moved (S, X)) - Base)));
+                     end;
+                  end loop;
+               end loop;
+            end;
+         end if;
+         Free (R);
+         Free (J);
+      end Linearity;
 
       --  A stage's outcome.
       Stage_A, Stage_B : State;
@@ -744,6 +819,9 @@ package body Driver.Robot.Kinematics.Fixed is
          Report.Sigma_Px := Sigma;
          Report.Used := Used;
          Report.Distorted := Keep_B;
+         if Final_Ok then
+            Linearity (Final, (if Keep_B then With_Distortion else Without_Distortion), Cov, Report.Linear_To);
+         end if;
          --  The covariance as the fit has it: the turn is about the eye's own axes (the pose is its estimate
          --  turned by it), the centre is in the world.
          if Final_Ok then
@@ -765,22 +843,49 @@ package body Driver.Robot.Kinematics.Fixed is
                Sigma_Fy : constant Real := Final.L.Fy * Sqrt (Cov (2, 2));
                Turn_Var : constant Real := Cov (7, 7) + Cov (8, 8) + Cov (9, 9);
                Place_Var : constant Real := Cov (10, 10) + Cov (11, 11) + Cov (12, 12);
+               Why : Ada.Strings.Unbounded.Unbounded_String;
+               --  Every criterion the eye fails is told, the covariance's own first: the sigmas of the others are read
+               --  from it.
+               procedure Say (Text : String) is
+               begin
+                  if Ada.Strings.Unbounded.Length (Why) > 0 then
+                     Ada.Strings.Unbounded.Append (Why, "; ");
+                  end if;
+                  Ada.Strings.Unbounded.Append (Why, Text);
+               end Say;
             begin
+               if Report.Linear_To < Driver.Conventions.Z - 1.0 then
+                  --  The sigmas rest on the cost being quadratic over them. One sigma is the standard deviation of a
+                  --  significance itself: a displacement the covariance puts Z sigmas away that the cost puts more
+                  --  than that nearer is not where the covariance says.
+                  Say ("the fit is not quadratic over its own sigma: a displacement of "
+                       & Driver.Log.Image (Driver.Conventions.Z, 0) & " sigmas along a principal direction of its"
+                       & " covariance changes the cost by only" & Driver.Log.Image (Report.Linear_To, 1)
+                       & ", so its covariance does not stand");
+               end if;
                if not Driver.Uncertain.Significant (Final.L.Fx, Sigma_Fx, 2 * Used - Terms)
                  or else not Driver.Uncertain.Significant (Final.L.Fy, Sigma_Fy, 2 * Used - Terms)
                then
-                  Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
-                    ("the points leave the focal lengths undetermined:" & Driver.Log.Image (Final.L.Fx, 1) & " +-"
-                     & Driver.Log.Image (Sigma_Fx, 1) & " and" & Driver.Log.Image (Final.L.Fy, 1) & " +-"
-                     & Driver.Log.Image (Sigma_Fy, 1) & " px");
-               elsif not (Driver.Conventions.Z * Sqrt (Turn_Var) < Ada.Numerics.Pi / 2.0) then
-                  Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
-                    ("the points leave the eye's turn known only to" & Real'Image (Sqrt (Turn_Var)) & " rad");
-               elsif not (Place_Var < Real'Last) then
-                  Report.Why := Ada.Strings.Unbounded.To_Unbounded_String ("the points leave the eye's centre unknown");
-               else
-                  Report.Determined := True;
+                  Say ("the points leave the focal lengths undetermined:" & Driver.Log.Image (Final.L.Fx, 1) & " +-"
+                       & Driver.Log.Image (Sigma_Fx, 1) & " and" & Driver.Log.Image (Final.L.Fy, 1) & " +-"
+                       & Driver.Log.Image (Sigma_Fy, 1) & " px");
                end if;
+               if not (Driver.Conventions.Z * Sqrt (Cov (3, 3)) < Real (Width) / 2.0
+                       and then Driver.Conventions.Z * Sqrt (Cov (4, 4)) < Real (Height) / 2.0)
+               then
+                  --  The optical axis is not located in the picture to within half of it.
+                  Say ("the points leave the eye's principal point known only to within"
+                       & Driver.Log.Image (Sqrt (Cov (3, 3)), 1) & " and" & Driver.Log.Image (Sqrt (Cov (4, 4)), 1)
+                       & " px in a picture of" & Width'Image & " by" & Height'Image);
+               end if;
+               if not (Driver.Conventions.Z * Sqrt (Turn_Var) < Ada.Numerics.Pi / 2.0) then
+                  Say ("the points leave the eye's turn known only to" & Real'Image (Sqrt (Turn_Var)) & " rad");
+               end if;
+               if not (Place_Var < Real'Last) then
+                  Say ("the points leave the eye's centre unknown");
+               end if;
+               Report.Why := Why;
+               Report.Determined := Ada.Strings.Unbounded.Length (Why) = 0;
             end;
          end if;
       end;
@@ -814,89 +919,148 @@ package body Driver.Robot.Kinematics.Fixed is
    is
       N      : constant Natural := Sightings'Length;
       E      : Vec3 := Zero3;
-      Weight : Real_Access := new Real_Array (1 .. N);
-      Rounds : Natural := 0;
-      Ok     : Boolean := True;
-      Again  : Boolean := True;
+      Best   : Real := Real'Last;   --  the least median miss any sample gave
 
-      --  Where the camera of the current E puts sighting J, and its depth there.
-      procedure Predict (J : Positive; U, V, Depth : out Real) is
-         Hx : constant Vec3 := H * [Along_1 (J), Along_2 (J), 1.0];
-         Q  : constant Vec3 := Hx + Height_Of (J) * E;
+      --  The homography's image of sighting J's foot on the plane.
+      function Foot_Image (J : Positive) return Vec3 is
+         Foot : constant Vec3 := [Along_1 (J), Along_2 (J), 1.0];
+      begin
+         return H * Foot;
+      end Foot_Image;
+
+      --  Where the camera of Candidate puts sighting J: its image, and the depth the image is taken at.
+      procedure Predict (J : Positive; Candidate : Vec3; U, V, Depth : out Real) is
+         Q : constant Vec3 := Foot_Image (J) + Height_Of (J) * Candidate;
       begin
          Depth := Q (3);
          U := (if Q (3) /= 0.0 then Q (1) / Q (3) else Real'Last);
          V := (if Q (3) /= 0.0 then Q (2) / Q (3) else Real'Last);
       end Predict;
+
+      --  The rows of the least squares for e that sighting J gives (point at height Z, image of its foot Hx,
+      --  pixel (U, V): Z (U e3 - e1) = Hx1 - U Hx3, and the same for V), weighed by W over the depth squared.
+      procedure Add_Rows (J : Positive; Candidate : Vec3; W : Real; A : in out Mat3; B : in out Vec3) is
+         Sg    : Sighting renames Sightings (Sightings'First + J - 1);
+         Z     : constant Real := Height_Of (J);
+         Hx    : constant Vec3 := Foot_Image (J);
+         Depth : constant Real := Hx (3) + Z * Candidate (3);
+      begin
+         if Off_Plane (J) and then Depth /= 0.0 then
+            declare
+               Weighed : constant Real := W / Depth ** 2;
+               Cu : constant Vec3 := [-Z, 0.0, Z * Sg.U];
+               Cv : constant Vec3 := [0.0, -Z, Z * Sg.V];
+               Ru : constant Real := Hx (1) - Sg.U * Hx (3);
+               Rv : constant Real := Hx (2) - Sg.V * Hx (3);
+            begin
+               A := A + Weighed * Outer (Cu, Cu) + Weighed * Outer (Cv, Cv);
+               B := B + (Weighed * Ru) * Cu + (Weighed * Rv) * Cv;
+            end;
+         end if;
+      end Add_Rows;
+
+      --  The e that sightings J1 and J2 alone fix, from where the homography alone puts them.
+      procedure Fix_By_Two (J1, J2 : Positive; Candidate : out Vec3; Good : out Boolean) is
+         A  : Mat3 := [others => [others => 0.0]];
+         B  : Vec3 := Zero3;
+         L  : Mat3;
+      begin
+         Add_Rows (J1, Zero3, 1.0, A, B);
+         Add_Rows (J2, Zero3, 1.0, A, B);
+         Driver.Numerics.Dense.Cholesky (A, L, Good);
+         Candidate := (if Good then Driver.Numerics.Dense.Cholesky_Solve (L, B) else Zero3);
+      end Fix_By_Two;
+
+      --  The distance in pixels between where sighting J was seen and where the camera of Candidate puts it.
+      function Miss (J : Positive; Candidate : Vec3) return Real is
+         U, V, Depth : Real;
+      begin
+         Predict (J, Candidate, U, V, Depth);
+         if Depth <= 0.0 then
+            return Real'Last;
+         end if;
+         return Sqrt ((Sightings (Sightings'First + J - 1).U - U) ** 2
+                      + (Sightings (Sightings'First + J - 1).V - V) ** 2);
+      end Miss;
    begin
       Lens := (others => <>);
       Pose := Identity;
       Found := False;
-      Weight.all := [others => 1.0];
-      while Again and then Ok and then Rounds <= N loop
-         Rounds := Rounds + 1;
+      --  A first e by consensus, as the homography is found: from samples of two off-plane sightings (which fix it:
+      --  four equations for three terms), the one that the least median of the misses over all the off-plane
+      --  sightings favours, so that up to half of them may be anything at all.
+      declare
+         Count : Natural := 0;
+      begin
+         for J in 1 .. N loop
+            if Off_Plane (J) then
+               Count := Count + 1;
+            end if;
+         end loop;
+         if Count < 2 then
+            return;
+         end if;
          declare
-            A  : Mat3 := [others => [others => 0.0]];
-            B  : Vec3 := Zero3;
-            L  : Mat3;
-            Pd : Boolean;
+            Which   : Fit.Count_Array (1 .. Count);
+            Index   : Fit.Count_Array (1 .. 2);
+            Misses  : Real_Access := new Real_Array (1 .. Count);
+            Sampler : Fit.Sampler;
+            Made    : Natural := 0;
          begin
             for J in 1 .. N loop
+               if Off_Plane (J) then
+                  Made := Made + 1;
+                  Which (Made) := J;
+               end if;
+            end loop;
+            for Sample in 1 .. Fit.Consensus_Samples (2, 0.5) loop
+               Fit.Pick (Sampler, Count, Index);
                declare
-                  Sg : Sighting renames Sightings (Sightings'First + J - 1);
-                  Z  : constant Real := Height_Of (J);
-                  Foot : constant Vec3 := [Along_1 (J), Along_2 (J), 1.0];
-                  Hx : constant Vec3 := H * Foot;
-                  Depth : constant Real := Hx (3) + Z * E (3);
+                  Candidate : Vec3;
+                  Good      : Boolean;
                begin
-                  if Off_Plane (J) and then Depth /= 0.0 then
+                  Fix_By_Two (Which (Index (1)), Which (Index (2)), Candidate, Good);
+                  if Good then
+                     for K in 1 .. Count loop
+                        Misses (K) := Miss (Which (K), Candidate);
+                     end loop;
                      declare
-                        W  : constant Real := Weight (J) / Depth ** 2;
-                        Cu : constant Vec3 := [-Z, 0.0, Z * Sg.U];
-                        Cv : constant Vec3 := [0.0, -Z, Z * Sg.V];
-                        Ru : constant Real := Hx (1) - Sg.U * Hx (3);
-                        Rv : constant Real := Hx (2) - Sg.V * Hx (3);
+                        Median : constant Real := Driver.Stats.Median (Misses.all);
                      begin
-                        A := A + W * Outer (Cu, Cu) + W * Outer (Cv, Cv);
-                        B := B + (W * Ru) * Cu + (W * Rv) * Cv;
+                        if Median < Best then
+                           Best := Median;
+                           E := Candidate;
+                        end if;
                      end;
                   end if;
                end;
             end loop;
-            Driver.Numerics.Dense.Cholesky (A, L, Pd);
-            if not Pd then
-               Ok := False;
-            else
-               declare
-                  Next  : constant Vec3 := Driver.Numerics.Dense.Cholesky_Solve (L, B);
-                  Both  : Real_Access := new Real_Array (1 .. 2 * N);
-                  Sigma : Real;
-               begin
-                  Again := abs (Next - E) > Driver.Conventions.Unchanged_Fraction * abs Next;
-                  E := Next;
-                  for J in 1 .. N loop
-                     declare
-                        U, V, Depth : Real;
-                     begin
-                        Predict (J, U, V, Depth);
-                        Both (2 * J - 1) := Sightings (Sightings'First + J - 1).U - U;
-                        Both (2 * J) := Sightings (Sightings'First + J - 1).V - V;
-                     end;
-                  end loop;
-                  Sigma := Driver.Stats.Robust_Sigma (Both.all);
-                  for J in 1 .. N loop
-                     Weight (J) := (if Sigma > 0.0
-                                    then Huber (Real'Max (abs Both (2 * J - 1), abs Both (2 * J)) / Sigma) else 1.0);
-                  end loop;
-                  Free (Both);
-               end;
+            Free (Misses);
+            if Best = Real'Last then
+               return;
             end if;
          end;
-      end loop;
-      Free (Weight);
-      if not Ok then
-         return;
-      end if;
+      end;
+      --  Then the least squares over the sightings that agree with it (their miss within Z of the noise the median
+      --  miss shows), once: the weights rest on the depths the consensus gave, and iterating them would let the
+      --  depths follow the fit.
+      declare
+         Noise : constant Real := Best / Fit.Rayleigh_Median;
+         A     : Mat3 := [others => [others => 0.0]];
+         B     : Vec3 := Zero3;
+         L     : Mat3;
+         Pd    : Boolean;
+      begin
+         for J in 1 .. N loop
+            if Off_Plane (J) and then not Driver.Uncertain.Significant (Miss (J, E), Noise) then
+               Add_Rows (J, E, 1.0, A, B);
+            end if;
+         end loop;
+         Driver.Numerics.Dense.Cholesky (A, L, Pd);
+         if Pd then
+            E := Driver.Numerics.Dense.Cholesky_Solve (L, B);
+         end if;
+      end;
       declare
          --  K R = the first three columns, K upper triangular with a positive diagonal, found from the last row up.
          Row_1 : constant Vec3 := [H (1, 1), H (1, 2), E (1)];

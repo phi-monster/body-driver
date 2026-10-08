@@ -1418,6 +1418,56 @@ package body Driver.Robot.Tests is
              & (if Tail (0) then " 42" else " 41") & " beats");
    end Alternating_Rounds_Stop;
 
+   --  A group the driver never commanded is held by sending it its current reading, beat after beat (Driver.Replies), and
+   --  a joint that creeps by a hair every beat makes that target change every beat. A beat whose target changed was
+   --  taken for no rest beat, so that the arms of A22 had no rest and no noise until the estimate at the doubling of
+   --  the stream (736 beats), Moving was false, and each push was waited for as long as the stream was old: three holds
+   --  of 292, 661 and 913 beats in the probes, 1,866 of the boot's 17,465. A hold asks for nothing: a beat is at rest
+   --  when no push is under way. A real push, after the rest, is still a push.
+   procedure Held_Group_Reaches_Its_Noise is
+      M       : Model;
+      Rng     : Generator;
+      Reading : Real := 5.0e-10;
+      Echo    : Real := Reading;   --  what the hold sends: the reading of the beat before
+      Pushed_At : constant := 140;
+
+      --  One beat: the group's reading creeps by a hair and jitters; the hold sends the reading of the beat before,
+      --  until a real command, at Pushed_At, asks 0.01 of it.
+      procedure Beat (B : Natural) is
+         O    : Observation;
+         Sent : Driver.Commands.Command := Driver.Commands.Hold;
+      begin
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         if B >= Pushed_At then
+            Reading := Reading + (if B = Pushed_At then 0.01 else 0.0);
+         else
+            Reading := Reading + 1.4e-12 + 1.0e-13 * Gaussian (Rng);
+         end if;
+         O.Readings.Append (Real_Array'(1 => Reading));
+         Driver.Commands.Set_Target (Sent, 1, [(if B < Pushed_At then Echo else Echo + 0.01)]);
+         Observe (M, O, Sent);
+         Echo := Reading;
+      end Beat;
+   begin
+      for B in 0 .. 119 loop
+         Beat (B);
+      end loop;
+      Driver.Robot.Channels.Measure (M);
+      Check (Driver.Robot.Channels.Noise (M, 1, 1) < 1.0e-9,
+             "the noise of a held group never commanded is" & Real'Image (Driver.Robot.Channels.Noise (M, 1, 1))
+             & ", not that of a creep of a hair a beat, after 120 beats");
+      for B in 120 .. 160 loop
+         Beat (B);
+      end loop;
+      Driver.Robot.Channels.Measure (M);
+      Check (Driver.Robot.Channels.Pushed (M, 1, Pushed_At), "the push after the rest is not a push");
+      Check (not Driver.Robot.Channels.Pushed (M, 1, 100), "a beat of the rest is part of a push");
+   end Held_Group_Reaches_Its_Noise;
+
    --  A joint stopped short of its target by something it keeps chattering
    --  against (a live x5's arm 2 in its first Hadamard cell: joint 3 moved by
    --  20 to 240 visible steps every beat for 800 beats and never came to
@@ -4379,6 +4429,7 @@ package body Driver.Robot.Tests is
       Head_Moved    : Rigid := Driver.Numerics.Identity;   --  how far it moved before the second arm's reference
       Head_Lens     : Driver.Robot.Kinematics.Fit.Lens := Rig_Lens;   --  the head's own lens
       Head_Shows    : Natural := Natural'Last;   --  the most points it answers, the first it shows
+      Seed          : Long_Long_Integer := 1;   --  the generator of the matches' errors starts here
       Lone_Box      : Boolean := False;   --  one small box stands on the table, in place of the others
       Arm_Noise     : Real := 0.1;        --  how far the arms' own matches err, pixels per coordinate
    end record;
@@ -4392,7 +4443,7 @@ package body Driver.Robot.Tests is
       Changes : constant Real_Matrix := Sweep_Changes;
       Placed  : constant array (1 .. 2) of Rigid := [Driver.Numerics.Identity, Scene.Second];
       Arms    : array (1 .. 2) of Arm_Evidence;
-      Rng     : Generator;
+      Rng     : Generator := (State => Scene.Seed);
       Cells   : constant := 4;
       Eyes    : constant Positive := (if Scene.Head then 3 else 2);
 
@@ -4773,11 +4824,11 @@ package body Driver.Robot.Tests is
    --  what it does not show.
    function Head_Rig
      (Boxes : Boolean; Shows : Natural := Natural'Last; Unseen : Boolean := True; Lone : Boolean := False;
-      Arm_Noise : Real := 0.1)
+      Arm_Noise : Real := 0.1; Head_Noise : Real := 0.1; Seed : Long_Long_Integer := 1)
       return Rig_Scene is
      ((Second => Far_Second, With_Boxes => Boxes, Head => True, Head_Pose => Head_Pose, Wrist_Sees => False,
        Unseen_Head => Unseen, Head_Lens => Off_Centre_Head, Head_Shows => Shows, Lone_Box => Lone,
-       Arm_Noise => Arm_Noise, others => <>));
+       Arm_Noise => Arm_Noise, Head_Noise => Head_Noise, Seed => Seed, others => <>));
 
    --  How many sigmas away from the truth the model's fixed eye E is: the head at Head_Pose, in the world's unit,
    --  with Off_Centre_Head.
@@ -4890,9 +4941,21 @@ package body Driver.Robot.Tests is
                 & Worst_Own'Image & " of its sigmas off the truth");
          Check (Worst_Back < 1.0e-6, "a point along a line of sight lands" & Worst_Back'Image
                 & " px from the pixel it was drawn through");
-         Check (abs (F.Pose.Translation - True_Centre) <= Driver.Conventions.Z * Sqrt (P.Position_Covariance (1, 1)
-                + P.Position_Covariance (2, 2) + P.Position_Covariance (3, 3)),
-                "the head's centre is off by" & Real'Image (abs (F.Pose.Translation - True_Centre)));
+         --  The pose estimate's own convention: the centre and the rotation vector that takes the estimate to the
+         --  truth, both in the world's axes, each within Z of its sigma.
+         declare
+            Away : constant Vec3 := True_Centre - F.Pose.Translation;
+            Turn : constant Vec3 := Driver.Numerics.Log (Head_Pose.Rotation * Transpose (P.Pose.Rotation));
+         begin
+            for A in 1 .. 3 loop
+               Check (abs Away (A) <= Driver.Conventions.Z * Sqrt (P.Position_Covariance (A, A)),
+                      "the head's centre is off by" & Real'Image (Away (A)) & " along axis" & A'Image
+                      & ", its sigma" & Real'Image (Sqrt (P.Position_Covariance (A, A))));
+               Check (abs Turn (A) <= Driver.Conventions.Z * Sqrt (P.Rotation_Covariance (A, A)),
+                      "the head is turned" & Real'Image (Turn (A)) & " rad about world axis" & A'Image
+                      & ", its sigma" & Real'Image (Sqrt (P.Rotation_Covariance (A, A))));
+            end loop;
+         end;
       end;
    end Measure_The_Head;
 
@@ -4975,6 +5038,93 @@ package body Driver.Robot.Tests is
          Check (Driver.Robot.Kinematics.Fixed_Why (M, 3)'Length > 0, "the head is not placed, and no reason is given");
       end if;
    end Head_Among_Few_Off_The_Table;
+
+   --  The worst, over a grid of five by five pixels, of the angle between the line of sight the head gives through a
+   --  pixel and the true one, in units of the sigma the head states for that line.
+   function Worst_Line_Pull (M : Model) return Real is
+      O     : Observation;
+      Worst : Real := 0.0;
+   begin
+      for Row in 0 .. 4 loop
+         for Col in 0 .. 4 loop
+            declare
+               Px    : constant Driver.Images.Pixel :=
+                 (U => 640.0 * (Real (Col) + 0.5) / 5.0, V => 480.0 * (Real (Row) + 0.5) / 5.0);
+               Line  : constant Ray_Estimate := Ray (M, 3, O, Px);
+               Truth : constant Vec3 :=
+                 Head_Pose.Rotation * Unit (Driver.Robot.Kinematics.Fit.Ray (Off_Centre_Head, Px.U, Px.V));
+               Angle : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Line.Direction.Unit_Vector * Truth)));
+            begin
+               Worst := Real'Max (Worst, Angle / Line.Direction.Sigma);
+            end;
+         end loop;
+      end loop;
+      return Worst;
+   end Worst_Line_Pull;
+
+   --  A head whose answers err by tens of pixels cannot fix its lens, and a covariance whose linearisation does not
+   --  hold over its sigma (or that leaves the optical axis anywhere in the picture) would say it did: the fit finds out
+   --  itself, by the cost over the covariance's range and by where the principal point is known to be, and the head
+   --  is unknown with that reason. The same scene with the answers off by 0.4 pixel (A16's matcher) is placed,
+   --  within Z of its sigmas.
+   --  And where answers off by 3 pixels place the head, it is within Z in its terms and in every line of sight: the
+   --  covariance it states is not a claim the data do not carry (the two scenes whose lines err most of eight).
+   procedure Head_With_Noisy_Answers is
+      Noisy, Quadratic, Fine : Model;
+
+      function Why (M : Model) return String is (Driver.Robot.Kinematics.Fixed_Why (M, 3));
+   begin
+      --  Answers off by 36 pixels (a twentieth of the picture): in most scenes made with other errors the eye's focal
+      --  lengths come out unsure (seeds 2 to 8: six so, and seed 4 by the cost not being quadratic over the
+      --  covariance's range). Seed 1 is the scene that places the eye otherwise: its principal point unsure by more
+      --  than the picture, and a distortion the noise made.
+      Build_Two_Arms (Noisy, Head_Rig (Boxes => True, Head_Noise => 36.0, Seed => 1));
+      Driver.Log.Line (Driver.Log.Robot, "head test (36 px, seed 1): "
+                       & (if Driver.Robot.Kinematics.Fixed_Known (Noisy, 3) then "placed"
+                          else "not placed: " & Why (Noisy)));
+      Check (not Driver.Robot.Kinematics.Fixed_Known (Noisy, 3), "a head whose answers err by 36 pixels is placed");
+      Check (Ada.Strings.Fixed.Index (Why (Noisy), "principal point") > 0,
+             "the reason is not that the principal point is not located within half the picture: '" & Why (Noisy)
+             & "'");
+      Build_Two_Arms (Quadratic, Head_Rig (Boxes => True, Head_Noise => 36.0, Seed => 4));
+      Driver.Log.Line (Driver.Log.Robot, "head test (36 px, seed 4): "
+                       & (if Driver.Robot.Kinematics.Fixed_Known (Quadratic, 3) then "placed"
+                          else "not placed: " & Why (Quadratic)));
+      Check (not Driver.Robot.Kinematics.Fixed_Known (Quadratic, 3), "a head whose answers err by 36 pixels is placed");
+      Check (Ada.Strings.Fixed.Index (Why (Quadratic), "quadratic") > 0,
+             "the reason is not that the cost is not quadratic over the fit's sigma: '" & Why (Quadratic) & "'");
+      Build_Two_Arms (Fine, Head_Rig (Boxes => True, Head_Noise => 0.4));
+      Check (Driver.Robot.Kinematics.Fixed_Known (Fine, 3),
+             "a head whose answers err by 0.4 pixel is not placed: " & Why (Fine));
+      if Driver.Robot.Kinematics.Fixed_Known (Fine, 3) then
+         Check (Head_Off (Fine, 3) <= Driver.Conventions.Z,
+                "the head with answers off by 0.4 pixel is" & Real'Image (Head_Off (Fine, 3))
+                & " sigmas off the truth");
+      end if;
+      for Seed in 5 .. 8 loop
+         if Seed = 5 or else Seed = 8 then
+            declare
+               Rough : Model;
+            begin
+               Build_Two_Arms (Rough, Head_Rig (Boxes => True, Head_Noise => 3.0, Seed => Long_Long_Integer (Seed)));
+               Driver.Log.Line (Driver.Log.Robot, "head test (3 px, seed" & Seed'Image & "): "
+                                & (if Driver.Robot.Kinematics.Fixed_Known (Rough, 3)
+                                   then "placed, " & Driver.Log.Image (Head_Off (Rough, 3), 2)
+                                        & " sigmas off, its worst line "
+                                        & Driver.Log.Image (Worst_Line_Pull (Rough), 2) & " sigmas off"
+                                   else "not placed: " & Why (Rough)));
+               if Driver.Robot.Kinematics.Fixed_Known (Rough, 3) then
+                  Check (Head_Off (Rough, 3) <= Driver.Conventions.Z,
+                         "the head with answers off by 3 pixels (seed" & Seed'Image & ") is"
+                         & Real'Image (Head_Off (Rough, 3)) & " sigmas off the truth");
+                  Check (Worst_Line_Pull (Rough) <= Driver.Conventions.Z,
+                         "a line of sight of the head with answers off by 3 pixels (seed" & Seed'Image & ") is"
+                         & Real'Image (Worst_Line_Pull (Rough)) & " sigmas off the truth");
+               end if;
+            end;
+         end if;
+      end loop;
+   end Head_With_Noisy_Answers;
 
    --  The head's place is part of the body: written, read back, it is the same fit with the same covariance, and
    --  the reloaded body answers as the measured one did.
@@ -5972,6 +6122,156 @@ package body Driver.Robot.Tests is
       Synthetic_Sweep (1.0, Expect_Fit => True, Frame_Error => 0.15, Track_Error => 0.35, Local_Error => 0.20);
    end Kinematics_With_Spreading_Errors;
 
+   --  The fit of an arm on the inputs of a recording of the simulator (tests/data: the readings' changes at each
+   --  keyframe, every sighting, the picture, and the number of keyframes the unit rests on). The camera's true focal
+   --  length is 397.04 pixels and its principal point the middle of the picture; the fit must come out fitted, within
+   --  a percent of both and keeping three quarters of its sightings.
+   procedure Fit_Of_A_Recording (Path : String) is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      package Real_IO is new Ada.Text_IO.Float_IO (Real);
+      package Int_IO is new Ada.Text_IO.Integer_IO (Integer);
+      F    : Ada.Text_IO.File_Type;
+      N, Frames, S, Width, Height, Unit : Integer;
+   begin
+      begin
+         Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+      exception
+         when Ada.Text_IO.Name_Error =>
+            Check (False, "the recorded inputs of an arm's fit are not at " & Path
+                          & " (the tests run from the driver's directory)");
+            return;
+      end;
+      Int_IO.Get (F, N);
+      Int_IO.Get (F, Frames);
+      Int_IO.Get (F, S);
+      Int_IO.Get (F, Width);
+      Int_IO.Get (F, Height);
+      Int_IO.Get (F, Unit);
+      declare
+         Visible   : Real_Array (1 .. N);
+         Changes   : Real_Matrix (1 .. Frames, 1 .. N);
+         type Sighting_Access is access Fit.Sighting_Array;
+         Seen      : constant Sighting_Access := new Fit.Sighting_Array (1 .. S);
+         Joints    : Fit.Joint_Array (1 .. N);
+         Found     : Fit.Lens;
+         Report    : Fit.Fit_Report;
+         Truth     : constant Real := 397.04;
+      begin
+         for J in 1 .. N loop
+            Real_IO.Get (F, Visible (J));
+         end loop;
+         for Frame in 1 .. Frames loop
+            for J in 1 .. N loop
+               Real_IO.Get (F, Changes (Frame, J));
+            end loop;
+         end loop;
+         for I in 1 .. S loop
+            declare
+               Frame, Track : Integer;
+            begin
+               Int_IO.Get (F, Frame);
+               Int_IO.Get (F, Track);
+               Seen (I).Frame := Frame;
+               Seen (I).Track := Track;
+               Real_IO.Get (F, Seen (I).U0);
+               Real_IO.Get (F, Seen (I).V0);
+               Real_IO.Get (F, Seen (I).U);
+               Real_IO.Get (F, Seen (I).V);
+            end;
+         end loop;
+         Ada.Text_IO.Close (F);
+         Fit.Fit (Changes, Visible, Seen.all, Width, Height, Unit, Joints, Found, Report);
+         Driver.Log.Line (Driver.Log.Robot, "kinematics test (recorded fit of" & Frames'Image & " keyframes): focal"
+                          & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy) & ", centre" & Real'Image (Found.Cx)
+                          & "," & Real'Image (Found.Cy) & ", kept" & Report.Used'Image & " of" & S'Image
+                          & ", noise" & Real'Image (Report.Sigma_Px) & " px");
+         Check (Report.Fitted and then Report.Determined,
+                "the fit of the recorded arm is not determined: stage" & Report.Stage'Image & ", "
+                & Ada.Strings.Unbounded.To_String (Report.Why));
+         Check (abs (Found.Fx - Truth) <= 0.01 * Truth and then abs (Found.Fy - Truth) <= 0.01 * Truth,
+                "the focal length is" & Real'Image (Found.Fx) & " by" & Real'Image (Found.Fy)
+                & " pixels where the camera's is" & Real'Image (Truth));
+         Check (abs (Found.Cx - Real (Width) / 2.0) <= 0.01 * Real (Width)
+                and then abs (Found.Cy - Real (Height) / 2.0) <= 0.01 * Real (Height),
+                "the principal point is" & Real'Image (Found.Cx) & "," & Real'Image (Found.Cy)
+                & " where the camera's is the middle of the picture");
+         Check (4 * Report.Used >= 3 * S, "the fit keeps only" & Report.Used'Image & " of" & S'Image & " sightings");
+      end;
+   end Fit_Of_A_Recording;
+
+   --  An arm's refit when its hand has pressed (A17): the 78 keyframes of the sweep and 56 of the presses, the arm
+   --  up to 1.4 radians from where it was swept, with 1 to 48 sightings each and some of them wrong. The stages
+   --  before the track refinement crossed the flat valley between the focal lengths, the centre and the distortion
+   --  in jumps from a damping of the float's epsilon, and the fit ended with a noise of 1.6 pixels, no joint
+   --  determined, and its normal equations singular.
+   procedure Kinematics_On_A_Recorded_Refit is
+   begin
+      Fit_Of_A_Recording ("tests/data/refit_with_presses.txt");
+   end Kinematics_On_A_Recorded_Refit;
+
+   --  The table that the tracks of an arm give: the tracks of a recording's fit (tests/data: per track the line of
+   --  sight in the reference eye, its refined depth and the depth's sigma), whose plane the arm calls its table. The
+   --  wrist cameras of those recordings look 30 degrees below the horizontal, so the true vertical in the eye's frame
+   --  is (0, -0.866, -0.5), and the table's normal, which points to the eye, is that.
+   function Table_Off_The_Vertical (Path : String; Tracks : out Natural) return Real is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      F      : Ada.Text_IO.File_Type;
+      Points : Fit.Sight_Point_Array (1 .. 1000);
+      Plane  : Fit.Sight_Plane;
+      On     : Fit.Flag_Array (1 .. 1000) := [others => False];
+      Up     : constant Vec3 := [0.0, -0.8660254037844386, -0.5];
+   begin
+      Tracks := 0;
+      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+      while not Ada.Text_IO.End_Of_File (F) loop
+         declare
+            Line  : constant String := Ada.Text_IO.Get_Line (F);
+            Value : array (1 .. 7) of Real;
+            Pos   : Positive := Line'First + 5;   --  after SIGHT
+         begin
+            for V in Value'Range loop
+               while Pos <= Line'Last and then Line (Pos) = ' ' loop
+                  Pos := Pos + 1;
+               end loop;
+               declare
+                  Stop : Positive := Pos;
+               begin
+                  while Stop <= Line'Last and then Line (Stop) /= ' ' loop
+                     Stop := Stop + 1;
+                  end loop;
+                  Value (V) := Real'Value (Line (Pos .. Stop - 1));
+                  Pos := Stop;
+               end;
+            end loop;
+            Tracks := Tracks + 1;
+            Points (Tracks) := (H => [Value (3), Value (4), Value (5)], Depth => Value (6), Sigma => Value (7));
+         end;
+      end loop;
+      Ada.Text_IO.Close (F);
+      Fit.Dominant_Plane (Points (1 .. Tracks), Plane, On (1 .. Tracks));
+      if not Plane.Found then
+         return Ada.Numerics.Pi;
+      end if;
+      return Ada.Numerics.Long_Elementary_Functions.Arccos (Real'Min (1.0, Fit.Plane_Normal (Plane) * Up));
+   end Table_Off_The_Vertical;
+
+   --  In a picture that looks along the table the room's far wall holds about as many of the tracks as the table does
+   --  (A23's second arm: 102 on the wall, 116 on the table), and the plane the most tracks lie on, scored by its
+   --  truncated cost, was the wall: the arm's up 87 degrees off the vertical (the wall is vertical), and a table that
+   --  its link to the other arm could not find in the head's view. Another recording holds a thing on the table 1 to
+   --  1.5 units nearer than the table, with 14 tracks against the table's 82: the table stays the table.
+   procedure Kinematics_Table_Of_The_Tracks is
+      Tracks : Natural;
+      Off    : Real;
+   begin
+      Off := Table_Off_The_Vertical ("tests/data/table_and_far_wall.txt", Tracks);
+      Check (Off < 0.01745, "the table of an arm that sees the far wall is" & Real'Image (Off * 57.29578)
+             & " degrees off the vertical, of" & Tracks'Image & " tracks");
+      Off := Table_Off_The_Vertical ("tests/data/table_and_a_thing.txt", Tracks);
+      Check (Off < 0.01745, "the table of an arm that sees a thing on it is" & Real'Image (Off * 57.29578)
+             & " degrees off the vertical, of" & Tracks'Image & " tracks");
+   end Kinematics_Table_Of_The_Tracks;
+
    --  The final refinement takes a step when it moves some combination of the
    --  parameters by more than Unchanged_Fraction of its standard error,
    --  whatever the cost: stopped by a hundredth of the cost, A10's and A11's
@@ -6033,6 +6333,12 @@ package body Driver.Robot.Tests is
                              & "sigmas when the matcher's errors are smooth fields over the picture, a point's in "
                              & "all its keyframes and a keyframe's own, and a shift of each keyframe",
                              Kinematics_With_Spreading_Errors'Access);
+      Driver.Tests.Register ("robot.kinematics.pressed", "an arm's refit with the keyframes of its hand's presses, "
+                             & "from the inputs of a recording, is not determined or not within a percent of the "
+                             & "camera's focal length and centre", Kinematics_On_A_Recorded_Refit'Access);
+      Driver.Tests.Register ("robot.kinematics.wall", "an arm whose picture holds the room's far wall as many tracks "
+                             & "as the table is given the wall for its table, or one that sees a thing on the table, "
+                             & "the thing", Kinematics_Table_Of_The_Tracks'Access);
       Driver.Tests.Register ("robot.kinematics.resolution", "the final refinement stops while a step still moves a "
                              & "combination of the parameters by more than Unchanged_Fraction of its standard error, "
                              & "because the step is a small part of the cost",
@@ -6085,6 +6391,10 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.head.lone",
                              "a fixed eye is placed, with a few points off the table, further from the truth than its "
                              & "own covariance says", Head_Among_Few_Off_The_Table'Access);
+      Driver.Tests.Register ("robot.head.noisy",
+                             "a fixed eye is placed from answers that err by 36 pixels (its linearised covariance not "
+                             & "standing over its own sigma), or one with answers off by 0.4 pixel is not placed",
+                             Head_With_Noisy_Answers'Access);
       Driver.Tests.Register ("robot.head.file",
                              "a fixed eye's place is lost, or changed in the covariance or the lines of sight, by the "
                              & "body file", Head_In_The_Body_File'Access);
@@ -6138,6 +6448,7 @@ package body Driver.Robot.Tests is
                              Unanswered_Push_Of_An_Unanswered_Group'Access);
       Driver.Tests.Register ("robot.channels.rounds", "the channels' noise and push rounds alternate for good, or take a "
                              & "beat whose mark alternates for rest", Alternating_Rounds_Stop'Access);
+      Driver.Tests.Register ("robot.channels.echo", "a group held by sending it its own reading, never commanded, has no rest and no noise because its target changes at every beat", Held_Group_Reaches_Its_Noise'Access);
       Driver.Tests.Register ("robot.steps.chatter", "a push against something its joint keeps chattering against never "
                              & "ends, or a free push that rings about its target is given up or called blocked",
                              Step_Ends_Against_Chatter'Access);
