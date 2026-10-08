@@ -887,19 +887,31 @@ driver-robot-hand-lobes.adb	return (Last >= Doubts.First_Index + 2 and then Stil
 driver-robot-hand-lobes.adb	return (Last >= Doubts.First_Index + 2 and then Still (Last, Last - 1) and then Still (Last - 1, Last - 2))	2	structure	two rounds in a row: three doubts compared, the last and the two before
 driver-robot-hand-lobes.adb	return (if Region = 0 then 0.0 else Sqrt (Sum / (2.0 * Real (Region))));	2.0	statistics	the mean over the two axes of the squared distance
 driver-robot-hand-lobes.ads	and then Driver.Pixels.Frames (Anchor) >= 2;	2	statistics	a deviation over poses needs two poses
+driver-robot-hand-lowering.adb	Enough : constant Boolean := T.Count > 2;	2	statistics	a scatter of shares needs more than two pushes before it, as a shortfall's does in the step tracker
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Least, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& (if Pixel > 0.0 then Driver.Log.Image (Pixel, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Aimed.Turn, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Descended, 4)));	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Least, 4) & "")	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Room.Value, 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Image (Step.Value, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Image (Step.Value, 4)	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (Bound, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
 driver-robot-hand-measure.adb	Bound : Real := Ada.Numerics.Pi / 2.0;	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
+driver-robot-hand-measure.adb	By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);	2.0	structure	each raise twice the one before, so that the smallest raise that frees the closer is found within a doubling of it
+driver-robot-hand-measure.adb	Eye : Eye_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
 driver-robot-hand-measure.adb	Lean : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;	4.0	math	half-way between away from the other lobes and across from them
+driver-robot-hand-measure.adb	Noise := Sqrt (2.0) * Reading_Noise (M, G, C);	2.0	statistics	the difference of two readings carries the channel's noise twice over
 driver-robot-hand-measure.adb	Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began));	1	structure	at least one asking: a view is asked for once it is pushed
 driver-robot-hand-measure.adb	else "" & Driver.Log.Image (By, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	elsif Steps.Stalled then "" & Driver.Log.Image (By, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	if Bound < Ada.Numerics.Pi / 2.0 and then not Checked and then Tilt = 0.0 then	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Eye.Value, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
@@ -1060,10 +1072,17 @@ driver-robot-hand-views.adb	if Driver.Pixels.Frames (V.Frames) >= 2 then	2	stati
 driver-robot-hand-views.adb	or else (Driver.Pixels.Frames (V.Frames) >= 2 and then not Comparable (T, P.Low.Element, V, C, Rest_Moved))	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
+driver-robot-hand.adb	& "" & (if Said.Point = 1 then "" else ""	1	structure	the first point of the hand is the tool's origin
+driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Said.Free, 3) & "");	100.0	format	a share printed as a percentage
+driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Said.Free, 3) & "");	3	format	digits printed in a log line or a message
+driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Said.Share, 1) & ""	1	format	digits printed in a log line or a message
+driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Said.Share, 1) & ""	100.0	format	a share printed as a percentage
 driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Shift.By / Lobe.Way.Reach, 2) & ""	100.0	format	a share of the travel is said in per cent
 driver-robot-hand.adb	& "" & Driver.Log.Image (100.0 * Shift.By / Lobe.Way.Reach, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (G.Value, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (Reach.Value * R.Lobes (L).Sights (Which).Spread, 3)	3	format	digits printed in a log line or a message
+driver-robot-hand.adb	& "" & Driver.Log.Image (Said.Asked, 4) & "" & Driver.Log.Image (Said.Went, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand.adb	& "" & Driver.Log.Image (Said.Asked, 4) & "" & Driver.Log.Image (Said.Went, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Driver.Robot.Hand.Shape.Scatter (R.Lobes (L).Shape), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Lobe.Way.Reach, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Reach.Value, 4) & "" & Driver.Log.Image (Reach.Sigma, 4)	4	format	digits printed in a log line or a message
@@ -1085,6 +1104,7 @@ driver-robot-hand.adb	Append (Text, "" & Driver.Log.Image (Shift.By, 2) & "");	2
 driver-robot-hand.adb	Append (Text, "" & Driver.Log.Image (Shift.Peak, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	Append (Text, (if L > 1 then "" else "") & "" & L'Image & ""	1	structure	a separator stands before every lobe but the first
 driver-robot-hand.adb	Append (Text, (if L > 1 then "" else "") & "" & L'Image & "");	1	structure	the first lobe is said with no separator before it
+driver-robot-hand.adb	Count : Natural := 1;	1	structure	the tool's origin is the first point of the hand
 driver-robot-hand.adb	Fast := 2.0 * Fast;	2.0	math	the descent doubles its step until the band
 driver-robot-hand.adb	Fast := 2.0 * Fast;	2.0	math	with nothing predicting the contact the descent doubles its step until it is blocked
 driver-robot-hand.adb	I : Hand_Id := 1;	1	structure	the first hand
@@ -1093,6 +1113,7 @@ driver-robot-hand.adb	Next : constant Ray_Estimate := Eye_Ray (M, P.Eye, (U => P
 driver-robot-hand.adb	Offset := 2.0 * Offset;	2.0	math	the sweep doubles its step
 driver-robot-hand.adb	Past := Real'Max (2.0 * Past, Real'Max (G.Sigma, Least));	2.0	numerics	doubling steps past the band
 driver-robot-hand.adb	Sqrt (2.0) * Reading_Noise (M, R.Group, C)));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-hand.adb	if E.Start < 1 or else not Driver.Robot.Channels.Has_Reading (M, Arm_Is, E.Start - 1)	1	structure	a push needs the reading before it: it began at the second beat or later
 driver-robot-hand.adb	if Pushes = 1 then	1	structure	the first push says whether the way answered
 driver-robot-hand.adb	return In_World (H, M, Id, O, (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	return In_World (H, M, Id, O, (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared

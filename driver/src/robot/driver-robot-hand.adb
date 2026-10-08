@@ -6,7 +6,9 @@ with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Hand.Frames;
 with Driver.Robot.Hand.Lobes;
+with Driver.Robot.Hand.Lowering;
 with Driver.Robot.Hand.Presses;
+with Driver.Robot.Hand.Pressing;
 with Driver.Robot.Hand.Shape;
 with Driver.Robot.Hand.Slide;
 with Driver.Robot.Hand.Sweep;
@@ -23,6 +25,7 @@ package body Driver.Robot.Hand is
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
    use type Driver.Robot.Hand.Sweep.Progress;
+   use type Driver.Robot.Hand.Lowering.Verdict;
 
    package Sweeps renames Driver.Robot.Hand.Sweep;
 
@@ -67,6 +70,10 @@ package body Driver.Robot.Hand is
       Lobes    : Lobe_Record_Vectors.Vector;
       Watch    : Driver.Robot.Hand.Presses.Watcher;   --  the arm's presses, from the stream
       Book     : Driver.Robot.Hand.Tips.Book;         --  the presses kept and the tips they measure
+      Lowering : Driver.Robot.Hand.Lowering.Track;    --  the descent under way, judged by where the hand went
+      Judged   : Natural := 0;                        --  the beat the latest push judged for lowering began
+      Stalled  : Natural := 0;                        --  the beat the latest push judged stalled began
+      Stalls   : Natural := 0;                        --  how many pushes were judged stalled
       Depth    : Estimate;
       Axis     : Direction_Estimate;
       Unsized  : Unbounded_String;                    --  what of its sizes is not measured, and why
@@ -665,6 +672,105 @@ package body Driver.Robot.Hand is
       return Result;
    end Measured_Slides;
 
+   procedure Judge_Push (R : in out Hand_Record; Id : Hand_Id; M : Model; O : Observation);
+   --  Judges the arm's latest push, once it has ended at rest, by where its
+   --  readings put the points of the hand (Driver.Robot.Hand.Lowering): the
+   --  tool's origin and the tips measured at the opening the closer stands at.
+   --  A push the arm followed and the hand did not go down with is a stall:
+   --  the hand lies on what it met, as a blocked push says too (A17's third
+   --  press, 4,600 beats on the table). Read from the stream alone, so that a
+   --  replay gives the verdicts of the run it replays.
+
+   procedure Judge_Push (R : in out Hand_Record; Id : Hand_Id; M : Model; O : Observation) is
+      Arm_Is : constant Group_Id := Arm_Group (M, R.Arm);
+   begin
+      if Driver.Robot.Steps.Episodes (M, Arm_Is) = 0 then
+         return;
+      end if;
+      declare
+         E : constant Episode := Driver.Robot.Steps.Latest (M, Arm_Is);
+      begin
+         if not (E.Ended and then E.Settled and then E.Rested) or else E.Start = R.Judged then
+            return;
+         end if;
+         R.Judged := E.Start;
+         if E.Start < 1 or else not Driver.Robot.Channels.Has_Reading (M, Arm_Is, E.Start - 1)
+           or else not Driver.Robot.Channels.Has_Reading (M, Arm_Is, E.End_At)
+           or else not Driver.Robot.Channels.Has_Target (M, Arm_Is, E.Start)
+         then
+            return;
+         end if;
+         declare
+            Size   : constant Natural := Group_Size (M, Arm_Is);
+            Up     : constant Direction_Estimate := Up_In_Arm (M, R.Arm);
+            Before : constant Real_Array :=
+              [for C in 1 .. Size => Driver.Robot.Channels.Reading (M, Arm_Is, E.Start - 1, C)];
+            Asked  : constant Real_Array := [for C in 1 .. Size => Driver.Robot.Channels.Target (M, Arm_Is, E.Start, C)];
+            After  : constant Real_Array := [for C in 1 .. Size => Driver.Robot.Channels.Reading (M, Arm_Is, E.End_At, C)];
+
+            function Seen_At (Arm : Real_Array) return Observation is
+               Then_Read : Observation;
+            begin
+               Then_Read.Readings := O.Readings;
+               Then_Read.Readings.Replace_Element (Arm_Is, Arm);
+               return Then_Read;
+            end Seen_At;
+
+            From   : constant Pose_Estimate := Tool_In_Arm (M, R.Arm, Seen_At (Before));
+            Target : constant Pose_Estimate := Tool_In_Arm (M, R.Arm, Seen_At (Asked));
+            To     : constant Pose_Estimate := Tool_In_Arm (M, R.Arm, Seen_At (After));
+         begin
+            if Up.Sigma = Real'Last or else From.Position_Covariance (1, 1) = Real'Last
+              or else Target.Position_Covariance (1, 1) = Real'Last or else To.Position_Covariance (1, 1) = Real'Last
+            then
+               return;
+            end if;
+            declare
+               Closer : constant Natural := Group_Size (M, R.Group);
+               Lobes  : constant Natural := Natural (R.Lobes.Length);
+               Where  : Driver.Robot.Hand.Lowering.Points (1 .. 1 + Lobes) := [others => Zero3];
+               Whose  : array (1 .. 1 + Lobes) of Natural := [others => 0];   --  the lobe a point is the tip of
+               Count  : Natural := 1;
+               Which  : Opening;
+               Said   : Driver.Robot.Hand.Lowering.Judgment;
+            begin
+               if Driver.Robot.Channels.Has_Reading (M, R.Group, E.End_At)
+                 and then Opening_Of (R, M, [for C in 1 .. Closer => Driver.Robot.Channels.Reading (M, R.Group, E.End_At, C)],
+                                      Which)
+               then
+                  for L in 1 .. Lobes loop
+                     declare
+                        Tip : constant Point_Estimate := Driver.Robot.Hand.Tips.Tip (R.Book, L, Which);
+                     begin
+                        if Known (Tip) then
+                           Count := Count + 1;
+                           Where (Count) := Tip.Mean;
+                           Whose (Count) := L;
+                        end if;
+                     end;
+                  end loop;
+               end if;
+               Driver.Robot.Hand.Lowering.Judge
+                 (R.Lowering, From, Target, To, -Up.Unit_Vector, Where (1 .. Count),
+                  Driver.Robot.Hand.Pressing.Least_Push (M, R.Arm, Seen_At (After)), Said);
+               if Said.Result = Driver.Robot.Hand.Lowering.Stalled then
+                  R.Stalled := E.Start;
+                  R.Stalls := R.Stalls + 1;
+                  Driver.Log.Line
+                    (Driver.Log.Robot,
+                     "hand" & Id'Image & ": the arm followed the push that began at beat" & E.Start'Image & " and the hand did not"
+                     & " go down with it: asked to take " & (if Said.Point = 1 then "the tool's origin" else "the tip of lobe"
+                                                            & Whose (Said.Point)'Image)
+                     & " down" & Driver.Log.Image (Said.Asked, 4) & ", it went down" & Driver.Log.Image (Said.Went, 4)
+                     & ", short by " & Driver.Log.Image (100.0 * Said.Share, 1) & " % of the ask, where the"
+                     & Driver.Robot.Hand.Lowering.Pushes (R.Lowering)'Image & " pushes of this descent before it fell short by at"
+                     & " most " & Driver.Log.Image (100.0 * Said.Free, 3) & " %: it has stopped lowering the hand");
+               end if;
+            end;
+         end;
+      end;
+   end Judge_Push;
+
    procedure Watch
      (R          : in out Hand_Record;
       Id         : Hand_Id;
@@ -696,6 +802,11 @@ package body Driver.Robot.Hand is
       Press : Driver.Robot.Hand.Presses.Event;
       Which : Opening;
 
+      --  The arm's latest push is one judged stalled.
+      function Stalled_Now return Boolean is
+        (R.Stalled /= 0 and then Driver.Robot.Steps.Episodes (M, Arm_Group (M, R.Arm)) > 0
+         and then Driver.Robot.Steps.Latest (M, Arm_Group (M, R.Arm)).Start = R.Stalled);
+
       function Pose_Of (Arm : Real_Array) return Pose_Estimate is
          Then_Read : Observation;
       begin
@@ -710,10 +821,13 @@ package body Driver.Robot.Hand is
                           & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image & " presses kept take their poses from the new fit");
          Size_Up (R, Id);
       end if;
+      Judge_Push (R, Id, M, O);
       if not Driver.Observations.Has_Reading (O, R.Group) then
          return;
       end if;
-      Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked, Is_Pushing, Is_Still, Tool_In_Arm (M, R.Arm, O),
+      --  A push that stalled is a block as far as the press is concerned: the verdict stands until the next push begins.
+      Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked or else Stalled_Now, Is_Pushing, Is_Still,
+                                         Tool_In_Arm (M, R.Arm, O),
                                          O.Readings.Element (Arm_Group (M, R.Arm)), O.Readings.Element (R.Group),
                                          Found, Press);
       if not Found then
@@ -787,6 +901,29 @@ package body Driver.Robot.Hand is
       end loop;
    end Observe;
 
+   procedure Free_Closer
+     (Arrived    : not null access function return Boolean;
+      Reading    : not null access function return Real;
+      Moved      : not null access function (Before, After : Real) return Boolean;
+      Ask        : not null access procedure;
+      Raise_Hand : not null access procedure (First : Boolean; Raised : out Boolean);
+      Raises     : out Natural)
+   is
+      Before : Real;
+      Done   : Boolean;
+   begin
+      Raises := 0;
+      Ask.all;
+      while not Arrived.all loop
+         Before := Reading.all;
+         Raise_Hand (Raises = 0, Done);
+         exit when not Done;
+         Raises := Raises + 1;
+         Ask.all;
+         exit when not Arrived.all and then not Moved (Before, Reading.all);
+      end loop;
+   end Free_Closer;
+
    procedure Sweep_Way
      (Way          : Real;
       Step         : Real;
@@ -848,12 +985,12 @@ package body Driver.Robot.Hand is
    procedure Descend
      (Above : not null access function return Heights;
       Least : Real;
-      Lower : not null access procedure (By : Real; Reached : out Boolean);
+      Lower : not null access procedure (By : Real; Result : out Push_Result);
       Steps : out Descent_Steps)
    is
       Fast    : Real := Least;   --  the next step of the fast part, doubling
       Past    : Real := 0.0;     --  the last step past the band, doubling
-      Reached : Boolean;
+      Pushed  : Push_Result;
       Allowed : Natural := Natural'Last;   --  the steps the schedule takes to cover the eye's room: no more are made
       First   : Boolean := True;
 
@@ -953,8 +1090,14 @@ package body Driver.Robot.Hand is
                when Banded   => Steps.Band := Steps.Band + 1;
                when Blind    => Steps.Blind := Steps.Blind + 1;
             end case;
-            Lower (By, Reached);
-            exit when not Reached;
+            Lower (By, Pushed);
+            case Pushed is
+               when Lowered => null;
+               when Stopped => exit;
+               when Stalled =>
+                  Steps.Stalled := True;
+                  exit;
+            end case;
          end;
       end loop;
    end Descend;

@@ -592,6 +592,66 @@ press now waits for it: after the aim, the closer's readings are those of the
 opening or are asked for once more (the finger is free then), and when they are
 still not there no press is made at that opening (`Closer_At`).
 
+**Lesson: a descent ends when the hand stops going down, whatever the arm does
+(A17).** The third press of A17 did not stop at the table, and it did not end
+as a press, because "the arm followed every push" and "the hand went down" are
+two things. From the truth (beats 6990 to 13600): the free pushes
+lowered the tool's last link, link 6, 1.0 to 1.1 mm each, at 8 to 9 beats a push;
+the lowest vertex of link 7, the finger, reached the table at beat 8208 (0.7 mm
+above it at 8200, 0.0 at 8208) and stayed within 0.4 mm of it until beat 13,200
+while it slid along the table 0.8 mm a push (y -267.9 to -267.1 mm at the first
+push after contact). The tool's origin and the camera did not stop at once: the
+push that brought the finger to the table lowered link 6 by 1.0 mm and the next
+three by 1.0, 0.9 and 0.8 mm (a hand pivoting on its finger while the finger
+slides), the following ones by less and less, 9.9 mm in all by beat 8920 (link 6
+118.1 to 108.2 mm above the table, the camera 55.9 to 49.2 mm), and then the
+camera rose again, to 61.6 mm at beat 11,120 and 79.8 at 13,600, as the hand
+rolled up on it. So what stops at the first push after contact is the contact,
+and it is a point of the finger; the tool's origin, which the plan moves as it
+asks, tells only after the pivot has spent itself.
+
+The arm's readings show the difference: a free push (A17 beats 7044 to 7076:
+5.8 mrad of joint motion each) was delivered 100.0 per cent along its ask with
+1.8 microradians across it (0.03 per cent of its length); the crawl's push at
+beat 9009, 11.6 mrad, 91.9 per cent along it and 3.4 mrad across it, 29 per cent
+of its length (joint 2 delivered 81 per cent of its share, joint 3 26, joint 4
+108, joints 1, 5 and 6 whatever the contact let them). The step tracker judges a
+group by the part of the delivery along the ask, 8 per cent short here, and said
+reached; the 29 per cent across the ask is the hand turning and sliding on what
+it touches.
+
+`Driver.Robot.Hand.Lowering` judges a push where the readings put the hand's
+points (`Tool_In_Arm` at the push's start, its target and its end): the tool's
+origin and the tips the hand has measured at the opening the closer stands at
+(a tip is a point of the tool frame, a provisional one a bound beyond the
+finger, which rises when the hand turns about the finger on the table and so
+shows the stall the origin does not). A point asked to go down by what the
+tool's noise tells (`Least_Push`) and stopped short by as much, and by a larger
+share of its ask than Z times any push of the descent before it fell short by,
+has stopped; the pushes before it are a measure of what free pushes do, however
+large (a joint held against gravity settles short by a share of its push), and
+three are the least that have a scatter. The pushes are forgotten when a push
+asks nothing down (a retreat, a hold), so a descent is compared with itself, and
+a stall among the first three pushes is taken for what free pushes do. The
+verdict is read from the stream by the estimators as the press is, so the same
+push is a block for the watcher that finds the press (the verdict stands until
+the next push begins, as a Blocked one does) and the descent that made it ends
+as a press, not Spent: a bound or a contact, whichever the presses tell, and not
+thrown away. (`hand.lowering.*`, `hand.measure.stall`.)
+
+**Lesson: a closer the table holds is freed by raising the hand (A17).** A
+finger resting on the table cannot slide along it, and the closer's reading,
+asked back to a reading it has been at, stays short of it: A17's, asked back to
+1.0 at the end of its sweep, stood between 0.59 and 0.686 for seventy beats and
+read 1.0 four beats after the aim lifted the hand. The sweep's returns to a
+reading the closer has been at (`Return_Channel`) check that it arrived (within
+its noise, or a step no eye tells from it), and if it did not, the hand is
+raised along the way up, in steps that double from the least move of its tool,
+while each raise sets the closer moving; a raise after which it has not moved
+was not what held it, and the hand is raised no more, nor higher than the eye
+stands above the table (`Free_Closer`; `hand.measure.held`). The hand stays
+where it was raised to: the presses aim from wherever the arm stands.
+
 ## Open
 
 - A contact that is less repeatable than the arm's predicted noise is not

@@ -264,6 +264,24 @@ private
    --  before the views showed anything; Answered, whether the first push
    --  was followed.
 
+   procedure Free_Closer
+     (Arrived    : not null access function return Boolean;
+      Reading    : not null access function return Real;
+      Moved      : not null access function (Before, After : Real) return Boolean;
+      Ask        : not null access procedure;
+      Raise_Hand : not null access procedure (First : Boolean; Raised : out Boolean);
+      Raises     : out Natural);
+   --  A closer asked back to a reading it has been at: asked (Ask settles it),
+   --  and while it has not Arrived, held by something. A finger resting on the
+   --  table is held by it, and cannot slide along it (A17: asked back to 1.0,
+   --  it stood at 0.59 to 0.686 for seventy beats, and reached 1.0 in four
+   --  once the aim had lifted the hand). The hand is raised (Raise_Hand, the
+   --  first raise the least, each after it twice the one before; Raised False
+   --  when it cannot be raised further) and the closer asked again, while
+   --  each raise sets the closer moving, until it arrives: a raise after which
+   --  its reading has not moved (Moved) was not what held it, and the hand is
+   --  raised no more. Raises is how many raises were made.
+
    function Seen_By (Shift : Real) return Real is (if Shift /= 0.0 then 1.0 / abs Shift else 0.0);
    --  The push that moves an eye's view by one pixel when the channel moves
    --  it Shift pixels a reading unit (Driver.Robot.Lockin.Shift): a whole
@@ -272,12 +290,18 @@ private
    --  change none. Zero, no blind push, when the shift is not measured.
 
    type Descent_Steps is record
-      Fast   : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
-      Band   : Natural := 0;   --  within that band, each the larger of the sigma and Least
-      Blind  : Natural := 0;   --  doubling, nothing predicting the contact (before a prediction, or past its band)
-      Capped : Natural := 0;   --  of those, the steps cut to the eye's room above the surface
-      Spent  : Boolean := False;   --  ended with the eye no room left to go down, and nothing met
+      Fast    : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
+      Band    : Natural := 0;   --  within that band, each the larger of the sigma and Least
+      Blind   : Natural := 0;   --  doubling, nothing predicting the contact (before a prediction, or past its band)
+      Capped  : Natural := 0;   --  of those, the steps cut to the eye's room above the surface
+      Spent   : Boolean := False;   --  ended with the eye no room left to go down, and nothing met
+      Stalled : Boolean := False;   --  ended by a step the arm followed and the hand did not go down with
    end record;
+
+   type Push_Result is
+     (Lowered,   --  the arm followed the step and the hand went down with it
+      Stopped,   --  the arm did not follow: it met something, or cannot go there
+      Stalled);  --  the arm followed and the hand did not go down (Driver.Robot.Hand.Lowering)
 
    function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Blind);
 
@@ -289,11 +313,13 @@ private
    procedure Descend
      (Above : not null access function return Heights;
       Least : Real;
-      Lower : not null access procedure (By : Real; Reached : out Boolean);
+      Lower : not null access procedure (By : Real; Result : out Push_Result);
       Steps : out Descent_Steps)
      with Pre => Least > 0.0;
    --  A press's descent: each step lowers the tool By, until one does not
-   --  reach (Lower says so: the arm met something, or cannot go there). Above
+   --  reach (Lower says so: the arm met something, or cannot go there) or the
+   --  hand does not go down with it (stalled: the press is made, a bound or a
+   --  contact, whichever the presses tell, and the descent is not spent). Above
    --  is read before each step. Tip is the tip's height above the contact
    --  predicted under it, with its sigma, Unknown when nothing predicts it.
    --  With a prediction, the steps double from Least for as long as each ends
