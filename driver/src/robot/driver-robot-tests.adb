@@ -3085,6 +3085,168 @@ package body Driver.Robot.Tests is
              & Kept'Image & ": its first step was taken before the noise was measured again");
    end Probe_Reads_After_It_Measures;
 
+   --  The rig of the drooping-joint probe, its arm 1 (which eye 1 sees) probed from 0.2, which the eye sees at once, after
+   --  the model has lost the noise of the arm's first joint, so that the probe asks for the estimates as it begins. With Wait
+   --  beats, the estimates are computed apart from the main loop (Driver.Robot.Compute_Apart): the decider that asks for them
+   --  waits (Driver.Beats), the model takes in Wait beats of rest, computes them, and the decider goes on in the beat after,
+   --  as Driver.Apart has the main loop do. Seen: the probe confirmed the level the eye saw.
+   procedure Probe_Through_Apart_Estimates
+     (Wait : Natural; Seen : out Boolean; Excursion : out Real; Finished : out Boolean)
+   is
+      M     : Model;
+      Done  : Boolean := False with Atomic;
+      Slow  : Boolean := False with Atomic;   --  the estimates the probe asks for take the Wait beats
+      Got   : Driver.Robot.Motion.Probe_Report;
+
+      task Decider;
+      task body Decider is
+         W : Natural;
+         procedure Estimate is
+         begin
+            Estimate_Now (M);
+         end Estimate;
+         procedure Lose_Noise is
+         begin
+            M.Noise.Replace_Element (0, Real'Last);   --  group 1's first channel
+            M.Noise_Freedom.Replace_Element (0, 0);
+         end Lose_Noise;
+      begin
+         Driver.Robot.Motion.Settle (M, W);
+         Driver.Robot.Motion.Hold (M, 100);
+         for K in 1 .. 16 loop
+            declare
+               C  : Driver.Commands.Command;
+               SR : Driver.Robot.Motion.Step_Report;
+            begin
+               --  Arm 1, which eye 1 sees, for the body's delay and the eyes' lag.
+               Driver.Commands.Set_Target (C, 1, [(if K mod 2 = 1 then 0.1 else 0.0), 0.0]);
+               Driver.Robot.Motion.Step (M, C, SR);
+               Driver.Robot.Motion.Hold (M, 2 + K mod 4);
+            end;
+         end loop;
+         Driver.Beats.Within_A_Beat (Estimate'Access);
+         Driver.Robot.Motion.Gather_Rest (M, 2);
+         Driver.Beats.Within_A_Beat (Lose_Noise'Access);
+         Slow := True;
+         Driver.Robot.Motion.Probe_Together (M, [1 => (Group => 1, Channel => 1)], 1.0, 0.2, Got);
+         Done := True;
+      exception
+         when others =>
+            Driver.Beats.Release;
+            Done := True;
+      end Decider;
+
+      Now, Shown : Rig_State;
+      Sent    : Driver.Commands.Command;
+      Rng     : Generator;
+      Counted : Natural := 0;   --  observations given to the model
+
+      function Observation_At (Beat : Natural) return Observation is
+         O : Observation;
+      begin
+         O.Beat := Driver.Clock.Beat (Beat);
+         for E in 1 .. 3 loop
+            O.Images.Append (Render (E, Shown));
+            O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         end loop;
+         O.Readings.Append (Now.Arm_1);
+         O.Readings.Append (Now.Arm_2);
+         O.Readings.Append (Real_Array'(1 => Now.Closer));
+         O.Readings.Append (Real_Array'(1 => Now.Part));
+         O.Readings.Append (Real_Array'(1 => Now.Idle + 1.0e-13 * Gaussian (Rng)));
+         for G in 1 .. 5 loop
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         end loop;
+         return O;
+      end Observation_At;
+   begin
+      Seen := False;
+      Excursion := 0.0;
+      if Wait > 0 then
+         Driver.Robot.Compute_Apart (M);
+      end if;
+      begin
+         loop
+            exit when Done;
+            declare
+               O       : constant Observation := Observation_At (Counted);
+               Took    : Boolean := False;
+               Pending : Driver.Commands.Command;
+            begin
+               if Counted = 0 then
+                  Driver.Commands.Set_Target (Sent, 1, Now.Arm_1);
+                  Driver.Commands.Set_Target (Sent, 2, Now.Arm_2);
+                  Driver.Commands.Set_Target (Sent, 3, [Now.Closer]);
+                  Driver.Commands.Set_Target (Sent, 4, [Now.Part]);
+                  Driver.Commands.Set_Target (Sent, 5, [Now.Idle]);
+               end if;
+               Observe (M, O, Sent);
+               Counted := Counted + 1;
+               --  The estimates due (the evidence doubled, or a decider asked): the model goes on taking in rest
+               --  while they are computed (all the Wait beats only for the probe's: the rest the model has counted
+               --  stays what a boot has by then), and the decider that waited goes on in the beat after.
+               if Driver.Robot.Estimates_Due (M) then
+                  for K in 1 .. (if Slow then Wait else 0) loop
+                     Observe (M, Observation_At (Counted), Sent);
+                     Counted := Counted + 1;
+                  end loop;
+                  Driver.Robot.Compute_Estimates (M);
+                  Driver.Beats.Estimates_Adopted;
+               end if;
+               loop
+                  Driver.Beats.Offer (O.Beat, O, Sent, Took);
+                  exit when Took or else Done;
+                  delay 0.0;
+               end loop;
+               exit when not Took;
+               Driver.Beats.Await (Pending);
+               for G in Group_Id range 1 .. 5 loop
+                  if Driver.Commands.Has_Target (Pending, G) then
+                     Driver.Commands.Set_Target (Sent, G, Driver.Commands.Target (Pending, G));
+                  end if;
+               end loop;
+               Shown := Now;
+               Now.Arm_1 := Driver.Commands.Target (Sent, 1);
+               Now.Arm_2 := Driver.Commands.Target (Sent, 2);
+               Now.Closer := Driver.Commands.Target (Sent, 3) (1);
+               Now.Part := Driver.Commands.Target (Sent, 4) (1);
+               Now.Idle := Driver.Commands.Target (Sent, 5) (1);
+            end;
+         end loop;
+      exception
+         when others =>
+            abort Decider;
+            raise;
+      end;
+      if not Done then
+         abort Decider;
+      end if;
+      Finished := Done;
+      Seen := Got.Seen;
+      Excursion := Got.Excursion;
+   end Probe_Through_Apart_Estimates;
+
+   --  An eye sees the joint of an arm move at the first amount: the probe confirms that amount, whether the estimates it
+   --  asks for as it begins come back in the same beat or beats later. Read before the estimates, the first beat no look has
+   --  judged is as old as the wait, the first look counts a false alarm's chance for every beat of it, the chance passes
+   --  one, and no run of moves makes that level certain: the probe is sure only at the next, twice the amount an eye needs
+   --  to see the joint, where the boot's pushes after it are taken from.
+   procedure Probe_Confirms_Through_Apart_Estimates is
+      In_Place, Apart                        : Boolean;
+      In_Place_Amount, Apart_Amount          : Real;
+      Done_1, Done_2                         : Boolean;
+   begin
+      Probe_Through_Apart_Estimates (0, In_Place, In_Place_Amount, Done_1);
+      Probe_Through_Apart_Estimates (300, Apart, Apart_Amount, Done_2);
+      Check (Done_1 and then Done_2, "a probe through the estimates did not finish");
+      Check (In_Place and then In_Place_Amount = 0.2,
+             "the probe of an arm's joint, the estimates in place, was sure of" & In_Place_Amount'Image
+             & " (seen:" & In_Place'Image & "), not of the 0.2 the eye saw at once");
+      Check (Apart and then Apart_Amount = In_Place_Amount,
+             "the probe of an arm's joint, the estimates back 300 beats later, was sure of" & Apart_Amount'Image
+             & " (seen:" & Apart'Image & "), not of the" & In_Place_Amount'Image & " it was sure of in place");
+   end Probe_Confirms_Through_Apart_Estimates;
+
    --  ── Probing a channel both ways ──
    --
    --  The rig of the drooping-joint probe, its group 5 (which no eye sees)
@@ -6368,6 +6530,8 @@ package body Driver.Robot.Tests is
                              Probe_Limits_And_Deadbands'Access);
       Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
+      Driver.Tests.Register ("robot.probe.apart", "a probe that asks for the estimates as it begins loses what an eye saw "
+                             & "when they come back beats later", Probe_Confirms_Through_Apart_Estimates'Access);
       Driver.Tests.Register ("robot.probe.lost", "a probe whose channel's noise was lost measures it again before "
                              & "it reads anything and takes its first step from it",
                              Probe_Reads_After_It_Measures'Access);
