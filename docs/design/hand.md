@@ -32,6 +32,8 @@ and the estimators find what it did in the stream.
 | `Hand.Tips` | a hand's presses, each given to the lobe that touched, and the tips they measure |
 | `Hand.Aims` | the turn about the eye that aims a press |
 | `Hand.Pressing` | what one press asks of its arm, in the arm's own frame: the aim, the lowering, the way back, the tip's gap above the table |
+| `Hand.Lowering` | whether a push that asked the hand to go down took it down: the readings' whole shortfall and the hand's points', against what free pushes of the descent fell short by |
+| `Hand.Slide` | how far a finger slid under a press, read at the edge of its mask in the picture under the press |
 
 ## Lobes from the change and the arm's poses
 

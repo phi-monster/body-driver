@@ -27,12 +27,15 @@
 --  as a share of the ask's length. Nothing of the arm's geometry is read.
 --
 --  The hand's points. The readings tell where they are (Driver.Robot.Tool_In_Arm),
---  and a point asked to go down that stopped short of where it was asked has
---  stopped when its shortfall is a larger share of its ask than any push of the
---  descent before it fell short by. The points are the tool's origin and the tips
---  the hand has measured at the opening it stands at; a hand turning about the
---  finger on the table lowers its origin and raises what lies beyond the finger,
---  and that point stopped.
+--  and a point that stopped short of where it was asked has stopped when its
+--  shortfall is a larger share of what the push asked of the hand (the most any
+--  point was asked to go down: a push that turns the tool about its origin asks
+--  the origin nothing, and a share of that is no number, as A17's aim gave one
+--  of 1.6e9 and left the descent with nothing to compare a push with) than any
+--  push of the descent before it fell short by. The points are the tool's origin
+--  and the tips the hand has measured at the opening it stands at; a hand
+--  turning about the finger on the table lowers its origin and raises what lies
+--  beyond the finger, and that point stopped.
 --
 --  Either is a stall only when the push asked something the one test of motion
 --  sees (Driver.Robot.Channels.Visible of its ask) and fell short of it by
@@ -76,7 +79,7 @@ package Driver.Robot.Hand.Lowering is
       Point         : Natural := 0;     --  the index in Where of the point the verdict rests on; 0 when there is none
       Asked         : Real := 0.0;      --  how far it was asked to go along Into
       Went          : Real := 0.0;      --  and went
-      Share         : Real := 0.0;      --  the part of its ask it fell short by
+      Share         : Real := 0.0;      --  how far short it fell, as a share of what the push asked of the hand
       Free          : Real := 0.0;      --  the largest share the pushes before it fell short by
       Point_Stalled : Boolean := False; --  and that is a stall
       --  By the readings:

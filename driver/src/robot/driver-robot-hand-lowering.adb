@@ -24,12 +24,11 @@ package body Driver.Robot.Hand.Lowering is
       --  What the push asked, and whether the shortfall of it is something the one test of motion sees: the floor
       --  under both measures.
       Seen        : constant Boolean := Joints.Asked and then Joints.Seen;
-      Any_Lowers  : Boolean := False;   --  some point was asked to go down at all
-      Any_Stopped : Boolean := False;   --  and some of them stopped short as free pushes do not
-      Worst       : Judgment;           --  of the points asked, the one that fell shortest by share
+      Lowering    : Real := 0.0;        --  how far the push asked the hand to go down: the most of any point
+      Any_Stopped : Boolean := False;   --  some point stopped short as free pushes do not
+      Worst       : Judgment;           --  of the points, the one that fell shortest by share
       Stall       : Judgment;           --  and, of those that stopped, the same
-      Biggest     : Real := 0.0;        --  the largest share, either way, of any point asked
-      Asked_Any   : Boolean := False;   --  some point was asked to go down by this push, which asked a motion that is seen
+      Biggest     : Real := 0.0;        --  the largest share, either way, of any point
       --  The readings: the share of the ask's length they stopped short of the target by, and whether
       --  that is more than free pushes stop short by.
       Joint_Share : constant Real :=
@@ -38,45 +37,42 @@ package body Driver.Robot.Hand.Lowering is
         Enough and then Seen and then Joint_Share > Driver.Conventions.Z * T.Joint_Largest;
    begin
       Said := (others => <>);
+      for P of Where loop
+         Lowering := Real'Max (Lowering, Down (Target.Pose, P, Into) - Down (From.Pose, P, Into));
+      end loop;
+      if Lowering <= 0.0 then
+         --  A retreat or a hold: the next descent is compared with itself.
+         T := (others => <>);
+         return;
+      end if;
+      if not Joints.Asked then
+         return;
+      end if;
+      --  A point's shortfall is a share of what the push asked of the hand, not of what it asked of the point: a
+      --  push that turns the tool about its origin asks the origin nothing down, and a share of that is no number.
       for I in Where'Range loop
          declare
             Start : constant Real := Down (From.Pose, Where (I), Into);
             Ask   : constant Real := Down (Target.Pose, Where (I), Into) - Start;
             Got   : constant Real := Down (To.Pose, Where (I), Into) - Start;
-            Short : constant Real := Ask - Got;
+            Share : constant Real := (Ask - Got) / Lowering;
+            Here  : constant Judgment :=
+              (Result => Lowered, Point => I, Asked => Ask, Went => Got, Share => Share, Free => T.Largest,
+               others => <>);
          begin
-            Any_Lowers := Any_Lowers or else Ask > 0.0;
-            if Ask > 0.0 and then Joints.Asked then
-               declare
-                  Share : constant Real := Short / Ask;
-                  Here  : constant Judgment :=
-                    (Result => Lowered, Point => I, Asked => Ask, Went => Got, Share => Share, Free => T.Largest,
-                     others => <>);
-               begin
-                  Biggest := Real'Max (Biggest, abs Share);
-                  if not Asked_Any or else Share > Worst.Share then
-                     Worst := Here;
-                  end if;
-                  Asked_Any := True;
-                  --  Larger by share than any free push fell short by.
-                  if Enough and then Seen and then Share > Driver.Conventions.Z * T.Largest then
-                     if not Any_Stopped or else Share > Stall.Share then
-                        Stall := Here;
-                     end if;
-                     Any_Stopped := True;
-                  end if;
-               end;
+            Biggest := Real'Max (Biggest, abs Share);
+            if I = Where'First or else Share > Worst.Share then
+               Worst := Here;
+            end if;
+            --  Larger by share than any free push fell short by.
+            if Enough and then Seen and then Share > Driver.Conventions.Z * T.Largest then
+               if not Any_Stopped or else Share > Stall.Share then
+                  Stall := Here;
+               end if;
+               Any_Stopped := True;
             end if;
          end;
       end loop;
-      if not Any_Lowers then
-         --  A retreat or a hold: the next descent is compared with itself.
-         T := (others => <>);
-         return;
-      end if;
-      if not Asked_Any then
-         return;
-      end if;
       Said := (if Any_Stopped then Stall else Worst);
       Said.Point_Stalled := Any_Stopped;
       Said.Joint_Share := Joint_Share;

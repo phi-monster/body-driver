@@ -24,8 +24,8 @@ package body Driver.Robot.Hand.Lowering.Tests is
    --  Readings not given: those of a tool that goes straight down, whose length is negative here.
    Straight_Down : constant Joint_Push := (Asked => False, Length => -1.0, Short => 0.0, Seen => False);
 
-   function Stand (X, Y, Z : Real; Turn : Real := 0.0) return Pose_Estimate is
-     ((Pose                => (Rotation => Exp ([Turn, 0.0, 0.0]), Translation => [X, Y, Z]),
+   function Stand (X, Y, Z : Real; Turn : Real := 0.0; Pitch : Real := 0.0) return Pose_Estimate is
+     ((Pose                => (Rotation => Exp ([Turn, Pitch, 0.0]), Translation => [X, Y, Z]),
        Position_Covariance => 1.0e-8 * Identity3,
        Rotation_Covariance => 1.0e-8 * Identity3));
 
@@ -120,6 +120,36 @@ package body Driver.Robot.Hand.Lowering.Tests is
                 & Said.Point'Image & ", went" & Said.Went'Image & " of" & Said.Asked'Image);
       end;
    end Hand_Turns_On_Its_Finger;
+
+   procedure Tool_Turns_About_Its_Origin is
+      --  A push that turns the tool about its origin asks the origin nothing down and a point at its side
+      --  0.3 across a part of the turn (0.3 sin of it). Free pushes of that kind are delivered, and a share
+      --  of the origin's nothing is no number: the pushes before must not be left with one that no push
+      --  of the descent could be compared with, and a push that is not delivered is a stall at the side.
+      Pivot  : constant Points := [[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]];
+      T      : Track;
+      Said   : Judgment;
+      Free_Turn : constant Joint_Push := (Asked => True, Length => 0.06, Short => 1.0e-6, Seen => False);
+      Stuck_Turn : constant Joint_Push := (Asked => True, Length => 0.06, Short => 0.06, Seen => True);
+   begin
+      for K in 1 .. 6 loop
+         declare
+            From : constant Real := 0.02 * Real (K);
+            To   : constant Real := From + 0.2;
+         begin
+            --  The origin is asked 2e-15 down (the turn is about it) and delivered 3.4e-6 up: A17's aim.
+            Judge (T, Stand (0.0, 0.0, 1.0, Pitch => From), Stand (0.0, 0.0, 1.0 - 2.0e-15, Pitch => To),
+                   Stand (0.0, 0.0, 1.0 + 3.4e-6, Pitch => To), Into, Pivot, Free_Turn, Said);
+            Check (Said.Result = Too_Few or else Said.Result = Lowered, "a free turn about the origin was judged "
+                   & Said.Result'Image & ", share" & Said.Share'Image);
+         end;
+      end loop;
+      Judge (T, Stand (0.0, 0.0, 1.0, Pitch => 0.2), Stand (0.0, 0.0, 1.0, Pitch => 0.4), Stand (0.0, 0.0, 1.0, Pitch => 0.2),
+             Into, Pivot, Stuck_Turn, Said);
+      Check (Said.Result = Stalled and then Said.Point = 2 and then Said.Free < 1.0e-3,
+             "a turn that was not delivered was judged " & Said.Result'Image & " at point" & Said.Point'Image
+             & " against free shares up to" & Said.Free'Image);
+   end Tool_Turns_About_Its_Origin;
 
    procedure Hand_Deflected is
       --  The readings tell what the hand's points do not (a hand with no tip measured yet, its origin going on
@@ -237,6 +267,8 @@ package body Driver.Robot.Hand.Lowering.Tests is
                              & "stalled at the first push that takes it nowhere", Hand_Slides'Access);
       Driver.Tests.Register ("hand.lowering.turn", "a hand turning on its finger, its origin still going down, is not "
                              & "stalled at the tip", Hand_Turns_On_Its_Finger'Access);
+      Driver.Tests.Register ("hand.lowering.pivot", "a turn about the tool's origin leaves the descent a share no push can be "
+                             & "compared with, or is not judged by the point it lowers", Tool_Turns_About_Its_Origin'Access);
       Driver.Tests.Register ("hand.lowering.across", "a push deflected across its ask, the hand's points going down as "
                              & "asked, is not a stall by the readings, or one the test of motion does not see is",
                              Hand_Deflected'Access);
