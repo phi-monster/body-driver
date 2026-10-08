@@ -498,8 +498,8 @@ private
       Table_Scatter  : Mat3 := [others => [others => 0.0]];
       Table_On     : Flag_Vectors.Vector;                      --  per track: it lies on the table
       --  Every track's point in its reference frame, three numbers each,
-      --  where Track_Known holds, at the depth the fit refined, its logarithm
-      --  uncertain by Track_Sigmas.
+      --  where Track_Known holds (its depth is a depth: Fit.Depth_Known), at
+      --  the depth the fit refined, its logarithm uncertain by Track_Sigmas.
       Tracks       : Real_Vectors.Vector;
       Track_Known  : Flag_Vectors.Vector;
       Track_Sigmas : Real_Vectors.Vector;

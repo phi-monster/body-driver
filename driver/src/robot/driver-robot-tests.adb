@@ -3491,6 +3491,23 @@ package body Driver.Robot.Tests is
       end;
    end Synthetic_Sweep;
 
+   --  A track's depth is known when it is positive and its logarithm is uncertain by less than 1 / Z (it is
+   --  significant against its own relative uncertainty); a track the sightings leave with no depth at all is not
+   --  known, whatever the size of the point it makes: A17's first fit had one at 1.7E97 units, its logarithm
+   --  uncertain by 2.5E6, which the head eye's fit took for a point and raised on.
+   procedure Depth_Is_Known_Or_Not is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      Z : constant Real := Driver.Conventions.Z;
+   begin
+      Check (Fit.Depth_Known (1.0, 0.01), "a depth known to a hundredth is not known");
+      Check (Fit.Depth_Known (3.7, 0.5 / Z), "a depth known to half of 1 / Z of itself is not known");
+      Check (not Fit.Depth_Known (3.7, 2.0 / Z), "a depth known to twice 1 / Z of itself is known");
+      Check (not Fit.Depth_Known (1.7E97, 2.5E6), "a depth of 1.7E97 uncertain by 2.5E6 is known");
+      Check (not Fit.Depth_Known (1.0, Real'Last), "a depth with no uncertainty stated is known");
+      Check (not Fit.Depth_Known (0.0, 0.01), "no depth is known");
+      Check (not Fit.Depth_Known (-2.0, 0.01), "a depth behind the eye is known");
+   end Depth_Is_Known_Or_Not;
+
    --  The arm of the kinematics test, taken as measured: a pose it can reach
    --  is reached, one beyond the readings it moved through is not.
    procedure Reach_A_Pose is
@@ -5710,6 +5727,9 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.boot.grew", "the cells that respond to a push are found to have grown by no more "
                              & "than the false alarms among those that did not, or not to have when they grew by more",
                              Growth_Of_The_Responding_Cells'Access);
+      Driver.Tests.Register ("robot.kinematics.depth", "a track the sightings leave with no depth at all is a known "
+                             & "point of little weight, or one that is determined is not known",
+                             Depth_Is_Known_Or_Not'Access);
       Driver.Tests.Register ("robot.boot.reread", "an arm the estimate finds carrying its eye only after the body "
                              & "was first read is never swept with it", Boot_With_A_Late_Mount'Access);
       Driver.Tests.Register ("robot.boot.settling", "a sweep level whose eye's picture keeps changing for beats after "
