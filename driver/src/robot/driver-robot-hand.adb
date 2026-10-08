@@ -1179,6 +1179,8 @@ package body Driver.Robot.Hand is
    function Found (H : Hands; Id : Hand_Id) return Hand_Record is (H.Data.Found (Id));
 
    function Hand_Count (H : Hands) return Natural is (if H.Data = null then 0 else Natural (H.Data.Found.Length));
+
+   function Exists (H : Hands; Id : Hand_Id) return Boolean is (H.Data /= null and then Id <= H.Data.Found.Last_Index);
    function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id is (Found (H, Id).Group);
    function Arm_Of (H : Hands; Id : Hand_Id) return Arm_Id is (Found (H, Id).Arm);
    function Lobe_Count (H : Hands; Id : Hand_Id) return Positive is (Natural (Found (H, Id).Lobes.Length));

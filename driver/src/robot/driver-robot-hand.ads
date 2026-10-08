@@ -39,6 +39,10 @@ package Driver.Robot.Hand is
    --  Decider: finds and measures every hand of the booted body.
 
    function Hand_Count (H : Hands) return Natural;
+   function Exists (H : Hands; Id : Hand_Id) return Boolean;
+   --  The hand Id is there now. The estimators drop and renumber hands between two held beats (the roles are
+   --  read again, a recompute of the heavier estimates; A29), so a decider that keeps a Hand_Id from an earlier
+   --  beat asks before it reads: the queries below, asked of an Id past the last hand, raise.
    function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id;
    function Arm_Of (H : Hands; Id : Hand_Id) return Arm_Id;
    function Lobe_Count (H : Hands; Id : Hand_Id) return Positive;

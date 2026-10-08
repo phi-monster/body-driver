@@ -1,5 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Fixed;
+with Driver.Beats;
 with Driver.Bytes;
 with Driver.Clock;
 with Driver.Commands;
@@ -529,8 +530,146 @@ package body Driver.Robot.Hand.Tests is
       end;
    end Unswept_Closer_Says_Why;
 
+   procedure Dropped_Hand is
+      --  A29: the estimators read the roles again between two held beats of the decider (a recompute of the
+      --  heavier estimates), Find_Pairs found no hand of the closer, and the press in progress, which held an
+      --  index into the hands, read one that was gone: CONSTRAINT_ERROR, and the boot with it. Measure is run
+      --  over a body whose closer is re-read as an arm at beat Drop (the next beat of the hand drops its hand,
+      --  as the estimators did), for every Drop from the first beat on: it ends, with the hand pressed or not,
+      --  and never raises.
+      Rays : constant Vec3 := Unit ([0.04, 0.03, 0.13]);
+
+      procedure Run (Drop : Natural; Finished, Raised, Dropped : out Boolean) is
+         M       : Driver.Robot.Model;
+         H       : Hands;
+         Sent    : Driver.Commands.Command;
+         Arm_At  : Real_Array (1 .. 3) := [0.1, 0.2, 0.3];
+         Pinch   : Real_Array (1 .. 1) := [0.04];
+         Done    : Boolean := False with Atomic;
+         Died    : Boolean := False with Atomic;
+
+         function Observed (Beat : Natural) return Observation is
+            O : Observation;
+         begin
+            O.Beat := Driver.Clock.Beat (Beat);
+            O.Readings.Append (Arm_At);
+            O.Readings.Append (Pinch);
+            O.Images.Append (Driver.Images.Create (4, 3, [1 .. 36 => Driver.Bytes.Byte'First]));
+            O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+            return O;
+         end Observed;
+      begin
+         Dropped := False;
+         --  The body's graph is the test's: an arm of three channels carrying the eye, and its closer; a body that
+         --  measured nothing would derive another from the stream.
+         M.From_File (Stored_Graph) := True;
+         Driver.Commands.Set_Target (Sent, 1, Arm_At);
+         Driver.Commands.Set_Target (Sent, 2, Pinch);
+         Driver.Robot.Observe (M, Observed (0), Sent);
+         M.Graph.Roles.Clear;
+         M.Graph.Roles.Append (Arm);
+         M.Graph.Roles.Append (Closer);
+         M.Graph.Arm_Of.Clear;
+         M.Graph.Arm_Of.Append (1);
+         M.Graph.Arm_Of.Append (1);
+         M.Graph.Arms.Clear;
+         M.Graph.Arms.Append (1);
+         M.Graph.Mounts.Clear;
+         M.Graph.Mounts.Append (Mount'(Kind => Arm_Carried, Arm => 1));
+         declare
+            Rows : Sight_Rows (1 .. 1);
+         begin
+            for W in Opening loop
+               Rows (1) (W) :=
+                 (Known  => True,
+                  Pixel  => (U => 0.0, V => 0.0),
+                  Ray    => (Origin    => (Mean => Zero3, Covariance => [others => [others => 0.0]]),
+                             Direction => (Unit_Vector => Rays, Sigma => 2.5e-4)),
+                  Spread => 0.0,
+                  Pitch  => 0.0);
+            end loop;
+            Adopt (H, 2, 1, 1, [1 => 0.04], [1 => 0.0], Rows);
+         end;
+         Observe (H, M, Observed (0), Sent);
+         Check (Hand_Count (H) = 1, "the hand to drop was not given");
+         Check (Exists (H, 1) and then not Exists (H, 2), "a hand is not said to be there, or one that is not is");
+         declare
+            task Decider;
+            task body Decider is
+            begin
+               Measure (H, M);
+               Done := True;
+            exception
+               when others =>
+                  Driver.Beats.Release;
+                  Died := True;
+                  Done := True;
+            end Decider;
+         begin
+            for B in 1 .. 2_000 loop
+               exit when Done;
+               declare
+                  O       : constant Observation := Observed (B);
+                  Took    : Boolean := False;
+                  Pending : Driver.Commands.Command;
+               begin
+                  if B = Drop then
+                     M.Graph.Roles.Replace_Element (2, Arm);
+                     M.Graph.Arm_Of.Replace_Element (2, 2);
+                     M.Graph.Arms.Append (2);
+                     Dropped := True;
+                  end if;
+                  Driver.Robot.Observe (M, O, Sent);
+                  Observe (H, M, O, Sent);
+                  loop
+                     Driver.Beats.Offer (O.Beat, O, Sent, Took);
+                     exit when Took or else Done;
+                     delay 0.0;
+                  end loop;
+                  exit when not Took;
+                  Driver.Beats.Await (Pending);
+                  --  The robot reaches what it was sent.
+                  if Driver.Commands.Has_Target (Pending, 1) then
+                     Driver.Commands.Set_Target (Sent, 1, Driver.Commands.Target (Pending, 1));
+                     Arm_At := Driver.Commands.Target (Sent, 1);
+                  end if;
+                  if Driver.Commands.Has_Target (Pending, 2) then
+                     Driver.Commands.Set_Target (Sent, 2, Driver.Commands.Target (Pending, 2));
+                     Pinch := Driver.Commands.Target (Sent, 2);
+                  end if;
+               end;
+            end loop;
+            if not Done then
+               abort Decider;
+            end if;
+         end;
+         Finished := Done;
+         Raised := Died;
+      end Run;
+
+      Finished, Raised, Dropped : Boolean;
+      Ran_Out : Natural := 0;
+   begin
+      Run (0, Finished, Raised, Dropped);
+      Check (Finished and then not Raised, "the decider did not end on the undisturbed body (no hand dropped)");
+      for Drop in 1 .. 60 loop
+         Run (Drop, Finished, Raised, Dropped);
+         if not Dropped then
+            Ran_Out := Ran_Out + 1;
+         end if;
+         Check (Finished and then not Raised,
+                "the decider " & (if Raised then "raised" else "did not end") & " when the hand was dropped at beat"
+                & Drop'Image);
+      end loop;
+      Check (Ran_Out < 60, "the decider ended before any drop was made, so nothing was tested");
+   end Dropped_Hand;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.measure.gone", "a hand dropped by the estimators between two beats of a press "
+                             & "makes the decider raise", Dropped_Hand'Access);
       Driver.Tests.Register ("hand.unmeasured", "an unmeasured body makes the hand fail or invent a hand",
                              Unmeasured_Body'Access);
       Driver.Tests.Register ("hand.measure.account", "a closer no hand is made of ends the measurement without a "

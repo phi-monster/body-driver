@@ -1,3 +1,4 @@
+with Ada.Containers.Vectors;
 with Driver.Beats;
 with Driver.Robot.Hand.Aims;
 with Driver.Robot.Hand.Pressing;
@@ -51,6 +52,32 @@ procedure Measure (H : in out Hands; M : in out Model) is
       return 0;
    end Own_Pair;
    --  Read inside a held beat.
+
+   --  What the decider holds from one beat to the next may be gone at the next: the estimators read the roles
+   --  again between two held beats (a recompute of the heavier estimates), Find_Pairs finds no hand of a closer
+   --  that is no longer one, and an index into the hands is out of range or another hand's. A29's press in
+   --  progress read the hand it measured at Found (2) when none was left. A hand is held here by its closer
+   --  group, found again at each beat it is read, and a press holds its record only to know it again (Present).
+   function Index_Of (Group : Group_Id) return Natural is
+   begin
+      for I in H.Data.Found.First_Index .. H.Data.Found.Last_Index loop
+         if H.Data.Found (I).Group = Group then
+            return Natural (I);
+         end if;
+      end loop;
+      return 0;
+   end Index_Of;
+   --  The hand made of that closer group now, 0 if none. Read inside a held beat.
+
+   function Present (Id : Hand_Id; R : Hand_Record) return Boolean is
+     (Id <= H.Data.Found.Last_Index and then H.Data.Found (Id).Group = R.Group and then H.Data.Found (Id).Arm = R.Arm);
+   --  The hand at Id is the hand R was read from. Read inside a held beat, as every index into the hands is.
+
+   Lost : Boolean := False;
+   --  Set by a read that found the hand under measure gone: the press in progress ends, the arm let go and taken
+   --  back, and nothing more of that hand is pressed. Cleared where the next hand begins.
+
+   package Group_Lists is new Ada.Containers.Vectors (Positive, Group_Id);
 
    procedure Move_Group (G : Group_Id; Target : Real_Array; Followed : out Boolean) is
       --  One step of the group to Target, settled, and one more still beat so
@@ -134,17 +161,28 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end Read_Closer;
 
       procedure Read_Raise (O : Observation) is
-         Up : constant Direction_Estimate := Up_In_Arm (M, Arm);
+         --  The arm and its eye are those of the closer's pair now, not those of the beat the closer was read at: the
+         --  estimators may have dropped the pair between the two.
+         P : constant Natural := Own_Pair (G);
       begin
          Room := Unknown;
-         if Up.Sigma = Real'Last or else Eye_Mount (M, Eye).Kind /= Arm_Carried then
+         if P = 0 then
             return;
          end if;
-         By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);
-         Plan := Driver.Robot.Hand.Pressing.Lowered (M, Arm, O, Up.Unit_Vector, By);
-         Room := Driver.Robot.Hand.Pressing.Gap
-           (M, Arm, O, (Mean => Eye_In_Tool (M, Eye, O).Pose.Translation, Covariance => [others => [others => 0.0]]),
-            Table_In_Arm (M, Arm), -Up.Unit_Vector);
+         Arm := H.Data.Pairs (P).Arm;
+         Eye := H.Data.Pairs (P).Eye;
+         declare
+            Up : constant Direction_Estimate := Up_In_Arm (M, Arm);
+         begin
+            if Up.Sigma = Real'Last or else Eye_Mount (M, Eye).Kind /= Arm_Carried then
+               return;
+            end if;
+            By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);
+            Plan := Driver.Robot.Hand.Pressing.Lowered (M, Arm, O, Up.Unit_Vector, By);
+            Room := Driver.Robot.Hand.Pressing.Gap
+              (M, Arm, O, (Mean => Eye_In_Tool (M, Eye, O).Pose.Translation, Covariance => [others => [others => 0.0]]),
+               Table_In_Arm (M, Arm), -Up.Unit_Vector);
+         end;
       end Read_Raise;
 
       function Is_There return Boolean is
@@ -235,35 +273,46 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end Poses_Now;
 
       procedure Plan_Raise (O : Observation) is
-         Up    : constant Direction_Estimate := Up_In_Arm (M, Arm);
-         Group : constant Group_Id := Arm_Group (M, Arm);
-         Now   : constant Real_Array := O.Readings.Element (Group);
+         --  The arm and its eye are those of the closer's pair now (see Read_Raise).
+         P : constant Natural := Own_Pair (G);
       begin
          Ready := False;
-         Why := Ada.Strings.Unbounded.To_Unbounded_String ("where up is, in the arm's frame, is not measured");
-         if Up.Sigma = Real'Last then
+         Why := Ada.Strings.Unbounded.To_Unbounded_String ("the closer's eye and arm are no longer a pair of the hand");
+         if P = 0 then
             return;
          end if;
-         By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);
-         Why := Ada.Strings.Unbounded.To_Unbounded_String
-           ("no raise within the arm's reach moves its readings by what an eye sees");
-         for Doubling in 1 .. Real'Machine_Mantissa loop
-            Plan := Driver.Robot.Hand.Pressing.Lowered (M, Arm, O, Up.Unit_Vector, By);
-            if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
-               Why := Ada.Strings.Unbounded.To_Unbounded_String (Driver.Robot.Motion.Why (Plan));
-               exit;
+         Arm := H.Data.Pairs (P).Arm;
+         Eye := H.Data.Pairs (P).Eye;
+         declare
+            Up    : constant Direction_Estimate := Up_In_Arm (M, Arm);
+            Group : constant Group_Id := Arm_Group (M, Arm);
+            Now   : constant Real_Array := O.Readings.Element (Group);
+         begin
+            Why := Ada.Strings.Unbounded.To_Unbounded_String ("where up is, in the arm's frame, is not measured");
+            if Up.Sigma = Real'Last then
+               return;
             end if;
-            declare
-               Goal : constant Real_Array := Driver.Robot.Motion.Last_Readings (Plan);
-               Step : constant Real_Array := [for I in Goal'Range => Goal (I) - Now (Now'First + I - Goal'First)];
-            begin
-               if Driver.Robot.Channels.Visible (M, Group, Step) then
-                  Ready := True;
-                  return;
+            By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);
+            Why := Ada.Strings.Unbounded.To_Unbounded_String
+              ("no raise within the arm's reach moves its readings by what an eye sees");
+            for Doubling in 1 .. Real'Machine_Mantissa loop
+               Plan := Driver.Robot.Hand.Pressing.Lowered (M, Arm, O, Up.Unit_Vector, By);
+               if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
+                  Why := Ada.Strings.Unbounded.To_Unbounded_String (Driver.Robot.Motion.Why (Plan));
+                  exit;
                end if;
-            end;
-            By := 2.0 * By;
-         end loop;
+               declare
+                  Goal : constant Real_Array := Driver.Robot.Motion.Last_Readings (Plan);
+                  Step : constant Real_Array := [for I in Goal'Range => Goal (I) - Now (Now'First + I - Goal'First)];
+               begin
+                  if Driver.Robot.Channels.Visible (M, Group, Step) then
+                     Ready := True;
+                     return;
+                  end if;
+               end;
+               By := 2.0 * By;
+            end loop;
+         end;
       end Plan_Raise;
 
       procedure Raise_Eye (Is_First : Boolean; Raised : out Boolean) is
@@ -520,7 +569,12 @@ procedure Measure (H : in out Hands; M : in out Model) is
 
       procedure Read_Aim (O : Observation) is
       begin
+         Lost := not Present (Id, R);
+         if Lost then
+            return;
+         end if;
          Driver.Robot.Hand.Pressing.Aim (M, R.Arm, R.Eye, O, Along, Aimed);
+         Arm_Is := Arm_Group (M, R.Arm);
          Stalls := H.Data.Found (Id).Stalls;
       end Read_Aim;
 
@@ -529,6 +583,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Descended : Real := 0.0;   --  how far the pushes that were reached have lowered the tool
       procedure Read_Lower (O : Observation) is
       begin
+         Lost := not Present (Id, R);
+         if Lost then
+            return;
+         end if;
          Plan := Driver.Robot.Hand.Pressing.Lowered (M, R.Arm, O, Aimed.Into, By);
          Stalls := H.Data.Found (Id).Stalls;
       end Read_Lower;
@@ -538,6 +596,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
       begin
          By := Step;
          Hold_Beat (Read_Lower'Access);
+         if Lost then
+            Reached := False;
+            return;
+         end if;
          if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
             Unplanned := True;
             Reached := False;
@@ -555,16 +617,23 @@ procedure Measure (H : in out Hands; M : in out Model) is
          --  eye above the table its arm's own eye saw, along the way down.
          Result : Driver.Robot.Hand.Heights;
          procedure Read_Above (O : Observation) is
-            B   : Driver.Robot.Hand.Tips.Book renames H.Data.Found (Id).Book;
-            Eye : constant Point_Estimate :=
-              (Mean => Eye_In_Tool (M, R.Eye, O).Pose.Translation, Covariance => [others => [others => 0.0]]);
          begin
-            Result.Tip := Driver.Robot.Hand.Pressing.Gap
-              (M, R.Arm, O, Driver.Robot.Hand.Tips.Tip (B, Lobe, Which), Driver.Robot.Hand.Tips.Surface (B), Aimed.Into);
-            Result.Eye := Driver.Robot.Hand.Pressing.Gap (M, R.Arm, O, Eye, Table_In_Arm (M, R.Arm), Aimed.Into);
-            --  The watcher judges every push from the stream (Driver.Robot.Hand.Lowering), as the press is found:
-            --  one verdict, here as in a replay. It has judged the step before this one stalled.
-            Result.Stalled := H.Data.Found (Id).Stalls > Stalls;
+            Lost := not Present (Id, R);
+            if Lost then
+               return;
+            end if;
+            declare
+               B   : Driver.Robot.Hand.Tips.Book renames H.Data.Found (Id).Book;
+               Eye : constant Point_Estimate :=
+                 (Mean => Eye_In_Tool (M, R.Eye, O).Pose.Translation, Covariance => [others => [others => 0.0]]);
+            begin
+               Result.Tip := Driver.Robot.Hand.Pressing.Gap
+                 (M, R.Arm, O, Driver.Robot.Hand.Tips.Tip (B, Lobe, Which), Driver.Robot.Hand.Tips.Surface (B), Aimed.Into);
+               Result.Eye := Driver.Robot.Hand.Pressing.Gap (M, R.Arm, O, Eye, Table_In_Arm (M, R.Arm), Aimed.Into);
+               --  The watcher judges every push from the stream (Driver.Robot.Hand.Lowering), as the press is found:
+               --  one verdict, here as in a replay. It has judged the step before this one stalled.
+               Result.Stalled := H.Data.Found (Id).Stalls > Stalls;
+            end;
          end Read_Above;
       begin
          Hold_Beat (Read_Above'Access);
@@ -573,12 +642,32 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Steps : Driver.Robot.Hand.Descent_Steps;
 
       procedure Read_Arm (O : Observation) is
+         --  The arm's group was found at the aim (Arm_Is) and is not looked up again: it is the arm's readings that
+         --  are wanted here, and they are there whatever became of the hand.
       begin
-         Arm_Is := Arm_Group (M, R.Arm);
          Arm_Now := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (O.Readings.Element (Arm_Is));
       end Read_Arm;
+
+      --  The hand this press measures is gone: it ends where it stands, with the arm let go and taken back to where
+      --  the descent began (or to where it stands, when it never moved), and nothing of it is kept.
+      procedure End_Lost (Moved : Boolean) is
+      begin
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the hand this press of lobe" & Lobe'Image & " measures is gone:"
+                          & " its closer group, group" & R.Group'Image & ", is no longer a closer of arm" & R.Arm'Image
+                          & " as the estimators have it between two beats of the press; the press ends here"
+                          & (if Moved then ", the arm let go and taken back to where the descent began" else ""));
+         if Moved then
+            Hold_Beat (Read_Arm'Access);
+            Move_Group (Arm_Is, Arm_Now.Element);
+            Move_Group (Arm_Is, Aim_At.Element);
+         end if;
+      end End_Lost;
    begin
       Hold_Beat (Read_Aim'Access);
+      if Lost then
+         End_Lost (Moved => False);
+         return False;
+      end if;
       if not Aimed.Ok then
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": up, the arm's pose or the eye's mount is unmeasured;"
                           & " no press");
@@ -608,6 +697,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
       declare
          First : constant Driver.Robot.Hand.Heights := Above;
       begin
+         if Lost then
+            End_Lost (Moved => True);
+            return False;
+         end if;
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": pressing lobe" & Lobe'Image & " at "
                           & (if Which = Open then "open" else "closed") & ", aimed by turning the hand "
                           & Driver.Log.Image (Aimed.Turn, 4) & " rad"
@@ -621,6 +714,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
                              else "; the eye's height above the table unknown"));
       end;
       Driver.Robot.Hand.Descend (Above'Access, Least, Lower'Access, Steps);
+      if Lost then
+         End_Lost (Moved => True);
+         return False;
+      end if;
       if Steps.Stalled then
          --  The last step was followed and took the hand nowhere: it is not part of the lowering.
          Descended := Descended - By;
@@ -688,23 +785,39 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Least   : Real := Real'Last;  --  the least tilt that tells the tip from a stop that does not move with it
          procedure Read_Agreed (O : Observation) is
             pragma Unreferenced (O);
-            Book : Driver.Robot.Hand.Tips.Book renames H.Data.Found (Id).Book;
          begin
-            Agreed := Driver.Robot.Hand.Tips.Latest_Agrees (Book);
-            Checked := Driver.Robot.Hand.Tips.Confirmed (Book, Lobe, Which);
-            Least := Driver.Robot.Hand.Aims.Least_Tilt (Driver.Robot.Hand.Tips.Distance (Book, Lobe, Which));
+            Lost := not Present (Id, R);
+            if Lost then
+               return;
+            end if;
+            declare
+               Book : Driver.Robot.Hand.Tips.Book renames H.Data.Found (Id).Book;
+            begin
+               Agreed := Driver.Robot.Hand.Tips.Latest_Agrees (Book);
+               Checked := Driver.Robot.Hand.Tips.Confirmed (Book, Lobe, Which);
+               Least := Driver.Robot.Hand.Aims.Least_Tilt (Driver.Robot.Hand.Tips.Distance (Book, Lobe, Which));
+            end;
          end Read_Agreed;
       begin
          Hold_Beat (Read_Agreed'Access);
+         if Lost then
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image & " is not pressed: the hand is gone"
+                             & " (its closer group is no longer a closer of its arm)");
+            return;
+         end if;
          if Checked then
             Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image & " at "
                              & (if Which = Open then "open" else "closed") & " is not pressed: its tip is confirmed already");
             return;
          end if;
          if not Press_Once (Id, R, Lobe, Which, Sight) then
-            return;
+            return;   --  Lost, or a press that could not be made: the next lobe is the caller's to go on to
          end if;
          Hold_Beat (Read_Agreed'Access);
+         if Lost then
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image & " is pressed no more: the hand is gone");
+            return;
+         end if;
          if Checked then
             Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image & " at "
                              & (if Which = Open then "open" else "closed") & " pressed once, straight, and its tip is"
@@ -733,11 +846,19 @@ procedure Measure (H : in out Hands; M : in out Model) is
                --  (Driver.Robot.Hand.Aims.Next_Tilt).
                while Tilt > 0.0 and then Tilt < Bound loop
                   if not Press_Once (Id, R, Lobe, Which, Driver.Robot.Hand.Aims.Tilted (Sight, Lean, Tilt)) then
+                     if Lost then
+                        return;   --  Press_Once said so
+                     end if;
                      Why := Ada.Strings.Unbounded.To_Unbounded_String ("a press could not be made");
                      exit;
                   end if;
                   Made := Made + 1;
                   Hold_Beat (Read_Agreed'Access);
+                  if Lost then
+                     Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & Lobe'Image
+                                      & " is pressed no more: the hand is gone");
+                     return;
+                  end if;
                   if Checked then
                      Why := Ada.Strings.Unbounded.To_Unbounded_String
                        ("the tip is confirmed: a press from another pose landed on it");
@@ -765,10 +886,15 @@ procedure Measure (H : in out Hands; M : in out Model) is
    begin
       Count := Group_Count (M);
    end Read_Groups;
+   Listed : Group_Lists.Vector;   --  the closer groups the hands found were made of when the pressing began
    procedure Read_Hands (O : Observation) is
       pragma Unreferenced (O);
    begin
-      Count := Natural (H.Data.Found.Length);
+      Listed.Clear;
+      for I in H.Data.Found.First_Index .. H.Data.Found.Last_Index loop
+         Listed.Append (H.Data.Found (I).Group);
+      end loop;
+      Count := Natural (Listed.Length);
    end Read_Hands;
    Text : Ada.Strings.Unbounded.Unbounded_String;
    procedure Read_Description (O : Observation) is
@@ -823,34 +949,41 @@ begin
          end if;
       end;
    end loop;
-   --  Press every lobe of every hand found, at both openings: a hand whose
-   --  group the body no longer takes for a closer of its arm is gone by then.
+   --  Press every lobe of every hand found, at both openings. A hand is held by its closer group and found again
+   --  where it is read, never by an index kept from an earlier beat: the estimators read the roles again between
+   --  two held beats, and a hand whose group the body no longer takes for a closer of its arm is gone, the others
+   --  (or the ones found again) are pressed on.
    Hold_Beat (Read_Hands'Access);
    if Count = 0 then
       Driver.Log.Line (Driver.Log.Robot, "hand: no hand was found, so nothing is pressed; below, what became of each closer");
    end if;
-   for Id in 1 .. Hand_Id'Base (Count) loop
+   for Group of Listed loop
       for Which in Opening loop
          declare
+            Id   : Hand_Id := Hand_Id'First;
             R    : Hand_Record;
             Here : Boolean := False;
             procedure Read_Hand (O : Observation) is
                pragma Unreferenced (O);
+               There : constant Natural := Index_Of (Group);
             begin
-               Here := Id <= H.Data.Found.Last_Index
-                 and then Role (M, H.Data.Found (Id).Group) = Closer
-                 and then Closer_Arm (M, H.Data.Found (Id).Group) = H.Data.Found (Id).Arm;
+               Here := There > 0
+                 and then Role (M, Group) = Closer
+                 and then Closer_Arm (M, Group) = H.Data.Found (Hand_Id (There)).Arm;
                if Here then
+                  Id := Hand_Id (There);
                   R := H.Data.Found (Id);
                end if;
             end Read_Hand;
          begin
+            Lost := False;
             Hold_Beat (Read_Hand'Access);
             if Here then
                Move_Group (R.Group, R.Readings (Which).Element);
                for L in 1 .. Natural (R.Lobes.Length) loop
                   if R.Lobes (L).Sights (Which).Known then
                      Press_Lobe (Id, R, L, Which);
+                     exit when Lost;
                   else
                      Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & L'Image & " at "
                                       & (if Which = Open then "open" else "closed")
@@ -858,8 +991,8 @@ begin
                   end if;
                end loop;
             elsif Which = Open then
-               Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & " is not pressed: its closer group is no longer"
-                                & " a closer of its arm");
+               Driver.Log.Line (Driver.Log.Robot, "hand: the hand of closer group" & Group'Image & " is not pressed: it is gone,"
+                                & " its group is no longer a closer of its arm");
             end if;
          end;
       end loop;

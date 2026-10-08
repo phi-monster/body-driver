@@ -747,10 +747,18 @@ squared (an offset of a prior sigma shows above Z noises: tilts of atan (Z noise
 over spread) at the least, 0.75 rad for lobe 1) or the prior is below the noise
 already, and Confirmed is a second press from another pose landing on the tip and
 Tested. The truth gave A22's pairs: the tilts from the first press, from the
-arm's last link at the press beats, were 0.943 rad (13840), 0.467 (13952) and 0.957
+arm's last link at the press beats (the truth's line for a beat is the beat
+plus 41 there; its poses are w first), were 0.960 rad (13840), 0.467 (13952) and 0.9565
 (14057, the confirming one, tan 1.4): that pair pinned one lateral axis to
 about 1.7 mm and left the other at the prior, which is where the 7.1 mm lay; the
-other side's presses, about another axis, stopped short of the table. Lobe 2's
+other side's presses, about another axis, stopped short of the table: the
+lowest part of the hand stood 8.7 and 10 cm above it. Both stops were the arm's
+own. In the first the third joint stopped at -0.0359 (asked -0.0578, the other
+five on their targets) with the second link 3.4 mm from the fourth, the value at
+which A27's right arm stopped twice (-0.0367, -0.0359, whatever the fourth joint
+was): the joint's low end, which the boot had only gone near (it showed -0.0415
+at the home pose and never asked past it); in the second the third joint stopped
+at +0.0731 (asked -0.0740) with the second link 0.6 mm from the fifth. Lobe 2's
 first press (14217) found the finger "not at 177.71 pixels": 87 per cent shut, and
 five presses of the crawl had it 94 to 99 per cent shut; they agreed (the same
 hand on the table) and confirmed one another, 19 mm off. A press whose finger
@@ -808,6 +816,29 @@ sight`), and the next prediction took it for the surface. A tip is in front of
 the eye: a fit that puts it at or behind it is not a tip, and the presses fitted
 to it stopped on something else or belong to another tip. The tip is not Ok
 then and the presses on it do not agree (`hand.touch.behind`).
+
+**Lesson: what the decider holds from one beat to the next may be gone at the
+next (A29).** The estimates are recomputed apart from the decider, between two of
+its held beats. After the recompute at 8,136 beats A29's roles changed (groups 5
+and 6 stopped being closers), `Find_Pairs` dropped both hands, and the press in
+progress read the hand it measures at `Found (2)` when none was left:
+`CONSTRAINT_ERROR` at `Read_Above`, and the boot with it. An index into the
+hands is valid in the beat it was read and not after. The decider holds a
+hand by its closer group, finds it again where it reads it (`Index_Of`), and a
+press holds the hand's record only to know it again (`Present`: the same group
+and arm at that index); every read of a press (the aim, each lowering, the
+heights before each step, the tip's agreement after) says whether the hand is
+there, and one that is not ends the press with a line, the arm let go and taken
+back to where the descent began if it had moved, and the lobes after it
+unpressed; the hands that are left are pressed on, by group, not by the
+number they had. The arm and eye of a closer's pair, read in one beat and used
+in the next by the raises, are read again where they are used. The same holds
+of anything outside this layer that keeps a `Hand_Id` across beats
+(`Exists` tells). `hand.measure.gone` runs the decider over a body whose closer
+is re-read as an arm at every beat from the first; `hand.measure.dropped`
+runs it with a fitted arm that presses (the rig of the pressing tests) and drops
+the hand at nineteen parts of the run, the descents among them: both raised
+before the change, at every drop that fell in a press, and end cleanly now.
 
 ## Open
 
