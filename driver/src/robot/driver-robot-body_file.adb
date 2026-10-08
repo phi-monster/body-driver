@@ -212,6 +212,32 @@ package body Driver.Robot.Body_File is
                  & ", ""through"": " & Int (F.Placed_Through) & "}}");
          end;
       end loop;
+      --  The eyes that stand still in the world: the lens and place of each, with the covariance of both.
+      Add ("], ""fixed"": [");
+      declare
+         First : Boolean := True;
+      begin
+         for E in M.Fixed_Eyes.First_Index .. M.Fixed_Eyes.Last_Index loop
+            declare
+               F : Fixed_Fit renames M.Fixed_Eyes (E);
+            begin
+               if F.Judged then
+                  Add (Separator (First) & LF & "  {""eye"": " & Int (Integer (E)) & ", ""known"": " & Flag (F.Known)
+                       & ", ""arm"": " & Int (Integer (F.Arm)) & ", ""lens"": {""fx"": " & Num (F.Lens.Fx)
+                       & ", ""fy"": " & Num (F.Lens.Fy) & ", ""cx"": " & Num (F.Lens.Cx)
+                       & ", ""cy"": " & Num (F.Lens.Cy)
+                       & ", ""k1"": " & Num (F.Lens.K1) & ", ""k2"": " & Num (F.Lens.K2) & "}"
+                       & ", ""rotation"": " & Nine (F.Pose.Rotation) & ", ""centre"": " & Three (F.Pose.Translation)
+                       & ", ""covariance"": " & Reals (F.Covariance) & ", ""used"": " & Int (F.Used)
+                       & ", ""offered"": " & Int (F.Offered) & ", ""sigma_px"": " & Num (F.Sigma_Px)
+                       & ", ""distorted"": " & Flag (F.Distorted)
+                       & ", ""why"": " & Driver.Json.Quote (To_String (F.Why))
+                       & ", ""from_matches"": " & Int (F.From_Matches) & ", ""from_sets"": " & Int (F.From_Sets) & "}");
+                  First := False;
+               end if;
+            end;
+         end loop;
+      end;
       Add ("]}}" & LF);
       return To_String (T);
    end Text;
@@ -577,6 +603,45 @@ package body Driver.Robot.Body_File is
                      M.Kinematics.Append (R);
                   end;
                end loop;
+               --  The eyes that stand still in the world.
+               M.Fixed_Eyes.Clear;
+               declare
+                  Fs : constant Node := Field (N, "fixed");
+               begin
+                  for I in 1 .. Size (Fs) loop
+                     declare
+                        X : constant Node := Item (Fs, I);
+                        E : constant Integer := Whole (X, "eye");
+                        L : constant Node := Field (X, "lens");
+                     begin
+                        if E >= 1 then
+                           while Integer (M.Fixed_Eyes.Last_Index) < E loop
+                              M.Fixed_Eyes.Append (Fixed_Fit'(others => <>));
+                           end loop;
+                           declare
+                              F : Fixed_Fit renames M.Fixed_Eyes (Eye_Id (E));
+                           begin
+                              F.Known := Truth (X, "known");
+                              F.Arm := Arm_Id'Base (Natural'Max (0, Whole (X, "arm")));
+                              F.Lens := (Fx => Value (Field (L, "fx")), Fy => Value (Field (L, "fy")),
+                                         Cx => Value (Field (L, "cx")), Cy => Value (Field (L, "cy")),
+                                         K1 => Value (Field (L, "k1")), K2 => Value (Field (L, "k2")));
+                              F.Pose := (Rotation    => Nine_Of (Field (X, "rotation")),
+                                         Translation => Three_Of (Field (X, "centre")));
+                              F.Covariance := Reals_Of (Field (X, "covariance"));
+                              F.Used := Natural'Max (0, Whole (X, "used"));
+                              F.Offered := Natural'Max (0, Whole (X, "offered"));
+                              F.Sigma_Px := Value (Field (X, "sigma_px"));
+                              F.Distorted := Truth (X, "distorted");
+                              F.Why := To_Unbounded_String (Driver.Json.Text (Doc, Field (X, "why")));
+                              F.Judged := True;
+                              F.From_Matches := Natural'Max (0, Whole (X, "from_matches"));
+                              F.From_Sets := Natural'Max (0, Whole (X, "from_sets"));
+                           end;
+                        end if;
+                     end;
+                  end loop;
+               end;
                --  What is reloaded stands and is not measured again, so the fits
                --  are kept only when every arm that carries an eye is fitted in
                --  them: a boot that failed during the arms' sweeps wrote the arms
@@ -601,6 +666,7 @@ package body Driver.Robot.Body_File is
                      Restored (Stored_Kinematics) := True;
                   else
                      M.Kinematics.Clear;
+                     M.Fixed_Eyes.Clear;
                   end if;
                end;
             end if;

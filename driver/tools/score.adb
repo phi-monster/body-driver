@@ -67,6 +67,7 @@ with Driver.Observations;
 with Driver.Protocol;
 with Driver.Recording;
 with Driver.Stats;
+with Driver.Uncertain;
 
 procedure Score is
 
@@ -348,6 +349,9 @@ procedure Score is
    type Tip_Estimate is record
       Tip, Press : Vec3;
       Reading    : Real_Holders.Holder;
+      Confirmed  : Boolean := False;   --  a second press from a distinct pose landed on it
+      Has_Spread : Boolean := False;   --  the driver stated a covariance (estimates before it did not)
+      Covariance : Mat3 := [others => [others => 0.0]];
    end record;
 
    type Lobe_Estimate is record
@@ -390,9 +394,30 @@ procedure Score is
       Why : Unbounded_String;
 
       function Tip_Of (N : Node) return Tip_Estimate is
-        ((Tip     => Vector_Of (Doc, Lookup (Doc, N, "tip")),
-          Press   => Vector_Of (Doc, Lookup (Doc, N, "press")),
-          Reading => Real_Holders.To_Holder (Numbers_Of (Doc, Lookup (Doc, N, "reading")))));
+         T : Tip_Estimate :=
+           (Tip     => Vector_Of (Doc, Lookup (Doc, N, "tip")),
+            Press   => Vector_Of (Doc, Lookup (Doc, N, "press")),
+            Reading => Real_Holders.To_Holder (Numbers_Of (Doc, Lookup (Doc, N, "reading"))),
+            others  => <>);
+         Confirmed  : constant Node := Lookup (Doc, N, "confirmed");
+         Covariance : constant Node := Lookup (Doc, N, "covariance");
+      begin
+         T.Confirmed := Confirmed /= No_Node and then Kind_Of (Doc, Confirmed) = Boolean_Value
+                        and then Is_True (Doc, Confirmed);
+         if Covariance /= No_Node and then Kind_Of (Doc, Covariance) = Array_Value then
+            T.Has_Spread := True;
+            for I in 1 .. 3 loop
+               declare
+                  Row : constant Vec3 := Vector_Of (Doc, Element (Doc, Covariance, I));
+               begin
+                  for J in 1 .. 3 loop
+                     T.Covariance (I, J) := Row (J);
+                  end loop;
+               end;
+            end loop;
+         end if;
+         return T;
+      end Tip_Of;
    begin
       Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
       while not Ada.Text_IO.End_Of_File (F) loop
@@ -1194,6 +1219,13 @@ procedure Score is
                   Estimates : array (1 .. Natural (H.Lobes.Length)) of Vec3;
                   --  A tip no press has measured at this opening (its press direction zero) is not scored.
                   Measured  : array (1 .. Natural (H.Lobes.Length)) of Boolean := [others => True];
+                  --  Each tip's press direction in the true link frame, the
+                  --  standard deviation the driver states for the tip along it
+                  --  (metres; Real'Last when it states none), and whether a
+                  --  second press confirmed the tip.
+                  Presses   : array (1 .. Natural (H.Lobes.Length)) of Vec3;
+                  Sigmas    : array (1 .. Natural (H.Lobes.Length)) of Real := [others => Real'Last];
+                  Confirmed : array (1 .. Natural (H.Lobes.Length)) of Boolean := [others => False];
                   Usable    : Boolean := not Fingers.Is_Empty;
                begin
                   for Lobe in Estimates'Range loop
@@ -1205,6 +1237,13 @@ procedure Score is
                         Rx : constant Mat3 := X_Rotation (Fit.X);
                         Press : constant Vec3 := (if abs E.Press > 0.0 then Unit (Transpose (Rx) * E.Press) else Zero3);
                      begin
+                        Presses (Lobe) := Press;
+                        Confirmed (Lobe) := E.Confirmed;
+                        if E.Has_Spread and then abs E.Press > 0.0 then
+                           --  The map into the true link frame turns and scales: the
+                           --  spread along the turned press is s times the stated one.
+                           Sigmas (Lobe) := Scale_Of (Fit.X) * Driver.Uncertain.Sigma_Along (E.Covariance, Unit (E.Press));
+                        end if;
                         Estimates (Lobe) := Scale_Of (Fit.X) * (Transpose (Rx) * (E.Tip - X_Translation (Fit.X)));
                         if abs E.Press = 0.0 then
                            Measured (Lobe) := False;
@@ -1265,13 +1304,26 @@ procedure Score is
                            elsif Best_Of (Lobe) = 0 then
                               Ada.Text_IO.Put_Line ("  lobe" & Lobe'Image & ": more lobes than fingers");
                            else
-                              Ada.Text_IO.Put_Line
-                                ("  " & (if At_Open then "open" else "closed") & " lobe" & Lobe'Image & " ("
-                                 & Fingers (Best_Of (Lobe)) & "): "
-                                 & Image (Millimetres_Per_Metre * abs (Estimates (Lobe) - Grid (Lobe, Best_Of (Lobe)).Support), 2)
-                                 & " mm from the support point along its press, "
-                                 & Image (Millimetres_Per_Metre * abs (Estimates (Lobe) - Grid (Lobe, Best_Of (Lobe)).Farthest), 2)
-                                 & " mm from the farthest vertex along the approach");
+                              declare
+                                 --  The press measures the tip along its own direction: the
+                                 --  error there, against the spread the driver states there.
+                                 Along : constant Real := (Estimates (Lobe) - Grid (Lobe, Best_Of (Lobe)).Support) * Presses (Lobe);
+                              begin
+                                 Ada.Text_IO.Put_Line
+                                   ("  " & (if At_Open then "open" else "closed") & " lobe" & Lobe'Image & " ("
+                                    & Fingers (Best_Of (Lobe)) & ", "
+                                    & (if Confirmed (Lobe) then "confirmed" else "provisional") & "): "
+                                    & Image (Millimetres_Per_Metre * abs (Estimates (Lobe) - Grid (Lobe, Best_Of (Lobe)).Support), 2)
+                                    & " mm from the support point along its press ("
+                                    & Image (Millimetres_Per_Metre * Along, 2) & " mm along the press"
+                                    & (if Sigmas (Lobe) < Real'Last and then Sigmas (Lobe) > 0.0
+                                       then ", " & Image (Along / Sigmas (Lobe), 2) & " of its stated sigma "
+                                            & Image (Millimetres_Per_Metre * Sigmas (Lobe), 2) & " mm"
+                                       else ", no sigma stated")
+                                    & "), "
+                                    & Image (Millimetres_Per_Metre * abs (Estimates (Lobe) - Grid (Lobe, Best_Of (Lobe)).Farthest), 2)
+                                    & " mm from the farthest vertex along the approach");
+                              end;
                            end if;
                         end loop;
                      end;
@@ -1389,7 +1441,8 @@ procedure Score is
                      --  Back into the driver's tool frame: p_D = Rx p_L / s + tx.
                      return (Tip     => Rx * Tip / S + Tx,
                              Press   => Rx * Press,
-                             Reading => Real_Holders.To_Holder (Value_Maps.Element (Recorded (B).Readings, Closer)));
+                             Reading => Real_Holders.To_Holder (Value_Maps.Element (Recorded (B).Readings, Closer)),
+                             Confirmed => True, others => <>);
                   end;
                end At_Beat;
             begin

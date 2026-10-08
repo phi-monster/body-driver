@@ -342,6 +342,9 @@ package body Driver.Robot is
       T : Rigid;
       K : Boolean;
    begin
+      if Eye_Mount (M, E).Kind = World_Fixed then
+         return Kinematics.Fixed_Pose (M, E);
+      end if;
       if A = 0 then
          return (others => <>);
       end if;
@@ -363,6 +366,18 @@ package body Driver.Robot is
    begin
       Px := (U => 0.0, V => 0.0);
       Visible := False;
+      if Eye_Mount (M, E).Kind = World_Fixed then
+         if Kinematics.Fixed_Known (M, E) then
+            declare
+               Placed : constant Pose_Estimate := Kinematics.Fixed_Pose (M, E);
+            begin
+               Kinematics.Fixed_Project_In_Eye (M, E, Inverse (Placed.Pose) * Point, Px.U, Px.V, Visible);
+               Visible := Visible and then Px.U in 0.0 .. Real (M.Eyes (E).Grid.Width)
+                          and then Px.V in 0.0 .. Real (M.Eyes (E).Grid.Height);
+            end;
+         end if;
+         return;
+      end if;
       if A > 0 then
          Arm_Eye (M, A, O, T, K);
          if K then
@@ -376,6 +391,13 @@ package body Driver.Robot is
    function Eye_Ray (M : Model; E : Eye_Id; Px : Driver.Images.Pixel) return Ray_Estimate is
       A : constant Arm_Id'Base := Fitted_Arm (M, E);
    begin
+      if Eye_Mount (M, E).Kind = World_Fixed then
+         return (if not Kinematics.Fixed_Known (M, E) then (others => <>)
+                 else (Origin    => (Mean => [0.0, 0.0, 0.0], Covariance => [others => [others => 0.0]]),
+                       Direction =>
+                         (Unit_Vector => Kinematics.Fixed_Ray_In_Eye (M, E, Px.U, Px.V),
+                          Sigma       => Kinematics.Fixed_Line_Sigma (M, E, Px.U, Px.V, In_World => False))));
+      end if;
       if A = 0 then
          return (others => <>);
       end if;
@@ -389,6 +411,21 @@ package body Driver.Robot is
       T : Rigid;
       K : Boolean;
    begin
+      if Eye_Mount (M, E).Kind = World_Fixed then
+         if not Kinematics.Fixed_Known (M, E) then
+            return (others => <>);
+         end if;
+         --  The fit's covariance of the lens and the turn together, correlations kept, gives the direction's sigma.
+         declare
+            Placed : constant Pose_Estimate := Kinematics.Fixed_Pose (M, E);
+         begin
+            return (Origin    => (Mean => Placed.Pose.Translation, Covariance => Placed.Position_Covariance),
+                    Direction =>
+                      (Unit_Vector => Driver.Numerics.Arrays."*"
+                                        (Placed.Pose.Rotation, Kinematics.Fixed_Ray_In_Eye (M, E, Px.U, Px.V)),
+                       Sigma       => Kinematics.Fixed_Line_Sigma (M, E, Px.U, Px.V, In_World => True)));
+         end;
+      end if;
       if A = 0 then
          return (others => <>);
       end if;
@@ -642,6 +679,9 @@ package body Driver.Robot is
                         else "image lag unmeasured, ")
                     & Mount_Kind'Image (Mt.Kind)
                     & (if Mt.Kind = Arm_Carried then " on arm" & Arm_Id'Image (Mt.Arm) else "")
+                    & (if Mt.Kind /= World_Fixed then ""
+                        elsif Kinematics.Fixed_Known (M, E) then ", placed in the world"
+                        else ", not placed in the world (" & Kinematics.Fixed_Why (M, E) & ")")
                     & ", rest noise " & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & " times its floor"
                     & (if M.Eyes (E).Rest_Counts_Known
                         then ", at most" & M.Eyes (E).Rest_Count_Max'Image & " cells move at rest ("

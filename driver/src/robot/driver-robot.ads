@@ -487,6 +487,11 @@ private
       Table        : Driver.Geometry.Plane_Estimate;
       Table_A      : Vec3 := [0.0, 0.0, 0.0];                 --  the same plane as its eye sees it (Fit.Sight_Plane)
       Table_Covariance : Mat3 := [others => [others => 0.0]];  --  of Table_A, its lens's lines of sight held
+      --  What the plane moves by with the fit's terms (the depths and the lens's lines of sight): 3 x Terms,
+      --  row by row; and the covariance of its points' scatter about it, which no term moves. A fixed eye
+      --  that sees points on the table carries them (Kinematics.Fixed).
+      Table_Response : Real_Vectors.Vector;
+      Table_Scatter  : Mat3 := [others => [others => 0.0]];
       Table_On     : Flag_Vectors.Vector;                      --  per track: it lies on the table
       --  Every track's point in its reference frame, three numbers each,
       --  where Track_Known holds, at the depth the fit refined, its logarithm
@@ -505,7 +510,37 @@ private
       Placed_Px    : Real := 0.0;                  --  the noise of the link that placed it, in its eye's units
       Placed_Points : Natural := 0;                --  the points that placed it
       Placed_Through : Natural := 0;               --  the eye that saw both it and the first arm
+      --  Per track, row by row: how the logarithm of its depth moves with each term of Covariance, the others'
+      --  depths at their best (Fit_Report.Depth_Gains): the share of every depth's uncertainty all of them have
+      --  in common, which a fixed eye placed from these points carries (Kinematics.Fixed).
+      Depth_Gains  : Real_Vectors.Vector;
    end record;
+
+   --  The lens and pose of an eye fixed in the world, measured from points the first arm's eye placed and the
+   --  answers it gave to where they are (Kinematics.Fixed): its camera in the world (the first arm's reference
+   --  frame, in that arm's unit) and its lens, with the covariance of both: 12 x 12, row by row, the lens's six
+   --  terms as an arm's fit has them (Kinematics.Fit.Lens_Terms: the logarithms of Fx and Fy, Cx, Cy, K1, K2; the
+   --  distortion terms zero when not kept), then the camera's turn about its own axes and its centre in the world.
+   --  Known only when the points determine them; Why says what they leave out when not.
+   type Fixed_Fit is record
+      Known      : Boolean := False;
+      Arm        : Arm_Id'Base := 0;            --  the arm whose points measured it
+      Lens       : Lens_Fit;
+      Pose       : Driver.Numerics.Rigid := Driver.Numerics.Identity;
+      Covariance : Real_Vectors.Vector;
+      Used       : Natural := 0;               --  the answers that fit
+      Offered    : Natural := 0;               --  the answers it was given
+      Sigma_Px   : Real := 0.0;                --  the noise they show
+      Distorted  : Boolean := False;           --  the distortion terms are kept
+      Why        : Ada.Strings.Unbounded.Unbounded_String;
+      --  What it was measured from, so that it is measured again only when that changed: the world arm's fit
+      --  (its keyframes with matches) and the sets of its reference matched into other eyes.
+      Judged       : Boolean := False;
+      From_Matches : Natural := 0;
+      From_Sets    : Natural := 0;
+   end record;
+
+   package Fixed_Fit_Vectors is new Ada.Containers.Vectors (Eye_Id, Fixed_Fit);
 
    type Arm_Evidence is record
       Arm      : Arm_Id'Base := 0;
@@ -545,6 +580,7 @@ private
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph
       Kinematics     : Arm_Evidence_Vectors.Vector;   --  per arm with an eye
+      Fixed_Eyes     : Fixed_Fit_Vectors.Vector;     --  per eye: what is measured of it when it is fixed in the world
       Is_Booted      : Boolean := False;
       From_File      : Stored_Flags := [others => False];   --  reloaded, so not measured again (Load_Body)
       Report         : Ada.Strings.Unbounded.Unbounded_String;   --  what the last estimate found, for Describe
