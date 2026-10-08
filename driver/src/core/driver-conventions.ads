@@ -22,7 +22,9 @@ package Driver.Conventions with Pure is
    --  of its hand's presses (80 to 134 keyframes), seven ended undetermined (a noise of 1.6 pixels, the normal
    --  equations singular) or fitted with a noise of 0.3 to 1.6 pixels, the centre up to 8 pixels off and, once, the
    --  focal lengths at 376 and 361 pixels; from this damping all eight gave a noise of 0.12 pixels and a focal
-   --  length of 397.4, where the camera's is 397.04.
+   --  length of 397.4, where the camera's is 397.04. A fit with no valley to cross (the homography of a plane
+   --  seen by an eye, the link of two planes) starts at the float's epsilon, as it always has: damped steps that
+   --  each lower the cost by less than the unchanged fraction stop it short of its minimum.
 
    Unchanged_Fraction : constant := 0.01;
    --  An iterative estimate has stopped changing when one more iteration

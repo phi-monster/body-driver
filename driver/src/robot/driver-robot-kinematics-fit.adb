@@ -199,6 +199,7 @@ package body Driver.Robot.Kinematics.Fit is
    generic
       Parameters : Positive;
       Residuals  : Positive;
+      Damping    : Real;   --  what the first step starts at; the fits that cross a flat valley start high
       with procedure Evaluate (X : Real_Array; R : out Real_Array);
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real);
 
@@ -208,7 +209,7 @@ package body Driver.Robot.Kinematics.Fit is
       R0     : Real_Access := new Real_Array (1 .. Residuals);
       Rn     : Real_Access := new Real_Array (1 .. Residuals);
       J      : Matrix_Access := new Real_Matrix (1 .. Residuals, 1 .. Parameters);
-      Lambda : Real := Driver.Conventions.Initial_Damping;
+      Lambda : Real := Damping;
       Cost0  : Real;
 
       function Cost (R : Real_Array) return Real is
@@ -1644,7 +1645,7 @@ package body Driver.Robot.Kinematics.Fit is
                end loop;
             end Evaluate;
 
-            procedure Solve is new Robust_Fit (Count, Used, Evaluate);
+            procedure Solve is new Robust_Fit (Count, Used, Driver.Conventions.Initial_Damping, Evaluate);
             X : Real_Array (1 .. Count) := [others => 0.0];
          begin
             for Xs of Sight loop
@@ -1972,7 +1973,7 @@ package body Driver.Robot.Kinematics.Fit is
                      Free (Poses);
                   end Evaluate;
 
-                  procedure Solve is new Robust_Fit (Count, Used, Evaluate);
+                  procedure Solve is new Robust_Fit (Count, Used, Driver.Conventions.Initial_Damping, Evaluate);
                begin
                   for I in 1 .. S loop
                      if Inlier (I) then
@@ -2871,7 +2872,7 @@ package body Driver.Robot.Kinematics.Fit is
             end loop;
          end Evaluate;
 
-         procedure Solve is new Robust_Fit (8, 2 * Used, Evaluate);
+         procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate);
          R : Real_Access := new Real_Array (1 .. 2 * Used);
       begin
          Solve (X, Sigma);
@@ -3479,7 +3480,7 @@ package body Driver.Robot.Kinematics.Fit is
                Chain_Residuals (D1.all, D2.all, F1, F2, Second_Eye, S1, S2, Xv, R);
             end Evaluate;
 
-            procedure Solve is new Robust_Fit (Terms, Rows, Evaluate);
+            procedure Solve is new Robust_Fit (Terms, Rows, Real'Model_Epsilon, Evaluate);
             Xf  : Real_Array (1 .. Terms) := X (Free_First .. Chain_Terms);
             R   : Real_Access := new Real_Array (1 .. Rows);
             Cost, Rss : Real := 0.0;
