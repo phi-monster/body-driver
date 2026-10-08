@@ -346,6 +346,34 @@ package body Driver.Action.Contact.Search.Tests is
       Check (Tried.Unreachable > 0 and then Tried.Placements > 0, "a refusal does not count what it tried");
    end Unreachable_Refused_With_What_Was_Tried;
 
+   --  Whether the way in is clear is a few tests of the hand against the
+   --  scene; whether the arm reaches a pose is an inverse kinematics solve,
+   --  many times dearer (a turned cup cost 502 failing solves, 7 of the 8
+   --  seconds of one search). A candidate whose way in is never clear is
+   --  refused without a single reach.
+   procedure Way_In_Asked_Before_The_Reach is
+      X      : constant Scene := Make (Bar (0.2, 0.02, 0.02), Turned, 0.4, 2);
+      Asked  : Natural := 0;
+      function Counted (Tool : Rigid) return Boolean is
+      begin
+         Asked := Asked + 1;
+         return abs Tool.Translation >= 0.0;
+      end Counted;
+      function Shut (Tool : Rigid; Closers : Real_Vectors.Vector) return Boolean is
+        (abs Tool.Translation < 0.0 and then Natural (Closers.Length) >= 0);
+      Beside : Point_Vectors.Vector;
+      Best   : Candidate;
+      Found  : Boolean;
+      Tried  : Account;
+   begin
+      Find (Shape_Of (X.S, 1), Beside, Effector_Of (X.S, 1), Slide (Up_Of (X)), Up_Of (X), (others => <>),
+            Counted'Access, Shut'Access, Best, Found, Tried);
+      Check (not Found, "a candidate whose way in is never clear is chosen");
+      Check (Tried.Unreachable > 0, "no candidate was refused for its way in");
+      Check (Asked = 0, "the arm was asked" & Asked'Image & " times to reach the poses of candidates whose way in "
+             & "is shut");
+   end Way_In_Asked_Before_The_Reach;
+
    procedure Register is
    begin
       Driver.Tests.Register ("action.search.bar", "a gripper closes along a bar instead of across it, or is chosen "
@@ -375,6 +403,9 @@ package body Driver.Action.Contact.Search.Tests is
                              Failed_Friction_Not_Taken_Again'Access);
       Driver.Tests.Register ("action.search.unreachable", "an unreachable choice is made or refused without an account",
                              Unreachable_Refused_With_What_Was_Tried'Access);
+      Driver.Tests.Register ("action.search.cost_order", "the arm is asked to reach the poses of a candidate whose "
+                             & "way in is shut",
+                             Way_In_Asked_Before_The_Reach'Access);
    end Register;
 
 end Driver.Action.Contact.Search.Tests;
