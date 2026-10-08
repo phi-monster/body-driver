@@ -660,9 +660,21 @@ raised along the way up, in steps that double from the least move of its tool,
 while each raise sets the closer moving; a raise after which it has not moved
 was not what held it, and the hand is raised no more, nor higher than the eye
 stands above the table (`Free_Closer`; `hand.measure.held`). The hand stays
-where it was raised to: the presses aim from wherever the arm stands.
+where it was raised to: the presses aim from wherever the arm stands. A19
+(8597f62) lost its first press the same way (`a press with the closer at neither
+measured opening is not used`, blocked after lowering 5.1 units).
 
 ## Open
+
+- A closer that follows neither way at its first push (a finger pressed so
+  hard on the table that its small first pushes do not move it) is left
+  stuck by the sweep; the hand does not raise the arm and sweep again. A17 and
+  A19 had fingers on the table at the sweep's pose, and both closers did start,
+  and were held only on the way back.
+- A stall among the first three pushes of a descent is taken for what free
+  pushes do (nothing is compared with fewer than three) and enters the
+  largest share the descent's later pushes are compared with, so that the
+  descent judges nothing more; the step tracker's block still ends it.
 
 - A contact that is less repeatable than the arm's predicted noise is not
   modelled (the fit no longer raises its noise to the scatter it sees, which a
