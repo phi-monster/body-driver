@@ -30,7 +30,13 @@ package body Driver.Robot.Steps is
       E.End_At := Beat;
       E.Settled := Settled;
       E.Rested := Rested;
-      if Settled and then E.Length > 0.0 and then Channels.Has_Reading (M, G, Beat) then
+      --  A push that asks for less than the one test of motion sees is not judged by what the group did: whatever
+      --  moved it meanwhile (a press let go, an arm relaxing from what it pressed) was not the push, there is no
+      --  delivery to fall short of, and nothing says it was answered or not. It is neither blocked nor a free
+      --  push, and what it delivered stays unknown.
+      if Settled and then E.Length > 0.0 and then Channels.Has_Reading (M, G, Beat)
+        and then Channels.Visible (M, G, Along_Ask (S, E.Length, E.Length))
+      then
          declare
             Along, Spread : Real := 0.0;
             Noise_Known   : Boolean := True;
@@ -83,12 +89,13 @@ package body Driver.Robot.Steps is
                   --  tell (where one watches) and the readings' noise could.
                   --  A shortfall no eye can tell from where the push was
                   --  asked to be is none, however exactly the readings tell
-                  --  it. A push is blocked as well when it asked what that
-                  --  test would see and nothing answered: a push smaller than
-                  --  the visible step moves nothing any eye can see, so that
-                  --  it did not seem to answer says nothing.
+                  --  it. A push is blocked as well when nothing answered it:
+                  --  it asked what that test sees (all that is judged here),
+                  --  so that it did not seem to answer is evidence. One the
+                  --  readings went against, by more than that, delivered less
+                  --  than nothing: its shortfall is longer than its ask.
                   E.Blocked :=
-                    (not Answered and then Channels.Visible (M, G, Along_Ask (S, E.Length, E.Length)))
+                    not Answered
                     or else (Falls_Short and then Channels.Visible (M, G, Along_Ask (S, E.Length, Short)));
                   if Answered and then not E.Blocked then
                      S.Free_Shortfalls.Append (Short);

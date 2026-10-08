@@ -53,8 +53,11 @@ package body Driver.Robot.Motion is
             declare
                E : constant Episode := Steps.Latest (M, Group_Id (G));
             begin
-               Append (Report.Detail, "group" & G'Image & ": delivered "
-                       & Driver.Log.Image (E.Delivered.Value, 3) & " of " & Driver.Log.Image (E.Length, 4)
+               Append (Report.Detail, "group" & G'Image & ": "
+                       & (if Known (E.Delivered)
+                          then "delivered " & Driver.Log.Image (E.Delivered.Value, 3) & " of "
+                          else "delivery not judged, asked ")
+                       & Driver.Log.Image (E.Length, 4)
                        & (if E.Blocked then ", blocked" else "")
                        & (if E.Rested then "" else ", given up still moving") & "; ");
                Report.At_Rest := Report.At_Rest and then E.Rested;

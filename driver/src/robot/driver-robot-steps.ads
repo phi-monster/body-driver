@@ -50,10 +50,21 @@
 --  the ask, so that a joint standing a few millionths of a radian off a
 --  target it was given before is nothing beside one stopped by something
 --  while the others move. A push answers when its reading moves
---  (Channels.Moving); one that asks for less than the one test of motion
---  sees moves nothing any eye can see, so that it did not seem to answer
---  says nothing, and is judged by its shortfall alone; one that asks for
---  more and was not answered is blocked.
+--  (Channels.Moving); one that asks for more than the one test of motion
+--  sees and was not answered is blocked.
+--
+--  A push that asks for less than that test sees is not judged at all: it
+--  moves nothing any eye can see, so that it did not seem to answer says
+--  nothing, and whatever the group did meanwhile was not what it asked (a
+--  press let go, the arm relaxing from the surface it pressed, a few
+--  millionths of a radian asked and half a thousandth moved the other
+--  way). There is no delivery to fall short of: its delivered fraction and
+--  its shortfall are unknown, it is not blocked, and it is not one of the
+--  group's free pushes, whose shortfalls it would otherwise widen. A push
+--  that does ask what that test sees, and is moved against its ask by a
+--  motion it sees, delivered less than nothing (its delivered fraction is
+--  below zero) and is blocked: something outside it, a surface the arm
+--  pressed, moved the group more than the push did.
 --
 --  The judgment is made from the stream alone, as the pushes happen, so the
 --  same verdicts follow from a recording (Driver.Robot.Blocked) as from the

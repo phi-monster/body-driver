@@ -1681,6 +1681,99 @@ package body Driver.Robot.Tests is
       end if;
    end Step_Short_Of_Sight;
 
+   --  A press let go (A16's Press_Once): the arm held against a surface is asked to stand where it is, a push of a
+   --  millionth, less than any eye can see, and relaxes by five steps an eye can see meanwhile, the way the surface
+   --  lets it. What moved it was not the push, and there is no delivery to fall short of: it is neither blocked nor
+   --  a free push (the group's free baseline does not take its shortfall), and its delivered fraction is unknown.
+   --  Where the ask is one the test sees and the joint is moved against it by a motion the test sees, nothing was
+   --  delivered either: that push is blocked, its delivered fraction below zero. Pushes 1 to 6 go out and back by
+   --  0.01 (the eye sees 0.009), push 7 is the let-go, push 8 asks 0.5 and is delivered, push 9 asks 0.4 and the
+   --  joint is moved 0.2 the other way.
+   procedure Step_Let_Go_Is_Not_Blocked is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Target, Reading, From : Real := 0.0;
+   begin
+      for B in 0 .. 140 loop
+         if B = 64 or else B = 128 then
+            --  What a lock-in measured of an eye watching the channel: ten cells moving 100 pixels per reading unit
+            --  (Visible_Step 0.009).
+            declare
+               S : Eye_Stream renames M.Eyes (1);
+            begin
+               S.Kept_Groups.Clear;
+               S.Kept_Channels.Clear;
+               S.Gains.Clear;
+               S.Gain_Variances.Clear;
+               S.Kept_Groups.Append (1);
+               S.Kept_Channels.Append (1);
+               for Cell in 1 .. 10 loop
+                  S.Gains.Append (1.0e4);
+                  S.Gain_Variances.Append (1.0);
+               end loop;
+               M.Graph.Effects.Replace_Element
+                 (1, (Verdict => Whole, Responding => 10, Textured => 10,
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0)));
+            end;
+         end if;
+         if B in 66 .. 110 then
+            declare
+               K     : constant Natural := (B - 66) / 5 + 1;
+               Phase : constant Natural := (B - 66) mod 5;
+            begin
+               if Phase = 0 then
+                  Target := (case K is
+                                when 7 => Reading + 1.0e-6,
+                                when 8 => 0.5,
+                                when 9 => Reading + 0.4,
+                                when others => (if K mod 2 = 1 then 0.01 else 0.0));
+                  From := Reading;
+               elsif Phase = 1 then
+                  Reading := From + (case K is
+                                        when 7 => -0.05,
+                                        when 9 => -0.2,
+                                        when others => 0.9855 * (Target - From));
+               end if;
+            end;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Reading + 1.0e-12 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Known (Visible_Step (M, 1, 1)), "the eye's visible step is known");
+      Check (Steps.Episodes (M, 1) = 9, "nine pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 9 then
+         for K in 1 .. 8 loop
+            Check (M.Groups (1).Episodes (K).Ended and then not M.Groups (1).Episodes (K).Blocked,
+                   "push" & K'Image & " is called blocked");
+         end loop;
+         declare
+            Let_Go : constant Episode := M.Groups (1).Episodes (7);
+            Against : constant Episode := M.Groups (1).Episodes (9);
+         begin
+            Check (not Let_Go.Blocked,
+                   "a push of a millionth, which the arm relaxed" & Real'Image (Let_Go.Shortfall.Value)
+                   & " away from, is called blocked");
+            Check (not Known (Let_Go.Delivered) and then not Known (Let_Go.Shortfall),
+                   "a push that asked less than any eye can see has a delivered fraction");
+            Check (Natural (M.Groups (1).Free_Shortfalls.Length) = 7,
+                   "the free pushes are" & Natural'Image (Natural (M.Groups (1).Free_Shortfalls.Length))
+                   & ", not seven (pushes 1 to 6 and 8: the let-go and the push moved against are not among them)");
+            Check (Against.Blocked and then Known (Against.Delivered) and then Against.Delivered.Value < 0.0,
+                   "a push the joint was moved against by a visible motion is not blocked with a negative delivered "
+                   & "fraction:" & Real'Image (Against.Delivered.Value));
+         end;
+      end if;
+   end Step_Let_Go_Is_Not_Blocked;
+
 
    --  The same joint, read as exactly, with a lock-in's step of 3e-17
    --  credited to it (what a lock-in that credits a group with the pictures'
@@ -5582,6 +5675,11 @@ package body Driver.Robot.Tests is
                              & "eye can see never ends while another joint of its group moves about", Step_Ends_Beside_A_Moving_Joint'Access);
       Driver.Tests.Register ("robot.steps.sight", "a push of a joint an eye watches is called blocked though it stopped "
                              & "short by less than the eye can see, or asked less than the eye can see", Step_Short_Of_Sight'Access);
+      Driver.Tests.Register ("robot.steps.letgo",
+                             "a push that asks less than any eye can see is called blocked because the arm relaxed "
+                             & "meanwhile, or joins the free pushes, or a push the joint is moved against by a visible "
+                             & "motion is not blocked with a negative delivered fraction",
+                             Step_Let_Go_Is_Not_Blocked'Access);
       Driver.Tests.Register ("robot.steps.free", "a push of a joint an eye watches is called blocked though it stopped short by "
                              & "no more than every free push of the joint does, because the joint's own error is as large "
                              & "as the step an eye can see", Step_Free_Error_As_Big_As_The_Step'Access);
