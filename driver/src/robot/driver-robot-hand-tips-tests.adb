@@ -72,11 +72,11 @@ package body Driver.Robot.Hand.Tips.Tests is
    --  arm's noise, and was pressing straight down. Lift is how far above the
    --  table the tip stopped: the arm stopped on something else.
    procedure Press_At (L : Positive; O : Opening; Tilt, Azimuth, X, Y : Real; Made : out Boolean;
-                       Press : out Driver.Robot.Hand.Presses.Event; Lift : Real := 0.0)
+                       Press : out Driver.Robot.Hand.Presses.Event; Lift : Real := 0.0; Slide : Vec3 := Zero3)
    is
       R       : constant Mat3 := Exp (Tilt * [Cos (Azimuth), Sin (Azimuth), 0.0]) * Pointing_Down (L, O);
       Landing : constant Vec3 := [X, Y, Lift + Contact_Sigma * Gaussian];
-      T       : constant Vec3 := Landing - R * Tips_True (L, O);
+      T       : constant Vec3 := Landing - R * (Tips_True (L, O) + Slide);   --  the finger slid by Slide under the press
       Other   : constant Positive := 3 - L;
       Beside  : constant Vec3 := R * Tips_True (Other, O) + T;
    begin
@@ -378,8 +378,94 @@ package body Driver.Robot.Hand.Tips.Tests is
       end;
    end Slides_Kept_With_Their_Presses;
 
+   --  The share of its travel between the openings each lobe's finger slides inward by under a press.
+   Slid_By : constant array (1 .. 2) of Real := [0.12, 0.28];
+
+   function Travel (L : Positive) return Vec3 is (Tips_True (L, Closed_Empty) - Tips_True (L, Open));
+
+   --  What the eye measured of the slide under a press of lobe L: its own, and nothing of the other's.
+   function Measured_Slide (L : Positive; Known_Slide : Boolean := True) return Slid_Row is
+     ([for Which in 1 .. 2 => (if Which = L and then Known_Slide
+                               then Slid'(Known => True, Pixels => 0.0, Pixels_Sigma => 1.0, Fraction => Slid_By (L),
+                                         Fraction_Sigma => 0.01)
+                               else Slid'(others => <>))]);
+
+   --  Presses at both openings, or at the open one only, the fingers sliding by their shares under each, the
+   --  slides measured or not.
+   function Book_With_Slides (Openings : Boolean; Measured : Boolean) return Book is
+      B     : Book;
+      Moved : Boolean;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 53);
+      Set_Sights (B, Sights);
+      Set_Frame (B, Table, No_Pose'Access, Moved);
+      for L in 1 .. 2 loop
+         for O in Opening loop
+            if O = Open or else Openings then
+               for K in 0 .. 11 loop
+                  declare
+                     Made  : Boolean;
+                     Press : Driver.Robot.Hand.Presses.Event;
+                  begin
+                     Press_At (L, O, 0.3 * Real (K mod 3), Ada.Numerics.Pi * Real (K mod 4) / 2.0,
+                               0.4 + 0.02 * Real (K), 0.1 + 0.03 * Real (L) + 0.01 * Real (K mod 5), Made, Press,
+                               Slide => Slid_By (L) * Travel (L));
+                     if Made then
+                        Add (B, Press, O, Measured_Slide (L, Measured));
+                     end if;
+                  end;
+               end loop;
+            end if;
+         end loop;
+      end loop;
+      return B;
+   end Book_With_Slides;
+
+   procedure Free_Tips_From_Slides is
+      --  Two fingers slide inward under every press by 12 and 28 per cent of their travel (3 to 9 mm). The
+      --  loaded tips are those of the fingers as they stood under the presses, off the free fingers by that;
+      --  the free tips, from the presses taken with the tips they slid to, are the fingers as they stand free,
+      --  and confirmed. They are unknown until both openings of a lobe have a tip and the presses have their
+      --  slides measured: pressed at one opening only, or with nothing measured of the slides, there is none.
+      Both : constant Book := Book_With_Slides (Openings => True, Measured => True);
+   begin
+      for L in 1 .. 2 loop
+         for O in Opening loop
+            declare
+               Free_Tip   : constant Point_Estimate := Tip (Both, L, O, Free);
+               Loaded_Tip : constant Point_Estimate := Tip (Both, L, O, Loaded);
+            begin
+               Check (Known (Free_Tip), "lobe" & L'Image & " " & O'Image & ": no free tip");
+               if Known (Free_Tip) and then Known (Loaded_Tip) then
+                  declare
+                     D : constant Vec3 := Free_Tip.Mean - Tips_True (L, O);
+                  begin
+                     Check (abs D < 1.0e-3, "lobe" & L'Image & " " & O'Image & ": the free tip is off by" & Real'Image (abs D));
+                     Check (abs (Loaded_Tip.Mean - Tips_True (L, O)) > 2.0 * abs D,
+                            "lobe" & L'Image & " " & O'Image & ": the loaded tip is off by" & Real'Image (abs (Loaded_Tip.Mean - Tips_True (L, O)))
+                            & ", the free tip by" & Real'Image (abs D));
+                  end;
+                  Check (Confirmed (Both, L, O, Free), "lobe" & L'Image & " " & O'Image & ": the free tip is not confirmed");
+                  Check (Beat (Both, L, O, Free) > 0 or else Pressed (Both) > 0, "the free tip rests on no press");
+               end if;
+            end;
+         end loop;
+      end loop;
+      declare
+         One_Opening : constant Book := Book_With_Slides (Openings => False, Measured => True);
+         Unmeasured  : constant Book := Book_With_Slides (Openings => True, Measured => False);
+      begin
+         Check (Known (Tip (One_Opening, 1, Open)) and then not Known (Tip (One_Opening, 1, Open, Free)),
+                "a lobe pressed at one opening only has a free tip, or no loaded one");
+         Check (Known (Tip (Unmeasured, 1, Open)) and then not Known (Tip (Unmeasured, 1, Open, Free)),
+                "presses whose slides nothing measured give a free tip, or no loaded one");
+      end;
+   end Free_Tips_From_Slides;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.tips.free", "a finger that slid under its presses has its free tip off, or unknown when "
+                             & "it can be told", Free_Tips_From_Slides'Access);
       Driver.Tests.Register ("hand.tips.slides", "the slides of a press are not kept with it, or not given by lobe "
                              & "and opening", Slides_Kept_With_Their_Presses'Access);
       Driver.Tests.Register ("hand.tips.book", "presses go to the wrong lobe, or the tips they give are off",

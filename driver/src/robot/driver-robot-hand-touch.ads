@@ -58,6 +58,11 @@ package Driver.Robot.Hand.Touch is
       Tool    : Pose_Estimate;   --  the arm's last link at rest after the block, in the surfaces' frame
       Sight   : Positive;        --  the tip that touched
       Surface : Positive;        --  what it touched
+      Slide   : Vec3 := [0.0, 0.0, 0.0];
+      --  How far the finger stood from the tip the fit finds, under this press, in the tool frame: a finger that
+      --  slides under its load touches with the tip it has slid to. Zero, the tip fitted is the finger as it stood
+      --  under the press (the loaded tip); the finger's slide, the tip fitted is the finger as it stands free.
+      Slide_Covariance : Mat3 := [others => [others => 0.0]];   --  how well that is known
    end record;
 
    type Press_Array is array (Positive range <>) of Press;

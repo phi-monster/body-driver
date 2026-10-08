@@ -193,7 +193,7 @@ package body Driver.Robot.Hand.Touch is
                         P    : Press renames Presses (I);
                         S    : constant Positive := Sight_Of (P);
                         F    : constant Positive := Surface_Of (P);
-                        X    : constant Vec3 := Tip_At (S);
+                        X    : constant Vec3 := Tip_At (S) + P.Slide;   --  the finger as it stood under the press
                         Y    : constant Vec3 := P.Tool.Pose * X;
                         N    : constant Vec3 := Nominal (F).Normal;
                         Lift : constant Vec3 := Transpose (P.Tool.Pose.Rotation) * N;
@@ -211,7 +211,7 @@ package body Driver.Robot.Hand.Touch is
                            for C in 1 .. Point_Unknowns loop
                               Base (Row, C0 + C - 1) := Lift (C);
                            end loop;
-                           Rhs (Row) := -(H - Lift * X);
+                           Rhs (Row) := -(H - Lift * Tip_At (S));
                         end if;
                         --  A higher surface lowers the tip's height above it.
                         --  A measured surface's plane here is its prior, and its
@@ -220,7 +220,7 @@ package body Driver.Robot.Hand.Touch is
                         Base (Row, CF) := -1.0;
                         Base (Row, CF + 1) := -(Nominal (F).Tangent_1 * (Y - Nominal (F).Centre));
                         Base (Row, CF + 2) := -(Nominal (F).Tangent_2 * (Y - Nominal (F).Centre));
-                        Sigma (Row) := Pose_Sigma (P.Tool, X, N);
+                        Sigma (Row) := Sqrt (Pose_Sigma (P.Tool, X, N) ** 2 + Lift * (P.Slide_Covariance * Lift));
                      end;
                   end if;
                end loop;
@@ -380,7 +380,7 @@ package body Driver.Robot.Hand.Touch is
                   S : constant Positive := Sight_Of (P);
                   F : constant Positive := Surface_Of (P);
                   N : constant Vec3 := (if Prior (F).Measured then Nominal (F).Normal else Unit (Into (F)));
-                  O : constant Vec3 := P.Tool.Pose * Line (S).Origin.Mean;
+                  O : constant Vec3 := P.Tool.Pose * (Line (S).Origin.Mean + P.Slide);
                begin
                   R := R + 1;
                   A (R, S) := N * (P.Tool.Pose.Rotation * Line (S).Direction.Unit_Vector);
@@ -431,7 +431,7 @@ package body Driver.Robot.Hand.Touch is
                   begin
                      for P of Presses loop
                         if Surface_Of (P) = F then
-                           Sum := Sum + P.Tool.Pose * (Line (Sight_Of (P)).Origin.Mean
+                           Sum := Sum + P.Tool.Pose * (Line (Sight_Of (P)).Origin.Mean + P.Slide
                                                        + Q (Sight_Of (P)) * Line (Sight_Of (P)).Direction.Unit_Vector);
                            Count := Count + 1;
                         end if;
@@ -592,6 +592,17 @@ package body Driver.Robot.Hand.Touch is
                     (Mean       => Tip_At (S),
                      Covariance => [for R in 1 .. Point_Unknowns => [for C in 1 .. Point_Unknowns => Solution_Cov (C0 + R - 1, C0 + C - 1)]]);
                end if;
+               --  A tip is in front of the eye. A line of sight that meets the surface at or behind it (A19: -79.4
+               --  units along it) is not the line of a tip that stopped the arm on the surface: the presses fitted to
+               --  it stopped on something else, or belong to another tip, and there is no tip.
+               if As = On_Sight and then Tip_Q (S) <= 0.0 then
+                  Result.Tips (S) := (Stopped => Stopped (S), Sunk => Sunk (S), others => <>);
+                  for I in Presses'Range loop
+                     if Sight_Of (Presses (I)) = S then
+                        Result.Agrees (I - Presses'First + 1) := False;
+                     end if;
+                  end loop;
+               end if;
             end;
          end if;
       end loop;
@@ -644,7 +655,7 @@ package body Driver.Robot.Hand.Touch is
                if Column_Of_Sight (S) > 0 and then Geometry.Known (Result.Planes (F)) then
                   declare
                      U    : constant Vec3 := Line (S).Direction.Unit_Vector;
-                     Y    : constant Vec3 := Presses (I).Tool.Pose * Tip_At (S);
+                     Y    : constant Vec3 := Presses (I).Tool.Pose * (Tip_At (S) + Presses (I).Slide);
                      N    : constant Vec3 := Result.Planes (F).Normal;
                      Over : constant Real := N * (Y - Result.Planes (F).Centre);
                      Rate : constant Real := (Transpose (Presses (I).Tool.Pose.Rotation) * N) * U;

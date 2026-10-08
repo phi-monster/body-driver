@@ -63,9 +63,12 @@ package Driver.Robot.Hand is
    --  as it stood under it:
    --    Loaded  the contact of the finger under the press, at the beat of the
    --            press the tip rests on (Tip_Beat);
-   --    Free    the finger unloaded, at the closer's reading: the loaded
-   --            contact less the slide the eye measured. Unknown until the
-   --            slide of the presses the tip rests on is measured.
+   --    Free    the finger unloaded, at the closer's reading: every press
+   --            taken with the tip it had slid to (the share of the lobe's
+   --            travel between its openings the eye measured under it).
+   --            Unknown until the lobe has a tip at each opening (the
+   --            travel is their difference) and the presses the tip rests
+   --            on have their slide measured.
 
    function Tip_In_Tool
      (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded)
@@ -77,10 +80,11 @@ package Driver.Robot.Hand is
    --  surface's normal is the contact's, and across the line of sight to the
    --  tip pixel the spread of the lobe's tip region as well as the eye's.
 
-   function Tip_Beat (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Driver.Clock.Beat;
-   --  The beat of the press the loaded tip rests on, the one among them that
-   --  gave the lowest hit: the finger as it stood then is the loaded tip's.
-   --  Zero when the tip is not known.
+   function Tip_Beat
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Driver.Clock.Beat;
+   --  The beat of the press the tip of that kind rests on, the one among them
+   --  that gave the lowest hit: the finger as it stood then is the loaded
+   --  tip's. Zero when the tip is not known.
 
    type Slide_Reading is record
       Beat           : Driver.Clock.Beat;   --  of the press
@@ -102,10 +106,13 @@ package Driver.Robot.Hand is
    --  Every press made at that opening, in the order they were made, with
    --  how far the lobe's finger had slid under it.
 
-   function Tip_Confirmed (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Boolean;
-   --  Tip_In_Tool's tip is checked: a second press, from a pose distinct from
-   --  the first's, landed on it within the noise. A tip one press fixes is a
-   --  bound the tip is not beyond, and the lowest one the presses gave.
+   function Tip_Confirmed
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Boolean;
+   --  Tip_In_Tool's tip of that kind is checked: a second press, from a pose
+   --  distinct from the first's, landed on it within the noise (the free tip's
+   --  holds the uncertainty of the slides the presses were corrected by). A tip
+   --  one press fixes is a bound the tip is not beyond, and the lowest one the
+   --  presses gave.
 
    function Press_Direction (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening)
      return Direction_Estimate;
@@ -281,6 +288,28 @@ private
    --  each raise sets the closer moving, until it arrives: a raise after which
    --  its reading has not moved (Moved) was not what held it, and the hand is
    --  raised no more. Raises is how many raises were made.
+
+   procedure Gather_Poses
+     (Wanted       : Positive;
+      Wait_At_Most : Positive;
+      Poses        : not null access function return Natural;
+      Raise_Eye    : not null access procedure (First : Boolean; Raised : out Boolean);
+      Raises       : out Natural;
+      Reached      : out Boolean);
+   --  The arm moves the eye so that it sees a closer's readings from Wanted
+   --  poses of the rest of the body (Selfsight: what a deviation of the robot
+   --  from its surroundings is taken over). A hand is measured from its own
+   --  arm's motion and not from what the boot did before it: the boot's sweeps
+   --  gave A22's closers dozens of poses at their start readings, and a body
+   --  file that is reloaded gives none (A25h logged "0 poses, two are needed"
+   --  at every round). While the eye has fewer, the eye is raised (Raise_Eye,
+   --  the first raise the least that shows, each after it twice the one before;
+   --  Raised False when it cannot be raised) and the pose is asked after, a beat
+   --  later each time, until the eye's picture has rested and its frame is kept
+   --  (Poses grew), or Wait_At_Most beats went by (the caller measures how long
+   --  a view takes to form). Poses is read inside a held beat, so each asking
+   --  is a beat. Raises is how many raises were made, Reached whether the eye
+   --  has Wanted poses at the end.
 
    function Seen_By (Shift : Real) return Real is (if Shift /= 0.0 then 1.0 / abs Shift else 0.0);
    --  The push that moves an eye's view by one pixel when the channel moves

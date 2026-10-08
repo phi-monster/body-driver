@@ -158,6 +158,11 @@ package body Driver.Robot.Stillness is
 
    procedure Watch (S : in out Eye_Stream; Began_Moving : Boolean) is
       U : constant Real := Driver.Conventions.Unchanged_Fraction;
+      --  How much more a change over two beats is than over one when successive changes do not push the same
+      --  way: independent changes add as roots of squares, the square root of two, the most any noise that
+      --  stays about its mean (flicker, or a pixel that wanders and is pulled back) does. A drift adds them
+      --  all, twice. A22's three eyes at rest: the middle of the ratio was 1.43 to 1.46, its quartiles 1.37 to 1.53.
+      Adds_Up : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0);
    begin
       S.Change_1 := -1.0;
       S.Change_2 := -1.0;
@@ -186,7 +191,7 @@ package body Driver.Robot.Stillness is
             S.Watch_Peak := Real'Max (S.Watch_Peak, C1);
             if S.Watch_Have
               and then (S.Watch_Last - C1 <= U * S.Watch_Last or else C1 <= U * S.Watch_Peak)
-              and then (C2 < 0.0 or else C2 - C1 <= Driver.Conventions.Z * abs (C1 - S.Watch_Last))
+              and then (C2 < 0.0 or else C2 - Adds_Up * C1 <= Driver.Conventions.Z * abs (C1 - S.Watch_Last))
             then
                S.Watch_Done := True;
             end if;
