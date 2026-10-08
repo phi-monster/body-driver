@@ -916,6 +916,13 @@ package body Driver.Robot.Hand is
                      --  prediction is only a bound. Steps of the band's size would
                      --  creep to the table (A17: 6000 beats, then the hand slid
                      --  along it, each small push reached): they double again.
+                     if Past = 0.0 then
+                        Driver.Log.Line
+                          (Driver.Log.Robot,
+                           "hand: the tip has gone past the contact its presses predict and the band of its sigma"
+                           & " about it, and met nothing (it is predicted" & Driver.Log.Image (G.Value, 4)
+                           & " above it now): the steps double again");
+                     end if;
                      Past := Real'Max (2.0 * Past, Real'Max (G.Sigma, Least));
                      By := Past;
                   end if;
