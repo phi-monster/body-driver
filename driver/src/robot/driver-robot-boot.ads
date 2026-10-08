@@ -16,6 +16,14 @@ package Driver.Robot.Boot is
    --  file to reload from and store into. Ok is False when the body breaks
    --  the porting contract (docs/body-protocol.md); the log says which clause.
 
+   function Grew (Before, After, Cells : Integer) return Boolean;
+   --  Whether After of the Cells of an eye respond to a group where Before did
+   --  a round of pushes earlier: more than the false alarms among the cells
+   --  that did not respond could make (the exact binomial tail of the new
+   --  responders among them, at the per-cell false-alarm rate, below Z's
+   --  tail). The boot pushes a group again, at twice the amounts, while an
+   --  eye that is undecided about it or shows a patch of it grew by this.
+
    procedure Save (M : Model; H : Driver.Robot.Hand.Hands; Body_File : String);
    --  Writes everything measured so far, with uncertainties and method
    --  versions, to the body file. Boot calls it as it measures; the replay
