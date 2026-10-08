@@ -7,10 +7,12 @@ with Driver.Images;
 with Driver.Robot.Hand.Aims.Tests;
 with Driver.Robot.Hand.Frames.Tests;
 with Driver.Robot.Hand.Lobes.Tests;
+with Driver.Robot.Hand.Lowering.Tests;
 with Driver.Robot.Hand.Presses.Tests;
 with Driver.Robot.Hand.Pressing.Tests;
 with Driver.Robot.Hand.Selfsight.Tests;
 with Driver.Robot.Hand.Shape.Tests;
+with Driver.Robot.Hand.Slide.Tests;
 with Driver.Robot.Hand.Tips.Tests;
 with Driver.Robot.Hand.Sweep.Tests;
 with Driver.Robot.Hand.Touch.Tests;
@@ -157,7 +159,7 @@ package body Driver.Robot.Hand.Tests is
       end Lower;
       function Above return Heights is
         ((Tip => (if Predict then (Value => Tip - Predicted, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown),
-          Eye => Unknown));
+          Eye => Unknown, others => <>));
       procedure Press (From : Real) is
       begin
          Tip := From;
@@ -194,6 +196,20 @@ package body Driver.Robot.Hand.Tests is
       Check (Over > Bound and then Over <= Last_Step,
              "(c) an obstacle the prediction misses was met with an overshoot of" & Over'Image
              & ", not by the fast step past the bound");
+      --  (e) the press that fixed the tip was stopped above the surface by something under it, so
+      --  the prediction is a bound and the surface is 10 below where it says. The band ends, the steps
+      --  double again, and the surface is met within a doubling's worth of steps more than (a) takes,
+      --  not by creeping at the band's size to the end of the room (A17's second press).
+      Predicted := 10.0;
+      Predict := True;
+      Press (10.2);
+      Check (Over > 0.0 and then Over <= Last_Step, "(e) the surface 10 below the predicted contact was not met by a step");
+      Check (Total (Steps) <= Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (10.2 / Least, 2.0)))
+                              + 2 * Natural (Real'Ceiling (Z)) + Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (10.2 / Sigma, 2.0)))
+                              + 3,
+             "(e) the press took" & Steps.Fast'Image & " fast," & Steps.Band'Image & " banded and" & Steps.Blind'Image
+             & " blind steps to reach a surface 10 below the prediction");
+      Check (Steps.Blind > 0, "(e) the steps past the band were not doubling again");
    end Press_Overshoot;
 
    procedure Eye_Room_Caps_The_Steps is
@@ -216,16 +232,20 @@ package body Driver.Robot.Hand.Tests is
       Lowest : Real := Real'Last;   --  the eye's height at its lowest
       Steps  : Descent_Steps;
       Pushes : Natural := 0;
+      Slides : Boolean := False;   --  the hand slides: its steps are reached and lower nothing
       procedure Lower (By : Real; Reached : out Boolean) is
       begin
          Pushes := Pushes + 1;
-         Tip := Tip - By;
+         if not Slides then
+            Tip := Tip - By;
+         end if;
          Lowest := Real'Min (Lowest, Tip + 0.05);
          Reached := Pushes < 40;   --  the arm gives way until the test ends it
       end Lower;
       function Above return Heights is
         ((Tip => Unknown,
-          Eye => (if Known_Eye then (Value => Tip + 0.05, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown)));
+          Eye => (if Known_Eye then (Value => Tip + 0.05, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown),
+          others => <>));
    begin
       Tip := 0.2;
       Descend (Above'Access, Least, Lower'Access, Steps);
@@ -241,7 +261,107 @@ package body Driver.Robot.Hand.Tests is
       Descend (Above'Access, Least, Lower'Access, Steps);
       Check (not Steps.Spent and then Steps.Capped = 0 and then Pushes = 40,
              "with the eye's height unknown the steps were stopped: " & Pushes'Image & " pushes");
+      --  (d) steps the arm reaches, none of which lowers the eye (a hand that slides along the table
+      --  it met, as A17's did for 6000 beats): the eye's room stays, and the steps end on the schedule
+      --  that covers it, doubling from Least, a step cut to the room and one that finds none: 10 here.
+      Known_Eye := True;
+      Pushes := 0;
+      Tip := 0.2;
+      Slides := True;
+      Descend (Above'Access, Least, Lower'Access, Steps);
+      Check (Steps.Spent and then Pushes <= 10 and then Pushes >= 8,
+             "steps that did not lower the eye went on for" & Pushes'Image & " pushes, not the schedule's 10");
    end Eye_Room_Caps_The_Steps;
+
+   procedure Stalled_Descent is
+      --  A hand lowered onto a table its tip is predicted 0.34 above (sigma 0.04), as A17's third press was: the
+      --  arm follows every step, the hand goes down with each until its tip is on the table, and the steps after
+      --  that are followed by the arm and take the hand nowhere. The descent ends at the first of them, a press
+      --  and not a descent spent: the room the eye has is nearly all there, and a descent that ran on to spend it
+      --  would be the press thrown away.
+      Least  : constant Real := 0.001;
+      Sigma  : constant Real := 0.04;
+      Tip    : Real := 0.34;   --  its height above the table
+      Pushes : Natural := 0;
+      Steps  : Descent_Steps;
+      Stalled : Boolean := False;   --  the last step was followed and took the hand nowhere
+      procedure Lower (By : Real; Reached : out Boolean) is
+      begin
+         Pushes := Pushes + 1;
+         Reached := True;   --  the arm follows every step
+         if Tip - By >= 0.0 then
+            Tip := Tip - By;
+         else
+            Stalled := True;
+         end if;
+      end Lower;
+      function Above return Heights is
+        ((Tip     => (Value => Tip, Sigma => Sigma, Degrees_Of_Freedom => 0),
+          Eye     => (Value => Tip + 2.0, Sigma => 0.001, Degrees_Of_Freedom => 0),
+          Stalled => Stalled));
+   begin
+      Descend (Above'Access, Least, Lower'Access, Steps);
+      Check (Steps.Stalled and then not Steps.Spent, "the descent of a hand that stopped going down ended stalled:"
+             & Steps.Stalled'Image & ", spent:" & Steps.Spent'Image);
+      Check (Pushes = Total (Steps) and then Pushes < 40, "the descent took" & Pushes'Image & " pushes");
+      Check (Tip < 0.2, "the hand was stopped at" & Real'Image (Tip) & " above the table, the tip not pressed onto it"
+             & " as far as the free steps took it");
+   end Stalled_Descent;
+
+   procedure Held_Closer is
+      --  A closer asked back to its open reading with a finger on the table (A17): it stays where it stood, and
+      --  moves at once when the hand stands clear of the table by anything.
+      --  (a) held: one raise, the least, frees it, and it is not raised again;
+      --  (b) jammed by something else: one raise, the least, and no more, since the closer did not move;
+      --  (c) already there: no raise;
+      --  (d) a hand that cannot be raised: the closer is left as it is.
+      Open    : constant Real := 1.0;
+      Reading : Real;
+      Clear   : Real;      --  how far the hand stands off the table
+      Jammed  : Boolean;
+      Can     : Boolean := True;
+      Asked   : Natural;
+      Raises  : Natural;
+      Raised  : Real;
+      function There return Boolean is (abs (Reading - Open) < 1.0e-9);
+      function Now return Real is (Reading);
+      function Moves (Before, After : Real) return Boolean is (abs (After - Before) > 1.0e-9);
+      procedure Ask is
+      begin
+         Asked := Asked + 1;
+         if not Jammed and then Clear > 0.0 then
+            Reading := Open;
+         end if;
+      end Ask;
+      procedure Raise_Hand (First : Boolean; Done : out Boolean) is
+      begin
+         Done := Can;
+         if Can then
+            Raised := (if First then 0.05 else 2.0 * Raised);
+            Clear := Clear + Raised;
+         end if;
+      end Raise_Hand;
+      procedure Case_Of (Start : Real; Is_Jammed, Raisable : Boolean) is
+      begin
+         Reading := Start;
+         Clear := 0.0;
+         Jammed := Is_Jammed;
+         Can := Raisable;
+         Asked := 0;
+         Raised := 0.0;
+         Free_Closer (There'Access, Now'Access, Moves'Access, Ask'Access, Raise_Hand'Access, Raises);
+      end Case_Of;
+   begin
+      Case_Of (0.6, Is_Jammed => False, Raisable => True);
+      Check (Raises = 1 and then There and then Asked = 2, "(a) a closer held by the table was raised" & Raises'Image
+             & " times and asked" & Asked'Image & " times, not raised once and asked twice");
+      Case_Of (0.6, Is_Jammed => True, Raisable => True);
+      Check (Raises = 1 and then not There, "(b) a closer jammed by something else was raised" & Raises'Image & " times, not once");
+      Case_Of (Open, Is_Jammed => False, Raisable => True);
+      Check (Raises = 0 and then Asked = 1, "(c) a closer already there was raised" & Raises'Image & " times");
+      Case_Of (0.6, Is_Jammed => False, Raisable => False);
+      Check (Raises = 0 and then not There, "(d) a hand that cannot be raised was raised" & Raises'Image & " times");
+   end Held_Closer;
 
    procedure Roles_Re_Read is
       --  A group the body first takes for a closer of an arm whose eye sees
@@ -342,6 +462,10 @@ package body Driver.Robot.Hand.Tests is
                              & "or creeps when nothing predicts it", Press_Overshoot'Access);
       Driver.Tests.Register ("hand.measure.room", "a step lowers the eye below the table its arm's own eye saw",
                              Eye_Room_Caps_The_Steps'Access);
+      Driver.Tests.Register ("hand.measure.stall", "a hand the arm follows and that stops going down is pushed on to the "
+                             & "end of its room, or is not a press", Stalled_Descent'Access);
+      Driver.Tests.Register ("hand.measure.held", "a closer held by the table is not freed by raising the hand, or a closer "
+                             & "nothing holds is raised for", Held_Closer'Access);
       Driver.Tests.Register ("hand.measure.roles", "a group the body re-read as an arm is swept as a closer",
                              Roles_Re_Read'Access);
       Driver.Robot.Hand.Frames.Tests.Register;
@@ -350,8 +474,10 @@ package body Driver.Robot.Hand.Tests is
       Driver.Robot.Hand.Selfsight.Tests.Register;
       Driver.Robot.Hand.Lobes.Tests.Register;
       Driver.Robot.Hand.Sweep.Tests.Register;
+      Driver.Robot.Hand.Lowering.Tests.Register;
       Driver.Robot.Hand.Presses.Tests.Register;
       Driver.Robot.Hand.Pressing.Tests.Register;
+      Driver.Robot.Hand.Slide.Tests.Register;
       Driver.Robot.Hand.Touch.Tests.Register;
       Driver.Robot.Hand.Tips.Tests.Register;
       Driver.Robot.Hand.Shape.Tests.Register;

@@ -20,6 +20,7 @@
 --  and nothing of where the arm stands in the world. Only Tip, Tip_Now and
 --  Grip_Centre take it into the world, through the arm's placement and unit.
 
+with Driver.Clock;
 with Driver.Commands;
 with Driver.Images;
 
@@ -55,11 +56,51 @@ package Driver.Robot.Hand is
    --  its two measured ends in the proportion its channel is closed; in the
    --  world as Tip is.
 
-   function Tip_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Point_Estimate;
+   type Tip_Kind is (Loaded, Free);
+   --  Which finger a tip is of. A pressed finger slides along its own axis
+   --  under the press (A16: 5 and 17.5 mm inward, the closer's reading
+   --  exactly where it was), so the tip a press gives is that of the finger
+   --  as it stood under it:
+   --    Loaded  the contact of the finger under the press, at the beat of the
+   --            press the tip rests on (Tip_Beat);
+   --    Free    the finger unloaded, at the closer's reading: the loaded
+   --            contact less the slide the eye measured. Unknown until the
+   --            slide of the presses the tip rests on is measured.
+
+   function Tip_In_Tool
+     (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded)
+     return Point_Estimate;
    --  A lobe's tip in the tool frame of the hand's arm (Driver.Robot.Tool_Pose),
    --  in the arm's own unit (Driver.Robot.Arm_Unit): what the hand measured,
    --  before any arm pose is applied. Known from the first press the tip
-   --  stopped, and provisional until Tip_Confirmed.
+   --  stopped, and provisional until Tip_Confirmed. Its covariance along the
+   --  surface's normal is the contact's, and across the line of sight to the
+   --  tip pixel the spread of the lobe's tip region as well as the eye's.
+
+   function Tip_Beat (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Driver.Clock.Beat;
+   --  The beat of the press the loaded tip rests on, the one among them that
+   --  gave the lowest hit: the finger as it stood then is the loaded tip's.
+   --  Zero when the tip is not known.
+
+   type Slide_Reading is record
+      Beat           : Driver.Clock.Beat;   --  of the press
+      Contact        : Boolean;             --  the press went to this lobe: it was the one that pressed
+      Tip_Rests      : Boolean;             --  and the lobe's tip rests on it
+      Known          : Boolean;
+      Pixels         : Real;                --  how far the lobe's tip region moved in its eye's picture along the way
+      Pixels_Sigma   : Real;                --  it closes in, from where the closer's reading puts it: positive inward
+      Fraction       : Real;                --  as a share of the travel between its openings in that picture
+      Fraction_Sigma : Real;
+   end record;
+   --  The finger's slide under a press. It is what a press loaded the finger
+   --  with, as the finger gives way: the compliance of the hand, for the
+   --  action layer's contact model, kept for every press at the opening.
+
+   type Slide_Readings is array (Positive range <>) of Slide_Reading;
+
+   function Slides (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Slide_Readings;
+   --  Every press made at that opening, in the order they were made, with
+   --  how far the lobe's finger had slid under it.
 
    function Tip_Confirmed (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Boolean;
    --  Tip_In_Tool's tip is checked: a second press, from a pose distinct from
@@ -138,9 +179,10 @@ private
    --  A lobe's tip at one opening: its pixel in the own eye and its line of
    --  sight in the tool frame.
    type Sight is record
-      Known : Boolean := False;
-      Pixel : Driver.Images.Pixel;
-      Ray   : Ray_Estimate;
+      Known  : Boolean := False;
+      Pixel  : Driver.Images.Pixel;
+      Ray    : Ray_Estimate;
+      Spread : Real := 0.0;   --  of the lobe's tip region from that pixel, per axis, as an angle (Tips.Sight_Of)
    end record;
 
    type Sight_Array is array (Opening) of Sight;
@@ -222,6 +264,24 @@ private
    --  before the views showed anything; Answered, whether the first push
    --  was followed.
 
+   procedure Free_Closer
+     (Arrived    : not null access function return Boolean;
+      Reading    : not null access function return Real;
+      Moved      : not null access function (Before, After : Real) return Boolean;
+      Ask        : not null access procedure;
+      Raise_Hand : not null access procedure (First : Boolean; Raised : out Boolean);
+      Raises     : out Natural);
+   --  A closer asked back to a reading it has been at: asked (Ask settles it),
+   --  and while it has not Arrived, held by something. A finger resting on the
+   --  table is held by it, and cannot slide along it (A17: asked back to 1.0,
+   --  it stood at 0.59 to 0.686 for seventy beats, and reached 1.0 in four
+   --  once the aim had lifted the hand). The hand is raised (Raise_Hand, the
+   --  first raise the least, each after it twice the one before; Raised False
+   --  when it cannot be raised further) and the closer asked again, while
+   --  each raise sets the closer moving, until it arrives: a raise after which
+   --  its reading has not moved (Moved) was not what held it, and the hand is
+   --  raised no more. Raises is how many raises were made.
+
    function Seen_By (Shift : Real) return Real is (if Shift /= 0.0 then 1.0 / abs Shift else 0.0);
    --  The push that moves an eye's view by one pixel when the channel moves
    --  it Shift pixels a reading unit (Driver.Robot.Lockin.Shift): a whole
@@ -230,19 +290,24 @@ private
    --  change none. Zero, no blind push, when the shift is not measured.
 
    type Descent_Steps is record
-      Fast   : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
-      Band   : Natural := 0;   --  within that band, each the larger of the sigma and Least
-      Blind  : Natural := 0;   --  doubling, nothing predicting the contact
-      Capped : Natural := 0;   --  of those, the steps cut to the eye's room above the surface
-      Spent  : Boolean := False;   --  ended with the eye no room left to go down, and nothing met
+      Fast    : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
+      Band    : Natural := 0;   --  within that band, each the larger of the sigma and Least
+      Blind   : Natural := 0;   --  doubling, nothing predicting the contact (before a prediction, or past its band)
+      Capped  : Natural := 0;   --  of those, the steps cut to the eye's room above the surface
+      Spent   : Boolean := False;   --  ended with the eye no room left to go down, and nothing met
+      Stalled : Boolean := False;   --  ended by a step the arm followed and the hand did not go down with
    end record;
 
    function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Blind);
 
    type Heights is record
-      Tip : Estimate := Unknown;   --  the tip above the contact predicted under it, along the way down
-      Eye : Estimate := Unknown;   --  the eye above the surface, along the way down
+      Tip     : Estimate := Unknown;   --  the tip above the contact predicted under it, along the way down
+      Eye     : Estimate := Unknown;   --  the eye above the surface, along the way down
+      Stalled : Boolean := False;      --  the step before was followed by the arm and the hand did not go down with it
    end record;
+   --  Stalled is read with the heights, from the judgment of the push the stream gave
+   --  (Driver.Robot.Hand.Lowering): the arm's readings went where the step asked and the
+   --  hand lies on what it met.
 
    procedure Descend
      (Above : not null access function return Heights;
@@ -251,7 +316,9 @@ private
       Steps : out Descent_Steps)
      with Pre => Least > 0.0;
    --  A press's descent: each step lowers the tool By, until one does not
-   --  reach (Lower says so: the arm met something, or cannot go there). Above
+   --  reach (Lower says so: the arm met something, or cannot go there) or the
+   --  hand does not go down with it (stalled: the press is made, a bound or a
+   --  contact, whichever the presses tell, and the descent is not spent). Above
    --  is read before each step. Tip is the tip's height above the contact
    --  predicted under it, with its sigma, Unknown when nothing predicts it.
    --  With a prediction, the steps double from Least for as long as each ends
@@ -259,7 +326,13 @@ private
    --  within that band each step is the larger of the sigma and Least, so the
    --  tip meets the surface at most that far short of a step's end: the
    --  overshoot the prediction already admits, and less force and less sinking
-   --  in where the tip is read. Without one the steps double from Least until
+   --  in where the tip is read. The band is as wide as the prediction says, Z
+   --  sigma either side of the contact: past it, with nothing met, the
+   --  prediction was a bound the surface is farther than (the press that fixed
+   --  the tip was stopped by something under it, A17's cutter), and the steps
+   --  double again from the band's, counted as blind; steps of the band's size
+   --  went on for 6000 beats there, each reached as the hand slid along the
+   --  table. Without a prediction the steps double from Least until
    --  one is not reached, the overshoot as it comes (the owner's rule, 10-05:
    --  the most aggressive choice everywhere; creeping by Least took A11's first
    --  presses into the thousands of pushes). Least is the smallest move of the

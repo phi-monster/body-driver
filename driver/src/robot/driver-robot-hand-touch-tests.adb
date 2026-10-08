@@ -133,6 +133,11 @@ package body Driver.Robot.Hand.Touch.Tests is
                 "the tip rests on" & F.Tips (1).Used'Image & " presses," & F.Tips (1).Stopped'Image
                 & " stopped above the table, confirmed " & F.Tips (1).Confirmed'Image);
          Check (F.Agrees (1) and then not F.Agrees (2) and then not F.Agrees (3), "the press the tip rests on is not said");
+         Check (F.Hits (1) > 0.0 and then F.Hits (1) < F.Hits (3) and then F.Hits (3) < F.Hits (2),
+                "the hits of a contact and two stops 30 and 60 mm short are not in the order of their lifts:"
+                & Real'Image (F.Hits (1)) & Real'Image (F.Hits (3)) & Real'Image (F.Hits (2)));
+         Check (abs (F.Hits (1) - F.Tips (1).Distance.Value) <= F.Tips (1).Distance.Sigma,
+                "the hit of the press the tip rests on is not the tip's distance");
          Check (not Uncertain.Significant (F.Tips (1).Distance.Value - Distance_True (1), F.Tips (1).Distance.Sigma),
                 "the tip is off by" & Real'Image (F.Tips (1).Distance.Value - Distance_True (1)) & ", more than its sigma"
                 & Real'Image (F.Tips (1).Distance.Sigma));
