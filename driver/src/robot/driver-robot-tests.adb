@@ -15,6 +15,7 @@ with Driver.Numerics.Dense;
 with Ada.Strings.Fixed;
 with Driver.Robot.Body_File;
 with Driver.Robot.Kinematics.Errors.Tests;
+with Driver.Robot.Kinematics.Fixed.Tests;
 with Driver.Recording;
 with Ada.Text_IO;
 with GNAT.OS_Lib;
@@ -1679,6 +1680,7 @@ package body Driver.Robot.Tests is
          Check (M.Groups (1).Episodes (12).Blocked, "a push the eye could see and nothing answered is not called blocked");
       end if;
    end Step_Short_Of_Sight;
+
 
    --  The same joint, read as exactly, with a lock-in's step of 3e-17
    --  credited to it (what a lock-in that credits a group with the pictures'
@@ -3768,6 +3770,9 @@ package body Driver.Robot.Tests is
 
    type Box_Array is array (Positive range <>) of Box;
 
+   --  A box standing alone: two of the first eye's points are on it (they are seen a tenth of a unit apart).
+   Lone : constant Box_Array := [(0.0, 0.13, 0.5, 0.63, 0.25)];
+
    --  Three under each arm's view, about half of what each eye sees.
    Boxes : constant Box_Array :=
      [(-0.7, 0.3, 0.2, 0.9, 0.2), (0.35, 1.4, 0.8, 1.7, 0.3), (-1.5, -0.2, 1.2, 2.1, 0.15),
@@ -3777,7 +3782,10 @@ package body Driver.Robot.Tests is
    --  (X_world = Placed * X_eye) meets, in that eye's frame: the nearest box
    --  top over its rectangle when With_Boxes, else the table; On_Table says
    --  which.
-   procedure Scene_Point (Placed : Rigid; U, V : Real; With_Boxes : Boolean; X : out Vec3; On_Table : out Boolean) is
+   procedure Scene_Point
+     (Placed : Rigid; U, V : Real; With_Boxes : Boolean; X : out Vec3; On_Table : out Boolean;
+      Standing : Box_Array := Boxes)
+   is
       H : constant Vec3 := Driver.Robot.Kinematics.Fit.Ray (Rig_Lens, U, V);
       D : constant Vec3 := Placed.Rotation * H;
       C : constant Vec3 := Placed.Translation;
@@ -3787,7 +3795,7 @@ package body Driver.Robot.Tests is
    begin
       On_Table := True;
       if With_Boxes then
-         for B of Boxes loop
+         for B of Standing loop
             declare
                S : constant Real := Along (Table_O + B.Height);
                P : constant Vec3 := C + S * D;
@@ -3823,6 +3831,10 @@ package body Driver.Robot.Tests is
       Unseen_Head   : Boolean := True;    --  the head answers the points it does not show
       Head_Noise    : Real := 0.1;        --  how far the head's answers err, pixels per coordinate
       Head_Moved    : Rigid := Driver.Numerics.Identity;   --  how far it moved before the second arm's reference
+      Head_Lens     : Driver.Robot.Kinematics.Fit.Lens := Rig_Lens;   --  the head's own lens
+      Head_Shows    : Natural := Natural'Last;   --  the most points it answers, the first it shows
+      Lone_Box      : Boolean := False;   --  one small box stands on the table, in place of the others
+      Arm_Noise     : Real := 0.1;        --  how far the arms' own matches err, pixels per coordinate
    end record;
 
    procedure Build_Two_Arms (M : in out Model; Scene : Rig_Scene) is
@@ -3842,7 +3854,7 @@ package body Driver.Robot.Tests is
          X : Vec3;
          On_Table : Boolean;
       begin
-         Scene_Point (Placed (A), U, V, Scene.With_Boxes, X, On_Table);
+         Scene_Point (Placed (A), U, V, Scene.With_Boxes, X, On_Table, (if Scene.Lone_Box then Lone else Boxes));
          return X;
       end Point_Of;
 
@@ -3850,8 +3862,10 @@ package body Driver.Robot.Tests is
       --  Seen_From maps From_Arm's reference frame into; Unseen: what it
       --  answers for those it does not show.
       procedure Match (Seen_From : Rigid; Frame : Positive; Eye : Natural; Into : in out Match_Set_Vectors.Vector;
-                       From_Arm : Positive; Unseen : Boolean; Error : Real := Noise) is
-         Set : Match_Set;
+                       From_Arm : Positive; Unseen : Boolean; Error : Real := Noise;
+                       Asked : Fit.Lens := Rig_Lens; Limit : Natural := Natural'Last) is
+         Set      : Match_Set;
+         Answered : Natural := 0;
       begin
          Set.Frame := Frame;
          Set.Eye := Eye;
@@ -3864,12 +3878,16 @@ package body Driver.Robot.Tests is
                Ahead : Boolean;
                Shown : Boolean;
             begin
-               Fit.Project (Rig_Lens, Seen_From * X, U, V, Ahead);
+               Fit.Project (Asked, Seen_From * X, U, V, Ahead);
                Shown := Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0;
                if not Shown and then Unseen then
                   --  As from the query eye's centre: its line of sight, turned.
-                  Fit.Project (Rig_Lens, Seen_From.Rotation * Fit.Ray (Rig_Lens, U0, V0), U, V, Ahead);
+                  Fit.Project (Asked, Seen_From.Rotation * Fit.Ray (Rig_Lens, U0, V0), U, V, Ahead);
                   Shown := Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0;
+               end if;
+               if Shown then
+                  Answered := Answered + 1;
+                  Shown := Answered <= Limit;
                end if;
                Set.To_U.Append (U + Error * Gaussian (Rng));
                Set.To_V.Append (V + Error * Gaussian (Rng));
@@ -3944,7 +3962,8 @@ package body Driver.Robot.Tests is
                end loop;
                Arms (A).Frames.Append (K);
                if F > 1 then
-                  Match (Inverse (Driver.Robot.Kinematics.Fit.Eye_At (Truth_Of (A), D)), F, 0, Arms (A).Matches, A, False);
+                  Match (Inverse (Driver.Robot.Kinematics.Fit.Eye_At (Truth_Of (A), D)), F, 0, Arms (A).Matches, A,
+                         False, Scene.Arm_Noise);
                end if;
             end;
          end loop;
@@ -3958,7 +3977,8 @@ package body Driver.Robot.Tests is
       if Scene.Head then
          for A in 1 .. 2 loop
             Match (Inverse ((if A = 2 then Scene.Head_Moved else Driver.Numerics.Identity) * Scene.Head_Pose) * Placed (A),
-                   1, 3, Arms (A).Eye_Matches, A, Scene.Unseen_Head, Scene.Head_Noise);
+                   1, 3, Arms (A).Eye_Matches, A, Scene.Unseen_Head, Scene.Head_Noise,
+                   Scene.Head_Lens, Scene.Head_Shows);
          end loop;
       end if;
       M.Kinematics.Append (Arms (1));
@@ -4196,6 +4216,260 @@ package body Driver.Robot.Tests is
       Check (not Known, "the second arm is placed through a head that moved between the two arms' views, off by"
              & Real'Image (abs (Placement.Translation - (1.0 / Unit_Of (M, 1)) * Far_Second.Translation)) & " units");
    end Moved_Head_Places_Nothing;
+
+   --  A head whose lens is not the wrists': its principal point lies 32 and 35 pixels from the picture's middle and
+   --  its two focal lengths differ.
+   Off_Centre_Head : constant Driver.Robot.Kinematics.Fit.Lens :=
+     (Fx => 330.0, Fy => 345.0, Cx => 352.0, Cy => 205.0, K1 => 0.0, K2 => 0.0);
+
+   --  The scene the head tests share: two arms with a table, and boxes on it when Boxes, and the head above and
+   --  behind them with a lens of its own, answering at most Shows points; Unseen says whether it also answers
+   --  what it does not show.
+   function Head_Rig
+     (Boxes : Boolean; Shows : Natural := Natural'Last; Unseen : Boolean := True; Lone : Boolean := False;
+      Arm_Noise : Real := 0.1)
+      return Rig_Scene is
+     ((Second => Far_Second, With_Boxes => Boxes, Head => True, Head_Pose => Head_Pose, Wrist_Sees => False,
+       Unseen_Head => Unseen, Head_Lens => Off_Centre_Head, Head_Shows => Shows, Lone_Box => Lone,
+       Arm_Noise => Arm_Noise, others => <>));
+
+   --  How many sigmas away from the truth the model's fixed eye E is: the head at Head_Pose, in the world's unit,
+   --  with Off_Centre_Head.
+   function Head_Off (M : Model; E : Eye_Id) return Real is
+      F      : Fixed_Fit renames M.Fixed_Eyes (E);
+      Report : Driver.Robot.Kinematics.Fixed.Fit_Report;
+   begin
+      Report.L := (Fx => F.Lens.Fx, Fy => F.Lens.Fy, Cx => F.Lens.Cx, Cy => F.Lens.Cy,
+                   K1 => F.Lens.K1, K2 => F.Lens.K2);
+      Report.Pose := F.Pose;
+      for X of F.Covariance loop
+         Report.Covariance.Append (X);
+      end loop;
+      return Driver.Robot.Kinematics.Fixed.Tests.Deviate
+        (Report, Off_Centre_Head,
+         (Rotation => Head_Pose.Rotation, Translation => (1.0 / Unit_Of (M, 1)) * Head_Pose.Translation));
+   end Head_Off;
+
+   --  Nothing is known of the head's place: every answer of it is unknown.
+   procedure Check_Head_Unknown (M : Model; What : String) is
+      O    : Observation;
+      P    : constant Pose_Estimate := Eye_Pose (M, 3, O);
+      Px   : constant Driver.Images.Pixel := (U => 320.0, V => 240.0);
+      Line : constant Ray_Estimate := Ray (M, 3, O, Px);
+      Own  : constant Ray_Estimate := Eye_Ray (M, 3, Px);
+      Seen : Driver.Images.Pixel;
+      Visible : Boolean;
+   begin
+      Check (not Driver.Robot.Kinematics.Fixed_Known (M, 3), What & ": the head is placed");
+      Check (Driver.Robot.Kinematics.Fixed_Why (M, 3)'Length > 0,
+             What & ": the head is not placed, and no reason is given");
+      Driver.Log.Line (Driver.Log.Robot, "head test (" & What & "): " & Driver.Robot.Kinematics.Fixed_Why (M, 3));
+      Check (P.Position_Covariance (1, 1) = Real'Last and then P.Rotation_Covariance (1, 1) = Real'Last,
+             What & ": the head's pose is known");
+      Check (Line.Direction.Sigma = Real'Last and then Own.Direction.Sigma = Real'Last,
+             What & ": a line of sight through the head is known");
+      Project (M, 3, O, [0.0, 0.0, 1.0], Seen, Visible);
+      Check (not Visible, What & ": a point is seen by the head");
+   end Check_Head_Unknown;
+
+   --  A head with a lens of its own that sees most of both arms' tables and their boxes: its lens and its place in
+   --  the world come out within Z of their sigmas of the truth, so do the lines of sight through its pixels, in its
+   --  own frame and in the world, and a point in the world lands in its picture where the lens and the place put it.
+   procedure Measure_The_Head is
+      M : Model;
+      O : Observation;
+   begin
+      Build_Two_Arms (M, Head_Rig (Boxes => True));
+      Check (Driver.Robot.Kinematics.Fixed_Known (M, 3),
+             "the head is not placed: " & Driver.Robot.Kinematics.Fixed_Why (M, 3));
+      if not Driver.Robot.Kinematics.Fixed_Known (M, 3) then
+         return;
+      end if;
+      declare
+         U1  : constant Real := Unit_Of (M, 1);
+         Off : constant Real := Head_Off (M, 3);
+         P   : constant Pose_Estimate := Eye_Pose (M, 3, O);
+         F   : Fixed_Fit renames M.Fixed_Eyes (3);
+         True_Centre : constant Vec3 := (1.0 / U1) * Head_Pose.Translation;
+         Worst_Line  : Real := 0.0;
+         Worst_Own   : Real := 0.0;
+         Worst_Back  : Real := 0.0;
+      begin
+         Driver.Log.Line (Driver.Log.Robot, "head test: " & Driver.Log.Image (Off, 2) & " sigmas off the truth, focal "
+                          & Driver.Log.Image (F.Lens.Fx, 2) & " x " & Driver.Log.Image (F.Lens.Fy, 2) & ", centre "
+                          & Driver.Log.Image (F.Lens.Cx, 2) & ", " & Driver.Log.Image (F.Lens.Cy, 2) & ", used"
+                          & F.Used'Image & " of" & F.Offered'Image);
+         Check (Off <= Driver.Conventions.Z, "the head is" & Off'Image & " sigmas off the truth");
+         Check (P.Pose.Rotation = F.Pose.Rotation and then P.Pose.Translation = F.Pose.Translation,
+                "the head's pose is not the fit's");
+         Check ((for all A in 1 .. 3 =>
+                   P.Position_Covariance (A, A) in 0.0 .. Real'Last and then P.Position_Covariance (A, A) > 0.0
+                   and then P.Rotation_Covariance (A, A) in 0.0 .. Real'Last
+                   and then P.Rotation_Covariance (A, A) > 0.0),
+                "the head's pose has no covariance");
+         for Row in 0 .. 4 loop
+            for Col in 0 .. 4 loop
+               declare
+                  Px    : constant Driver.Images.Pixel :=
+                    (U => 640.0 * (Real (Col) + 0.5) / 5.0, V => 480.0 * (Real (Row) + 0.5) / 5.0);
+                  Line  : constant Ray_Estimate := Ray (M, 3, O, Px);
+                  Own   : constant Ray_Estimate := Eye_Ray (M, 3, Px);
+                  In_Eye : constant Vec3 := Unit (Driver.Robot.Kinematics.Fit.Ray (Off_Centre_Head, Px.U, Px.V));
+                  Truth : constant Vec3 := Head_Pose.Rotation * In_Eye;
+                  Angle : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Line.Direction.Unit_Vector * Truth)));
+                  Angle_Own : constant Real :=
+                    Arccos (Real'Max (-1.0, Real'Min (1.0, Own.Direction.Unit_Vector * In_Eye)));
+                  Along : constant Vec3 := Line.Origin.Mean + 3.0 * Line.Direction.Unit_Vector;
+                  Back  : Driver.Images.Pixel;
+                  Seen  : Boolean;
+               begin
+                  Check (Line.Direction.Sigma < Real'Last and then Own.Direction.Sigma < Real'Last,
+                         "a line of sight through the head has no sigma");
+                  Worst_Line := Real'Max (Worst_Line, Angle / Line.Direction.Sigma);
+                  Worst_Own := Real'Max (Worst_Own, Angle_Own / Own.Direction.Sigma);
+                  Project (M, 3, O, Along, Back, Seen);
+                  Worst_Back := Real'Max (Worst_Back, Sqrt ((Back.U - Px.U) ** 2 + (Back.V - Px.V) ** 2));
+                  Check (Seen, "a point along the line of sight through pixel" & Px.U'Image & Px.V'Image
+                         & " is not seen by the head");
+               end;
+            end loop;
+         end loop;
+         Driver.Log.Line (Driver.Log.Robot, "head test: lines of sight off the truth by at most "
+                          & Driver.Log.Image (Worst_Line, 2) & " of their sigmas in the world, "
+                          & Driver.Log.Image (Worst_Own, 2) & " in the eye; a point along a line lands "
+                          & Driver.Log.Image (Worst_Back, 9) & " px from its pixel");
+         Check (Worst_Line <= Driver.Conventions.Z, "a line of sight through the head is"
+                & Worst_Line'Image & " of its sigmas off the truth");
+         Check (Worst_Own <= Driver.Conventions.Z, "a line of sight in the head's frame is"
+                & Worst_Own'Image & " of its sigmas off the truth");
+         Check (Worst_Back < 1.0e-6, "a point along a line of sight lands" & Worst_Back'Image
+                & " px from the pixel it was drawn through");
+         Check (abs (F.Pose.Translation - True_Centre) <= Driver.Conventions.Z * Sqrt (P.Position_Covariance (1, 1)
+                + P.Position_Covariance (2, 2) + P.Position_Covariance (3, 3)),
+                "the head's centre is off by" & Real'Image (abs (F.Pose.Translation - True_Centre)));
+      end;
+   end Measure_The_Head;
+
+   --  Five true answers: the head's place is not determined, and the eye says so with a reason, not with numbers.
+   procedure Head_Needs_Answers is
+      M : Model;
+   begin
+      Build_Two_Arms (M, Head_Rig (Boxes => True, Shows => 5, Unseen => False));
+      Check_Head_Unknown (M, "five answers");
+   end Head_Needs_Answers;
+
+   --  The head sees plenty of the arm's points, but every one lies on the table: the plane fixes the eye only up to
+   --  one term (its focal length trades against its distance), so its place is not determined. With boxes on the
+   --  table, the same head is placed (Measure_The_Head).
+   procedure Head_Needs_More_Than_A_Plane is
+      M : Model;
+   begin
+      Build_Two_Arms (M, Head_Rig (Boxes => False));
+      Check_Head_Unknown (M, "the table alone");
+      Check (M.Fixed_Eyes (3).Offered > Driver.Robot.Kinematics.Fixed.Terms,
+             "the head was offered" & M.Fixed_Eyes (3).Offered'Image & " answers, not more than its terms");
+   end Head_Needs_More_Than_A_Plane;
+
+   --  The rest of what a boot measures of the two-arm rig, set to values it could have measured, for its body file to
+   --  be reloaded whole.
+   procedure Measured_Rig (M : in out Model) is
+   begin
+      for G in Group_Id range 1 .. 2 loop
+         for C in 1 .. 6 loop
+            M.Noise.Append (1.0e-6 * Real (C) / 3.0);
+            M.Noise_Freedom.Append (100 + C);
+            M.Groups (G).Low_Seen.Append (-0.2 - 0.01 * Real (C));
+            M.Groups (G).High_Seen.Append (0.2 + 0.01 * Real (C));
+         end loop;
+         M.Groups (G).Delay_Beats := 2;
+         M.Groups (G).Delay_Known := True;
+         M.Graph.Roles.Append (Arm);
+         M.Graph.Arm_Of.Append (Arm_Id (G));
+         M.Graph.Breach.Append (0);
+      end loop;
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         M.Lags.Append (1);
+         M.Lag_Known.Append (True);
+         M.Eyes (E).Rest_Factor := 1.0 + 1.0 / 7.0;
+         M.Eyes (E).Rest_Counts_Known := True;
+         M.Eyes (E).Rest_Count_Max := 3;
+         M.Eyes (E).Rest_Count_Beats := 41;
+         for Cell in 1 .. 4 loop
+            M.Eyes (E).Textured.Append (Cell /= 2);
+         end loop;
+      end loop;
+   end Measured_Rig;
+
+   --  The table with a single small box on it, two points of the first eye's view, and the arm's own matches ten
+   --  times as noisy as the box is high: nearly a plane. The head is placed or it is not, but whichever it says is
+   --  true to its covariance: the points on the table say nothing of the eye's lens whatever the noise of their
+   --  depths seems to (the table alone, Head_Needs_More_Than_A_Plane), and the two off it say what they can.
+   procedure Head_Among_Few_Off_The_Table is
+      M    : Model;
+      Off  : Real;
+      Here : Natural := 0;
+   begin
+      Build_Two_Arms (M, Head_Rig (Boxes => True, Lone => True, Arm_Noise => 1.0));
+      for I in 0 .. Natural (M.Kinematics (1).Query_U.Length) - 1 loop
+         if I < Natural (M.Kinematics (1).Result.Table_On.Length) and then not M.Kinematics (1).Result.Table_On (I) then
+            Here := Here + 1;
+         end if;
+      end loop;
+      Check (Here > 0, "no point of the first arm's view is off its table: the box is not seen");
+      Driver.Log.Line (Driver.Log.Robot, "head test (a lone box): " & Here'Image
+                       & " of the first arm's points off the table; "
+                       & (if Driver.Robot.Kinematics.Fixed_Known (M, 3) then "placed" else "not placed: "
+                          & Driver.Robot.Kinematics.Fixed_Why (M, 3)));
+      if Driver.Robot.Kinematics.Fixed_Known (M, 3) then
+         Off := Head_Off (M, 3);
+         Driver.Log.Line (Driver.Log.Robot, "head test (a lone box): placed, " & Driver.Log.Image (Off, 2)
+                          & " sigmas off the truth, focal " & Driver.Log.Image (M.Fixed_Eyes (3).Lens.Fx, 2));
+         Check (Off <= Driver.Conventions.Z, "the head is placed, and" & Off'Image & " sigmas off the truth");
+      else
+         Check (Driver.Robot.Kinematics.Fixed_Why (M, 3)'Length > 0, "the head is not placed, and no reason is given");
+      end if;
+   end Head_Among_Few_Off_The_Table;
+
+   --  The head's place is part of the body: written, read back, it is the same fit with the same covariance, and
+   --  the reloaded body answers as the measured one did.
+   procedure Head_In_The_Body_File is
+      M, Back : Model;
+      O       : Observation;
+      Ok      : Boolean;
+      Why     : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      Build_Two_Arms (M, Head_Rig (Boxes => True));
+      Check (Driver.Robot.Kinematics.Fixed_Known (M, 3), "the head to write is not placed");
+      Measured_Rig (M);
+      declare
+         Written : constant String := Driver.Robot.Body_File.Text (M);
+      begin
+         Driver.Robot.Body_File.Read (Back, Written, Ok, Why);
+         Check (Ok, "the body file was not read: " & Ada.Strings.Unbounded.To_String (Why));
+         Check (Reloaded (Back, Stored_Kinematics), "the kinematics were not reloaded: "
+                & Ada.Strings.Unbounded.To_String (Why));
+         Check (Driver.Robot.Kinematics.Fixed_Known (Back, 3), "the reloaded body has no place for the head");
+         Check (Driver.Robot.Body_File.Text (Back) = Written, "the reloaded body writes another file");
+         if Driver.Robot.Kinematics.Fixed_Known (Back, 3) then
+            declare
+               Px   : constant Driver.Images.Pixel := (U => 100.0, V => 400.0);
+               Was  : constant Ray_Estimate := Ray (M, 3, O, Px);
+               Now  : constant Ray_Estimate := Ray (Back, 3, O, Px);
+               PW   : constant Pose_Estimate := Eye_Pose (M, 3, O);
+               PN   : constant Pose_Estimate := Eye_Pose (Back, 3, O);
+            begin
+               Check (Was.Direction.Unit_Vector = Now.Direction.Unit_Vector
+                      and then Was.Direction.Sigma = Now.Direction.Sigma
+                      and then Was.Origin.Mean = Now.Origin.Mean and then Was.Origin.Covariance = Now.Origin.Covariance,
+                      "the reloaded head gives another line of sight");
+               Check (PW.Pose.Rotation = PN.Pose.Rotation and then PW.Pose.Translation = PN.Pose.Translation
+                      and then PW.Position_Covariance = PN.Position_Covariance
+                      and then PW.Rotation_Covariance = PN.Rotation_Covariance,
+                      "the reloaded head stands elsewhere, or less certainly");
+            end;
+         end if;
+      end;
+   end Head_In_The_Body_File;
 
    --  How far a plane estimate lies from the true plane True_N * X = True_O
    --  (True_N towards the eye) in units of its own uncertainty: the length of
@@ -5178,6 +5452,7 @@ package body Driver.Robot.Tests is
    procedure Register is
    begin
       Driver.Robot.Kinematics.Errors.Tests.Register;
+      Driver.Robot.Kinematics.Fixed.Tests.Register;
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
                              & "stack, as the decider's does", Estimate_In_A_Task'Access);
       Driver.Tests.Register ("robot.probe.limits", "a channel at its limit one way is asked ever further that way though "
@@ -5243,6 +5518,23 @@ package body Driver.Robot.Tests is
                              Place_Through_A_Precise_Head'Access);
       Driver.Tests.Register ("robot.world.moved", "a head that moved between the two arms' views places the second arm",
                              Moved_Head_Places_Nothing'Access);
+      Driver.Tests.Register ("robot.head.pose",
+                             "a fixed eye with a lens of its own, seeing the arms' tables and boxes, is not placed in "
+                             & "the world within Z of its sigmas, or a line of sight through its pixels is off by more "
+                             & "than its sigma, or a point along one does not land on its pixel",
+                             Measure_The_Head'Access);
+      Driver.Tests.Register ("robot.head.few",
+                             "a fixed eye is placed from five true answers, or says nothing of why not",
+                             Head_Needs_Answers'Access);
+      Driver.Tests.Register ("robot.head.plane",
+                             "a fixed eye is placed from answers that all lie on the table, whose plane fixes it only "
+                             & "up to one term", Head_Needs_More_Than_A_Plane'Access);
+      Driver.Tests.Register ("robot.head.lone",
+                             "a fixed eye is placed, with a few points off the table, further from the truth than its "
+                             & "own covariance says", Head_Among_Few_Off_The_Table'Access);
+      Driver.Tests.Register ("robot.head.file",
+                             "a fixed eye's place is lost, or changed in the covariance or the lines of sight, by the "
+                             & "body file", Head_In_The_Body_File'Access);
       Driver.Tests.Register ("robot.arm.frame", "an arm's tool, table or up in its own frame, or a reach planned there, "
                              & "moves when the arm is misplaced in the world or not placed, or comes out off the truth "
                              & "beyond Z of its own sigma", Arm_Frame_Free_Of_Placement'Access);

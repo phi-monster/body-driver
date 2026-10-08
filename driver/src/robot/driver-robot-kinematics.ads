@@ -132,4 +132,34 @@ private package Driver.Robot.Kinematics is
    procedure Project_In_Eye (M : Model; A : Arm_Id; P : Vec3; U, V : out Real; In_Front : out Boolean);
    --  Where a point of the arm's eye frame lands in its image.
 
+   --  An eye that stands still in the world (the graph mounts it World_Fixed) has its lens and its place in the
+   --  world measured from the first arm's tracked points and the answers the eye gave to where they are
+   --  (Kinematics.Fixed), by Refit, once the arm is fitted and the eye's set of answers is there, and again when
+   --  either changed. The world is that arm's reference frame, in its unit.
+
+   function Fixed_Known (M : Model; E : Eye_Id) return Boolean;
+   --  The fixed eye's lens and place are determined (Fixed.Fit_Report.Determined).
+
+   function Fixed_Why (M : Model; E : Eye_Id) return String;
+   --  What the evidence leaves out of the fixed eye when it is not determined; empty when it is.
+
+   function Fixed_Pose (M : Model; E : Eye_Id) return Pose_Estimate;
+   --  The fixed eye's camera frame in the world with its covariance (the centre's, and the turn's carried into
+   --  world axes); unknown (covariances Real'Last) until determined.
+
+   function Fixed_Ray_In_Eye (M : Model; E : Eye_Id; U, V : Real) return Vec3;
+   --  The unit line of sight through pixel (U, V) of the fixed eye, in its frame.
+
+   procedure Fixed_Project_In_Eye (M : Model; E : Eye_Id; P : Vec3; U, V : out Real; In_Front : out Boolean);
+   --  Where a point of the fixed eye's frame lands in its image.
+
+   function Fixed_Angle_Sigma (M : Model; E : Eye_Id) return Real;
+   --  The angle one pixel of the noise its answers showed subtends at the fixed eye; Real'Last until determined.
+
+   function Fixed_Line_Sigma (M : Model; E : Eye_Id; U, V : Real; In_World : Boolean) return Real;
+   --  How uncertain, as an angle, the line of sight through the pixel is: Fixed_Angle_Sigma with what the
+   --  covariance of the fit leaves the direction uncertain by at that pixel, the lens's terms alone (in the eye's
+   --  frame) or, In_World, together with the turn, their correlations kept: a line through a pixel the points
+   --  pin is far surer than the principal point and the turn are each. Real'Last until determined.
+
 end Driver.Robot.Kinematics;
