@@ -180,6 +180,12 @@ package Driver.Robot.Kinematics.Fit is
                                           --  best): the share of its uncertainty every depth has in common
    end record;
 
+   function Depth_Known (Depth, Sigma : Real) return Boolean;
+   --  Whether a track's depth is one: positive, and significant against its own relative uncertainty (Sigma is that
+   --  of its logarithm), which is to say known to better than 1 / Z of itself. A track the sightings leave with no
+   --  depth at all (the first fit of an arm once had one at 1.7E97 units, its logarithm uncertain by 2.5E6) is not
+   --  known; it is not a point of little weight.
+
    procedure Fit
      (Changes    : Driver.Numerics.Arrays.Real_Matrix;   --  per keyframe (row), every joint's reading change from the reference
       Visible    : Real_Array;         --  per joint, the reading change its eye can just see (0: unknown)

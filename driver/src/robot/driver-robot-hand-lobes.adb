@@ -1257,6 +1257,60 @@ package body Driver.Robot.Hand.Lobes is
       end;
    end Reach_Tip;
 
+   function Tip_Cap (Lobe_Mask : Mask; Centre, Tip : Pixel) return Mask is
+      W       : constant Natural := Width (Lobe_Mask);
+      H       : constant Natural := Height (Lobe_Mask);
+      Reach_U : constant Real := Tip.U - Centre.U;
+      Reach_V : constant Real := Tip.V - Centre.V;
+      Length  : constant Real := Sqrt (Reach_U ** 2 + Reach_V ** 2);
+      Result  : Mask := Create (W, H);
+      Pixels  : Natural := 0;
+      Back, Ahead : Real := 0.0;   --  the lobe's reach behind the tip, along the way, and (if any) ahead of it
+
+      function Along (C, R : Natural) return Real is
+        (((Real (C) + 0.5 - Tip.U) * Reach_U + (Real (R) + 0.5 - Tip.V) * Reach_V) / Length);
+   begin
+      if Length = 0.0 then
+         return Result;
+      end if;
+      for R in 0 .. H - 1 loop
+         for C in 0 .. W - 1 loop
+            if Contains (Lobe_Mask, C, R) then
+               Pixels := Pixels + 1;
+               Back := Real'Min (Back, Along (C, R));
+               Ahead := Real'Max (Ahead, Along (C, R));
+            end if;
+         end loop;
+      end loop;
+      declare
+         Mean_Width : constant Real := Real (Pixels) / Real'Max (1.0, Ahead - Back);
+      begin
+         for R in 0 .. H - 1 loop
+            for C in 0 .. W - 1 loop
+               if Contains (Lobe_Mask, C, R) and then Along (C, R) >= Ahead - Mean_Width then
+                  Include (Result, C, R);
+               end if;
+            end loop;
+         end loop;
+      end;
+      return Result;
+   end Tip_Cap;
+
+   function Tip_Spread (Cap : Mask; Tip : Pixel) return Real is
+      Sum    : Real := 0.0;
+      Region : Natural := 0;
+   begin
+      for R in 0 .. Height (Cap) - 1 loop
+         for C in 0 .. Width (Cap) - 1 loop
+            if Contains (Cap, C, R) then
+               Sum := Sum + (Real (C) + 0.5 - Tip.U) ** 2 + (Real (R) + 0.5 - Tip.V) ** 2;
+               Region := Region + 1;
+            end if;
+         end loop;
+      end loop;
+      return (if Region = 0 then 0.0 else Sqrt (Sum / (2.0 * Real (Region))));
+   end Tip_Spread;
+
    function Lobes_Of_Sets
      (Here_Set, There_Set : Mask;
       Attached            : Mask;

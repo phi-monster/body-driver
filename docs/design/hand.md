@@ -32,6 +32,8 @@ and the estimators find what it did in the stream.
 | `Hand.Tips` | a hand's presses, each given to the lobe that touched, and the tips they measure |
 | `Hand.Aims` | the turn about the eye that aims a press |
 | `Hand.Pressing` | what one press asks of its arm, in the arm's own frame: the aim, the lowering, the way back, the tip's gap above the table |
+| `Hand.Lowering` | whether a push that asked the hand to go down took it down: the readings' whole shortfall and the hand's points', against what free pushes of the descent fell short by |
+| `Hand.Slide` | how far a finger slid under a press, read at the edge of its mask in the picture under the press |
 
 ## Lobes from the change and the arm's poses
 
@@ -421,6 +423,66 @@ presses lets a wrong update of the surface's tilt pass unnoticed, since the
 start already holds the right normal. A table sloped 0.15 rad found a sign
 error in the tilt update at once.
 
+**Lesson: a pressed finger slides, and what a press gives is the finger as it
+stood under it (A16).** The scorer set A16's two tips against the free finger
+(the support point of its collision mesh at the closer's reading): along the
+press they were 2.75 and 8.06 mm short of it, 4.1 and 10.4 times the sigma the
+driver stated. Against the finger as it stood at the press both were within it,
+along the press's normal (-0.53 and -0.41 mm): the fingers of the true robot, at
+the press of lobe 1 (beat 10264), stood 5.1 mm (link 7) and 1.8 mm (link 8)
+inward along their own axis from where the closer's reading puts them, and at
+the press of lobe 2 (beat 10654) link 8 stood 17.5 mm in, the closer reading
+1.0000 throughout: it reads what it was asked, not where the finger is. So a tip
+a press gives is the loaded finger's (`Tip_Kind`: Loaded), at the press the tip
+rests on (`Tip_Beat`), and the free finger's (Free) is unknown until the slide of
+the presses it rests on is measured and the tips at both openings are known (the
+slide is along the finger's travel, which is the difference of the two). The
+tip's covariance holds what a press does not tell: across its line of sight the
+spread of the lobe's tip region (its pixels in the cap within one mean width of
+the tip, about the tip pixel: A16 lobe 1's, 0.351 units across a tip 4.83
+along), not the 0.026 mm the pixel alone gives.
+
+**Lesson: a slide is read at the finger's edge, not in its pixels (A16, A17).**
+`Slide` measures the shift, along the way the lobe closes in its eye's picture,
+at which the picture under a press shows the free finger's edge: the points of
+the lobe's mask edge near its tip, each scored by the step of luma across it
+(weighted by how nearly across the way it lies), the greatest score the shift,
+from where the same score was greatest in the free picture (the points are read
+a pixel off the edge) and as far from the truth as half what the patch's two
+halves, taken across the way, put it apart. Three things that look right failed,
+each on the data. (1) The free finger's pixels matched in the picture under the
+press (the mean absolute difference of luma): a finger that enters the picture
+from its side and is of one tone has the same pixels at every shift along it, so
+the cost is flat on one side and the least is anywhere on it; a patch of the
+pixels the finger would come to cover (a ring) put a floor under the other side,
+but its Gaussian classes were wrong in the picture under the press: the black
+finger that was 8 to 10 in the free view stands at 41 to 66 there (the room it
+reflects had changed), the table beside it that was 120 to 140 is 40 to 77, and
+A16's and A17's lobes at no slide gave -26 pixels twice, with a sigma of 14. (2)
+The same with the least misclassified pixels over every threshold on luma (a
+threshold per shift, so that a change of light moves it): the table's dark wood
+against the finger's grey, and the least at -12 pixels for a finger that had
+not moved. (3) The edge, scored by the step of luma across it of the free sign
+(the finger is the darker side), weighted by the way across the edge against the
+way of the shift, with the greatest score taken from the free picture's own
+greatest: twelve measurements, five presses of A16 and one of A17 at two lobes
+each, against the truth's finger positions (4.55 pixels to the millimetre at the
+tip, 200 pixels of travel for 44 mm):
+
+| press (beat) | lobe | measured, pixels | truth, pixels (mm) | sigma, pixels |
+| --- | --- | --- | --- | --- |
+| A16 10264 | 1 (link 7) | 23.11 | 23.2 (5.1) | 0.30 |
+| A16 10264 | 2 (link 8) | 8.31 | 8.2 (1.8) | 4.52 |
+| A16 10353 | 1 / 2 | -0.07 / -0.02 | 0 / 0 | 0.30 / 0.42 |
+| A16 10533 | 1 / 2 | -0.23 / 0.05 | 0 / 0 | 3.78 / 4.12 |
+| A16 10654 | 1 / 2 | 0.05 / 78.48 | 0 / 79.6 (17.5) | 0.30 / 4.65 |
+| A16 10687 | 1 / 2 | -0.27 / 0.04 | 0 / 0 | 0.29 / 0.29 |
+| A17 6998 | 1 / 2 | -0.22 / -0.13 | 0 / 0 | 0.30 / 0.54 |
+
+The least score of several that stand out of the others is the one nearest where
+the finger stood free: a slide is the smallest the picture lets it be (A16's
+press 10533 had a second, stronger edge 196 pixels in).
+
 ## How the decider aims a press
 
 A press turns the hand about the eye, so the eye keeps its view, until the
@@ -482,7 +544,139 @@ A15's table, 0.716 of its ask against a noise of 0.0001, is. The presses found
 in the stream were not misled: from all of it the estimators kept one press,
 the one that met the table.
 
+**Lesson: the band about a predicted contact has two edges, and a press that
+stopped in the air fixes only a bound (A17).** A17's first press that the hand
+kept (beat 6998, the closer at its open reading) stopped the arm in the air: at
+the rest after its let-go the lowest vertex of link 7 was 86.2 mm above the table
+(92.1 mm at beat 6975, where the arm stopped) and that of link 8 187.4 mm, and
+link 2 lay within 8 mm of link 4, as A16's stops had (A16: link 2 within 6.3 mm
+of link 4). The press before it, the one the closer was not at an opening for,
+stopped with link 7 105 mm above the table (beat 6921). The line of sight through the tip meets
+the table 17.87 units from the eye from that pose (266 mm: the arm's unit was
+14.9 mm in A17), and the finger was not on the table there. One press fixes a
+provisional tip, and a provisional tip is the hit, the farthest the tip can be:
+a bound, not the tip. The next press (tilted by 0.28 rad, aimed at "0.3416 +-
+0.0437 above the surface the presses so far fixed") took that bound for the
+contact: from the first push it was within Z sigma of it, so every push was the
+larger of the sigma and the least, 0.0437 units, 0.6 mm, at 8 beats a push, and
+the band had no far edge: the hand went down 0.15 m in 1,200 beats (truth: the
+finger's link 7 from 0.936 to 0.786 m, beats 7021 to 8259), met the table, and
+went on as it slid along it for 4,600 beats (8 cm in y; the finger's z 0.7829 to
+0.7813), each push reached: the joints followed 83 to 97 per cent of each, one
+of them 22 per cent, and the step tracker, which judges a group, said reached.
+Nothing ended it: not Blocked, and not Spent, because the eye's room above the
+table never ran out for a hand that stayed on it. The log said nothing for its
+last 25 minutes because a press says how it went down only when it ends.
+
+The band is now as wide as its prediction says, Z sigma either side of the
+contact, and past it (nothing met) the steps double again, from the band's own,
+counted as blind: the prediction was a bound. The descent also ends, Spent, when
+it has made the steps a doubling schedule needs to cover the eye's room above the
+table (doubling from Least to the room, a step cut to it, one that finds none;
+with a prediction, its band and the doubling past it): steps that were reached
+and lowered nothing end on the schedule, not on the clock. A hand that ends Spent
+goes back to where the descent began, for the presses after it begin there.
+(`hand.measure.press` (e), `hand.measure.room` (d): the surface 10 below the
+predicted contact is met by a doubling, and steps that lower nothing end at the
+schedule's ten.)
+
+**Lesson: the closer is at the opening before the press is made at it (A17).**
+The first press of A17's first lobe (beats 6913 to 6920) was blocked, and "a
+press with the closer at neither measured opening is not used": the closer read
+0.6859 where its openings read 1.0 and 0.0. The closer had been asked for 1.0
+since before beat 6840; its reading had crept from 0.59 to 0.686 over 70 beats
+while the arm stood at the sweep's pose, and at that pose the truth has the left
+finger's lowest vertex on the table (0.0 mm, at (-0.274, -0.261), from beat 6860
+to the aim's first move at 6913; link 8 was 20 mm above it): the finger could not
+open against it. The aim's turn took the hand off the table and the reading
+jumped to 1.0 at beat 6918, five beats into a press that had begun without it. A
+press now waits for it: after the aim, the closer's readings are those of the
+opening or are asked for once more (the finger is free then), and when they are
+still not there no press is made at that opening (`Closer_At`).
+
+**Lesson: a descent ends when the hand stops going down, whatever the arm does
+(A17).** The third press of A17 did not stop at the table, and it did not end
+as a press, because "the arm followed every push" and "the hand went down" are
+two things. From the truth (beats 6990 to 13600): the free pushes
+lowered the tool's last link, link 6, 1.0 to 1.1 mm each, at 8 to 9 beats a push;
+the lowest vertex of link 7, the finger, reached the table at beat 8208 (0.7 mm
+above it at 8200, 0.0 at 8208) and stayed within 0.4 mm of it until beat 13,200
+while it slid along the table 0.8 mm a push (y -267.9 to -267.1 mm at the first
+push after contact). The tool's origin and the camera did not stop at once: the
+push that brought the finger to the table lowered link 6 by 1.0 mm and the next
+three by 1.0, 0.9 and 0.8 mm (a hand pivoting on its finger while the finger
+slides), the following ones by less and less, 9.9 mm in all by beat 8920 (link 6
+118.1 to 108.2 mm above the table, the camera 55.9 to 49.2 mm), and then the
+camera rose again, to 61.6 mm at beat 11,120 and 79.8 at 13,600, as the hand
+rolled up on it. So what stops at the first push after contact is the contact,
+and it is a point of the finger; the tool's origin, which the plan moves as it
+asks, tells only after the pivot has spent itself.
+
+The arm's readings show the difference: a free push (A17 beats 7044 to 7076:
+5.8 mrad of joint motion each) was delivered 100.0 per cent along its ask with
+1.8 microradians across it (0.03 per cent of its length); the crawl's push at
+beat 9009, 11.6 mrad, 91.9 per cent along it and 3.4 mrad across it, 29 per cent
+of its length (joint 2 delivered 81 per cent of its share, joint 3 26, joint 4
+108, joints 1, 5 and 6 whatever the contact let them). The step tracker judges a
+group by the part of the delivery along the ask, 8 per cent short here, and said
+reached; the 29 per cent across the ask is the hand turning and sliding on what
+it touches.
+
+`Driver.Robot.Hand.Lowering` judges a push by how far it fell short of its ask,
+in two places, and either is a stall. In the readings: the whole vector from
+where the joints stopped to the push's target, as a share of the ask's length,
+no geometry read, so it is the same for any arm. At the hand's points
+(`Tool_In_Arm` at the push's start, its target and its end): the tool's origin
+and the tips the hand has measured at the opening the closer stands at, each a
+share of the lowering it was asked (a tip is a point of the tool frame, a
+provisional one a bound beyond the finger, which rises when the hand turns about
+the finger on the table and so shows the stall the origin does not). A share is
+a stall when it is larger than Z times the largest share any push of the descent
+before it fell short by (free pushes fall short by one share of their length,
+however long: a joint held against gravity settles short by a share of its push;
+three pushes are the least that have a scatter), and the push asked what the one
+test of motion sees (`Channels.Visible` of its ask) and fell short of it by what
+that test sees (of the shortfall vector): that test is the floor under both. The
+first version had the tool's `Least_Push` for a floor, the tool's uncertainty at
+the pose it stands at; it is the uncertainty of a fit, common to the two poses a
+push is the difference of, and it grew with the descent: A17's pushes were 0.0561
+units, and from beat 7502 the lowered tool's was more, so nothing was judged after
+it, the contact included. The pushes are forgotten when a push asks nothing down
+(a retreat, a hold), so a descent is compared with itself, and a stall among the
+first three pushes is taken for what free pushes do. The verdict is read from the
+stream by the estimators as the press is, so the same push is a block for the
+watcher that finds the press (the verdict stands until the next push begins, as a
+Blocked one does), and it is read with the heights before the next step, not by a
+beat of its own, so the descent that made it ends as a press, not Spent: a bound
+or a contact, whichever the presses tell, and not thrown away.
+(`hand.lowering.*`, `hand.measure.stall`.)
+
+**Lesson: a closer the table holds is freed by raising the hand (A17).** A
+finger resting on the table cannot slide along it, and the closer's reading,
+asked back to a reading it has been at, stays short of it: A17's, asked back to
+1.0 at the end of its sweep, stood between 0.59 and 0.686 for seventy beats and
+read 1.0 four beats after the aim lifted the hand. The sweep's returns to a
+reading the closer has been at (`Return_Channel`) check that it arrived (within
+its noise, or a step no eye tells from it), and if it did not, the hand is
+raised along the way up, in steps that double from the least move of its tool,
+while each raise sets the closer moving; a raise after which it has not moved
+was not what held it, and the hand is raised no more, nor higher than the eye
+stands above the table (`Free_Closer`; `hand.measure.held`). The hand stays
+where it was raised to: the presses aim from wherever the arm stands. A19
+(8597f62) lost its first press the same way (`a press with the closer at neither
+measured opening is not used`, blocked after lowering 5.1 units).
+
 ## Open
+
+- A closer that follows neither way at its first push (a finger pressed so
+  hard on the table that its small first pushes do not move it) is left
+  stuck by the sweep; the hand does not raise the arm and sweep again. A17 and
+  A19 had fingers on the table at the sweep's pose, and both closers did start,
+  and were held only on the way back.
+- A stall among the first three pushes of a descent is taken for what free
+  pushes do (nothing is compared with fewer than three) and enters the
+  largest share the descent's later pushes are compared with, so that the
+  descent judges nothing more; the step tracker's block still ends it.
 
 - A contact that is less repeatable than the arm's predicted noise is not
   modelled (the fit no longer raises its noise to the scatter it sees, which a

@@ -93,6 +93,98 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Move_Channel (G, Channel, To, Followed);
    end Move_Channel;
 
+   --  One channel back to a reading the closer has been at, and the hand raised away from the table if it stays
+   --  short of it. A closer that stays short of a reading it has been at is held by something, and a finger
+   --  resting on the table is held by it: it cannot slide along what it presses on. A17's, asked back to its
+   --  open reading 1.0 at the end of its sweep, stood between 0.59 and 0.686 for seventy beats, and reached 1.0
+   --  in four once the aim had lifted the hand off the table. The hand is raised along the way up, in steps that
+   --  double from the least move of its tool, while each raise sets the closer moving, until the closer
+   --  arrives; a raise after which the closer has not moved was not what held it, so the hand is not raised
+   --  again, nor higher than the eye stands above the table (past that the table is not what holds it).
+   procedure Return_Channel (G : Group_Id; C : Positive; To : Real) is
+      Reading : Real := To;        --  the channel's reading now
+      Arrived : Boolean := True;   --  within its noise of To, or of a step no eye tells from it
+      Placed  : Boolean := False;  --  the closer is one an eye on an arm watches
+      Arm     : Arm_Id := 1;
+      Eye     : Eye_Id := 1;
+      Plan    : Driver.Robot.Motion.Plan;
+      Report  : Driver.Robot.Motion.Step_Report;
+      First   : Boolean := True;   --  the raise now is the first
+      By      : Real := 0.0;       --  the raise now, doubling
+      Raised  : Real := 0.0;       --  and the raises so far
+      Room    : Estimate := Unknown;   --  how high the eye stands above the table, along the way up
+      Noise   : Real := 0.0;
+      Raises  : Natural;
+
+      procedure Read_Closer (O : Observation) is
+         P : constant Natural := Own_Pair (G);
+         R : constant Real_Array := O.Readings.Element (G);
+      begin
+         Reading := R (R'First + C - 1);
+         Noise := Sqrt (2.0) * Reading_Noise (M, G, C);
+         Arrived := not Significant (Reading - To, Noise)
+           or else (Known (Visible_Step (M, G, C)) and then abs (Reading - To) < Visible_Step (M, G, C).Value);
+         Placed := P > 0;
+         if Placed then
+            Arm := H.Data.Pairs (P).Arm;
+            Eye := H.Data.Pairs (P).Eye;
+         end if;
+      end Read_Closer;
+
+      procedure Read_Raise (O : Observation) is
+         Up : constant Direction_Estimate := Up_In_Arm (M, Arm);
+      begin
+         Room := Unknown;
+         if Up.Sigma = Real'Last or else Eye_Mount (M, Eye).Kind /= Arm_Carried then
+            return;
+         end if;
+         By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);
+         Plan := Driver.Robot.Hand.Pressing.Lowered (M, Arm, O, Up.Unit_Vector, By);
+         Room := Driver.Robot.Hand.Pressing.Gap
+           (M, Arm, O, (Mean => Eye_In_Tool (M, Eye, O).Pose.Translation, Covariance => [others => [others => 0.0]]),
+            Table_In_Arm (M, Arm), -Up.Unit_Vector);
+      end Read_Raise;
+
+      function Is_There return Boolean is
+      begin
+         Hold_Beat (Read_Closer'Access);
+         return Arrived or else not Placed;
+      end Is_There;
+
+      function Reads return Real is (Reading);
+
+      function Moved_By (Before, After : Real) return Boolean is (Significant (After - Before, Noise));
+
+      procedure Ask_Again is
+      begin
+         Move_Channel (G, C, To);
+      end Ask_Again;
+
+      --  The hand raised along the way up, not past the eye's height above the table.
+      procedure Raise_Once (Is_First : Boolean; Done : out Boolean) is
+      begin
+         Done := False;
+         First := Is_First;
+         Hold_Beat (Read_Raise'Access);
+         if not Known (Room) or else Raised + By > Room.Value
+           or else Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned
+         then
+            return;
+         end if;
+         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image & ", asked back to "
+                          & Driver.Log.Image (To, 6) & ", reads " & Driver.Log.Image (Reading, 6) & ": it is held; the hand"
+                          & " is raised by " & Driver.Log.Image (By, 4) & " (" & Driver.Log.Image (Raised, 4) & " before) of the "
+                          & Driver.Log.Image (Room.Value, 4) & " the eye stands above the table");
+         Driver.Robot.Motion.Follow (M, Plan, Report);
+         Done := Report.Outcome = Driver.Robot.Motion.Reached;
+         if Done then
+            Raised := Raised + By;
+         end if;
+      end Raise_Once;
+   begin
+      Free_Closer (Is_There'Access, Reads'Access, Moved_By'Access, Ask_Again'Access, Raise_Once'Access, Raises);
+   end Return_Channel;
+
    --  How long a push's view took to form, the longest of every push this
    --  decider made: a view waits at most that long. Before any view formed,
    --  as many beats as the stream had when the sweep began: no wait is longer
@@ -196,7 +288,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                                                                   else "the stream had run before the sweep")
                                    elsif Answered then "following from the first" else "at its end there"));
             end;
-            Move_Channel (G, C, Start);
+            Return_Channel (G, C, Start);
          end loop;
          if Gone then
             Driver.Log.Line (Driver.Log.Robot, "hand: group" & G'Image & " is no longer a closer the hand watches;"
@@ -236,7 +328,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
       begin
          Hold_Beat (Read_Open'Access);
          if Known_Open then
-            Move_Channel (G, C, Open_At);
+            Return_Channel (G, C, Open_At);
          end if;
       end;
    end Sweep_Channel;
@@ -258,6 +350,19 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  press would be in a frame that has moved.
    --  False when the arm cannot reach it or the body does not say where down
    --  is, or the eye had no room left above the table and nothing was met.
+   --  The closer's readings are those of the opening, within their noise and not those of the other.
+   function Closer_At (R : Hand_Record; Which : Opening) return Boolean is
+      Now  : Driver.Robot.Hand.Views.Reading_Holders.Holder;
+      Seen : Opening;
+      procedure Read_Closer (O : Observation) is
+      begin
+         Now := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (O.Readings.Element (R.Group));
+      end Read_Closer;
+   begin
+      Hold_Beat (Read_Closer'Access);
+      return Opening_Of (R, M, Now.Element, Seen) and then Seen = Which;
+   end Closer_At;
+
    function Press_Once (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening; Along : Vec3) return Boolean is
       Aimed  : Driver.Robot.Hand.Pressing.Aimed;
       Plan   : Driver.Robot.Motion.Plan;
@@ -265,10 +370,12 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Arm_Is : Group_Id;
       Arm_Now : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  the arm's readings at the last Read_Arm
       Aim_At  : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  and where the descent began
+      Stalls  : Natural := 0;   --  the pushes the watcher had judged stalled when the step now under way began
 
       procedure Read_Aim (O : Observation) is
       begin
          Driver.Robot.Hand.Pressing.Aim (M, R.Arm, R.Eye, O, Along, Aimed);
+         Stalls := H.Data.Found (Id).Stalls;
       end Read_Aim;
 
       Least : Real;   --  the least push, where the aim leaves the tool, kept above zero so that the doubling begins
@@ -277,6 +384,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
       procedure Read_Lower (O : Observation) is
       begin
          Plan := Driver.Robot.Hand.Pressing.Lowered (M, R.Arm, O, Aimed.Into, By);
+         Stalls := H.Data.Found (Id).Stalls;
       end Read_Lower;
 
       Unplanned : Boolean := False;   --  a step could not be planned
@@ -308,6 +416,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Result.Tip := Driver.Robot.Hand.Pressing.Gap
               (M, R.Arm, O, Driver.Robot.Hand.Tips.Tip (B, Lobe, Which), Driver.Robot.Hand.Tips.Surface (B), Aimed.Into);
             Result.Eye := Driver.Robot.Hand.Pressing.Gap (M, R.Arm, O, Eye, Table_In_Arm (M, R.Arm), Aimed.Into);
+            --  The watcher judges every push from the stream (Driver.Robot.Hand.Lowering), as the press is found:
+            --  one verdict, here as in a replay. It has judged the step before this one stalled.
+            Result.Stalled := H.Data.Found (Id).Stalls > Stalls;
          end Read_Above;
       begin
          Hold_Beat (Read_Above'Access);
@@ -336,6 +447,18 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Driver.Robot.Motion.Follow (M, Plan, Report);
       Hold_Beat (Read_Arm'Access);
       Aim_At := Arm_Now;
+      --  The closer is at the opening the press is made at, or is brought there first: a press made
+      --  while the closer is on its way is a press at no opening (A17's first press, at 0.686 of an
+      --  opening at 1.0: the finger that held it back was off the table only once the aim turned the
+      --  hand). It is asked once more, and if it does not come, no press is made.
+      if not Closer_At (R, Which) then
+         Move_Group (R.Group, R.Readings (Which).Element);
+         if not Closer_At (R, Which) then
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the closer of lobe" & Lobe'Image & " does not come to its "
+                             & (if Which = Open then "open" else "closed") & " opening: no press is made at it");
+            return False;
+         end if;
+      end if;
       declare
          First : constant Driver.Robot.Hand.Heights := Above;
       begin
@@ -352,6 +475,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
                              else "; the eye's height above the table unknown"));
       end;
       Driver.Robot.Hand.Descend (Above'Access, Least, Lower'Access, Steps);
+      if Steps.Stalled then
+         --  The last step was followed and took the hand nowhere: it is not part of the lowering.
+         Descended := Descended - By;
+      end if;
       --  One line a press, for the boot's account of where its time went:
       --  how many pushes, and why each was as long as it was.
       Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": press of lobe" & Lobe'Image & " at "
@@ -359,14 +486,24 @@ procedure Measure (H : in out Hands; M : in out Model) is
                        & Natural'Image (Driver.Robot.Hand.Total (Steps)) & " pushes,"
                        & Steps.Fast'Image & " fast and" & Steps.Band'Image
                        & " within Z sigma of the contact its presses predict," & Steps.Blind'Image
-                       & " doubling from " & Driver.Log.Image (Least, 4) & " with nothing predicting it,"
+                       & " doubling from " & Driver.Log.Image (Least, 4) & " with nothing predicting it (before a prediction, or past its band),"
                        & Steps.Capped'Image & " cut to the eye's room above the table; "
                        & (if Unplanned then "then it cannot press lower: " & Driver.Robot.Motion.Why (Plan)
-                          elsif Steps.Spent then "then the eye has no room left above the table and nothing was met, after lowering "
+                          elsif Steps.Spent then "then the eye has no room left above the table, or the steps that cover it were made,"
+                               & " and nothing was met, after lowering "
                                & Driver.Log.Image (Descended, 4)
+                          elsif Steps.Stalled then "stalled, the arm followed the last push by " & Driver.Log.Image (By, 4)
+                               & " and the hand did not go down with it, after lowering " & Driver.Log.Image (Descended, 4)
                           else "blocked, the last push by " & Driver.Log.Image (By, 4) & " after lowering "
                                & Driver.Log.Image (Descended, 4)));
-      if Unplanned or else Steps.Spent then
+      if Unplanned then
+         return False;
+      end if;
+      if Steps.Spent then
+         --  Nothing was met and no more steps are made: the hand goes back to where the
+         --  descent began, as after a press, for the presses after it begin there.
+         Hold_Beat (Read_Arm'Access);
+         Move_Group (Arm_Is, Aim_At.Element);
          return False;
       end if;
       --  Let go: the arm held where the block left it, so the hand rests; then

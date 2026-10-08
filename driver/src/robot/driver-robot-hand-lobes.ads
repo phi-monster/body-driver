@@ -99,6 +99,17 @@ package Driver.Robot.Hand.Lobes is
 
    package Lobe_Vectors is new Ada.Containers.Vectors (Positive, Lobe);
 
+   function Tip_Cap (Lobe_Mask : Mask; Centre, Tip : Pixel) return Mask;
+   --  A lobe's tip region: its pixels within one mean width of the tip, along
+   --  the way the tip lies from the lobe's centre; the mean width is the
+   --  lobe's pixels over its length along that way. The point of a lobe that
+   --  touches is somewhere in the region, not on the line through the tip
+   --  pixel. Empty for a lobe whose tip is its centre.
+
+   function Tip_Spread (Cap : Mask; Tip : Pixel) return Real;
+   --  How far the pixels of a tip region lie from the tip pixel, per axis, in
+   --  pixels (root mean square). Zero for an empty region.
+
    function Find
      (Forward  : Correspondence_Array;   --  first view to the other
       Backward : Correspondence_Array;   --  other view to the first

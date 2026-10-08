@@ -7,6 +7,7 @@ package body Driver.Robot.Hand.Tips.Tests is
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
    use Driver.Tests;
+   use type Driver.Clock.Beat;
 
    Gen : Ada.Numerics.Float_Random.Generator;
 
@@ -50,11 +51,13 @@ package body Driver.Robot.Hand.Tips.Tests is
 
    function Line (L : Positive; O : Opening) return Vec3 is (Unit (Tips_True (L, O) - Eye));
 
-   function Sights return Sight_Table is
+   --  The lobes' lines of sight, each with the spread of its tip region across it (an angle).
+   function Sights (Spread : Real := 0.0) return Sight_Table is
      ([for L in 1 .. 2 =>
-         [for O in Opening => (Known => True,
-                               Ray   => (Origin    => (Mean => Eye, Covariance => 1.0e-10 * Identity3),
-                                         Direction => (Unit_Vector => Line (L, O), Sigma => 1.0e-5)))]]);
+         [for O in Opening => (Known  => True,
+                               Ray    => (Origin    => (Mean => Eye, Covariance => 1.0e-10 * Identity3),
+                                          Direction => (Unit_Vector => Line (L, O), Sigma => 1.0e-5)),
+                               Spread => Spread)]]);
 
    Down : constant Vec3 := [0.0, 0.0, -1.0];
 
@@ -261,34 +264,132 @@ package body Driver.Robot.Hand.Tips.Tests is
       Set_Sights (B, Sights);
       Set_Frame (B, Table, No_Pose'Access, Moved);
       Press_At (1, Open, 0.0, 0.0, 0.45, 0.10, Made, Press);
+      Press.Beat := 100;
       Add (B, Press, Open);
       First := Tip (B, 1, Open);
       Check (Made and then Known (First) and then not Confirmed (B, 1, Open) and then Latest_Agrees (B),
              "one press the tip stopped did not give a provisional tip");
+      Check (Beat (B, 1, Open) = 100, "the beat of the press the tip rests on is" & Beat (B, 1, Open)'Image);
       Press_At (1, Open, 0.3, 1.0, 0.40, 0.15, Made, Press, Lift => 0.06);
+      Press.Beat := 200;
       Add (B, Press, Open);
       Check (Made and then not Latest_Agrees (B) and then Agreeing (B, 1, Open) = 1 and then not Confirmed (B, 1, Open),
              "a press that stopped 60 mm short is one the tip rests on");
       Press_At (1, Open, 0.3, 4.0, 0.50, 0.12, Made, Press, Lift => 0.03);
+      Press.Beat := 300;
       Add (B, Press, Open);
       Check (Made and then not Latest_Agrees (B) and then Agreeing (B, 1, Open) = 1 and then Pressed (B) = 3,
              "a press that stopped 30 mm short is one the tip rests on");
       Check (Tip (B, 1, Open).Mean = First.Mean,
              "presses that stopped short moved the tip by" & Real'Image (abs (Tip (B, 1, Open).Mean - First.Mean)));
+      Check (Beat (B, 1, Open) = 100, "the beat of the press the tip rests on, with two stops after it, is"
+             & Beat (B, 1, Open)'Image);
       Press_At (1, Open, 0.6, 2.0, 0.42, 0.13, Made, Press);
+      Press.Beat := 400;
       Add (B, Press, Open);
       Check (Made and then Latest_Agrees (B) and then Agreeing (B, 1, Open) = 2 and then Confirmed (B, 1, Open),
              "a second press from another pose that the tip stopped did not confirm it:" & Agreeing (B, 1, Open)'Image);
+      Check (Beat (B, 1, Open) = 100 or else Beat (B, 1, Open) = 400,
+             "the beat of the tip two presses rest on is" & Beat (B, 1, Open)'Image);
    end Stalls_Neither_Agree_Nor_Confirm;
 
+   procedure Spread_Widens_Across_The_Line is
+      --  A tip lies on its line of sight at the distance a press put it; the
+      --  lobe's tip region lies within a spread of that line, so across the
+      --  line the tip's covariance grows by that spread at that distance, and
+      --  along the line it does not.
+      Spread : constant Real := 0.05;
+      Narrow, Wide : Point_Estimate;
+      Distance_Of_Wide : Real := 0.0;
+   begin
+      for Pass in 1 .. 2 loop
+         declare
+            B     : Book;
+            Moved : Boolean;
+            Made  : Boolean;
+            Press : Driver.Robot.Hand.Presses.Event;
+         begin
+            Ada.Numerics.Float_Random.Reset (Gen, 41);
+            Set_Sights (B, Sights (if Pass = 1 then 0.0 else Spread));
+            Set_Frame (B, Table, No_Pose'Access, Moved);
+            Press_At (1, Open, 0.0, 0.0, 0.45, 0.10, Made, Press);
+            Add (B, Press, Open);
+            if Pass = 1 then
+               Narrow := Tip (B, 1, Open);
+            else
+               Wide := Tip (B, 1, Open);
+               Distance_Of_Wide := Distance (B, 1, Open).Value;
+            end if;
+         end;
+      end loop;
+      declare
+         U      : constant Vec3 := Line (1, Open);
+         V      : constant Vec3 := Unit (Cross (U, [0.0, 0.0, 1.0]));
+         Along  : constant Real := U * (Wide.Covariance * U) - U * (Narrow.Covariance * U);
+         Across : constant Real := V * (Wide.Covariance * V) - V * (Narrow.Covariance * V);
+      begin
+         Check (Known (Narrow) and then Known (Wide) and then Narrow.Mean = Wide.Mean, "the spread moved the tip");
+         Check (abs Along < 1.0e-12, "the spread widened the tip along its line of sight by" & Real'Image (Along));
+         Check (abs (Across - (Distance_Of_Wide * Spread) ** 2) < 1.0e-9 * (Distance_Of_Wide * Spread) ** 2 + 1.0e-15,
+                "the spread widened the tip across its line by" & Real'Image (Across) & " against"
+                & Real'Image ((Distance_Of_Wide * Spread) ** 2));
+      end;
+   end Spread_Widens_Across_The_Line;
+
+
+   procedure Slides_Kept_With_Their_Presses is
+      --  Every press carries how far each lobe's finger stood from where the
+      --  closer's reading puts it; they come back in the order the presses were made,
+      --  with the lobe the press went to marked.
+      B     : Book;
+      Moved : Boolean;
+      Made  : Boolean;
+      Press : Driver.Robot.Hand.Presses.Event;
+      Slid_20 : constant Slid := (Known => True, Pixels => 20.0, Pixels_Sigma => 0.5, Fraction => 0.1,
+                                  Fraction_Sigma => 0.0025);
+      Slid_Nil : constant Slid := (Known => True, Pixels => 0.2, Pixels_Sigma => 0.4, Fraction => 0.001,
+                                   Fraction_Sigma => 0.002);
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 57);
+      Set_Sights (B, Sights);
+      Set_Frame (B, Table, No_Pose'Access, Moved);
+      Press_At (1, Open, 0.0, 0.0, 0.45, 0.10, Made, Press);
+      Press.Beat := 100;
+      Add (B, Press, Open, [1 => Slid_20, 2 => Slid_Nil]);
+      Press_At (1, Open, 0.6, 2.0, 0.42, 0.13, Made, Press);
+      Press.Beat := 200;
+      Add (B, Press, Open, [1 => Slid_20, 2 => (others => <>)]);
+      Press_At (2, Closed_Empty, 0.0, 0.0, 0.40, -0.10, Made, Press);
+      Press.Beat := 300;
+      Add (B, Press, Closed_Empty);
+      declare
+         First  : constant Press_Slides := Slides_Of (B, 1, Open);
+         Second : constant Press_Slides := Slides_Of (B, 2, Open);
+         Closed : constant Press_Slides := Slides_Of (B, 2, Closed_Empty);
+      begin
+         Check (First'Length = 2 and then First (1).Beat = 100 and then First (2).Beat = 200,
+                "the slides at the open opening are of" & First'Length'Image & " presses");
+         Check (First (1).Contact and then First (2).Contact, "the first lobe pressed at the open opening twice");
+         Check (First (1).Slid = Slid_20 and then First (2).Slid = Slid_20, "the first lobe's slides were not kept");
+         Check (not Second (1).Contact and then Second (1).Slid = Slid_Nil, "the other lobe's slide is not its own");
+         Check (not Second (2).Slid.Known, "a slide that was not measured is known");
+         Check (Closed'Length = 1 and then Closed (1).Beat = 300 and then not Closed (1).Slid.Known,
+                "a press made without slides has one");
+      end;
+   end Slides_Kept_With_Their_Presses;
 
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.tips.slides", "the slides of a press are not kept with it, or not given by lobe "
+                             & "and opening", Slides_Kept_With_Their_Presses'Access);
       Driver.Tests.Register ("hand.tips.book", "presses go to the wrong lobe, or the tips they give are off",
                              Both_Openings'Access);
       Driver.Tests.Register ("hand.tips.reassign",
                              "a press whose approach is unknown or misleading stays with the wrong lobe or none",
                              Directions_Unknown_Or_Misleading'Access);
+      Driver.Tests.Register ("hand.tips.spread",
+                             "the lobe's tip region does not widen the tip across its line of sight, or does along it",
+                             Spread_Widens_Across_The_Line'Access);
       Driver.Tests.Register ("hand.tips.stalls",
                              "presses that stopped short of the table move the tip, agree with it or confirm it",
                              Stalls_Neither_Agree_Nor_Confirm'Access);

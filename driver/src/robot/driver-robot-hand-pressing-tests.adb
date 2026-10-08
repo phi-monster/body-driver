@@ -216,10 +216,11 @@ package body Driver.Robot.Hand.Pressing.Tests is
       for L in 1 .. 2 loop
          for W in Opening loop
             Rows (L) (W) :=
-              (Known => True,
-               Pixel => (U => 0.0, V => 0.0),
-               Ray   => (Origin    => (Mean => Zero3, Covariance => [others => [others => 0.0]]),
-                         Direction => (Unit_Vector => Unit (Tips_True (L, W)), Sigma => 2.5e-4)));
+              (Known  => True,
+               Pixel  => (U => 0.0, V => 0.0),
+               Ray    => (Origin    => (Mean => Zero3, Covariance => [others => [others => 0.0]]),
+                          Direction => (Unit_Vector => Unit (Tips_True (L, W)), Sigma => 2.5e-4)),
+               Spread => 0.0);
          end loop;
       end loop;
       Adopt (H, Group_Id (2 + A), Arm_Id (A), Eye_Id (A), [1 => 1.0], [1 => 0.0], Rows);

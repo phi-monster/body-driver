@@ -972,8 +972,46 @@ package body Driver.Robot.Hand.Lobes.Tests is
       end;
    end Pieces_Of_A_Finger_Are_Not_Lobes;
 
+   procedure Tip_Region_Spread is
+      --  A finger 20 pixels across and 100 long, its tip at the top: the region
+      --  at its tip is the 20 rows and some of the 21st within one mean width
+      --  (20 pixels) of the tip, and a pixel of it lies from the tip pixel, per
+      --  axis, by the root mean square of 33.5 across and 136.7 along: 9.22 pixels.
+      Finger : Mask := Create (100, 140);
+      Short  : Mask := Create (100, 140);
+      Cap    : Mask;
+      Spread : Real;
+   begin
+      for R in 10 .. 109 loop
+         for C in 40 .. 59 loop
+            Include (Finger, C, R);
+         end loop;
+      end loop;
+      Cap := Tip_Cap (Finger, Centre => (U => 50.0, V => 60.0), Tip => (U => 50.5, V => 10.5));
+      Check (Count (Cap) in 400 .. 420, "the region at a finger's tip has" & Count (Cap)'Image
+             & " pixels, not 20 rows' worth and a part of the 21st");
+      Spread := Tip_Spread (Cap, Tip => (U => 50.5, V => 10.5));
+      Check (abs (Spread - 9.22) < 0.1, "the spread of the region at a finger's tip is" & Real'Image (Spread) & " pixels, not 9.22");
+      --  The same finger half as long has a tip region of the same width and half the rows' worth
+      --  of reach behind it: the region follows the mean width, which is 20, so its spread is the same.
+      for R in 60 .. 109 loop
+         for C in 40 .. 59 loop
+            Include (Short, C, R);
+         end loop;
+      end loop;
+      Cap := Tip_Cap (Short, Centre => (U => 50.0, V => 85.0), Tip => (U => 50.5, V => 60.5));
+      Spread := Tip_Spread (Cap, Tip => (U => 50.5, V => 60.5));
+      Check (abs (Spread - 9.22) < 0.15, "the spread of the region at a shorter finger's tip is" & Real'Image (Spread));
+      --  A lobe whose tip is its centre has no way, so no region.
+      Cap := Tip_Cap (Finger, Centre => (U => 50.5, V => 10.5), Tip => (U => 50.5, V => 10.5));
+      Check (Count (Cap) = 0 and then Tip_Spread (Cap, Tip => (U => 50.5, V => 10.5)) = 0.0,
+             "a lobe with no way to its tip has a region");
+   end Tip_Region_Spread;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.lobes.cap", "the region at a lobe's tip, its spread from the tip pixel, is not the "
+                             & "lobe's own width and reach", Tip_Region_Spread'Access);
       Driver.Tests.Register ("hand.lobes.lit", "a closed finger's lit face, whose brightness the table's at the other "
                              & "end shares, is the closed end's, told by the poses",
                              Lit_Face_Is_The_Closed_Finger'Access);

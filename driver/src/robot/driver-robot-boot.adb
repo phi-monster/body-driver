@@ -133,7 +133,7 @@ package body Driver.Robot.Boot is
       --  amount an eye sees it move at, never into a way at its end, in an
       --  order no other group shares, for the lock-in to tell the groups
       --  apart; then settles.
-      procedure Push_Both_Ways (G : Group_Id; Size : Positive; Factor : Real) is
+      procedure Push_Both_Ways (G : Group_Id; Size : Positive; Factor : Real; Moved : out Boolean) is
          use type Driver.Robot.Motion.Sense;
          Start  : constant Real_Array := Holds_Of (G, Size);
          Amount : Real_Array (1 .. Size) := [others => 0.0];
@@ -141,6 +141,7 @@ package body Driver.Robot.Boot is
          Order  : Push_Array (1 .. 2 * Size);
          Count  : Natural := 0;
       begin
+         Moved := False;
          for R of Recognized loop
             if R.Ref.Group = G and then R.Ref.Channel <= Size and then R.Amount > 0.0 then
                Amount (R.Ref.Channel) := Factor * R.Amount;
@@ -160,6 +161,7 @@ package body Driver.Robot.Boot is
             begin
                Away (P.Channel) := Start (P.Channel) + P.Sign * Amount (P.Channel);
                Go_To (G, Away, Report);
+               Moved := Moved or else Report.Outcome = Driver.Robot.Motion.Reached;
                Go_To (G, Start, Report);
             end;
          end loop;
@@ -212,7 +214,11 @@ package body Driver.Robot.Boot is
                                    else " moves nothing any eye sees, up to where it stops following"));
             end;
          end loop;
-         Push_Both_Ways (G, Size, 1.0);
+         declare
+            Moved : Boolean;
+         begin
+            Push_Both_Ways (G, Size, 1.0, Moved);
+         end;
       end Recognize;
 
       --  Turns every joint of the arm both ways from where it rests, by steps
@@ -551,9 +557,15 @@ package body Driver.Robot.Boot is
                      --  such eye is open about is pushed again, at twice the amounts of
                      --  its last round, until every eye has answered (the whole picture
                      --  moves, or nothing does), or a round leaves the cells each open
-                     --  eye found responding no more than chance explains: not
+                     --  eye found responding no more than chance explains (not
                      --  significantly more, at Z and the per-cell false alarm, among
-                     --  the cells that did not respond before.
+                     --  the cells that did not respond before) and the cells that do not
+                     --  respond would show no motion together once the push is doubled
+                     --  (Resting_Motion: a far part of the view that moves by less than any
+                     --  cell can tell shows in no cell and, a little, in them all, and a
+                     --  push of twice the size makes four times that), or a push moves
+                     --  nothing further than the one before (the channels are at their
+                     --  ends).
                      declare
                         Eyes : Natural := 0;
                         procedure Read_Eyes is
@@ -570,8 +582,13 @@ package body Driver.Robot.Boot is
                            Now    : Count_Grid;
                            Cells  : Count_Grid;   --  the cells it was reached over
                            Shows  : array (1 .. Count, 1 .. Eyes) of Eye_Response;
+                           Rests  : array (1 .. Count, 1 .. Eyes) of Real;   --  the rest's motion together, in sigmas
                            Factor : array (1 .. Count) of Real := [others => 1.0];
                            Again  : array (1 .. Count) of Boolean;
+                           Spent  : array (1 .. Count) of Boolean := [others => False];   --  pushed as far as it goes
+                           --  What a round that doubles the push makes of the motion the cells that did not respond
+                           --  show together: their energies grow with the square of the push, and so does the sum.
+                           Doubled : constant Real := 2.0 ** 2;
 
                            procedure Read_Open is
                            begin
@@ -585,8 +602,11 @@ package body Driver.Robot.Boot is
                                        Now (G, E) := Responding (M, Group_Id (G), Eye_Id (E));
                                        Cells (G, E) := Textured_Cells (M, Group_Id (G), Eye_Id (E));
                                        Shows (G, E) := Response (M, Group_Id (G), Eye_Id (E));
-                                       Again (G) := Again (G) or else Last (G, E) < 0
-                                         or else Grew (Last (G, E), Now (G, E), Cells (G, E));
+                                       Rests (G, E) := Resting_Motion (M, Group_Id (G), Eye_Id (E));
+                                       Again (G) := not Spent (G)
+                                         and then (Again (G) or else Last (G, E) < 0
+                                                   or else Grew (Last (G, E), Now (G, E), Cells (G, E))
+                                                   or else Doubled * Rests (G, E) > Driver.Conventions.Z);
                                     end if;
                                  end loop;
                               end loop;
@@ -603,7 +623,9 @@ package body Driver.Robot.Boot is
                                           & Integer'Image (Integer (Factor (G))) & " times the amounts:"
                                           & Now (G, E)'Image & " of" & Cells (G, E)'Image & " cells respond"
                                           & (if Last (G, E) >= 0 then ", " & Integer'Image (Last (G, E))
-                                             & " before" else ""));
+                                             & " before" else "")
+                                          & ", the rest move together by " & Driver.Log.Image (Rests (G, E), 2)
+                                          & " sigmas");
                                     end if;
                                  end loop;
                               end loop;
@@ -616,7 +638,19 @@ package body Driver.Robot.Boot is
                                        & " leaves an eye undecided or showing a patch that may grow;"
                                        & " pushed again at" & Integer'Image (Integer (Factor (G)))
                                        & " times its amounts");
-                                    Push_Both_Ways (Group_Id (G), Sizes (G), Factor (G));
+                                    declare
+                                       Moved : Boolean;
+                                    begin
+                                       Push_Both_Ways (Group_Id (G), Sizes (G), Factor (G), Moved);
+                                       if not Moved then
+                                          Spent (G) := True;
+                                          Driver.Log.Line
+                                            (Driver.Log.Robot, "boot: group" & G'Image
+                                             & " moved no further when pushed at"
+                                             & Integer'Image (Integer (Factor (G)))
+                                             & " times its amounts: its channels are at their ends; not pushed again");
+                                       end if;
+                                    end;
                                  end if;
                               end loop;
                               Last := Now;
