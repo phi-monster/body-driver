@@ -284,12 +284,20 @@ package Driver.Robot.Kinematics.Fit is
 
    procedure Dominant_Plane (Points : Sight_Point_Array; Plane : out Sight_Plane; On : out Flag_Array)
      with Pre => On'First = Points'First and then On'Last = Points'Last;
-   --  The plane most of the points lie on, each point judged by its own
-   --  uncertainty: by consensus over samples of three, each scored by the
-   --  squares of every point's residual in units of its sigma, none counted
-   --  past Z squared; then by weighted least squares on the inverse depths of
-   --  the points that lie on it (On), re-chosen at the residuals' own spread
-   --  until the choice settles. Covariance is the sandwich over those points.
+   --  The plane most of the points lie on, or a nearer surface that holds about as many
+   --  and is not parallel to it, each point judged by its own uncertainty. A plane is
+   --  found by consensus over samples of three, each scored by the squares of every
+   --  point's residual in units of its sigma, none counted past Z squared; then by
+   --  weighted least squares on the inverse depths of the points that lie on it (On),
+   --  re-chosen at the residuals' own spread until the choice settles. The plane the
+   --  consensus favours is found first, then another among the points it leaves, and so
+   --  on until one holds significantly fewer points than the most found
+   --  (Regression.Count_Significant of the larger against an even split). Of the planes
+   --  found, one replaces the choice only when it is not parallel to it (its normal
+   --  beyond Z of the planes' tilt sigmas) and is nearer the eye: the room's wall is as
+   --  large as the table in a picture that looks along it, and the top of a thing on
+   --  the table is no other table. Covariance is the sandwich
+   --  over its points.
 
    procedure Refit_Plane (Points : Sight_Point_Array; On : Flag_Array; Plane : out Sight_Plane)
      with Pre => On'First = Points'First and then On'Last = Points'Last;

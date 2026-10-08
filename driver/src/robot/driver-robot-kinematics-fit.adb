@@ -2,6 +2,7 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Distributions;
 with Driver.Numerics.Dense;
+with Driver.Robot.Regression;
 with Driver.Robot.Kinematics.Errors;
 with Driver.Stats;
 with Driver.Uncertain;
@@ -2529,131 +2530,189 @@ package body Driver.Robot.Kinematics.Fit is
       end;
    end Plane_Estimate_Of;
 
+   --  How far a plane is from the eye.
+   function Distance (P : Sight_Plane) return Real is (1.0 / Sqrt (P.A * P.A));
+
    procedure Dominant_Plane (Points : Sight_Point_Array; Plane : out Sight_Plane; On : out Flag_Array) is
       Minimal : constant := 3;
-      Index   : Count_Access := new Count_Array (1 .. Points'Length);
-      Valid   : Natural := 0;
-   begin
-      Plane := (others => <>);
-      On := [others => False];
-      for I in Points'Range loop
-         if Usable (Points (I)) then
-            Valid := Valid + 1;
-            Index (Valid) := I;
-         end if;
-      end loop;
-      if Valid <= Minimal then
-         Free (Index);
-         return;
-      end if;
-      declare
-         Sm      : Sampler;
-         Best    : Real := Real'Last;
-         Best_A  : Vec3 := [0.0, 0.0, 0.0];
-         Support : Natural := 0;
-         Needed  : Positive := Positive'Last;
-         Drawn   : Natural := 0;
-         Bound   : constant Real := Driver.Conventions.Z ** 2;
+      Half    : constant := 0.5;   --  an even split: the null of two planes that hold as many points
+      Taken   : Flag_Array (Points'Range) := [others => False];   --  on a plane found already
+      First   : Boolean := True;
+      Reference  : Natural := 0;   --  the most points on any plane found so far
+      This       : Sight_Plane;
+      This_On    : Flag_Array (Points'Range);
+      This_Count : Natural;        --  the points on it
+
+      --  Whether two planes are one way up to what their own tilts can tell: the angle between their normals is within Z
+      --  times the root of the sum of their tilt variances.
+      function Parallel (A, B : Sight_Plane) return Boolean is
+         Cosine : constant Real := Real'Min (1.0, Real'Max (-1.0, Plane_Normal (A) * Plane_Normal (B)));
+         Spread : constant Real := Sqrt (Plane_Tilt_Sigma (A) ** 2 + Plane_Tilt_Sigma (B) ** 2);
       begin
-         --  Consensus: as many samples as the support found so far asks for.
-         while Drawn < Needed loop
-            Drawn := Drawn + 1;
-            declare
-               Pick3 : Count_Array (1 .. Minimal);
-               M     : Mat3;
-               Q     : Vec3;
-            begin
-               Pick (Sm, Valid, Pick3);
-               for R in 1 .. Minimal loop
-                  declare
-                     P : Sight_Point renames Points (Index (Pick3 (R)));
-                  begin
-                     for C in 1 .. 3 loop
-                        M (R, C) := P.H (C);
-                     end loop;
-                     Q (R) := Inverse_Depth (P);
-                  end;
-               end loop;
-               if Determinant (M) /= 0.0 then
-                  declare
-                     A     : constant Vec3 := Inverse (M) * Q;
-                     Cost  : Real := 0.0;
-                     Agree : Natural := 0;
-                  begin
-                     for K in 1 .. Valid loop
-                        declare
-                           Z2 : constant Real := Standard_Residual (A, Points (Index (K))) ** 2;
-                        begin
-                           Cost := Cost + Real'Min (Z2, Bound);
-                           if Z2 <= Bound then
-                              Agree := Agree + 1;
-                           end if;
-                        end;
-                     end loop;
-                     if Cost < Best then
-                        Best := Cost;
-                        Best_A := A;
-                        if Agree > Support then
-                           Support := Agree;
-                           Needed := Consensus_Samples (Minimal, Real (Support) / Real (Valid));
-                        end if;
-                     end if;
-                  end;
-               end if;
-            end;
+         return Arccos (Cosine) <= Driver.Conventions.Z * Spread;
+      end Parallel;
+
+      --  The plane most of the points not taken lie on: by consensus over samples of three, each scored by the squares
+      --  of every point's residual in units of its sigma, none counted past Z squared; then by weighted least squares
+      --  on the inverse depths of the points that lie on it (This_On), re-chosen at the residuals' own spread until
+      --  the choice settles.
+      procedure Consensus is
+         Index : Count_Access := new Count_Array (1 .. Points'Length);
+         Valid : Natural := 0;
+      begin
+         This := (others => <>);
+         This_On := [others => False];
+         This_Count := 0;
+         for I in Points'Range loop
+            if not Taken (I) and then Usable (Points (I)) then
+               Valid := Valid + 1;
+               Index (Valid) := I;
+            end if;
          end loop;
-         if Support <= Minimal then
+         if Valid <= Minimal then
             Free (Index);
             return;
          end if;
-         --  From the consensus: the points within Z of their own sigma, the
-         --  plane through them by weighted least squares, the choice renewed
-         --  at the spread of their residuals until it settles.
-         for K in 1 .. Valid loop
-            On (Index (K)) := Standard_Residual (Best_A, Points (Index (K))) ** 2 <= Bound;
-         end loop;
          declare
-            Changed : Natural := Natural'Last;
+            Sm      : Sampler;
+            Best    : Real := Real'Last;
+            Best_A  : Vec3 := [0.0, 0.0, 0.0];
+            Support : Natural := 0;
+            Needed  : Positive := Positive'Last;
+            Drawn   : Natural := 0;
+            Bound   : constant Real := Driver.Conventions.Z ** 2;
          begin
-            loop
-               Refit_Plane (Points, On, Plane);
-               exit when not Plane.Found;
+            --  Consensus: as many samples as the support found so far asks for.
+            while Drawn < Needed loop
+               Drawn := Drawn + 1;
                declare
-                  Z_All  : Real_Access := new Real_Array (1 .. Valid);
-                  Count  : Natural := 0;
-                  Spread : Real;
-                  Now_Changed : Natural := 0;
+                  Pick3 : Count_Array (1 .. Minimal);
+                  M     : Mat3;
+                  Q     : Vec3;
                begin
-                  for K in 1 .. Valid loop
-                     if On (Index (K)) then
-                        Count := Count + 1;
-                        Z_All (Count) := Standard_Residual (Plane.A, Points (Index (K)));
-                     end if;
-                  end loop;
-                  Spread := Noise_Of (Z_All (1 .. Count));
-                  Free (Z_All);
-                  for K in 1 .. Valid loop
+                  Pick (Sm, Valid, Pick3);
+                  for R in 1 .. Minimal loop
                      declare
-                        Fits : constant Boolean :=
-                          Spread > 0.0 and then not Driver.Uncertain.Significant
-                                                      (Standard_Residual (Plane.A, Points (Index (K))), Spread);
+                        P : Sight_Point renames Points (Index (Pick3 (R)));
                      begin
-                        if Fits /= On (Index (K)) then
-                           Now_Changed := Now_Changed + 1;
-                           On (Index (K)) := Fits;
-                        end if;
+                        for C in 1 .. 3 loop
+                           M (R, C) := P.H (C);
+                        end loop;
+                        Q (R) := Inverse_Depth (P);
                      end;
                   end loop;
-                  exit when Now_Changed = 0 or else Now_Changed >= Changed;
-                  Changed := Now_Changed;
+                  if Determinant (M) /= 0.0 then
+                     declare
+                        A     : constant Vec3 := Inverse (M) * Q;
+                        Cost  : Real := 0.0;
+                        Agree : Natural := 0;
+                     begin
+                        for K in 1 .. Valid loop
+                           declare
+                              Z2 : constant Real := Standard_Residual (A, Points (Index (K))) ** 2;
+                           begin
+                              Cost := Cost + Real'Min (Z2, Bound);
+                              if Z2 <= Bound then
+                                 Agree := Agree + 1;
+                              end if;
+                           end;
+                        end loop;
+                        if Cost < Best then
+                           Best := Cost;
+                           Best_A := A;
+                           if Agree > Support then
+                              Support := Agree;
+                              Needed := Consensus_Samples (Minimal, Real (Support) / Real (Valid));
+                           end if;
+                        end if;
+                     end;
+                  end if;
                end;
             end loop;
-            if Plane.Found then
-               Refit_Plane (Points, On, Plane);
+            if Support <= Minimal then
+               Free (Index);
+               return;
             end if;
+            --  From the consensus: the points within Z of their own sigma, the
+            --  plane through them by weighted least squares, the choice renewed
+            --  at the spread of their residuals until it settles.
+            for K in 1 .. Valid loop
+               This_On (Index (K)) := Standard_Residual (Best_A, Points (Index (K))) ** 2 <= Bound;
+            end loop;
+            declare
+               Changed : Natural := Natural'Last;
+            begin
+               loop
+                  Refit_Plane (Points, This_On, This);
+                  exit when not This.Found;
+                  declare
+                     Z_All  : Real_Access := new Real_Array (1 .. Valid);
+                     Count  : Natural := 0;
+                     Spread : Real;
+                     Now_Changed : Natural := 0;
+                  begin
+                     for K in 1 .. Valid loop
+                        if This_On (Index (K)) then
+                           Count := Count + 1;
+                           Z_All (Count) := Standard_Residual (This.A, Points (Index (K)));
+                        end if;
+                     end loop;
+                     Spread := Noise_Of (Z_All (1 .. Count));
+                     Free (Z_All);
+                     for K in 1 .. Valid loop
+                        declare
+                           Fits : constant Boolean :=
+                             Spread > 0.0 and then not Driver.Uncertain.Significant
+                                                         (Standard_Residual (This.A, Points (Index (K))), Spread);
+                        begin
+                           if Fits /= This_On (Index (K)) then
+                              Now_Changed := Now_Changed + 1;
+                              This_On (Index (K)) := Fits;
+                           end if;
+                        end;
+                     end loop;
+                     exit when Now_Changed = 0 or else Now_Changed >= Changed;
+                     Changed := Now_Changed;
+                  end;
+               end loop;
+               if This.Found then
+                  Refit_Plane (Points, This_On, This);
+               end if;
+            end;
+            for K in 1 .. Valid loop
+               if This_On (Index (K)) then
+                  This_Count := This_Count + 1;
+               end if;
+            end loop;
          end;
-      end;
-      Free (Index);
+         Free (Index);
+      end Consensus;
+   begin
+      Plane := (others => <>);
+      On := [others => False];
+      --  The table is the plane most of the points lie on, or a nearer surface that holds about as many and is not
+      --  parallel to it: the room's far wall has as many tracks as the table in a picture that looks along it, and is
+      --  no surface an arm works on. A plane parallel to the table, at another height (the top of a thing standing on
+      --  it), is no other table, and never replaces it. Planes are found one after another, each among the points the
+      --  earlier ones left, until one holds significantly fewer points than the most found, to within what chance
+      --  explains: it would be the dominant plane of the rest. The first is taken whatever it is, as the plane most of
+      --  the points lie on has always been; a plane that is not parallel to the choice replaces it only when it is
+      --  nearer the eye.
+      loop
+         Consensus;
+         exit when not This.Found;
+         exit when not First
+           and then Driver.Robot.Regression.Count_Significant (Reference, Reference + This_Count, Half);
+         if First or else (not Parallel (This, Plane) and then Distance (This) < Distance (Plane)) then
+            Plane := This;
+            On := This_On;
+         end if;
+         Reference := Natural'Max (Reference, This_Count);
+         First := False;
+         for I in Points'Range loop
+            Taken (I) := Taken (I) or else This_On (I);
+         end loop;
+      end loop;
    end Dominant_Plane;
 
    ---------------------------------------------------------------------------

@@ -5808,6 +5808,69 @@ package body Driver.Robot.Tests is
       Fit_Of_A_Recording ("tests/data/refit_with_presses.txt");
    end Kinematics_On_A_Recorded_Refit;
 
+   --  The table that the tracks of an arm give: the tracks of a recording's fit (tests/data: per track the line of
+   --  sight in the reference eye, its refined depth and the depth's sigma), whose plane the arm calls its table. The
+   --  wrist cameras of those recordings look 30 degrees below the horizontal, so the true vertical in the eye's frame
+   --  is (0, -0.866, -0.5), and the table's normal, which points to the eye, is that.
+   function Table_Off_The_Vertical (Path : String; Tracks : out Natural) return Real is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      F      : Ada.Text_IO.File_Type;
+      Points : Fit.Sight_Point_Array (1 .. 1000);
+      Plane  : Fit.Sight_Plane;
+      On     : Fit.Flag_Array (1 .. 1000) := [others => False];
+      Up     : constant Vec3 := [0.0, -0.8660254037844386, -0.5];
+   begin
+      Tracks := 0;
+      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+      while not Ada.Text_IO.End_Of_File (F) loop
+         declare
+            Line  : constant String := Ada.Text_IO.Get_Line (F);
+            Value : array (1 .. 7) of Real;
+            Pos   : Positive := Line'First + 5;   --  after SIGHT
+         begin
+            for V in Value'Range loop
+               while Pos <= Line'Last and then Line (Pos) = ' ' loop
+                  Pos := Pos + 1;
+               end loop;
+               declare
+                  Stop : Positive := Pos;
+               begin
+                  while Stop <= Line'Last and then Line (Stop) /= ' ' loop
+                     Stop := Stop + 1;
+                  end loop;
+                  Value (V) := Real'Value (Line (Pos .. Stop - 1));
+                  Pos := Stop;
+               end;
+            end loop;
+            Tracks := Tracks + 1;
+            Points (Tracks) := (H => [Value (3), Value (4), Value (5)], Depth => Value (6), Sigma => Value (7));
+         end;
+      end loop;
+      Ada.Text_IO.Close (F);
+      Fit.Dominant_Plane (Points (1 .. Tracks), Plane, On (1 .. Tracks));
+      if not Plane.Found then
+         return Ada.Numerics.Pi;
+      end if;
+      return Ada.Numerics.Long_Elementary_Functions.Arccos (Real'Min (1.0, Fit.Plane_Normal (Plane) * Up));
+   end Table_Off_The_Vertical;
+
+   --  In a picture that looks along the table the room's far wall holds about as many of the tracks as the table does
+   --  (A23's second arm: 102 on the wall, 116 on the table), and the plane the most tracks lie on, scored by its
+   --  truncated cost, was the wall: the arm's up 87 degrees off the vertical (the wall is vertical), and a table that
+   --  its link to the other arm could not find in the head's view. Another recording holds a thing on the table 1 to
+   --  1.5 units nearer than the table, with 14 tracks against the table's 82: the table stays the table.
+   procedure Kinematics_Table_Of_The_Tracks is
+      Tracks : Natural;
+      Off    : Real;
+   begin
+      Off := Table_Off_The_Vertical ("tests/data/table_and_far_wall.txt", Tracks);
+      Check (Off < 0.01745, "the table of an arm that sees the far wall is" & Real'Image (Off * 57.29578)
+             & " degrees off the vertical, of" & Tracks'Image & " tracks");
+      Off := Table_Off_The_Vertical ("tests/data/table_and_a_thing.txt", Tracks);
+      Check (Off < 0.01745, "the table of an arm that sees a thing on it is" & Real'Image (Off * 57.29578)
+             & " degrees off the vertical, of" & Tracks'Image & " tracks");
+   end Kinematics_Table_Of_The_Tracks;
+
    --  The final refinement takes a step when it moves some combination of the
    --  parameters by more than Unchanged_Fraction of its standard error,
    --  whatever the cost: stopped by a hundredth of the cost, A10's and A11's
@@ -5865,6 +5928,9 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.kinematics.pressed", "an arm's refit with the keyframes of its hand's presses, "
                              & "from the inputs of a recording, is not determined or not within a percent of the "
                              & "camera's focal length and centre", Kinematics_On_A_Recorded_Refit'Access);
+      Driver.Tests.Register ("robot.kinematics.wall", "an arm whose picture holds the room's far wall as many tracks "
+                             & "as the table is given the wall for its table, or one that sees a thing on the table, "
+                             & "the thing", Kinematics_Table_Of_The_Tracks'Access);
       Driver.Tests.Register ("robot.kinematics.resolution", "the final refinement stops while a step still moves a "
                              & "combination of the parameters by more than Unchanged_Fraction of its standard error, "
                              & "because the step is a small part of the cost",

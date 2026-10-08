@@ -1251,6 +1251,8 @@ driver-robot-kinematics-fit.adb	B := B + Ln (2.0) / 2.0;	2.0	numerics	half an oc
 driver-robot-kinematics-fit.adb	C : Real := 1.0;	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	C : constant Mat3 := (1.0 / Length ** 2) * (Pr * P.Covariance * Pr);	1.0	math	the normal's change is the inverse-depth vector's change across it over its length
 driver-robot-kinematics-fit.adb	Cl (T) := C (T) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
+driver-robot-kinematics-fit.adb	Cosine : constant Real := Real'Min (1.0, Real'Max (-1.0, Plane_Normal (A) * Plane_Normal (B)));	1.0	math	a cosine lies between minus one and one
+driver-robot-kinematics-fit.adb	Cosine : constant Real := Real'Min (1.0, Real'Max (-1.0, Plane_Normal (A) * Plane_Normal (B)));	1.0	math	a cosine lies between minus one and one
 driver-robot-kinematics-fit.adb	Count : constant Positive := 3 * N + 1;	3	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Count : constant Positive := 6 + Per_Joint * N;	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Count : constant Positive := 6 + Per_Joint * N;	6	structure	the positions of the parameters in the vector
@@ -1286,6 +1288,7 @@ driver-robot-kinematics-fit.adb	Golden : constant Real := (3.0 - Sqrt (5.0)) * A
 driver-robot-kinematics-fit.adb	H : constant Mat3 := Homography_Of (Xv (Xv'First .. Xv'First + 7));	7	structure	a homography's eight free entries come first
 driver-robot-kinematics-fit.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));	1.0	numerics	forward differences at the square root of the float's resolution relative to each parameter's size
 driver-robot-kinematics-fit.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (X'First + K - 1));	1.0	numerics	the scale floor of a finite difference and of a bracket width
+driver-robot-kinematics-fit.adb	Half : constant := 0.5;	0.5	statistics	an even split: the null of two planes that hold as many points
 driver-robot-kinematics-fit.adb	Hd : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Xf (P));	1.0	numerics	the scale floor of a finite difference
 driver-robot-kinematics-fit.adb	Hn (R, C) := Vectors (3 * (R - 1) + C, Least);	3	structure	a homography's entries row by row, three to a row
 driver-robot-kinematics-fit.adb	Hold (D1, 1);	1	structure	the first side, then the second
@@ -1494,6 +1497,7 @@ driver-robot-kinematics-fit.adb	for Pass in 1 .. 2 loop	2	structure	the side sol
 driver-robot-kinematics-fit.adb	for Q in 1 .. 9 loop	9	structure	a homography's nine entries: the direct linear transform's unknowns
 driver-robot-kinematics-fit.adb	for R in 1 .. 3 loop	3	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
 driver-robot-kinematics-fit.adb	for Sample in 1 .. Consensus_Samples (Minimal, 0.5) loop	0.5	statistics	the least median's breakdown point: half the points may be anything
+driver-robot-kinematics-fit.adb	function Distance (P : Sight_Plane) return Real is (1.0 / Sqrt (P.A * P.A));	1.0	math	a plane A * X = 1 is 1 / |A| from the origin
 driver-robot-kinematics-fit.adb	function Inverse_Depth (P : Sight_Point) return Real is (1.0 / P.Depth);	1.0	math	inverse depth
 driver-robot-kinematics-fit.adb	function Rayleigh_Median return Real is (Sqrt (2.0 * Ln (2.0)));	2.0	math	the median of a Rayleigh variate (the length of two Gaussian components) is sqrt (2 ln 2) times their scale
 driver-robot-kinematics-fit.adb	function Rayleigh_Median return Real is (Sqrt (2.0 * Ln (2.0)));	2.0	math	the median of a Rayleigh variate (the length of two Gaussian components) is sqrt (2 ln 2) times their scale
