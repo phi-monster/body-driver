@@ -2119,6 +2119,9 @@ package body Driver.Robot.Kinematics.Fit is
       Report.Fitted := Report.Determined;
    end Fit;
 
+   function Depth_Known (Depth, Sigma : Real) return Boolean is
+     (Depth > 0.0 and then Sigma < Real'Last and then Driver.Uncertain.Significant (1.0, Sigma));
+
    function Unit_Sigma
      (Joints     : Joint_Array;
       Changes    : Driver.Numerics.Arrays.Real_Matrix;

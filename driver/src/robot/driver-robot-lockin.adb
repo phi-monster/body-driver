@@ -88,7 +88,8 @@ package body Driver.Robot.Lockin is
       Energy     : Real_Grid;
       Dof        : Natural_Grid;
       Noise      : Real_Vectors.Vector;
-      Least, Most : out Natural)
+      Least, Most : out Natural;
+      Resting     : out Real)
    is
       Z        : constant Real := Driver.Conventions.Z;
       Tail     : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Z);
@@ -119,6 +120,31 @@ package body Driver.Robot.Lockin is
       end loop;
       Least := Count;
       Most := Count;
+      --  The cells that did not respond, together: each one's energy is an unbiased estimate of the motion it
+      --  shows (its statistic less its degrees of freedom, in its noise), whatever it is, and under no motion
+      --  has the variance of a chi-square: twice its degrees of freedom times its noise to the fourth.
+      Resting := 0.0;
+      declare
+         Weights, Weighted : Real := 0.0;
+      begin
+         for Cell in Textured'Range loop
+            if Textured (Cell) and then not Responding (Cell, G) and then Dof (Cell, G) > 0
+              and then Noise (Cell - 1) > 0.0 and then Noise (Cell - 1) < Real'Last
+            then
+               declare
+                  Weight : constant Real := 1.0 / (2.0 * Real (Dof (Cell, G)) * Noise (Cell - 1) ** 4);
+               begin
+                  if Weight < Real'Last then
+                     Weights := Weights + Weight;
+                     Weighted := Weighted + Weight * Energy (Cell, G);
+                  end if;
+               end;
+            end if;
+         end loop;
+         if Weights > 0.0 then
+            Resting := Weighted / Sqrt (Weights);
+         end if;
+      end;
       if Count > 0 and then Largest > 0 then
          declare
             Typical   : constant Real := Driver.Stats.Median (Energies (1 .. Count));
@@ -453,11 +479,14 @@ package body Driver.Robot.Lockin is
                                        --  those that respond, and the share of the cells too noisy
                                        --  to tell that show it together.
                                        Least, Most : Natural;
+                                       Resting     : Real;
                                        --  An eye mostly sees the world: a whole image moves when
                                        --  a significant majority of what can move does.
                                        Half : constant Real := 0.5;
                                     begin
-                                       Cells_Showing (G, Textured.all, Responding.all, Energy.all, Dof.all, S.Noise, Least, Most);
+                                       Cells_Showing (G, Textured.all, Responding.all, Energy.all, Dof.all, S.Noise,
+                                                      Least, Most, Resting);
+                                       Effect.Resting := Resting;
                                        Effect.Responding := Count;
                                        Effect.Textured := T;
                                        Effect.Fraction :=

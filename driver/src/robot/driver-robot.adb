@@ -632,6 +632,9 @@ package body Driver.Robot is
    function Textured_Cells (M : Model; G : Group_Id; E : Eye_Id) return Natural is
      (Graph.Effect (M, G, E).Textured);
 
+   function Resting_Motion (M : Model; G : Group_Id; E : Eye_Id) return Real is
+     (Graph.Effect (M, G, E).Resting);
+
    function Image_Lag (M : Model; E : Eye_Id) return Integer is
      (if E <= M.Lags.Last_Index then M.Lags (E) else 0);
 
@@ -668,6 +671,10 @@ package body Driver.Robot is
                if F.Verdict /= Unmeasured then
                   Append (T, "; eye" & Eye_Id'Image (E) & " " & Eye_Response'Image (F.Verdict) & " "
                           & Image (F.Responding) & "/" & Image (F.Textured));
+                  --  Where it is the open question: how much the cells that did not respond move together.
+                  if F.Verdict in Patch | Undecided then
+                     Append (T, " (the rest by " & Image (F.Resting, 1) & " sigmas)");
+                  end if;
                end if;
             end;
          end loop;

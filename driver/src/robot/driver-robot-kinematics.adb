@@ -719,7 +719,7 @@ package body Driver.Robot.Kinematics is
                                        then Report.Depth_Sigmas (Report.Depth_Sigmas.First_Index + I) else Real'Last);
                                     H : constant Vec3 := Fit.Ray (Lens, R.Query_U (I), R.Query_V (I));
                                  begin
-                                    Result.Track_Known.Append (D > 0.0);
+                                    Result.Track_Known.Append (Fit.Depth_Known (D, S));
                                     Result.Track_Sigmas.Append (S);
                                     for X of H loop
                                        Result.Tracks.Append (D * X);
