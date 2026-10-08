@@ -620,24 +620,34 @@ group by the part of the delivery along the ask, 8 per cent short here, and said
 reached; the 29 per cent across the ask is the hand turning and sliding on what
 it touches.
 
-`Driver.Robot.Hand.Lowering` judges a push where the readings put the hand's
-points (`Tool_In_Arm` at the push's start, its target and its end): the tool's
-origin and the tips the hand has measured at the opening the closer stands at
-(a tip is a point of the tool frame, a provisional one a bound beyond the
-finger, which rises when the hand turns about the finger on the table and so
-shows the stall the origin does not). A point asked to go down by what the
-tool's noise tells (`Least_Push`) and stopped short by as much, and by a larger
-share of its ask than Z times any push of the descent before it fell short by,
-has stopped; the pushes before it are a measure of what free pushes do, however
-large (a joint held against gravity settles short by a share of its push), and
-three are the least that have a scatter. The pushes are forgotten when a push
-asks nothing down (a retreat, a hold), so a descent is compared with itself, and
-a stall among the first three pushes is taken for what free pushes do. The
-verdict is read from the stream by the estimators as the press is, so the same
-push is a block for the watcher that finds the press (the verdict stands until
-the next push begins, as a Blocked one does) and the descent that made it ends
-as a press, not Spent: a bound or a contact, whichever the presses tell, and not
-thrown away. (`hand.lowering.*`, `hand.measure.stall`.)
+`Driver.Robot.Hand.Lowering` judges a push by how far it fell short of its ask,
+in two places, and either is a stall. In the readings: the whole vector from
+where the joints stopped to the push's target, as a share of the ask's length,
+no geometry read, so it is the same for any arm. At the hand's points
+(`Tool_In_Arm` at the push's start, its target and its end): the tool's origin
+and the tips the hand has measured at the opening the closer stands at, each a
+share of the lowering it was asked (a tip is a point of the tool frame, a
+provisional one a bound beyond the finger, which rises when the hand turns about
+the finger on the table and so shows the stall the origin does not). A share is
+a stall when it is larger than Z times the largest share any push of the descent
+before it fell short by (free pushes fall short by one share of their length,
+however long: a joint held against gravity settles short by a share of its push;
+three pushes are the least that have a scatter), and the push asked what the one
+test of motion sees (`Channels.Visible` of its ask) and fell short of it by what
+that test sees (of the shortfall vector): that test is the floor under both. The
+first version had the tool's `Least_Push` for a floor, the tool's uncertainty at
+the pose it stands at; it is the uncertainty of a fit, common to the two poses a
+push is the difference of, and it grew with the descent: A17's pushes were 0.0561
+units, and from beat 7502 the lowered tool's was more, so nothing was judged after
+it, the contact included. The pushes are forgotten when a push asks nothing down
+(a retreat, a hold), so a descent is compared with itself, and a stall among the
+first three pushes is taken for what free pushes do. The verdict is read from the
+stream by the estimators as the press is, so the same push is a block for the
+watcher that finds the press (the verdict stands until the next push begins, as a
+Blocked one does), and it is read with the heights before the next step, not by a
+beat of its own, so the descent that made it ends as a press, not Spent: a bound
+or a contact, whichever the presses tell, and not thrown away.
+(`hand.lowering.*`, `hand.measure.stall`.)
 
 **Lesson: a closer the table holds is freed by raising the hand (A17).** A
 finger resting on the table cannot slide along it, and the closer's reading,
