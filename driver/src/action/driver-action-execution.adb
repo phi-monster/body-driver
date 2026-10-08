@@ -254,17 +254,31 @@ package body Driver.Action.Execution is
       return Far;
    end Lever_Of;
 
-   function One_Arm (S : Snapshot; A : Arm_Id; Tool : Rigid; Slack : Real := Real'Last) return Order is
+   --  The goal of taking the tool to Tool by a path kept within Slack of the
+   --  straight one, not within less than the arm can tell its pose to.
+   function Bounded_Goal (S : Snapshot; A : Arm_Id; Tool : Rigid; Slack : Real) return Arm_Goal is
       Sigma : constant Real := Search.Effector_Of (S, A).Sigma;
    begin
-      return (Arms     => Arm_Goal_Vectors.To_Vector
-                            ((Goal_Of (A, Tool)
-                              with delta Clearance => (if Slack = Real'Last or else Sigma = Real'Last then Real'Last
-                                                       else Real'Max (Slack, Z * Sigma)),
-                                         Lever     => Lever_Of (S, A)), 1),
-              Closers  => Closer_Goal_Vectors.Empty_Vector,
-              Settle   => True);
-   end One_Arm;
+      return (Goal_Of (A, Tool)
+              with delta Clearance => (if Slack = Real'Last or else Sigma = Real'Last then Real'Last
+                                       else Real'Max (Slack, Z * Sigma)),
+                         Lever     => Lever_Of (S, A));
+   end Bounded_Goal;
+
+   function One_Arm (S : Snapshot; A : Arm_Id; Tool : Rigid; Slack : Real := Real'Last) return Order is
+     ((Arms     => Arm_Goal_Vectors.To_Vector (Bounded_Goal (S, A, Tool, Slack), 1),
+       Closers  => Closer_Goal_Vectors.Empty_Vector,
+       Settle   => True));
+
+   --  Whether the arm can be taken to Tool only off the straight path by more
+   --  than Slack: the plant plans it kept within that and says whether the
+   --  straight path leaves what the arm can reach, so that a bow above it is
+   --  left. Asked within Within.
+   function Bowed (P : Plant'Class; S : Snapshot; A : Arm_Id; Tool : Rigid; Slack : Real) return Boolean is
+      Answer : constant Reach_Answer := P.Reach (Bounded_Goal (S, A, Tool, Slack));
+   begin
+      return Answer.Status = Reachable and then Answer.Bow > 0.0;
+   end Bowed;
 
    --  The margin a body part known to Sigma keeps from a thing's samples:
    --  Z of the two sigmas together, and half a pitch between samples.
@@ -455,8 +469,19 @@ package body Driver.Action.Execution is
             declare
                Straight : constant Real :=
                  (if abs Up > 0.0 then Slack_Of (X.S, E, From, Goal, Held, Near) else Real'Last);
+               Off      : Boolean := False;
+               procedure Asking is
+               begin
+                  Off := Bowed (P, X.S, A, Goal, Straight);
+               end Asking;
             begin
-               if Straight >= 0.0 then
+               --  A clear straight way is taken unless the arm cannot keep to
+               --  it: where it leaves what the arm can reach, the way is not
+               --  the one that was cleared.
+               if Straight >= 0.0 and then Straight < Real'Last then
+                  P.Within (Asking'Access);
+               end if;
+               if Straight >= 0.0 and then not Off then
                   Go (P, X, A, Goal, Outcome, Why, Straight);
                   return;
                end if;
@@ -470,7 +495,17 @@ package body Driver.Action.Execution is
                Lift : Real := 0.0;
                Via_1, Via_2 : Rigid;
                Found : Boolean := False;
-               --  Raised until the way over is clear or out of reach, where the
+               --  The first leg not done yet.
+               function First_Leg return Rigid is
+                  Raised : constant Boolean :=
+                    Real'((From.Translation - Via_1.Translation) * Up) >= -Now.Step.Value;
+                  Over   : constant Boolean :=
+                    abs (From.Translation - Via_2.Translation) <= Now.Step.Value;
+               begin
+                  return (if Over then Goal elsif Raised then Via_2 else Via_1);
+               end First_Leg;
+               --  Raised until the way over is clear, the leg to be taken is
+               --  one the arm can keep to, or it is out of reach, where the
                --  body's reach can be asked.
                procedure Over_The_Top is
                begin
@@ -484,6 +519,7 @@ package body Driver.Action.Execution is
                      if Clear_Way (X.S, E, From, Via_1, Held, Near)
                        and then Clear_Way (X.S, E, Via_1, Via_2, Held, Near)
                        and then Clear_Way (X.S, E, Via_2, Goal, Held, Near)
+                       and then not Bowed (P, X.S, A, First_Leg, Slack_Of (X.S, E, From, First_Leg, Held, Near))
                      then
                         Found := True;
                         exit;
@@ -495,17 +531,13 @@ package body Driver.Action.Execution is
                P.Within (Over_The_Top'Access);
                if not Found then
                   Outcome := Refused;
-                  Why := To_Unbounded_String ("no clear way there: straight is blocked and every way over the top "
-                                              & "up to " & Img (Lift) & " above the higher of the two ends is out of reach");
+                  Why := To_Unbounded_String ("no clear way there: straight is blocked or leaves what the arm can reach, "
+                                              & "and every way over the top up to " & Img (Lift) & " above the higher of "
+                                              & "the two ends is blocked, out of reach or off the path the arm can keep to");
                   return;
                end if;
-               --  The first leg not done yet.
                declare
-                  Raised : constant Boolean :=
-                    Real'((From.Translation - Via_1.Translation) * Up) >= -Now.Step.Value;
-                  Over   : constant Boolean :=
-                    abs (From.Translation - Via_2.Translation) <= Now.Step.Value;
-                  Leg    : constant Rigid := (if Over then Goal elsif Raised then Via_2 else Via_1);
+                  Leg : constant Rigid := First_Leg;
                begin
                   Go (P, X, A, Leg, Outcome, Why, Slack_Of (X.S, E, From, Leg, Held, Near));
                   if Outcome in Refused | Blocked then
@@ -753,6 +785,11 @@ package body Driver.Action.Execution is
       end;
    end Moving_Points;
 
+   --  How far apart the moving points lie: the thing's samples, or the arm's
+   --  parts as they are laid.
+   function Moving_Pitch (S : Snapshot; T : Thing_Id'Base) return Real is
+     (if T /= 0 then Thing (S, T).Pitch else Finest_Pitch (S));
+
    --  The arm's touching parts as one side of a relation: their middle (the
    --  lobes' faces, else its own surface, else its tool), and their points.
    function Effector_Item (S : Snapshot; A : Arm_Id) return Goals.Item is
@@ -782,11 +819,11 @@ package body Driver.Action.Execution is
 
    function Part_Point (S : Snapshot; A : Arm_Id) return Point_Estimate is (Effector_Item (S, A).Centre);
 
-   --  How far along the unit twist the moving points can go before one of
-   --  them meets a surface or a thing other than Except, and the band of
-   --  that distance's uncertainty.
-   procedure Contact_Ahead (S : Snapshot; Moving : Contact.Point_Vectors.Vector; Sigma : Real; Except : Thing_Id'Base;
-                            G : Contact.Twist; Ahead, Band : out Real)
+   --  How far along the unit twist the moving points, whose samples lie a
+   --  Pitch apart, can go before one of them meets a surface or a thing other
+   --  than Except, and the band of that distance's uncertainty.
+   procedure Contact_Ahead (S : Snapshot; Moving : Contact.Point_Vectors.Vector; Pitch, Sigma : Real;
+                            Except : Thing_Id'Base; G : Contact.Twist; Ahead, Band : out Real)
    is
    begin
       Ahead := Real'Last;
@@ -824,7 +861,9 @@ package body Driver.Action.Execution is
                   if O.Id /= Except then
                      declare
                         B        : constant Real := Z * Sqrt (Sigma ** 2 + O.Sigma ** 2);
-                        Reach_Of : constant Real := O.Pitch / 2.0 + B;
+                        --  A sample of either surface is never farther than half a pitch from the nearest
+                        --  of the other's points that is to meet it, nor the points of both than the two halves.
+                        Reach_Of : constant Real := (O.Pitch + Pitch) / 2.0 + B;
                         Behind   : constant Real := B / Sqrt (VV);   --  how far behind is still at it, in the noise
                      begin
                         --  As for a surface: a sample passed by less than the noise
@@ -1010,7 +1049,7 @@ package body Driver.Action.Execution is
             end Choosing;
          begin
             if Goal.Ok and then (not Goal.Done or else Pushing) then
-               Contact_Ahead (X.S, Moving_Points (X.S, T, G.Arm), Sigma, T, Goal.Motion, Ahead, Band);
+               Contact_Ahead (X.S, Moving_Points (X.S, T, G.Arm), Moving_Pitch (X.S, T), Sigma, T, Goal.Motion, Ahead, Band);
                P.Within (Choosing'Access);
             end if;
             F.Commanded := Step > 0.0;
@@ -1277,7 +1316,7 @@ package body Driver.Action.Execution is
       --  inside it on half the beats, and each of those is a step no longer
       --  than a contact's band), and the arm's own resolution on top.
       function Margin (S : Snapshot) return Real is
-        (Object_Pitch / 2.0 + 2.0 * Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)
+        ((Object_Pitch + Moving_Pitch (S, T)) / 2.0 + 2.0 * Z * Sqrt (Subject_Of (S).Sigma ** 2 + Object_Of (S).Sigma ** 2)
          + Arm (S, G.Arm).Step.Value);
       Route   : Goals.Plan := Goals.Over_Plan (X.S, Subject_Of (X.S), Object_Of (X.S), R, Margin (X.S));
       Planned : Point_Estimate := Object_Of (X.S).Centre;

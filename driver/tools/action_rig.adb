@@ -87,20 +87,23 @@ package body Action_Rig is
       Must_Be_Inside (P, "a reach");
       declare
          Plan : constant Motion.Plan :=
-           Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only));
+           Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only),
+                              Clearance => Goal.Clearance, Lever => Goal.Lever);
          Answer : constant Plants.Reach_Answer :=
            (case Motion.Status (Plan) is
-               when Motion.Planned     => (Status => Plants.Reachable, Why => Null_Unbounded_String),
+               when Motion.Planned     =>
+                 (Status => Plants.Reachable, Why => Null_Unbounded_String, Bow => Motion.Worst_Bow (Plan)),
                when Motion.Unreachable =>
-                 (Status => Plants.Unreachable, Why => To_Unbounded_String (Motion.Why (Plan))),
+                 (Status => Plants.Unreachable, Why => To_Unbounded_String (Motion.Why (Plan)), Bow => 0.0),
                when Motion.Unmeasured  =>
-                 (Status => Plants.Unmeasured, Why => To_Unbounded_String (Motion.Why (Plan))));
+                 (Status => Plants.Unmeasured, Why => To_Unbounded_String (Motion.Why (Plan)), Bow => 0.0));
       begin
          if Trace then
             Reach_Log.Append (Reach_Record'(From   => Driver.Robot.Tool_Pose (P.Robot.all, Goal.Arm, P.Last).Pose,
                                             Asked  => Goal.Tool,
                                             Status => Answer.Status,
-                                            Why    => Answer.Why));
+                                            Why    => Answer.Why,
+                                            Bow    => Answer.Bow));
          end if;
          return Answer;
       end;
