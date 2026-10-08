@@ -13,6 +13,12 @@
 --  is busy. A disconnected robot may reconnect on the same port; nothing
 --  measured is lost.
 --
+--  The heavier estimates (roles, kinematics) are computed by a task of their
+--  own (Driver.Apart): a recompute grows to minutes, and the robot is answered
+--  every beat. While the models are apart every message is answered with
+--  Hold and kept back, then given to the models in order, as it would have
+--  been; the decider is offered beats again once the models are back.
+--
 --  A failure the driver cannot go on from (an exception in the main loop or
 --  the boot) is written to the log whole and ends the program with a failure
 --  status, the recording closed: the tasks still waiting (the decider, the
@@ -24,6 +30,7 @@ with Ada.Exceptions;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Driver.Action;
+with Driver.Apart;
 with Driver.Beats;
 with Driver.Brain;
 with Driver.Bytes;
@@ -166,10 +173,60 @@ procedure Body_Driver is
    Sent     : Driver.Commands.Command := Driver.Commands.Hold;   --  the last command sent
    Holds    : Driver.Replies.State;
 
-   procedure Handle (Data : Driver.Bytes.Byte_Array) is
-      Req  : Driver.Protocol.Request;
-      Took : Boolean;
+   --  What a robot message gives the models: a new episode, and an
+   --  observation with the command in effect while it was captured (the last
+   --  one sent before it arrived).
+   type Input (Observed : Boolean := False) is record
+      Reset : Boolean := False;
+      Sent  : Driver.Commands.Command := Driver.Commands.Hold;
+      case Observed is
+         when True  => O : Driver.Observations.Observation;
+         when False => null;
+      end case;
+   end record;
+
+   procedure Robot_Part (M : Input) is
    begin
+      if M.Reset then
+         Driver.World.New_Episode (Scene);
+         Driver.Beats.New_Episode;
+      end if;
+      if M.Observed then
+         Driver.Robot.Observe (Robot, M.O, M.Sent);
+      end if;
+   end Robot_Part;
+
+   procedure Rest (M : Input) is
+   begin
+      if M.Observed then
+         Driver.Robot.Hand.Observe (Hands, Robot, M.O, M.Sent);
+         Driver.World.Observe (Scene, Robot, Hands, M.O, M.Sent);
+         Driver.Beats.Hear (To_String (M.O.Instruction));
+         Tasks.Offer (To_String (M.O.Instruction), Driver.Beats.Episode);
+      end if;
+   end Rest;
+
+   function Due return Boolean is (Driver.Robot.Estimates_Due (Robot));
+
+   procedure Compute is
+   begin
+      Driver.Robot.Compute_Estimates (Robot);
+   end Compute;
+
+   procedure Estimates_Failed (E : Ada.Exceptions.Exception_Occurrence) is
+   begin
+      Fail ("the estimates failed", E);
+   end Estimates_Failed;
+
+   package Apart is new Driver.Apart (Input, Robot_Part, Rest, Due, Compute, Estimates_Failed);
+
+   procedure Handle (Data : Driver.Bytes.Byte_Array) is
+      Req        : Driver.Protocol.Request;
+      Took       : Boolean;
+      Held       : Boolean;
+      Went_Apart : Boolean := False;
+   begin
+      Apart.Arrive (Held);
       Driver.Recording.Write_Shared (Driver.Recording.Robot_Message, Data);
       Driver.Protocol.Decode (Data, Req, Ok);
       if not Ok then
@@ -178,36 +235,48 @@ procedure Body_Driver is
       end if;
       if Req.Kind = Driver.Protocol.Reset then
          Driver.Replies.New_Episode (Holds);
-         Driver.World.New_Episode (Scene);
-         Driver.Beats.New_Episode;
       end if;
-      if Driver.Protocol.Has_Observation (Req) then
-         if not Known then
-            Driver.Observations.Recognize (Req.Doc, Req.Observation, Layout, Known);
-            if Known then
-               Line (Core, "the robot reports:" & ASCII.LF & Driver.Observations.Describe (Layout));
-            else
-               Line (Core, "waiting: the driver needs at least one camera and one group of readings, got "
-                     & Driver.Observations.Describe (Layout));
+      if Driver.Protocol.Has_Observation (Req) and then not Known then
+         Driver.Observations.Recognize (Req.Doc, Req.Observation, Layout, Known);
+         if Known then
+            Line (Core, "the robot reports:" & ASCII.LF & Driver.Observations.Describe (Layout));
+         else
+            Line (Core, "waiting: the driver needs at least one camera and one group of readings, got "
+                  & Driver.Observations.Describe (Layout));
+         end if;
+      end if;
+      declare
+         Observed : constant Boolean := Driver.Protocol.Has_Observation (Req) and then Known;
+         M        : Input (Observed);
+      begin
+         M.Reset := Req.Kind = Driver.Protocol.Reset;
+         M.Sent := Sent;
+         if Observed then
+            Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), M.O);
+            Current := M.O;
+            Have_Obs := True;
+         end if;
+         if Held then
+            --  The models are the estimator's: the robot holds, the message waits.
+            Apart.Hold_Back (M);
+            Pending := Driver.Commands.Hold;
+         else
+            Apart.Take_In (M, Went_Apart);
+            if Went_Apart then
+               Pending := Driver.Commands.Hold;
+            elsif Observed then
+               Driver.Beats.Offer (Driver.Clock.Beat (Beat), Current, Sent, Took);
+               if Took then
+                  Driver.Beats.Await (Pending);
+               else
+                  Pending := Driver.Commands.Hold;
+               end if;
             end if;
          end if;
-         if Known then
-            Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), Current);
-            Have_Obs := True;
-            Driver.Robot.Observe (Robot, Current, Sent);
-            Driver.Robot.Hand.Observe (Hands, Robot, Current, Sent);
-            Driver.World.Observe (Scene, Robot, Hands, Current, Sent);
-            Driver.Beats.Hear (To_String (Current.Instruction));
-            Tasks.Offer (To_String (Current.Instruction), Driver.Beats.Episode);
-            Driver.Beats.Offer (Driver.Clock.Beat (Beat), Current, Sent, Took);
-            if Took then
-               Driver.Beats.Await (Pending);
-            else
-               Pending := Driver.Commands.Hold;
-            end if;
+         if Observed then
             Beat := Beat + 1;
          end if;
-      end if;
+      end;
       if Driver.Protocol.Wants_Action (Req) and then Known and then Have_Obs then
          declare
             Action : Driver.Bytes.Buffer;
@@ -220,6 +289,9 @@ procedure Body_Driver is
       end if;
       Driver.Recording.Write_Shared (Driver.Recording.Driver_Message, Reply.To_Array);
       Driver.Wire.Send (Connection, Reply.To_Array, Ok);
+      if not Held and then not Went_Apart then
+         Apart.After_Reply;
+      end if;
    end Handle;
 
 begin
@@ -245,6 +317,7 @@ begin
       return;
    end if;
    Line (Core, "listening on port" & Natural'Image (Port));
+   Driver.Robot.Compute_Apart (Robot);
    Decider.Start;
    loop
       Driver.Wire.Accept_Client (Connection, Ok);
