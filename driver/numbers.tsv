@@ -2000,8 +2000,8 @@ driver-robot-regression.ads	function Count_Significant (Count, Trials : Natural;
 driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
 driver-robot-steps.adb	(E.Followed < 2	2	structure	a scatter needs two beats; with fewer there is no chatter to tell a gain from
 driver-robot-steps.adb	(Gain, Sqrt (2.0 * E.Spread_Along / Real (E.Followed - 1)), E.Followed - 1));	2.0	math	a gain is the difference of two beats' progress, whose variance is twice one beat's
+driver-robot-steps.adb	Own (C) := (Unit * Sqrt (2.0) * Sigma) ** 2;	2.0	statistics	a shortfall is the difference of two readings, the one before the push and the one where it stopped: the root of two of the reading noise
 driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
-driver-robot-steps.adb	Variance (C) := (Unit * Sqrt (2.0) * Sigma) ** 2 + Largest ** 2;	2.0	statistics	a shortfall is the difference of two readings, the one before the push and the one where it stopped: the root of two of the reading noise
 driver-robot-steps.adb	if Natural (M.Groups (G).Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	if Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	if not (E.Ended and then E.Rested and then E.Blocked) or else E.Length <= 0.0 or else E.Start < 1	1	structure	a push needs the reading before it: it began at the second beat or later

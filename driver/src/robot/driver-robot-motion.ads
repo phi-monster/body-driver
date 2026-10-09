@@ -38,10 +38,11 @@ package Driver.Robot.Motion is
    --  The decider's word that the group's latest push, ended Blocked or Short, was stopped by the body itself and
    --  not by a surface it was pressing: an aim, a step in free air, a probe. Only the caller can know that: a
    --  table and a joint's end both leave a push short. It finds, from the stream alone, the channel that stopped
-   --  the push (Driver.Robot.Steps.Limiter: the channel whose share of its ask undelivered is larger than that of
-   --  every other channel asked, by more than Z standard deviations of the difference, each from the channel's own
-   --  reading noise and the group's free pushes' scatter; the only channel asked is that channel) and notes where
-   --  it stopped, in the sense it was asked, as an end of the channel (Driver.Robot.End_Of). Nothing is noted for
+   --  the push (Driver.Robot.Steps.Limiter: the channel whose part of the shortfall along the ask, its share of the
+   --  ask times its own shortfall, is more than Z standard deviations above zero and above that of every other
+   --  channel, from the readings' noise and the scatter of the group's free pushes; the only channel asked is that
+   --  channel) and notes where it stopped, in the sense it was asked, as an end of the channel
+   --  (Driver.Robot.End_Of). Nothing is noted for
    --  a push given up while its readings kept moving, one that was not blocked, or one no channel dominates (the
    --  shortfall spread over the channels). The furthest stop seen of a sense stands: a stop where the arm met
    --  itself is relaxed by a later one that went further. Like every decider call it is made between Next and

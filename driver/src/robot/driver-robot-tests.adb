@@ -6463,6 +6463,24 @@ package body Driver.Robot.Tests is
              "a push given up while its readings moved has a limiter");
       Check (Limiter_Of (A27_6152_Start, A27_6152_Aim, A27_6152_Stop, Blocked => False) = 0,
              "a push that was not blocked has a limiter");
+      --  (g) The scatter of the free pushes (2e-5 here) is the whole shortfall's, and counts once in the difference of
+      --      two channels' parts. Two channels asked alike have parts of the shortfall along the ask that are their
+      --      shortfalls over the root of two. Short by parts 1.0e-4 and 3.0e-5 they differ by 7e-5: more than Z of the
+      --      two channels' noise with the scatter once (6.0e-5), less than Z of it counted for each channel (8.5e-5),
+      --      and the first is the limiter. Short by 1.0e-4 and 5.0e-5 they differ by 5e-5, less than either: none.
+      declare
+         Root_Two : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0);
+         function Two_Short_By (First, Second : Real) return Natural is
+           (Limiter_Of ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.1, 0.1, 0.0, 0.0, 0.0, 0.0],
+                        [0.1 - First * Root_Two, 0.1 - Second * Root_Two, 0.0, 0.0, 0.0, 0.0]));
+      begin
+         Check (Two_Short_By (1.0e-4, 3.0e-5) = 1,
+                "two channels whose parts differ by more than Z of their noise and the scatter of free pushes once"
+                & " have limiter" & Two_Short_By (1.0e-4, 3.0e-5)'Image);
+         Check (Two_Short_By (1.0e-4, 5.0e-5) = 0,
+                "two channels whose parts differ by less than the scatter of free pushes have limiter"
+                & Two_Short_By (1.0e-4, 5.0e-5)'Image);
+      end;
    end Limiter_Finds_The_Channel_That_Stopped;
 
    procedure A_Lone_Channel_Is_The_Limiter_Only_If_Short_By_More_Than_Its_Scatter is

@@ -247,7 +247,13 @@ package Driver.Robot is
    --  the body itself stopped (Driver.Robot.Motion.Note_Stopped) left it, the furthest such a push left it, and no
    --  nearer than the readings the channel has been seen at; its sigma is the channel's reading noise. Unknown until
    --  the channel has shown an end, or while its noise is not measured: plans are free past the readings seen until
-   --  a channel has shown one, and Driver.Robot.Motion.Plan_Reach refuses a path past it.
+   --  a channel has shown one, and Driver.Robot.Motion.Plan_Reach refuses a path past it. Once a sense has a stop
+   --  the end is the extreme ever READ in that sense, here or in the runs the body file kept (every stop is a
+   --  reading, so it is no nearer than the lowest or highest the channel has shown): only a reading made by
+   --  something other than Plan_Reach, a command given directly or the boot's own steps, can widen it, which is
+   --  what an aim that stops costs, one aim, and after it plans refuse past what the arm has shown. That is what
+   --  keeps a stop that depends on the other channels (the arm meeting itself) from refusing asks the arm has
+   --  made, and from being a refusal nothing could contradict.
 
    type Eye_Response is (Unmeasured, Nothing, Patch, Undecided, Whole);
    --  What pushing a group does to what an eye sees: nothing, a patch of the

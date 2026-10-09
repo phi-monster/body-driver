@@ -266,9 +266,9 @@ package body Driver.Robot.Steps is
          Largest : Real := 0.0;
          --  What each channel contributed to the push's shortfall along its ask, as Finish weighs the channels: its
          --  share of the ask (the channel's ask over the ask's length) times its own shortfall, and the variance of
-         --  that. A channel asked nothing the one test of motion sees contributes none, however it moved (a joint
-         --  that shifts when another stops has a share of the ask of a few thousandths).
-         Short, Variance : Real_Array (1 .. Size) := [others => 0.0];
+         --  that which its own readings bring. A channel asked nothing the one test of motion sees contributes none,
+         --  however it moved (a joint that shifts when another stops has a share of the ask of a few thousandths).
+         Short, Own : Real_Array (1 .. Size) := [others => 0.0];
          Best    : Natural := 0;
       begin
          if Natural (M.Groups (G).Free_Shortfalls.Length) > 2 then
@@ -289,24 +289,26 @@ package body Driver.Robot.Steps is
                  and then Channels.Visible (M, G, [for I in 1 .. Size => (if I = C then Ask else 0.0)])
                then
                   Short (C) := Unit * (Aim - Stop);
-                  Variance (C) := (Unit * Sqrt (2.0) * Sigma) ** 2 + Largest ** 2;
-               else
-                  Variance (C) := Largest ** 2;
+                  Own (C) := (Unit * Sqrt (2.0) * Sigma) ** 2;
                end if;
             end;
          end loop;
-         --  The channel that fell short by the most along the ask, if it fell short at all.
+         --  The channel that fell short by the most along the ask, if it fell short at all: by more than Z deviations
+         --  of its own readings and of the scatter of free pushes. That scatter is the whole shortfall's (one number a
+         --  push, the sum of the channels' parts), so it bounds a part, and the difference of two parts, once.
          for C in 1 .. Size loop
-            if Short (C) > Driver.Conventions.Z * Sqrt (Variance (C)) and then (Best = 0 or else Short (C) > Short (Best)) then
+            if Short (C) > Driver.Conventions.Z * Sqrt (Own (C) + Largest ** 2)
+              and then (Best = 0 or else Short (C) > Short (Best))
+            then
                Best := C;
             end if;
          end loop;
          if Best = 0 then
             return 0;
          end if;
-         --  And by more than every other channel.
+         --  And by more than every other channel: the two channels' readings apart, and the scatter once.
          for C in 1 .. Size loop
-            if C /= Best and then Short (Best) - Short (C) <= Driver.Conventions.Z * Sqrt (Variance (Best) + Variance (C)) then
+            if C /= Best and then Short (Best) - Short (C) <= Driver.Conventions.Z * Sqrt (Own (Best) + Own (C) + Largest ** 2) then
                return 0;
             end if;
          end loop;
