@@ -198,8 +198,8 @@ package body Driver.Action.Execution is
    end Finest_Pitch;
 
    --  The measured parts of the arm that can meet something, in the world
-   --  with the tool at Tool: the lobes' faces and backs back to the depth of
-   --  the hand, their ends, and the arm's own surface.
+   --  with the tool at Tool: each lobe from its end back to the depth of the
+   --  hand, the lobes' ends, and the arm's own surface.
    function Body_Points (E : Search.Effector; Tool : Rigid; Spacing : Real) return Contact.Point_Vectors.Vector is
       Pts : Contact.Point_Vectors.Vector;
    begin
@@ -207,21 +207,10 @@ package body Driver.Action.Execution is
          declare
             F  : constant Real := E.Closers (Pd.Closer).Now;
             C  : constant Vec3 := Pd.Open + F * (Pd.Closed - Pd.Open) + E.Band * E.Along;   --  the lobe's end
-            Across : constant Vec3 := Cross (Pd.Facing, E.Along);
-            Wd : constant Vec3 := (if abs Across > 0.0 then Unit (Across) else Zero3);
-            NW : constant Positive := Positive'Max (1, Natural (Real'Ceiling (2.0 * Pd.Half_Width / Spacing)));
             NL : constant Positive := Positive'Max (1, Natural (Real'Ceiling (E.Depth / Spacing)));
          begin
-            for I in 0 .. NW loop
-               for J in 0 .. NL loop
-                  declare
-                     Q : constant Vec3 := C + (2.0 * Real (I) / Real (NW) - 1.0) * Pd.Half_Width * Wd
-                                            - (E.Depth * Real (J) / Real (NL)) * E.Along;
-                  begin
-                     Pts.Append (Tool * Q);
-                     Pts.Append (Tool * (Q - Pd.Thickness * Pd.Facing));
-                  end;
-               end loop;
+            for J in 0 .. NL loop
+               Pts.Append (Tool * (C - (E.Depth * Real (J) / Real (NL)) * E.Along));
             end loop;
          end;
       end loop;

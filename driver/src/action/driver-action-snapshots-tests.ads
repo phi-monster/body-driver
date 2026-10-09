@@ -59,14 +59,14 @@ package Driver.Action.Snapshots.Tests is
    function Floor (Id : Surface_Id; Place : Rigid; Sigma : Real) return Surface_State;
    --  The plane z = 0 of Place, normal +z of Place.
 
-   function Gripper (Arm : Arm_Id; Hand : Hand_Id; Opening, Width, Thickness, Depth, Sigma : Real)
-     return Hand_State;
+   function Gripper (Arm : Arm_Id; Hand : Hand_Id; Opening, Depth, Sigma : Real) return Hand_State;
    --  Two lobes closing toward each other along the tool's x, their ends
-   --  Depth beyond the tool origin along the tool's z.
+   --  Opening apart when open and meeting when closed, Depth beyond the tool
+   --  origin along the tool's z.
 
-   function Five_Lobes (Arm : Arm_Id; Hand : Hand_Id; Radius, Width, Thickness, Depth, Sigma : Real)
-     return Hand_State;
-   --  Five lobes on a circle about the tool's z, closing toward its axis.
+   function Five_Lobes (Arm : Arm_Id; Hand : Hand_Id; Radius, Closed_Radius, Depth, Sigma : Real) return Hand_State;
+   --  Five lobes on a circle about the tool's z, their ends at Radius open
+   --  and at Closed_Radius closed on nothing.
 
    function Arm_Of (Id : Arm_Id; Tool : Rigid; Sigma : Real) return Arm_State;
    --  An arm whose tool pose is known to Sigma, stepping by a tenth of it.

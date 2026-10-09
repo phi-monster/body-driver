@@ -119,9 +119,9 @@ procedure Contact_Matrix is
       else
          S.Arms.Append (Arm_Of (1, Down, Arm_Sigma));
          if Hand = Two_Lobes then
-            S.Hands.Append (Gripper (1, 1, 0.08 * Scale, 0.015 * Scale, 0.01 * Scale, 0.04 * Scale, Sigma));
+            S.Hands.Append (Gripper (1, 1, 0.08 * Scale, 0.04 * Scale, Sigma));
          else
-            S.Hands.Append (Five_Lobes (1, 1, 0.06 * Scale, 0.012 * Scale, 0.01 * Scale, 0.05 * Scale, Sigma));
+            S.Hands.Append (Five_Lobes (1, 1, 0.06 * Scale, 0.012 * Scale, 0.05 * Scale, Sigma));
          end if;
       end if;
       declare
