@@ -910,14 +910,14 @@ procedure Measure (H : in out Hands; M : in out Model) is
             exit when Checked;
             declare
                Lean  : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;
-               Tilt  : Real := Scale;
                Bound : Real := Ada.Numerics.Pi / 2.0;   --  the least tilt this side was found not to make
+               Tilt  : Real := Driver.Robot.Hand.Aims.First_Tilt (Scale, Least, Bound);
                Made  : Natural := 0;
                Why   : Ada.Strings.Unbounded.Unbounded_String :=
                  Ada.Strings.Unbounded.To_Unbounded_String ("tilted to a right angle");
             begin
-               --  The hand's own angle, then double while the presses are ones
-               --  the tip rests on, half when one stops short of the table
+               --  The hand's own angle, and no less than the least that tells the tip from a stop (Aims.First_Tilt), then
+               --  double while the presses are ones the tip rests on, half when one stops short of the table
                --  (Driver.Robot.Hand.Aims.Next_Tilt).
                while Tilt > 0.0 and then Tilt < Bound loop
                   if not Press_Once (Id, R, Lobe, Which, Driver.Robot.Hand.Aims.Tilted (Sight, Lean, Tilt)) then

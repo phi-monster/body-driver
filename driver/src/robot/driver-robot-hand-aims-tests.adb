@@ -93,8 +93,32 @@ package body Driver.Robot.Hand.Aims.Tests is
       Check (Tilt = 0.0, "a stop was followed by half of the tilt with no tip to tell it from");
    end Tilts_Follow_The_Arm;
 
+   procedure The_First_Tilt_Is_Worth_Making is
+      --  A31's closed lobe 1 after its straight press: the tip 3.8156 along its line known to 0.0920, which a second
+      --  press tells from a stop at 0.45; the hand's own angle between its two lines of sight was 0.0203.
+      Least : constant Real := Least_Tilt ((Value => 3.8156, Sigma => 0.0920, Degrees_Of_Freedom => 0));
+      Right : constant Real := Ada.Numerics.Pi / 2.0;
+   begin
+      Check (abs (Least - 0.4523) < 1.0e-3, "the least tilt of A31's closed lobe is" & Real'Image (Least));
+      Check (First_Tilt (0.0203, Least, Right) = Least,
+             "the first tilt of a hand whose lobes lie 0.0203 apart is" & Real'Image (First_Tilt (0.0203, Least, Right))
+             & ", under the" & Real'Image (Least) & " that tells a tip from a stop");
+      Check (First_Tilt (0.9326, 0.4, Right) = 0.9326, "the first tilt of an open hand is not its own angle, 0.9326");
+      Check (First_Tilt (0.9326, 1.07, Right) = 1.07, "the first tilt is under the least that tells the tip from a stop, 1.07");
+      Check (First_Tilt (0.0203, Real'Last, Right) = 0.0203, "the first tilt of a tip at no known distance is not the hand's own angle");
+      --  A31's hand 2 closed lobe 1 after its first press: 5.48 along its line known to 3.93, for which no tilt under a
+      --  right angle tells a stop: the press at the hand's own angle is another look at it, which brought the sigma to 0.15.
+      Check (First_Tilt (0.1081, Least_Tilt ((Value => 5.4837, Sigma => 3.9309, Degrees_Of_Freedom => 0)), Right) = 0.1081,
+             "a tip too uncertain for any tilt under a right angle to tell was not pressed at the hand's own angle");
+      --  Not under what this side was found not to make.
+      Check (First_Tilt (0.0203, Least, 0.3) = 0.0203, "a first tilt was made past the tilt this side did not make");
+   end The_First_Tilt_Is_Worth_Making;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.aims.first", "the first tilt of a side is under the least that tells a tip from a stop, "
+                             & "or is not the hand's own angle when that is more",
+                             The_First_Tilt_Is_Worth_Making'Access);
       Driver.Tests.Register ("hand.aims.tilts", "a tilt the arm cannot make is asked again, or the tilts never end",
                              Tilts_Follow_The_Arm'Access);
       Driver.Tests.Register ("hand.aims.turn", "the turn that aims a lobe moves the eye or aims it wrong",

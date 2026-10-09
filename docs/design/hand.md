@@ -848,6 +848,27 @@ half of it is tried. (`robot.ends.*`, `hand.press.yaw`, `hand.measure.yaw`.) The
 sigma above the predicted contact, not doubling from the least move over it) is the same sentence: the stop of the
 arm's own showed at the sixth of thirteen pushes.
 
+**Lesson: the first tilt is no less than the least that tells a tip from a stop, and what a press touches is a vertex
+of the finger (A31).** A31's left hand (the 9d9316b build, before the aim and the ends): four lobes, none
+confirmed, 7.57 to 8.78 mm from the support point of the truth, of which 0.22 to 1.73 mm along the press (within 1.5
+of its sigmas everywhere): the rest is lateral. The truth's collision vertices say what each press touched (the
+finger's lowest vertex in its own frame at the deepest call of each stretch on the table): the finger ends in a flat
+pad, 10 mm across (z from -0.0049 to +0.0051 in the finger's frame, 1.5 mm in y), and the press meets one of its two
+lower corners. Open lobe 1: the straight press (beat 4901, the finger 42.6 degrees from straight down) the corner
+at z = -0.0049, its second tilted press (5207, 56.8 degrees, the finger rolled 50 degrees about its axis) the other,
++0.0051; open lobe 2 the same (-0.0049 at 30.3 degrees, +0.0051 at 57.9); every one of the six presses of the two
+closed lobes the same corner, -0.0049, with the finger 28 to 34 degrees from straight down. So at the tilts of the
+hand's own angle (0.93 to 1.2 rad for the open hand) the vertex flips with the roll, 10 mm between presses, and a
+point fit sits between them; and at the closed hand's own angle (0.020 and 0.029 rad, the two lobes almost along
+each other from the eye) the tilted presses were 1 to 5 degrees from the straight one and told nothing across the
+sight: the tip 3.82 along its line known to 0.092 needs 0.452 rad (Least_Tilt) to be told from a stop, the next
+tilt, double, was 0.041, under it, and each side ended after one press; the lobes were left 'not tested across the
+sight', their lateral region 6.9 mm wide, and the 7.4 to 7.8 mm they were off is that stated width. The first tilt
+of a side is now the hand's own angle and no less than the least (Aims.First_Tilt; the hand's own angle itself
+when the tip is so uncertain that the least is a right angle or more: the press at it is another look, which brought
+A31's hand 2 closed lobe 1 from 3.93 to 0.15), and the hull is not built: whether the open hand's flipping vertex
+needs it is for the first run that tilts as the least says.
+
 **Lesson: an aim the arm did not complete is not the start of a press (A27).**
 A27's hand 2 (the right arm) pressed lobe 1 first, straight: the aim, a turn of
 1.0762 rad about the eye, stopped the arm at the third joint +0.0705 for the
