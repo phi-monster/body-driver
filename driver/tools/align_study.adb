@@ -24,13 +24,12 @@
 --  report: the rows of any runs, summarized by error, by how far the points moved, and by what the truth says
 --  of them.
 
+with Ada.Calendar;
 with Ada.Command_Line;
 with Ada.Containers.Vectors;
 with Ada.Directories;
-with Ada.Execution_Time;
 with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
-with Ada.Real_Time;
 with Ada.Streams.Stream_IO;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
@@ -726,8 +725,8 @@ procedure Align_Study is
       Factor  : constant Real := Real'Value (Ada.Command_Line.Argument (6));
       Errors  : Real_Array (1 .. Ada.Command_Line.Argument_Count - 6);
       Asked   : Natural := 0;
-      use type Ada.Execution_Time.CPU_Time;
-      Started : constant Ada.Execution_Time.CPU_Time := Ada.Execution_Time.Clock;
+      use type Ada.Calendar.Time;
+      Started : constant Ada.Calendar.Time := Ada.Calendar.Clock;
    begin
       for K in Errors'Range loop
          Errors (K) := Real'Value (Ada.Command_Line.Argument (6 + K));
@@ -745,7 +744,7 @@ procedure Align_Study is
       Ada.Text_IO.Put_Line
         (Ada.Text_IO.Standard_Error,
          Img (Asked) & " alignments in"
-         & Real'Image (Real (Ada.Real_Time.To_Duration (Ada.Execution_Time.Clock - Started))) & " s of cpu time");
+         & Real'Image (Real (Ada.Calendar.Clock - Started)) & " s of wall time");
    end Run_Mode;
 
    ---------------------------------------------------------------------------
