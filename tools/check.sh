@@ -27,10 +27,13 @@ sources() { find "$D/src" -name '*.ad[sb]' ! -name '*-tests.ad[sb]'; }  # driver
 # build
 if [ "${1:-}" != "--no-build" ]; then
   ALR="${ALR:-$(command -v alr || echo "$HOME/alire/bin/alr")}"
-  out=$(cd "$D" && "$ALR" -n build 2>&1)
+  out=$(cd "$D" && "$ALR" -n build 2>&1); status=$?
   #  A compiler message reads "file:line:col: error: ..." or "... warning: ..."; a bare match would also
-  #  take a file whose name holds the word (driver-robot-kinematics-errors.adb).
-  if echo "$out" | grep -qE '(^|: )(error|warning)[: ]'; then echo "$out" | grep -E '(^|: )(error|warning)[: ]' | head -20; red "build"; else ok "build"; fi
+  #  take a file whose name holds the word (driver-robot-kinematics-errors.adb). A build can also stop
+  #  with neither ("compilation abandoned" when a unit needs what the toolchain lacks): its status says so.
+  if echo "$out" | grep -qE '(^|: )(error|warning)[: ]'; then echo "$out" | grep -E '(^|: )(error|warning)[: ]' | head -20; red "build"
+  elif [ "$status" -ne 0 ]; then echo "$out" | tail -5; red "build (status $status)"
+  else ok "build"; fi
 fi
 
 # numbers
