@@ -63,6 +63,17 @@ package Driver.Recording is
    --  Shared_Started says whether it is being written, so a writer can skip
    --  encoding a record nobody keeps.
 
+   procedure Write_Shared (Kind : Record_Kind; Payload : Driver.Bytes.Byte_Array; Place : out Positive);
+   procedure Write_Shared
+     (Kind    : Record_Kind;
+      Payload : Driver.Bytes.Byte_Array;
+      Then_Do : not null access procedure (Place : Positive));
+   --  Every shared record has a place in one order, 1 for the first: every
+   --  record counts, written or not, so the places are the same with and
+   --  without a recording. Then_Do runs with the record's place before any
+   --  other record is written, so what it makes known is known from exactly
+   --  that point of the recording on (a service reply, Driver.Services).
+
 private
 
    type Reader is limited record
