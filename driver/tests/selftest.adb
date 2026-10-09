@@ -3,6 +3,7 @@
 
 with Ada.Command_Line;
 with Driver.Action.Tests;
+with Driver.Alignment.Tests;
 with Driver.Apart_Tests;
 with Driver.Brain.Tests;
 with Driver.Core_Tests;
@@ -22,6 +23,7 @@ begin
    Driver.Core_Tests.Register;
    Driver.Apart_Tests.Register;
    Driver.Distributions.Tests.Register;
+   Driver.Alignment.Tests.Register;
    Driver.Geometry.Tests.Register;
    Driver.Pixels.Tests.Register;
    Driver.Instrument.Tests.Register;
