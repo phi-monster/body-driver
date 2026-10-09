@@ -111,14 +111,15 @@ package body Driver.Robot.Hand.Pressing is
    end Aim_Reaching;
 
    function Lowered
-     (M : Model; Arm : Arm_Id; O : Observation; Into : Vec3; By : Real) return Driver.Robot.Motion.Plan
+     (M : Model; Arm : Arm_Id; O : Observation; Into : Vec3; By : Real; Turn_Free : Boolean := False)
+      return Driver.Robot.Motion.Plan
    is
       Tool : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
    begin
       return Driver.Robot.Motion.Plan_Reach_In_Arm
         (M, Arm, O,
          (Pose          => (Rotation => Tool.Pose.Rotation, Translation => Tool.Pose.Translation + By * Into),
-          Position_Only => False));
+          Position_Only => Turn_Free));
    end Lowered;
 
    function Gap

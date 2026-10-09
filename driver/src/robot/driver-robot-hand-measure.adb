@@ -316,7 +316,12 @@ procedure Measure (H : in out Hands; M : in out Model) is
                Why := Ada.Strings.Unbounded.To_Unbounded_String
                  ("no raise within the arm's reach moves its readings by what an eye sees");
                for Doubling in 1 .. Real'Machine_Mantissa loop
-                  Plan := Driver.Robot.Hand.Pressing.Lowered (M, Arm, O, Up.Unit_Vector, By);
+                  --  A raise is made for the poses it gives the eye, whatever its turn: its
+                  --  plan reaches the place, not the turn (A68 and A69: arm 2's raises
+                  --  with the turn held were refused for a turn the model left 8.4e-4 rad
+                  --  off, the closer had no second pose at its low reading, and no hand was
+                  --  made of it).
+                  Plan := Driver.Robot.Hand.Pressing.Lowered (M, Arm, O, Up.Unit_Vector, By, Turn_Free => True);
                   if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
                      Why := Ada.Strings.Unbounded.To_Unbounded_String (Driver.Robot.Motion.Why (Plan));
                      exit;
