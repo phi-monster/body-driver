@@ -25,7 +25,11 @@
 --  place the pixels give, with the covariance their gradients allow and the
 --  scatter of what the fit leaves unexplained show (inflated by how smooth
 --  that scatter is, because neighbouring residuals that agree are one
---  observation, not many), and by how far the answer moves when the same patch
+--  observation, not many; and the larger of what the second picture's slopes
+--  and the first's, through the fitted gain and warp, allow, because the
+--  second picture's noise has slopes too, which a picture whose texture lies
+--  under its noise counts as information it does not have), and by how far
+--  the answer moves when the same patch
 --  is fitted again on its middle and at the next coarser levels (a contour
 --  that moves with another surface than the texture beside it, a texture finer
 --  than the pictures hold, and a shading that moved all pull the place by more
