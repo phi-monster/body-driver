@@ -185,6 +185,17 @@ package body Driver.Robot is
    --  is always measured.
    procedure Recompute (M : in out Model) is
       Start : constant Duration := Driver.Clock.Seconds;
+      --  Where the time went, stage by stage, for the line at the end.
+      Mark  : Duration := Start;
+      Parts : Ada.Strings.Unbounded.Unbounded_String;
+      procedure Took (Stage : String) is
+         Now : constant Duration := Driver.Clock.Seconds;
+      begin
+         Ada.Strings.Unbounded.Append
+           (Parts, (if Ada.Strings.Unbounded.Length (Parts) = 0 then "" else ", ") & Stage & " "
+                   & Driver.Log.Image (Real (Now - Mark), 1));
+         Mark := Now;
+      end Took;
    begin
       Channels.Measure (M);
       for S of M.Eyes loop
@@ -192,22 +203,28 @@ package body Driver.Robot is
             Stillness.Measure_Luma_Noise (S);
          end if;
       end loop;
+      Took ("channels");
       if not M.From_File (Stored_Lags) then
          Lag.Measure (M);
       end if;
+      Took ("lags");
       if not M.From_File (Stored_Responses) then
          Lockin.Measure_Rest_Noise (M);
          Lockin.Measure (M);
       end if;
+      Took ("lock-in");
       if not M.From_File (Stored_Graph) then
          Graph.Derive (M);
       end if;
+      Took ("graph");
       if not M.From_File (Stored_Kinematics) then
          Kinematics.Refit (M);
       end if;
+      Took ("kinematics");
       M.Graph_Evidence := M.Beats;
       Driver.Log.Line (Driver.Log.Robot, "estimated from" & M.Beats'Image & " beats in"
-                       & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
+                       & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s ("
+                       & Ada.Strings.Unbounded.To_String (Parts) & ")");
    end Recompute;
 
    --  A decider's call goes into the recording (kind E) inside its window,
