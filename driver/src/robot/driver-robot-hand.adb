@@ -1102,6 +1102,9 @@ package body Driver.Robot.Hand is
       end loop;
    end Sweep_Way;
 
+   function In_Free_Air (Stopped : Heights) return Boolean is
+     (Known (Stopped.Tip) and then Stopped.Tip.Value > Driver.Conventions.Z * Stopped.Tip.Sigma);
+
    procedure Descend
      (Above : not null access function return Heights;
       Least : Real;

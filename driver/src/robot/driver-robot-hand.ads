@@ -361,6 +361,13 @@ private
    --  (Driver.Robot.Hand.Lowering): the arm's readings went where the step asked and the
    --  hand lies on what it met.
 
+   function In_Free_Air (Stopped : Heights) return Boolean;
+   --  Whether a push that was not completed stopped in free air, so that what stopped it is the body's and not a
+   --  surface's: the tip stands above the contact the presses so far predict by more than Z of its own deviation.
+   --  Nothing is said of a tip nothing predicts (no press has fixed the surface under it), nor of one at the contact
+   --  or within its deviation of it: a table and a joint's end both leave a push short, and a push that rests is
+   --  the table's.
+
    procedure Descend
      (Above : not null access function return Heights;
       Least : Real;

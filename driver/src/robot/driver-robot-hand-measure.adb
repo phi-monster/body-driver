@@ -1,6 +1,5 @@
 with Ada.Containers.Vectors;
 with Driver.Beats;
-with Driver.Conventions;
 with Driver.Robot.Hand.Aims;
 with Driver.Robot.Hand.Pressing;
 with Driver.Robot.Hand.Selfsight;
@@ -793,7 +792,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                End_Lost (Moved => True);
                return False;
             end if;
-            if Known (Stopped.Tip) and then Stopped.Tip.Value > Driver.Conventions.Z * Stopped.Tip.Sigma then
+            if Driver.Robot.Hand.In_Free_Air (Stopped) then
                Hold_Beat (Note_The_Stop'Access);
             end if;
          end;

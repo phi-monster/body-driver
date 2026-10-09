@@ -4,6 +4,7 @@ with Driver.Beats;
 with Driver.Bytes;
 with Driver.Clock;
 with Driver.Commands;
+with Driver.Conventions;
 with Driver.Images;
 with Driver.Robot.Hand.Aims.Tests;
 with Driver.Robot.Hand.Frames.Tests;
@@ -669,8 +670,31 @@ package body Driver.Robot.Hand.Tests is
       Check (Ran_Out < 60, "the decider ended before any drop was made, so nothing was tested");
    end Dropped_Hand;
 
+   --  A push the arm did not complete is the body's stop, and noted as an end, only when the tip stands above the
+   --  contact the presses predict by more than Z of its deviation (A22's press 2 at beat 13827: the hand 8.7 cm above
+   --  the table, the third joint at its end). On the table, or where nothing predicts the table, it is not said:
+   --  a table and a joint's end both leave a push short.
+   procedure Free_Air_Is_Above_The_Contact_By_More_Than_Z is
+      use Driver.Conventions;
+      function Above (Value, Sigma : Real) return Heights is
+        (Tip => (Value => Value, Sigma => Sigma, Degrees_Of_Freedom => 100), others => <>);
+   begin
+      Check (In_Free_Air (Above (6.6662, 0.3841)),
+             "a tip 17 deviations above the contact the presses predict is not in free air");
+      Check (In_Free_Air (Above (Z * 0.3841 * 1.01, 0.3841)),
+             "a tip a hundredth above Z deviations is not in free air");
+      Check (not In_Free_Air (Above (Z * 0.3841 * 0.99, 0.3841)),
+             "a tip a hundredth under Z deviations above the contact is in free air");
+      Check (not In_Free_Air (Above (0.0, 0.3841)), "a tip at the contact is in free air");
+      Check (not In_Free_Air (Above (-2.0, 0.3841)), "a tip below the contact the presses predict is in free air");
+      Check (not In_Free_Air (Heights'(others => <>)), "a tip nothing predicts is in free air");
+      Check (not In_Free_Air (Above (1000.0, Real'Last)), "a tip whose deviation is not known is in free air");
+   end Free_Air_Is_Above_The_Contact_By_More_Than_Z;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.measure.air", "a push stopped on the table, or where nothing predicts the table, is said "
+                             & "to be the body's, or one stopped in the air is not", Free_Air_Is_Above_The_Contact_By_More_Than_Z'Access);
       Driver.Tests.Register ("hand.measure.gone", "a hand dropped by the estimators between two beats of a press "
                              & "makes the decider raise", Dropped_Hand'Access);
       Driver.Tests.Register ("hand.unmeasured", "an unmeasured body makes the hand fail or invent a hand",
