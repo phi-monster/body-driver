@@ -200,8 +200,18 @@ package body Driver.Robot.Motion is
                end loop;
             end if;
             if (if Up then S.Has_Stopped_High (At_C) else S.Has_Stopped_Low (At_C)) then
-               --  The end the channel has explains it; a stop beyond it is read as a reading, which widens the end.
-               Driver.Log.Line (Driver.Log.Robot, Where & ": at the end the channel has");
+               --  The end the channel has explains it; a stop beyond it is read as a reading, which widens the end, and
+               --  said, so that a far end hit after a near false one is not a quiet success in the log.
+               declare
+                  Found_At : constant Real := (if Up then S.Stopped_High (At_C) else S.Stopped_Low (At_C));
+               begin
+                  if (if Up then Stop > Found_At else Stop < Found_At) and then Apart (At_C, Stop, Found_At) then
+                     Driver.Log.Line (Driver.Log.Robot, Where & ": beyond the end found at " & Driver.Log.Image (Found_At, 6)
+                                      & ": the reading widens it");
+                  else
+                     Driver.Log.Line (Driver.Log.Robot, Where & ": at the end the channel has");
+                  end if;
+               end;
             else
                declare
                   Found  : Boolean := False;   --  the same reading found again from another pose

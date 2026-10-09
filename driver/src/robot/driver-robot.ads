@@ -370,7 +370,9 @@ private
    --  Stops are kept for the groups of an arm (Driver.Robot.Motion.Note_Stopped): a group of one channel, a closer's,
    --  has no other channel to stand elsewhere, so none of its stops is found again and End_Of stays Unknown for it.
    --  The readings' noise is the scale of two readings of a channel here, and the channel's travel the scale of the
-   --  chance that two contacts meet at one reading; nothing but the stream sets either. A boot that moves one joint at a
+   --  chance that two contacts meet at one reading; nothing but the stream sets either. The travel is the range seen so far, so
+   --  early in a boot two stops of one soft limit are further apart than D and are kept, and agree once the range
+   --  has grown. A boot that moves one joint at a
    --  time from the rest pose confirms no end by itself, its stops share one pose: an end is found by a later stop
    --  from another configuration (presses, tilts, a task), and Unknown after the boot is not a fault.
 

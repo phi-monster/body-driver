@@ -886,13 +886,15 @@ poisoned first press sets a book of one press with a sigma of 0.11 at a distance
 the second press 'went past the contact its presses predict and met nothing' (A27's 'confirmed 18.7122' was the
 same family). Now: the first command that takes effect for the arm after the block (Channels.Target_Changed) is
 the let-go whether or not it began a push; a second one before the hand has rested ends the watching without a
-press (the rest that follows is the retreat's); and the decider, after the hold, waits for the arm's own readings
-to be still before it retreats, at most as long as the longest push the arm has had took (Hand.Longest_Push, from
-the stream), and says so when it did not rest or the hand found no press (the press is then not made). Teeth:
-hand.presses.hold (the hold begins no push, the arm rests: found at the rest), hand.presses.retreat (the retreat
-is sent first: no press, and the watcher is free for the next), hand.measure.longest; the push-based let-go of A16
-and the late answer are unchanged. The decider's wait has no rig that reaches it (the rig never blocks a descent
-on a table): it is read in the next run's log.
+press (the rest that follows is the retreat's); and the decider, after the hold, waits until the watcher has found the
+press (at the arm's own rest) before it retreats, at most the stream's length, and says so when none was found (the
+press is then not made). A cap of the longest push the arm had had took, first tried, lost A37's presses: its longest
+push was 135 beats and the readings of a hard press creep on for 500 (a simulator's readings repeat exactly or they are
+not still: stillness against a noise of 1e-17 is exactness; the judgement of rest is A's, and a rest against the
+smallest change that matters to a press is proposed to A). Teeth: hand.presses.hold (the hold begins no push, the arm
+rests: found at the rest), hand.presses.retreat (the retreat is sent first: no press, and the watcher is free for the
+next); the push-based let-go of A16 and the late answer are unchanged. The decider's wait has no rig that reaches it
+(the rig never blocks a descent on a table): it is read in the next run's log.
 
 **Lesson: a joint's end is found again at the same reading from another pose; one stop is a contact (A36).** The ends
 of 25bbbd6 took one stop for an end and made it the highest (lowest) reading the joint had shown. A36 (a2ed747, hands
