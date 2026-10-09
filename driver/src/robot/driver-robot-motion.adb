@@ -455,7 +455,18 @@ package body Driver.Robot.Motion is
                Lag := Natural'Max (Lag, Natural'Max (0, Image_Lag (M, Eye_Id (E))));
             end loop;
             Wait := Wait + Delay_Beats + Lag;
+            --  Once the readings had time to answer, every beat is looked at,
+            --  and the look ends at the first one some eye saw move, or when
+            --  the slowest eye's lag has passed: a lag measured long (an
+            --  eye that hardly sees the group, its fit taking the alias a push
+            --  away: A62's eye 3 at seven beats for one) costs its wait only
+            --  where nothing is seen. The chance of a false alarm is summed
+            --  over every beat looked at, whenever the look ends (Look).
             Done := Looked >= Wait;
+            if not Done and then Looked > Delay_Beats then
+               Look (M, From, Seen, Chance);
+               Done := Seen;
+            end if;
             if Done then
                Look (M, From, Seen, Chance);
                Unlooked := M.Beats;
