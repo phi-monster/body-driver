@@ -2,6 +2,7 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Distributions;
 with Driver.Numerics.Dense;
+with Driver.Parallel_For;
 with Driver.Robot.Regression;
 with Driver.Robot.Kinematics.Errors;
 with Driver.Stats;
@@ -620,18 +621,26 @@ package body Driver.Robot.Kinematics.Fit is
                   loop
                      --  The Jacobian: the parameters one by one; the depths all at
                      --  once, since each residual has one depth of its own.
-                     for P in 1 .. Count loop
-                        declare
+                     --  The columns at once (Driver.Parallel_For): each moves its own
+                     --  parameter, takes every residual again into its own array and
+                     --  writes only its own column.
+                     declare
+                        procedure Column (P : Positive) is
                            Xp : Real_Array := X;
                            H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));
+                           Rp : Real_Access := new Real_Array (1 .. 2 * Used);
                         begin
                            Xp (P) := Xp (P) + H;
-                           Residuals (Xp, Depth.all, Index, Rn.all);
+                           Residuals (Xp, Depth.all, Index, Rp.all);
                            for I in 1 .. 2 * Used loop
-                              Jp (I, P) := (Rn (I) - R0 (I)) / H;
+                              Jp (I, P) := (Rp (I) - R0 (I)) / H;
                            end loop;
-                        end;
-                     end loop;
+                           Free (Rp);
+                        end Column;
+                        procedure Columns is new Driver.Parallel_For (Column);
+                     begin
+                        Columns (1, Count);
+                     end;
                      declare
                         Dp : Real_Access := new Real_Array'(Depth.all);
                         H  : constant Real := Sqrt (Real'Model_Epsilon);
