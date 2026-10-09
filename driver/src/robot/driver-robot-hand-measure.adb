@@ -573,17 +573,39 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Began   : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  and where the aim began
       Stalls  : Natural := 0;   --  the pushes the watcher had judged stalled when the step now under way began
 
+      --  The poses that point Along down are a circle of them (a turn of the hand about the way down, through the
+      --  eye), and the arm's joints reach some of the circle and not others (Pressing.Aim_Reaching): the first whose
+      --  aim is planned, and whose descent to the contact the presses so far predict is planned too (an end a channel
+      --  showed, Driver.Robot.End_Of, refuses a path past it), is the aim; none is a tilt the arm cannot make from
+      --  where it stands.
+      Reaches : Boolean := False;   --  an aim, and the descent from it to the predicted contact, are planned
+      Unmeasured_Aim : Boolean := False;   --  the aim at the least rotation was not planned for want of a measured arm
+      Why_Not : Ada.Strings.Unbounded.Unbounded_String;   --  why the aim at the least rotation was not
+      Yaw     : Real := 0.0;   --  the turn about the way down the aim took
+
       procedure Read_Aim (O : Observation) is
       begin
          Lost := not Present (Id, R);
          if Lost then
             return;
          end if;
-         Driver.Robot.Hand.Pressing.Aim (M, R.Arm, R.Eye, O, Along, Aimed);
          Arm_Is := Arm_Group (M, R.Arm);
          Began := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (O.Readings.Element (Arm_Is));
          Stalls := H.Data.Found (Id).Stalls;
+         declare
+            B : Driver.Robot.Hand.Tips.Book renames H.Data.Found (Id).Book;
+         begin
+            Driver.Robot.Hand.Pressing.Aim_Reaching
+              (M, R.Arm, R.Eye, O, Along, Driver.Robot.Hand.Tips.Tip (B, Lobe, Which), Driver.Robot.Hand.Tips.Surface (B),
+               Aimed, Yaw, Reaches, Unmeasured_Aim, Why_Not);
+         end;
       end Read_Aim;
+
+      procedure Note_The_Stop (O : Observation) is
+         pragma Unreferenced (O);
+      begin
+         Driver.Robot.Motion.Note_Stopped (M, Arm_Is);
+      end Note_The_Stop;
 
       Least : Real;   --  the least push, where the aim leaves the tool, kept above zero so that the doubling begins
       By : Real := 0.0;
@@ -681,12 +703,27 @@ procedure Measure (H : in out Hands; M : in out Model) is
                           & " no press");
          return False;
       end if;
-      Plan := Aimed.Plan;
-      Least := Real'Max (Real'Model_Epsilon, Aimed.Least);
-      if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
-         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": cannot aim a press: " & Driver.Robot.Motion.Why (Plan));
+      if not Reaches then
+         if Unmeasured_Aim then
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": cannot aim a press: "
+                             & Ada.Strings.Unbounded.To_String (Why_Not));
+            return False;
+         end if;
+         --  Nothing was moved: the tilt is one the arm cannot make from where it stands, as a press that stopped
+         --  short of the table says, and half of it is tried.
+         Aim_Short := True;
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": no aim of a press of lobe" & Lobe'Image & " at "
+                          & (if Which = Open then "open" else "closed") & " is planned, the hand turned about the way down by "
+                          & "any eighth of a turn: " & Ada.Strings.Unbounded.To_String (Why_Not));
          return False;
       end if;
+      if Yaw /= 0.0 then
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the aim of a press of lobe" & Lobe'Image
+                          & " at the least rotation is not planned (" & Ada.Strings.Unbounded.To_String (Why_Not)
+                          & "); the hand turned about the way down by " & Driver.Log.Image (Yaw, 4) & " rad it is");
+      end if;
+      Plan := Aimed.Plan;
+      Least := Real'Max (Real'Model_Epsilon, Aimed.Least);
       Driver.Robot.Motion.Follow (M, Plan, Report);
       Hold_Beat (Read_Arm'Access);
       --  An aim the arm did not complete is not a press: it stopped on something of its own or short of the pose,
@@ -699,6 +736,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                           & " at " & (if Which = Open then "open" else "closed") & ", turning the hand "
                           & Driver.Log.Image (Aimed.Turn, 4) & " rad (" & Ada.Strings.Unbounded.To_String (Report.Detail)
                           & "): no press is made from where it stopped, and the arm is taken back to where the aim began");
+         Hold_Beat (Note_The_Stop'Access);   --  the aim is in free air: what stopped it is the body's, and noted
          Move_Group (Arm_Is, Began.Element);
          return False;
       end if;
@@ -742,6 +780,22 @@ procedure Measure (H : in out Hands; M : in out Model) is
       if Steps.Stalled then
          --  The last step was followed and took the hand nowhere: it is not part of the lowering.
          Descended := Descended - By;
+      elsif not Unplanned and then not Steps.Spent then
+         --  The last push was not completed. When the tip stands above the contact the presses so far predict by more
+         --  than Z of its sigma the hand is in free air, and what stopped the push is the body's: the channel that
+         --  fell short of the rest has stopped at an end, and says so (A22's press 2 at beat 13827, the third joint at
+         --  -0.0359 for the -0.0578 asked, the hand 8.7 cm above the table). On the table it is not.
+         declare
+            Stopped : constant Driver.Robot.Hand.Heights := Above;
+         begin
+            if Lost then
+               End_Lost (Moved => True);
+               return False;
+            end if;
+            if Driver.Robot.Hand.In_Free_Air (Stopped) then
+               Hold_Beat (Note_The_Stop'Access);
+            end if;
+         end;
       end if;
       --  One line a press, for the boot's account of where its time went:
       --  how many pushes, and why each was as long as it was.
@@ -760,12 +814,12 @@ procedure Measure (H : in out Hands; M : in out Model) is
                                & " and the hand did not go down with it, after lowering " & Driver.Log.Image (Descended, 4)
                           else "blocked, the last push by " & Driver.Log.Image (By, 4) & " after lowering "
                                & Driver.Log.Image (Descended, 4)));
-      if Unplanned then
-         return False;
-      end if;
-      if Steps.Spent then
-         --  Nothing was met and no more steps are made: the hand goes back to where the
-         --  descent began, as after a press, for the presses after it begin there.
+      if Unplanned or else Steps.Spent then
+         --  Nothing was met and no more steps are made, or the next step is one the arm cannot be taken through (an
+         --  end a channel showed is on the way down, with nothing predicting the contact to have told so before): the
+         --  hand goes back to where the descent began, as after a press, for the presses after it begin there. A
+         --  tilt that cannot be lowered is one that cannot be made, and half of it is tried.
+         Aim_Short := Unplanned;
          Hold_Beat (Read_Arm'Access);
          Move_Group (Arm_Is, Aim_At.Element);
          return False;

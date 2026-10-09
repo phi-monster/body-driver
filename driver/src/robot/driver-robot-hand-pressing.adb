@@ -16,7 +16,9 @@ package body Driver.Robot.Hand.Pressing is
       return Threshold (Vector_Gate (Vec3'Length)) * Sqrt (Real'Max (Values (1), Real'Max (Values (2), Values (3))));
    end Least_Push;
 
-   procedure Aim (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed) is
+   procedure Aim
+     (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed; Yaw : Real := 0.0)
+   is
       Tool    : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
       Down    : constant Direction_Estimate := Up_In_Arm (M, Arm);
    begin
@@ -29,6 +31,15 @@ package body Driver.Robot.Hand.Pressing is
       Result.Into := -Down.Unit_Vector;
       Result.Above := Driver.Robot.Hand.Aims.Turned_About
         (Tool.Pose, Eye_In_Tool (M, Eye, O).Pose.Translation, Along, Result.Into);
+      if Yaw /= 0.0 then
+         declare
+            Eye_Here : constant Vec3 := Eye_In_Tool (M, Eye, O).Pose.Translation;
+            Eye_At   : constant Vec3 := Result.Above * Eye_Here;
+            Rotation : constant Mat3 := Exp (Yaw * Result.Into) * Result.Above.Rotation;
+         begin
+            Result.Above := (Rotation => Rotation, Translation => Eye_At - Rotation * Eye_Here);
+         end;
+      end if;
       Result.Turn := Angle (Transpose (Tool.Pose.Rotation) * Result.Above.Rotation);
       Result.Plan := Driver.Robot.Motion.Plan_Reach_In_Arm (M, Arm, O, (Pose => Result.Above, Position_Only => False));
       if Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Planned then
@@ -40,6 +51,61 @@ package body Driver.Robot.Hand.Pressing is
          end;
       end if;
    end Aim;
+
+   procedure Aim_Reaching
+     (M       : Model;
+      Arm     : Arm_Id;
+      Eye     : Eye_Id;
+      O       : Observation;
+      Along   : Vec3;
+      Tip     : Point_Estimate;
+      Surface : Driver.Geometry.Plane_Estimate;
+      Result  : out Aimed;
+      Yaw     : out Real;
+      Reaches : out Boolean;
+      Unmeasured : out Boolean;
+      Why     : out Ada.Strings.Unbounded.Unbounded_String)
+   is
+      Group : constant Group_Id := Arm_Group (M, Arm);
+   begin
+      Reaches := False;
+      Unmeasured := False;
+      Yaw := 0.0;
+      Why := Ada.Strings.Unbounded.Null_Unbounded_String;
+      Result := (others => <>);
+      for K in 0 .. 7 loop
+         --  0, a quarter turn one way, the other, half a turn each way, three quarters each way, a whole one.
+         Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);
+         Aim (M, Arm, Eye, O, Along, Result, Yaw);
+         exit when not Result.Ok;
+         Reaches := Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Planned;
+         if K = 0 and then not Reaches then
+            Unmeasured := Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Unmeasured;
+            Why := Ada.Strings.Unbounded.To_Unbounded_String (Driver.Robot.Motion.Why (Result.Plan));
+         end if;
+         if Reaches then
+            declare
+               There : Observation := O;
+               Down  : Estimate;
+            begin
+               There.Readings.Replace_Element (Group, Driver.Robot.Motion.Last_Readings (Result.Plan));
+               Down := Gap (M, Arm, There, Tip, Surface, Result.Into);
+               if Known (Down) and then Down.Value > 0.0 then
+                  declare
+                     Deep : constant Driver.Robot.Motion.Plan := Lowered (M, Arm, There, Result.Into, Down.Value);
+                  begin
+                     Reaches := Driver.Robot.Motion.Status (Deep) = Driver.Robot.Motion.Planned;
+                     if K = 0 and then not Reaches then
+                        Why := Ada.Strings.Unbounded.To_Unbounded_String
+                          ("the descent from it to the contact the presses predict: " & Driver.Robot.Motion.Why (Deep));
+                     end if;
+                  end;
+               end if;
+            end;
+         end if;
+         exit when Reaches;
+      end loop;
+   end Aim_Reaching;
 
    function Lowered
      (M : Model; Arm : Arm_Id; O : Observation; Into : Vec3; By : Real) return Driver.Robot.Motion.Plan

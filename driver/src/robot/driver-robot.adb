@@ -587,6 +587,41 @@ package body Driver.Robot is
    function Reading_Noise (M : Model; G : Group_Id; Channel : Positive) return Real is
      (Channels.Noise (M, G, Channel));
 
+   function End_Of (M : Model; G : Group_Id; Channel : Positive; S : Sense) return Estimate is
+      Noise : constant Real := (if G <= M.Groups.Last_Index and then Channel <= M.Groups (G).Size
+                                then Channels.Noise (M, G, Channel) else Real'Last);
+   begin
+      --  A channel whose noise is not measured shows no end: nothing tells a reading from it.
+      if Noise = Real'Last then
+         return Unknown;
+      end if;
+      declare
+         Stream : Group_Stream renames M.Groups (G);
+         At_C   : constant Natural := Channel - 1;
+         Known  : constant Boolean :=
+           (case S is
+              when Decreasing => At_C < Natural (Stream.Has_Stopped_Low.Length) and then Stream.Has_Stopped_Low (At_C),
+              when Increasing => At_C < Natural (Stream.Has_Stopped_High.Length) and then Stream.Has_Stopped_High (At_C));
+      begin
+         if not Known then
+            return Unknown;
+         end if;
+         --  Never nearer than the readings the channel has been seen at: a stop is where a push left the channel,
+         --  not proof that it cannot go further.
+         return (Value              => (case S is
+                                          when Decreasing =>
+                                            (if At_C < Natural (Stream.Low_Seen.Length)
+                                             then Real'Min (Stream.Stopped_Low (At_C), Stream.Low_Seen (At_C))
+                                             else Stream.Stopped_Low (At_C)),
+                                          when Increasing =>
+                                            (if At_C < Natural (Stream.High_Seen.Length)
+                                             then Real'Max (Stream.Stopped_High (At_C), Stream.High_Seen (At_C))
+                                             else Stream.Stopped_High (At_C))),
+                 Sigma              => Noise,
+                 Degrees_Of_Freedom => Channels.Noise_Freedom (M, G, Channel));
+      end;
+   end End_Of;
+
    function Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate is
       Best : Estimate := Unknown;
    begin

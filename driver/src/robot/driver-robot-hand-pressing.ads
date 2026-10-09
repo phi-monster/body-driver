@@ -19,6 +19,7 @@
 --  Plain geometry on what the body measured; the decider that moves the arm
 --  is Driver.Robot.Hand.Measure. Read inside a held beat, as it does.
 
+with Ada.Strings.Unbounded;
 with Driver.Geometry;
 with Driver.Robot.Motion;
 
@@ -33,10 +34,38 @@ package Driver.Robot.Hand.Pressing is
       Plan  : Driver.Robot.Motion.Plan;   --  from the tool as at O to Above; unset unless Ok
    end record;
 
-   procedure Aim (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed);
+   procedure Aim
+     (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed; Yaw : Real := 0.0);
    --  The tool turned about the eye (a point of the tool frame, so that the
    --  eye keeps its view) by the least rotation that points Along, a
    --  direction of the tool frame, into the table, and a plan to get there.
+   --  Yaw turns the hand further about the way down, through the eye, which
+   --  keeps Along pointing down and the eye where it is: the poses that point
+   --  Along down are a circle of them, and the arm's joints reach some of the
+   --  circle and not others (A22's lobe 2 aimed straight stands 0.117 outside
+   --  the readings the arm has shown at the least rotation, 0.103 inside them
+   --  at 30 degrees).
+
+   procedure Aim_Reaching
+     (M       : Model;
+      Arm     : Arm_Id;
+      Eye     : Eye_Id;
+      O       : Observation;
+      Along   : Vec3;
+      Tip     : Point_Estimate;
+      Surface : Driver.Geometry.Plane_Estimate;
+      Result  : out Aimed;
+      Yaw     : out Real;
+      Reaches : out Boolean;
+      Unmeasured : out Boolean;
+      Why     : out Ada.Strings.Unbounded.Unbounded_String);
+   --  The first aim of Along that the arm can be taken to, and from which it can be taken down to the contact the
+   --  presses so far predict (Tip in the tool frame, Surface in the arm's: nothing is asked of the descent when they
+   --  do not predict it): the least rotation first, then the hand turned about the way down by a quarter either way,
+   --  by half a turn, by three quarters, and by the whole of one (eight poses of the circle). A path past an end a
+   --  channel showed is not planned (Driver.Robot.Motion.Plan_Reach); Yaw is the turn that was taken. Reaches is
+   --  False when none is planned, Result then the last tried, and Why says why the least rotation was not, with the
+   --  descent when it is that; Unmeasured is True when that was for want of a measured arm.
 
    function Least_Push (M : Model; Arm : Arm_Id; O : Observation) return Real;
    --  The smallest move of the tool that tells from its noise, where the tool
