@@ -326,6 +326,31 @@ package body Driver.Robot.Lockin is
             Lag   : constant Integer := (if E <= M.Lags.Last_Index then M.Lags (E) else 0);
             Rows  : Natural := 0;
 
+            --  How long the eye's picture goes on settling after the body stops moving: from the last beat any
+            --  commandable group moved or was pushed to the first beat after it at which the picture had settled
+            --  (the stillness watch), the longest such stretch in the stream. The picture of a renderer that
+            --  accumulates its frames drifts for beats after the readings stop, and carries the tail of a motion
+            --  into the beats after it.
+            function Settling_Tail return Natural is
+               Longest : Natural := 0;
+               Last    : Natural := 0;   --  the last beat a group moved or was pushed
+               Waiting : Boolean := False;
+            begin
+               for B in 0 .. Natural'Min (M.Beats, Natural (S.Settled_At.Length)) - 1 loop
+                  if (for some G in M.Groups.First_Index .. M.Groups.Last_Index =>
+                        M.Groups (G).Commandable and then (Channels.Pushed (M, G, B) or else Channels.Moving (M, G, B)))
+                  then
+                     Last := B;
+                     Waiting := True;
+                  elsif Waiting and then S.Settled_At (B) then
+                     Longest := Natural'Max (Longest, B - Last);
+                     Waiting := False;
+                  end if;
+               end loop;
+               return Longest;
+            end Settling_Tail;
+            Tail : constant Natural := Settling_Tail;
+
             --  A beat of the eye can be explained when its displacement was
             --  measured, every commandable group's readings exist for the
             --  beat it shows and the one before, at most one group was being
@@ -369,15 +394,17 @@ package body Driver.Robot.Lockin is
                      if Before < 0 or else Before >= Natural (S.Settled_At.Length) or else not S.Settled_At (Before) then
                         return False;
                      end if;
-                     --  Nor did another group move at any beat of the push: its
-                     --  picture goes on changing for beats after its readings
-                     --  stop, and the lock-in would credit that to this push
-                     --  (A62 and A63, the arms swept at once: arm 2 took eye 2,
-                     --  arm 1's, as a whole, and no hand was made of either
-                     --  closer).
+                     --  Nor did another group move at any beat of the push, nor
+                     --  within the eye's settling tail before it: its picture
+                     --  goes on changing for beats after its readings stop, and
+                     --  the lock-in would credit that to this push (A62 and A63,
+                     --  the arms swept at once: arm 2 took eye 2, arm 1's, as a
+                     --  whole; with the push's own beats only, A79 to A85 still
+                     --  gave arm 2 eye 2 WHOLE after their sweeps, A85's with 240
+                     --  of 525 cells, and A85's boot ended in a breach).
                      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
                         if G /= Pusher and then M.Groups (G).Commandable then
-                           for B2 in Began .. Natural (R) loop
+                           for B2 in Integer'Max (0, Integer (Began) - Tail) .. Natural (R) loop
                               if Channels.Pushed (M, G, B2) or else Channels.Moving (M, G, B2) then
                                  return False;
                               end if;
