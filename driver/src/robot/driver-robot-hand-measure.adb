@@ -377,15 +377,21 @@ procedure Measure (H : in out Hands; M : in out Model) is
       --  place them: the eye has seen the readings from fewer than a deviation needs (Unlocated), or the changed pixels
       --  do not fall in two groups by how much they vary over the poses (Unplaced, Unseparated). The poses are asked to
       --  double, and the estimators place the lobes again once they have (Driver.Robot.Hand.Sweep).
+      --  The poses are gathered at the end of the travel the eye has seen from fewer poses, the closer brought there
+      --  first: a separation needs poses at both ends, and gathering more where the closer happened to stop gave A70's
+      --  arm 2 159 poses at its open end and none at its closed one, and no hand.
       procedure Top_Up_Poses (G : Group_Id; C : Positive) is
          Status : Sweeps.Progress := Sweeps.Measured;
          Helps  : Boolean := False;   --  more poses could place the lobes
          Have   : Natural := 0;
+         Fewer  : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  the readings at the end with fewer poses
+         There  : Boolean := False;   --  the closer stands at that end
          procedure Read_Status (O : Observation) is
             P : constant Natural := Own_Pair (G);
          begin
             Status := Sweeps.Measured;
             Helps := False;
+            There := True;
             if P > 0 and then C <= Sweeps.Channels (H.Data.Pairs (P).Sweep) then
                declare
                   S : Sweeps.State renames H.Data.Pairs (P).Sweep;
@@ -395,6 +401,24 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   Helps := Status = Sweeps.Unlocated
                     or else (Status = Sweeps.Unplaced
                              and then Sweeps.Located_Of (S, C).How = Driver.Robot.Hand.Lobes.Unseparated);
+                  if Helps and then Sweeps.Has_Ends (S, C) then
+                     declare
+                        Low    : constant Real_Array := Sweeps.Low_Closer (S, C);
+                        High   : constant Real_Array := Sweeps.High_Closer (S, C);
+                        Now    : constant Real_Array := O.Readings.Element (G);
+                        At_Low : constant Boolean := Sweeps.Poses (S, Low) <= Sweeps.Poses (S, High);
+                        To_Low, To_High : Real := 0.0;
+                     begin
+                        for I in Now'Range loop
+                           To_Low := To_Low + (Now (I) - Low (Low'First + I - Now'First)) ** 2;
+                           To_High := To_High + (Now (I) - High (High'First + I - Now'First)) ** 2;
+                        end loop;
+                        Fewer := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (if At_Low then Low else High);
+                        Have := Sweeps.Poses (S, Fewer.Element);
+                        --  The closer stands at the end it is nearer.
+                        There := At_Low = (To_Low <= To_High);
+                     end;
+                  end if;
                end;
             end if;
          end Read_Status;
@@ -403,6 +427,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
          loop
             Hold_Beat (Read_Status'Access);
             exit when not Helps;
+            if not There then
+               Move_Group (G, Fewer.Element);
+            end if;
             Gather_Own_Poses (G, Positive'Max (Driver.Robot.Hand.Selfsight.Needed, 2 * Have), Reached);
             exit when not Reached;
             --  The estimators place again at the next beat that sees the poses doubled; one more beat to read it.

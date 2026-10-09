@@ -75,6 +75,12 @@ package Driver.Robot.Hand.Sweep is
    function High_End (S : State; Channel : Positive) return Views.View
      with Pre => Has_Ends (S, Channel);
 
+   function Low_Closer (S : State; Channel : Positive) return Real_Array
+     with Pre => Has_Ends (S, Channel);
+   function High_Closer (S : State; Channel : Positive) return Real_Array
+     with Pre => Has_Ends (S, Channel);
+   --  The closer's readings at each end of the channel's travel, as its views were taken there.
+
    function Lobes_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector
      with Pre => Status (S, Channel) = Measured;
    --  Here is the low end, There the high end.
