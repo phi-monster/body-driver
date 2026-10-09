@@ -3,6 +3,7 @@
 
 with Ada.Command_Line;
 with Driver.Action.Tests;
+with Driver.Apart_Tests;
 with Driver.Brain.Tests;
 with Driver.Core_Tests;
 with Driver.Distributions.Tests;
@@ -19,6 +20,7 @@ procedure Selftest is
    Failed : Natural;
 begin
    Driver.Core_Tests.Register;
+   Driver.Apart_Tests.Register;
    Driver.Distributions.Tests.Register;
    Driver.Geometry.Tests.Register;
    Driver.Pixels.Tests.Register;

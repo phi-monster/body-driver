@@ -79,6 +79,7 @@ package body Driver.Brain.Rounds is
       Previous_Moved : Boolean := True;
       Round_Number   : Natural := 0;
       Finished       : Boolean := False;
+      Wait_Beats     : Positive := 1;   --  beats from a call that got no answer to the next call
 
       --  One answer: read, bound, checked and run, or refused before anything
       --  moves. Happened tells the next round which.
@@ -243,9 +244,24 @@ package body Driver.Brain.Rounds is
                         if Around.Episode_Over then
                            Say ("the episode ended while the brain was writing");
                         elsif A.How = Driver.Brain.Service.Failed then
-                           Happened := "Your last answer could not be read: " & A.Why & ".";
-                           Say ("no program: " & To_String (A.Why));
+                           --  No answer at all: the service could not be reached
+                           --  or replied with an error. The brain wrote nothing, so
+                           --  it is told nothing; it is asked again after twice as
+                           --  many beats as the last time, so a service that is down
+                           --  is not called, nor its failure logged, every beat.
+                           Say ("no program: " & To_String (A.Why) & "; asking again after" & Wait_Beats'Image
+                                & (if Wait_Beats = 1 then " beat" else " beats"));
+                           declare
+                              Idle : Snapshot;
+                           begin
+                              for B in 2 .. Wait_Beats loop
+                                 exit when Around.Episode_Over;
+                                 Around.Look (Table, Idle);
+                              end loop;
+                           end;
+                           Wait_Beats := (if Wait_Beats > Positive'Last / 2 then Positive'Last else 2 * Wait_Beats);
                         else
+                           Wait_Beats := 1;
                            Answer (A, Now, View);
                         end if;
                      end;

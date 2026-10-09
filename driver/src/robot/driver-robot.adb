@@ -3,6 +3,7 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Ada.Directories;
 with Ada.Text_IO;
+with Driver.Beats;
 with Driver.Bytes;
 with Driver.Clock;
 with Driver.Conventions;
@@ -203,8 +204,26 @@ package body Driver.Robot is
    procedure Estimate_Now (M : in out Model) is
    begin
       Driver.Recording.Write_Shared (Driver.Recording.Estimates_Asked, Driver.Bytes.To_Bytes (""));
-      Recompute (M);
+      if M.Apart then
+         M.Due := True;
+         Driver.Beats.Wait_For_Estimates;
+      else
+         Recompute (M);
+      end if;
    end Estimate_Now;
+
+   procedure Compute_Apart (M : in out Model) is
+   begin
+      M.Apart := True;
+   end Compute_Apart;
+
+   function Estimates_Due (M : Model) return Boolean is (M.Due);
+
+   procedure Compute_Estimates (M : in out Model) is
+   begin
+      Recompute (M);
+      M.Due := False;
+   end Compute_Estimates;
 
    procedure Observe (M : in out Model; O : Observation; Sent : Driver.Commands.Command) is
    begin
@@ -218,7 +237,11 @@ package body Driver.Robot is
       --  The estimates are redone whenever the evidence behind them has
       --  doubled: a logarithmic number of times over any stream.
       if M.Beats >= 2 * M.Graph_Evidence then
-         Recompute (M);
+         if M.Apart then
+            M.Due := True;
+         else
+            Recompute (M);
+         end if;
       end if;
    end Observe;
 

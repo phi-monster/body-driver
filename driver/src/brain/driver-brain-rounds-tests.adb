@@ -16,6 +16,9 @@ package body Driver.Brain.Rounds.Tests is
    LF : constant String := [ASCII.LF];
 
    package Text_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, String);
+   package Count_Vectors is new Ada.Containers.Vectors (Positive, Natural);
+
+   Looks_Seen : Natural := 0;   --  every look of every scene, for the brain fixture to note when it is asked
 
    function Has (S, Part : String) return Boolean is (Ada.Strings.Fixed.Index (S, Part) > 0);
 
@@ -49,6 +52,7 @@ package body Driver.Brain.Rounds.Tests is
       if S.Looks_Left > 0 then
          S.Looks_Left := S.Looks_Left - 1;
       end if;
+      Looks_Seen := Looks_Seen + 1;
       Now := (others => <>);
       Now.Images.Append (Picture);
       Now.Images.Append (Picture);
@@ -59,10 +63,13 @@ package body Driver.Brain.Rounds.Tests is
 
    overriding function Episode_Over (S : Scene) return Boolean is (S.Looks_Left = 0);
 
-   --  A brain that answers from a script and keeps every prompt.
+   --  A brain that answers from a script and keeps every prompt and the look
+   --  it was asked after. A script line "FAIL why" is a call that got no
+   --  answer (the service could not be reached).
    type Scripted is new Thinker with record
       Programs : Text_Vectors.Vector;
       Prompts  : Text_Vectors.Vector;
+      Asked_At : Count_Vectors.Vector;
    end record;
 
    overriding function Write_Program
@@ -81,8 +88,13 @@ package body Driver.Brain.Rounds.Tests is
       Text : constant String := (if T.Programs.Is_Empty then "done" & LF else T.Programs.First_Element);
    begin
       T.Prompts.Append (Prompt);
+      T.Asked_At.Append (Looks_Seen);
       if not T.Programs.Is_Empty then
          T.Programs.Delete_First;
+      end if;
+      if Text'Length > 5 and then Text (Text'First .. Text'First + 4) = "FAIL " then
+         return (How => Driver.Brain.Service.Failed, Why => To_Unbounded_String (Text (Text'First + 5 .. Text'Last)),
+                 others => <>);
       end if;
       return (How => Driver.Brain.Service.Ended, Program => To_Unbounded_String (Text), others => <>);
    end Write_Program;
@@ -203,7 +215,7 @@ package body Driver.Brain.Rounds.Tests is
       Around : Scene := (Looks_Left => Looks);
       Eyes   : Eyes_Fixture;
    begin
-      Brain := (Programs => Programs, Prompts => <>);
+      Brain := (Programs => Programs, Prompts => <>, Asked_At => <>);
       Doer := (Done_Wants => <>);
       Run ("Pick up the scissors.", Around, Brain, Eyes, Doer);
    end Episode;
@@ -287,6 +299,31 @@ package body Driver.Brain.Rounds.Tests is
       Check (Doer.Done_Wants.Is_Empty, "a program written while the episode ended does not run");
    end Episode_Ends;
 
+   --  A call that gets no answer is not told to the brain as an answer of its,
+   --  and the next call waits twice as many beats as the one before.
+   procedure No_Answer is
+      Brain    : Scripted;
+      Doer     : Body_Fixture;
+      Programs : Text_Vectors.Vector;
+   begin
+      for I in 1 .. 3 loop
+         Programs.Append ("FAIL connection refused");
+      end loop;
+      Programs.Append ("done" & LF);
+      Episode (Programs, Brain, Doer);
+      Check (Natural (Brain.Prompts.Length) = 4, "the brain was asked" & Brain.Prompts.Length'Image
+             & " times, not three that got no answer and one done");
+      if Natural (Brain.Asked_At.Length) = 4 then
+         Check (Brain.Asked_At (2) - Brain.Asked_At (1) = 1 and then Brain.Asked_At (3) - Brain.Asked_At (2) = 2
+                and then Brain.Asked_At (4) - Brain.Asked_At (3) = 4,
+                "the calls after one, two and three that got no answer came" & Natural'Image (Brain.Asked_At (2) - Brain.Asked_At (1))
+                & "," & Natural'Image (Brain.Asked_At (3) - Brain.Asked_At (2)) & " and"
+                & Natural'Image (Brain.Asked_At (4) - Brain.Asked_At (3)) & " beats apart, not 1, 2 and 4");
+         Check (Has (Brain.Prompts (4), Driver.Brain.Round.First_Round) and then not Has (Brain.Prompts (4), "connection"),
+                "a call that got no answer was told to the brain as if it had answered");
+      end if;
+   end No_Answer;
+
    procedure Register is
    begin
       Register ("brain.rounds.lift", "a round loses the name, the change, or the account of how it ended",
@@ -298,6 +335,8 @@ package body Driver.Brain.Rounds.Tests is
       Register ("brain.rounds.look", "the brain looks through the wrong eye", Eye_Switch'Access);
       Register ("brain.rounds.same", "the brain is not told it repeats a program that moved nothing", Same_Again'Access);
       Register ("brain.rounds.episode", "a program written for an episode that ended still runs", Episode_Ends'Access);
+      Register ("brain.rounds.no_answer", "a call that got no answer is told to the brain, or the service is called every beat",
+                No_Answer'Access);
    end Register;
 
 end Driver.Brain.Rounds.Tests;

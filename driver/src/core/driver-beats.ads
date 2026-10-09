@@ -55,6 +55,17 @@ package Driver.Beats is
    --  so a decider that only looks never moves the robot. A failure in
    --  During still answers the beat before it propagates.
 
+   procedure Wait_For_Estimates;
+   --  Decider side, in a held beat, when the estimates it asked for are
+   --  computed apart from the main loop (Driver.Robot.Estimate_Now): answers
+   --  the beat with a hold, waits until the main loop has adopted them, then
+   --  takes the next beat, so the caller goes on inside a held beat. The robot
+   --  is answered every beat meanwhile.
+
+   procedure Estimates_Adopted;
+   --  Main side: the estimates computed apart are in the models; a decider
+   --  waiting for them goes on. With nobody waiting it does nothing.
+
    procedure Offer
      (Beat         : Driver.Clock.Beat;
       O            : Driver.Observations.Observation;
