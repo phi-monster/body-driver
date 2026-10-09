@@ -210,6 +210,9 @@ package body Driver.Robot is
       Took ("lags");
       if not M.From_File (Stored_Responses) then
          Lockin.Measure_Rest_Noise (M);
+      end if;
+      Took ("rest noise");
+      if not M.From_File (Stored_Responses) then
          Lockin.Measure (M);
       end if;
       Took ("lock-in");

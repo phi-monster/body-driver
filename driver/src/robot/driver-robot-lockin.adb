@@ -3,14 +3,13 @@ with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Distributions;
-with Driver.Parallel_For;
+with Driver.Shared_For;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Lag;
 with Driver.Robot.Regression;
 with Driver.Stats;
 with Driver.Uncertain;
-with System.Multiprocessors;
 
 package body Driver.Robot.Lockin is
 
@@ -576,18 +575,9 @@ package body Driver.Robot.Lockin is
                            end if;
                         end Fit_Cell;
 
-                        --  The cells shared among as many works as the machine has processors, every so many
-                        --  cells to each (the textured ones lie together), all fitted at once.
-                        Works : constant Positive := Natural'Min (N, Natural (System.Multiprocessors.Number_Of_CPUs));
-                        procedure Fit_Share (Work : Positive) is
-                           Cell : Natural := Work;
-                        begin
-                           while Cell <= N loop
-                              Fit_Cell (Cell);
-                              Cell := Cell + Works;
-                           end loop;
-                        end Fit_Share;
-                        procedure Fit_Shares is new Driver.Parallel_For (Fit_Share);
+                        --  The cells are fitted at once, each processor taking the next cell nobody has: a cell's
+                        --  fit takes as many rounds as its weights need to settle, and some take many more.
+                        procedure Fit_Cells is new Driver.Shared_For (Fit_Cell);
                      begin
                         for R in 1 .. Rows loop
                            X (R, 1) := 1.0;
@@ -595,7 +585,7 @@ package body Driver.Robot.Lockin is
                               X (R, K + 1) := Pushed_Change (Cols (K).Group, Beat_Of (R) - Lag, Cols (K).Channel);
                            end loop;
                         end loop;
-                        Fit_Shares (1, Works);
+                        Fit_Cells (1, N);
                         for Cell in 1 .. N loop
                            S.Noise.Append (Noise_Of (Cell));
                         end loop;

@@ -12,6 +12,7 @@ with Driver.Geometry.Tests;
 with Driver.Instrument.Tests;
 with Driver.Lanes_Tests;
 with Driver.Parallel_For_Tests;
+with Driver.Shared_For_Tests;
 with Driver.Pixels.Tests;
 with Driver.Robot.Hand.Tests;
 with Driver.Robot.Tests;
@@ -25,6 +26,7 @@ begin
    Driver.Core_Tests.Register;
    Driver.Apart_Tests.Register;
    Driver.Parallel_For_Tests.Register;
+   Driver.Shared_For_Tests.Register;
    Driver.Lanes_Tests.Register;
    Driver.Distributions.Tests.Register;
    Driver.Alignment.Tests.Register;
