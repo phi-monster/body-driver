@@ -2,6 +2,7 @@ with Ada.Containers.Vectors;
 with Driver.Beats;
 with Driver.Bytes;
 with Driver.Recording;
+with Driver.Services;
 
 package body Driver.Apart is
 
@@ -11,6 +12,15 @@ package body Driver.Apart is
    begin
       Driver.Recording.Write_Shared (Kind, Driver.Bytes.To_Bytes (""));
    end Note;
+
+   --  A part the estimator gives the models is a step for the services'
+   --  replies (Driver.Services.Step_Begins), begun with its record.
+   procedure Take_Step is
+      Place : Positive;
+   begin
+      Driver.Recording.Write_Shared (Driver.Recording.Taken_In, Driver.Bytes.To_Bytes (""), Place);
+      Driver.Services.Step_Begins (Place);
+   end Take_Step;
 
    --  Home: the main loop has the models. To_Compute: they went apart and the
    --  estimates are next. Computing: the estimator computes them. Taking_In:
@@ -143,10 +153,10 @@ package body Driver.Apart is
                   Compute;
                   Backlog.Computed;
                when Rest_Of =>
-                  Note (Driver.Recording.Taken_In);
+                  Take_Step;
                   Rest (M);
                when Kept_Back =>
-                  Note (Driver.Recording.Taken_In);
+                  Take_Step;
                   Robot_Part (M);
                   if Due then
                      Backlog.Due_Again (M);
