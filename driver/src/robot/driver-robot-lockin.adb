@@ -32,11 +32,18 @@ package body Driver.Robot.Lockin is
    type Natural_Grid is array (Positive range <>, Driver.Observations.Group_Id range <>) of Natural;
    type Natural_Grid_Access is access Natural_Grid;
    procedure Free is new Ada.Unchecked_Deallocation (Natural_Grid, Natural_Grid_Access);
+   type Noisy_Cell_Access is access Noisy_Cell_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Noisy_Cell_Array, Noisy_Cell_Access);
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
+
+   --  An eye mostly sees the world: a whole image moves when a significant majority of what can move does. The same
+   --  half is how much of the energy of the cells too noisy to tell the cells far above the rest must carry to be what
+   --  moves (Cells_Shown).
+   Half : constant Real := 0.5;
 
    --  A regressor: one channel of one commandable group.
    type Column is record
@@ -61,6 +68,57 @@ package body Driver.Robot.Lockin is
       end return;
    end Median_Shift;
 
+   function Cells_Disagree (Showing, Silent : Natural) return Boolean is
+     (Regression.Count_Significant (Showing + Silent, Showing + Silent, Half)
+      and then not Regression.Count_Significant (Showing, Showing + Silent, Half));
+
+   function Cells_Shown (Pool : Noisy_Cell_Array; Typical : Real; Able_Disagree : Boolean) return Shown is
+      Z : constant Real := Driver.Conventions.Z;
+
+      --  The variance of a cell's energy at the typical energy: Var ** 2 times that of its statistic.
+      function Variance_Of (C : Noisy_Cell) return Real is
+        (2.0 * Real (C.Freedom) * C.Variance ** 2 + 4.0 * C.Variance * Typical);
+
+      function Far_Above (C : Noisy_Cell) return Boolean is
+        (C.Responds and then C.Energy > Typical + Z * Sqrt (Variance_Of (C)));
+
+      Far, Rest : Natural := 0;
+      Far_Energy, Energy : Real := 0.0;
+      Weights, Weighted  : Real := 0.0;
+   begin
+      for C of Pool loop
+         Energy := Energy + Real'Max (0.0, C.Energy);
+         if Far_Above (C) then
+            Far := Far + 1;
+            Far_Energy := Far_Energy + C.Energy;
+         end if;
+      end loop;
+      declare
+         Theirs : constant Boolean := Able_Disagree and then Far > 0 and then Far_Energy >= Half * Energy;
+         Counted : constant Natural := (if Theirs then Far else 0);
+      begin
+         for C of Pool loop
+            if not (Theirs and then Far_Above (C)) then
+               Rest := Rest + 1;
+               Weights := Weights + 1.0 / Variance_Of (C);
+               Weighted := Weighted + C.Energy / Variance_Of (C);
+            end if;
+         end loop;
+         if Rest = 0 then
+            return (Least => Counted, Most => Counted);
+         end if;
+         declare
+            Mean  : constant Real := Weighted / Weights;
+            Sigma : constant Real := 1.0 / Sqrt (Weights);
+            Low   : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));
+            High  : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean + Z * Sigma) / Typical));
+         begin
+            return (Least => Counted + Natural (Real'Floor (Low * Real (Rest))),
+                    Most  => Counted + Natural (Real'Ceiling (High * Real (Rest))));
+         end;
+      end;
+   end Cells_Shown;
+
    --  How many of an eye's textured cells show group G's motion, at least and
    --  at most, which is what a whole image moving takes (Measure): the cells
    --  whose displacement follows the group, and the cells too noisy to tell by
@@ -75,12 +133,15 @@ package body Driver.Robot.Lockin is
    --  statistic it would have, less Z of that statistic's own spread, reaches
    --  the critical value of its test; the energy over its variance that takes
    --  is Needed. Whether a cell can tell depends on its noise alone, not on
-   --  whether it responded, so the weighted mean of the energies of all the
-   --  cells that cannot is unbiased. As a share of the median, it Z standard
-   --  errors below is the least share of those cells that show the motion, and
-   --  Z standard errors above the most. A picture that moves only where it is
-   --  best measured gains nothing by this, however many cells are too noisy to
-   --  tell: together they show no energy.
+   --  whether it responded, so the energies of all the cells that cannot say,
+   --  whatever those cells did, how much of the motion they show: Cells_Shown,
+   --  as a share of the median. A picture that moves only where it is best
+   --  measured gains nothing by this, however many cells are too noisy to
+   --  tell: together they show no energy, and the few of them that show a
+   --  great deal are what moves, not the others. The cells that can tell are
+   --  the witnesses of the whole: they are enough to say it when even all of
+   --  them showing it would be a significant majority, and then a significant
+   --  majority of them must show it (Disagree says they do not).
    procedure Cells_Showing
      (G          : Group_Id;
       Textured   : Flags;
@@ -89,6 +150,7 @@ package body Driver.Robot.Lockin is
       Dof        : Natural_Grid;
       Noise      : Real_Vectors.Vector;
       Least, Most : out Natural;
+      Disagree    : out Boolean;
       Resting     : out Real)
    is
       Z        : constant Real := Driver.Conventions.Z;
@@ -120,6 +182,7 @@ package body Driver.Robot.Lockin is
       end loop;
       Least := Count;
       Most := Count;
+      Disagree := False;
       --  The cells that did not respond, together: each one's energy is an unbiased estimate of the motion it
       --  shows (its statistic less its degrees of freedom, in its noise), whatever it is, and under no motion
       --  has the variance of a chi-square: twice its degrees of freedom times its noise to the fourth.
@@ -150,8 +213,9 @@ package body Driver.Robot.Lockin is
             Typical   : constant Real := Driver.Stats.Median (Energies (1 .. Count));
             Needed    : Real_Array (1 .. Largest) := [others => 0.0];   --  by degrees of freedom, found when first asked
             Able      : Natural := 0;   --  cells that could tell and responded
+            Silent    : Natural := 0;   --  cells that could tell and did not
             Too_Noisy : Natural := 0;   --  cells that could not tell
-            Weights, Weighted : Real := 0.0;
+            Pool      : Noisy_Cell_Access := new Noisy_Cell_Array (1 .. Textured'Length);
          begin
             for Cell in Textured'Range loop
                if Textured (Cell) and then Dof (Cell, G) > 0 and then Typical > 0.0 then
@@ -165,35 +229,47 @@ package body Driver.Robot.Lockin is
                      if Needed (Freedom) * Var <= Typical then
                         if Responding (Cell, G) then
                            Able := Able + 1;
+                        else
+                           Silent := Silent + 1;
                         end if;
                      else
-                        declare
-                           --  The variance of the cell's energy: Var ** 2 times that of its statistic.
-                           Weight : constant Real := 1.0 / (2.0 * Real (Freedom) * Var ** 2 + 4.0 * Var * Typical);
-                        begin
-                           Too_Noisy := Too_Noisy + 1;
-                           Weights := Weights + Weight;
-                           Weighted := Weighted + Weight * Energy (Cell, G);
-                        end;
+                        Too_Noisy := Too_Noisy + 1;
+                        Pool (Too_Noisy) :=
+                          (Energy => Energy (Cell, G), Variance => Var, Freedom => Freedom,
+                           Responds => Responding (Cell, G));
                      end if;
                   end;
                end if;
             end loop;
+            Disagree := Cells_Disagree (Able, Silent);
             if Too_Noisy > 0 then
                declare
-                  Mean  : constant Real := Weighted / Weights;
-                  Sigma : constant Real := 1.0 / Sqrt (Weights);
-                  Low   : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));
-                  High  : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean + Z * Sigma) / Typical));
+                  Show : constant Shown := Cells_Shown (Pool (1 .. Too_Noisy), Typical, Disagree);
                begin
-                  Least := Natural'Max (Count, Able + Natural (Real'Floor (Low * Real (Too_Noisy))));
-                  Most := Natural'Max (Count, Able + Natural (Real'Ceiling (High * Real (Too_Noisy))));
+                  Least := Natural'Max (Count, Able + Show.Least);
+                  Most := Natural'Max (Count, Able + Show.Most);
                end;
             end if;
+            Free (Pool);
          end;
       end if;
       Free (Energies);
    end Cells_Showing;
+
+   function Judge (Responding, Textured, Least, Most : Natural; Able_Disagree : Boolean) return Eye_Response is
+      --  The per-cell test's own false-alarm rate.
+      P0 : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+   begin
+      if not Regression.Count_Significant (Responding, Textured, P0) then
+         return Nothing;
+      elsif not Able_Disagree and then Regression.Count_Significant (Least, Textured, Half) then
+         return Whole;
+      elsif Regression.Count_Significant (Textured - Most, Textured, Half) then
+         return Patch;
+      else
+         return Undecided;
+      end if;
+   end Judge;
 
    procedure Measure (M : in out Model) is
       Groups : constant Natural := Natural (M.Groups.Length);
@@ -207,6 +283,12 @@ package body Driver.Robot.Lockin is
       --  as outliers.
       function Pushed_Change (G : Group_Id; Beat : Natural; Channel : Positive) return Real is
         (if Channels.Pushed (M, G, Beat) then Channels.Change (M, G, Beat, Channel) else 0.0);
+
+      --  The beat at which the push of a group that is under way at a beat began, for every group and beat.
+      Starts : Natural_Access := new Natural_Array (1 .. Groups * M.Beats);
+
+      function Push_Start (G : Group_Id; Beat : Natural) return Natural is
+        (Starts ((Natural (G) - 1) * M.Beats + Beat + 1));
    begin
       M.Graph.Effects.Clear;
       M.Graph.Effects.Append (Eye_Effect'(others => <>), Ada.Containers.Count_Type (Groups * Eyes));
@@ -216,8 +298,25 @@ package body Driver.Robot.Lockin is
          end if;
       end loop;
       if All_Columns = 0 or else M.Beats < 2 then
+         Free (Starts);
          return;
       end if;
+      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+         declare
+            Began : Natural := 0;
+         begin
+            for B in 0 .. M.Beats - 1 loop
+               if M.Groups (G).Commandable and then Channels.Pushed (M, G, B) then
+                  if B = 0 or else not Channels.Pushed (M, G, B - 1) then
+                     Began := B;
+                  end if;
+                  Starts ((Natural (G) - 1) * M.Beats + B + 1) := Began;
+               else
+                  Starts ((Natural (G) - 1) * M.Beats + B + 1) := 0;
+               end if;
+            end loop;
+         end;
+      end loop;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
             S     : Eye_Stream renames M.Eyes (E);
@@ -227,12 +326,21 @@ package body Driver.Robot.Lockin is
 
             --  A beat of the eye can be explained when its displacement was
             --  measured, every commandable group's readings exist for the
-            --  beat it shows and the one before, and at most one group was
-            --  being pushed then: a push that coincides with another is no
-            --  reference for either (their effects cannot be told apart).
+            --  beat it shows and the one before, at most one group was being
+            --  pushed then, no other group's reading moved (a push that
+            --  coincides with another group's motion is no reference for
+            --  either: their effects cannot be told apart, and a group that
+            --  moves with no push under way, one that ended or was given up
+            --  while it kept moving, moves its picture all the same), and the
+            --  push, if there is one, began from a picture that had settled,
+            --  at the beat before it began: the tail of an earlier motion is
+            --  not the push's effect. (That beat, not the one that shows the
+            --  push's first reading: the watch restarts at the lag the eye
+            --  had when the beat was taken, which is not yet measured early.)
             function Usable (B : Natural) return Boolean is
                R      : constant Integer := B - Lag;
                Pushes : Natural := 0;
+               Pusher : Group_Id := M.Groups.First_Index;
             begin
                if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 then
                   return False;
@@ -243,10 +351,22 @@ package body Driver.Robot.Lockin is
                         return False;
                      elsif Channels.Pushed (M, G, R) then
                         Pushes := Pushes + 1;
+                        Pusher := G;
+                     elsif Channels.Moving (M, G, R) then
+                        return False;
                      end if;
                   end if;
                end loop;
-               return Pushes <= 1;
+               if Pushes > 1 then
+                  return False;
+               elsif Pushes = 1 then
+                  declare
+                     Before : constant Integer := Integer (Push_Start (Pusher, Natural (R))) - 1;
+                  begin
+                     return Before >= 0 and then Before < Natural (S.Settled_At.Length) and then S.Settled_At (Before);
+                  end;
+               end if;
+               return True;
             end Usable;
          begin
             S.Noise.Clear;
@@ -448,10 +568,8 @@ package body Driver.Robot.Lockin is
                         for Cell in 1 .. N loop
                            S.Textured.Append (Textured (Cell));
                         end loop;
-                        --  The per-cell test's own false-alarm rate.
                         declare
-                           P0 : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
-                           T  : Natural := 0;
+                           T : Natural := 0;
                         begin
                            for Cell in 1 .. N loop
                               if Textured (Cell) then
@@ -479,27 +597,17 @@ package body Driver.Robot.Lockin is
                                        --  those that respond, and the share of the cells too noisy
                                        --  to tell that show it together.
                                        Least, Most : Natural;
+                                       Disagree    : Boolean;
                                        Resting     : Real;
-                                       --  An eye mostly sees the world: a whole image moves when
-                                       --  a significant majority of what can move does.
-                                       Half : constant Real := 0.5;
                                     begin
                                        Cells_Showing (G, Textured.all, Responding.all, Energy.all, Dof.all, S.Noise,
-                                                      Least, Most, Resting);
+                                                      Least, Most, Disagree, Resting);
                                        Effect.Resting := Resting;
                                        Effect.Responding := Count;
                                        Effect.Textured := T;
                                        Effect.Fraction :=
                                          (Value => F, Sigma => Sqrt (F * (1.0 - F) / Real (T)), Degrees_Of_Freedom => 0);
-                                       if not Regression.Count_Significant (Count, T, P0) then
-                                          Effect.Verdict := Nothing;
-                                       elsif Regression.Count_Significant (Least, T, Half) then
-                                          Effect.Verdict := Whole;
-                                       elsif Regression.Count_Significant (T - Most, T, Half) then
-                                          Effect.Verdict := Patch;
-                                       else
-                                          Effect.Verdict := Undecided;
-                                       end if;
+                                       Effect.Verdict := Judge (Count, T, Least, Most, Disagree);
                                     end;
                                  end if;
                                  M.Graph.Effects.Replace_Element ((Natural (G) - 1) * Eyes + Natural (E), Effect);
@@ -518,6 +626,7 @@ package body Driver.Robot.Lockin is
             end if;
          end;
       end loop;
+      Free (Starts);
    end Measure;
 
    procedure Measure_Rest_Noise (M : in out Model) is

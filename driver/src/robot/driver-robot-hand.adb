@@ -75,6 +75,7 @@ package body Driver.Robot.Hand is
       Judged   : Natural := 0;                        --  the beat the latest push judged for lowering began
       Stalled  : Natural := 0;                        --  the beat the latest push judged stalled began
       Stalls   : Natural := 0;                        --  how many pushes were judged stalled
+      Rests    : Natural := 0;                        --  how many presses the watcher found at a rest, used or not
       Depth    : Estimate;
       Axis     : Direction_Estimate;
       Unsized  : Unbounded_String;                    --  what of its sizes is not measured, and why
@@ -868,10 +869,12 @@ package body Driver.Robot.Hand is
       Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked or else Stalled_Now, Is_Pushing, Is_Still,
                                          Tool_In_Arm (M, R.Arm, O),
                                          O.Readings.Element (Arm_Group (M, R.Arm)), O.Readings.Element (R.Group),
-                                         Found, Press);
+                                         Found, Press,
+                                         Retargeted => Driver.Robot.Channels.Target_Changed (M, Arm_Group (M, R.Arm), Natural (O.Beat)));
       if not Found then
          return;
       end if;
+      R.Rests := R.Rests + 1;
       if Opening_Of (R, M, Press.Closer.Element, Which) then
          Driver.Robot.Hand.Tips.Add (R.Book, Press, Which, Measured_Slides (R, Id, O, Which));
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": a press at the " & Opening'Image (Which)

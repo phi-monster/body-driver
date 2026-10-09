@@ -848,6 +848,111 @@ half of it is tried. (`robot.ends.*`, `hand.press.yaw`, `hand.measure.yaw`.) The
 sigma above the predicted contact, not doubling from the least move over it) is the same sentence: the stop of the
 arm's own showed at the sixth of thirteen pushes.
 
+**Lesson: the first tilt is no less than the least that tells a tip from a stop, and what a press touches is a vertex
+of the finger (A31).** A31's left hand (the 9d9316b build, before the aim and the ends): four lobes, none
+confirmed, 7.57 to 8.78 mm from the support point of the truth, of which 0.22 to 1.73 mm along the press (within 1.5
+of its sigmas everywhere): the rest is lateral. The truth's collision vertices say what each press touched (the
+finger's lowest vertex in its own frame at the deepest call of each stretch on the table): the finger ends in a flat
+pad, 10 mm across (z from -0.0049 to +0.0051 in the finger's frame, 1.5 mm in y), and the press meets one of its two
+lower corners. Open lobe 1: the straight press (beat 4901, the finger 42.6 degrees from straight down) the corner
+at z = -0.0049, its second tilted press (5207, 56.8 degrees, the finger rolled 50 degrees about its axis) the other,
++0.0051; open lobe 2 the same (-0.0049 at 30.3 degrees, +0.0051 at 57.9); every one of the six presses of the two
+closed lobes the same corner, -0.0049, with the finger 28 to 34 degrees from straight down. So at the tilts of the
+hand's own angle (0.93 to 1.2 rad for the open hand) the vertex flips with the roll, 10 mm between presses, and a
+point fit sits between them; and at the closed hand's own angle (0.020 and 0.029 rad, the two lobes almost along
+each other from the eye) the tilted presses were 1 to 5 degrees from the straight one and told nothing across the
+sight: the tip 3.82 along its line known to 0.092 needs 0.452 rad (Least_Tilt) to be told from a stop, the next
+tilt, double, was 0.041, under it, and each side ended after one press; the lobes were left 'not tested across the
+sight', their lateral region 6.9 mm wide, and the 7.4 to 7.8 mm they were off is that stated width. The first fix
+(8d17591) made the first tilt of a side the hand's own angle and no less than the least; A36 and A39, which ran it,
+showed the other side of it: the least was taken from the tip distance's sigma, which after one press carries the
+table plane's offset (15 per cent of the distance), so a closed lobe's first tilt was 1.14 to 1.2 rad, which the arm
+could not make ('a press stopped short of the table at 1.2185 rad', A36 and A39) or made by laying the hand down on
+its palm (A36's third press of open lobe 1: the truth has the finger's side on the table, vertex (0, -0.0124,
+-0.0263), the finger 84.9 degrees from straight down, the palm 1.6 mm above the table), while the same lobe
+after the plane was pinned (A37, 1.9 per cent) asked 0.36 and was pressed at 0.40, 0.55, 0.40. Two presses of one tip
+tell it from a stop of the eye by the difference of their hits, s T^2 / 2, whose noise is the tool's own place in
+each (Pressing.Least_Push), not the tip distance's sigma, which both presses share in its plane offset: so
+Least_Tilt takes the push, and the first tilt of a side is the least (Aims.First_Tilt: not the hand's own angle,
+0.020 for a closed hand and 0.84 to 1.2 for an open one, which neither is a tilt anything asks for), 0.28 rad
+for A36's first press (a push of 0.148 on 5.29), and the presses double from it while the tip rests on them. The
+hand's own angle only where no tilt under a right angle tells a stop (the distance not known or the tool's place
+not measured: the press at it is another look, which brought A31's hand 2 closed lobe 1 from 3.93 to 0.15). The
+hull and the finger-side press are the next lessons.
+
+**Lesson: the arm does not leave the table until the hand has rested on it, and a rest after the retreat is no
+press (A35).** A35's first press (the 7bd2880 build, hands from A32's body file): 'a press at the OPEN opening, at
+beat 911 ... lobe 1 provisional 11.4457 +- 0.1117 along its sight', where 11.4457 is, to four decimals, 'the eye
+11.4457 above the table' logged at the aim before the descent (190 mm in the truth), and the truth had the finger on
+the table with the camera 63 to 68 mm above it. The model's own eye path (the replay of A35's recording, same code) says how: the
+last push of the descent was blocked at beat 880 (the eye 6.89 from the aim), the hand eased back for 18 beats
+(5.34 to 5.09 along the way down), the retreat began at 898 and the eye was back at the aim at 910; the watcher
+took the first rest after the retreat, 911, for the press. The watcher took a press at the first rest after
+'another push begins', and the decider's let-go is a hold at the readings the block left; when the arm has not
+moved by a step the tracker sees after the hold, Channels.Asked starts no push for it, Move_Group returns at once,
+and the retreat is the next command and the only push, whose end is the aim. In A35's second press the hold did
+start a push (a jump back at 1052 to 1056) and the decider waited for its rest, 130 beats and more: the design,
+which A31 followed (the press 130 beats after the block). The
+poisoned first press sets a book of one press with a sigma of 0.11 at a distance about three times the real one, and
+the second press 'went past the contact its presses predict and met nothing' (A27's 'confirmed 18.7122' was the
+same family). Now: the first command that takes effect for the arm after the block (Channels.Target_Changed) is
+the let-go whether or not it began a push; a second one before the hand has rested ends the watching without a
+press (the rest that follows is the retreat's); and the decider, after the hold, waits until the watcher has found the
+press (at the arm's own rest) before it retreats, at most the stream's length, and says so when none was found (the
+press is then not made). A cap of the longest push the arm had had took, first tried, lost A37's presses: its longest
+push was 135 beats and the readings of a hard press creep on for 500 (a simulator's readings repeat exactly or they are
+not still: stillness against a noise of 1e-17 is exactness; the judgement of rest is A's, and a rest against the
+smallest change that matters to a press is proposed to A). Teeth: hand.presses.hold (the hold begins no push, the arm
+rests: found at the rest), hand.presses.retreat (the retreat is sent first: no press, and the watcher is free for the
+next); the push-based let-go of A16 and the late answer are unchanged. The decider's wait has no rig that reaches it
+(the rig never blocks a descent on a table): it is read in the next run's log.
+
+**Lesson: a joint's end is found again at the same reading from another pose; one stop is a contact (A36).** The ends
+of 25bbbd6 took one stop for an end and made it the highest (lowest) reading the joint had shown. A36 (a2ed747, hands
+from A32's body file): 'body: group 1 channel 4 stopped at -1.418393 asked -1.293375 from -1.993641 ... an end of the
+channel upwards', a fast descent blocked at once at the tilt of 0.84 rad, and the truth has the finger AND the palm on
+the table there (link8 0.7649 and link6 0.7665 m, the table at 0.7649): a contact the tip model did not predict, not a
+limit of the joint, which the boot had read up to 0.2383 (A22's boot 0.509). That one stop made 0.2383 the fourth
+joint's upward end, and the next descent, lobe 2 at open, 'cannot press lower: channel 4 of group 1 would pass its
+end, upwards at 0.238338 ... going to 0.5': a press lost. Same run, 'channel 4 stopped at -1.966150' (down) where
+A34 had '-2.174645': two readings for one joint's low side, at most one a limit (A22's boot read -2.1633). On the third
+joint: -0.0359 (A22 press 2), -0.0368 and -0.0359 (A27, other poses) against +0.0731, +0.0705, +0.0194, which vary
+with the other joints. So a stop is kept with the group's readings where it was made (Stop_Record), and is an end when
+the channel stops at the same reading from another pose: some other channel standing somewhere else. Two readings are
+one reading when they differ by less than D = the false alarm rate of Z times the channel's travel over two, the
+distance within which two independent contacts, anywhere in the travel, would meet by chance no more often than a Z
+test alarms, and no less than Z deviations of the difference of two readings (the readings' noise, which is the whole
+of it for a real robot's coarse readings and nothing in a simulator whose readings repeat exactly: 1e-17; the
+controller leaves a soft stop a few thousandths of a radian apart from one push to the next, 0.0009 on the third
+joint, under D = 0.0018 of its 1.3 rad of travel). The fit's floor was the first candidate for the scale and
+is not used: it is the planner's scale for a path, not a stop's. A stop that the readings have since passed is NOT
+dropped: a soft limit is passed by a deeper push (the boot read the third joint at -0.0415, deeper than its stops
+at -0.0359 and -0.0368), so 'the joint has read beyond it' is no proof that it is not an end. An end explains the
+stops short of it, which are kept no more; a stop beyond it widens it as a reading. Nothing changes for a plan until
+an end is found: 'free past the readings seen' holds. COST, said out loud: a true end is hit twice instead of
+once (one aim more per end, and the second aim is the next tilt the decider halves to, from another pose, so it is a
+natural pair), and the repeats of an aim that stops without being an end are bounded by the decider alone (one retry
+past a moved end, then half the tilt); a boot that moves one joint at a time from the rest pose confirms no end by
+itself (its stops share one pose), so an Unknown end after the boot is not a fault; a group of one channel (a
+closer) never confirms. The count of aims it spent is for the first run that tests it to say. Teeth: robot.ends.noted
+(a stop alone; two stops at different readings; the same reading from the same pose; the third joint's -0.0368 and
+-0.0359 from another pose, an end at the furthest; a stop short of the end it has, kept no more; a stop going up with
+one going down; a channel with no noise; the end no nearer than the readings seen), robot.ends.file (the stops and
+their poses round-trip), with a mutation for each rule of the match.
+
+**Lesson: an aim that stopped on an end the arm showed by it is planned again past that end, once (A34).** A34's hand 1,
+lobe 2 at open: 'the arm did not reach the aim ... turning the hand 0.9550 rad (group 1: delivered 0.994 of 0.9436,
+blocked)', 'body: group 1 channel 4 stopped at -2.174645 asked -2.186958 from -1.710912 ... an end of the channel
+downwards' (a real end: A22's boot had read -2.1633 there), and then 'lobe 2 at open tilted one way: 0 presses, then a
+press stopped short of the table at 0.9550 rad, and the tilts under it are none that tells the tip from a stop': the
+tilt was halved to 0.4775, under the least, and the side ended, although the end the stop had just shown makes the
+aim at another turn about the way down plannable (Aim_Reaching with the end known). The first plan of an aim is made
+before the end is known (plans are free past the readings seen until a channel has shown one), so the aim that
+shows it stops; Press_Past_Its_Ends plans the same aim once more when the stop moved an end (Note_Stopped says so),
+turned about the way down past it or refused (no move spent); the halving is for a tilt the arm cannot make at any
+turn. A34 noted the second end the same way (the shoulder at -0.244220 for -0.608266 asked, from the descent of a
+press whose tip was the bogus 11.4726 of the first press).
+
 **Lesson: an aim the arm did not complete is not the start of a press (A27).**
 A27's hand 2 (the right arm) pressed lobe 1 first, straight: the aim, a turn of
 1.0762 rad about the eye, stopped the arm at the third joint +0.0705 for the

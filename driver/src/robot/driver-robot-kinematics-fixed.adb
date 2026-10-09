@@ -319,7 +319,11 @@ package body Driver.Robot.Kinematics.Fixed is
             begin
                Linearize (S, Which, R.all, J.all);
                Normal_Equations (R.all, J.all, A, G, Cost);
-               while Moves and then not Lowered loop
+               --  The damping is doubled until a step lowers the cost or moves nothing, and no further than a float
+               --  goes: past it the damping is infinite, the damped matrix of a term the data say nothing of (nothing
+               --  times infinity) or of a pixel that is no number is no matrix, never positive definite, and nothing
+               --  would end the loop.
+               while Moves and then not Lowered and then Lambda < Real'Last / 2.0 loop
                   declare
                      D  : Real_Matrix := A;
                      L  : Real_Matrix (1 .. P, 1 .. P);
@@ -341,7 +345,11 @@ package body Driver.Robot.Kinematics.Fixed is
                               Next : constant State := Moved (S, X);
                               C1   : constant Real := Cost_At (Next);
                            begin
-                              Moves := (for some Q in 1 .. P => Step (Q) /= 0.0);
+                              --  A step moves the state when it changes it in floating point, not when a term of
+                              --  it is not zero: a step of a thousandth of the state's resolution is not zero
+                              --  and moves nothing, and a damping that doubles has to make it zero (a thousand
+                              --  doublings) before the search ends.
+                              Moves := Next /= S;
                               if Moves and then C1 < Cost0 then
                                  Done := not Fit.Moves_The_Fit (Cost0 - C1);
                                  S := Next;

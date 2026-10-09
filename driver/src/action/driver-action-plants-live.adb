@@ -191,9 +191,7 @@ package body Driver.Action.Plants.Live is
                   X.Lobes.Append (Lobe_State'(Open_Tip   => Open.Mean,
                                               Closed_Tip => Closed.Mean,
                                               Tip_Sigma  => Real'Max (Largest_Sigma (Open.Covariance),
-                                                                      Largest_Sigma (Closed.Covariance)),
-                                              Width      => 0.0,
-                                              Thickness  => 0.0));
+                                                                      Largest_Sigma (Closed.Covariance))));
                end;
             end loop;
             X.Fraction := Fraction_Of (Robot, Hands, Id, O);

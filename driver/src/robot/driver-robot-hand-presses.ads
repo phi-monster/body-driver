@@ -11,9 +11,17 @@
 --  let-go: its line of sight met the table 0.6 mm nearer at the block than at
 --  the rest, and the rest was the pose within 0.3 mm of the truth.
 --
---  The push has let go when another begins: a verdict of Blocked stands until
---  the next push starts, whatever that push is. The rest is the first beat
---  after that push has ended at which the arm's own readings are still (the
+--  The push has let go when another begins, or when another command takes
+--  effect for the arm (a hold at the readings the block left may ask the arm
+--  nothing the step tracker sees, and begin no push, and is a let-go all the
+--  same): a verdict of Blocked stands
+--  until the next push starts, whatever that push is. A second command that
+--  takes effect before the hand has rested is the retreat's: the rest that
+--  follows is the aim's, where the hand is not on what it pressed, and no press
+--  is found (A35's first press, a tip 11.4457 from the eye for the 3.8 it was:
+--  the hold began no push, the arm was still easing back, and the retreat was
+--  the next command; the watcher took the rest at the aim). The rest is the
+--  first beat after that push has ended at which the arm's own readings are still (the
 --  caller says so), not the body's: the eyes' pictures lag the arm and settle
 --  after it, and the arm's next move does not wait for them (A16: the retreat
 --  began three beats after the let-go's rest in two presses of three, with
@@ -62,10 +70,13 @@ package Driver.Robot.Hand.Presses is
       Arm     : Real_Array;
       Closer  : Real_Array;
       Found   : out Boolean;
-      Press   : out Event);
+      Press   : out Event;
+      Retargeted : Boolean := False);
    --  One beat of one arm, Arm its readings; Blocked the verdict on its
    --  latest push, Pushing that push still under way, Still its own readings
-   --  at rest. Found is True at the beat a press ends.
+   --  at rest, Retargeted a new command for the arm took effect at the beat
+   --  (Driver.Robot.Channels.Target_Changed). Found is True at the beat a press
+   --  ends.
 
 private
 
@@ -80,6 +91,7 @@ private
       Stood      : Boolean := False;   --  a still pose is known
       Last_Still : Pose_Estimate;      --  where the tool last stood still while free
       Approach   : Direction_Estimate; --  measured at the first blocked beat
+      Commands   : Natural := 0;       --  the new commands that took effect since the block
    end record;
 
 end Driver.Robot.Hand.Presses;

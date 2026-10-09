@@ -8,6 +8,10 @@ package Driver.Log is
 
    procedure Line (T : Topic; Text : String);
 
+   procedure Stamp (Beat : Natural);
+   --  From then on each line begins with "@", the beat given last and a blank:
+   --  the replay says so at which beat of a recording each line was written.
+
    function Image (X : Real; Digits_After_Point : Natural := 3) return String;
    --  A fixed-point rendering without the leading blank of Real'Image.
 

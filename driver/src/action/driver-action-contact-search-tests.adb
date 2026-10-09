@@ -50,9 +50,9 @@ package body Driver.Action.Contact.Search.Tests is
          X.S.Arms.Append (Arm_Of (1, Down, Sigma));
       end if;
       if Hands = 2 then
-         X.S.Hands.Append (Gripper (1, 1, 0.08, 0.015, 0.01, 0.04, Sigma));
+         X.S.Hands.Append (Gripper (1, 1, 0.08, 0.04, Sigma));
       elsif Hands = 5 then
-         X.S.Hands.Append (Five_Lobes (1, 1, 0.06, 0.012, 0.01, 0.05, Sigma));
+         X.S.Hands.Append (Five_Lobes (1, 1, 0.06, 0.012, 0.05, Sigma));
       end if;
       return X;
    end Make;
@@ -118,31 +118,29 @@ package body Driver.Action.Contact.Search.Tests is
       end loop;
    end Bar_Closes_Across_Its_Width;
 
-   procedure Scissors_Close_Across_A_Part is
+   --  A lobe is known only by where its end is: two ends touch a thing at two
+   --  points, which hold no turn about the line between them, and no contact
+   --  patch of a lobe is assumed. Flat scissors taken at their edges are
+   --  touched on a line that misses their centre of mass, so no contact set
+   --  lifts them without their turning, and none is made up.
+   procedure Point_Ends_Do_Not_Hold_Flat_Scissors is
       X     : constant Scene := Make (Scissors (0.18, 0.016, 0.006), Turned, 1.1, 2);
       Best  : Candidate;
       Found : Boolean;
       Tried : Account;
    begin
       Search (X, Slide (Up_Of (X)), Best, Found, Tried);
-      Check (Found, "no contact set raises flat scissors: " & Say (Tried));
-      if Found then
-         --  Thin flat parts are taken by their edges, level with the table,
-         --  the two touches pressing against each other: never from above,
-         --  where the lobes would land on the blades and close on nothing.
-         Check (abs (Across (Best) * Up_Of (X)) < 0.2, "the lobes close up and down on flat scissors");
-         Check (Best.Touches (1).Inward * Best.Touches (2).Inward < -0.9,
-                "the two touches on the scissors do not press against each other");
-      end if;
-   end Scissors_Close_Across_A_Part;
+      Check (not Found, "a contact set of two lobe ends lifts flat scissors although no pinch line holds their turn");
+      Check (Tried.Cannot_Balance > 0, "the flat scissors were refused for another reason: " & Say (Tried));
+   end Point_Ends_Do_Not_Hold_Flat_Scissors;
 
    --  The pose where the last straight stretch begins is reached by the
    --  arm's travel, so a candidate whose pose there the travel cannot reach
    --  is passed over for one it can. Here the travel keeps the hand above
    --  the table by the hand's own depth, which only a hand that comes down
-   --  onto the scissors is where its last stretch begins.
+   --  onto the bar is where its last stretch begins.
    procedure Travel_Reaches_The_Start is
-      X     : constant Scene := Make (Scissors (0.18, 0.016, 0.006), Turned, 2.4, 2);
+      X     : constant Scene := Make (Bar (0.2, 0.02, 0.02), Turned, 2.4, 2);
       Depth : constant Real := Effector_Of (X.S, 1).Depth;
       function Above_The_Table (Tool : Rigid; Closers : Real_Vectors.Vector) return Boolean is
         (Natural (Closers.Length) >= 0
@@ -154,7 +152,7 @@ package body Driver.Action.Contact.Search.Tests is
    begin
       Find (Shape_Of (X.S, 1), Beside, Effector_Of (X.S, 1), Slide (Up_Of (X)), Up_Of (X), (others => <>),
             Anywhere'Access, Above_The_Table'Access, Best, Found, Tried);
-      Check (Found, "no contact set raises flat scissors from where the travel can bring the hand: " & Say (Tried));
+      Check (Found, "no contact set raises a bar from where the travel can bring the hand: " & Say (Tried));
       if Found then
          Check (Above_The_Table (Best.Hover, Best.Before),
                 "the last straight stretch begins where the arm's travel cannot bring the hand");
@@ -207,7 +205,7 @@ package body Driver.Action.Contact.Search.Tests is
 
    --  Five alike lobes evenly around the hand's axis repeat after a fifth
    --  of a turn, two alike opposed lobes after half a turn; one lobe made
-   --  unlike the others, wider or moved by far more than its sigma, breaks
+   --  unlike the others, its end open or closed moved by far more than its sigma, breaks
    --  the repetition.
    procedure Symmetry_Is_Measured is
       Five : constant Scene := Make (Upright_Cylinder (0.02, 0.08), Upright, 0.0, 5);
@@ -224,7 +222,7 @@ package body Driver.Action.Contact.Search.Tests is
             L : Lobe_State := H.Lobes (3);
          begin
             if Change = 1 then
-               L.Width := L.Width + 20.0 * Sigma;
+               L.Closed_Tip := L.Closed_Tip + [0.0, 0.0, 20.0 * Sigma];
             else
                L.Open_Tip := L.Open_Tip + [0.0, 0.0, 20.0 * Sigma];
             end if;
@@ -379,8 +377,9 @@ package body Driver.Action.Contact.Search.Tests is
       Driver.Tests.Register ("action.search.bar", "a gripper closes along a bar instead of across it, or is chosen "
                              & "at the very friction it needs and squeezes without bound",
                              Bar_Closes_Across_Its_Width'Access);
-      Driver.Tests.Register ("action.search.scissors", "flat scissors are taken across their gap or from above",
-                             Scissors_Close_Across_A_Part'Access);
+      Driver.Tests.Register ("action.search.scissors",
+                             "two lobe ends are taken to hold flat scissors on a pinch line that misses their centre of mass",
+                             Point_Ends_Do_Not_Hold_Flat_Scissors'Access);
       Driver.Tests.Register ("action.search.travel", "the last straight stretch begins where the arm's travel cannot "
                              & "bring the hand", Travel_Reaches_The_Start'Access);
       Driver.Tests.Register ("action.search.cylinder", "the touches on a cylinder do not face each other",

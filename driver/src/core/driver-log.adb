@@ -16,9 +16,23 @@ package body Driver.Log is
       end Write;
    end Output;
 
-   procedure Line (T : Topic; Text : String) is
+   Stamped    : Boolean := False with Atomic;
+   Stamp_Beat : Natural := 0 with Atomic;
+
+   procedure Stamp (Beat : Natural) is
    begin
-      Output.Write ("[" & Ada.Characters.Handling.To_Lower (Topic'Image (T)) & "] " & Text);
+      Stamp_Beat := Beat;
+      Stamped := True;
+   end Stamp;
+
+   procedure Line (T : Topic; Text : String) is
+      Head : constant String := "[" & Ada.Characters.Handling.To_Lower (Topic'Image (T)) & "] " & Text;
+   begin
+      if Stamped then
+         Output.Write ("@" & Image (Stamp_Beat) & " " & Head);
+      else
+         Output.Write (Head);
+      end if;
    end Line;
 
    function Image (X : Real; Digits_After_Point : Natural := 3) return String is

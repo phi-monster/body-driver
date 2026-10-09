@@ -876,7 +876,7 @@ package body Driver.Action.Plants.Tests is
       end loop;
       for H of W.Hands loop
          declare
-            G : Hand_State := Gripper (H.Arm, H.Id, H.Opening, H.Width, H.Thickness, H.Depth, Sigma);
+            G : Hand_State := Gripper (H.Arm, H.Id, H.Opening, H.Depth, Sigma);
             F_Sigma : constant Real := Sigma / H.Opening;
          begin
             G.Fraction := (Value => H.Fraction + F_Sigma * Gauss (W), Sigma => F_Sigma, Degrees_Of_Freedom => 0);

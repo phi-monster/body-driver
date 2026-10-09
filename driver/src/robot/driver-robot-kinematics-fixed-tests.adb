@@ -1,8 +1,10 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Text_IO;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Log;
 with Driver.Tests;
+with GNAT.OS_Lib;
 
 package body Driver.Robot.Kinematics.Fixed.Tests is
 
@@ -472,6 +474,71 @@ package body Driver.Robot.Kinematics.Fixed.Tests is
       Check (Rejected > 0, "no fit of thirty at three pixels was found not quadratic over its own sigma");
    end Quadratic_Over_Its_Own_Sigma;
 
+   Ends_Guard : constant String :=
+     "a fit of an eye never ends: its refinement doubles its damping for ever when the matrix it damps is no matrix "
+     & "(a lens of no focal length, an answer at no pixel)";
+
+   --  A fit ends whatever it is given. A refinement that finds no step to lower its cost doubles its damping and tries
+   --  again, until a step lowers the cost or moves nothing. The matrix of a term the data say nothing of (its column of
+   --  the Jacobian is nothing) or of a pixel that is no number is no matrix once the damping is infinite, which a
+   --  damping that doubles every try is long before the step is nothing, and such a matrix is never positive definite:
+   --  the loop went on for ever. Two fits that cannot end in an eye, each in a task that is waited for Bound: one
+   --  begins from a lens whose focal lengths are nothing (every point of the picture is at the principal point, and no
+   --  pose moves any residual); one of whose answers is at no pixel. A task that spins cannot be stopped (an abort
+   --  waits for a point where the task can be, and a loop of arithmetic has none), nor the program ended with it: a
+   --  fit that does not end says so as a failed test does, and ends the program.
+   procedure Ends_Whatever_It_Is_Given is
+      Bound : constant Duration := 30.0;
+      G     : Generator;
+      S     : constant Scene := Draw (G, Table => 30, Box => 20, Wrong_Share => 0.2, Noise => 0.3, Own_Sigma => 0.002);
+      Near_Pose : constant Rigid :=
+        (Rotation    => Eye_Pose.Rotation * Driver.Numerics.Exp ([0.01, -0.01, 0.005]),
+         Translation => Eye_Pose.Translation + [0.05, -0.05, 0.03]);
+      Near_Lens : constant Fit.Lens :=
+        (Fx => 1.05 * Eye_Lens.Fx, Fy => 0.95 * Eye_Lens.Fy, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      No_Lens   : constant Fit.Lens := (Fx => 0.0, Fy => 0.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      --  Nothing divided by nothing, from a number the compiler does not know to be zero.
+      Nought    : constant Real := S.Points (1).U0 - S.Points (1).U0;
+      Not_A_Pixel : constant Real := Nought / Nought;
+
+      procedure Fit_In_Time (What : String; Lens : Fit.Lens; Seen : Sighting_Array; R : out Fit_Report) is
+         Raised : Boolean := True;
+         task Fitting is
+            entry Done;
+         end Fitting;
+         task body Fitting is
+         begin
+            begin
+               Fit_Eye (S.Points, [1 => Identity], Seen, Nothing, Nothing, 640, 480, Lens, Near_Pose, R);
+               Raised := False;
+            exception
+               when others =>
+                  null;
+            end;
+            accept Done;
+         end Fitting;
+      begin
+         select
+            Fitting.Done;
+            Check (not Raised, What & ": the fit raised an exception");
+         or
+            delay Bound;
+            Ada.Text_IO.Put_Line ("FAIL  robot.fixed.ends  (guards: " & Ends_Guard & ")");
+            Ada.Text_IO.Put_Line ("      " & What & ": the fit did not end in" & Duration'Image (Bound)
+                                  & " seconds; the program ends with it");
+            GNAT.OS_Lib.OS_Exit (1);
+         end select;
+      end Fit_In_Time;
+
+      Report : Fit_Report;
+      Wrong  : Sighting_Array := S.Sightings;
+   begin
+      Fit_In_Time ("a lens of no focal length", No_Lens, S.Sightings, Report);
+      Check (not Report.Determined, "an eye whose lens is nothing is determined: " & Image (Report));
+      Wrong (1).U := Not_A_Pixel;
+      Fit_In_Time ("an answer at no pixel", Near_Lens, Wrong, Report);
+   end Ends_Whatever_It_Is_Given;
+
    procedure Register is
    begin
       Register ("robot.fixed.recover",
@@ -500,6 +567,7 @@ package body Driver.Robot.Kinematics.Fixed.Tests is
       Register ("robot.fixed.quadratic",
                 "a fit whose cost is not quadratic over its own sigma is called determined, though its covariance "
                 & "does not stand", Quadratic_Over_Its_Own_Sigma'Access);
+      Register ("robot.fixed.ends", Ends_Guard, Ends_Whatever_It_Is_Given'Access);
    end Register;
 
 end Driver.Robot.Kinematics.Fixed.Tests;

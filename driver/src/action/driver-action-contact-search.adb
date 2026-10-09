@@ -97,12 +97,10 @@ package body Driver.Action.Contact.Search is
                         declare
                            Facing : constant Vec3 :=
                              (if Moves (L) then Unit (L.Closed_Tip - L.Open_Tip) else Unit (Toward));
-                           Ahead  : constant Vec3 := (L.Thickness / 2.0) * Facing;
                         begin
-                           E.Pads.Append (Pad'(Closer => C, Open => L.Open_Tip + Ahead,
-                                               Closed => (if Moves (L) then L.Closed_Tip else L.Open_Tip) + Ahead,
-                                               Facing => Facing, Half_Width => L.Width / 2.0,
-                                               Thickness => L.Thickness));
+                           E.Pads.Append (Pad'(Closer => C, Open => L.Open_Tip,
+                                               Closed => (if Moves (L) then L.Closed_Tip else L.Open_Tip),
+                                               Facing => Facing));
                         end;
                      end if;
                   end;
@@ -166,8 +164,6 @@ package body Driver.Action.Contact.Search is
                            if Image (K) = 0 and then not Taken (J) and then E.Pads (J).Closer = E.Pads (K).Closer
                              and then Same (S * E.Pads (K).Open, E.Pads (J).Open)
                              and then Same (S * E.Pads (K).Closed, E.Pads (J).Closed)
-                             and then not Significant (E.Pads (J).Half_Width - E.Pads (K).Half_Width, Tip_Sd)
-                             and then not Significant (E.Pads (J).Thickness - E.Pads (K).Thickness, Tip_Sd)
                            then
                               Image (K) := J;
                               Taken (J) := True;
@@ -334,8 +330,9 @@ package body Driver.Action.Contact.Search is
    procedure Free is new Ada.Unchecked_Deallocation (Key_Array, Key_Array_Access);
 
    type Footprint is (Disc, Whole_Face);
-   --  Disc: a face's inscribed disc about the lobe's end. Whole_Face: the face
-   --  back along the lobe as deep as a thing may go into the hand.
+   --  Disc: the lobe's end. Whole_Face: the line back along the lobe as deep
+   --  as a thing may go into the hand. Either meets the samples within the
+   --  thing's pitch of it.
 
    procedure Find
      (Thing     : Shape;
@@ -407,7 +404,7 @@ package body Driver.Action.Contact.Search is
       --  sample and every face at every placement, and the standard vector
       --  operators return their results through the secondary stack.
       procedure First_Meeting
-        (A0, V, Facing, Back : Vec3; Half_Width : Real; Face : Footprint; S : out Real; Hit : out Natural)
+        (A0, V, Facing, Back : Vec3; Face : Footprint; S : out Real; Hit : out Natural)
       is
          Speed : constant Real := V * Facing;
          Fx    : constant Real := Facing (1);
@@ -447,8 +444,8 @@ package body Driver.Action.Contact.Search is
                         Centred : constant Real := Sqrt ((Cx * Cx + Cy * Cy) + Cz * Cz);
                         Fits    : constant Boolean :=
                           (case Face is
-                              when Disc       => Sqrt ((Gx * Gx + Gy * Gy) + Gz * Gz) <= Half_Width,
-                              when Whole_Face => Centred <= Half_Width and then L >= -Res and then L <= E.Depth);
+                              when Disc       => Sqrt ((Gx * Gx + Gy * Gy) + Gz * Gz) <= Res,
+                              when Whole_Face => Centred <= Res and then L >= -Res and then L <= E.Depth);
                      begin
                         if Fits then
                            S := Real'Min (S, Sq);
@@ -498,7 +495,7 @@ package body Driver.Action.Contact.Search is
                   Hit : Natural;
                begin
                   First_Meeting (Pts (I) + R * (PJ.Open - PK.Open), R * ((PJ.Closed - PJ.Open) - (PK.Closed - PK.Open)),
-                                 R * PJ.Facing, Back, PJ.Half_Width, Face, S, Hit);
+                                 R * PJ.Facing, Back, Face, S, Hit);
                   S_Star := Real'Min (S_Star, S);
                end;
             end if;
@@ -510,7 +507,7 @@ package body Driver.Action.Contact.Search is
          X := Pts (I) - R * (PK.Open + S_Star * (PK.Closed - PK.Open));
          for J in 1 .. N_Pads loop
             First_Meeting (X + R * E.Pads (J).Open, R * (E.Pads (J).Closed - E.Pads (J).Open), R * E.Pads (J).Facing,
-                           Back, E.Pads (J).Half_Width, Face, Meet (J), Hits (J));
+                           Back, Face, Meet (J), Hits (J));
          end loop;
          --  Each closer stops where its first face meets the thing; one that
          --  meets nothing keeps its present fraction.
@@ -557,7 +554,7 @@ package body Driver.Action.Contact.Search is
          P.Clear;
          for J in Hits'Range loop
             if Hits (J) /= 0 then
-               T.Append (Touch'(Point => Pts (Hits (J)), Inward => -Nrm (Hits (J)), Patch => E.Pads (J).Half_Width,
+               T.Append (Touch'(Point => Pts (Hits (J)), Inward => -Nrm (Hits (J)), Patch => 0.0,
                                 Tension => False));
                P.Append (J);
             end if;
@@ -584,7 +581,7 @@ package body Driver.Action.Contact.Search is
                           (P.Open + Real (F) * (P.Closed - P.Open)) - (PK.Open + Real (G) * (PK.Closed - PK.Open));
                         Perp : constant Vec3 := D - Real'(D * PK.Facing) * PK.Facing;
                      begin
-                        L := Real'Max (L, abs Perp + (if Extra > 0.0 then P.Half_Width + Extra else 0.0));
+                        L := Real'Max (L, abs Perp + Real'Max (0.0, Extra));
                      end;
                   end loop;
                end loop;
@@ -652,11 +649,11 @@ package body Driver.Action.Contact.Search is
          end loop;
       end Enumerate;
 
-      --  A pad's box at fraction F with the tool at (R, X): its face, the way
-      --  it faces, across it, and back along the lobe toward the hand.
+      --  A lobe at fraction F with the tool at (R, X): its end, the way it
+      --  faces, across it, and back along it toward the hand, as far as Length.
       type Box is record
-         Face, Facing, Side, Back      : Vec3;
-         Half_Width, Thickness, Length : Real;
+         Face, Facing, Side, Back : Vec3;
+         Length                   : Real;
       end record;
 
       function Box_Of (P : Pad; R : Mat3; X : Vec3; F, Extra : Real) return Box is
@@ -665,12 +662,11 @@ package body Driver.Action.Contact.Search is
       begin
          return (Face => X + R * (P.Open + F * (P.Closed - P.Open)) - E.Band * Back, Facing => Facing,
                  Side => Unit (Cross (Back, Facing)), Back => Back,
-                 Half_Width => P.Half_Width, Thickness => P.Thickness, Length => E.Depth + Extra);
+                 Length => E.Depth + Extra);
       end Box_Of;
 
-      --  Some point is inside the box grown by Margin on every side: behind
-      --  the face by its thickness, across by half its width, back along the
-      --  lobe by Length. Written out per component, as First_Meeting is.
+      --  Some point is within Margin of the lobe, from its end back along it
+      --  by Length. Written out per component, as First_Meeting is.
       function Any_Inside (B : Box; Points : Vec3_Array; Margin : Real) return Boolean is
          Fx : constant Real := B.Face (1);
          Fy : constant Real := B.Face (2);
@@ -692,8 +688,7 @@ package body Driver.Action.Contact.Search is
                Dz : constant Real := Q (3) - Fz;
                A  : constant Real := (Dx * Nx + Dy * Ny) + Dz * Nz;
             begin
-               if A <= Margin and then A >= -B.Thickness - Margin
-                 and then abs ((Dx * Sx + Dy * Sy) + Dz * Sz) <= B.Half_Width + Margin
+               if abs A <= Margin and then abs ((Dx * Sx + Dy * Sy) + Dz * Sz) <= Margin
                then
                   declare
                      L : constant Real := (Dx * Bx + Dy * By) + Dz * Bz;
@@ -712,20 +707,7 @@ package body Driver.Action.Contact.Search is
         (abs Thing.Floor_Up > 0.0 and then (P - Thing.Floor_Point) * Thing.Floor_Up < -Z * Thing.Floor_Sigma);
 
       function Below_Floor (B : Box) return Boolean is
-      begin
-         for I in 0 .. 1 loop
-            for J in -1 .. 1 loop
-               for K in 0 .. 1 loop
-                  if J /= 0 and then Below_Floor (B.Face - Real (I) * B.Thickness * B.Facing
-                                                  + Real (J) * B.Half_Width * B.Side + Real (K) * B.Length * B.Back)
-                  then
-                     return True;
-                  end if;
-               end loop;
-            end loop;
-         end loop;
-         return False;
-      end Below_Floor;
+        (Below_Floor (B.Face) or else Below_Floor (B.Face + B.Length * B.Back));
 
       type Verdict is (Fits, Into_Material, Too_Deep, Through_Surface, Through_Others);
 
@@ -771,7 +753,7 @@ package body Driver.Action.Contact.Search is
             declare
                F : constant Vec3 := Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face - Mid;
             begin
-               Span := Real'Max (Span, abs (F - Real'(F * Back) * Back) + P.Half_Width);
+               Span := Real'Max (Span, abs (F - Real'(F * Back) * Back));
             end;
          end loop;
          for Q of Pts loop
