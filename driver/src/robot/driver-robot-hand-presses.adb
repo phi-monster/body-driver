@@ -38,7 +38,8 @@ package body Driver.Robot.Hand.Presses is
       Arm     : Real_Array;
       Closer  : Real_Array;
       Found   : out Boolean;
-      Press   : out Event)
+      Press   : out Event;
+      Retargeted : Boolean := False)
    is
    begin
       Found := False;
@@ -47,17 +48,28 @@ package body Driver.Robot.Hand.Presses is
          when Free =>
             if Blocked then
                W.State := Driven;
+               W.Commands := 0;
                W.Approach := (if W.Stood then Moved_Into (W.Last_Still, Tool) else (others => <>));
             elsif Still then
                W.Stood := True;
                W.Last_Still := Tool;
             end if;
          when Driven =>
-            --  The verdict stands until another push begins: that is the let-go.
-            if not Blocked then
+            --  The verdict stands until another push begins: that is the let-go. Or until another command takes
+            --  effect: a hold at the readings the block left asks the arm nothing it can see, begins no push
+            --  for the step tracker, and is a let-go all the same (A35's first press: the arm still easing back
+            --  at the hold, the retreat the next command).
+            if Retargeted then
+               W.Commands := W.Commands + 1;
+            end if;
+            if not Blocked or else W.Commands > 0 then
                W.State := Let_Go;
             end if;
-         when Let_Go | Settling =>
+         when Let_Go =>
+            if Retargeted then
+               W.Commands := W.Commands + 1;
+            end if;
+         when Settling =>
             null;
       end case;
       --  The rest is after the let-go has ended, not at the beat it begins: a
@@ -65,7 +77,11 @@ package body Driver.Robot.Hand.Presses is
       --  the one under the push.
       case W.State is
          when Let_Go =>
-            if Still and then not Pushing then
+            if W.Commands > 1 then
+               --  A second command took effect before the hand rested: the rest that comes is the retreat's, where the
+               --  hand is not on what it pressed. Not a press.
+               W.State := Settling;
+            elsif Still and then not Pushing then
                Found := True;
                Press := (Tool     => Tool,
                          Arm      => Reading_Holders.To_Holder (Arm),

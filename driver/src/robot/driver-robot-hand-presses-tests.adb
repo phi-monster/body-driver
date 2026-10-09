@@ -31,7 +31,10 @@ package body Driver.Robot.Hand.Presses.Tests is
 
    type Found_Array is array (Positive range <>) of Found_Press;
 
-   function Run (Stream : Stream_Kind) return Found_Array is
+   type Commands_Kind is array (Positive range <>) of Boolean;
+   --  The beats at which a new command for the arm takes effect.
+
+   function Run (Stream : Stream_Kind; Commanded : Commands_Kind := [1 .. 0 => False]) return Found_Array is
       W     : Watcher;
       Found : Boolean;
       Press : Event;
@@ -41,7 +44,8 @@ package body Driver.Robot.Hand.Presses.Tests is
    begin
       for B in Stream'Range loop
          Observe (W, Driver.Clock.Beat (B), Stream (B).Blocked, Stream (B).Pushing, Stream (B).Still,
-                  Pose_At (Stream (B).Height), [1 => Stream (B).Height], [1 => 0.04], Found, Press);
+                  Pose_At (Stream (B).Height), [1 => Stream (B).Height], [1 => 0.04], Found, Press,
+                  Retargeted => B in Commanded'Range and then Commanded (B));
          if Found then
             Count := Count + 1;
             Got (Count) := (Beat => Driver.Clock.Beat (B), Height => Stream (B).Height, Event => Press);
@@ -150,8 +154,64 @@ package body Driver.Robot.Hand.Presses.Tests is
              & (if Got'Length > 0 then Got (1).Beat'Image else " none"));
    end Let_Go_Answered_Late;
 
+   procedure Hold_Begins_No_Push is
+      --  A35's first press: the push that met the table ended blocked while the arm was still easing back; the hold at
+      --  the readings the block left asked the arm nothing the step tracker sees, so no push began and the verdict
+      --  stood; the arm eased back a few beats more, came to rest, and the retreat followed. The press is the rest
+      --  after the hold, where the hand is on the table, not the rest at the aim after the retreat.
+      Stream : constant Stream_Kind :=
+        [1  => (False, False, True, 0.200),
+         2  => (False, True, False, 0.150),     --  the descent
+         3  => (False, True, False, 0.110),
+         4  => (True, False, False, 0.0980),    --  the push ended blocked, the arm still easing
+         5  => (True, False, False, 0.0982),
+         6  => (True, False, False, 0.0985),    --  the hold takes effect: no push begins, the verdict stands
+         7  => (True, False, False, 0.0988),
+         8  => (True, False, True, 0.0990),     --  at rest: the press
+         9  => (True, False, True, 0.0990),
+         10 => (False, True, False, 0.150),     --  the retreat
+         11 => (False, False, True, 0.200)];    --  at rest at the aim
+      Commanded : constant Commands_Kind (1 .. 11) := [6 | 10 => True, others => False];
+      Got : constant Found_Array := Run (Stream, Commanded);
+   begin
+      Check (Got'Length = 1 and then Got (1).Beat = 8 and then Got (1).Height = 0.0990,
+             "a hold that began no push gave" & Got'Length'Image & " presses, the first at beat"
+             & (if Got'Length > 0 then Got (1).Beat'Image & ", height" & Got (1).Height'Image else " none"));
+   end Hold_Begins_No_Push;
+
+   procedure Retreat_Before_The_Rest_Is_No_Press is
+      --  The same, the retreat sent before the arm came to rest: the rest that follows is the aim's. No press; and
+      --  the watcher is free again at that rest, so that the press after it is found.
+      Stream : constant Stream_Kind :=
+        [1  => (False, False, True, 0.200),
+         2  => (False, True, False, 0.150),
+         3  => (False, True, False, 0.110),
+         4  => (True, False, False, 0.0980),
+         5  => (True, False, False, 0.0982),
+         6  => (True, False, False, 0.0985),    --  the hold takes effect
+         7  => (True, False, False, 0.0988),    --  the arm is still easing back
+         8  => (False, True, False, 0.120),     --  the retreat takes effect before any rest
+         9  => (False, True, False, 0.170),
+         10 => (False, False, True, 0.200),     --  at rest at the aim: not a press
+         11 => (False, True, False, 0.150),     --  a second press
+         12 => (True, False, False, 0.0980),
+         13 => (True, False, False, 0.0985),    --  its hold takes effect
+         14 => (True, False, True, 0.0990)];    --  and rests: the press
+      Commanded : constant Commands_Kind (1 .. 14) := [6 | 8 | 13 => True, others => False];
+      Got : constant Found_Array := Run (Stream, Commanded);
+   begin
+      Check (Got'Length = 1 and then Got (1).Beat = 14,
+             "a retreat before the rest gave" & Got'Length'Image & " presses, the first at beat"
+             & (if Got'Length > 0 then Got (1).Beat'Image & ", height" & Got (1).Height'Image else " none"));
+   end Retreat_Before_The_Rest_Is_No_Press;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.presses.hold", "a hold that began no push is not the let-go, or the rest after the "
+                             & "retreat is taken for the press",
+                             Hold_Begins_No_Push'Access);
+      Driver.Tests.Register ("hand.presses.retreat", "a retreat sent before the hand rested gives a press at the aim, or "
+                             & "the watcher is not free after it", Retreat_Before_The_Rest_Is_No_Press'Access);
       Driver.Tests.Register ("hand.presses.stream", "a press is read at the wrong beat or with the wrong direction",
                              One_Press'Access);
       Driver.Tests.Register ("hand.presses.unmoved", "a press that moved nothing is given a direction",

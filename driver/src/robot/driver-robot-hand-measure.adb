@@ -670,6 +670,22 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end Above;
       Steps : Driver.Robot.Hand.Descent_Steps;
 
+      --  What the hand has found of its press since the let-go: the presses its book keeps, whether the arm's own
+      --  readings are at rest (Driver.Robot.Hand.Arm_At_Rest), and the most beats a push of the arm has taken.
+      Kept_Now : Natural := 0;
+      Resting  : Boolean := False;
+      Allowed  : Natural := 0;
+      procedure Read_Kept (O : Observation) is
+      begin
+         Lost := not Present (Id, R);
+         if Lost then
+            return;
+         end if;
+         Kept_Now := Driver.Robot.Hand.Tips.Pressed (H.Data.Found (Id).Book);
+         Resting := Driver.Robot.Hand.Arm_At_Rest (M, R.Arm, O);
+         Allowed := Driver.Robot.Hand.Longest_Push (M, R.Arm);
+      end Read_Kept;
+
       procedure Read_Arm (O : Observation) is
          --  The arm's group was found at the aim (Arm_Is) and is not looked up again: it is the arm's readings that
          --  are wanted here, and they are there whatever became of the hand.
@@ -824,12 +840,44 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Move_Group (Arm_Is, Aim_At.Element);
          return False;
       end if;
-      --  Let go: the arm held where the block left it, so the hand rests; then
-      --  back to where the descent began.
-      Hold_Beat (Read_Arm'Access);
-      Move_Group (Arm_Is, Arm_Now.Element);
-      Move_Group (Arm_Is, Aim_At.Element);
-      return True;
+      --  Let go: the arm held where the block left it, so the hand rests there, and the arm does not leave until it
+      --  has. The watcher takes the press at that rest (Driver.Robot.Hand.Presses); a retreat begun while the readings
+      --  still ease back would give it the rest at the aim, where the hand is not on what it pressed (A35's first
+      --  press: a tip 11.4457 from the eye, the eye's height at the aim, for the 3.8 it was). The wait is for the
+      --  arm's own readings to be still, at most as long as the longest push the arm has had took to come to rest.
+      declare
+         Kept_Before : Natural;
+         Waited      : Natural := 0;
+      begin
+         Hold_Beat (Read_Kept'Access);
+         if Lost then
+            End_Lost (Moved => True);
+            return False;
+         end if;
+         Kept_Before := Kept_Now;
+         Hold_Beat (Read_Arm'Access);
+         Move_Group (Arm_Is, Arm_Now.Element);
+         loop
+            Hold_Beat (Read_Kept'Access);
+            exit when Lost or else Resting or else Waited >= Allowed;
+            Waited := Waited + 1;
+         end loop;
+         if Lost then
+            End_Lost (Moved => True);
+            return False;
+         end if;
+         if Kept_Now = Kept_Before then
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": no press of lobe" & Lobe'Image & " was found at the rest after"
+                             & " the let-go: the arm "
+                             & (if Resting then "rested, and the hand found no press in it"
+                                else "did not rest in" & Waited'Image & " beats, the longest a push of the arm took")
+                             & "; the arm is taken back to where the descent began");
+            Move_Group (Arm_Is, Aim_At.Element);
+            return False;
+         end if;
+         Move_Group (Arm_Is, Aim_At.Element);
+         return True;
+      end;
    end Press_Once;
 
    procedure Press_Lobe (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening) is

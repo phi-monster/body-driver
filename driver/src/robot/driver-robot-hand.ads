@@ -49,6 +49,13 @@ package Driver.Robot.Hand is
    --  at Target is that at From, to what the arm's fit can tell (Kinematics.Angle_Sigma, Z times it), as the steps of a
    --  descent are (Pressing.Lowered) and the turn of an aim about the eye is not. True when the poses are not known.
    --  A block counts toward a press only when the push that was blocked asked a translation (Observe).
+   function Arm_At_Rest (M : Model; A : Arm_Id; O : Observation) return Boolean;
+   --  The arm's own readings are at rest at the beat of O (Driver.Robot.Stillness): the watcher takes a press at the
+   --  first such beat after the hand is let go, and a decider that takes the hand away waits for it first.
+
+   function Longest_Push (M : Model; A : Arm_Id) return Natural;
+   --  How many beats the longest push the arm has had took, from its start to the beat it ended at: the most a body
+   --  that has answered pushes is known to take to come to rest, and so the most a decider waits for it to.
    function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id;
    function Arm_Of (H : Hands; Id : Hand_Id) return Arm_Id;
    function Lobe_Count (H : Hands; Id : Hand_Id) return Positive;

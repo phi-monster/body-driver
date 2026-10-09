@@ -869,6 +869,31 @@ when the tip is so uncertain that the least is a right angle or more: the press 
 A31's hand 2 closed lobe 1 from 3.93 to 0.15), and the hull is not built: whether the open hand's flipping vertex
 needs it is for the first run that tilts as the least says.
 
+**Lesson: the arm does not leave the table until the hand has rested on it, and a rest after the retreat is no
+press (A35).** A35's first press (the 7bd2880 build, hands from A32's body file): 'a press at the OPEN opening, at
+beat 911 ... lobe 1 provisional 11.4457 +- 0.1117 along its sight', where 11.4457 is, to four decimals, 'the eye
+11.4457 above the table' logged at the aim before the descent (190 mm in the truth), and the truth had the finger on
+the table with the camera 63 to 68 mm above it. The model's own eye path (the replay of A35's recording, same code) says how: the
+last push of the descent was blocked at beat 880 (the eye 6.89 from the aim), the hand eased back for 18 beats
+(5.34 to 5.09 along the way down), the retreat began at 898 and the eye was back at the aim at 910; the watcher
+took the first rest after the retreat, 911, for the press. The watcher took a press at the first rest after
+'another push begins', and the decider's let-go is a hold at the readings the block left; when the arm has not
+moved by a step the tracker sees after the hold, Channels.Asked starts no push for it, Move_Group returns at once,
+and the retreat is the next command and the only push, whose end is the aim. In A35's second press the hold did
+start a push (a jump back at 1052 to 1056) and the decider waited for its rest, 130 beats and more: the design,
+which A31 followed (the press 130 beats after the block). The
+poisoned first press sets a book of one press with a sigma of 0.11 at a distance about three times the real one, and
+the second press 'went past the contact its presses predict and met nothing' (A27's 'confirmed 18.7122' was the
+same family). Now: the first command that takes effect for the arm after the block (Channels.Target_Changed) is
+the let-go whether or not it began a push; a second one before the hand has rested ends the watching without a
+press (the rest that follows is the retreat's); and the decider, after the hold, waits for the arm's own readings
+to be still before it retreats, at most as long as the longest push the arm has had took (Hand.Longest_Push, from
+the stream), and says so when it did not rest or the hand found no press (the press is then not made). Teeth:
+hand.presses.hold (the hold begins no push, the arm rests: found at the rest), hand.presses.retreat (the retreat
+is sent first: no press, and the watcher is free for the next), hand.measure.longest; the push-based let-go of A16
+and the late answer are unchanged. The decider's wait has no rig that reaches it (the rig never blocks a descent
+on a table): it is read in the next run's log.
+
 **Lesson: an aim the arm did not complete is not the start of a press (A27).**
 A27's hand 2 (the right arm) pressed lobe 1 first, straight: the aim, a turn of
 1.0762 rad about the eye, stopped the arm at the third joint +0.0705 for the
