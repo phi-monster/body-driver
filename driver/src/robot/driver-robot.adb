@@ -758,6 +758,35 @@ package body Driver.Robot is
       end;
    end Eye_Watch;
 
+   function Group_Watch (M : Model; G : Group_Id) return String is
+      use Ada.Strings.Unbounded;
+      B    : constant Integer := M.Beats - 1;
+      Text : Unbounded_String;
+   begin
+      if G > M.Groups.Last_Index or else B < 1 or else not Channels.Has_Reading (M, G, B) then
+         return "no reading";
+      end if;
+      Append (Text, "readings");
+      for C in 1 .. M.Groups (G).Size loop
+         Append (Text, " " & Driver.Log.Image (Channels.Reading (M, G, B, C), 6));
+      end loop;
+      if Channels.Has_Reading (M, G, B - 1) and then Channels.Noise_Measured (M, G) then
+         Append (Text, ", change in sigmas");
+         for C in 1 .. M.Groups (G).Size loop
+            Append (Text, " " & Driver.Log.Image (Channels.Change (M, G, B, C) / Channels.Noise (M, G, C), 1));
+         end loop;
+      end if;
+      Append (Text, (if Channels.Moving (M, G, B) then ", moving" else ", still")
+              & (if Channels.Pushed (M, G, B) then ", pushed" else ""));
+      if Channels.Has_Target (M, G, B) then
+         Append (Text, ", target");
+         for C in 1 .. M.Groups (G).Size loop
+            Append (Text, " " & Driver.Log.Image (Channels.Target (M, G, B, C), 6));
+         end loop;
+      end if;
+      return To_String (Text);
+   end Group_Watch;
+
    function Image_Lag (M : Model; E : Eye_Id) return Integer is
      (if E <= M.Lags.Last_Index then M.Lags (E) else 0);
 

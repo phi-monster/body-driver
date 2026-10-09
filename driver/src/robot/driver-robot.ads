@@ -304,6 +304,12 @@ package Driver.Robot is
    --  its noise), whether it is still and whether it has settled, and the
    --  largest displacement of a resolved cell at this beat, in pixels and in
    --  units of that cell's noise.
+
+   function Group_Watch (M : Model; G : Group_Id) return String;
+   --  For a replay that follows a group beat by beat: its readings at the
+   --  latest beat, each channel's change from the beat before in units of
+   --  its noise, whether the group moved (Channels.Moving) and whether it
+   --  is being pushed, and its target where one is in effect.
    --  How many beats the eye's images trail the readings they belong to:
    --  the image of beat B shows the body as read at beat B - Image_Lag; 0
    --  until measured.

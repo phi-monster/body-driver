@@ -1,4 +1,5 @@
 --  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT] [--watch EYE]
+--         [--readings GROUP]
 --
 --  Feeds a recording (Driver.Recording format, uncompressed; it is read once,
 --  forward, so "zstd -dc run.rec.zst | replay /dev/stdin ..." needs no copy on
@@ -33,7 +34,9 @@
 --  estimates computed apart), in seconds and milliseconds a beat, and how many
 --  beats it replayed. With --watch EYE, every beat also gives a line on that
 --  eye (Driver.Robot.Eye_Watch): how much its picture changed, whether it is
---  still and settled, and how far its cells moved.
+--  still and settled, and how far its cells moved; with --readings GROUP, one
+--  on that group (Driver.Robot.Group_Watch): its readings, their change in
+--  units of their noise, whether it moved and was pushed, and its target.
 --
 --  The estimators' service calls are answered as Driver.Services describes
 --  for a replay: by the live service when --inst or --eye names one (a
@@ -264,8 +267,10 @@ procedure Replay is
    type Part is (Parsing, Robot_Layer, Hand_Layer, World_Layer, Estimates_Apart);
    Spent : array (Part) of Duration := [others => 0.0];
 
-   --  With --watch, the eye followed beat by beat (Driver.Robot.Eye_Watch).
+   --  With --watch, the eye followed beat by beat (Driver.Robot.Eye_Watch); with --readings, the group
+   --  (Driver.Robot.Group_Watch).
    Watched : Natural := 0;
+   Followed : Natural := 0;
 
    procedure Robot_Part (M : Input) is
       Start : Duration;
@@ -281,6 +286,10 @@ procedure Replay is
          Spent (Robot_Layer) := Spent (Robot_Layer) + (Driver.Clock.Seconds - Start);
          if Watched > 0 then
             Line (Core, "eye" & Watched'Image & ": " & Driver.Robot.Eye_Watch (Robot, Driver.Robot.Eye_Id (Watched)));
+         end if;
+         if Followed > 0 then
+            Line (Core, "group" & Followed'Image & ": "
+                  & Driver.Robot.Group_Watch (Robot, Driver.Observations.Group_Id (Followed)));
          end if;
       end if;
    end Robot_Part;
@@ -503,7 +512,7 @@ procedure Replay is
 begin
    if Argument_Count < 1 then
       Line (Core, "usage: replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT]"
-            & " [--watch EYE]");
+            & " [--watch EYE] [--readings GROUP]");
       Set_Exit_Status (Failure);
       return;
    end if;
@@ -519,6 +528,8 @@ begin
          Configure_Service (Driver.Services.Brain, Argument (I + 1));
       elsif Argument (I) = "--watch" then
          Watched := Natural'Value (Argument (I + 1));
+      elsif Argument (I) = "--readings" then
+         Followed := Natural'Value (Argument (I + 1));
       end if;
    end loop;
 
