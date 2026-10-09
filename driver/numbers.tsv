@@ -15,10 +15,8 @@ driver-action-contact-search.adb	(if L <= Res then 1 else Positive (Real'Ceiling
 driver-action-contact-search.adb	(if L <= Res then 1 else Positive (Real'Ceiling (2.0 * Pi * L / Res)));	2.0	math	a full circle is two pi
 driver-action-contact-search.adb	(if Natural (T.Length) >= 2 and then abs (T (2).Point - T (1).Point) > 0.0	2	math	a direction between touches needs two of them
 driver-action-contact-search.adb	(if Pin.Any_Angle then Steps_For (Lever (Pin.Pad_Index, E.Depth)) else 1);	1	math	a pin fixed at its own turn is one placement
-driver-action-contact-search.adb	Ahead : constant Vec3 := (L.Thickness / 2.0) * Facing;	2.0	math	the face is half a thickness ahead of the lobe's centre line
 driver-action-contact-search.adb	Apart : constant Gate := Vector_Gate (3);	3	structure	points of space have three coordinates
 driver-action-contact-search.adb	F : constant Vec3 := Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face - Mid;	0.0	math	no extra length: the box as the lobe is
-driver-action-contact-search.adb	Facing => Facing, Half_Width => L.Width / 2.0,	2.0	math	half of the measured width
 driver-action-contact-search.adb	Mid := Mid + Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face / Real (N_Pads);	0.0	math	no extra length: the box as the lobe is
 driver-action-contact-search.adb	Most : constant Real := Real'Min (Friction.High, 1.0 / Physics.Least_Distinct (Resolution));	1.0	math	the friction whose angle is as far from a right angle as the least distinct one is from none: tan (pi/2 - a) = 1 / tan a
 driver-action-contact-search.adb	Next : Positive := 1;	1	structure	the first position in the order
@@ -37,10 +35,6 @@ driver-action-contact-search.adb	for C in 1 .. 3 loop	3	structure	the three coor
 driver-action-contact-search.adb	for Count in reverse 2 .. N loop	2	math	a hand repeats under a rotation only if at least two make a circle; one is no symmetry
 driver-action-contact-search.adb	for F in 0 .. 1 loop	1	structure	the two ends of a closing path: open and closed
 driver-action-contact-search.adb	for G in 0 .. 1 loop	1	structure	the two ends of a closing path: open and closed
-driver-action-contact-search.adb	for I in 0 .. 1 loop	1	structure	a box corner is on the face or a thickness behind it
-driver-action-contact-search.adb	for J in -1 .. 1 loop	1	structure	the two sides of a face (zero, the middle, is skipped)
-driver-action-contact-search.adb	for J in -1 .. 1 loop	1	structure	the two sides of a face (zero, the middle, is skipped)
-driver-action-contact-search.adb	for K in 0 .. 1 loop	1	structure	a box corner is at the lobe's end or its far end
 driver-action-contact-search.adb	if Natural (E.Pads.Length) < 2 then	2	math	closing on something needs at least two lobes
 driver-action-contact-search.adb	if Natural (E.Pads.Length) >= 2 and then abs E.Along > 0.0 and then Tip_Sd < Real'Last then	2	math	a turn can take a pad onto another only when there are at least two
 driver-action-contact-search.adb	if Physics.Need (None, Thing.Base, Motion, Thing.Centre.Mean, U, 0.0).Why = Physics.Footing_In_Way then	0.0	math	whether a motion goes into the surface does not depend on friction
@@ -88,11 +82,7 @@ driver-action-execution.adb	Lift := (if Lift > 0.0 then 2.0 * Lift else Real'Max
 driver-action-execution.adb	Limit := Real'Min (Limit, Real'Max (Fine, Z * Sqrt (2.0) * Largest_Sigma (Start.Covariance)	2.0	statistics	a rise is the difference of two readings: its sigma is root two times theirs
 driver-action-execution.adb	Low := (Low + High) / 2.0;	2.0	numerics	bisection halves the interval
 driver-action-execution.adb	NL : constant Positive := Positive'Max (1, Natural (Real'Ceiling (E.Depth / Spacing)));	1	structure	at least one interval, so both ends are sampled
-driver-action-execution.adb	NW : constant Positive := Positive'Max (1, Natural (Real'Ceiling (2.0 * Pd.Half_Width / Spacing)));	1	structure	at least one interval, so both ends are sampled
-driver-action-execution.adb	NW : constant Positive := Positive'Max (1, Natural (Real'Ceiling (2.0 * Pd.Half_Width / Spacing)));	2.0	math	the full width is twice the half width
 driver-action-execution.adb	Pieces : constant Positive := Positive'Max (1, Natural (Real'Ceiling ((Shift + Turn * Lever) / Spacing)));	1	structure	at least one piece, so the end of the way is checked
-driver-action-execution.adb	Q : constant Vec3 := C + (2.0 * Real (I) / Real (NW) - 1.0) * Pd.Half_Width * Wd	1.0	math	from minus one to one half widths across the face
-driver-action-execution.adb	Q : constant Vec3 := C + (2.0 * Real (I) / Real (NW) - 1.0) * Pd.Half_Width * Wd	2.0	math	from minus one to one half widths across the face
 driver-action-execution.adb	Reach_Of : constant Real := (O.Pitch + Pitch) / 2.0 + B;	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample, of either surface: the half of each
 driver-action-execution.adb	Set_Closer (P, X, C.Hand, 0.0, Out_Come);	0.0	math	a closer's fraction: zero is open
 driver-action-execution.adb	Set_Closer (P, X, C.Hand, 0.0, Out_Come);	0.0	math	a closer's fraction: zero is open
@@ -2063,8 +2053,6 @@ driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, twice Z squared times (2 Q - K)
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: twice the critical value in 2 Q - K
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	4.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, four Z to the fourth
-driver-robot-motion.adb	& "" & Driver.Log.Image (Start, 6) & "" & E.Start'Image	6	format	digits printed in a log line or a message
-driver-robot-lockin.adb	return Pushes <= 1;	1	structure	a row is a reference only while at most one group is pushed
 driver-robot-motion.adb	"" & G'Image & "" & C'Image & "" & Driver.Log.Image (Stop, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (W (C), 6));	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& (if Way = Increasing then "" else "") & "" & Driver.Log.Image (Stop.Value, 6)	6	format	digits printed in a log line or a message
