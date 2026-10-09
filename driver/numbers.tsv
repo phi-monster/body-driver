@@ -140,6 +140,121 @@ driver-action-grids.adb	for DK in -1 .. 1 loop	1	structure	the cube itself and i
 driver-action-plants-live.adb	(if Known (R.Delivered) and then R.Delivered.Value < 1.0	1.0	math	the whole step delivered is a fraction of one
 driver-action-plants-live.adb	R.Beats := 1;	1	structure	an order that moves nothing lets exactly one beat pass
 driver-action-plants-live.adb	if N < 2 then	2	math	a nearest neighbour needs at least two samples
+driver-alignment.adb	((C.VV * Du ** 2 - 2.0 * C.UV * Du * Dv + C.UU * Dv ** 2) / (C.UU * C.VV - C.UV ** 2));	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
+driver-alignment.adb	(Noise * (((T.Qu - P.Centre_U) ** 2 * P.Place_UU + 2.0 * (T.Qu - P.Centre_U) * (T.Qv - P.Centre_V) * P.Place_UV	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
+driver-alignment.adb	([Sx, Sy, Sx * Di, Sx * Dj, Sy * Di, Sy * Dj, -Template, -1.0]);	1.0	math	a pixel's residual falls by one for each level of offset: its derivative by the offset is minus one
+driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);	0.5	math	the outer piece's slope: minus half the square of the distance to the end of the support
+driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);	1.0	math	the cubic B-spline's inner piece reaches one knot spacing
+driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);	1.5	math	the inner piece's slope: the derivative of A cubed over two is three halves of A squared
+driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);	2.0	math	the cubic B-spline's outer piece ends two knot spacings from its centre
+driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);	2.0	math	the inner piece's slope: the derivative of minus A squared is minus twice A
+driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);	2.0	math	the outer piece's distance to the end of its support
+driver-alignment.adb	+ Integer'Min (Across - 1, Integer'Max (0, Integer (Real'Rounding (Centre_U - (Real (Low_X) + 0.5))))) + 1;	0.5	math	a pixel's centre lies half a pixel in from its corner
+driver-alignment.adb	Answered : constant Answer := Align_At (First, Second, Query, Level_Used, Plain, Radius, 1);	1	structure	a patch of the usual width: one times it
+driver-alignment.adb	C (First + (Count - 1) * Step) := Pole / (Pole ** 2 - 1.0) * (Plus (Count) + Pole * Plus (Count - 1));	1.0	math	the closing term of the spline prefilter: the pole over its square less one
+driver-alignment.adb	Cost := 0.5 * (Current.Rss + Penalty (T, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
+driver-alignment.adb	Cost := 0.5 * (Current.Rss + Penalty (T, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
+driver-alignment.adb	Filter_Line (Spline.all, Spline'First + Row * Width, 1, Width);	1	structure	along a row the next pixel is one apart
+driver-alignment.adb	Finest : constant := 0;	0	structure	the finest size of the pyramid is the picture itself: size 0
+driver-alignment.adb	Fraction : Real := 1.0;	1.0	numerics	the line search starts with the whole step
+driver-alignment.adb	Fraction := Fraction / 2.0;	2.0	numerics	a step that raises the cost is halved
+driver-alignment.adb	Gain : constant Real := 6.0;	6.0	math	the cubic B-spline weighs a sample and its neighbours one, four and one sixths: the prefilter's gain undoes the sum of six
+driver-alignment.adb	Grow : Positive := 1)	1	structure	a patch is the usual width unless asked to grow
+driver-alignment.adb	Halving : constant := 2;	2	math	a size of the pyramid is half the one before: the pictures are halved
+driver-alignment.adb	High_X : constant Integer := Integer (Real'Ceiling (Centre_U + Extent_U - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
+driver-alignment.adb	High_Y : constant Integer := Integer (Real'Ceiling (Centre_V + Extent_V - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
+driver-alignment.adb	Integer'Min (Down - 1, Integer'Max (0, Integer (Real'Rounding (Centre_V - (Real (Low_Y) + 0.5))))) * Across	0.5	math	a pixel's centre lies half a pixel in from its corner
+driver-alignment.adb	Largest := Sqrt ((Total + Sqrt (Real'Max (0.0, Total ** 2 - 4.0 * Det ** 2))) / 2.0);	2.0	math	the larger root of a quadratic is half the sum of the roots and the root of the discriminant
+driver-alignment.adb	Largest := Sqrt ((Total + Sqrt (Real'Max (0.0, Total ** 2 - 4.0 * Det ** 2))) / 2.0);	4.0	math	the discriminant of the quadratic in the squared singular values is the trace squared less four determinants squared
+driver-alignment.adb	Least_Half : constant := 2;	2	math	a central difference reaches one pixel and the interpolation another
+driver-alignment.adb	Light_Noise_Floor : constant Real := 2.0 * Quantization;	2.0	statistics	the difference of two rounded levels has twice the variance of one rounding
+driver-alignment.adb	Low_X : constant Integer := Integer (Real'Floor (Centre_U - Extent_U - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
+driver-alignment.adb	Low_Y : constant Integer := Integer (Real'Floor (Centre_V - Extent_V - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
+driver-alignment.adb	Mean : constant Real := (C.UU + C.VV) / 2.0;	2.0	math	the mean of the two variances
+driver-alignment.adb	Most_Variants : constant := 3;	3	statistics	the other fits an answer's covariance rests on: the patch's middle and the two next coarser sizes
+driver-alignment.adb	Parameters : constant := 8;	8	structure	the warp has eight unknowns: the place (2), the linear part (4), the light's gain and offset (2)
+driver-alignment.adb	Per_Axis : constant Positive := Positive (Real'Ceiling (Sqrt (2.0 * Real (Parameters))));	2.0	statistics	at least twice as many parts as unknowns, or the sum of the parts' squared scores cannot have the unknowns' rank with room
+driver-alignment.adb	Pole : constant Real := Sqrt (3.0) - 2.0;	2.0	math	the cubic B-spline's prefilter pole: root 3 less 2
+driver-alignment.adb	Pole : constant Real := Sqrt (3.0) - 2.0;	3.0	math	the cubic B-spline's prefilter pole is the root of z squared + 4 z + 1 that lies inside the unit circle: root 3 less 2
+driver-alignment.adb	Power : Real := 1.0;	1.0	math	the empty product: the pole to the power 0
+driver-alignment.adb	Quantization : constant Real := 1.0 / 12.0;	1.0	statistics	a uniform rounding to a whole unit has the variance one twelfth
+driver-alignment.adb	Quantization : constant Real := 1.0 / 12.0;	12.0	statistics	a uniform rounding to a whole unit has the variance one twelfth
+driver-alignment.adb	Real'Max (0.0, Real'Min (1.0 - 1.0 / Real (Field'Length), Cross / Sqrt (Left * Right)));	1.0	statistics	a correlation of n values cannot be told from one by less than one over n
+driver-alignment.adb	Result : Real := 1.0;	1.0	math	no inflation: the factor of independent values
+driver-alignment.adb	Result := Result * (1.0 + R) / (1.0 - R);	1.0	statistics	the variance of a mean of values with autocorrelation r is (1 + r) / (1 - r) times that of independent ones
+driver-alignment.adb	Rho : Real_Array (1 .. Across * Down) := [others => -2.0];	2.0	structure	a correlation is at least -1, so below -1 marks a cell that is not a candidate
+driver-alignment.adb	Scale (K) := 1.0 / Sqrt (H (K, K));	1.0	numerics	the unknown is scaled by the inverse root of its curvature, so the scaled matrix has a unit diagonal
+driver-alignment.adb	Scale (K) := 1.0 / Sqrt (H (K, K));	1.0	numerics	the unknown is scaled by the inverse root of its curvature, so the scaled matrix has a unit diagonal
+driver-alignment.adb	Score (K) := -0.5 * (Pixels * (Fits (K).Rss / Real (Fits (K).Count)) / (Noise * Spread)	0.5	statistics	the log posterior is minus half the sum of the pixels' squares in noise units and of the distance from the prediction in its deviations
+driver-alignment.adb	Skew : constant Real := Sqrt (((C.UU - C.VV) / 2.0) ** 2 + C.UV ** 2);	2.0	math	half the difference of the two variances: the eigenvalues lie that far either side of their mean
+driver-alignment.adb	Spread : Real := 1.0;	1.0	statistics	no inflation until the residuals' smoothness is measured
+driver-alignment.adb	Step : constant Positive := (if Axis = 1 then 1 else Side);	1	structure	and its next pixel is one apart
+driver-alignment.adb	Step : constant Positive := (if Axis = 1 then 1 else Side);	1	structure	the first axis runs along a row
+driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	1	math	the filter's first tap lies one pixel before the two pixels it replaces
+driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	1.0	math	the binomial filter 1 3 3 1: an outer tap is one part
+driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	1.0	math	the binomial filter 1 3 3 1: an outer tap is one part
+driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	2	math	its last tap lies one pixel after them: two from the first
+driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	3.0	math	the binomial filter 1 3 3 1: an inner tap is three parts
+driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	3.0	math	the binomial filter 1 3 3 1: an inner tap is three parts
+driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	8.0	math	the binomial weights 1 3 3 1 add up to eight
+driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	8.0	math	the binomial weights 1 3 3 1 add up to eight
+driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	8.0	math	the binomial weights 1 3 3 1 add up to eight
+driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	8.0	math	the binomial weights 1 3 3 1 add up to eight
+driver-alignment.adb	Trial_Cost := 0.5 * (Trial.Rss + Penalty (Candidate, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
+driver-alignment.adb	Unit (J) := 1.0;	1.0	math	a unit vector: the column of the identity
+driver-alignment.adb	Wider : constant Answer := Align_At (First, Second, Query, Level_Used, Plain, Radius, 2);	2	structure	a patch twice as wide, the factor of a size of the pyramid
+driver-alignment.adb	Window_Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	statistics	a place has two coordinates
+driver-alignment.adb	Wx, Sx, Wy, Sy : array (0 .. 3) of Real;	3	math	the cubic B-spline reads four coefficients along an axis: one before the cell and two after
+driver-alignment.adb	X : constant Real := U - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
+driver-alignment.adb	Y : constant Real := V - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
+driver-alignment.adb	and then (Axis = 2 or else (K - Field'First) mod Side < Side - 1)	2	structure	the second axis of a field on a grid, along its columns: it has a neighbour in every row but the last
+driver-alignment.adb	elsif A < 2.0 then	2.0	math	the cubic B-spline's outer piece ends two knot spacings from its centre
+driver-alignment.adb	elsif Rho (Nearest) > -2.0 then	2.0	structure	a correlation is at least -1, so below -1 marks a cell that is not a candidate
+driver-alignment.adb	for A in -1 .. 2 loop	1	math	the halving filter's first tap lies one pixel before the two pixels it replaces
+driver-alignment.adb	for A in -1 .. 2 loop	2	math	its last tap lies one pixel after them: two from the first
+driver-alignment.adb	for Axis in 1 .. 2 loop	2	structure	the two axes of a picture
+driver-alignment.adb	for B in -1 .. 2 loop	1	math	the halving filter's first tap lies one pixel before the two pixels it replaces
+driver-alignment.adb	for B in -1 .. 2 loop	2	math	its last tap lies one pixel after them: two from the first
+driver-alignment.adb	for Column in 0 .. 3 loop	3	math	the cubic B-spline reads four coefficients along an axis: one before the cell and two after
+driver-alignment.adb	for Dc in -1 .. 1 loop	1	structure	and one after it
+driver-alignment.adb	for Dc in -1 .. 1 loop	1	structure	the neighbours of a candidate within a pixel: one before it
+driver-alignment.adb	for Dr in -1 .. 1 loop	1	structure	and one after it
+driver-alignment.adb	for Dr in -1 .. 1 loop	1	structure	and one after it
+driver-alignment.adb	for K in 0 .. 3 loop	3	math	the cubic B-spline reads four coefficients along an axis: one before the cell and two after
+driver-alignment.adb	for K in 2 .. Count loop	2	structure	the filter's recursion starts at the second sample: the first is summed apart
+driver-alignment.adb	for K in 2 .. Count loop	2	structure	the insertion starts at the second peak: one alone is in order
+driver-alignment.adb	for K in 3 .. 6 loop	3	structure	the linear part's four entries follow the place's two: unknowns 3 to 6
+driver-alignment.adb	for K in 3 .. 6 loop	6	structure	the linear part's last entry is unknown 6: the gain and offset follow
+driver-alignment.adb	for K in reverse 0 .. Count - 2 loop	2	structure	the backward recursion starts at the second from last: the last is set apart
+driver-alignment.adb	for Row in 0 .. 3 loop	3	math	the cubic B-spline reads four coefficients along an axis: one before the cell and two after
+driver-alignment.adb	function Cell_U (Index : Positive) return Real is (Real (Cell_X (Index)) + 0.5);	0.5	math	a pixel's centre lies half a pixel in from its corner
+driver-alignment.adb	function Cell_V (Index : Positive) return Real is (Real (Cell_Y (Index)) + 0.5);	0.5	math	a pixel's centre lies half a pixel in from its corner
+driver-alignment.adb	function Side_Of (Half : Natural) return Positive is (2 * Half + 1);	2	math	a patch is its half-width either side of the point, and the point
+driver-alignment.adb	if 2 * Count >= N then	2	math	at least half the patch: twice the count reaches the patch's size
+driver-alignment.adb	if 2 * Fitted.Count < Side_Of (Grow * Top_Half) ** 2 then	2	math	at least half the patch: twice the count reaches the patch's size
+driver-alignment.adb	if 2 * Present < N then	2	math	at least half the patch: twice the count reaches the patch's size
+driver-alignment.adb	if A < 1.0 then	1.0	math	the cubic B-spline's inner piece reaches one knot spacing
+driver-alignment.adb	if Count < 2 then	2	structure	a line of fewer than two samples has nothing to filter
+driver-alignment.adb	if Det <= 0.0 or else Largest_Scale > Real (Halving) or else Smallest_Scale < 1.0 / Real (Halving) then	1.0	math	a change of scale by a halving either way: the smallest allowed is one over the largest
+driver-alignment.adb	if Radius / Real (Halving) ** Step + 1.0 <= Real (H) then	1.0	math	a pixel of margin beyond the window's radius
+driver-alignment.adb	if Rho (K) > -2.0 then	2.0	structure	a correlation is at least -1, so below -1 marks a cell that is not a candidate
+driver-alignment.adb	if Smallest > Ridge_Smallest / 2.0 then	2.0	statistics	the data must be at least as precise as the window: together their covariance is at most half the window's
+driver-alignment.adb	if X < 1.0 or else Y < 1.0 or else X >= Real (Width - 2) or else Y >= Real (Height - 2) then	1.0	math	the same along the second axis
+driver-alignment.adb	if X < 1.0 or else Y < 1.0 or else X >= Real (Width - 2) or else Y >= Real (Height - 2) then	1.0	math	the spline reads a coefficient one pixel before the cell: the first pixel is not read
+driver-alignment.adb	if X < 1.0 or else Y < 1.0 or else X >= Real (Width - 2) or else Y >= Real (Height - 2) then	2	math	and two after the cell: the last two pixels are not read
+driver-alignment.adb	if X < 1.0 or else Y < 1.0 or else X >= Real (Width - 2) or else Y >= Real (Height - 2) then	2	math	the same along the second axis
+driver-alignment.adb	or else (Last_Moved > Moved and then Moved ** 2 / (Last_Moved - Moved) <= 1.0 / Z)	1.0	statistics	what the steps to come add up to is under a standard error over Z, which no test the driver makes can tell from none
+driver-alignment.adb	return (2.0 - A) ** 3 / 6.0;	2.0	math	the outer piece's distance to the end of its support
+driver-alignment.adb	return (2.0 - A) ** 3 / 6.0;	6.0	math	the cubic B-spline's outer piece is that distance cubed over six
+driver-alignment.adb	return 2.0 / 3.0 - A * A + A ** 3 / 2.0;	2.0	math	the cubic B-spline's centre value is two thirds
+driver-alignment.adb	return 2.0 / 3.0 - A * A + A ** 3 / 2.0;	2.0	math	the inner piece's cubic term is A cubed over two
+driver-alignment.adb	return 2.0 / 3.0 - A * A + A ** 3 / 2.0;	2xA	math	the inner piece's quadratic term is the square of the distance, written as a product
+driver-alignment.adb	return 2.0 / 3.0 - A * A + A ** 3 / 2.0;	3.0	math	the cubic B-spline's centre value is two thirds
+driver-alignment.adb	return Natural (Real'Rounding (Side / 2.0));	2.0	math	half the patch's side lies either side of its point
+driver-alignment.adb	return Sqrt (Real'Max (0.0, (Q_VV * Du ** 2 - 2.0 * Q_UV * Du * Dv + Q_UU * Dv ** 2) / Q_Det));	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
+driver-alignment.adb	while J >= 1 and then Rho (Peaks (J)) < Rho (Held) loop	1	structure	the insertion stops at the first peak
+driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);	1.0	math	the identity map: the first diagonal entry is one
+driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);	1.0	math	the identity map: the second diagonal entry is one
 driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
