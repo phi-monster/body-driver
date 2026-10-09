@@ -5204,10 +5204,6 @@ package body Driver.Robot.Tests is
          Check (Reloaded (Back, Stored_Kinematics), "the kinematics were not reloaded: "
                 & Ada.Strings.Unbounded.To_String (Why));
          Check (Driver.Robot.Kinematics.Fixed_Known (Back, 3), "the reloaded body has no place for the head");
-         Check (Natural (Back.Groups (1).Stops.Length) = 2 and then Back.Groups (1).Stops (2).Channel = 3
-                and then not Back.Groups (1).Stops (2).Up and then abs (Back.Groups (1).Stops (2).Value - 1.4) < 1.0e-9
-                and then abs (Back.Groups (1).Stops (2).Pose (4) - 0.24) < 1.0e-9 and then Back.Groups (1).Stops (1).Up,
-                "the reloaded body has other stops than the written one's, or their poses");
          Check (Driver.Robot.Body_File.Text (Back) = Written, "the reloaded body writes another file");
          if Driver.Robot.Kinematics.Fixed_Known (Back, 3) then
             declare
@@ -6706,6 +6702,10 @@ package body Driver.Robot.Tests is
          Check (abs (Driver.Robot.End_Of (Back, 1, 3, Driver.Robot.Increasing).Value - 1.5) < 1.0e-9
                 and then abs (Driver.Robot.End_Of (Back, 1, 5, Driver.Robot.Decreasing).Value + 1.5) < 1.0e-9,
                 "the reloaded ends are other numbers than the written ones");
+         Check (Natural (Back.Groups (1).Stops.Length) = 2 and then Back.Groups (1).Stops (2).Channel = 3
+                and then not Back.Groups (1).Stops (2).Up and then abs (Back.Groups (1).Stops (2).Value - 1.4) < 1.0e-9
+                and then abs (Back.Groups (1).Stops (2).Pose (3) - 0.24) < 1.0e-9 and then Back.Groups (1).Stops (1).Up,
+                "the reloaded body has other stops than the written one's, or their poses");
          Check (Driver.Robot.Body_File.Text (Back) = Written, "the reloaded body writes another file");
       end;
    end Ends_Are_Kept_In_The_Body_File;
