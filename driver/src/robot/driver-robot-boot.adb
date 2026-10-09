@@ -276,6 +276,12 @@ package body Driver.Robot.Boot is
                --  the estimates over the whole stream to tell them apart.
                Order : Push_Array (1 .. 2 * Size);
                Count : Natural := 0;
+               --  Drawn in a held beat: the arms swept at once (Driver.Beats.At_Once)
+               --  share the boot's one generator, and their windows never overlap.
+               procedure Draw_Order is
+               begin
+                  Shuffle (Order (1 .. Count), Rng);
+               end Draw_Order;
             begin
                for C in 1 .. Size loop
                   if Per_Unit (C) > 0.0 and then First (C) > 0.0 then
@@ -287,7 +293,7 @@ package body Driver.Robot.Boot is
                                       & " does not move its eye; not swept");
                   end if;
                end loop;
-               Shuffle (Order (1 .. Count), Rng);
+               Driver.Beats.Within_A_Beat (Draw_Order'Access);
                for P of Order (1 .. Count) loop
                   declare
                      Offset : Real := First (P.Channel);
@@ -375,7 +381,11 @@ package body Driver.Robot.Boot is
                   end if;
                end;
             end;
-            Driver.Robot.Motion.Settle (M, Waited);
+            declare
+               Waited_Here : Natural;   --  each arm's own: arms are swept at once
+            begin
+               Driver.Robot.Motion.Settle (M, Waited_Here);
+            end;
          end;
       end Sweep;
 
@@ -399,59 +409,89 @@ package body Driver.Robot.Boot is
          end loop;
       end Read_Body;
 
-      --  Every arm of the current estimate is swept with the eye it carries:
-      --  the body is read again before each sweep and after the fit's
-      --  estimate, since later evidence can change a role or a mount (an eye
-      --  can decide by a later estimate that it rides on a group). An arm is
-      --  known by its group, since a new arm can renumber the others, and is
-      --  swept again when it carries another eye than the one it was swept
-      --  with; an arm that carries none has nothing to sweep. The fit is made
-      --  when no arm is left.
+      --  Every arm of the current estimate is swept with the eye it carries,
+      --  every such arm at once (Driver.Beats.At_Once, an arm a lane: their
+      --  sweeps move their own groups, and each step waits for the whole body
+      --  to be still): the body is read again before each round of sweeps and
+      --  after the fit's estimate, since later evidence can change a role or a
+      --  mount (an eye can decide by a later estimate that it rides on a
+      --  group). An arm is known by its group, since a new arm can renumber the
+      --  others, and is swept again when it carries another eye than the one it
+      --  was swept with; an arm that carries none has nothing to sweep. The fit
+      --  is made when no arm is left.
       procedure Sweep_Every_Arm is
          type Arm_Eye is record
             Group : Group_Id := 1;
             Eye   : Eye_Id := 1;
+            Arm   : Arm_Id := 1;
          end record;
          package Pair_Lists is new Ada.Containers.Vectors (Positive, Arm_Eye);
-         Swept : Pair_Lists.Vector;
-         Next  : Arm_Id'Base := 0;
-         Pair  : Arm_Eye;
+         Swept   : Pair_Lists.Vector;
+         Unswept : Pair_Lists.Vector;
+
+         use type Ada.Containers.Count_Type;
+         use type Driver.Observations.Camera_Id;
+
+         function Same_Pair (A, B : Arm_Eye) return Boolean is (A.Group = B.Group and then A.Eye = B.Eye);
+
          procedure Find_Unswept is
          begin
-            Next := 0;
+            Unswept.Clear;
             for A in 1 .. Arm_Count (M) loop
-               for E in 1 .. Eye_Count (M) loop
-                  --  The eye the sweep moves: the last one the arm carries.
-                  if Eye_Mount (M, Eye_Id (E)).Kind = Arm_Carried
-                    and then Eye_Mount (M, Eye_Id (E)).Arm = Arm_Id (A)
-                  then
-                     Next := Arm_Id (A);
-                     Pair := (Group => Arm_Group (M, Arm_Id (A)), Eye => Eye_Id (E));
+               declare
+                  Found : Boolean := False;
+                  Pair  : Arm_Eye;
+               begin
+                  for E in 1 .. Eye_Count (M) loop
+                     --  The eye the sweep moves: the last one the arm carries.
+                     if Eye_Mount (M, Eye_Id (E)).Kind = Arm_Carried
+                       and then Eye_Mount (M, Eye_Id (E)).Arm = Arm_Id (A)
+                     then
+                        Found := True;
+                        Pair := (Group => Arm_Group (M, Arm_Id (A)), Eye => Eye_Id (E), Arm => Arm_Id (A));
+                     end if;
+                  end loop;
+                  if Found and then not (for some S of Swept => Same_Pair (S, Pair)) then
+                     Unswept.Append (Pair);
                   end if;
-               end loop;
-               if Next > 0 and then Swept.Contains (Pair) then
-                  Next := 0;
-               end if;
-               exit when Next > 0;
+               end;
             end loop;
          end Find_Unswept;
+
+         procedure Sweep_Lane (Lane : Positive) is
+         begin
+            Sweep (Unswept (Lane).Arm);
+         end Sweep_Lane;
+
+         procedure Sweep_At_Once is new Driver.Beats.At_Once (Sweep_Lane);
       begin
          loop
             Driver.Beats.Within_A_Beat (Find_Unswept'Access);
-            if Next > 0 then
-               Driver.Log.Line (Driver.Log.Robot, "boot: sweeping arm" & Next'Image & " (group" & Pair.Group'Image
-                                & ") with eye" & Pair.Eye'Image);
-               Sweep (Next);
-               Swept.Append (Pair);
+            if not Unswept.Is_Empty then
+               for P of Unswept loop
+                  Driver.Log.Line (Driver.Log.Robot, "boot: sweeping arm" & P.Arm'Image & " (group" & P.Group'Image
+                                   & ") with eye" & P.Eye'Image
+                                   & (if Unswept.Length > 1 then ", the" & Unswept.Length'Image & " arms at once" else ""));
+               end loop;
+               if Unswept.Length = 1 then
+                  Sweep (Unswept.First_Element.Arm);
+               else
+                  Sweep_At_Once (Positive (Unswept.Length));
+               end if;
+               for P of Unswept loop
+                  Swept.Append (P);
+               end loop;
             else
                --  The instrument answers the keyframes' matches a beat or more
                --  after they were asked: the fit waits for every answer.
                Driver.Robot.Motion.Hold_While_Matching (M);
                Driver.Beats.Within_A_Beat (Estimate'Access);
                Driver.Beats.Within_A_Beat (Find_Unswept'Access);
-               exit when Next = 0;
-               Driver.Log.Line (Driver.Log.Robot, "boot: the estimate after the sweeps lists arm" & Next'Image
-                                & " (group" & Pair.Group'Image & ") with eye" & Pair.Eye'Image & ", not swept yet");
+               exit when Unswept.Is_Empty;
+               for P of Unswept loop
+                  Driver.Log.Line (Driver.Log.Robot, "boot: the estimate after the sweeps lists arm" & P.Arm'Image
+                                   & " (group" & P.Group'Image & ") with eye" & P.Eye'Image & ", not swept yet");
+               end loop;
             end if;
          end loop;
       end Sweep_Every_Arm;
