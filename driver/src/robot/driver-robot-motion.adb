@@ -132,8 +132,9 @@ package body Driver.Robot.Motion is
       end;
    end Step;
 
-   procedure Note_Stopped (M : in out Model; G : Group_Id) is
+   procedure Note_Stopped (M : in out Model; G : Group_Id; Noted : out Boolean) is
    begin
+      Noted := False;
       if Steps.Episodes (M, G) = 0 then
          return;
       end if;
@@ -170,10 +171,12 @@ package body Driver.Robot.Motion is
                if not S.Has_Stopped_High (At_C) or else Stop > S.Stopped_High (At_C) then
                   S.Has_Stopped_High.Replace_Element (At_C, True);
                   S.Stopped_High.Replace_Element (At_C, Stop);
+                  Noted := True;
                end if;
             elsif not S.Has_Stopped_Low (At_C) or else Stop < S.Stopped_Low (At_C) then
                S.Has_Stopped_Low.Replace_Element (At_C, True);
                S.Stopped_Low.Replace_Element (At_C, Stop);
+               Noted := True;
             end if;
             Driver.Log.Line (Driver.Log.Robot, "body: group" & G'Image & " channel" & C'Image & " stopped at "
                              & Driver.Log.Image (Stop, 6) & " asked " & Driver.Log.Image (Channels.Target (M, G, E.Start, C), 6)
@@ -181,6 +184,12 @@ package body Driver.Robot.Motion is
                              & " (the shortfall of the rest spread, or less): an end of the channel " & (if Up then "upwards" else "downwards"));
          end;
       end;
+   end Note_Stopped;
+
+   procedure Note_Stopped (M : in out Model; G : Group_Id) is
+      Ignored : Boolean;
+   begin
+      Note_Stopped (M, G, Ignored);
    end Note_Stopped;
 
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is

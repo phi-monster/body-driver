@@ -82,6 +82,11 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  something of its own, or short of it): a tilt this arm cannot make from where it stands, and not a press that
    --  stopped short of the table. Set afresh by each press.
 
+   Learned_An_End : Boolean := False;
+   --  Set by a press whose aim stopped on something of the arm's own that moved an end the arm showed
+   --  (Driver.Robot.Motion.Note_Stopped): the same aim, planned again, is turned about the way down past it. Set
+   --  afresh by each press.
+
    package Group_Lists is new Ada.Containers.Vectors (Positive, Group_Id);
 
    procedure Move_Group (G : Group_Id; Target : Real_Array; Followed : out Boolean) is
@@ -603,8 +608,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
 
       procedure Note_The_Stop (O : Observation) is
          pragma Unreferenced (O);
+         Noted : Boolean;
       begin
-         Driver.Robot.Motion.Note_Stopped (M, Arm_Is);
+         Driver.Robot.Motion.Note_Stopped (M, Arm_Is, Noted);
+         Learned_An_End := Learned_An_End or else Noted;
       end Note_The_Stop;
 
       Least : Real;   --  the least push, where the aim leaves the tool, kept above zero so that the doubling begins
@@ -709,6 +716,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end End_Lost;
    begin
       Aim_Short := False;
+      Learned_An_End := False;
       Hold_Beat (Read_Aim'Access);
       if Lost then
          End_Lost (Moved => False);
@@ -880,6 +888,24 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end;
    end Press_Once;
 
+   --  A press; when its aim stopped on an end the arm showed by stopping there (Learned_An_End), the same press once
+   --  more: the aim is planned again with the end known, turned about the way down past it if it was in the way at the
+   --  pose it was first planned at, or not planned at all (Aim_Short) and no arm move is spent (A34: lobe 2 at open,
+   --  the fourth joint at -2.1746 for the -2.1870 asked, and the tilt then halved under the least that tells a tip).
+   function Press_Past_Its_Ends
+     (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening; Along : Vec3) return Boolean
+   is
+      Done : Boolean := Press_Once (Id, R, Lobe, Which, Along);
+   begin
+      if not Done and then not Lost and then Aim_Short and then Learned_An_End then
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the aim of a press of lobe" & Lobe'Image & " at "
+                          & (if Which = Open then "open" else "closed")
+                          & " stopped on an end the arm showed by it: the same aim is planned again past it");
+         Done := Press_Once (Id, R, Lobe, Which, Along);
+      end if;
+      return Done;
+   end Press_Past_Its_Ends;
+
    procedure Press_Lobe (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening) is
       Sight  : constant Vec3 := R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector;
       Lines  : Driver.Robot.Hand.Aims.Direction_Array (1 .. Natural (R.Lobes.Length));
@@ -933,7 +959,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                              & (if Which = Open then "open" else "closed") & " is not pressed: its tip is confirmed already");
             return;
          end if;
-         if not Press_Once (Id, R, Lobe, Which, Sight) then
+         if not Press_Past_Its_Ends (Id, R, Lobe, Which, Sight) then
             return;   --  Lost, or a press that could not be made: the next lobe is the caller's to go on to
          end if;
          Hold_Beat (Read_Agreed'Access);
@@ -968,7 +994,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                --  double while the presses are ones the tip rests on, half when one stops short of the table
                --  (Driver.Robot.Hand.Aims.Next_Tilt).
                while Tilt > 0.0 and then Tilt < Bound loop
-                  if not Press_Once (Id, R, Lobe, Which, Driver.Robot.Hand.Aims.Tilted (Sight, Lean, Tilt)) then
+                  if not Press_Past_Its_Ends (Id, R, Lobe, Which, Driver.Robot.Hand.Aims.Tilted (Sight, Lean, Tilt)) then
                      if Lost then
                         return;   --  Press_Once said so
                      end if;

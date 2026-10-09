@@ -6528,11 +6528,13 @@ package body Driver.Robot.Tests is
       --  never nearer than the readings the channel has been seen at; nothing before a stop, nothing for a channel
       --  whose noise is not measured, and the way up is its own.
       M : Model;
+      Noted : Boolean;
    begin
       Ends_Body (M);
       Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing)), "an end before any stop");
       Ends_Push (M, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
-      Driver.Robot.Motion.Note_Stopped (M, 1);
+      Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
+      Check (Noted, "the first stop of the third joint moved no end");
       declare
          End_Is : constant Estimate := Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing);
       begin
@@ -6544,11 +6546,13 @@ package body Driver.Robot.Tests is
       Check (not Known (Driver.Robot.End_Of (M, 1, 2, Driver.Robot.Decreasing)),
              "the second joint, short but not the limiter, has an end");
       Ends_Push (M, [0.0, 0.0, 0.0705, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
-      Driver.Robot.Motion.Note_Stopped (M, 1);
+      Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
+      Check (Noted, "a stop that went further moved no end");
       Check (abs (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing).Value + 0.0368) < 1.0e-12,
              "a stop that went further did not widen the end to -0.0368");
       Ends_Push (M, [0.0, 0.0, 0.3, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0273, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0194, 0.0, 0.0, 0.0]);
-      Driver.Robot.Motion.Note_Stopped (M, 1);
+      Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
+      Check (not Noted, "a stop nearer than the end moved it");
       Check (abs (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing).Value + 0.0368) < 1.0e-12,
              "a stop where the arm met itself (+0.0194) moved the end it had found (-0.0368)");
       --  The stops are readings, and a channel is never taken to end nearer than its readings seen, so the end the

@@ -894,6 +894,19 @@ is sent first: no press, and the watcher is free for the next), hand.measure.lon
 and the late answer are unchanged. The decider's wait has no rig that reaches it (the rig never blocks a descent
 on a table): it is read in the next run's log.
 
+**Lesson: an aim that stopped on an end the arm showed by it is planned again past that end, once (A34).** A34's hand 1,
+lobe 2 at open: 'the arm did not reach the aim ... turning the hand 0.9550 rad (group 1: delivered 0.994 of 0.9436,
+blocked)', 'body: group 1 channel 4 stopped at -2.174645 asked -2.186958 from -1.710912 ... an end of the channel
+downwards' (a real end: A22's boot had read -2.1633 there), and then 'lobe 2 at open tilted one way: 0 presses, then a
+press stopped short of the table at 0.9550 rad, and the tilts under it are none that tells the tip from a stop': the
+tilt was halved to 0.4775, under the least, and the side ended, although the end the stop had just shown makes the
+aim at another turn about the way down plannable (Aim_Reaching with the end known). The first plan of an aim is made
+before the end is known (plans are free past the readings seen until a channel has shown one), so the aim that
+shows it stops; Press_Past_Its_Ends plans the same aim once more when the stop moved an end (Note_Stopped says so),
+turned about the way down past it or refused (no move spent); the halving is for a tilt the arm cannot make at any
+turn. A34 noted the second end the same way (the shoulder at -0.244220 for -0.608266 asked, from the descent of a
+press whose tip was the bogus 11.4726 of the first press).
+
 **Lesson: an aim the arm did not complete is not the start of a press (A27).**
 A27's hand 2 (the right arm) pressed lobe 1 first, straight: the aim, a turn of
 1.0762 rad about the eye, stopped the arm at the third joint +0.0705 for the
