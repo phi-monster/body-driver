@@ -1,8 +1,10 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Numerics.Dense;
+with Driver.Parallel_For;
 with Driver.Stats;
 with Driver.Uncertain;
+with System.Multiprocessors;
 
 package body Driver.Alignment.Keyframes is
 
@@ -25,6 +27,8 @@ package body Driver.Alignment.Keyframes is
    end record;
 
    package Located_Vectors is new Ada.Containers.Vectors (Positive, Located);
+
+   type Located_Array is array (Positive range <>) of Located;
 
    --  How far a point moves along each axis.
    type Displacement is record
@@ -575,6 +579,46 @@ package body Driver.Alignment.Keyframes is
       end;
    end Predict;
 
+   --  Every point of the reference into the second picture from its prediction, in as many pieces at once as the
+   --  machine has processors (a point's alignment reads the two pyramids and writes only its own answer); where
+   --  the answers were found, the places they say, as the field of displacements is fitted to them.
+   procedure Align_All
+     (C       : Chain;
+      Second  : Pyramid;
+      Given   : Prediction_Array;
+      Answers : out Answer_Array;
+      Placed  : out Located_Vectors.Vector)
+   is
+      Count  : constant Natural := Given'Length;
+      Pieces : constant Natural := Natural'Max (1, Natural'Min (Count, Natural (System.Multiprocessors.Number_Of_CPUs)));
+      Marks  : Located_Array (1 .. Count);
+
+      procedure Piece (Index : Positive) is
+         First : constant Positive := (Index - 1) * Count / Pieces + 1;
+         Last  : constant Natural := Index * Count / Pieces;
+      begin
+         for K in First .. Last loop
+            declare
+               Result : Answer renames Answers (Answers'First + K - 1);
+            begin
+               Result := Align (C.Pictures, Second, Given (Given'First + K - 1));
+               if Result.Verdict = Found then
+                  Marks (K) := (Found => True, Place => Result.To,
+                                Sigma => Sqrt (Real'Max (Result.Cov.UU, Result.Cov.VV)));
+               end if;
+            end;
+         end loop;
+      end Piece;
+
+      procedure Run is new Driver.Parallel_For (Piece);
+   begin
+      Run (1, Pieces);
+      Placed.Clear;
+      for Mark of Marks loop
+         Placed.Append (Mark);
+      end loop;
+   end Align_All;
+
    procedure Agreement (C : Chain; Answers : Answer_Array; Agree : out Flag_Array) is
       Placed : Located_Vectors.Vector;
       Field  : Field_Fit;
@@ -600,18 +644,7 @@ package body Driver.Alignment.Keyframes is
       Placed : Located_Vectors.Vector;
       Field  : Field_Fit;
    begin
-      for K in Given'Range loop
-         declare
-            Result : Answer renames Answers (Answers'First + K - Given'First);
-            Place  : Located;
-         begin
-            Result := Align (C.Pictures, Second, Given (K));
-            if Result.Verdict = Found then
-               Place := (Found => True, Place => Result.To, Sigma => Sqrt (Real'Max (Result.Cov.UU, Result.Cov.VV)));
-            end if;
-            Placed.Append (Place);
-         end;
-      end loop;
+      Align_All (C, Second, Given, Answers, Placed);
       Fit_Field (C, Placed, Field, Agree);
    end Realign;
 
@@ -630,18 +663,7 @@ package body Driver.Alignment.Keyframes is
       for X of Change loop
          Next.Change.Append (X);
       end loop;
-      for K in Given'Range loop
-         declare
-            Result : Answer renames Answers (Answers'First + K - Given'First);
-            Place  : Located;
-         begin
-            Result := Align (C.Pictures, Second, Given (K));
-            if Result.Verdict = Found then
-               Place := (Found => True, Place => Result.To, Sigma => Sqrt (Real'Max (Result.Cov.UU, Result.Cov.VV)));
-            end if;
-            Placed.Append (Place);
-         end;
-      end loop;
+      Align_All (C, Second, Given, Answers, Placed);
       Fit_Field (C, Placed, Next.Field, Agree);
       --  How far the extrapolation of each order that was tried was off, beyond what it stated: the relative error
       --  its next use must allow for.

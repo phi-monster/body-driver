@@ -56,8 +56,9 @@
 
 with Driver.Images;
 
-private with Ada.Containers.Indefinite_Holders;
 private with Ada.Containers.Vectors;
+private with Ada.Finalization;
+private with System.Atomic_Counters;
 
 package Driver.Alignment is
 
@@ -152,13 +153,35 @@ package Driver.Alignment is
 
 private
 
-   package Real_Holders is new Ada.Containers.Indefinite_Holders (Real_Array);
+   --  An array of reals made once and read after by any number of alignments at once (Driver.Parallel_For). The
+   --  levels that share it count themselves with an atomic counter, and reading it writes nothing. (A reference
+   --  into an Ada.Containers.Indefinite_Holders element counts itself in a field of the holder that every reader
+   --  writes without a lock: read by tasks together, the count is lost, the holder never returns to zero and
+   --  refuses its own finalization.)
+   type Reals_Access is access Real_Array;
+
+   type Counted is limited record
+      Count  : System.Atomic_Counters.Atomic_Counter;
+      Values : Reals_Access;
+   end record;
+
+   type Counted_Access is access Counted;
+
+   type Shared_Reals is new Ada.Finalization.Controlled with record
+      Held : Counted_Access;
+   end record;
+
+   overriding procedure Adjust (Item : in out Shared_Reals);
+   overriding procedure Finalize (Item : in out Shared_Reals);
 
    type Level is record
       Width, Height : Natural := 0;
-      Luma, Spline  : Real_Holders.Holder;   --  the pixels, and the coefficients of the cubic spline through them
+      Luma, Spline  : Shared_Reals;   --  the pixels, and the coefficients of the cubic spline through them
    end record;
 
+   --  A pyramid is read by several points' alignments at once too: a reference into its vector without the
+   --  tampering check is a plain pointer, where the check's counters are written by every reader.
+   pragma Suppress (Tampering_Check);
    package Level_Vectors is new Ada.Containers.Vectors (Natural, Level);
 
    type Pyramid is record

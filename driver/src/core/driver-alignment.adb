@@ -11,8 +11,38 @@ package body Driver.Alignment is
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
 
-   type Real_Access is access Real_Array;
-   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
+   subtype Real_Access is Reals_Access;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Reals_Access);
+   procedure Free_Counted is new Ada.Unchecked_Deallocation (Counted, Counted_Access);
+
+   overriding procedure Adjust (Item : in out Shared_Reals) is
+   begin
+      if Item.Held /= null then
+         System.Atomic_Counters.Increment (Item.Held.Count);
+      end if;
+   end Adjust;
+
+   overriding procedure Finalize (Item : in out Shared_Reals) is
+   begin
+      if Item.Held /= null then
+         if System.Atomic_Counters.Decrement (Item.Held.Count) then
+            Free (Item.Held.Values);
+            Free_Counted (Item.Held);
+         end if;
+         Item.Held := null;
+      end if;
+   end Finalize;
+
+   --  A copy of the values, made to be shared and not written again.
+   function Shared (Values : Real_Array) return Shared_Reals is
+     (Ada.Finalization.Controlled with Held => new Counted'(Count => <>, Values => new Real_Array'(Values)));
+
+   --  The values themselves, made to be shared and not written again; the caller's access is given up.
+   procedure Adopt (Item : out Shared_Reals; Values : in out Real_Access) is
+   begin
+      Item := (Ada.Finalization.Controlled with Held => new Counted'(Count => <>, Values => Values));
+      Values := null;
+   end Adopt;
 
    type Mask_Array is array (Positive range <>) of Boolean;
 
@@ -105,9 +135,8 @@ package body Driver.Alignment is
       for Column in 0 .. Width - 1 loop
          Filter_Line (Spline.all, Spline'First + Column, Width, Height);
       end loop;
-      Result := (Width => Width, Height => Height, Luma => Real_Holders.To_Holder (Pixels),
-                 Spline => Real_Holders.To_Holder (Spline.all));
-      Free (Spline);
+      Result := (Width => Width, Height => Height, Luma => Shared (Pixels), Spline => <>);
+      Adopt (Result.Spline, Spline);
       return Result;
    end Make_Level;
 
@@ -615,10 +644,8 @@ package body Driver.Alignment is
       Scale   : constant Real := Real (Halving) ** Step;
       A_Level : Level renames First.Sizes (Step);
       B_Level : Level renames Second.Sizes (Step);
-      A_Spline_Ref : constant Real_Holders.Constant_Reference_Type := A_Level.Spline.Constant_Reference;
-      B_Spline_Ref : constant Real_Holders.Constant_Reference_Type := B_Level.Spline.Constant_Reference;
-      A_Spline : Real_Array renames A_Spline_Ref.Element.all;
-      B_Spline : Real_Array renames B_Spline_Ref.Element.all;
+      A_Spline : Real_Array renames A_Level.Spline.Held.Values.all;
+      B_Spline : Real_Array renames B_Level.Spline.Held.Values.all;
 
       Half : constant Natural := Grow * Half_Patch (A_Level.Width, A_Level.Height);
       Side : constant Positive := Side_Of (Half);
@@ -1004,15 +1031,14 @@ package body Driver.Alignment is
       Half  : constant Natural := Half_Patch (Top.Width, Top.Height);
       Side  : constant Positive := Side_Of (Half);
       N     : constant Positive := Side * Side;
-      Spline_Ref : constant Real_Holders.Constant_Reference_Type := Top.Spline.Constant_Reference;
       Template : Real_Array (1 .. N);
       Slope_U  : Real_Array (1 .. N);
       Slope_V  : Real_Array (1 .. N);
       Valid    : Mask_Array (1 .. N);
       Present  : Natural := 0;
    begin
-      Resample (Spline_Ref.Element.all, Top.Width, Top.Height, Query.From.U, Query.From.V, Inverse_Of (Linear), Half,
-                Template, Slope_U, Slope_V, Valid);
+      Resample (Top.Spline.Held.Values.all, Top.Width, Top.Height, Query.From.U, Query.From.V, Inverse_Of (Linear),
+                Half, Template, Slope_U, Slope_V, Valid);
       for K in 1 .. N loop
          if Valid (K) then
             Present := Present + 1;
@@ -1053,10 +1079,8 @@ package body Driver.Alignment is
       Scale   : constant Real := Real (Halving) ** Coarse;
       A_Level : Level renames First.Sizes (Coarse);
       B_Level : Level renames Second.Sizes (Coarse);
-      A_Spline_Ref : constant Real_Holders.Constant_Reference_Type := A_Level.Spline.Constant_Reference;
-      B_Luma_Ref : constant Real_Holders.Constant_Reference_Type := B_Level.Luma.Constant_Reference;
-      A_Spline : Real_Array renames A_Spline_Ref.Element.all;
-      B_Luma : Real_Array renames B_Luma_Ref.Element.all;
+      A_Spline : Real_Array renames A_Level.Spline.Held.Values.all;
+      B_Luma : Real_Array renames B_Level.Luma.Held.Values.all;
 
       Half : constant Natural := Grow * Half_Patch (A_Level.Width, A_Level.Height);
       Side : constant Positive := Side_Of (Half);
@@ -1479,7 +1503,7 @@ package body Driver.Alignment is
 
    --  Align for pictures at about the same scale: the warp's scale within one halving.
    function Align_Matched (First, Second : Pyramid; Query : Prediction) return Answer is
-      Second_Top : constant Level := Second.Sizes (0);
+      Second_Top : Level renames Second.Sizes (0);
       --  The prediction's covariance, and what a place on a grid of pixels cannot be known to beyond.
       Plain      : constant Place_Covariance :=
         (UU => Query.Cov.UU + Quantization, UV => Query.Cov.UV, VV => Query.Cov.VV + Quantization);
