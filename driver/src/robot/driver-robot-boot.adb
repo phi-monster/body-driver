@@ -159,8 +159,13 @@ package body Driver.Robot.Boot is
                Away : Real_Array := Start;
             begin
                Away (P.Channel) := Start (P.Channel) + P.Sign * Amount (P.Channel);
+               --  Each push from a body at rest, its pictures settled: what the eyes see move is the push's own, and
+               --  not the tail of the push before it, which the lock-in would credit to this one (Lockin.Measure
+               --  leaves out a push that began from a picture still changing).
+               Driver.Robot.Motion.Settle (M, Waited);
                Go_To (G, Away, Report);
                Moved := Moved or else Report.Outcome = Driver.Robot.Motion.Reached;
+               Driver.Robot.Motion.Settle (M, Waited);
                Go_To (G, Start, Report);
             end;
          end loop;

@@ -1872,6 +1872,7 @@ driver-robot-kinematics-fixed.adb	if not (Driver.Conventions.Z * Sqrt (Cov (3, 3
 driver-robot-kinematics-fixed.adb	if not (Driver.Conventions.Z * Sqrt (Turn_Var) < Ada.Numerics.Pi / 2.0) then	2.0	math	a quarter turn
 driver-robot-kinematics-fixed.adb	if not Driver.Uncertain.Significant (Final.L.Fx, Sigma_Fx, 2 * Used - Terms)	2	structure	two residual components per sighting, against the terms they must determine
 driver-robot-kinematics-fixed.adb	or else not Driver.Uncertain.Significant (Final.L.Fy, Sigma_Fy, 2 * Used - Terms)	2	structure	two residual components per sighting, against the terms they must determine
+driver-robot-kinematics-fixed.adb	while Moves and then not Lowered and then Lambda < Real'Last / 2.0 loop	2.0	math	the largest damping whose double is still a float
 driver-robot-kinematics-fixed.ads	Point : Positive := 1;	1	structure	the first point or pose, a number the field holds before it is set
 driver-robot-kinematics-fixed.ads	Pose : Positive := 1;	1	structure	the first point or pose, a number the field holds before it is set
 driver-robot-kinematics-fixed.ads	Terms : constant := Fit.Lens_Terms + 6;	6	structure	the lens's terms, then the turn's three and the centre's three
@@ -1953,6 +1954,7 @@ driver-robot-kinematics.adb	R (4 .. 6) := Driver.Numerics.Log (Transpose (T.Rota
 driver-robot-kinematics.adb	R.Placement_Covariance.Append (0.0, 36);	0.0	structure	the first arm's placement is exact: the world is its frame
 driver-robot-kinematics.adb	R.Placement_Covariance.Append (0.0, 36);	36	structure	a pose's covariance, six terms by six, row by row
 driver-robot-kinematics.adb	R.Scale := 1.0;	1.0	math	the identity's scale: the first arm is the world as it is
+driver-robot-kinematics.adb	Report.Depth_Gains.Append (0.0);	0.0	structure	a query no sighting names has no track in the fit: its depth moves with no term
 driver-robot-kinematics.adb	Rows : constant Positive := (if Position_Only then 3 else 6);	3	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	Rows : constant Positive := (if Position_Only then 3 else 6);	6	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	Scale := 1.0;	1.0	math	the identity's scale: the first arm is the world as it is
@@ -2030,8 +2032,10 @@ driver-robot-lag.adb	return 1.0;	1.0	math	a probability: too few rows to fit, so
 driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));	0.5	math	the chi-square median with two degrees of freedom
 driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));	1.0	math	the chi-square median with two degrees of freedom
 driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));	2	math	the chi-square median with two degrees of freedom
+driver-robot-lockin.adb	(2.0 * Real (C.Freedom) * C.Variance ** 2 + 4.0 * C.Variance * Typical);	2.0	math	the variance of a chi-square statistic is twice its degrees of freedom
+driver-robot-lockin.adb	(2.0 * Real (C.Freedom) * C.Variance ** 2 + 4.0 * C.Variance * Typical);	4.0	math	the variance of a non-central chi-square statistic adds four times its non-centrality
 driver-robot-lockin.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	structure	a displacement has two components
-driver-robot-lockin.adb	Half : constant Real := 0.5;	0.5	math	a majority is more than half: a whole image moves when a significant majority of its cells do
+driver-robot-lockin.adb	Half : constant Real := 0.5;	0.5	math	a majority is more than half: a whole image moves when a significant majority of its cells do, and the cells far above the rest are what moves when they carry more than half the energy
 driver-robot-lockin.adb	High : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean + Z * Sigma) / Typical));	1.0	math	a share of the cells is at most all of them
 driver-robot-lockin.adb	Low : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));	1.0	math	a share of the cells is at most all of them
 driver-robot-lockin.adb	S.Gain_Variances.Append (0.0);	0.0	math	a cell that does not respond adds no gain
@@ -2046,17 +2050,16 @@ driver-robot-lockin.adb	S.Shifts.Append (0.0, Ada.Containers.Count_Type (Kept));
 driver-robot-lockin.adb	Sigma : constant Real := 1.0 / Sqrt (Weights);	1.0	math	the standard error of a mean weighted by inverse variances is one over the root of the weights' sum
 driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Dof (Cell, G)) * Noise (Cell - 1) ** 4);	1.0	math	the weight of an estimate is the inverse of its variance
 driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Dof (Cell, G)) * Noise (Cell - 1) ** 4);	2.0	math	a chi-square has a variance of twice its degrees of freedom
-driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Freedom) * Var ** 2 + 4.0 * Var * Typical);	1.0	math	the weight of an estimate is the inverse of its variance
-driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Freedom) * Var ** 2 + 4.0 * Var * Typical);	2.0	math	the variance of a chi-square statistic is twice its degrees of freedom
-driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Freedom) * Var ** 2 + 4.0 * Var * Typical);	4.0	math	the variance of a non-central chi-square statistic adds four times its non-centrality
+driver-robot-lockin.adb	Weights := Weights + 1.0 / Variance_Of (C);	1.0	math	the weight of an estimate is the inverse of its variance
 driver-robot-lockin.adb	X (R, 1) := 1.0;	1.0	math	the intercept column of a regression
+driver-robot-lockin.adb	elsif Pushes = 1 then	1	structure	one group is pushed: its push is a reference only if the picture had settled when it began
 driver-robot-lockin.adb	if All_Columns = 0 or else M.Beats < 2 then	2	structure	a displacement needs two frames
 driver-robot-lockin.adb	if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 then	1	structure	the beat before the one an image shows must exist
+driver-robot-lockin.adb	if Pushes > 1 then	1	structure	a row is a reference only while at most one group is pushed
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: its linear term, twice Z squared
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, twice Z squared times (2 Q - K)
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: twice the critical value in 2 Q - K
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	4.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, four Z to the fourth
-driver-robot-lockin.adb	return Pushes <= 1;	1	structure	a row is a reference only while at most one group is pushed
 driver-robot-motion.adb	& "" & Driver.Log.Image (Start, 6) & "" & E.Start'Image	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (W (C), 6));	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& (if Way = Increasing then "" else "") & "" & Driver.Log.Image (Stop.Value, 6)	6	format	digits printed in a log line or a message

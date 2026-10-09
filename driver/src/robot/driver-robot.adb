@@ -110,6 +110,7 @@ package body Driver.Robot is
             if S.Judged.Is_Empty and then M.Beats > 0 then
                S.Judged.Append (False, Ada.Containers.Count_Type (M.Beats));
                S.Still_At.Append (False, Ada.Containers.Count_Type (M.Beats));
+               S.Settled_At.Append (False, Ada.Containers.Count_Type (M.Beats));
             end if;
             declare
                N    : constant Natural := Cells (S.Grid);
@@ -145,6 +146,7 @@ package body Driver.Robot is
                      S.Has_Before := False;
                   end if;
                   Stillness.Watch (S, Reset);
+                  S.Settled_At.Append (S.Watch_Done);
                end;
                --  This frame is the next one's previous, and the previous one
                --  the next one's before; a missing frame, or one of another

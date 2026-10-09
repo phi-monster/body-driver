@@ -16,16 +16,60 @@
 --  significant minority; anything in between is undecided. A cell shows it
 --  when it responds, or, when its own noise is too much for it to tell a motion
 --  as large as the responding cells show, in the share that the cells like it
---  show it together. So a view partly too faint for its cells to tell a push
---  is still moved whole by it; a patch of the best-measured cells is not made
---  the whole picture by the faint cells around it, which together show
---  nothing; and a push too small for the faint cells to show it even together
---  leaves the verdict undecided, since the share is known only within its
---  error. That a group moves anything at all is itself tested: the
---  responding cells must outnumber the false alarms the per-cell test makes
---  on its own.
+--  show it together (Cells_Shown). So a view partly too faint for its cells
+--  to tell a push is still moved whole by it; a patch of the best-measured
+--  cells is not made the whole picture by the faint cells around it, which
+--  together show nothing, nor by the few of them that show a great deal (the
+--  fingers of a hand in view); and a push too small for the faint cells to
+--  show it even together leaves the verdict undecided, since the share is
+--  known only within its error. That a group moves anything at all is itself
+--  tested: the responding cells must outnumber the false alarms the per-cell
+--  test makes on its own.
 
 private package Driver.Robot.Lockin is
+
+   type Noisy_Cell is record
+      Energy   : Real;       --  the motion the group shows in the cell: its Wald statistic less its degrees of freedom,
+                             --  times its variance (zero in mean when the group moves nothing there)
+      Variance : Real;       --  of the cell's displacement noise
+      Freedom  : Positive;   --  degrees of freedom of the cell's test of the group
+      Responds : Boolean;    --  the test is significant
+   end record;
+
+   type Noisy_Cell_Array is array (Positive range <>) of Noisy_Cell;
+
+   type Shown is record
+      Least, Most : Natural;
+   end record;
+
+   function Cells_Disagree (Showing, Silent : Natural) return Boolean;
+   --  Whether the cells that can tell a motion of the typical energy, Showing of them showing it and Silent of them not,
+   --  disagree that a picture moves whole: they are enough to say it (even all of them showing it would be a significant
+   --  majority) and a significant majority of them do not show it. Too few of them to say anything do not disagree.
+
+   function Cells_Shown (Pool : Noisy_Cell_Array; Typical : Real; Able_Disagree : Boolean) return Shown
+     with Pre  => Pool'Length > 0 and then Typical > 0.0 and then (for all C of Pool => C.Variance > 0.0),
+          Post => Cells_Shown'Result.Least <= Cells_Shown'Result.Most and then Cells_Shown'Result.Most <= Pool'Length;
+   --  Of cells whose noise is too much for them to tell a motion of the energy Typical, how many show a motion of that
+   --  energy, at least and at most (Z errors either side of the estimate). A cell's energy estimates the motion it
+   --  shows without bias whatever its noise, with the variance of a non-central chi-square of the typical energy
+   --  (twice its degrees of freedom times its variance squared, and four times its variance times the energy), so
+   --  their mean over the typical energy is the share of them that show it if each that does shows the typical energy.
+   --  Cells far above it, that respond with an energy beyond the typical by Z of their own spread, show it, and are
+   --  counted so, when the cells that can tell do not agree that the picture moves whole (Able_Disagree: they are enough
+   --  to say it, and a significant majority of them do not show it), and they carry more than half the pool's energy:
+   --  the mean is then theirs and says nothing of the others (the fingers of a hand in view, a few cells among hundreds,
+   --  show 10 ** 4 to 10 ** 5 times what the rest of the picture does: A29's closer, at 8136 beats, had 37 of 371,
+   --  99.8 % of the energy, a mean 560 times the typical energy, 75 of its 154 cells that can tell showing it, and was
+   --  called an arm), and the others are read without them. A whole picture's nearer parts, a few cells that show
+   --  more, stay in the mean when the cells that can tell agree (A31's first arm, at 252 beats: 14 cells carried
+   --  three quarters of the energy and 103 of its 108 cells that can tell showed the motion).
+
+   function Judge (Responding, Textured, Least, Most : Natural; Able_Disagree : Boolean) return Eye_Response;
+   --  What an eye makes of a group from how many of its Textured cells Responding to it and how many show its motion,
+   --  Least at least and Most at most: nothing unless the responding cells outnumber the false alarms the per-cell test
+   --  makes on its own; whole when a significant majority show it and the cells that can tell do not disagree; a patch
+   --  when a significant majority do not; else undecided.
 
    procedure Measure (M : in out Model);
    --  Re-measures every group's effect on every eye, and each cell's

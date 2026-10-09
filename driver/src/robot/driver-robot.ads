@@ -437,6 +437,8 @@ private
       Rest_Count_Max     : Natural := 0;     --  the most of them at any such beat,
       Rest_Count_Beats   : Natural := 0;     --  over how many beats
       Still_At      : Flag_Vectors.Vector;   --  per beat: judged still
+      Settled_At    : Flag_Vectors.Vector;   --  per beat: its picture had stopped changing since the body last began
+                                             --  to move (the watch's Done at that beat, Stillness)
    end record;
 
    package Eye_Stream_Vectors is new Ada.Containers.Vectors (Eye_Id, Eye_Stream);
