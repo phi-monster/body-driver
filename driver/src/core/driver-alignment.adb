@@ -928,6 +928,119 @@ package body Driver.Alignment is
    --  How much likelier (in logarithm) the best place must be than the best other place for it to be called the
    --  place at the significance Z stands for: the odds at which the chance of the other being the place is that tail.
 
+   --  How many independent observations a patch holds, for its correlation with a picture that has nothing to do
+   --  with it: Bartlett's count, the pixels over the sum of the squares of the patch's own autocorrelation over all
+   --  lags (a patch whose pixels agree with their neighbours far off holds fewer observations than it has pixels,
+   --  and a texture of one wavelength holds a few), never fewer than one nor more than its pixels.
+   function Independent_Samples (Template : Real_Array; Valid : Mask_Array; Side : Positive) return Real is
+      Count : Natural := 0;
+      Sum   : Real := 0.0;
+      Half  : constant Natural := (Side - 1) / 2;
+   begin
+      for K in Template'Range loop
+         if Valid (K) then
+            Count := Count + 1;
+            Sum := Sum + Template (K);
+         end if;
+      end loop;
+      if Count < 2 then
+         return 1.0;
+      end if;
+      declare
+         Mean : constant Real := Sum / Real (Count);
+         Spread : Real := 0.0;
+         Squares : Real := 1.0;   --  the lag at nothing, whose autocorrelation is one
+      begin
+         for K in Template'Range loop
+            if Valid (K) then
+               Spread := Spread + (Template (K) - Mean) ** 2;
+            end if;
+         end loop;
+         Spread := Spread / Real (Count);
+         if Spread <= 0.0 then
+            return 1.0;
+         end if;
+         --  Every lag once on one side of nothing (the other side's is the same), doubled.
+         for Dy in 0 .. Half loop
+            for Dx in (if Dy = 0 then 1 else -Half) .. Half loop
+               declare
+                  Pairs : Natural := 0;
+                  Total : Real := 0.0;
+               begin
+                  for Row in 0 .. Side - 1 - Dy loop
+                     for Column in Integer'Max (0, -Dx) .. Integer'Min (Side - 1, Side - 1 - Dx) loop
+                        declare
+                           A : constant Positive := Template'First + Row * Side + Column;
+                           B : constant Positive := A + Dy * Side + Dx;
+                        begin
+                           if Valid (A) and then Valid (B) then
+                              Pairs := Pairs + 1;
+                              Total := Total + (Template (A) - Mean) * (Template (B) - Mean);
+                           end if;
+                        end;
+                     end loop;
+                  end loop;
+                  if Pairs > 0 then
+                     Squares := Squares + 2.0 * (Total / Real (Pairs) / Spread) ** 2;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         return Real'Min (Real (Count), Real'Max (1.0, Real (Count) / Squares));
+      end;
+   end Independent_Samples;
+
+   --  Whether an answer beats chance: where the prediction leaves several independent places of the patch open
+   --  (its one-standard-deviation ellipse holds as many), a correlation as high as the best of that many unrelated
+   --  places reaches, at the significance of the one gate shared among them, is no evidence of a match. The
+   --  correlation of a patch of so many independent observations with an unrelated picture follows Student's t
+   --  with that many less two degrees of freedom. Where the prediction leaves one place open its own belief is the
+   --  evidence the pixels need not add to.
+   function Beats_Chance
+     (First : Pyramid; Query : Prediction; Plain : Place_Covariance; Linear : Linear_Part; Correlation : Real)
+      return Boolean
+   is
+      Top   : Level renames First.Sizes (0);
+      Half  : constant Natural := Half_Patch (Top.Width, Top.Height);
+      Side  : constant Positive := Side_Of (Half);
+      N     : constant Positive := Side * Side;
+      Spline_Ref : constant Real_Holders.Constant_Reference_Type := Top.Spline.Constant_Reference;
+      Template : Real_Array (1 .. N);
+      Slope_U  : Real_Array (1 .. N);
+      Slope_V  : Real_Array (1 .. N);
+      Valid    : Mask_Array (1 .. N);
+      Present  : Natural := 0;
+   begin
+      Resample (Spline_Ref.Element.all, Top.Width, Top.Height, Query.From.U, Query.From.V, Inverse_Of (Linear), Half,
+                Template, Slope_U, Slope_V, Valid);
+      for K in 1 .. N loop
+         if Valid (K) then
+            Present := Present + 1;
+         end if;
+      end loop;
+      if Present < 2 then
+         return True;
+      end if;
+      declare
+         Independent : constant Real := Independent_Samples (Template, Valid, Side);
+         Area   : constant Real :=
+           Ada.Numerics.Pi * Sqrt (Real'Max (0.0, Plain.UU * Plain.VV - Plain.UV ** 2));
+         Places : constant Real := Area * Independent / Real (Present);
+      begin
+         if Places <= 1.0 then
+            return True;
+         end if;
+         declare
+            Freedom : constant Positive := Positive'Max (1, Natural (Real'Floor (Independent)) - 2);
+            T       : constant Real :=
+              Driver.Distributions.Student_T_Quantile
+                (Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / Places, Freedom);
+         begin
+            return Correlation >= T / Sqrt (Real (Freedom) + T ** 2);
+         end;
+      end;
+   end Beats_Chance;
+
    --  The search of the window at the level Coarse, and the refinement down to the full size.
    function Align_At
      (First, Second : Pyramid;
@@ -948,7 +1061,7 @@ package body Driver.Alignment is
       Half : constant Natural := Grow * Half_Patch (A_Level.Width, A_Level.Height);
       Side : constant Positive := Side_Of (Half);
       N    : constant Positive := Side * Side;
-      Top_Half : constant Natural := Half_Patch (Second.Sizes (0).Width, Second.Sizes (0).Height);
+      Top_Half : constant Natural := Half_Patch (First.Sizes (0).Width, First.Sizes (0).Height);   --  the patch the fit ends on
 
       Template : Real_Array (1 .. N);
       Valid    : Mask_Array (1 .. N);
@@ -1279,7 +1392,7 @@ package body Driver.Alignment is
             --  noise allows. Where nothing depends on the choice the variants agree and add nothing.
             declare
                Last_Half  : constant Natural :=
-                 Grow * Half_Patch (Second.Sizes (Finest).Width, Second.Sizes (Finest).Height);
+                 Grow * Half_Patch (First.Sizes (Finest).Width, First.Sizes (Finest).Height);
                Deepest    : constant Natural := Natural'Min (Levels (First), Levels (Second)) - 1;
                Shift_U, Shift_V : Real_Array (1 .. Most_Variants);
                Other      : Summary;
@@ -1350,18 +1463,7 @@ package body Driver.Alignment is
    end Align_At;
 
    function Largest_Window (First, Second : Pyramid) return Real is
-      Deepest : constant Natural := Natural'Min (Levels (First), Levels (Second)) - 1;
-      Widest  : Real := 0.0;
-   begin
-      for Step in 0 .. Deepest loop
-         declare
-            Reach : constant Natural := Half_Patch (Second.Sizes (Step).Width, Second.Sizes (Step).Height);
-         begin
-            Widest := Real'Max (Widest, Real (Reach - 1) * Real (Halving) ** Step);
-         end;
-      end loop;
-      return Widest;
-   end Largest_Window;
+     (Real'Min (Real (Second.Sizes (0).Width), Real (Second.Sizes (0).Height)) / 2.0);
 
    function Largest_Sigma (First, Second : Pyramid) return Real is
       Widest : constant Real := Largest_Window (First, Second);
@@ -1375,7 +1477,8 @@ package body Driver.Alignment is
       return Sigma;
    end Largest_Sigma;
 
-   function Align (First, Second : Pyramid; Query : Prediction) return Answer is
+   --  Align for pictures at about the same scale: the warp's scale within one halving.
+   function Align_Matched (First, Second : Pyramid; Query : Prediction) return Answer is
       Second_Top : constant Level := Second.Sizes (0);
       --  The prediction's covariance, and what a place on a grid of pixels cannot be known to beyond.
       Plain      : constant Place_Covariance :=
@@ -1386,9 +1489,10 @@ package body Driver.Alignment is
       Largest_Scale, Smallest_Scale : Real;
       Det : constant Real := Query.Linear.UU * Query.Linear.VV - Query.Linear.UV * Query.Linear.VU;
    begin
-      --  The warp must be one the levels compare: no mirror, and no more than a halving's change of scale.
+      --  The warp must be one the levels compare: no mirror, and no direction made smaller by more than a halving
+      --  (the pictures' pixels would be skipped over there; made larger, they are read between).
       Singular_Values (Query.Linear, Largest_Scale, Smallest_Scale);
-      if Det <= 0.0 or else Largest_Scale > Real (Halving) or else Smallest_Scale < 1.0 / Real (Halving) then
+      if Det <= 0.0 or else Smallest_Scale < 1.0 / Real (Halving) then
          return Fail (Bad_Warp);
       end if;
       --  Beyond the picture altogether.
@@ -1397,40 +1501,139 @@ package body Driver.Alignment is
       then
          return Fail (Outside_Picture, Not_In_View);
       end if;
-      --  The level the window is searched at: the finest where it is no wider than a patch there.
+      --  The level the window is searched at: the finest where it is no wider than a patch there; where it is wider
+      --  than a patch at every level, the level where it is the least wider than its patch, so long as the window
+      --  is narrower than the picture (Largest_Window).
       declare
          Deepest : constant Natural := Natural'Min (Levels (First), Levels (Second)) - 1;
+         Chosen  : Natural := 0;
+         Narrow  : Boolean := False;
+         Least   : Real := Real'Last;
       begin
          for Step in 0 .. Deepest loop
             declare
-               H : constant Natural := Half_Patch (Second.Sizes (Step).Width, Second.Sizes (Step).Height);
+               H    : constant Natural := Half_Patch (Second.Sizes (Step).Width, Second.Sizes (Step).Height);
+               Need : constant Real := Radius / Real (Halving) ** Step + 1.0;
             begin
-               if Radius / Real (Halving) ** Step + 1.0 <= Real (H) then
-                  declare
-                     Level_Used : constant Natural := Step;
-                     Answered   : constant Answer := Align_At (First, Second, Query, Level_Used, Plain, Radius, 1);
-                  begin
-                     --  What a patch of the usual size cannot decide for lack of what lies around the point (it is
-                     --  ambiguous, tells the place no better than the window does, or is carried off by what the
-                     --  patch holds) may be decided by one twice as wide, the factor of a level of the pictures.
-                     if Answered.Verdict = Not_Found
-                       and then Answered.Because in Ambiguous | Uninformative | No_Evidence | Left_Window | Not_Settled
-                     then
-                        declare
-                           Wider : constant Answer := Align_At (First, Second, Query, Level_Used, Plain, Radius, 2);
-                        begin
-                           if Wider.Verdict = Found then
-                              return Wider;
-                           end if;
-                        end;
-                     end if;
-                     return Answered;
-                  end;
+               if Need <= Real (H) then
+                  Chosen := Step;
+                  Narrow := True;
+                  exit;
+               elsif Need / Real (H) < Least then
+                  Least := Need / Real (H);
+                  Chosen := Step;
                end if;
             end;
          end loop;
+         if not Narrow and then Radius > Largest_Window (First, Second) then
+            return Fail (Window_Too_Large);
+         end if;
+         declare
+            Level_Used : constant Natural := Chosen;
+
+            --  An answer stands only if it beats chance among the places the prediction leaves open.
+            function Checked (Found : Answer) return Answer is
+              (if Found.Verdict = Driver.Alignment.Found
+                    and then not Beats_Chance (First, Query, Plain, Found.Linear, Found.Correlation)
+               then Fail (No_Evidence) else Found);
+
+            Answered   : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 1));
+         begin
+            --  What a patch of the usual size cannot decide for lack of what lies around the point (it is
+            --  ambiguous, tells the place no better than the window does, or is carried off by what the
+            --  patch holds) may be decided by one twice as wide, the factor of a level of the pictures.
+            if Answered.Verdict = Not_Found
+              and then Answered.Because in Ambiguous | Uninformative | No_Evidence | Left_Window | Not_Settled
+            then
+               declare
+                  Wider : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2));
+               begin
+                  if Wider.Verdict = Found then
+                     return Wider;
+                  end if;
+               end;
+            end if;
+            return Answered;
+         end;
       end;
-      return Fail (Window_Too_Large);
+   end Align_Matched;
+
+   --  The pictures from the level Down on: the halvings of the same picture, the first of them the full size now.
+   function Shifted (P : Pyramid; Down : Natural) return Pyramid is
+      Result : Pyramid;
+   begin
+      for K in Down .. P.Sizes.Last_Index loop
+         Result.Sizes.Append (P.Sizes (K));
+      end loop;
+      return Result;
+   end Shifted;
+
+   function Scaled (L : Linear_Part; By : Real) return Linear_Part is
+     ((UU => L.UU * By, UV => L.UV * By, VU => L.VU * By, VV => L.VV * By));
+
+   function Align (First, Second : Pyramid; Query : Prediction) return Answer is
+      Largest, Smallest : Real;
+   begin
+      Singular_Values (Query.Linear, Largest, Smallest);
+      --  A warp that changes the scale by more than a halving compares the pictures at levels that differ: the
+      --  one that shows the point larger is halved until the two show it at about one size (its coordinates, the
+      --  warp and the prediction's covariance with it), and the answer is carried back.
+      if Query.Linear.UU * Query.Linear.VV - Query.Linear.UV * Query.Linear.VU <= 0.0 or else Smallest <= 0.0 then
+         return Align_Matched (First, Second, Query);
+      end if;
+      declare
+         --  The first picture is halved until no direction of it is made smaller by more than a halving; where the
+         --  warp only enlarges, the second is halved until its smallest enlargement is about one.
+         Shrinks : constant Boolean := Smallest < 1.0 / Real (Halving);
+         Down    : constant Natural :=
+           (if Shrinks then Natural (Real'Rounding (Log (1.0 / Smallest, Real (Halving))))
+            elsif Smallest > 1.0 then Natural (Real'Rounding (Log (Smallest, Real (Halving))))
+            else 0);
+         Size    : constant Real := Real (Halving) ** Down;
+      begin
+         if Down = 0 or else (Shrinks and then Down >= Levels (First))
+           or else (not Shrinks and then Down >= Levels (Second))
+         then
+            return Align_Matched (First, Second, Query);
+         elsif Shrinks then
+            declare
+               Smaller : constant Pyramid := Shifted (First, Down);
+               Result  : Answer :=
+                 Align_Matched
+                   (Smaller, Second,
+                    (From => (U => Query.From.U / Size, V => Query.From.V / Size), To => Query.To,
+                     Linear => Scaled (Query.Linear, Size), Cov => Query.Cov,
+                     Linear_Sigma => (if Query.Linear_Sigma < Real'Last then Query.Linear_Sigma * Size
+                                      else Real'Last)));
+            begin
+               if Result.Verdict = Found then
+                  Result.Linear := Scaled (Result.Linear, 1.0 / Size);
+               end if;
+               return Result;
+            end;
+         else
+            declare
+               Smaller : constant Pyramid := Shifted (Second, Down);
+               Result  : Answer :=
+                 Align_Matched
+                   (First, Smaller,
+                    (From => Query.From, To => (U => Query.To.U / Size, V => Query.To.V / Size),
+                     Linear => Scaled (Query.Linear, 1.0 / Size),
+                     Cov => (UU => Query.Cov.UU / Size ** 2, UV => Query.Cov.UV / Size ** 2,
+                             VV => Query.Cov.VV / Size ** 2),
+                     Linear_Sigma => (if Query.Linear_Sigma < Real'Last then Query.Linear_Sigma / Size
+                                      else Real'Last)));
+            begin
+               if Result.Verdict = Found then
+                  Result.To := (U => Result.To.U * Size, V => Result.To.V * Size);
+                  Result.Cov := (UU => Result.Cov.UU * Size ** 2, UV => Result.Cov.UV * Size ** 2,
+                                 VV => Result.Cov.VV * Size ** 2);
+                  Result.Linear := Scaled (Result.Linear, Size);
+               end if;
+               return Result;
+            end;
+         end if;
+      end;
    end Align;
 
 end Driver.Alignment;

@@ -39,6 +39,7 @@ with Driver.Geometry;
 with Driver.Images;
 with Driver.Numerics;
 with Driver.Observations;
+private with Driver.Alignment.Keyframes;
 private with Driver.Pixels;
 private with Driver.Services;
 with Driver.Uncertain;
@@ -511,7 +512,9 @@ private
       Eye      : Natural := 0;           --  the other eye whose view it is; 0 for the arm's own keyframes
       To_U, To_V     : Real_Vectors.Vector;   --  per query point, where it went
       Back_U, Back_V : Real_Vectors.Vector;   --  and where that matched back to in the reference
-      Found    : Flag_Vectors.Vector;    --  the instrument gave an answer
+      Found    : Flag_Vectors.Vector;    --  the aligner or the instrument gave an answer
+      Stated   : Real := Real'Last;      --  an own keyframe: the median standard deviation its prediction stated
+      Wide     : Natural := 0;           --  and how many points it refused for that prediction's uncertainty
    end record;
 
    package Match_Set_Vectors is new Ada.Containers.Vectors (Positive, Match_Set);
@@ -622,8 +625,10 @@ private
       Eye      : Eye_Id'Base := 0;
       Frames   : Keyframe_Vectors.Vector;   --  the first is the reference
       Query_U, Query_V : Real_Vectors.Vector;   --  the reference's query points
-      Pending  : Pending_Vectors.Vector;
-      Matches  : Match_Set_Vectors.Vector;
+      Chain    : Driver.Alignment.Keyframes.Chain;   --  the reference's pyramid and what its keyframes showed
+      Aligned  : Natural := 0;   --  how many of Frames are aligned into Matches (Kinematics.Align_New)
+      Revision : Natural := 0;   --  how many keyframes were aligned again from the fitted arm (Kinematics.Realign)
+      Matches  : Match_Set_Vectors.Vector;   --  one per aligned keyframe after the reference, in order
       Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
       --  The first arm's reference view matched into this arm's, its query
       --  points into this arm's reference image (Kinematics.Observe), and of

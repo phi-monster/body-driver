@@ -662,7 +662,7 @@ procedure Align_Study is
    --  correlation, the instrument's error (u, v), the instrument's round trip (or -1) and whether it answered,
    --  the point's place in the first picture, what the fit left unexplained, the patch's own spread, and the
    --  answer's degrees of freedom.
-   procedure Print_Row (Q : Question; K : Positive; A : Driver.Alignment.Answer; Error : Real) is
+   procedure Print_Row (Q : Question; K : Positive; A : Driver.Alignment.Answer; Error : Real; Agrees : Integer := -1) is
       P        : constant Point := Q.Points (K);
       Found    : constant Boolean := A.Verdict = Driver.Alignment.Found;
       Has_Roma : constant Boolean := P.Roma_U >= 0.0;
@@ -685,7 +685,8 @@ procedure Align_Study is
          & " " & Fixed_If (Has_Roma, P.Roma_U - P.True_U, 4) & " " & Fixed_If (Has_Roma, P.Roma_V - P.True_V, 4)
          & " " & Fixed (Trip, 3) & " " & (if Has_Roma then "1" else "0")
          & " " & Fixed (P.U, 2) & " " & Fixed (P.V, 2)
-         & " " & Fixed (A.Fit_Rms, 3) & " " & Fixed (A.Patch_Rms, 3) & " " & Img (A.Degrees_Of_Freedom));
+         & " " & Fixed (A.Fit_Rms, 3) & " " & Fixed (A.Patch_Rms, 3) & " " & Img (A.Degrees_Of_Freedom)
+         & (if Agrees >= 0 then " " & Img (Agrees) else ""));
    end Print_Row;
 
    procedure Ask_Point
@@ -1361,6 +1362,7 @@ procedure Align_Study is
             Own     : constant Real := Sqrt (Dot (Change, Change));
             Given   : Driver.Alignment.Keyframes.Prediction_Array (Points'Range);
             Answers : Driver.Alignment.Keyframes.Answer_Array (Points'Range);
+            Agree   : Driver.Alignment.Keyframes.Flag_Array (Points'Range);
             From    : Driver.Alignment.Keyframes.Source;
             Points_Here, Reached, Covered, Found : Natural := 0;
             Sum_Identity, Sum_Predicted : Real := 0.0;
@@ -1369,12 +1371,12 @@ procedure Align_Study is
             Driver.Alignment.Keyframes.Predict
               (Chain, Change, Noises, Shifts, Driver.Alignment.Keyframes.No_Offer, Given, From);
             Driver.Alignment.Keyframes.Add
-              (Chain, Read_Ppm (Dir & "/req_" & Padded (Q.Number) & "_b.ppm"), Change, Given, Answers);
+              (Chain, Read_Ppm (Dir & "/req_" & Padded (Q.Number) & "_b.ppm"), Change, Given, Answers, Agree);
             for I in Points'Range loop
                declare
                   P : Point renames Q.Points (I);
                begin
-                  Print_Row (Q, I, Answers (I), 1.0);
+                  Print_Row (Q, I, Answers (I), 1.0, (if Agree (I) then 1 else 0));
                   if Answers (I).Verdict = Driver.Alignment.Found then
                      Found := Found + 1;
                   end if;
@@ -1546,6 +1548,219 @@ procedure Align_Study is
       Refusals (Same_Eye => False);
    end Report_Mode;
 
+   ---------------------------------------------------------------------------
+   --  distinct: how distinctive a point's patch is in the whole of the other picture, when its warp is known.
+
+   type Real_Access is access Real_Array;
+
+   --  The luma of a picture at a level (halved that many times by averaging two by two).
+   procedure Level_Luma
+     (I : Driver.Images.Image; Level : Natural; Pixels : out Real_Access; Width, Height : out Natural)
+   is
+      W    : Natural := Driver.Images.Width (I);
+      H    : Natural := Driver.Images.Height (I);
+      Cur  : Real_Access := new Real_Array (1 .. W * H);
+   begin
+      Driver.Images.Luma (I, Cur.all);
+      for Step in 1 .. Level loop
+         declare
+            NW : constant Natural := W / 2;
+            NH : constant Natural := H / 2;
+            Next : constant Real_Access := new Real_Array (1 .. NW * NH);
+         begin
+            for Y in 0 .. NH - 1 loop
+               for X in 0 .. NW - 1 loop
+                  Next (1 + Y * NW + X) :=
+                    (Cur (1 + (2 * Y) * W + 2 * X) + Cur (1 + (2 * Y) * W + 2 * X + 1)
+                     + Cur (1 + (2 * Y + 1) * W + 2 * X) + Cur (1 + (2 * Y + 1) * W + 2 * X + 1)) / 4.0;
+               end loop;
+            end loop;
+            Cur := Next;
+            W := NW;
+            H := NH;
+         end;
+      end loop;
+      Pixels := Cur;
+      Width := W;
+      Height := H;
+   end Level_Luma;
+
+   function Bilinear (P : Real_Array; W, H : Natural; X, Y : Real) return Real is
+      --  X and Y in pixel units where the centre of the first pixel is (0.5, 0.5).
+      Fx : constant Real := X - 0.5;
+      Fy : constant Real := Y - 0.5;
+      X0 : constant Integer := Integer (Real'Floor (Fx));
+      Y0 : constant Integer := Integer (Real'Floor (Fy));
+      Ax : constant Real := Fx - Real (X0);
+      Ay : constant Real := Fy - Real (Y0);
+      function At_Pixel (Cx, Cy : Integer) return Real is
+        (P (1 + Integer'Max (0, Integer'Min (H - 1, Cy)) * W + Integer'Max (0, Integer'Min (W - 1, Cx))));
+   begin
+      return (1.0 - Ay) * ((1.0 - Ax) * At_Pixel (X0, Y0) + Ax * At_Pixel (X0 + 1, Y0))
+        + Ay * ((1.0 - Ax) * At_Pixel (X0, Y0 + 1) + Ax * At_Pixel (X0 + 1, Y0 + 1));
+   end Bilinear;
+
+   procedure Distinct_Mode is
+      Dir    : constant String := Ada.Command_Line.Argument (2);
+      Lag    : constant String := Ada.Command_Line.Argument (3);
+      Number : constant Natural := Natural'Value (Ada.Command_Line.Argument (4));
+      Q      : constant Question_Access := Read_Question (Dir, Number, Lag);
+      Image_A : constant Driver.Images.Image := Read_Ppm (Dir & "/req_" & Padded (Number) & "_a.ppm");
+      Image_B : constant Driver.Images.Image := Read_Ppm (Dir & "/req_" & Padded (Number) & "_b.ppm");
+      Half   : constant Natural := 8;   --  a patch of seventeen pixels a side, as a level of the aligner's carries
+      Tried, Top1, Top5, Seen : Natural := 0;
+      Ratios : Real_Vectors.Vector;
+   begin
+      for I in 1 .. Natural (Q.Points.Length) loop
+         declare
+            P : Point renames Q.Points (I);
+            Det : constant Real := P.Jxx * P.Jyy - P.Jxy * P.Jyx;
+         begin
+            if P.Status = 'V' and then Det > 1.0E-6 then
+               Seen := Seen + 1;
+               declare
+                  Scale : constant Real := Sqrt (Det);
+                  --  The level of the first picture whose pixels are the second's, or the second's that are the first's.
+                  A_Level : constant Natural :=
+                    (if Scale < 1.0 then Natural (Real'Max (0.0, Real'Rounding (Log (1.0 / Scale, 2.0)))) else 0);
+                  B_Level : constant Natural :=
+                    (if Scale > 1.0 then Natural (Real'Max (0.0, Real'Rounding (Log (Scale, 2.0)))) else 0);
+                  A_Px, B_Px : Real_Access;
+                  Aw, Ah, Bw, Bh : Natural;
+                  Ratio : constant Real := Real (2 ** A_Level) / Real (2 ** B_Level);
+                  --  The second picture's pixel offset (at its level) to the first's offset (at its level):
+                  --  d_A = Ratio * Inverse (J) * d_B / ...
+                  Ia : constant Real := P.Jyy / Det;
+                  Ib : constant Real := -P.Jxy / Det;
+                  Ic : constant Real := -P.Jyx / Det;
+                  Id : constant Real := P.Jxx / Det;
+                  Side : constant Positive := 2 * Half + 1;
+                  Template : Real_Array (1 .. Side * Side);
+                  Mean_T, Var_T : Real := 0.0;
+                  Best, Truth_Rho : Real := -2.0;
+                  Best_X, Best_Y : Integer := 0;
+                  Truth_X : constant Integer := Integer (Real'Floor (P.True_U / Real (2 ** B_Level)));
+                  Truth_Y : constant Integer := Integer (Real'Floor (P.True_V / Real (2 ** B_Level)));
+                  type Peak is record
+                     X, Y : Integer;
+                     Rho  : Real;
+                  end record;
+                  Peaks : array (1 .. 5) of Peak := [others => (0, 0, -2.0)];
+               begin
+                  Level_Luma (Image_A, A_Level, A_Px, Aw, Ah);
+                  Level_Luma (Image_B, B_Level, B_Px, Bw, Bh);
+                  --  The first picture's patch resampled through the known warp, at the second's level.
+                  for Dy in -Half .. Half loop
+                     for Dx in -Half .. Half loop
+                        declare
+                           Bx : constant Real := Real (Dx);
+                           By : constant Real := Real (Dy);
+                           --  offset in the first picture's full-size pixels: Inverse (J) * (offset in the second's full-size pixels)
+                           Fu : constant Real := Real (2 ** B_Level) * (Ia * Bx + Ib * By);
+                           Fv : constant Real := Real (2 ** B_Level) * (Ic * Bx + Id * By);
+                           Sx : constant Real := (P.U + Fu) / Real (2 ** A_Level);
+                           Sy : constant Real := (P.V + Fv) / Real (2 ** A_Level);
+                           T  : constant Real := Bilinear (A_Px.all, Aw, Ah, Sx, Sy);
+                        begin
+                           Template ((Dy + Half) * Side + Dx + Half + 1) := T;
+                           Mean_T := Mean_T + T;
+                        end;
+                     end loop;
+                  end loop;
+                  Mean_T := Mean_T / Real (Side * Side);
+                  for K in Template'Range loop
+                     Template (K) := Template (K) - Mean_T;
+                     Var_T := Var_T + Template (K) ** 2;
+                  end loop;
+                  if Var_T > 1.0E-9 then
+                     Tried := Tried + 1;
+                     for Cy in Half .. Bh - 1 - Half loop
+                        for Cx in Half .. Bw - 1 - Half loop
+                           declare
+                              Sum_S, Sum_SS, Sum_ST : Real := 0.0;
+                              K : Natural := 0;
+                           begin
+                              for Dy in -Half .. Half loop
+                                 for Dx in -Half .. Half loop
+                                    K := K + 1;
+                                    declare
+                                       S : constant Real := B_Px (1 + (Cy + Dy) * Bw + Cx + Dx);
+                                    begin
+                                       Sum_S := Sum_S + S;
+                                       Sum_SS := Sum_SS + S * S;
+                                       Sum_ST := Sum_ST + S * Template (K);
+                                    end;
+                                 end loop;
+                              end loop;
+                              declare
+                                 N   : constant Real := Real (Side * Side);
+                                 Vss : constant Real := Sum_SS - Sum_S ** 2 / N;
+                                 Rho : constant Real := (if Vss > 1.0E-9 then Sum_ST / Sqrt (Vss * Var_T) else -2.0);
+                              begin
+                                 if abs (Cx - Truth_X) <= 1 and then abs (Cy - Truth_Y) <= 1 then
+                                    Truth_Rho := Real'Max (Truth_Rho, Rho);
+                                 end if;
+                                 if Rho > Best then
+                                    Best := Rho;
+                                    Best_X := Cx;
+                                    Best_Y := Cy;
+                                 end if;
+                                 --  the five best places at least four pixels apart
+                                 declare
+                                    Slot : Natural := 0;
+                                 begin
+                                    for S_K in Peaks'Range loop
+                                       if abs (Peaks (S_K).X - Cx) <= 3 and then abs (Peaks (S_K).Y - Cy) <= 3 then
+                                          Slot := S_K;
+                                       end if;
+                                    end loop;
+                                    if Slot > 0 then
+                                       if Rho > Peaks (Slot).Rho then
+                                          Peaks (Slot) := (Cx, Cy, Rho);
+                                       end if;
+                                    else
+                                       declare
+                                          Lowest : Positive := 1;
+                                       begin
+                                          for S_K in Peaks'Range loop
+                                             if Peaks (S_K).Rho < Peaks (Lowest).Rho then
+                                                Lowest := S_K;
+                                             end if;
+                                          end loop;
+                                          if Rho > Peaks (Lowest).Rho then
+                                             Peaks (Lowest) := (Cx, Cy, Rho);
+                                          end if;
+                                       end;
+                                    end if;
+                                 end;
+                              end;
+                           end;
+                        end loop;
+                     end loop;
+                     if abs (Best_X - Truth_X) <= 1 and then abs (Best_Y - Truth_Y) <= 1 then
+                        Top1 := Top1 + 1;
+                     end if;
+                     if (for some Item of Peaks => abs (Item.X - Truth_X) <= 1 and then abs (Item.Y - Truth_Y) <= 1) then
+                        Top5 := Top5 + 1;
+                     end if;
+                     Ratios.Append (Truth_Rho - Best);
+                     Ada.Text_IO.Put_Line
+                       ("point" & Natural'Image (I) & " scale " & Fixed (Scale, 3) & " levels" & Natural'Image (A_Level)
+                        & Natural'Image (B_Level) & " truth rho " & Fixed (Truth_Rho, 3) & " best " & Fixed (Best, 3)
+                        & (if abs (Best_X - Truth_X) <= 1 and then abs (Best_Y - Truth_Y) <= 1 then " TOP1" else ""));
+                  end if;
+                  pragma Unreferenced (Ratio);
+               end;
+            end if;
+         end;
+      end loop;
+      Ada.Text_IO.Put_Line
+        ("request" & Natural'Image (Number) & ": points the truth sees" & Natural'Image (Seen) & ", textured"
+         & Natural'Image (Tried) & ", the whole picture's best place is the truth's" & Natural'Image (Top1) & " ("
+         & Percent (Top1, Natural'Max (1, Tried)) & " %), among its five best" & Natural'Image (Top5) & " ("
+         & Percent (Top5, Natural'Max (1, Tried)) & " %)");
+   end Distinct_Mode;
+
 begin
    if Ada.Command_Line.Argument_Count < 2 then
       Ada.Text_IO.Put_Line ("usage: align_study roma|run|report ...");
@@ -1559,6 +1774,8 @@ begin
       Run_Mode (Probe => True);
    elsif Ada.Command_Line.Argument (1) = "chain" then
       Chain_Mode;
+   elsif Ada.Command_Line.Argument (1) = "distinct" then
+      Distinct_Mode;
    else
       Report_Mode;
    end if;

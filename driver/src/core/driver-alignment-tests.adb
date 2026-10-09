@@ -267,6 +267,26 @@ package body Driver.Alignment.Tests is
       Check (O.Worst_Linear < 0.02, "the linear part was recovered no closer than" & Real'Image (O.Worst_Linear));
    end Affine;
 
+   procedure Scaled_Views is
+      --  The second picture shows the scene at less than half the size of the first, and at more than twice it: the
+      --  pictures are compared at levels that differ, and the points are found where they are, as when the scale is
+      --  one.
+      Smaller : constant Linear_Part := (UU => 0.42, UV => 0.0, VU => 0.0, VV => 0.42);
+      Larger  : constant Linear_Part := (UU => 2.2, UV => 0.0, VU => 0.0, VV => 2.2);
+      O       : Outcome;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 26);
+      O := Run (Textured, Smaller, 40.0, 30.0, 0.5, 0.4, -0.3, 1.0, Linear_Sigma => 0.1);
+      Check (O.Found * 10 >= O.Asked * 8, "a scene seen at 0.42 was found at only" & Natural'Image (O.Found) & " of"
+             & Natural'Image (O.Asked) & " points: " & Describe (O));
+      Check (O.Worst < 0.3, "a point of a scene seen at 0.42 was found" & Real'Image (O.Worst) & " px from the truth");
+      O := Run (Textured, Larger, -140.0, -90.0, 0.5, 0.4, -0.3, 1.0, Linear_Sigma => 0.1, Columns => 3, Rows => 2,
+                Margin => 90.0);
+      Check (O.Found * 10 >= O.Asked * 8, "a scene seen at 2.2 was found at only" & Natural'Image (O.Found) & " of"
+             & Natural'Image (O.Asked) & " points: " & Describe (O));
+      Check (O.Worst < 0.3, "a point of a scene seen at 2.2 was found" & Real'Image (O.Worst) & " px from the truth");
+   end Scaled_Views;
+
    procedure Grained is
       --  A grain about three pixels in period, the second picture shifted by under a period, the prediction two
       --  pixels off, so the window holds a period or two and the true basin is narrow (a period is three pixels)
@@ -547,12 +567,13 @@ package body Driver.Alignment.Tests is
         Picture (Textured, Linear_At (Change), Shift_At (Change, 1), Shift_At (Change, 2), 0.8);
       Given   : Keyframes.Prediction_Array (Points'Range);
       Answers : Keyframes.Answer_Array (Points'Range);
+      Agree   : Keyframes.Flag_Array (Points'Range);
       Result  : Sweep_Outcome;
    begin
       Keyframes.Predict (C, Change, Readings_Noise, Shift, Offered, Given, Result.Source);
       Result.Window := Gate * Sqrt (Given (Points'First).Cov.UU + 1.0 / 12.0);
       Result.Stated := Sqrt (Given (Points'First).Cov.UU);
-      Keyframes.Add (C, Image, Change, Given, Answers);
+      Keyframes.Add (C, Image, Change, Given, Answers, Agree);
       for K in Points'Range loop
          declare
             Truth : constant Driver.Images.Pixel :=
@@ -742,6 +763,46 @@ package body Driver.Alignment.Tests is
              & Keyframes.Source'Image (Near.Source));
    end Offered_Model;
 
+   procedure Field_Agreement is
+      --  The answers of a keyframe, a third of them wrong places (a window that held the texture's likeness and not
+      --  the place), the rest on a smooth field that turns and stretches the picture (a hundred pixels at the far
+      --  corner) with the aligner's own scatter: the wrong ones, whatever they claim, are the ones that do not
+      --  agree with the field, and the right ones do, though a third of the answers are wrong.
+      Points  : constant Keyframes.Point_Array := Grid_Points;
+      C       : Keyframes.Chain;
+      Answers : Keyframes.Answer_Array (Points'Range);
+      Agree   : Keyframes.Flag_Array (Points'Range);
+      Wrong_Agreeing, Right_Disagreeing : Natural := 0;
+      Wrong   : array (Points'Range) of Boolean := [others => False];
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 25);
+      Keyframes.Begin_Reference (C, Picture (Textured, Identity_Part, 0.0, 0.0, 0.8), Points);
+      for K in Points'Range loop
+         declare
+            P : Driver.Images.Pixel renames Points (K);
+            Truth : constant Driver.Images.Pixel :=
+              (U => P.U + 3.0 + 0.30 * P.U - 0.10 * P.V, V => P.V - 2.0 + 0.10 * P.U + 0.20 * P.V);
+         begin
+            Wrong (K) := K mod 3 = 0;
+            Answers (K) :=
+              (Verdict => Found, To => (if Wrong (K) then (U => P.U + 40.0 * Gaussian, V => P.V + 40.0 * Gaussian)
+                                       else (U => Truth.U + 0.05 * Gaussian, V => Truth.V + 0.05 * Gaussian)),
+               Cov => (UU => 0.01, UV => 0.0, VV => 0.01), others => <>);
+         end;
+      end loop;
+      Keyframes.Agreement (C, Answers, Agree);
+      for K in Points'Range loop
+         if Wrong (K) and then Agree (K) then
+            Wrong_Agreeing := Wrong_Agreeing + 1;
+         elsif not Wrong (K) and then not Agree (K) then
+            Right_Disagreeing := Right_Disagreeing + 1;
+         end if;
+      end loop;
+      Check (Wrong_Agreeing = 0, Natural'Image (Wrong_Agreeing) & " wrong answers agreed with the field of the right ones");
+      Check (Right_Disagreeing * 10 <= Points'Length,
+             Natural'Image (Right_Disagreeing) & " of the right answers did not agree with their own field");
+   end Field_Agreement;
+
    procedure Contaminated is
       --  An earlier keyframe turned the second joint as well as the first: its points moved by the second joint's
       --  share too, which a multiple of it carries along. The prediction from it states that part as an
@@ -773,6 +834,9 @@ package body Driver.Alignment.Tests is
         ("alignment.still", "identical pictures are not settled at the place they agree at", Still'Access);
       Driver.Tests.Register
         ("alignment.affine", "the warp of a turned and stretched picture is not recovered", Affine'Access);
+      Driver.Tests.Register
+        ("alignment.scale", "a scene seen at less than half or more than twice the size is not found where it is",
+         Scaled_Views'Access);
       Driver.Tests.Register
         ("alignment.grain", "a grain of a few pixels' period is found a period off", Grained'Access);
       Driver.Tests.Register
@@ -807,6 +871,9 @@ package body Driver.Alignment.Tests is
       Driver.Tests.Register
         ("alignment.offered", "a model of the caller's that states less than the chain is not the one used",
          Offered_Model'Access);
+      Driver.Tests.Register
+        ("alignment.field", "answers a third of which are wrong places are not told from the right ones by their field",
+         Field_Agreement'Access);
       Driver.Tests.Register
         ("alignment.contaminated", "a keyframe that also turned another joint is a node with no uncertainty of that",
          Contaminated'Access);

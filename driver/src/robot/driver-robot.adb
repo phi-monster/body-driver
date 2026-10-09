@@ -192,7 +192,11 @@ package body Driver.Robot is
          Graph.Derive (M);
       end if;
       if not M.From_File (Stored_Kinematics) then
+         Kinematics.Align_New (M);
          Kinematics.Refit (M);
+         if Kinematics.Realign (M) then
+            Kinematics.Refit (M);
+         end if;
       end if;
       M.Graph_Evidence := M.Beats;
       Driver.Log.Line (Driver.Log.Robot, "estimated from" & M.Beats'Image & " beats in"

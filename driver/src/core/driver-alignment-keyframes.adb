@@ -15,7 +15,7 @@ package body Driver.Alignment.Keyframes is
    --  Found points a field is fitted to at the least: as many as would leave its scatter as many degrees of
    --  freedom as it has coefficients.
 
-   type Flag_Array is array (Positive range <>) of Boolean;
+   type Natural_Array is array (Positive range <>) of Natural;
 
    --  Where a point of the reference was found in a keyframe, and how well the aligner said it knew.
    type Located is record
@@ -66,20 +66,152 @@ package body Driver.Alignment.Keyframes is
               VV => 1.0 + (F.V (3) + F.V (5) * X + 2.0 * F.V (6) * Y) / Half_V);
    end Gradient;
 
+   --  The points of the found ones that most of them agree with, by an affine field of displacements through the
+   --  three points of a sample, the sample whose field leaves the least median of its residuals; the points whose
+   --  residual along each axis is within Z robust scales (the median of a residual's length over the median of the
+   --  length of a two-dimensional Gaussian's). The samples are spread triples: the points in order along an axis
+   --  (the picture's two and its two diagonals), one from each third, so that all the points get their turn
+   --  and no three lie close. False when no sample has a field.
+   procedure Robust_Start (C : Chain; Placed : Located_Vectors.Vector; Keep : in out Flag_Array) is
+      Count : constant Natural := Natural (Placed.Length);
+      Seen  : Natural := 0;
+      Found : Boolean := False;
+   begin
+      for I in 1 .. Count loop
+         if Placed (I).Found then
+            Seen := Seen + 1;
+         end if;
+      end loop;
+      if Seen < 2 * Terms then
+         return;
+      end if;
+      declare
+         Index : Natural_Array (1 .. Seen);
+         Along : Real_Array (1 .. Seen);
+         Third : constant Positive := Seen / 3;
+         Best  : Real := Real'Last;
+         Plane : Real_Array (1 .. 6) := [others => 0.0];   --  the best sample's field, u then v: constant, x, y
+         Residual : Real_Array (1 .. Seen);
+         K : Natural := 0;
+
+         --  The fraction of the half picture from the centre, as Basis has it.
+         function X_Of (I : Positive) return Real is
+           ((C.Points (I).U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0));
+         function Y_Of (I : Positive) return Real is
+           ((C.Points (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));
+
+         procedure Try (A, B, D : Positive) is
+            M      : Real_Matrix (1 .. 3, 1 .. 3);
+            Bu, Bv : Real_Vector (1 .. 3);
+            Xu, Xv : Real_Vector (1 .. 3);
+            Full_U, Full_V : Boolean;
+            Rows   : constant array (1 .. 3) of Positive := [A, B, D];
+         begin
+            for R in 1 .. 3 loop
+               M (R, 1) := 1.0;
+               M (R, 2) := X_Of (Index (Rows (R)));
+               M (R, 3) := Y_Of (Index (Rows (R)));
+               Bu (R) := Placed (Index (Rows (R))).Place.U - C.Points (Index (Rows (R))).U;
+               Bv (R) := Placed (Index (Rows (R))).Place.V - C.Points (Index (Rows (R))).V;
+            end loop;
+            Driver.Numerics.Dense.Least_Squares (M, Bu, Xu, Full_U);
+            Driver.Numerics.Dense.Least_Squares (M, Bv, Xv, Full_V);
+            if not (Full_U and then Full_V) then
+               return;
+            end if;
+            for S in 1 .. Seen loop
+               declare
+                  P  : constant Positive := Index (S);
+                  Pu : constant Real := Xu (1) + Xu (2) * X_Of (P) + Xu (3) * Y_Of (P);
+                  Pv : constant Real := Xv (1) + Xv (2) * X_Of (P) + Xv (3) * Y_Of (P);
+               begin
+                  Residual (S) := Sqrt ((Placed (P).Place.U - C.Points (P).U - Pu) ** 2
+                                        + (Placed (P).Place.V - C.Points (P).V - Pv) ** 2);
+               end;
+            end loop;
+            declare
+               Middle : constant Real := Driver.Stats.Median (Residual);
+            begin
+               if Middle < Best then
+                  Best := Middle;
+                  Plane := [Xu (1), Xu (2), Xu (3), Xv (1), Xv (2), Xv (3)];
+                  Found := True;
+               end if;
+            end;
+         end Try;
+      begin
+         for I in 1 .. Count loop
+            if Placed (I).Found then
+               K := K + 1;
+               Index (K) := I;
+            end if;
+         end loop;
+         for Family in 1 .. 4 loop
+            --  The points in order along the axis of the family, by insertion.
+            for S in 1 .. Seen loop
+               Along (S) :=
+                 (case Family is
+                     when 1 => X_Of (Index (S)),
+                     when 2 => Y_Of (Index (S)),
+                     when 3 => X_Of (Index (S)) + Y_Of (Index (S)),
+                     when others => X_Of (Index (S)) - Y_Of (Index (S)));
+            end loop;
+            declare
+               Order : Natural_Array (1 .. Seen) := [others => 0];
+            begin
+               for S in 1 .. Seen loop
+                  declare
+                     J : Natural := S - 1;
+                  begin
+                     while J >= 1 and then Along (Order (J)) > Along (S) loop
+                        Order (J + 1) := Order (J);
+                        J := J - 1;
+                     end loop;
+                     Order (J + 1) := S;
+                  end;
+               end loop;
+               for S in 1 .. Third loop
+                  Try (Order (S), Order (S + Third), Order (S + 2 * Third));
+               end loop;
+            end;
+         end loop;
+         if not Found then
+            return;
+         end if;
+         --  The points the best sample's field agrees with.
+         for S in 1 .. Seen loop
+            declare
+               P  : constant Positive := Index (S);
+               Pu : constant Real := Plane (1) + Plane (2) * X_Of (P) + Plane (3) * Y_Of (P);
+               Pv : constant Real := Plane (4) + Plane (5) * X_Of (P) + Plane (6) * Y_Of (P);
+               Du : constant Real := Placed (P).Place.U - C.Points (P).U - Pu;
+               Dv : constant Real := Placed (P).Place.V - C.Points (P).V - Pv;
+               Scale : constant Real := Best / Sqrt (2.0 * Log (2.0));
+            begin
+               Keep (P) := abs Du <= Z * Scale and then abs Dv <= Z * Scale;
+            end;
+         end loop;
+      end;
+   end Robust_Start;
+
    --  The displacements of the found points as a smooth field, fitted to the points that lie within Z robust
-   --  scales of it, until the points that do are the same.
-   function Fit_Field (C : Chain; Placed : Located_Vectors.Vector) return Field_Fit is
+   --  scales of it, until the points that do are the same, starting from those a robust affine field agrees with
+   --  (Robust_Start). Agree says which points the final field agrees with; none when it has no field.
+   procedure Fit_Field
+     (C : Chain; Placed : Located_Vectors.Vector; Result : out Field_Fit; Agree : out Flag_Array)
+   is
       Count  : constant Natural := Natural (Placed.Length);
-      Result : Field_Fit;
       Keep   : Flag_Array (1 .. Count);
       Seen   : Natural := 0;
    begin
+      Result := (others => <>);
       for I in 1 .. Count loop
          Keep (I) := Placed (I).Found;
          if Keep (I) then
             Seen := Seen + 1;
          end if;
       end loop;
+      Robust_Start (C, Placed, Keep);
       for Pass in 1 .. Real'Machine_Mantissa loop
          declare
             Used : Natural := 0;
@@ -150,7 +282,11 @@ package body Driver.Alignment.Keyframes is
             end;
          end;
       end loop;
-      return Result;
+      if Result.Valid then
+         Agree := Keep;
+      else
+         Agree := [others => False];
+      end if;
    end Fit_Field;
 
    ---------------------------------------------------------------------------
@@ -295,6 +431,19 @@ package body Driver.Alignment.Keyframes is
 
    function Keyframes (C : Chain) return Natural is (Natural (C.Frames.Length));
 
+   function Scatter (C : Chain) return Real is
+      Sigmas : Real_Array (1 .. Natural (C.Frames.Length));
+      Count  : Natural := 0;
+   begin
+      for F of C.Frames loop
+         if F.Moved and then F.Field.Valid then
+            Count := Count + 1;
+            Sigmas (Count) := F.Field.Sigma;
+         end if;
+      end loop;
+      return (if Count = 0 then 0.0 else Driver.Stats.Median (Sigmas (1 .. Count)));
+   end Scatter;
+
    procedure Predict
      (C       : in out Chain;
       Change  : Driver.Real_Array;
@@ -327,6 +476,7 @@ package body Driver.Alignment.Keyframes is
       From := Same_Pose;
       if Count = 0 or else Is_None (Changes, Noises) then
          Stay (0.0);
+         C.Last := Same_Pose;
          return;
       end if;
       declare
@@ -421,15 +571,57 @@ package body Driver.Alignment.Keyframes is
             From := Extrapolated;
             Extrapolate (C, C.Latest (Chosen), Into);
          end if;
+         C.Last := From;
       end;
    end Predict;
+
+   procedure Agreement (C : Chain; Answers : Answer_Array; Agree : out Flag_Array) is
+      Placed : Located_Vectors.Vector;
+      Field  : Field_Fit;
+   begin
+      for K in Answers'Range loop
+         Placed.Append
+           ((if Answers (K).Verdict = Found
+             then Located'(Found => True, Place => Answers (K).To,
+                           Sigma => Sqrt (Real'Max (Answers (K).Cov.UU, Answers (K).Cov.VV)))
+             else Located'(others => <>)));
+      end loop;
+      Fit_Field (C, Placed, Field, Agree);
+   end Agreement;
+
+   procedure Realign
+     (C       : Chain;
+      Image   : Driver.Images.Image;
+      Given   : Prediction_Array;
+      Answers : out Answer_Array;
+      Agree   : out Flag_Array)
+   is
+      Second : constant Pyramid := Pyramid_Of (Image);
+      Placed : Located_Vectors.Vector;
+      Field  : Field_Fit;
+   begin
+      for K in Given'Range loop
+         declare
+            Result : Answer renames Answers (Answers'First + K - Given'First);
+            Place  : Located;
+         begin
+            Result := Align (C.Pictures, Second, Given (K));
+            if Result.Verdict = Found then
+               Place := (Found => True, Place => Result.To, Sigma => Sqrt (Real'Max (Result.Cov.UU, Result.Cov.VV)));
+            end if;
+            Placed.Append (Place);
+         end;
+      end loop;
+      Fit_Field (C, Placed, Field, Agree);
+   end Realign;
 
    procedure Add
      (C       : in out Chain;
       Image   : Driver.Images.Image;
       Change  : Driver.Real_Array;
       Given   : Prediction_Array;
-      Answers : out Answer_Array)
+      Answers : out Answer_Array;
+      Agree   : out Flag_Array)
    is
       Second : constant Pyramid := Pyramid_Of (Image);
       Placed : Located_Vectors.Vector;
@@ -450,7 +642,7 @@ package body Driver.Alignment.Keyframes is
             Placed.Append (Place);
          end;
       end loop;
-      Next.Field := Fit_Field (C, Placed);
+      Fit_Field (C, Placed, Next.Field, Agree);
       --  How far the extrapolation of each order that was tried was off, beyond what it stated: the relative error
       --  its next use must allow for.
       for Order in 1 .. Orders loop
@@ -460,7 +652,7 @@ package body Driver.Alignment.Keyframes is
                Excess, Shown : Real := 0.0;
             begin
                for K in 1 .. Natural (C.Points.Length) loop
-                  if Placed (K).Found then
+                  if Placed (K).Found and then Agree (Agree'First + K - 1) then
                      declare
                         P    : constant Driver.Images.Pixel := C.Points (K);
                         Move : constant Displacement := Move_Of (C, P, Guess);
@@ -480,6 +672,8 @@ package body Driver.Alignment.Keyframes is
             end;
          end if;
       end loop;
+      Next.Moved := C.Last /= Same_Pose;
+      C.Last := Supplied;
       C.Latest := [others => <>];
       C.Frames.Append (Next);
    end Add;

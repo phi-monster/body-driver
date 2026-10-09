@@ -136,8 +136,8 @@ driver-alignment-keyframes.adb	Half_U : constant Real := Real (C.Width) / 2.0;	2
 driver-alignment-keyframes.adb	Half_V : constant Real := Real (C.Height) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	Least_Points : constant := 2 * Terms;	2	statistics	as many points as would leave the scatter of a field as many degrees of freedom as it has coefficients
 driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	a warp that moves nothing is the identity: its diagonal is one
-driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	the weights of the fields are weights of the change from the identity: the one stays
 driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	the other diagonal entry's identity
+driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	the weights of the fields are weights of the change from the identity: the one stays
 driver-alignment-keyframes.adb	Result.Sigma := Sqrt ((Su ** 2 + Sv ** 2) / 2.0);	2.0	statistics	a variance per axis is half the sum of the squares over the two axes
 driver-alignment-keyframes.adb	Shown := Shown + (Move.Du ** 2 + Move.Dv ** 2) / 2.0;	2.0	statistics	a variance per axis is half the sum of the squares over the two axes
 driver-alignment-keyframes.adb	Stay (0.0);	0.0	math	a keyframe at the reference's own readings has moved nothing: no spread
@@ -146,8 +146,8 @@ driver-alignment-keyframes.adb	VU => (F.V (2) + 2.0 * F.V (4) * X + F.V (5) * Y)
 driver-alignment-keyframes.adb	VV => 1.0 + (F.V (3) + F.V (5) * X + 2.0 * F.V (6) * Y) / Half_V);	1.0	math	a warp that moves nothing is the identity: its diagonal is one
 driver-alignment-keyframes.adb	VV => 1.0 + (F.V (3) + F.V (5) * X + 2.0 * F.V (6) * Y) / Half_V);	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
 driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess.W2 * (Slope_2.VV - 1.0)),	1.0	math	a warp that moves nothing is the identity: its diagonal is one
-driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess.W2 * (Slope_2.VV - 1.0)),	1.0	math	the weights of the fields are weights of the change from the identity: the one stays
 driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess.W2 * (Slope_2.VV - 1.0)),	1.0	math	the other diagonal entry's identity
+driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess.W2 * (Slope_2.VV - 1.0)),	1.0	math	the weights of the fields are weights of the change from the identity: the one stays
 driver-alignment-keyframes.adb	X : constant Real := (P.U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	X : constant Real := (P.U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	Y : constant Real := (P.V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
@@ -1904,6 +1904,7 @@ driver-robot-kinematics.adb	"" & Pm (Report.L.Fx, Report.L.Fx * Sd (1), 2) & ""	
 driver-robot-kinematics.adb	"" & Pm (Report.Pose.Translation (1), Sd (10), 3) & ""	10	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	"" & Pm (Report.Pose.Translation (1), Sd (10), 3) & ""	3	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Link.Joint, 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& "" & Driver.Log.Image (Match_Sigma (R), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Report.Sigma_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& "" & Pm (Report.L.Cy, Sd (4), 2)	2	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	& "" & Pm (Report.L.Cy, Sd (4), 2)	4	structure	the index of a term of the covariance
@@ -1912,6 +1913,8 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Lens.Fx, 2) & "" & Driver.Log.Im
 driver-robot-kinematics.adb	& Driver.Log.Image (Link.Sigma, 3) & "" & Driver.Log.Image (Link.F, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Link.Sigma, 3) & "" & Driver.Log.Image (Link.F, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (R2.Result.Scale_Sigma, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Alone, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Clipped, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Keyframe, 3) & ""	3	format	digits printed in a log line or a message
@@ -1937,6 +1940,11 @@ driver-robot-kinematics.adb	(Covariance (1, 1) + Covariance (2, 2) + Covariance 
 driver-robot-kinematics.adb	(Covariance (4, 4) + Covariance (5, 5) + Covariance (6, 6)), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	(Pending_Match'(Frame => 1,	1	structure	the reference keyframe is the first
 driver-robot-kinematics.adb	(Pending_Match'(Frame => 1,	1	structure	the reference keyframe is the first
+driver-robot-kinematics.adb	(Up.V - Down.V) / (2.0 * Step * Scale)];	2.0	math	a central difference over a step each way is the difference over twice the step
+driver-robot-kinematics.adb	(case A is when 1 => [1.0, 0.0, 0.0], when 2 => [0.0, 1.0, 0.0], when others => [0.0, 0.0, 1.0]);	1	structure	the first axis of space
+driver-robot-kinematics.adb	(case A is when 1 => [1.0, 0.0, 0.0], when 2 => [0.0, 1.0, 0.0], when others => [0.0, 0.0, 1.0]);	2	structure	the second axis of space
+driver-robot-kinematics.adb	+ J (3 + I) (A) * Place (I, L) * J (3 + L) (B);	3	structure	the three derivatives by the eye's turn come before those by its place
+driver-robot-kinematics.adb	+ J (3 + I) (A) * Place (I, L) * J (3 + L) (B);	3	structure	the three derivatives by the eye's turn come before those by its place
 driver-robot-kinematics.adb	- Unit (Fit.Ray (Moved (L, Term, -S), U, V)))) / (2.0 * S);	2.0	math	a central difference spans two steps
 driver-robot-kinematics.adb	/ (2.0 * Sigmas (Term));	2.0	math	a central difference spans two steps
 driver-robot-kinematics.adb	Cc (P, Q) := C (3 + P, 3 + Q);	3	structure	the three components of a vector, the three terms of a turn
@@ -1960,10 +1968,18 @@ driver-robot-kinematics.adb	Ends : array (1 .. 2) of Vec3;	2	math	a central diff
 driver-robot-kinematics.adb	F.Table_Response (2 * T + Term - 1)];	2	structure	the third row of the plane's response
 driver-robot-kinematics.adb	Free_Terms : constant Natural := Fit.Lens_Terms + (if In_World then 3 else 0);	3	structure	the turn's three terms follow the lens's
 driver-robot-kinematics.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (K));	1.0	numerics	the scale floor of a finite difference
+driver-robot-kinematics.adb	J (3 + A) := [(Up.U - Down.U) / (2.0 * Step * Scale),	2.0	math	a central difference over a step each way is the difference over twice the step
+driver-robot-kinematics.adb	J (3 + A) := [(Up.U - Down.U) / (2.0 * Step * Scale),	3	structure	the three derivatives by the eye's turn come before those by its place
+driver-robot-kinematics.adb	J (7) := [(Up.U - Down.U) / (2.0 * Step), (Up.V - Down.V) / (2.0 * Step)];	2.0	math	a central difference over a step each way is the difference over twice the step
+driver-robot-kinematics.adb	J (7) := [(Up.U - Down.U) / (2.0 * Step), (Up.V - Down.V) / (2.0 * Step)];	2.0	math	a central difference over a step each way is the difference over twice the step
+driver-robot-kinematics.adb	J (A) := [(Up.U - Down.U) / (2.0 * Step), (Up.V - Down.V) / (2.0 * Step)];	2.0	math	a central difference over a step each way is the difference over twice the step
+driver-robot-kinematics.adb	J (A) := [(Up.U - Down.U) / (2.0 * Step), (Up.V - Down.V) / (2.0 * Step)];	2.0	math	a central difference over a step each way is the difference over twice the step
 driver-robot-kinematics.adb	J : array (1 .. 3, 1 .. Free_Terms) of Real := [others => [others => 0.0]];	3	structure	three coordinates
 driver-robot-kinematics.adb	K := K + 2;	2	structure	two coordinates per round trip
 driver-robot-kinematics.adb	Lambda := 2.0 * Lambda;	2.0	numerics	the damping doubles after a step that did not help
 driver-robot-kinematics.adb	Lambda := Lambda / 2.0;	2.0	numerics	the damping halves after a step that helped
+driver-robot-kinematics.adb	Land ((1.0 + Step) * X, Zero3, Zero3, Up, F1);	1.0	math	the depth moved by a fraction of itself: the point's scale is one plus the step
+driver-robot-kinematics.adb	Land ((1.0 / Slope) * H, Zero3, Zero3, Where, Ok);	1.0	math	the line of sight meets a plane at depth one over its slope along the line
 driver-robot-kinematics.adb	Outputs : constant := 7;	7	structure	the placement's seven terms: its turn (three), its centre (three) and the log of its scale
 driver-robot-kinematics.adb	Period : constant Real := 2.0 * Ada.Numerics.Pi / abs F.C;	2.0	math	a turn of a joint's axis is two pi radians, which the fit's scale turns into a period of readings
 driver-robot-kinematics.adb	Place (P, Q) := C (Fit.Lens_Terms + 3 + P, Fit.Lens_Terms + 3 + Q);	3	structure	the turn's three terms follow the lens's
@@ -1973,6 +1989,7 @@ driver-robot-kinematics.adb	Poses : constant Fixed.Pose_Array (1 .. 1) := [1 => 
 driver-robot-kinematics.adb	R (1 .. 3) := D;	3	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	R (4 .. 6) := Driver.Numerics.Log (Transpose (T.Rotation) * Goal.Rotation);	4	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	R (4 .. 6) := Driver.Numerics.Log (Transpose (T.Rotation) * Goal.Rotation);	6	structure	three rows of position, three of turn
+driver-robot-kinematics.adb	R.Aligned := 1;	1	structure	the reference is the first keyframe and is aligned with itself
 driver-robot-kinematics.adb	R.Placement_Covariance.Append (0.0, 36);	0.0	structure	the first arm's placement is exact: the world is its frame
 driver-robot-kinematics.adb	R.Placement_Covariance.Append (0.0, 36);	36	structure	a pose's covariance, six terms by six, row by row
 driver-robot-kinematics.adb	R.Scale := 1.0;	1.0	math	the identity's scale: the first arm is the world as it is
@@ -1983,12 +2000,24 @@ driver-robot-kinematics.adb	Scale := 1.0;	1.0	math	the identity's scale: the fir
 driver-robot-kinematics.adb	Scale := 1.0;	1.0	structure	the identity's scale until the arm is placed
 driver-robot-kinematics.adb	Seen (N) := (Point => N, Pose => 1, U => Answer_U, V => Answer_V);	1	structure	one pose: the base, where the points stand still
 driver-robot-kinematics.adb	Sights_Of (U, V, F, Moved (L, K, (if E = 1 then -Sigma_K else Sigma_K)), S.all);	1	math	a central difference: one standard deviation either way
+driver-robot-kinematics.adb	Step : constant Real := Ada.Numerics.Long_Elementary_Functions."" (Real'Model_Epsilon, 1.0 / 3.0);	1.0	numerics	the step of a central difference is the cube root of the machine epsilon: the one that balances its truncation against its rounding
+driver-robot-kinematics.adb	Step : constant Real := Ada.Numerics.Long_Elementary_Functions."" (Real'Model_Epsilon, 1.0 / 3.0);	3.0	numerics	the cube root
 driver-robot-kinematics.adb	T (T'First (1) + D - 1, T'First (2) + K - 1) + (Ends (2) (D) - Ends (1) (D)) / (2.0 * Sigma_K);	2.0	math	a central difference: one standard deviation either way spans two
 driver-robot-kinematics.adb	Tc (P, Q) := C (3 + P, Q);	3	structure	the three components of a vector, the three terms of a turn
+driver-robot-kinematics.adb	Through_Plane (Plane, U0 + 1.0, V0, P1, Ok1);	1.0	math	the warp is the plane's carrying of the pixel a pixel along u
+driver-robot-kinematics.adb	Through_Plane (Plane, U0, V0 + 1.0, P2, Ok2);	1.0	math	and of the pixel a pixel along v
 driver-robot-kinematics.adb	Trips (K + 2) := abs (S.Back_V (I) - R.Query_V (I));	2	structure	two coordinates per round trip
 driver-robot-kinematics.adb	Trips : Real_Access := new Real_Array (1 .. 2 * Count);	2	structure	two coordinates per round trip
 driver-robot-kinematics.adb	U.Append (Real (X0 + X1) / 2.0);	2.0	math	the centre of a cell
+driver-robot-kinematics.adb	Unbounded : constant Real := Real'Last / 4.0;	4.0	numerics	a variance that is unbounded but whose square root and sum with others stay finite
 driver-robot-kinematics.adb	V.Append (Real (Y0 + Y1) / 2.0);	2.0	math	the centre of a cell
+driver-robot-kinematics.adb	Variance : array (1 .. 3) of Real := [others => 0.0];	3	structure	the covariance of a place has three entries: uu, uv and vv
+driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];	1	structure	the entries of the covariance of a place, by the pixel's two axes
+driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];	1	structure	the entries of the covariance of a place, by the pixel's two axes
+driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];	1	structure	the entries of the covariance of a place, by the pixel's two axes
+driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];	2	structure	the entries of the covariance of a place, by the pixel's two axes
+driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];	2	structure	the entries of the covariance of a place, by the pixel's two axes
+driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];	2	structure	the entries of the covariance of a place, by the pixel's two axes
 driver-robot-kinematics.adb	W : constant Natural := Index_Of (M, 1);	1	structure	the first arm is the world
 driver-robot-kinematics.adb	W : constant Natural := Index_Of (M, 1);	1	structure	the world is the first arm's reference frame
 driver-robot-kinematics.adb	W : constant Natural := Index_Of (M, 1);	1	structure	the world is the first arm's reference frame
@@ -1996,7 +2025,15 @@ driver-robot-kinematics.adb	X1 : constant Real := F.Tracks (3 * I);	3	structure	
 driver-robot-kinematics.adb	X2 : constant Real := F.Tracks (3 * I + 1);	3	structure	three coordinates per point; three terms for the plane's own error
 driver-robot-kinematics.adb	X3 : constant Real := F.Tracks (3 * I + 2);	2	structure	two residual components per sighting
 driver-robot-kinematics.adb	X3 : constant Real := F.Tracks (3 * I + 2);	3	structure	two residual components per sighting
+driver-robot-kinematics.adb	[R.Result.Tracks (3 * Q), R.Result.Tracks (3 * Q + 1), R.Result.Tracks (3 * Q + 2)];	2	structure	a track's point is three numbers, one track after another: the second is two on
+driver-robot-kinematics.adb	[R.Result.Tracks (3 * Q), R.Result.Tracks (3 * Q + 1), R.Result.Tracks (3 * Q + 2)];	3	structure	a track's point is three numbers, one track after another
+driver-robot-kinematics.adb	[R.Result.Tracks (3 * Q), R.Result.Tracks (3 * Q + 1), R.Result.Tracks (3 * Q + 2)];	3	structure	a track's point is three numbers, one track after another
+driver-robot-kinematics.adb	[R.Result.Tracks (3 * Q), R.Result.Tracks (3 * Q + 1), R.Result.Tracks (3 * Q + 2)];	3	structure	a track's point is three numbers, one track after another
 driver-robot-kinematics.adb	and then (Fresh or else (Natural (R.Frames.Length) = 1 and then Beat > R.Frames (1).Beat));	1	structure	the reference alone so far: the next keyframe at its pose is its still twin
+driver-robot-kinematics.adb	and then Natural (R.Result.Tracks.Length) >= 3 * Queries;	3	structure	a track's point is three numbers
+driver-robot-kinematics.adb	and then Place (1, 1) < Real'Last	1	structure	an uncertainty that is not known has its first diagonal entry unbounded
+driver-robot-kinematics.adb	and then Place (1, 1) < Real'Last	1	structure	an uncertainty that is not known has its first diagonal entry unbounded
+driver-robot-kinematics.adb	else [0.0, 0.0, 1.0 / X (3)]);	1.0	math	the plane across the line of sight at depth z has slope one over z along it
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
@@ -2004,11 +2041,14 @@ driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
+driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	the axes of space: three
 driver-robot-kinematics.adb	for B in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for B in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for B in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for D in 1 .. 3 loop	3	math	three coordinates
 driver-robot-kinematics.adb	for E in 1 .. 2 loop	2	math	a central difference: one standard deviation either way
+driver-robot-kinematics.adb	for I in 1 .. 3 loop	3	structure	the axes of space: three
+driver-robot-kinematics.adb	for L in 1 .. 3 loop	3	structure	the axes of space: three
 driver-robot-kinematics.adb	for P in 1 .. 3 loop	3	structure	the three components of a vector, the three terms of a turn
 driver-robot-kinematics.adb	for P in 1 .. 3 loop	3	structure	the three components of a vector, the three terms of a turn
 driver-robot-kinematics.adb	for P in 1 .. 3 loop	3	structure	three coordinates
@@ -2018,19 +2058,23 @@ driver-robot-kinematics.adb	for Q in 1 .. 3 loop	3	structure	the three component
 driver-robot-kinematics.adb	for Q in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for Q in 1 .. 6 loop	6	structure	the six terms of a pose: its turn (three) and its centre (three)
 driver-robot-kinematics.adb	function C (P, Q : Positive) return Real is (R.Placement_Covariance ((P - 1) * 6 + Q - 1));	6	structure	the six terms of a pose: its turn (three) and its centre (three)
+driver-robot-kinematics.adb	if Current (M, R) and then R.Result.Fitted and then R.Aligned >= 2 and then Queries > 0 then	2	structure	a keyframe after the reference is the second or later
 driver-robot-kinematics.adb	if Natural (R.Frames.Length) = 1 then	1	structure	the first keyframe is the reference
 driver-robot-kinematics.adb	or else Natural (F.Depth_Gains.Length) /= Q * T or else Natural (F.Tracks.Length) /= 3 * Q	3	structure	three coordinates per point; three terms for the plane's own error
 driver-robot-kinematics.adb	or else Natural (F.Table_Response.Length) /= 3 * T	3	structure	three coordinates per point; three terms for the plane's own error
 driver-robot-kinematics.adb	or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) /= 36	36	structure	a pose's covariance, six terms by six, row by row
-driver-robot-kinematics.adb	return R.Unanswerable or else (Natural (R.Frames.Length) >= 2 and then R.Pending.Is_Empty);	2	structure	the reference and its twin
+driver-robot-kinematics.adb	return Natural (R.Frames.Length) >= 2;	2	structure	the still twin of the reference is the second keyframe
 driver-robot-kinematics.adb	return Square_Root (Fixed_Angle_Sigma (M, E) ** 2 + Var / 2.0);	2.0	math	half the trace: the variance per axis across a line
 driver-robot-kinematics.adb	then "" & Driver.Log.Image (Report.Linear_To, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	then "" & Pm (Report.L.K1, Sd (5), 4) & "" & Pm (Report.L.K2, Sd (6), 4)	4	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	then "" & Pm (Report.L.K1, Sd (5), 4) & "" & Pm (Report.L.K2, Sd (6), 4)	4	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	then "" & Pm (Report.L.K1, Sd (5), 4) & "" & Pm (Report.L.K2, Sd (6), 4)	5	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	then "" & Pm (Report.L.K1, Sd (5), 4) & "" & Pm (Report.L.K2, Sd (6), 4)	6	structure	the index of a term of the covariance
+driver-robot-kinematics.adb	then (1.0 / (R.Result.Table_A * X)) * R.Result.Table_A	1.0	math	the table's plane A * X = 1 scaled to pass through the point
 driver-robot-kinematics.adb	then F.Tracks (3 * K + 2) else 0.0),	2	structure	a track's point, three numbers each: its depth along its line of sight is the third
 driver-robot-kinematics.adb	then F.Tracks (3 * K + 2) else 0.0),	3	structure	a track's point, three numbers each: its depth along its line of sight is the third
+driver-robot-kinematics.adb	type Derivative_Array is array (1 .. 7) of Pixel_Derivative;	7	structure	the turn, the place and the depth of a derivative: indices one to seven
+driver-robot-kinematics.adb	type Pixel_Derivative is array (1 .. 2) of Real;	2	structure	a pixel has two coordinates
 driver-robot-kinematics.adb	when 1 => (L with delta Fx => L.Fx * Ada.Numerics.Long_Elementary_Functions.Exp (By)),	1	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
 driver-robot-kinematics.adb	when 2 => (L with delta Fy => L.Fy * Ada.Numerics.Long_Elementary_Functions.Exp (By)),	2	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
 driver-robot-kinematics.adb	when 3 => (L with delta Cx => L.Cx + By),	3	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2

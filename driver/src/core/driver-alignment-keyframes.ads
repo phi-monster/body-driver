@@ -36,6 +36,7 @@ package Driver.Alignment.Keyframes is
    type Point_Array is array (Positive range <>) of Driver.Images.Pixel;
    type Prediction_Array is array (Positive range <>) of Prediction;
    type Answer_Array is array (Positive range <>) of Answer;
+   type Flag_Array is array (Positive range <>) of Boolean;
 
    procedure Begin_Reference (C : out Chain; Reference : Driver.Images.Image; Points : Point_Array);
    --  Starts the chain from the reference picture and the points that will be asked of it; no keyframe yet.
@@ -47,6 +48,11 @@ package Driver.Alignment.Keyframes is
 
    function Keyframes (C : Chain) return Natural;
    --  How many keyframes have been aligned.
+
+   function Scatter (C : Chain) return Real;
+   --  How far the aligner errs here: the median, over the keyframes that were not predicted to be the reference again
+   --  (the same pose) and whose field has enough points, of the robust scale of what the smooth field of the
+   --  displacements of their found points leaves of them, in pixels; zero when there is none.
 
    type Source is (Same_Pose, Extrapolated, New_Direction, Supplied);
    --  Same_Pose: the change of readings is none the noise can tell. Extrapolated: from earlier keyframes whose
@@ -76,15 +82,37 @@ package Driver.Alignment.Keyframes is
    --  Into has an element per point. The chain remembers the predictions of each order that it made, for the Add
    --  that follows.
 
+   procedure Realign
+     (C       : Chain;
+      Image   : Driver.Images.Image;
+      Given   : Prediction_Array;
+      Answers : out Answer_Array;
+      Agree   : out Flag_Array)
+     with Pre => Has_Reference (C) and then Given'Length = Point_Count (C) and then Answers'Length = Given'Length
+                 and then Agree'Length = Answers'Length;
+   --  Aligns every point of the reference into Image from the given prediction, as Add does, and keeps nothing: the
+   --  chain is not changed. For a keyframe aligned before from a prediction too uncertain to search, and now offered
+   --  a better one. Agree is as Add's.
+
+   procedure Agreement (C : Chain; Answers : Answer_Array; Agree : out Flag_Array)
+     with Pre => Has_Reference (C) and then Answers'Length = Point_Count (C) and then Agree'Length = Answers'Length;
+   --  Which of the answers found lie in a smooth field of displacements with the others (as Add says of a keyframe's).
+
    procedure Add
      (C       : in out Chain;
       Image   : Driver.Images.Image;
       Change  : Driver.Real_Array;
       Given   : Prediction_Array;
-      Answers : out Answer_Array)
-     with Pre => Has_Reference (C) and then Given'Length = Point_Count (C) and then Answers'Length = Given'Length;
+      Answers : out Answer_Array;
+      Agree   : out Flag_Array)
+     with Pre => Has_Reference (C) and then Given'Length = Point_Count (C) and then Answers'Length = Given'Length
+                 and then Agree'Length = Answers'Length;
    --  Aligns every point of the reference into Image from its prediction (the one Predict gave, or the caller's
-   --  own), and keeps the answers as a keyframe the next is predicted from. The predictions of each order that
+   --  own), and keeps the answers as a keyframe the next is predicted from. Agree says which points the keyframe
+   --  lies in a smooth field of displacements with (the displacements of the found points, a quadratic of the place,
+   --  fitted to those that a robust affine field agrees with, then to those within Z robust scales of it): an
+   --  answer that does not is a wrong answer more often than a right one, whatever it claims; none agree when there
+   --  are too few found points for a field. The predictions of each order that
    --  Predict made are judged by the answers (how far each was off beyond what it stated), whichever one was used,
    --  and the relative error that showed is what the next use of that order allows for.
 
@@ -113,6 +141,7 @@ private
    type Frame is record
       Change    : Real_Vectors.Vector;   --  of the readings from the reference's, per channel
       Field     : Field_Fit;
+      Moved     : Boolean := True;   --  it was not predicted to be the reference again (the same pose)
       Curvature : Order_Errors := [others => 0.0];
       --  Per order, how far a prediction of this keyframe of that order was off beyond what the fields it rested on
       --  carried, relative to the move, per unit of the distance the extrapolation went (the amount between the
@@ -143,6 +172,7 @@ private
       Points   : Pixel_Vectors.Vector;
       Frames   : Frame_Vectors.Vector;
       Latest   : Candidate_Array;   --  per order, the prediction that stated the least for the keyframe being added
+      Last     : Source := Supplied;   --  where the last prediction came from, until the keyframe it was for is added
    end record;
 
 end Driver.Alignment.Keyframes;

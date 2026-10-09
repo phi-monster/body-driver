@@ -839,12 +839,10 @@ package body Driver.Robot.Tests is
    end Keyframe_Despite_Held_Jitter;
 
    --  An arm at rest takes its reference keyframe and then a still twin of
-   --  it at the same pose, whose match measures the matcher's own error
-   --  before the arm moves (on the rig, which has no instrument, the match
-   --  is refused for good, and the twin counts as answered). The sweep then
-   --  starts where both the view and the matcher can tell a move: given a
-   --  matcher that errs by 0.5 pixels, far more than the cells' noise, at Z
-   --  times that over the view's shift.
+   --  it at the same pose (the sweep waits for it). The aligner's own error
+   --  is not known from two identical pictures, so the sweep starts where the
+   --  cells tell a move, and where the aligner can once keyframes the arm moved
+   --  to are aligned: Z times the larger of the two over the view's shift.
    procedure Twin_Before_The_Sweep is
       M    : Model;
       R    : Rig;
@@ -873,30 +871,11 @@ package body Driver.Robot.Tests is
          end loop;
          Check (Twins = 1, "arm 1 at rest has" & Twins'Image & " still twins of its reference, not one");
       end;
-      Check (Driver.Robot.Kinematics.Twin_Answered (M, 1), "the twin of an arm whose matches are refused for good is waited for");
-      --  A matcher whose round trips come back half a pixel off, both ways.
-      for E of M.Kinematics loop
-         if E.Group = 1 then
-            declare
-               Set : Match_Set;
-            begin
-               Set.Frame := 2;
-               for I in 0 .. Natural (E.Query_U.Length) - 1 loop
-                  Set.To_U.Append (E.Query_U (I));
-                  Set.To_V.Append (E.Query_V (I));
-                  Set.Back_U.Append (E.Query_U (I) + (if I mod 2 = 0 then 0.5 else -0.5));
-                  Set.Back_V.Append (E.Query_V (I) + (if I mod 2 = 0 then -0.5 else 0.5));
-                  Set.Found.Append (True);
-               end loop;
-               E.Matches.Append (Set);
-            end;
-         end if;
-      end loop;
+      Check (Driver.Robot.Kinematics.Twin_Answered (M, 1), "the arm's still twin was not taken");
       declare
-         Noise : constant Real := Driver.Robot.Kinematics.Match_Noise (M, 1);
+         Noise : constant Real :=
+           Real'Max (Lockin.Cell_Noise (M, 1), Driver.Robot.Kinematics.Match_Noise (M, 1));
       begin
-         Check (Noise > Lockin.Cell_Noise (M, 1), "the matcher's half-pixel error is not measured above the cells' noise:"
-                & Noise'Image);
          for C in 1 .. 2 loop
             declare
                Start : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
@@ -1009,9 +988,10 @@ package body Driver.Robot.Tests is
    end Settle_Past_A_Patch_Flickering_At_Rest;
 
    --  The sweep starts each joint where its eye's view moves by what one cell
-   --  of it tells: Z times the cells' displacement noise. The visible step,
-   --  which a matched filter over every cell sees, moves the view by far less
-   --  than any one point of a match can be told.
+   --  of it tells and the aligner can tell: Z times the larger of the cells'
+   --  displacement noise and the aligner's scatter on the keyframes the arm has
+   --  moved to. The visible step, which a matched filter over every cell sees,
+   --  moves the view by far less than any one point of a match can be told.
    procedure Sweep_Starts_Where_A_Cell_Tells is
       M : Model;
    begin
@@ -1020,7 +1000,8 @@ package body Driver.Robot.Tests is
          declare
             Start : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
             Shift : constant Real := Lockin.Shift (M, 1, 1, C);
-            Noise : constant Real := Lockin.Cell_Noise (M, 1);
+            Noise : constant Real :=
+              Real'Max (Lockin.Cell_Noise (M, 1), Driver.Robot.Kinematics.Match_Noise (M, 1));
          begin
             Check (Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last, "arm 1's sweep plan is not measured");
             if Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last then
@@ -1040,8 +1021,8 @@ package body Driver.Robot.Tests is
       M : Model;
       R : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
    begin
-      R.Pending.Append
-        (Pending_Match'(Frame  => 2,
+      R.World_Pending.Append
+        (Pending_Match'(Frame  => 1,
                         Eye    => 0,
                         Points => 1,
                         Ticket => Driver.Instrument.Submit_Match

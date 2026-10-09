@@ -105,7 +105,7 @@ package Driver.Alignment is
      (Matched,
       Outside_Picture,    --  the whole window lies beyond the second picture
       Edge_Of_Picture,    --  the point is in the picture but its patch is mostly out of it
-      Window_Too_Large,   --  wider than a patch of the coarsest level can carry
+      Window_Too_Large,   --  as wide as the picture: it says nothing of where to look
       Bad_Warp,           --  a mirror, or a change of scale beyond what one level compares
       No_Texture,         --  the patch has no structure to compare
       Ambiguous,          --  another place explains the patch as well as the best
@@ -138,11 +138,11 @@ package Driver.Alignment is
    function Largest_Window (First, Second : Pyramid) return Real
      with Pre => Levels (First) > 0 and then Levels (Second) > 0;
    --  The radius, in pixels of the full-size pictures, of the widest window of places Align searches for a point
-   --  between these two pictures: the prediction's covariance, taken at the gate for two dimensions, must lie
-   --  within it, or the answer is Window_Too_Large. A window that wide is searched at the coarsest size of the
-   --  pictures whose patch still reaches it, and no more precisely than a patch there allows; the boot that
-   --  chooses how far it moves a keyframe by what the prediction can follow keeps its predicted displacement and
-   --  the uncertainty of that at the gate inside it.
+   --  between these two pictures: half the second picture's smaller side. The prediction's covariance, taken at
+   --  the gate for two dimensions, must lie within it, or the answer is Window_Too_Large: a window as wide as the
+   --  picture says nothing of where to look. A window wider than a patch at every size of the pictures is searched
+   --  at the size where it is the least wider than its patch, which tells the place no better than that size
+   --  allows and often cannot tell it from another (Ambiguous).
 
    function Largest_Sigma (First, Second : Pyramid) return Real
      with Pre => Levels (First) > 0 and then Levels (Second) > 0;
