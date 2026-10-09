@@ -515,6 +515,11 @@ begin
    end loop;
    Driver.Recording.Close (R);
    Apart.Replay_End;
+   if Driver.Services.Unanswered > 0 then
+      Line (Core, "the recording holds no reply to" & Natural'Image (Driver.Services.Unanswered)
+            & " calls this replay made, the first at beat" & Natural'Image (Natural (Driver.Services.First_Unanswered))
+            & ": from there the replay asks what the run did not, unless they are only the last beats' calls");
+   end if;
    Line (Core, "replayed" & Natural'Image (Beat) & " beats," & Natural'Image (Commanded_Beats)
          & " actions," & Natural'Image (Episodes) & " episode resets");
    if Length (Body_File) > 0 then

@@ -12,6 +12,7 @@ with Driver.Images;
 with Driver.Json;
 with Driver.Msgpack;
 with Driver.Observations;
+with Driver.Recording;
 with Driver.Replies;
 with Driver.Services;
 with Driver.Numerics.Dense;
@@ -754,6 +755,90 @@ package body Driver.Core_Tests is
       Check (Latest_Words = "now the box" and then Words_Heard = Before + 2, "changed words were not noticed");
    end Person_Words;
 
+   --  A reply is seen from the first step whose record comes after the
+   --  reply's own record, whenever the reply came in: the order a replay
+   --  gives the models its replies in (Driver.Services.Step_Begins).
+   procedure Reply_Order is
+      use GNAT.Sockets;
+      CRLF : constant String := ASCII.CR & ASCII.LF;
+
+      --  Answers two calls; the second only when told to.
+      task Server is
+         entry Listening (Port : out Natural);
+         entry Answer_Second;
+      end Server;
+
+      task body Server is
+         Listener  : Socket_Type;
+         Client    : Socket_Type;
+         Address   : Sock_Addr_Type := (Family => Family_Inet, Addr => Loopback_Inet_Addr, Port => Any_Port);
+         Buffer    : Ada.Streams.Stream_Element_Array (1 .. 4096);
+         Last      : Ada.Streams.Stream_Element_Offset;
+         Body_Text : constant String := "{}";
+         Reply     : constant String :=
+           "HTTP/1.1 200 OK" & CRLF & "Content-Type: application/json" & CRLF
+           & "Content-Length:" & Natural'Image (Body_Text'Length) & CRLF & CRLF & Body_Text;
+      begin
+         Create_Socket (Listener);
+         Bind_Socket (Listener, Address);
+         Listen_Socket (Listener);
+         Address := Get_Socket_Name (Listener);
+         accept Listening (Port : out Natural) do
+            Port := Natural (Address.Port);
+         end Listening;
+         for Call in 1 .. 2 loop
+            Accept_Socket (Listener, Client, Address);
+            Receive_Socket (Client, Buffer, Last);
+            if Call = 2 then
+               accept Answer_Second;
+            end if;
+            Send_Socket (Client, Driver.Bytes.To_Bytes (Reply), Last);
+            Close_Socket (Client);
+         end loop;
+         Close_Socket (Listener);
+      end Server;
+
+      procedure Wait_In (T : Driver.Services.Ticket) is
+      begin
+         for Try in 1 .. 10_000 loop
+            exit when Driver.Services.Came_In (T);
+            delay 0.001;
+         end loop;
+      end Wait_In;
+
+      Port       : Natural;
+      P1, P2, P3 : Positive;
+      T1, T2     : Driver.Services.Ticket;
+   begin
+      Server.Listening (Port);
+      Driver.Services.Configure (Driver.Services.Instrument, "127.0.0.1", Port);
+      --  A reply that comes in during the step its call was made in.
+      Driver.Recording.Write_Shared (Driver.Recording.Robot_Message, Driver.Bytes.To_Bytes ("1"), P1);
+      Driver.Services.Step_Begins (P1);
+      T1 := Driver.Services.Submit (Driver.Services.Instrument, "/match", "{}", 1);
+      Wait_In (T1);
+      Check (Driver.Services.Came_In (T1), "the first reply never came in");
+      Check (not Driver.Services.Ready (T1), "a reply was seen in the step its call was made in");
+      Driver.Recording.Write_Shared (Driver.Recording.Robot_Message, Driver.Bytes.To_Bytes ("2"), P2);
+      Driver.Services.Step_Begins (P2);
+      Check (Driver.Services.Ready (T1), "a reply recorded before a step's record was not seen in that step");
+      --  A reply that comes in after a step's record was written but before
+      --  the step looks: in the recording it comes after that record.
+      T2 := Driver.Services.Submit (Driver.Services.Instrument, "/match", "{}", 2);
+      Driver.Recording.Write_Shared (Driver.Recording.Robot_Message, Driver.Bytes.To_Bytes ("3"), P3);
+      Server.Answer_Second;
+      Wait_In (T2);
+      Driver.Services.Step_Begins (P3);
+      Check (Driver.Services.Came_In (T2), "the second reply never came in");
+      Check (not Driver.Services.Ready (T2), "a reply recorded after a step's record was seen in that step");
+      Driver.Services.Step_Begins (Positive'Last);
+      Check (Driver.Services.Ready (T2), "a reply in was not seen once every step had ended");
+      if Driver.Services.Ready (T1) and then Driver.Services.Ready (T2) then
+         Check (Driver.Services.Collect (T1).Ok and then Driver.Services.Collect (T2).Ok, "a reply was lost");
+      end if;
+      Driver.Services.Configure (Driver.Services.Instrument, "", 0);
+   end Reply_Order;
+
    procedure Replayed_Services is
       use Driver.Services;
       R  : constant Reply := (Ok => True, Text => Ada.Strings.Unbounded.To_Unbounded_String ("answer"), others => <>);
@@ -828,6 +913,9 @@ package body Driver.Core_Tests is
                              Released_Beat'Access);
       Driver.Tests.Register ("core.person_words", "new words are missed, or old ones counted again",
                              Person_Words'Access);
+      Driver.Tests.Register ("core.reply_order",
+                             "a submitted call's reply is seen at another step than a replay gives it at",
+                             Reply_Order'Access);
       Driver.Tests.Register ("core.replayed_services",
                              "a replayed service reply arrives on another beat or answers another call",
                              Replayed_Services'Access);

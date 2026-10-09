@@ -47,6 +47,21 @@ package Driver.Services is
    --  calls.
    function Submit (S : Service; Path : String; Request : String; Beat : Driver.Clock.Beat) return Ticket;
    function Ready (T : Ticket) return Boolean;
+   --  The reply may be collected now: it came in, and its record comes before
+   --  the record the current step began with (Step_Begins), so a replay,
+   --  which gives the models each reply where its record is, sees it at the
+   --  same step whenever the reply raced the step's record.
+
+   procedure Step_Begins (Place : Positive);
+   --  The estimators begin a step: they are given a robot message, or a part
+   --  of one (Driver.Apart), whose record has this place in the recording's
+   --  order (Driver.Recording.Write_Shared). A program that never begins a
+   --  step, or begins one at Positive'Last, sees every reply as soon as it
+   --  is in.
+
+   function Came_In (T : Ticket) return Boolean;
+   --  The reply is in, whether or not the current step may see it yet.
+
    function Collect (T : Ticket) return Reply
      with Pre => Ready (T);
 
@@ -73,6 +88,14 @@ package Driver.Services is
 
    procedure Replay_Beat (Beat : Driver.Clock.Beat);
    --  The beat the replay is about to feed.
+
+   function Unanswered return Natural;
+   function First_Unanswered return Driver.Clock.Beat
+     with Pre => Unanswered > 0;
+   --  Replay: the submitted calls the recording has given no reply to so far,
+   --  and the beat the first of them was submitted at. A call the run never
+   --  made is never answered: from that beat on, the replay and the run
+   --  differ (calls of the last beats may only have outlasted the recording).
 
    procedure End_Replay;
    --  Back to live calls; replayed calls still waiting are dropped.
