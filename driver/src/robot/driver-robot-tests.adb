@@ -6912,84 +6912,99 @@ package body Driver.Robot.Tests is
    end A_Lone_Channel_Is_The_Limiter_Only_If_Short_By_More_Than_Its_Scatter;
 
    procedure Stops_Are_Noted_As_Ends is
-      --  The third joint, A27 hand 2's: it stopped against the arm itself at +0.0705 (beat 6152), then at its low end
-      --  -0.0368 (6567), then against the forearm at +0.0194 (6642). The end is the furthest stop of the sense, and
-      --  never nearer than the readings the channel has been seen at; nothing before a stop, nothing for a channel
-      --  whose noise is not measured, and the way up is its own.
+      --  The third joint, A27 hand 2's: it stopped against the arm itself at +0.0705 (beat 6152), at its low end
+      --  -0.0368 (6567), against the forearm at +0.0194 (6642), and at its low end again, -0.0359 (7041), from another
+      --  pose. A stop is an end of its channel when the channel stops at the same reading, to within what two contacts
+      --  would not meet by chance, from another pose of the other channels: until then it is noted, and no plan
+      --  is refused. Nothing for a channel whose noise is not measured, and the way up is its own.
       M : Model;
       Noted : Boolean;
+      Third_Joint_Down : Boolean;
    begin
       Ends_Body (M);
       Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing)), "an end before any stop");
+      --  (a) A27's aim at 6152, the third joint stopped at +0.0705: one stop, noted, no end.
       Ends_Push (M, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
       Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
-      Check (Noted, "the first stop of the third joint moved no end");
+      Check (not Noted and then Natural (M.Groups (1).Stops.Length) = 1, "the first stop of the third joint moved an end or was not kept");
+      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing)), "one stop made an end");
+      --  (b) -0.0368 from a pose with the other joints elsewhere: the readings differ by a tenth of a radian, not an end.
+      Ends_Push (M, [0.0, 0.0, 0.0705, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
+      Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
+      Check (not Noted and then Natural (M.Groups (1).Stops.Length) = 2, "two stops a tenth of a radian apart made an end");
+      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing)), "two stops at different readings made an end");
+      --  (c) The same reading again from the same pose is the same contact seen twice.
+      Ends_Push (M, [0.0, 0.0, 0.0705, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
+      Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
+      Check (not Noted and then Natural (M.Groups (1).Stops.Length) = 2, "the same stop from the same pose was kept or made an end");
+      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing)), "a stop seen twice from one pose made an end");
+      --  (d) -0.0359 from another pose, 0.9 thousandths of a radian from the second: found again, an end.
+      Ends_Push (M, [0.1, 0.2, 0.3, 0.3, 0.1, 0.1], [0.1, 0.2, -0.1016, 0.3, 0.1, 0.1], [0.1, 0.2, -0.0359, 0.3, 0.1, 0.1]);
+      Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
+      Check (Noted, "a stop found again from another pose moved no end");
       declare
          End_Is : constant Estimate := Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing);
       begin
-         Check (Known (End_Is) and then abs (End_Is.Value - 0.0705) < 1.0e-12 and then abs (End_Is.Sigma - 1.0e-6) < 1.0e-12,
-                "the first stop (+0.0705) is not the end, or its sigma is not the channel's noise");
+         Third_Joint_Down := Known (End_Is) and then abs (End_Is.Value + 0.0368) < 1.0e-12 and then abs (End_Is.Sigma - 1.0e-6) < 1.0e-12;
       end;
-      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Increasing)),
-             "a stop going down is an end going up");
-      Check (not Known (Driver.Robot.End_Of (M, 1, 2, Driver.Robot.Decreasing)),
-             "the second joint, short but not the limiter, has an end");
-      Ends_Push (M, [0.0, 0.0, 0.0705, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
-      Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
-      Check (Noted, "a stop that went further moved no end");
-      Check (abs (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing).Value + 0.0368) < 1.0e-12,
-             "a stop that went further did not widen the end to -0.0368");
+      Check (Third_Joint_Down, "the end found twice (-0.0368, -0.0359) is not the furthest of the two, or its sigma is not the channel's noise");
+      Check (Natural (M.Groups (1).Stops.Length) = 1, "the stops that made the end were kept as stops as well");
+      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Increasing)), "a stop going down is an end going up");
+      Check (not Known (Driver.Robot.End_Of (M, 1, 2, Driver.Robot.Decreasing)), "the second joint, short but not the limiter, has an end");
+      --  (e) A stop where the arm met itself, against an end the channel has: the end explains it, nothing is kept.
       Ends_Push (M, [0.0, 0.0, 0.3, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0273, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0194, 0.0, 0.0, 0.0]);
       Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
-      Check (not Noted, "a stop nearer than the end moved it");
+      Check (not Noted and then Natural (M.Groups (1).Stops.Length) = 1, "a stop short of the end it explained was kept or moved the end");
       Check (abs (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing).Value + 0.0368) < 1.0e-12,
              "a stop where the arm met itself (+0.0194) moved the end it had found (-0.0368)");
-      --  The stops are readings, and a channel is never taken to end nearer than its readings seen, so the end the
-      --  model shows is the lowest reading when a stop was noted; what it kept of the stops is the furthest of them.
+      --  The stops are readings, and a channel is never taken to end nearer than its readings seen.
       Check (M.Groups (1).Has_Stopped_Low (2) and then abs (M.Groups (1).Stopped_Low (2) + 0.0368) < 1.0e-12
              and then not M.Groups (1).Has_Stopped_High (2),
-             "the stops kept are not the furthest down (-0.0368) of the three, or one is kept going up");
+             "the end kept is not the furthest down (-0.0368) of the two, or one is kept going up");
       --  A push is a stop when its caller says so: the sixth joint asked up and stopped short, on a body of its own.
       declare
          Fresh : Model;
       begin
          Ends_Body (Fresh);
          Ends_Push (Fresh, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.5], [0.0, 0.0, 0.0, 0.0, 0.0, 0.1]);
-         Check (not Known (Driver.Robot.End_Of (Fresh, 1, 6, Driver.Robot.Increasing)), "an end was found without the caller's word");
+         Check (Natural (Fresh.Groups (1).Stops.Length) = 0, "a stop was kept without the caller's word");
          Driver.Robot.Motion.Note_Stopped (Fresh, 1);
-         --  Its stop at 0.1 is below the 1.0 it was first seen at, and an end is no nearer than a reading seen.
-         Check (Known (Driver.Robot.End_Of (Fresh, 1, 6, Driver.Robot.Increasing))
-                and then abs (Driver.Robot.End_Of (Fresh, 1, 6, Driver.Robot.Increasing).Value - 1.0) < 1.0e-12,
-                "the sixth joint asked up and stopped short at 0.1 has no end up there, or one below the 1.0 it was seen at");
+         Check (Natural (Fresh.Groups (1).Stops.Length) = 1 and then not Known (Driver.Robot.End_Of (Fresh, 1, 6, Driver.Robot.Increasing)),
+                "the sixth joint asked up and stopped short at 0.1 made an end, or was not kept");
       end;
       declare
-         Other : Model;
+         Unmeasured : Model;
       begin
-         Ends_Body (Other);
-         Ends_Push (Other, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
-         Driver.Robot.Motion.Note_Stopped (Other, 1);
-         Check (Known (Driver.Robot.End_Of (Other, 1, 3, Driver.Robot.Decreasing)), "the stop was not noted before the noise went");
-         Other.Noise.Clear;   --  the noise is not measured (a reload that lost it)
-         Check (not Known (Driver.Robot.End_Of (Other, 1, 3, Driver.Robot.Decreasing)),
-                "a channel whose noise is not measured showed an end");
-         declare
-            Unmeasured : Model;
-         begin
-            Ends_Body (Unmeasured);
-            Unmeasured.Noise.Clear;   --  nor was it when the push was
-            Ends_Push (Unmeasured, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
-            Driver.Robot.Motion.Note_Stopped (Unmeasured, 1);
-            Check (not Known (Driver.Robot.End_Of (Unmeasured, 1, 3, Driver.Robot.Decreasing)),
-                   "a push of a channel whose noise was not measured showed an end");
-         end;
+         Ends_Body (Unmeasured);
+         Unmeasured.Noise.Clear;   --  the noise is not measured
+         Ends_Push (Unmeasured, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
+         Driver.Robot.Motion.Note_Stopped (Unmeasured, 1);
+         Check (Natural (Unmeasured.Groups (1).Stops.Length) = 0 and then not Known (Driver.Robot.End_Of (Unmeasured, 1, 3, Driver.Robot.Decreasing)),
+                "a push of a channel whose noise was not measured was kept or showed an end");
       end;
-      --  Seen, the channel is no nearer: the end is never above a reading the channel has been seen at.
+      --  A stop going up does not make an end with one going down at the same reading, and the other way about.
+      declare
+         Ways : Model;
+      begin
+         Ends_Body (Ways);
+         Ends_Push (Ways, [0.0, 0.0, 0.3, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
+         Driver.Robot.Motion.Note_Stopped (Ways, 1);
+         Ends_Push (Ways, [0.1, 0.2, -0.3, 0.3, 0.1, 0.1], [0.1, 0.2, 0.2, 0.3, 0.1, 0.1], [0.1, 0.2, -0.0368, 0.3, 0.1, 0.1]);
+         Driver.Robot.Motion.Note_Stopped (Ways, 1);
+         Check (Natural (Ways.Groups (1).Stops.Length) = 2 and then not Known (Driver.Robot.End_Of (Ways, 1, 3, Driver.Robot.Decreasing))
+                and then not Known (Driver.Robot.End_Of (Ways, 1, 3, Driver.Robot.Increasing)),
+                "a stop going up and one going down at one reading made an end");
+      end;
+      --  Seen, the channel is no nearer: an end found at -0.0368 and -0.0359 is not above a reading the channel has been
+      --  seen at (-0.0415, the home pose of A27's boot).
       declare
          Seen : Model;
       begin
          Ends_Body (Seen);
          Ends_Push (Seen, [0.0, 0.0, -0.0415, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0415, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0415, 0.0, 0.0, 0.0]);
-         Ends_Push (Seen, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
+         Ends_Push (Seen, [0.0, 0.0, 0.3, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
+         Driver.Robot.Motion.Note_Stopped (Seen, 1);
+         Ends_Push (Seen, [0.1, 0.2, 0.3, 0.3, 0.1, 0.1], [0.1, 0.2, -0.1016, 0.3, 0.1, 0.1], [0.1, 0.2, -0.0359, 0.3, 0.1, 0.1]);
          Driver.Robot.Motion.Note_Stopped (Seen, 1);
          Check (abs (Driver.Robot.End_Of (Seen, 1, 3, Driver.Robot.Decreasing).Value + 0.0415) < 1.0e-12,
                 "an end above a reading the channel was seen at, which it can reach");
@@ -7051,6 +7066,17 @@ package body Driver.Robot.Tests is
          M.Groups (1).Has_Stopped_Low.Append (C mod 2 = 1);
          M.Groups (1).Has_Stopped_High.Append (C mod 3 = 0);
       end loop;
+      --  Two stops not yet found again, each with the pose it was made from.
+      for K in 1 .. 2 loop
+         declare
+            Pose : Real_Vectors.Vector;
+         begin
+            for C in 1 .. 6 loop
+               Pose.Append (0.1 * Real (K) + 0.01 * Real (C));
+            end loop;
+            M.Groups (1).Stops.Append (Stop_Record'(Channel => 1 + K, Up => K = 1, Value => 0.7 * Real (K), Pose => Pose));
+         end;
+      end loop;
       declare
          Written : constant String := Driver.Robot.Body_File.Text (M);
       begin
@@ -7065,6 +7091,10 @@ package body Driver.Robot.Tests is
          Check (abs (Driver.Robot.End_Of (Back, 1, 3, Driver.Robot.Increasing).Value - 1.5) < 1.0e-9
                 and then abs (Driver.Robot.End_Of (Back, 1, 5, Driver.Robot.Decreasing).Value + 1.5) < 1.0e-9,
                 "the reloaded ends are other numbers than the written ones");
+         Check (Natural (Back.Groups (1).Stops.Length) = 2 and then Back.Groups (1).Stops (2).Channel = 3
+                and then not Back.Groups (1).Stops (2).Up and then abs (Back.Groups (1).Stops (2).Value - 1.4) < 1.0e-9
+                and then abs (Back.Groups (1).Stops (2).Pose (3) - 0.24) < 1.0e-9 and then Back.Groups (1).Stops (1).Up,
+                "the reloaded body has other stops than the written one's, or their poses");
          Check (Driver.Robot.Body_File.Text (Back) = Written, "the reloaded body writes another file");
       end;
    end Ends_Are_Kept_In_The_Body_File;

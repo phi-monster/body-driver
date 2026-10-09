@@ -12,6 +12,9 @@ package body Driver.Robot.Hand.Pressing is
       Values  : Vec3;
       Vectors : Mat3;
    begin
+      if Tool.Position_Covariance (1, 1) = Real'Last then
+         return Real'Last;   --  the tool's place is not measured
+      end if;
       Symmetric_Eigensystem (Tool.Position_Covariance, Values, Vectors);
       return Threshold (Vector_Gate (Vec3'Length)) * Sqrt (Real'Max (Values (1), Real'Max (Values (2), Values (3))));
    end Least_Push;
