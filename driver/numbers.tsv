@@ -434,6 +434,8 @@ driver-instrument.adb	Channels : constant := 3;	3	format	three colour bytes per 
 driver-instrument.adb	File_Header : constant := 14;	14	format	BMP: the file header is 14 bytes
 driver-instrument.adb	Info_Header : constant := 40;	40	format	BMP: the BITMAPINFOHEADER is 40 bytes
 driver-instrument.adb	M.Certainty := Driver.Json.Number (Doc, Driver.Json.Element (Doc, E, 3));	3	format	the service's answer is u, v, certainty
+driver-instrument.adb	Pixels (To + Offset (Channels * Column) + 2) := RGB (From + Offset (Channels * Column));	2	format	a bitmap pixel is blue, green, red: the byte two places on in one order is the first in the other
+driver-instrument.adb	Pixels (To + Offset (Channels * Column)) := RGB (From + Offset (Channels * Column) + 2);	2	format	a bitmap pixel is blue, green, red: the byte two places on in one order is the first in the other
 driver-instrument.adb	Put_Little (B, 0, 4 * 4);	4	format	BMP: four four-byte fields of resolution and palette
 driver-instrument.adb	Put_Little (B, 0, 4 * 4);	4	format	BMP: four four-byte fields of resolution and palette
 driver-instrument.adb	Put_Little (B, 0, 4);	4	format	BMP: a four-byte field
@@ -866,12 +868,16 @@ driver-robot-flow.adb	(Driver.Uncertain.Vector_Gate (2), Final,	2	structure	a di
 driver-robot-flow.adb	(Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;	2.0	math	the smaller eigenvalue of a symmetric 2 x 2 matrix, (trace - sqrt (trace^2 - 4 det)) / 2
 driver-robot-flow.adb	(Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;	4.0	math	the smaller eigenvalue of a symmetric 2 x 2 matrix, (trace - sqrt (trace^2 - 4 det)) / 2
 driver-robot-flow.adb	(if Condition > 0.0 then Sqrt (2.0 * Luma_Variance / Condition) else Real'Last);	2.0	math	a displacement between two frames carries both frames' pixel noise
+driver-robot-flow.adb	Fx : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_X) + 1);	1	structure	a fraction per column or row of the largest cell, numbered from one, with one to spare
+driver-robot-flow.adb	Fy : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_Y) + 1);	1	structure	a fraction per column or row of the largest cell, numbered from one, with one to spare
 driver-robot-flow.adb	Gx (I) := (At_Before (X + 1, Y) - At_Before (X - 1, Y)) / 2.0;	2.0	math	a central difference spans two pixels
+driver-robot-flow.adb	Gx : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_X * Most_Y));	1	structure	at least one element, so a grid without cells allocates an empty-sized buffer no smaller than one
 driver-robot-flow.adb	Gy (I) := (At_Before (X, Y + 1) - At_Before (X, Y - 1)) / 2.0;	2.0	math	a central difference spans two pixels
+driver-robot-flow.adb	Gy : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_X * Most_Y));	1	structure	at least one element, so a grid without cells allocates an empty-sized buffer no smaller than one
+driver-robot-flow.adb	Px : Index_Access := new Index_Array (0 .. Natural'Max (1, Most_X));	1	structure	at least one element, so a grid without cells allocates an empty-sized buffer no smaller than one
+driver-robot-flow.adb	Py : Index_Access := new Index_Array (0 .. Natural'Max (1, Most_Y));	1	structure	at least one element, so a grid without cells allocates an empty-sized buffer no smaller than one
 driver-robot-flow.adb	X0 := Natural'Max (X0, 1);	1	structure	the central difference needs the pixel before
-driver-robot-flow.adb	X1 : constant Natural := Natural'Min (Natural (Real'Floor (Xc)), W - 2);	2	structure	bilinear interpolation reads the pixel after its left neighbour, so that neighbour is at most the one before the last
 driver-robot-flow.adb	Y0 := Natural'Max (Y0, 1);	1	structure	the central difference needs the pixel before
-driver-robot-flow.adb	Y1 : constant Natural := Natural'Min (Natural (Real'Floor (Yc)), H - 2);	2	structure	bilinear interpolation reads the pixel below its upper neighbour, so that neighbour is at most the one before the last
 driver-robot-flow.adb	and then abs U <= Real (Nx) / 2.0 and then abs V <= Real (Ny) / 2.0;	2.0	structure	a translation beyond half the cell has moved most of the template out of the window it is matched in
 driver-robot-flow.adb	and then abs U <= Real (Nx) / 2.0 and then abs V <= Real (Ny) / 2.0;	2.0	structure	a translation beyond half the cell has moved most of the template out of the window it is matched in
 driver-robot-flow.adb	or else abs U > Real (Nx) / 2.0 or else abs V > Real (Ny) / 2.0;	2.0	structure	a translation beyond half the cell has moved most of the template out of the window it is matched in

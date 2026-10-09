@@ -326,6 +326,12 @@ private
 
    type Stored_Flags is array (Stored) of Boolean;
 
+   --  The streams are read element by element in every estimator's inner
+   --  loops; a tampering check makes each read a controlled reference (built,
+   --  finalized, abort deferred and undeferred: a tenth of the driver's time
+   --  over A37's first 2324 beats, Visible_Step alone reading 575 million
+   --  elements). These instances keep their index checks and drop that one.
+   pragma Suppress (Tampering_Check);
    package Real_Vectors is new Ada.Containers.Vectors (Natural, Real);
    package Flag_Vectors is new Ada.Containers.Vectors (Natural, Boolean);
    type Luma_Access is access Real_Array;
@@ -419,6 +425,7 @@ private
       Current       : Luma_Access;           --  luma of this beat's frame
       Before        : Luma_Access;           --  luma of the frame two beats ago
       Means, Variances : Luma_Access;        --  the stillness test's per-pixel reads of its views
+      Deviations       : Luma_Access;        --  the square roots of Variances, for the settle watch
       Has_Previous  : Boolean := False;      --  Previous is the frame of the beat before, of the grid's size
       Has_Before    : Boolean := False;      --  Before is the frame two beats ago, of the grid's size
       --  Whether the picture has stopped changing since the body last began to
