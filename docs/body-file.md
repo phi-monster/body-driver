@@ -68,7 +68,7 @@ measured from:
 |---|---|---|
 | `noise` | every channel's reading noise and its degrees of freedom | the readings |
 | `travel` | every channel's lowest and highest reading so far | the readings |
-| `ends` | every channel's furthest stop down and up, where a push the body itself stopped left it (`low`, `high`, with `has_low` and `has_high` saying whether there is one) | the noise |
+| `ends` | every channel's end down and up, found where the body stopped a push of it at the same reading from two poses of the other channels (`low`, `high`, with `has_low` and `has_high` saying whether there is one), and the `stops` not yet found again, each with the channel, the sense, the reading and the group's readings it was made from | the noise |
 | `steps` | every group's longest wait for an answer, its free pushes' shortfalls | the noise |
 | `lags` | every eye's image lag, and whether it is known | the noise |
 | `responses` | every eye's cell noise at rest, what each channel's push does to each cell, each group's effect on the eye | the noise, the lags |
@@ -78,11 +78,15 @@ measured from:
 The `ends` are what the arm showed by being stopped, not by being seen
 (`Driver.Robot.Motion.Note_Stopped`, `Driver.Robot.End_Of`): a decider that knows a push of the arm was stopped by the body
 itself and not by a surface it pressed says so, and the channel the stop is the shortfall of, by a significance test of each
-asked channel's share undelivered against its own noise, has the reading it stopped at noted in the sense it was asked. The
-furthest stop of a sense stands (a stop where the arm met itself is relaxed by a later one that went further), no nearer than
-the readings the channel has been seen at, and a plan that passes it (`Driver.Robot.Motion.Plan_Reach`) is refused. Until a
-channel has shown an end plans are free past the readings seen. The ends are reloaded with the noise they rest on and are
-never reset by a recompute.
+asked channel's part of the shortfall against its own noise, has the reading it stopped at noted in the sense it was asked,
+with the group's readings there. A joint's end is a property of that joint, which no pose of the others changes: a stop is an
+end when the channel stops at the same reading from another pose (some other channel standing somewhere else), the two
+readings within what two independent contacts would not meet by chance (the false alarm rate of Z over the channel's travel,
+and no less than Z deviations of the difference of two readings); until then it is a stop kept with its pose, and plans stay
+free. An end is no nearer than the readings the channel has been seen at, and a plan that passes it
+(`Driver.Robot.Motion.Plan_Reach`) is refused. The ends and the stops are reloaded with the noise they rest on and are never
+reset by a recompute; a file of the first method (ends from one stop) is measured again. A boot that moves one joint at a time
+from the rest pose confirms no end by itself: its stops share one pose.
 
 `Driver.Robot.Load_Body` reloads a file into a model by the same rules; a
 model that has seen no robot takes the file's groups and eyes, so a measured

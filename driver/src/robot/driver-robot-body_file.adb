@@ -61,6 +61,17 @@ package body Driver.Robot.Body_File is
       return To_String (T);
    end Flags;
 
+   function Stops (V : Stop_Vectors.Vector) return String is
+      T : Unbounded_String := To_Unbounded_String ("[");
+   begin
+      for I in V.First_Index .. V.Last_Index loop
+         Append (T, Separator (I = V.First_Index) & "{""channel"": " & Int (V (I).Channel) & ", ""up"": " & Flag (V (I).Up)
+                 & ", ""value"": " & Num (V (I).Value) & ", ""pose"": " & Reals (V (I).Pose) & "}");
+      end loop;
+      Append (T, "]");
+      return To_String (T);
+   end Stops;
+
    function Three (X : Vec3) return String is ("[" & Num (X (1)) & ", " & Num (X (2)) & ", " & Num (X (3)) & "]");
 
    function Nine (R : Mat3) return String is
@@ -101,15 +112,16 @@ package body Driver.Robot.Body_File is
       end loop;
       Add ("]}," & LF);
 
-      --  Where a push the body stopped left each channel, the furthest down and up, and whether one did: the ends the
-      --  arm showed by stopping (Driver.Robot.Motion.Note_Stopped). A group none of whose channels showed an end has
-      --  empty vectors.
+      --  The ends the arm showed by stopping (Driver.Robot.Motion.Note_Stopped): per channel where it ended, the furthest
+      --  down and up, and whether it did, and the stops not yet found again from another pose, each with the pose it was
+      --  made from. A group none of whose channels showed an end has empty vectors.
       Add (" ""ends"": {""method"": " & Int (Ends_Method) & ", ""groups"": [");
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          Add (Separator (G = M.Groups.First_Index) & "{""low"": " & Reals (M.Groups (G).Stopped_Low)
               & ", ""has_low"": " & Flags (M.Groups (G).Has_Stopped_Low)
               & ", ""high"": " & Reals (M.Groups (G).Stopped_High)
-              & ", ""has_high"": " & Flags (M.Groups (G).Has_Stopped_High) & "}");
+              & ", ""has_high"": " & Flags (M.Groups (G).Has_Stopped_High)
+              & ", ""stops"": " & Stops (M.Groups (G).Stops) & "}");
       end loop;
       Add ("]}," & LF);
 
@@ -467,6 +479,24 @@ package body Driver.Robot.Body_File is
                               end if;
                            end loop;
                         end if;
+                        --  The stops not yet found again: the file's join the model's, each with the pose it was made from.
+                        declare
+                           Stops_Node : constant Node := Field (Item (Gs, I), "stops");
+                        begin
+                           for K in 1 .. Size (Stops_Node) loop
+                              declare
+                                 Record_Node : constant Node := Item (Stops_Node, K);
+                                 Pose        : constant Real_Vectors.Vector := Reals_Of (Field (Record_Node, "pose"));
+                                 Channel     : constant Integer := Whole (Record_Node, "channel");
+                              begin
+                                 if Channel >= 1 and then Channel <= S.Size and then Natural (Pose.Length) = S.Size then
+                                    S.Stops.Append
+                                      (Stop_Record'(Channel => Channel, Up => Is_True (Doc, Field (Record_Node, "up")),
+                                                     Value => Value (Field (Record_Node, "value")), Pose => Pose));
+                                 end if;
+                              end;
+                           end loop;
+                        end;
                      end if;
                   end;
                end loop;

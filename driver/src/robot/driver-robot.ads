@@ -263,17 +263,16 @@ package Driver.Robot is
    --  The way a channel's reading is asked to go.
 
    function End_Of (M : Model; G : Group_Id; Channel : Positive; S : Sense) return Estimate;
-   --  The reading beyond which the channel was found not to follow when asked further that way: where a push that
-   --  the body itself stopped (Driver.Robot.Motion.Note_Stopped) left it, the furthest such a push left it, and no
-   --  nearer than the readings the channel has been seen at; its sigma is the channel's reading noise. Unknown until
-   --  the channel has shown an end, or while its noise is not measured: plans are free past the readings seen until
-   --  a channel has shown one, and Driver.Robot.Motion.Plan_Reach refuses a path past it. Once a sense has a stop
-   --  the end is the extreme ever READ in that sense, here or in the runs the body file kept (every stop is a
-   --  reading, so it is no nearer than the lowest or highest the channel has shown): only a reading made by
-   --  something other than Plan_Reach, a command given directly or the boot's own steps, can widen it, which is
-   --  what an aim that stops costs, one aim, and after it plans refuse past what the arm has shown. That is what
-   --  keeps a stop that depends on the other channels (the arm meeting itself) from refusing asks the arm has
-   --  made, and from being a refusal nothing could contradict.
+   --  The reading beyond which the channel was found not to follow when asked further that way: where pushes that
+   --  the body itself stopped (Driver.Robot.Motion.Note_Stopped) left it at the same reading from two poses of the
+   --  other channels, the furthest of them, and no nearer than the readings the channel has been seen at; its sigma
+   --  is the channel's reading noise. A joint's end is a property of that joint, which no pose of the others
+   --  changes; a stop that one pose explains (the arm on itself, the palm on the table) is a contact, noted
+   --  until another pose shows the same reading, and plans stay free past the readings seen meanwhile. Unknown
+   --  until the channel has shown an end, or while its noise is not measured, and Driver.Robot.Motion.Plan_Reach
+   --  refuses a path past an end. An end is the extreme ever READ in that sense where the arm has read beyond it,
+   --  here or in the runs the body file kept: only a reading made by something other than Plan_Reach, a command
+   --  given directly or the boot's own steps, can widen it.
 
    type Eye_Response is (Unmeasured, Nothing, Patch, Undecided, Whole);
    --  What pushing a group does to what an eye sees: nothing, a patch of the
@@ -358,6 +357,23 @@ private
 
    package Episode_Vectors is new Ada.Containers.Vectors (Positive, Episode);
 
+   --  A stop the body made of a push (Driver.Robot.Motion.Note_Stopped) that is not yet an end: one value of one
+   --  channel, in one pose of the group. It is an end when the channel stops at the same reading from another pose.
+   type Stop_Record is record
+      Channel : Positive := 1;
+      Up      : Boolean := False;
+      Value   : Real := 0.0;
+      Pose    : Real_Vectors.Vector;   --  the group's readings where it stopped
+   end record;
+
+   package Stop_Vectors is new Ada.Containers.Vectors (Positive, Stop_Record);
+   --  Stops are kept for the groups of an arm (Driver.Robot.Motion.Note_Stopped): a group of one channel, a closer's,
+   --  has no other channel to stand elsewhere, so none of its stops is found again and End_Of stays Unknown for it.
+   --  The readings' noise is the scale of two readings of a channel here, and the channel's travel the scale of the
+   --  chance that two contacts meet at one reading; nothing but the stream sets either. A boot that moves one joint at a
+   --  time from the rest pose confirms no end by itself, its stops share one pose: an end is found by a later stop
+   --  from another configuration (presses, tilts, a task), and Unknown after the boot is not a fault.
+
    --  A group's readings and the target in effect, beat after beat; beat K
    --  of the stream is the K-th observation (counted from zero).
    type Group_Stream is record
@@ -374,9 +390,11 @@ private
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
       Free_Shortfalls : Real_Vectors.Vector;   --  of every answered push that was not blocked, along its ask, in order
       Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
-      Stopped_Low, Stopped_High : Real_Vectors.Vector;   --  per channel, where a push the body stopped left it, the
-                                                         --  furthest down and up (End_Of); valid where the flags are
-      Has_Stopped_Low, Has_Stopped_High : Flag_Vectors.Vector;   --  a stop of that sense was noted for the channel
+      Stopped_Low, Stopped_High : Real_Vectors.Vector;   --  per channel, the ends: where the body stopped a push of the
+                                                         --  channel at the same reading from two poses, the furthest
+                                                         --  down and up (End_Of); valid where the flags are
+      Has_Stopped_Low, Has_Stopped_High : Flag_Vectors.Vector;   --  an end of that sense was found for the channel
+      Stops       : Stop_Vectors.Vector;   --  the stops that have not been found again from another pose
    end record;
 
    package Group_Stream_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Stream);

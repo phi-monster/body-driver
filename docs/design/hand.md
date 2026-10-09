@@ -894,6 +894,39 @@ is sent first: no press, and the watcher is free for the next), hand.measure.lon
 and the late answer are unchanged. The decider's wait has no rig that reaches it (the rig never blocks a descent
 on a table): it is read in the next run's log.
 
+**Lesson: a joint's end is found again at the same reading from another pose; one stop is a contact (A36).** The ends
+of 25bbbd6 took one stop for an end and made it the highest (lowest) reading the joint had shown. A36 (a2ed747, hands
+from A32's body file): 'body: group 1 channel 4 stopped at -1.418393 asked -1.293375 from -1.993641 ... an end of the
+channel upwards', a fast descent blocked at once at the tilt of 0.84 rad, and the truth has the finger AND the palm on
+the table there (link8 0.7649 and link6 0.7665 m, the table at 0.7649): a contact the tip model did not predict, not a
+limit of the joint, which the boot had read up to 0.2383 (A22's boot 0.509). That one stop made 0.2383 the fourth
+joint's upward end, and the next descent, lobe 2 at open, 'cannot press lower: channel 4 of group 1 would pass its
+end, upwards at 0.238338 ... going to 0.5': a press lost. Same run, 'channel 4 stopped at -1.966150' (down) where
+A34 had '-2.174645': two readings for one joint's low side, at most one a limit (A22's boot read -2.1633). On the third
+joint: -0.0359 (A22 press 2), -0.0368 and -0.0359 (A27, other poses) against +0.0731, +0.0705, +0.0194, which vary
+with the other joints. So a stop is kept with the group's readings where it was made (Stop_Record), and is an end when
+the channel stops at the same reading from another pose: some other channel standing somewhere else. Two readings are
+one reading when they differ by less than D = the false alarm rate of Z times the channel's travel over two, the
+distance within which two independent contacts, anywhere in the travel, would meet by chance no more often than a Z
+test alarms, and no less than Z deviations of the difference of two readings (the readings' noise, which is the whole
+of it for a real robot's coarse readings and nothing in a simulator whose readings repeat exactly: 1e-17; the
+controller leaves a soft stop a few thousandths of a radian apart from one push to the next, 0.0009 on the third
+joint, under D = 0.0018 of its 1.3 rad of travel). The fit's floor was the first candidate for the scale and
+is not used: it is the planner's scale for a path, not a stop's. A stop that the readings have since passed is NOT
+dropped: a soft limit is passed by a deeper push (the boot read the third joint at -0.0415, deeper than its stops
+at -0.0359 and -0.0368), so 'the joint has read beyond it' is no proof that it is not an end. An end explains the
+stops short of it, which are kept no more; a stop beyond it widens it as a reading. Nothing changes for a plan until
+an end is found: 'free past the readings seen' holds. COST, said out loud: a true end is hit twice instead of
+once (one aim more per end, and the second aim is the next tilt the decider halves to, from another pose, so it is a
+natural pair), and the repeats of an aim that stops without being an end are bounded by the decider alone (one retry
+past a moved end, then half the tilt); a boot that moves one joint at a time from the rest pose confirms no end by
+itself (its stops share one pose), so an Unknown end after the boot is not a fault; a group of one channel (a
+closer) never confirms. The count of aims it spent is for the first run that tests it to say. Teeth: robot.ends.noted
+(a stop alone; two stops at different readings; the same reading from the same pose; the third joint's -0.0368 and
+-0.0359 from another pose, an end at the furthest; a stop short of the end it has, kept no more; a stop going up with
+one going down; a channel with no noise; the end no nearer than the readings seen), robot.ends.file (the stops and
+their poses round-trip), with a mutation for each rule of the match.
+
 **Lesson: an aim that stopped on an end the arm showed by it is planned again past that end, once (A34).** A34's hand 1,
 lobe 2 at open: 'the arm did not reach the aim ... turning the hand 0.9550 rad (group 1: delivered 0.994 of 0.9436,
 blocked)', 'body: group 1 channel 4 stopped at -2.174645 asked -2.186958 from -1.710912 ... an end of the channel

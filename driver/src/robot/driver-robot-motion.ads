@@ -41,14 +41,19 @@ package Driver.Robot.Motion is
    --  the push (Driver.Robot.Steps.Limiter: the channel whose part of the shortfall along the ask, its share of the
    --  ask times its own shortfall, is more than Z standard deviations above zero and above that of every other
    --  channel, from the readings' noise and the scatter of the group's free pushes; the only channel asked is that
-   --  channel) and notes where it stopped, in the sense it was asked, as an end of the channel
-   --  (Driver.Robot.End_Of). Nothing is noted for
-   --  a push given up while its readings kept moving, one that was not blocked, or one no channel dominates (the
-   --  shortfall spread over the channels). The furthest stop seen of a sense stands: a stop where the arm met
-   --  itself is relaxed by a later one that went further. Like every decider call it is made between Next and
-   --  Send; it waits for nothing and asks for no estimate.
-   --  Noted is True when the stop is a new end or moves one further: plans past it are refused from now, and a
-   --  decider whose aim stopped may plan the same aim again, now turned about the way down past the end it showed.
+   --  channel) and keeps where it stopped, in the sense it was asked, with the group's readings there. Nothing is
+   --  noted for a push given up while its readings kept moving, one that was
+   --  not blocked, or one no channel dominates (the shortfall spread over the channels). One stop is not an end:
+   --  a joint's end is a property of that joint, found again at the same reading from another pose of the other
+   --  channels (the arm on itself, the palm on the table, stop a joint at readings that depend on the others), the
+   --  two readings within what two independent contacts would not meet by chance and no less than Z deviations of
+   --  the difference of two readings; a stop is kept until then, and the same reading from the same pose is the
+   --  same contact. Once a channel has an end in a sense its stops there are explained by it and kept no more. Like
+   --  every decider call it is made between Next and Send; it waits for nothing and asks for no estimate; what it
+   --  writes the estimates' task does not read. It is for the groups of an arm: a group of one channel has no other
+   --  channel to stand elsewhere, so its stops are never found again.
+   --  Noted is True when the stop made an end: plans past it are refused from now, and a decider whose aim stopped
+   --  may plan the same aim again, now turned about the way down past the end it showed.
 
    procedure Note_Stopped (M : in out Model; G : Group_Id);
    --  The same, for a caller that does not ask whether it moved an end.
