@@ -278,6 +278,7 @@ procedure Body_Driver is
          end if;
          if Observed then
             Beat := Beat + 1;
+            Driver.Log.Stamp (Beat);
          end if;
       end;
       if Driver.Protocol.Wants_Action (Req) and then Known and then Have_Obs then

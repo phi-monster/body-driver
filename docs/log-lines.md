@@ -4,8 +4,12 @@ The driver writes one line per event to standard output, flushed at once, so
 a log read live is never behind:
 
 ```
-[topic] text
+@<beat> [topic] text
 ```
+
+`@<beat>` is the number of observations the robot had sent when the line was
+written (the replay of a recording gives the same number); lines written
+before the first observation have none.
 
 The topic is one of `core` (the connection, the protocol, the main loop),
 `robot` (measuring the body: groups, eyes, hands), `world` (things and
