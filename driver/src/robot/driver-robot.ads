@@ -526,6 +526,7 @@ private
       Eye      : Natural := 0;           --  the other eye whose view it is; 0 for the arm's own keyframes
       To_U, To_V     : Real_Vectors.Vector;   --  per query point, where it went
       Back_U, Back_V : Real_Vectors.Vector;   --  and where that matched back to in the reference
+      Sigma    : Real_Vectors.Vector;    --  and the standard deviation the aligner stated of the answer (none from the instrument)
       Found    : Flag_Vectors.Vector;    --  the aligner or the instrument gave an answer
       Stated   : Real := Real'Last;      --  an own keyframe: the median standard deviation its prediction stated
       Wide     : Natural := 0;           --  and how many points it refused for that prediction's uncertainty

@@ -72,6 +72,20 @@ package Driver.Alignment is
    function Levels (P : Pyramid) return Natural;
    --  The number of sizes, the full one included.
 
+   function Level_Width (P : Pyramid; Level : Natural) return Natural
+     with Pre => Level < Levels (P);
+   function Level_Height (P : Pyramid; Level : Natural) return Natural
+     with Pre => Level < Levels (P);
+   --  The size of the picture at a level: each side halved Level times.
+
+   procedure Sample_Level
+     (P : Pyramid; Level : Natural; U, V : Real; Value, Du, Dv : out Real; Ok : out Boolean)
+     with Pre => Level < Levels (P);
+   --  The picture at a level, read between its pixels by the cubic spline through them: its value and its slopes along
+   --  u and v at the place (U, V) (corner-origin coordinates of that level's pixels, the first pixel's centre at a
+   --  half), in levels of luma per pixel of that level. Not Ok when the sixteen pixels around the place are not all
+   --  in the picture.
+
    type Linear_Part is record
       UU, UV, VU, VV : Real := 0.0;
    end record;

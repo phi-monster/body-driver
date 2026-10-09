@@ -9,6 +9,7 @@ with Driver.Distributions;
 with Driver.Images;
 with Driver.Instrument;
 with Driver.Observations;
+with Driver.Stats;
 with Driver.Beats;
 with Driver.Log;
 with Driver.Numerics.Dense;
@@ -3900,7 +3901,7 @@ package body Driver.Robot.Tests is
                         V := V + Noise * Gaussian (Rng) + Shared_V + Track_V (K) + Local_V (K);
                         if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
                            Seen := Seen + 1;
-                           All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V);
+                           All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V, Own => 0.0);
                         end if;
                      end;
                   end loop;
@@ -7080,8 +7081,47 @@ package body Driver.Robot.Tests is
       end;
    end Ends_Are_Kept_In_The_Body_File;
 
+   procedure Scales_Beside_Stated_Sigmas is
+      --  Residuals each of the spread of a common floor (a tenth of a pixel: what the model leaves of any sighting)
+      --  and what its sighting states, which grows from nothing to a pixel and a half as the view moved the more. The
+      --  noise they show together is several times the floor; the floor read from them beside what is stated is
+      --  the common one, so the sightings that moved far, whose residuals are large for what they state, are not taken
+      --  for outliers by the noise of those that moved little. With nothing stated the floor is that noise.
+      Count   : constant := 2000;
+      Floor   : constant Real := 0.1;
+      R, Own, None : Real_Array (1 .. Count);
+      Rng     : Generator;
+   begin
+      for I in 1 .. Count loop
+         Own (I) := 1.5 * Real (I) / Real (Count);
+         None (I) := 0.0;
+         R (I) := Ada.Numerics.Long_Elementary_Functions.Sqrt (Floor ** 2 + Own (I) ** 2) * Gaussian (Rng);
+      end loop;
+      declare
+         Read  : constant Real := Driver.Robot.Kinematics.Fit.Floor_Of (R, Own);
+         Alone : constant Real := Driver.Robot.Kinematics.Fit.Floor_Of (R, None);
+         Shown : Real_Array (1 .. Count);
+      begin
+         for I in 1 .. Count loop
+            Shown (I) := abs R (I);
+         end loop;
+         Check_Close (Read, Floor, 0.03, "the floor read beside what the sightings state, from residuals whose floor is"
+                      & Real'Image (Floor) & ", is" & Real'Image (Read));
+         Check (Alone > 3.0 * Floor,
+                "the noise the residuals show together is not several times their floor:" & Real'Image (Alone));
+         Check_Close (Alone, Driver.Stats.Median (Shown)
+                      / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5), 1.0E-9,
+                      "with nothing stated the floor is not the noise the residuals show");
+         Check (Driver.Robot.Kinematics.Fit.Scale_Of (0.0, 0.0) > 0.0, "a residual with neither floor nor stated has no scale");
+         Check_Close (Driver.Robot.Kinematics.Fit.Scale_Of (0.3, 0.4), 0.5, 1.0E-12, "a scale is the floor and what is stated, as variances");
+      end;
+   end Scales_Beside_Stated_Sigmas;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("robot.kinematics.scales", "the floor of the scales residuals are judged at is the noise "
+                             & "they show together though their sightings state more as they moved further, so those "
+                             & "that moved far are outliers", Scales_Beside_Stated_Sigmas'Access);
       Driver.Robot.Kinematics.Errors.Tests.Register;
       Driver.Robot.Kinematics.Fixed.Tests.Register;
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "

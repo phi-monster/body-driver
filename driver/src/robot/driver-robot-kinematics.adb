@@ -599,13 +599,6 @@ package body Driver.Robot.Kinematics is
       end return;
    end Stated_By;
 
-   --  The aligner refused the point because the prediction it was given said too little of where to look.
-   function Prediction_Caused (A : Driver.Alignment.Answer) return Boolean is
-     (A.Verdict = Driver.Alignment.Not_Found
-      and then A.Because in Driver.Alignment.Window_Too_Large | Driver.Alignment.Ambiguous
-                          | Driver.Alignment.No_Evidence | Driver.Alignment.Left_Window
-                          | Driver.Alignment.Not_Settled | Driver.Alignment.Bad_Warp);
-
    --  What a keyframe's answers say of where the reference's query points went: the answers found that agree with
    --  the keyframe's field of displacements (a wrong answer is as sure of itself as a right one, and is told from it
    --  by the others), but those whose uncertainty is more than Z times the keyframe's typical one (the median of
@@ -646,12 +639,13 @@ package body Driver.Robot.Kinematics is
       for I in Answers'Range loop
          Set.To_U.Append (Answers (I).To.U);
          Set.To_V.Append (Answers (I).To.V);
+         Set.Sigma.Append (if Answers (I).Verdict = Driver.Alignment.Found then Sigma_Of (Answers (I)) else 0.0);
          --  There is no way back: an answer is judged by its own uncertainty, not by another answer.
          Set.Back_U.Append (R.Query_U (I - 1));
          Set.Back_V.Append (R.Query_V (I - 1));
          Set.Found.Append (Answers (I).Verdict = Driver.Alignment.Found and then Agrees (I)
                            and then Sigma_Of (Answers (I)) <= Driver.Conventions.Z * Typical);
-         if Prediction_Caused (Answers (I))
+         if Keyframes.Prediction_Caused (Answers (I))
            or else (Answers (I).Verdict = Driver.Alignment.Found and then not Agrees (I))
          then
             Set.Wide := Set.Wide + 1;
@@ -1049,7 +1043,8 @@ package body Driver.Robot.Kinematics is
                                  K := K + 1;
                                  Seen (K) := (Frame => S.Frame, Track => I + 1,
                                               U0 => R.Query_U (I), V0 => R.Query_V (I),
-                                              U => S.To_U (I), V => S.To_V (I));
+                                              U => S.To_U (I), V => S.To_V (I),
+                                              Own => (if I < Natural (S.Sigma.Length) then S.Sigma (I) else 0.0));
                               end if;
                            end loop;
                         end loop;

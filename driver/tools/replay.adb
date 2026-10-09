@@ -1,4 +1,4 @@
---  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT] [--watch EYE]
+--  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT] [--watch EYE] [--dump DIR EYE EVERY]
 --
 --  Feeds a recording (Driver.Recording format, uncompressed; it is read once,
 --  forward, so "zstd -dc run.rec.zst | replay /dev/stdin ..." needs no copy on
@@ -34,6 +34,8 @@
 --  beats it replayed. With --watch EYE, every beat also gives a line on that
 --  eye (Driver.Robot.Eye_Watch): how much its picture changed, whether it is
 --  still and settled, and how far its cells moved.
+--  With --dump DIR EYE EVERY, the eye's picture at every EVERY-th beat is written
+--  to DIR/eyeEYE_BEAT.ppm (a study's way of seeing what the estimators saw).
 --
 --  The estimators' service calls are answered as Driver.Services describes
 --  for a replay: by the live service when --inst or --eye names one (a
@@ -46,6 +48,7 @@ with Ada.Command_Line;
 with Ada.Exceptions;
 with Ada.Containers.Indefinite_Ordered_Maps;
 with Ada.Strings.Fixed;
+with Ada.Streams.Stream_IO;
 with Ada.Text_IO;
 with Ada.Strings.Unbounded;
 with Driver.Apart;
@@ -267,6 +270,33 @@ procedure Replay is
    --  With --watch, the eye followed beat by beat (Driver.Robot.Eye_Watch).
    Watched : Natural := 0;
 
+   --  With --dump, the eye's picture every so many beats, written as a PPM.
+   Dump_Dir   : Unbounded_String;
+   Dump_Eye   : Natural := 0;
+   Dump_Every : Natural := 0;
+   Dump_Only  : Boolean := False;   --  with --dump-only, nothing else is estimated
+
+   procedure Write_Ppm (File : String; I : Driver.Images.Image) is
+      F    : Ada.Streams.Stream_IO.File_Type;
+      Head : constant String :=
+        "P6" & ASCII.LF & Ada.Strings.Fixed.Trim (Natural'Image (Driver.Images.Width (I)), Ada.Strings.Left) & " "
+        & Ada.Strings.Fixed.Trim (Natural'Image (Driver.Images.Height (I)), Ada.Strings.Left) & ASCII.LF & "255" & ASCII.LF;
+      Bytes : Driver.Bytes.Byte_Array (1 .. Ada.Streams.Stream_Element_Offset (Head'Length));
+
+      procedure Put (RGB : Driver.Bytes.Byte_Array) is
+      begin
+         Ada.Streams.Stream_IO.Write (F, RGB);
+      end Put;
+   begin
+      for K in Head'Range loop
+         Bytes (Ada.Streams.Stream_Element_Offset (K - Head'First + 1)) := Driver.Bytes.Byte (Character'Pos (Head (K)));
+      end loop;
+      Ada.Streams.Stream_IO.Create (F, Ada.Streams.Stream_IO.Out_File, File);
+      Ada.Streams.Stream_IO.Write (F, Bytes);
+      Driver.Images.Query (I, Put'Access);
+      Ada.Streams.Stream_IO.Close (F);
+   end Write_Ppm;
+
    procedure Robot_Part (M : Input) is
       Start : Duration;
    begin
@@ -282,13 +312,18 @@ procedure Replay is
          if Watched > 0 then
             Line (Core, "eye" & Watched'Image & ": " & Driver.Robot.Eye_Watch (Robot, Driver.Robot.Eye_Id (Watched)));
          end if;
+         if Dump_Every > 0 and then Natural (M.O.Beat) mod Dump_Every = 0 and then Driver.Observations.Has_Image (M.O, Driver.Observations.Camera_Id (Dump_Eye)) then
+            Write_Ppm (To_String (Dump_Dir) & "/eye" & Ada.Strings.Fixed.Trim (Natural'Image (Dump_Eye), Ada.Strings.Left)
+                       & "_" & Ada.Strings.Fixed.Trim (Natural'Image (Natural (M.O.Beat)), Ada.Strings.Left) & ".ppm",
+                       M.O.Images (Driver.Observations.Camera_Id (Dump_Eye)));
+         end if;
       end if;
    end Robot_Part;
 
    procedure Rest (M : Input) is
       Start : Duration;
    begin
-      if M.Observed then
+      if M.Observed and then not Dump_Only then
          Start := Driver.Clock.Seconds;
          Driver.Robot.Hand.Observe (Hands, Robot, M.O, M.Sent);
          Spent (Hand_Layer) := Spent (Hand_Layer) + (Driver.Clock.Seconds - Start);
@@ -307,6 +342,9 @@ procedure Replay is
    procedure Compute is
       Start : constant Duration := Driver.Clock.Seconds;
    begin
+      if Dump_Only then
+         return;
+      end if;
       Driver.Robot.Compute_Estimates (Robot);
       Spent (Estimates_Apart) := Spent (Estimates_Apart) + (Driver.Clock.Seconds - Start);
    end Compute;
@@ -519,6 +557,12 @@ begin
          Configure_Service (Driver.Services.Brain, Argument (I + 1));
       elsif Argument (I) = "--watch" then
          Watched := Natural'Value (Argument (I + 1));
+      elsif Argument (I) = "--dump-only" then
+         Dump_Only := True;
+      elsif Argument (I) = "--dump" and then I + 3 <= Argument_Count then
+         Dump_Dir := To_Unbounded_String (Argument (I + 1));
+         Dump_Eye := Natural'Value (Argument (I + 2));
+         Dump_Every := Natural'Value (Argument (I + 3));
       end if;
    end loop;
 

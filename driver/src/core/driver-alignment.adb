@@ -283,6 +283,18 @@ package body Driver.Alignment is
       end;
    end Sample;
 
+   function Level_Width (P : Pyramid; Level : Natural) return Natural is (P.Sizes (Level).Width);
+
+   function Level_Height (P : Pyramid; Level : Natural) return Natural is (P.Sizes (Level).Height);
+
+   procedure Sample_Level
+     (P : Pyramid; Level : Natural; U, V : Real; Value, Du, Dv : out Real; Ok : out Boolean)
+   is
+      Size : Driver.Alignment.Level renames P.Sizes (Level);
+   begin
+      Sample (Size.Spline.Held.Values.all, Size.Width, Size.Height, U, V, Value, Du, Dv, Ok);
+   end Sample_Level;
+
    ---------------------------------------------------------------------------
    --  How smooth a field of residuals or pixels is
 
@@ -627,6 +639,40 @@ package body Driver.Alignment is
       Converged   : Boolean := False;
       Informative : Boolean := False;  --  the normal equations could be solved
    end record;
+
+   type Summary_Array is array (Positive range <>) of Summary;
+   type Summary_Access is access Summary_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Summary_Array, Summary_Access);
+
+   type Natural_Array is array (Positive range <>) of Natural;
+   type Natural_Access is access Natural_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Natural_Array, Natural_Access);
+
+   --  What a search of a window keeps for every place of it. A window of a few hundred pixels across at a fine level
+   --  has some hundreds of thousands of them, more than a task's stack holds (the stack of a task that a Parallel_For
+   --  starts is a fraction of the main task's): these arrays live on the heap and go with the search, however it ends.
+   type Candidates (Count : Natural) is new Ada.Finalization.Limited_Controlled with record
+      Rho   : Reals_Access := new Real_Array'(1 .. Count => -2.0);   --  -2: not a candidate
+      Peaks : Natural_Access := new Natural_Array'(1 .. Count => 0);
+   end record;
+
+   overriding procedure Finalize (Item : in out Candidates) is
+   begin
+      Free (Item.Rho);
+      Free (Item.Peaks);
+   end Finalize;
+
+   --  And of the places that are peaks of their own: the fit of each, and how well it scores.
+   type Peak_Fits (Count : Natural) is new Ada.Finalization.Limited_Controlled with record
+      Fits  : Summary_Access := new Summary_Array (1 .. Count);
+      Score : Reals_Access := new Real_Array'(1 .. Count => Real'First);
+   end record;
+
+   overriding procedure Finalize (Item : in out Peak_Fits) is
+   begin
+      Free (Item.Fits);
+      Free (Item.Score);
+   end Finalize;
 
    --  Gauss-Newton on the whole warp at the level of the pictures' halvings Step, from Start (given at the full
    --  size), directly on the pixels.
@@ -1112,11 +1158,12 @@ package body Driver.Alignment is
       Across : constant Positive := High_X - Low_X + 1;
       Down   : constant Positive := High_Y - Low_Y + 1;
 
-      Rho    : Real_Array (1 .. Across * Down) := [others => -2.0];   --  -2: not a candidate
+      Window_Candidates : Candidates (Across * Down);
+      Rho    : Real_Array renames Window_Candidates.Rho.all;
       Tested : Natural := 0;
       Flat   : Natural := 0;
 
-      Peaks      : array (1 .. Across * Down) of Natural := [others => 0];
+      Peaks      : Natural_Array renames Window_Candidates.Peaks.all;
       Peak_Count : Natural := 0;
 
       --  The place of a cell, at this level's scale, and the pixel it is the centre of.
@@ -1251,7 +1298,8 @@ package body Driver.Alignment is
 
       declare
          Tries  : constant Positive := Peak_Count + 1;   --  every peak, and the place the prediction itself says
-         Fits   : array (1 .. Peak_Count + 1) of Summary;
+         Peak_Scratch : Peak_Fits (Peak_Count + 1);
+         Fits   : Summary_Array renames Peak_Scratch.Fits.all;
          Nearest : constant Positive :=
            Integer'Min (Down - 1, Integer'Max (0, Integer (Real'Rounding (Centre_V - (Real (Low_Y) + 0.5))))) * Across
            + Integer'Min (Across - 1, Integer'Max (0, Integer (Real'Rounding (Centre_U - (Real (Low_X) + 0.5))))) + 1;
@@ -1336,7 +1384,7 @@ package body Driver.Alignment is
             Noise  : constant Real := Fits (Reference).Noise;
             Spread : constant Real := Fits (Reference).Spread;
             Pixels : constant Real := Real (Fits (Reference).Count);
-            Score  : array (1 .. Peak_Count + 1) of Real := [others => Real'First];
+            Score  : Real_Array renames Peak_Scratch.Score.all;
          begin
             for K in 1 .. Tries loop
                if Fits (K).Informative then

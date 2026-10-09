@@ -26,8 +26,6 @@ package body Driver.Alignment.Keyframes is
       Sigma : Real := 0.0;   --  the larger of the answer's two standard deviations
    end record;
 
-   package Located_Vectors is new Ada.Containers.Vectors (Positive, Located);
-
    type Located_Array is array (Positive range <>) of Located;
 
    --  How far a point moves along each axis.
@@ -76,8 +74,8 @@ package body Driver.Alignment.Keyframes is
    --  length of a two-dimensional Gaussian's). The samples are spread triples: the points in order along an axis
    --  (the picture's two and its two diagonals), one from each third, so that all the points get their turn
    --  and no three lie close. False when no sample has a field.
-   procedure Robust_Start (C : Chain; Placed : Located_Vectors.Vector; Keep : in out Flag_Array) is
-      Count : constant Natural := Natural (Placed.Length);
+   procedure Robust_Start (C : Chain; Placed : Located_Array; Keep : in out Flag_Array) is
+      Count : constant Natural := Placed'Length;
       Seen  : Natural := 0;
       Found : Boolean := False;
    begin
@@ -198,13 +196,114 @@ package body Driver.Alignment.Keyframes is
       end;
    end Robust_Start;
 
+   Max_Degree : constant := 2;
+   --  The quadratic of the place is the highest field (Terms of its terms).
+
+   function Terms_Of (Degree : Natural) return Positive is ((Degree + 1) * (Degree + 2) / 2);
+   --  The terms of a polynomial of that degree in the place's two coordinates: Basis lists them lowest degree first,
+   --  so the terms of a lower degree are the first ones.
+
+   --  One degree's least-squares fit of the displacements of the points whose bases are the rows of A: its
+   --  coefficients (zero beyond its terms), the inverse of its normal matrix (row by row, as Field_Fit has it), and
+   --  its leave-one-out error: the mean over the points of the squared error each would be predicted with by the
+   --  fit of the others, both axes together. Not Ok when the points are too few for the degree (as many as its
+   --  terms twice), or its normal matrix is not positive definite, or a point alone decides its own fit.
+   procedure Fit_Degree
+     (A      : Real_Matrix;
+      Bu, Bv : Real_Vector;
+      Degree : Natural;
+      Xu, Xv : out Real_Array;
+      Inv    : out Real_Array;
+      Leave  : out Real;
+      Ok     : out Boolean)
+   is
+      Rows   : constant Natural := A'Length (1);
+      P      : constant Positive := Terms_Of (Degree);
+      Normal : Real_Matrix (1 .. P, 1 .. P) := [others => [others => 0.0]];
+      Factor : Real_Matrix (1 .. P, 1 .. P);
+      Gain   : Real_Matrix (1 .. P, 1 .. P);   --  the inverse of Normal
+      Rhs_U, Rhs_V : Real_Vector (1 .. P) := [others => 0.0];
+      Pd     : Boolean;
+
+      function Basis_At (R, I : Positive) return Real is (A (A'First (1) + R - 1, A'First (2) + I - 1));
+   begin
+      Xu := [others => 0.0];
+      Xv := [others => 0.0];
+      Inv := [others => 0.0];
+      Leave := Real'Last;
+      Ok := False;
+      if Rows < 2 * P then
+         return;
+      end if;
+      for R in 1 .. Rows loop
+         for I in 1 .. P loop
+            Rhs_U (I) := Rhs_U (I) + Basis_At (R, I) * Bu (Bu'First + R - 1);
+            Rhs_V (I) := Rhs_V (I) + Basis_At (R, I) * Bv (Bv'First + R - 1);
+            for J in 1 .. P loop
+               Normal (I, J) := Normal (I, J) + Basis_At (R, I) * Basis_At (R, J);
+            end loop;
+         end loop;
+      end loop;
+      Driver.Numerics.Dense.Cholesky (Normal, Factor, Pd);
+      if not Pd then
+         return;
+      end if;
+      for J in 1 .. P loop
+         declare
+            Unit   : Real_Vector (1 .. P) := [others => 0.0];
+            Column : Real_Vector (1 .. P);
+         begin
+            Unit (J) := 1.0;
+            Column := Driver.Numerics.Dense.Cholesky_Solve (Factor, Unit);
+            for I in 1 .. P loop
+               Gain (I, J) := Column (I);
+               Inv ((I - 1) * Terms + J) := Column (I);
+            end loop;
+         end;
+      end loop;
+      declare
+         Coefficients_U : constant Real_Vector := Gain * Rhs_U;
+         Coefficients_V : constant Real_Vector := Gain * Rhs_V;
+         Sum            : Real := 0.0;
+      begin
+         for I in 1 .. P loop
+            Xu (I) := Coefficients_U (I);
+            Xv (I) := Coefficients_V (I);
+         end loop;
+         for R in 1 .. Rows loop
+            declare
+               Leverage : Real := 0.0;
+               Miss_U   : Real := Bu (Bu'First + R - 1);
+               Miss_V   : Real := Bv (Bv'First + R - 1);
+            begin
+               for I in 1 .. P loop
+                  Miss_U := Miss_U - Xu (I) * Basis_At (R, I);
+                  Miss_V := Miss_V - Xv (I) * Basis_At (R, I);
+                  for J in 1 .. P loop
+                     Leverage := Leverage + Basis_At (R, I) * Gain (I, J) * Basis_At (R, J);
+                  end loop;
+               end loop;
+               if 1.0 - Leverage <= Real'Epsilon then
+                  return;
+               end if;
+               Sum := Sum + ((Miss_U / (1.0 - Leverage)) ** 2 + (Miss_V / (1.0 - Leverage)) ** 2) / 2.0;
+            end;
+         end loop;
+         Leave := Sum / Real (Rows);
+      end;
+      Ok := True;
+   end Fit_Degree;
+
    --  The displacements of the found points as a smooth field, fitted to the points that lie within Z robust
    --  scales of it, until the points that do are the same, starting from those a robust affine field agrees with
-   --  (Robust_Start). Agree says which points the final field agrees with; none when it has no field.
+   --  (Robust_Start). Its degree (a constant, an affine map or a quadratic of the place) is the one whose
+   --  leave-one-out error over those points is the least: a quadratic fitted to few or crowded points carries its
+   --  error to the places they do not cover, which is no field to extrapolate (Variance says how far to believe it
+   --  at a place). Agree says which points the final field agrees with; none when it has no field.
    procedure Fit_Field
-     (C : Chain; Placed : Located_Vectors.Vector; Result : out Field_Fit; Agree : out Flag_Array)
+     (C : Chain; Placed : Located_Array; Result : out Field_Fit; Agree : out Flag_Array)
    is
-      Count  : constant Natural := Natural (Placed.Length);
+      Count  : constant Natural := Placed'Length;
       Keep   : Flag_Array (1 .. Count);
       Seen   : Natural := 0;
    begin
@@ -229,8 +328,7 @@ package body Driver.Alignment.Keyframes is
             declare
                A      : Real_Matrix (1 .. Used, 1 .. Terms);
                Bu, Bv : Real_Vector (1 .. Used);
-               Xu, Xv : Real_Vector (1 .. Terms);
-               Full_U, Full_V : Boolean;
+               Best   : Real := Real'Last;
                K      : Natural := 0;
             begin
                for I in 1 .. Count loop
@@ -247,15 +345,27 @@ package body Driver.Alignment.Keyframes is
                      end;
                   end if;
                end loop;
-               Driver.Numerics.Dense.Least_Squares (A, Bu, Xu, Full_U);
-               Driver.Numerics.Dense.Least_Squares (A, Bv, Xv, Full_V);
-               exit when not (Full_U and then Full_V);
-               for J in 1 .. Terms loop
-                  Result.U (J) := Xu (J);
-                  Result.V (J) := Xv (J);
+               Result.Valid := False;
+               for Degree in 0 .. Max_Degree loop
+                  declare
+                     Xu, Xv : Real_Array (1 .. Terms);
+                     Inv    : Real_Array (1 .. Terms * Terms);
+                     Leave  : Real;
+                     Ok     : Boolean;
+                  begin
+                     Fit_Degree (A, Bu, Bv, Degree, Xu, Xv, Inv, Leave, Ok);
+                     if Ok and then Leave < Best then
+                        Best := Leave;
+                        Result.U := Xu;
+                        Result.V := Xv;
+                        Result.Inverse := Inv;
+                        Result.Order := Terms_Of (Degree);
+                        Result.Valid := True;
+                     end if;
+                  end;
                end loop;
-               Result.Valid := True;
             end;
+            exit when not Result.Valid;
             declare
                Ru, Rv : Real_Array (1 .. Seen);
                K      : Natural := 0;
@@ -273,6 +383,7 @@ package body Driver.Alignment.Keyframes is
                   Next : Flag_Array (1 .. Count) := [others => False];
                begin
                   Result.Sigma := Sqrt ((Su ** 2 + Sv ** 2) / 2.0);
+                  Result.Support := Used;
                   K := 0;
                   for I in 1 .. Count loop
                      if Placed (I).Found then
@@ -292,6 +403,21 @@ package body Driver.Alignment.Keyframes is
          Agree := [others => False];
       end if;
    end Fit_Field;
+
+   --  The variance of the displacement the field gives at a place: what it leaves of the points it was fitted to,
+   --  and, since its coefficients are estimated from them, the more the farther the place lies from them (the
+   --  variance of a prediction from a least-squares fit).
+   function Variance (C : Chain; F : Field_Fit; P : Driver.Images.Pixel) return Real is
+      B   : constant Real_Array := Basis (C, P);
+      Sum : Real := 0.0;
+   begin
+      for I in 1 .. F.Order loop
+         for J in 1 .. F.Order loop
+            Sum := Sum + B (I) * F.Inverse ((I - 1) * Terms + J) * B (J);
+         end loop;
+      end loop;
+      return F.Sigma ** 2 * (1.0 + Sum);
+   end Variance;
 
    ---------------------------------------------------------------------------
    --  Predictions
@@ -367,15 +493,17 @@ package body Driver.Alignment.Keyframes is
       end if;
    end Weights;
 
-   --  The standard deviation of what the fields carry into a prediction: their scatter and their off-direction
-   --  parts, through the weights.
-   function Carried (C : Chain; Off : Real_Array; First, Second : Natural; W1, W2 : Real) return Real is
-      One   : constant Real := (W1 * C.Frames (First).Field.Sigma) ** 2 + (W1 * Off (First)) ** 2;
+   --  The standard deviation of what the fields carry into a prediction at a place: their scatter there (Variance:
+   --  more where they were fitted to no points near) and their off-direction parts, through the weights.
+   function Carried_At (C : Chain; Guess : Candidate; P : Driver.Images.Pixel) return Real is
+      One   : constant Real :=
+        Guess.W1 ** 2 * (Variance (C, C.Frames (Guess.First).Field, P) + Guess.Off1 ** 2);
       Other : constant Real :=
-        (if Second = 0 then 0.0 else (W2 * C.Frames (Second).Field.Sigma) ** 2 + (W2 * Off (Second)) ** 2);
+        (if Guess.Second = 0 then 0.0
+         else Guess.W2 ** 2 * (Variance (C, C.Frames (Guess.Second).Field, P) + Guess.Off2 ** 2));
    begin
       return Sqrt (One + Other);
-   end Carried;
+   end Carried_At;
 
    function Move_Of (C : Chain; P : Driver.Images.Pixel; Guess : Candidate) return Displacement is
       Result : Displacement :=
@@ -391,8 +519,8 @@ package body Driver.Alignment.Keyframes is
 
    --  The standard deviation a prediction states of a move: what the fields carry and the relative error of the
    --  move.
-   function Stated_Sigma (Guess : Candidate; Move : Displacement) return Real is
-     (Sqrt (Guess.Carry ** 2 + (Guess.Relative ** 2) * (Move.Du ** 2 + Move.Dv ** 2)));
+   function Stated_Sigma (C : Chain; Guess : Candidate; P : Driver.Images.Pixel; Move : Displacement) return Real is
+     (Sqrt (Carried_At (C, Guess, P) ** 2 + (Guess.Relative ** 2) * (Move.Du ** 2 + Move.Dv ** 2)));
 
    --  The predictions of every point from the fields of the earlier keyframes of a candidate.
    procedure Extrapolate (C : Chain; Guess : Candidate; Into : out Prediction_Array) is
@@ -404,7 +532,7 @@ package body Driver.Alignment.Keyframes is
             Slope_1    : constant Linear_Part := Gradient (C, C.Frames (Guess.First).Field, P);
             Slope_2    : constant Linear_Part :=
               (if Guess.Second = 0 then Identity_Part else Gradient (C, C.Frames (Guess.Second).Field, P));
-            Sigma : constant Real := Stated_Sigma (Guess, Move);
+            Sigma : constant Real := Stated_Sigma (C, Guess, P, Move);
          begin
             Into (K) :=
               (From => P, To => (U => P.U + Move.Du, V => P.V + Move.Dv),
@@ -506,12 +634,12 @@ package body Driver.Alignment.Keyframes is
               abs (Own - Amounts (First)) * (if Second = 0 then 1.0 else abs (Own - Amounts (Second)));
             Guess    : Candidate :=
               (Valid => True, First => First, Second => Second, Curve => Curve (Order), Dist => Dist,
-               Relative => Curve (Order) * Dist, others => <>);
+               Relative => Curve (Order) * Dist, Off1 => Off (First), Off2 => (if Second = 0 then 0.0 else Off (Second)),
+               others => <>);
          begin
             Weights (Amounts, First, Second, Own, Guess.W1, Guess.W2);
-            Guess.Carry := Carried (C, Off, First, Second, Guess.W1, Guess.W2);
             for K in Sigmas'Range loop
-               Sigmas (K) := Stated_Sigma (Guess, Move_Of (C, C.Points (K), Guess));
+               Sigmas (K) := Stated_Sigma (C, Guess, C.Points (K), Move_Of (C, C.Points (K), Guess));
             end loop;
             Guess.Median := Driver.Stats.Median (Sigmas);
             if Guess.Median < C.Latest (Order).Median then
@@ -579,58 +707,132 @@ package body Driver.Alignment.Keyframes is
       end;
    end Predict;
 
-   --  Every point of the reference into the second picture from its prediction, in as many pieces at once as the
-   --  machine has processors (a point's alignment reads the two pyramids and writes only its own answer); where
-   --  the answers were found, the places they say, as the field of displacements is fitted to them.
-   procedure Align_All
+   --  The aligner's refusal of a point may be the prediction's doing and not the point's: it found no place within
+   --  what the prediction allowed, or several, or none that beats chance.
+   function Prediction_Caused (A : Answer) return Boolean is
+     (A.Verdict = Not_Found
+      and then A.Because in Window_Too_Large | Ambiguous | No_Evidence | Left_Window | Not_Settled | Bad_Warp);
+
+   function Agreeing_Of (Flags : Flag_Array) return Natural is
+      Count : Natural := 0;
+   begin
+      for F of Flags loop
+         if F then
+            Count := Count + 1;
+         end if;
+      end loop;
+      return Count;
+   end Agreeing_Of;
+
+   --  The points of the reference that Only marks, into the second picture from their predictions, in as many pieces
+   --  at once as the machine has processors (a point's alignment reads the two pyramids and writes only its own
+   --  answer and mark); where an answer was found, its mark has the place it says, as the field of displacements is
+   --  fitted to the marks.
+   procedure Align_Some
      (C       : Chain;
       Second  : Pyramid;
       Given   : Prediction_Array;
-      Answers : out Answer_Array;
-      Placed  : out Located_Vectors.Vector)
+      Only    : Flag_Array;
+      Answers : in out Answer_Array;
+      Marks   : in out Located_Array)
    is
       Count  : constant Natural := Given'Length;
       Pieces : constant Natural := Natural'Max (1, Natural'Min (Count, Natural (System.Multiprocessors.Number_Of_CPUs)));
-      Marks  : Located_Array (1 .. Count);
 
       procedure Piece (Index : Positive) is
          First : constant Positive := (Index - 1) * Count / Pieces + 1;
          Last  : constant Natural := Index * Count / Pieces;
       begin
          for K in First .. Last loop
-            declare
-               Result : Answer renames Answers (Answers'First + K - 1);
-            begin
-               Result := Align (C.Pictures, Second, Given (Given'First + K - 1));
-               if Result.Verdict = Found then
-                  Marks (K) := (Found => True, Place => Result.To,
-                                Sigma => Sqrt (Real'Max (Result.Cov.UU, Result.Cov.VV)));
-               end if;
-            end;
+            if Only (Only'First + K - 1) then
+               declare
+                  Result : Answer renames Answers (Answers'First + K - 1);
+               begin
+                  Result := Align (C.Pictures, Second, Given (Given'First + K - 1));
+                  Marks (K) :=
+                    (if Result.Verdict = Found
+                     then (Found => True, Place => Result.To, Sigma => Sqrt (Real'Max (Result.Cov.UU, Result.Cov.VV)))
+                     else (others => <>));
+               end;
+            end if;
          end loop;
       end Piece;
 
       procedure Run is new Driver.Parallel_For (Piece);
    begin
       Run (1, Pieces);
-      Placed.Clear;
-      for Mark of Marks loop
-         Placed.Append (Mark);
+   end Align_Some;
+
+   --  Where a keyframe's own field puts a point, to the uncertainty the field has there.
+   function Asked_From (C : Chain; Field : Field_Fit; P : Driver.Images.Pixel) return Prediction is
+      Spread : constant Real := Variance (C, Field, P);
+   begin
+      return (From => P, To => (U => P.U + Evaluate (C, Field.U, P), V => P.V + Evaluate (C, Field.V, P)),
+              Linear => Gradient (C, Field, P), Cov => (UU => Spread, UV => 0.0, VV => Spread),
+              Linear_Sigma => Real'Last);
+   end Asked_From;
+
+   --  The points the prediction did not place (refused for what it said of where to look, or found where the field of
+   --  the others does not agree) are asked again from the keyframe's own field, which the answers that agree with
+   --  one another have made: where it puts them, to the uncertainty it has there. The field is then fitted to all
+   --  the answers, and the asking goes on while more of them agree.
+   procedure Settle
+     (C       : Chain;
+      Second  : Pyramid;
+      Answers : in out Answer_Array;
+      Marks   : in out Located_Array;
+      Field   : in out Field_Fit;
+      Agree   : in out Flag_Array)
+   is
+      Count    : constant Natural := Marks'Length;
+      Given    : Prediction_Array (1 .. Count);
+      Todo     : Flag_Array (1 .. Count);
+      Agreeing : Natural := Agreeing_Of (Agree);
+   begin
+      loop
+         exit when not Field.Valid;
+         Todo := [others => False];
+         for K in 1 .. Count loop
+            declare
+               Seen : Answer renames Answers (Answers'First + K - 1);
+            begin
+               if not Agree (K) and then (Prediction_Caused (Seen) or else Seen.Verdict = Found) then
+                  Todo (K) := True;
+                  Given (K) := Asked_From (C, Field, C.Points (K));
+               end if;
+            end;
+         end loop;
+         exit when Agreeing_Of (Todo) = 0;
+         Align_Some (C, Second, Given, Todo, Answers, Marks);
+         declare
+            Refit : Field_Fit;
+            Again : Flag_Array (1 .. Count);
+         begin
+            Fit_Field (C, Marks, Refit, Again);
+            exit when not Refit.Valid or else Agreeing_Of (Again) <= Agreeing;
+            Field := Refit;
+            Agree := Again;
+            Agreeing := Agreeing_Of (Again);
+         end;
       end loop;
-   end Align_All;
+   end Settle;
 
    procedure Agreement (C : Chain; Answers : Answer_Array; Agree : out Flag_Array) is
-      Placed : Located_Vectors.Vector;
-      Field  : Field_Fit;
+      Marks : Located_Array (1 .. Answers'Length);
+      Field : Field_Fit;
+      Mine  : Flag_Array (1 .. Answers'Length);
    begin
-      for K in Answers'Range loop
-         Placed.Append
-           ((if Answers (K).Verdict = Found
-             then Located'(Found => True, Place => Answers (K).To,
-                           Sigma => Sqrt (Real'Max (Answers (K).Cov.UU, Answers (K).Cov.VV)))
-             else Located'(others => <>)));
+      for K in Marks'Range loop
+         declare
+            Seen : Answer renames Answers (Answers'First + K - 1);
+         begin
+            if Seen.Verdict = Found then
+               Marks (K) := (Found => True, Place => Seen.To, Sigma => Sqrt (Real'Max (Seen.Cov.UU, Seen.Cov.VV)));
+            end if;
+         end;
       end loop;
-      Fit_Field (C, Placed, Field, Agree);
+      Fit_Field (C, Marks, Field, Mine);
+      Agree := Mine;
    end Agreement;
 
    procedure Realign
@@ -641,11 +843,14 @@ package body Driver.Alignment.Keyframes is
       Agree   : out Flag_Array)
    is
       Second : constant Pyramid := Pyramid_Of (Image);
-      Placed : Located_Vectors.Vector;
+      Marks  : Located_Array (1 .. Given'Length);
       Field  : Field_Fit;
+      Mine   : Flag_Array (1 .. Given'Length);
    begin
-      Align_All (C, Second, Given, Answers, Placed);
-      Fit_Field (C, Placed, Field, Agree);
+      Align_Some (C, Second, Given, [1 .. Given'Length => True], Answers, Marks);
+      Fit_Field (C, Marks, Field, Mine);
+      Settle (C, Second, Answers, Marks, Field, Mine);
+      Agree := Mine;
    end Realign;
 
    procedure Add
@@ -657,43 +862,64 @@ package body Driver.Alignment.Keyframes is
       Agree   : out Flag_Array)
    is
       Second : constant Pyramid := Pyramid_Of (Image);
-      Placed : Located_Vectors.Vector;
+      Count  : constant Natural := Given'Length;
+      Marks  : Located_Array (1 .. Count);
+      Mine   : Flag_Array (1 .. Count);
       Next   : Frame;
+
+      --  Whether the field puts the point inside the picture: where the prediction was of any use.
+      function In_View (P : Driver.Images.Pixel) return Boolean is
+        (P.U + Evaluate (C, Next.Field.U, P) in 0.0 .. Real (C.Width)
+         and then P.V + Evaluate (C, Next.Field.V, P) in 0.0 .. Real (C.Height));
    begin
       for X of Change loop
          Next.Change.Append (X);
       end loop;
-      Align_All (C, Second, Given, Answers, Placed);
-      Fit_Field (C, Placed, Next.Field, Agree);
+      Align_Some (C, Second, Given, [1 .. Count => True], Answers, Marks);
+      Fit_Field (C, Marks, Next.Field, Mine);
+      Settle (C, Second, Answers, Marks, Next.Field, Mine);
+      Agree := Mine;
       --  How far the extrapolation of each order that was tried was off, beyond what it stated: the relative error
-      --  its next use must allow for.
-      for Order in 1 .. Orders loop
-         if C.Latest (Order).Valid then
-            declare
-               Guess         : Candidate renames C.Latest (Order);
-               Excess, Shown : Real := 0.0;
-            begin
-               for K in 1 .. Natural (C.Points.Length) loop
-                  if Placed (K).Found and then Agree (Agree'First + K - 1) then
+      --  its next use must allow for. It is judged against the keyframe's field at every point that stays in the
+      --  picture, not only at the points that were answered: a prediction off by more than the aligner could follow
+      --  leaves no answer to judge it by. What the field itself does not know there (Variance) is not counted.
+      if Next.Field.Valid then
+         for Order in 1 .. Orders loop
+            if C.Latest (Order).Valid then
+               declare
+                  Guess  : Candidate renames C.Latest (Order);
+                  Ratios : Real_Array (1 .. Count);
+                  Judged : Natural := 0;
+               begin
+                  --  Per point, how far it was off beyond what was stated and the field knows, over the size of
+                  --  its move (both per axis, as variances); a move the field's own uncertainty there does not
+                  --  separate from none tells nothing. The relative error is the median of them: a few points
+                  --  the aligner could not follow do not set the window of the rest.
+                  for K in 1 .. Count loop
                      declare
                         P    : constant Driver.Images.Pixel := C.Points (K);
                         Move : constant Displacement := Move_Of (C, P, Guess);
+                        Size : constant Real := (Move.Du ** 2 + Move.Dv ** 2) / 2.0;
+                        Know : constant Real := Variance (C, Next.Field, P);
                      begin
-                        Excess := Excess
-                          + ((Placed (K).Place.U - P.U - Move.Du) ** 2
-                             + (Placed (K).Place.V - P.V - Move.Dv) ** 2) / 2.0
-                          - Stated_Sigma (Guess, Move) ** 2 - Placed (K).Sigma ** 2;
-                        Shown := Shown + (Move.Du ** 2 + Move.Dv ** 2) / 2.0;
+                        if In_View (P) and then Size > Know then
+                           Judged := Judged + 1;
+                           Ratios (Judged) :=
+                             (((Evaluate (C, Next.Field.U, P) - Move.Du) ** 2
+                               + (Evaluate (C, Next.Field.V, P) - Move.Dv) ** 2) / 2.0
+                              - Stated_Sigma (C, Guess, P, Move) ** 2 - Know) / Size;
+                        end if;
                      end;
-                  end if;
-               end loop;
-               Next.Curvature (Order) :=
-                 (if Shown > 0.0 and then Guess.Dist > 0.0
-                  then Sqrt (Guess.Curve ** 2 + Real'Max (0.0, Excess) / (Shown * Guess.Dist ** 2))
-                  else Guess.Curve);
-            end;
-         end if;
-      end loop;
+                  end loop;
+                  Next.Curvature (Order) :=
+                    (if Judged > 0 and then Guess.Dist > 0.0
+                     then Sqrt (Guess.Curve ** 2
+                                + Real'Max (0.0, Driver.Stats.Median (Ratios (1 .. Judged))) / Guess.Dist ** 2)
+                     else Guess.Curve);
+               end;
+            end if;
+         end loop;
+      end if;
       Next.Moved := C.Last /= Same_Pose;
       C.Last := Supplied;
       C.Latest := [others => <>];

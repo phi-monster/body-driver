@@ -7,12 +7,16 @@
 --  the reference and a keyframe are all that tells where they will be in the next: when the next keyframe's change
 --  of readings is a multiple of an earlier one's (the body moved the same joint, by another amount), the points
 --  have moved by about that multiple of what they moved then. Each keyframe keeps its displacements as a smooth
---  field (a quadratic of the place in the picture, fitted robustly: the view of a plane turned about a point is
---  nearly that, and what is not is the scatter the prediction states), so that the noise of one point's answer is
---  not multiplied by the multiple. A prediction states the scatter of the fields it rests on carried by the weights
---  it gave them; how far the part of an earlier change that is no multiple of the next can have moved the view (the
+--  field (a constant, an affine map or a quadratic of the place in the picture, whichever predicts its own points
+--  best when each is left out in turn, fitted robustly: the view of a plane turned about a point is nearly a
+--  quadratic, and what is not is the scatter the prediction states), so that the noise of one point's answer is
+--  not multiplied by the multiple. A prediction states the scatter of the fields it rests on at the point asked,
+--  carried by the weights it gave them (a field is the less known the farther the point lies from those it was
+--  fitted to); how far the part of an earlier change that is no multiple of the next can have moved the view (the
 --  sizes of its entries times the pixels a unit of each channel moves the view); and the relative error the
---  earlier extrapolations showed beyond the uncertainty they stated. One earlier keyframe gives a field linear in
+--  earlier extrapolations showed, judged at every point that stays in the picture and not only at those that were
+--  answered, beyond the uncertainty they stated. A point the prediction did not place, or placed where the field of
+--  the others does not agree, is asked again from the keyframe's own field. One earlier keyframe gives a field linear in
 --  the amount of the change, two a quadratic in it, which follows a view that is not linear in the joint; of the
 --  predictions from one earlier keyframe and from every two the one that states the least is used, and it is used
 --  only if it states less than not having moved at all, the points having moved as far as the change can have moved
@@ -94,6 +98,10 @@ package Driver.Alignment.Keyframes is
    --  chain is not changed. For a keyframe aligned before from a prediction too uncertain to search, and now offered
    --  a better one. Agree is as Add's.
 
+   function Prediction_Caused (A : Answer) return Boolean;
+   --  The aligner's refusal may be the prediction's doing and not the point's: it found no place within what the
+   --  prediction allowed, or several, or none that beats chance.
+
    procedure Agreement (C : Chain; Answers : Answer_Array; Agree : out Flag_Array)
      with Pre => Has_Reference (C) and then Answers'Length = Point_Count (C) and then Agree'Length = Answers'Length;
    --  Which of the answers found lie in a smooth field of displacements with the others (as Add says of a keyframe's).
@@ -127,9 +135,14 @@ private
    package Pixel_Vectors is new Ada.Containers.Vectors (Positive, Driver.Images.Pixel);
 
    type Field_Fit is record
-      U, V  : Real_Array (1 .. Terms) := [others => 0.0];   --  the displacement as a quadratic of the place, per axis
-      Valid : Boolean := False;
-      Sigma : Real := 0.0;   --  the robust scale of what the field leaves of the points it was fitted to
+      U, V    : Real_Array (1 .. Terms) := [others => 0.0];   --  the displacement as a polynomial of the place, per axis
+      Valid   : Boolean := False;
+      Sigma   : Real := 0.0;   --  the robust scale of what the field leaves of the points it was fitted to
+      Order   : Natural := 0;  --  the terms of the polynomial that are the field's (a constant, an affine map or all)
+      Inverse : Real_Array (1 .. Terms * Terms) := [others => 0.0];
+      --  the inverse of the normal matrix of those terms at the points it was fitted to, row by row: how far its
+      --  coefficients are known, so how far it can be believed at a place those points are not at (Variance)
+      Support : Natural := 0;  --  how many points it was fitted to
    end record;
 
    Orders : constant := 2;
@@ -154,7 +167,7 @@ private
       Valid         : Boolean := False;
       First, Second : Natural := 0;   --  the earlier keyframes; Second is zero for order 1
       W1, W2        : Real := 0.0;    --  the weights of their fields
-      Carry         : Real := 0.0;    --  the standard deviation the fields carry into the prediction
+      Off1, Off2    : Real := 0.0;    --  how far at most the part of each keyframe's change off the direction moved
       Curve         : Real := 0.0;    --  the curvature it allows for (the largest the keyframes along it showed)
       Dist          : Real := 0.0;    --  how far it extrapolates, in amounts of the change (squared for order 2)
       Relative      : Real := 0.0;    --  the relative error of the move it allows for: Curve times Dist

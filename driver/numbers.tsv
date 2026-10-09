@@ -130,18 +130,37 @@ driver-action-grids.adb	for DK in -1 .. 1 loop	1	structure	the cube itself and i
 driver-action-plants-live.adb	(if Known (R.Delivered) and then R.Delivered.Value < 1.0	1.0	math	the whole step delivered is a fraction of one
 driver-action-plants-live.adb	R.Beats := 1;	1	structure	an order that moves nothing lets exactly one beat pass
 driver-action-plants-live.adb	if N < 2 then	2	math	a nearest neighbour needs at least two samples
+driver-alignment-keyframes.adb	((C.Points (I).U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
+driver-alignment-keyframes.adb	((C.Points (I).U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
+driver-alignment-keyframes.adb	((C.Points (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
+driver-alignment-keyframes.adb	((C.Points (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
 driver-alignment-keyframes.adb	(for all K in Change'Range => not Driver.Uncertain.Significant (Change (K), Noise (K) * Sqrt (2.0)));	2.0	statistics	a difference of two readings has the noise of each: the root of two times one reading's
-driver-alignment-keyframes.adb	+ (Placed (K).Place.V - P.V - Move.Dv) ** 2) / 2.0	2.0	statistics	a variance per axis is half the sum of the squares over the two axes
+driver-alignment-keyframes.adb	+ (Evaluate (C, Next.Field.V, P) - Move.Dv) ** 2) / 2.0	2.0	math	the mean over the two axes of a squared error: its sum over two
+driver-alignment-keyframes.adb	Bu, Bv : Real_Vector (1 .. 3);	3	structure	the three terms of an affine field of the place: a constant and the two coordinates
 driver-alignment-keyframes.adb	Half_U : constant Real := Real (C.Width) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	Half_V : constant Real := Real (C.Height) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	Least_Points : constant := 2 * Terms;	2	statistics	as many points as would leave the scatter of a field as many degrees of freedom as it has coefficients
 driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	a warp that moves nothing is the identity: its diagonal is one
 driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	the other diagonal entry's identity
 driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	the weights of the fields are weights of the change from the identity: the one stays
+driver-alignment-keyframes.adb	M (R, 1) := 1.0;	1.0	math	an affine field's constant term has the basis one
+driver-alignment-keyframes.adb	M : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	the three points of a sample, the three terms of an affine field
+driver-alignment-keyframes.adb	M : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	the three points of a sample, the three terms of an affine field
+driver-alignment-keyframes.adb	Max_Degree : constant := 2;	2	structure	the quadratic of the place is the highest degree a field has (its Terms terms)
+driver-alignment-keyframes.adb	Pieces : constant Natural := Natural'Max (1, Natural'Min (Count, Natural (System.Multiprocessors.Number_Of_CPUs)));	1	structure	one piece at the least, whatever the machine or the points
+driver-alignment-keyframes.adb	Plane : Real_Array (1 .. 6) := [others => 0.0];	6	structure	an affine field's six numbers: per axis the constant and the two coordinates
 driver-alignment-keyframes.adb	Result.Sigma := Sqrt ((Su ** 2 + Sv ** 2) / 2.0);	2.0	statistics	a variance per axis is half the sum of the squares over the two axes
-driver-alignment-keyframes.adb	Shown := Shown + (Move.Du ** 2 + Move.Dv ** 2) / 2.0;	2.0	statistics	a variance per axis is half the sum of the squares over the two axes
+driver-alignment-keyframes.adb	Rows : constant array (1 .. 3) of Positive := [A, B, D];	3	structure	the three points of a sample
+driver-alignment-keyframes.adb	Run (1, Pieces);	1	structure	from the first piece
+driver-alignment-keyframes.adb	Scale : constant Real := Best / Sqrt (2.0 * Log (2.0));	2.0	statistics	the median of the length of a two-dimensional Gaussian's deviation is its scale times the root of twice the logarithm of two
+driver-alignment-keyframes.adb	Scale : constant Real := Best / Sqrt (2.0 * Log (2.0));	2.0	statistics	the median of the length of a two-dimensional Gaussian's deviation is its scale times the root of twice the logarithm of two
+driver-alignment-keyframes.adb	Size : constant Real := (Move.Du ** 2 + Move.Dv ** 2) / 2.0;	2.0	math	the mean over the two axes of a squared move: its sum over two
 driver-alignment-keyframes.adb	Stay (0.0);	0.0	math	a keyframe at the reference's own readings has moved nothing: no spread
+driver-alignment-keyframes.adb	Sum := Sum + ((Miss_U / (1.0 - Leverage)) ** 2 + (Miss_V / (1.0 - Leverage)) ** 2) / 2.0;	2.0	math	the mean over the two axes of a squared error: its sum over two
+driver-alignment-keyframes.adb	Third : constant Positive := Seen / 3;	3	structure	a third of the points: a sample takes one from each third
+driver-alignment-keyframes.adb	Try (Order (S), Order (S + Third), Order (S + 2 * Third));	2	structure	one point from each of the three thirds
 driver-alignment-keyframes.adb	UV => (F.U (3) + F.U (5) * X + 2.0 * F.U (6) * Y) / Half_V,	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
+driver-alignment-keyframes.adb	Unit (J) := 1.0;	1.0	math	the unit vector of a term
 driver-alignment-keyframes.adb	VU => (F.V (2) + 2.0 * F.V (4) * X + F.V (5) * Y) / Half_U,	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
 driver-alignment-keyframes.adb	VV => 1.0 + (F.V (3) + F.V (5) * X + 2.0 * F.V (6) * Y) / Half_V);	1.0	math	a warp that moves nothing is the identity: its diagonal is one
 driver-alignment-keyframes.adb	VV => 1.0 + (F.V (3) + F.V (5) * X + 2.0 * F.V (6) * Y) / Half_V);	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
@@ -150,17 +169,30 @@ driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess
 driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess.W2 * (Slope_2.VV - 1.0)),	1.0	math	the weights of the fields are weights of the change from the identity: the one stays
 driver-alignment-keyframes.adb	X : constant Real := (P.U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	X : constant Real := (P.U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
+driver-alignment-keyframes.adb	Xu, Xv : Real_Vector (1 .. 3);	3	structure	the three terms of an affine field of the place
 driver-alignment-keyframes.adb	Y : constant Real := (P.V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	Y : constant Real := (P.V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	abs (Own - Amounts (First)) * (if Second = 0 then 1.0 else abs (Own - Amounts (Second)));	1.0	math	an order-one extrapolation has one distance: the second factor is the empty product
+driver-alignment-keyframes.adb	for Family in 1 .. 4 loop	4	structure	the picture's two axes and its two diagonals
+driver-alignment-keyframes.adb	for R in 1 .. 3 loop	3	structure	the three points of a sample
 driver-alignment-keyframes.adb	function Order_Of (Second : Natural) return Positive is (if Second = 0 then 1 else Orders);	1	structure	one earlier keyframe gives an extrapolation of order one
+driver-alignment-keyframes.adb	function Terms_Of (Degree : Natural) return Positive is ((Degree + 1) * (Degree + 2) / 2);	2	math	the terms of a polynomial of that degree in two coordinates: (degree + 1) (degree + 2) over two
+driver-alignment-keyframes.adb	function Terms_Of (Degree : Natural) return Positive is ((Degree + 1) * (Degree + 2) / 2);	2	math	the terms of a polynomial of that degree in two coordinates: (degree + 1) (degree + 2) over two
+driver-alignment-keyframes.adb	if Rows < 2 * P then	2	statistics	as many points as twice the terms: as many degrees of freedom as terms
+driver-alignment-keyframes.adb	if Seen < 2 * Terms then	2	statistics	as many points as twice the terms: as many degrees of freedom as terms
 driver-alignment-keyframes.adb	return (UU => 1.0 + (F.U (2) + 2.0 * F.U (4) * X + F.U (5) * Y) / Half_U,	1.0	math	a warp that moves nothing is the identity: its diagonal is one
 driver-alignment-keyframes.adb	return (UU => 1.0 + (F.U (2) + 2.0 * F.U (4) * X + F.U (5) * Y) / Half_U,	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
+driver-alignment-keyframes.adb	return F.Sigma ** 2 * (1.0 + Sum);	1.0	math	the variance of a least squares prediction: the residual variance times one plus the place's leverage
 driver-alignment-keyframes.adb	return [1.0, X, Y, X * X, X * Y, Y * Y];	1.0	math	the first term of a quadratic is its constant
+driver-alignment-keyframes.adb	when 1 => X_Of (Index (S)),	1	structure	the family along the picture's first axis
+driver-alignment-keyframes.adb	when 2 => Y_Of (Index (S)),	2	structure	the family along the picture's second axis
+driver-alignment-keyframes.adb	when 3 => X_Of (Index (S)) + Y_Of (Index (S)),	3	structure	the family along the picture's diagonal
+driver-alignment-keyframes.adb	while J >= 1 and then Along (Order (J)) > Along (S) loop	1	structure	the first place of the insertion sort
 driver-alignment-keyframes.ads	Orders : constant := 2;	2	structure	an extrapolation is linear (one earlier keyframe) or quadratic (two) in the amount
 driver-alignment-keyframes.ads	Terms : constant := 6;	6	math	a quadratic of two coordinates has six coefficients: one, two, three
 driver-alignment.adb	((C.VV * Du ** 2 - 2.0 * C.UV * Du * Dv + C.UU * Dv ** 2) / (C.UU * C.VV - C.UV ** 2));	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
 driver-alignment.adb	(Noise * (((T.Qu - P.Centre_U) ** 2 * P.Place_UU + 2.0 * (T.Qu - P.Centre_U) * (T.Qv - P.Centre_V) * P.Place_UV	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
+driver-alignment.adb	(Real'Min (Real (Second.Sizes (0).Width), Real (Second.Sizes (0).Height)) / 2.0);	2.0	structure	the widest window is half the picture across: the farthest a point of the one can lie from the other that it is not as far from every edge
 driver-alignment.adb	([Sx, Sy, Sx * Di, Sx * Dj, Sy * Di, Sy * Dj, -Template, -1.0]);	1.0	math	a pixel's residual falls by one for each level of offset: its derivative by the offset is minus one
 driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);	0.5	math	the outer piece's slope: minus half the square of the distance to the end of the support
 driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);	1.0	math	the cubic B-spline's inner piece reaches one knot spacing
@@ -168,8 +200,9 @@ driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then 
 driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);	2.0	math	the cubic B-spline's outer piece ends two knot spacings from its centre
 driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);	2.0	math	the inner piece's slope: the derivative of minus A squared is minus twice A
 driver-alignment.adb	(if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);	2.0	math	the outer piece's distance to the end of its support
+driver-alignment.adb	(if Shrinks then Natural (Real'Rounding (Log (1.0 / Smallest, Real (Halving))))	1.0	math	the factor of the warp's smallest scale: its inverse is the enlargement
 driver-alignment.adb	+ Integer'Min (Across - 1, Integer'Max (0, Integer (Real'Rounding (Centre_U - (Real (Low_X) + 0.5))))) + 1;	0.5	math	a pixel's centre lies half a pixel in from its corner
-driver-alignment.adb	Answered : constant Answer := Align_At (First, Second, Query, Level_Used, Plain, Radius, 1);	1	structure	a patch of the usual width: one times it
+driver-alignment.adb	Answered : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 1));	1	structure	a patch of the usual size: grown by one
 driver-alignment.adb	C (First + (Count - 1) * Step) := Pole / (Pole ** 2 - 1.0) * (Plus (Count) + Pole * Plus (Count - 1));	1.0	math	the closing term of the spline prefilter: the pole over its square less one
 driver-alignment.adb	Cost := 0.5 * (Current.Rss + Penalty (T, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
 driver-alignment.adb	Cost := 0.5 * (Current.Rss + Penalty (T, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
@@ -177,8 +210,11 @@ driver-alignment.adb	Filter_Line (Spline.all, Spline'First + Row * Width, 1, Wid
 driver-alignment.adb	Finest : constant := 0;	0	structure	the finest size of the pyramid is the picture itself: size 0
 driver-alignment.adb	Fraction : Real := 1.0;	1.0	numerics	the line search starts with the whole step
 driver-alignment.adb	Fraction := Fraction / 2.0;	2.0	numerics	a step that raises the cost is halved
+driver-alignment.adb	Freedom : constant Positive := Positive'Max (1, Natural (Real'Floor (Independent)) - 2);	1	statistics	at least one degree of freedom
+driver-alignment.adb	Freedom : constant Positive := Positive'Max (1, Natural (Real'Floor (Independent)) - 2);	2	statistics	a correlation's degrees of freedom: its independent observations less the two it was fitted by
 driver-alignment.adb	Gain : constant Real := 6.0;	6.0	math	the cubic B-spline weighs a sample and its neighbours one, four and one sixths: the prefilter's gain undoes the sum of six
 driver-alignment.adb	Grow : Positive := 1)	1	structure	a patch is the usual width unless asked to grow
+driver-alignment.adb	Half : constant Natural := (Side - 1) / 2;	2	math	half a patch's side less the middle pixel
 driver-alignment.adb	Halving : constant := 2;	2	math	a size of the pyramid is half the one before: the pictures are halved
 driver-alignment.adb	High_X : constant Integer := Integer (Real'Ceiling (Centre_U + Extent_U - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
 driver-alignment.adb	High_Y : constant Integer := Integer (Real'Ceiling (Centre_V + Extent_V - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
@@ -187,10 +223,12 @@ driver-alignment.adb	Largest := Sqrt ((Total + Sqrt (Real'Max (0.0, Total ** 2 -
 driver-alignment.adb	Largest := Sqrt ((Total + Sqrt (Real'Max (0.0, Total ** 2 - 4.0 * Det ** 2))) / 2.0);	4.0	math	the discriminant of the quadratic in the squared singular values is the trace squared less four determinants squared
 driver-alignment.adb	Least_Half : constant := 2;	2	math	a central difference reaches one pixel and the interpolation another
 driver-alignment.adb	Light_Noise_Floor : constant Real := 2.0 * Quantization;	2.0	statistics	the difference of two rounded levels has twice the variance of one rounding
+driver-alignment.adb	Linear => Scaled (Query.Linear, 1.0 / Size),	1.0	math	the warp seen from the other picture scales by the inverse
 driver-alignment.adb	Low_X : constant Integer := Integer (Real'Floor (Centre_U - Extent_U - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
 driver-alignment.adb	Low_Y : constant Integer := Integer (Real'Floor (Centre_V - Extent_V - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
 driver-alignment.adb	Mean : constant Real := (C.UU + C.VV) / 2.0;	2.0	math	the mean of the two variances
 driver-alignment.adb	Most_Variants : constant := 3;	3	statistics	the other fits an answer's covariance rests on: the patch's middle and the two next coarser sizes
+driver-alignment.adb	Need : constant Real := Radius / Real (Halving) ** Step + 1.0;	1.0	math	a pixel to read the window across
 driver-alignment.adb	Parameters : constant := 8;	8	structure	the warp has eight unknowns: the place (2), the linear part (4), the light's gain and offset (2)
 driver-alignment.adb	Per_Axis : constant Positive := Positive (Real'Ceiling (Sqrt (2.0 * Real (Parameters))));	2.0	statistics	at least twice as many parts as unknowns, or the sum of the parts' squared scores cannot have the unknowns' rank with room
 driver-alignment.adb	Pole : constant Real := Sqrt (3.0) - 2.0;	2.0	math	the cubic B-spline's prefilter pole: root 3 less 2
@@ -201,12 +239,16 @@ driver-alignment.adb	Quantization : constant Real := 1.0 / 12.0;	12.0	statistics
 driver-alignment.adb	Real'Max (0.0, Real'Min (1.0 - 1.0 / Real (Field'Length), Cross / Sqrt (Left * Right)));	1.0	statistics	a correlation of n values cannot be told from one by less than one over n
 driver-alignment.adb	Result : Real := 1.0;	1.0	math	no inflation: the factor of independent values
 driver-alignment.adb	Result := Result * (1.0 + R) / (1.0 - R);	1.0	statistics	the variance of a mean of values with autocorrelation r is (1 + r) / (1 - r) times that of independent ones
-driver-alignment.adb	Rho : Real_Array (1 .. Across * Down) := [others => -2.0];	2.0	structure	a correlation is at least -1, so below -1 marks a cell that is not a candidate
+driver-alignment.adb	Result.Linear := Scaled (Result.Linear, 1.0 / Size);	1.0	math	carried back by the inverse of the factor it was scaled by
+driver-alignment.adb	Rho : Reals_Access := new Real_Array'(1 .. Count => -2.0);	2.0	structure	the value of a place that is not a candidate: below any correlation, as before
 driver-alignment.adb	Scale (K) := 1.0 / Sqrt (H (K, K));	1.0	numerics	the unknown is scaled by the inverse root of its curvature, so the scaled matrix has a unit diagonal
 driver-alignment.adb	Scale (K) := 1.0 / Sqrt (H (K, K));	1.0	numerics	the unknown is scaled by the inverse root of its curvature, so the scaled matrix has a unit diagonal
 driver-alignment.adb	Score (K) := -0.5 * (Pixels * (Fits (K).Rss / Real (Fits (K).Count)) / (Noise * Spread)	0.5	statistics	the log posterior is minus half the sum of the pixels' squares in noise units and of the distance from the prediction in its deviations
+driver-alignment.adb	Shrinks : constant Boolean := Smallest < 1.0 / Real (Halving);	1.0	math	a direction made smaller by more than a halving: the warp shrinks by the inverse of the halving
 driver-alignment.adb	Skew : constant Real := Sqrt (((C.UU - C.VV) / 2.0) ** 2 + C.UV ** 2);	2.0	math	half the difference of the two variances: the eigenvalues lie that far either side of their mean
 driver-alignment.adb	Spread : Real := 1.0;	1.0	statistics	no inflation until the residuals' smoothness is measured
+driver-alignment.adb	Squares : Real := 1.0;	1.0	statistics	a sum of squares of autocorrelations that starts at the lag zero one
+driver-alignment.adb	Squares := Squares + 2.0 * (Total / Real (Pairs) / Spread) ** 2;	2.0	statistics	Bartlett's sum: twice the squares of the autocorrelations at the lags
 driver-alignment.adb	Step : constant Positive := (if Axis = 1 then 1 else Side);	1	structure	and its next pixel is one apart
 driver-alignment.adb	Step : constant Positive := (if Axis = 1 then 1 else Side);	1	structure	the first axis runs along a row
 driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	1	math	the filter's first tap lies one pixel before the two pixels it replaces
@@ -221,7 +263,7 @@ driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 
 driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	8.0	math	the binomial weights 1 3 3 1 add up to eight
 driver-alignment.adb	Trial_Cost := 0.5 * (Trial.Rss + Penalty (Candidate, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
 driver-alignment.adb	Unit (J) := 1.0;	1.0	math	a unit vector: the column of the identity
-driver-alignment.adb	Wider : constant Answer := Align_At (First, Second, Query, Level_Used, Plain, Radius, 2);	2	structure	a patch twice as wide, the factor of a size of the pyramid
+driver-alignment.adb	Wider : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2));	2	structure	a patch twice as wide
 driver-alignment.adb	Window_Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	statistics	a place has two coordinates
 driver-alignment.adb	Wx, Sx, Wy, Sy : array (0 .. 3) of Real;	3	math	the cubic B-spline reads four coefficients along an axis: one before the cell and two after
 driver-alignment.adb	X : constant Real := U - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
@@ -229,6 +271,7 @@ driver-alignment.adb	Y : constant Real := V - 0.5;	0.5	math	a place's coefficien
 driver-alignment.adb	and then (Axis = 2 or else (K - Field'First) mod Side < Side - 1)	2	structure	the second axis of a field on a grid, along its columns: it has a neighbour in every row but the last
 driver-alignment.adb	elsif A < 2.0 then	2.0	math	the cubic B-spline's outer piece ends two knot spacings from its centre
 driver-alignment.adb	elsif Rho (Nearest) > -2.0 then	2.0	structure	a correlation is at least -1, so below -1 marks a cell that is not a candidate
+driver-alignment.adb	elsif Smallest > 1.0 then Natural (Real'Rounding (Log (Smallest, Real (Halving))))	1.0	math	a warp that enlarges in every direction
 driver-alignment.adb	for A in -1 .. 2 loop	1	math	the halving filter's first tap lies one pixel before the two pixels it replaces
 driver-alignment.adb	for A in -1 .. 2 loop	2	math	its last tap lies one pixel after them: two from the first
 driver-alignment.adb	for Axis in 1 .. 2 loop	2	structure	the two axes of a picture
@@ -239,6 +282,7 @@ driver-alignment.adb	for Dc in -1 .. 1 loop	1	structure	and one after it
 driver-alignment.adb	for Dc in -1 .. 1 loop	1	structure	the neighbours of a candidate within a pixel: one before it
 driver-alignment.adb	for Dr in -1 .. 1 loop	1	structure	and one after it
 driver-alignment.adb	for Dr in -1 .. 1 loop	1	structure	and one after it
+driver-alignment.adb	for Dx in (if Dy = 0 then 1 else -Half) .. Half loop	1	structure	the first half of the neighbours of the row, each pair once
 driver-alignment.adb	for K in 0 .. 3 loop	3	math	the cubic B-spline reads four coefficients along an axis: one before the cell and two after
 driver-alignment.adb	for K in 2 .. Count loop	2	structure	the filter's recursion starts at the second sample: the first is summed apart
 driver-alignment.adb	for K in 2 .. Count loop	2	structure	the insertion starts at the second peak: one alone is in order
@@ -253,9 +297,11 @@ driver-alignment.adb	if 2 * Count >= N then	2	math	at least half the patch: twic
 driver-alignment.adb	if 2 * Fitted.Count < Side_Of (Grow * Top_Half) ** 2 then	2	math	at least half the patch: twice the count reaches the patch's size
 driver-alignment.adb	if 2 * Present < N then	2	math	at least half the patch: twice the count reaches the patch's size
 driver-alignment.adb	if A < 1.0 then	1.0	math	the cubic B-spline's inner piece reaches one knot spacing
+driver-alignment.adb	if Count < 2 then	2	statistics	a correlation needs two pixels
 driver-alignment.adb	if Count < 2 then	2	structure	a line of fewer than two samples has nothing to filter
-driver-alignment.adb	if Det <= 0.0 or else Largest_Scale > Real (Halving) or else Smallest_Scale < 1.0 / Real (Halving) then	1.0	math	a change of scale by a halving either way: the smallest allowed is one over the largest
-driver-alignment.adb	if Radius / Real (Halving) ** Step + 1.0 <= Real (H) then	1.0	math	a pixel of margin beyond the window's radius
+driver-alignment.adb	if Det <= 0.0 or else Smallest_Scale < 1.0 / Real (Halving) then	1.0	math	a direction made smaller by more than a halving: the inverse of the halving
+driver-alignment.adb	if Places <= 1.0 then	1.0	statistics	fewer than one place the pixels tell apart: the prediction is the evidence
+driver-alignment.adb	if Present < 2 then	2	statistics	a correlation needs two pixels
 driver-alignment.adb	if Rho (K) > -2.0 then	2.0	structure	a correlation is at least -1, so below -1 marks a cell that is not a candidate
 driver-alignment.adb	if Smallest > Ridge_Smallest / 2.0 then	2.0	statistics	the data must be at least as precise as the window: together their covariance is at most half the window's
 driver-alignment.adb	if X < 1.0 or else Y < 1.0 or else X >= Real (Width - 2) or else Y >= Real (Height - 2) then	1.0	math	the same along the second axis
@@ -265,11 +311,14 @@ driver-alignment.adb	if X < 1.0 or else Y < 1.0 or else X >= Real (Width - 2) or
 driver-alignment.adb	or else (Last_Moved > Moved and then Moved ** 2 / (Last_Moved - Moved) <= 1.0 / Z)	1.0	statistics	what the steps to come add up to is under a standard error over Z, which no test the driver makes can tell from none
 driver-alignment.adb	return (2.0 - A) ** 3 / 6.0;	2.0	math	the outer piece's distance to the end of its support
 driver-alignment.adb	return (2.0 - A) ** 3 / 6.0;	6.0	math	the cubic B-spline's outer piece is that distance cubed over six
+driver-alignment.adb	return 1.0;	1.0	statistics	a pixel is one independent sample when nothing says more
+driver-alignment.adb	return 1.0;	1.0	statistics	a pixel is one independent sample when nothing says more
 driver-alignment.adb	return 2.0 / 3.0 - A * A + A ** 3 / 2.0;	2.0	math	the cubic B-spline's centre value is two thirds
 driver-alignment.adb	return 2.0 / 3.0 - A * A + A ** 3 / 2.0;	2.0	math	the inner piece's cubic term is A cubed over two
 driver-alignment.adb	return 2.0 / 3.0 - A * A + A ** 3 / 2.0;	2xA	math	the inner piece's quadratic term is the square of the distance, written as a product
 driver-alignment.adb	return 2.0 / 3.0 - A * A + A ** 3 / 2.0;	3.0	math	the cubic B-spline's centre value is two thirds
 driver-alignment.adb	return Natural (Real'Rounding (Side / 2.0));	2.0	math	half the patch's side lies either side of its point
+driver-alignment.adb	return Real'Min (Real (Count), Real'Max (1.0, Real (Count) / Squares));	1.0	statistics	at least one independent sample
 driver-alignment.adb	return Sqrt (Real'Max (0.0, (Q_VV * Du ** 2 - 2.0 * Q_UV * Du * Dv + Q_UU * Dv ** 2) / Q_Det));	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
 driver-alignment.adb	while J >= 1 and then Rho (Peaks (J)) < Rho (Held) loop	1	structure	the insertion stops at the first peak
 driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);	1.0	math	the identity map: the first diagonal entry is one
@@ -1425,8 +1474,14 @@ driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First
 driver-robot-kinematics-fit.adb	(Depth > 0.0 and then Sigma < Real'Last and then Driver.Uncertain.Significant (1.0, Sigma));	1.0	statistics	the depth against its own relative uncertainty: a depth of one unit is significant when its sigma is under 1 / Z of it
 driver-robot-kinematics-fit.adb	(Median_Abs (R) / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5));	0.5	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	(Sqrt (Real'Max (0.0, E (Errors.Both_Across) + E (Errors.Both_Down)) / 2.0));	2.0	math	the mean of the two components' variances
+driver-robot-kinematics-fit.adb	(V (2 * J - 1) * E_1 (J) + V (2 * J) * E_2 (J));	2	structure	a joint's two numbers across its axis: the entries 2J - 1 and 2J of the vector
+driver-robot-kinematics-fit.adb	(V (2 * J - 1) * E_1 (J) + V (2 * J) * E_2 (J));	2	structure	a joint's two numbers across its axis: the entries 2J - 1 and 2J of the vector
 driver-robot-kinematics-fit.adb	(W => Best (J).W, P => Cos (Best (J).Phi) * E1 + Sin (Best (J).Phi) * E2, C => 1.0, Slide => False);	1.0	numerics	the reading scale stage 1 starts from (a turn of one radian per reading unit); stage 4 fits it
 driver-robot-kinematics-fit.adb	(Xv (Xv'First + Side_First (Side) - 1 .. Xv'First + Side_First (Side) + Lens_Terms - 2));	2	structure	a side's lens terms, then its plane's move, in the joint parameters
+driver-robot-kinematics-fit.adb	([Across_Columns (3 * I - 2, C), Across_Columns (3 * I - 1, C), Across_Columns (3 * I, C)]);	2	structure	the three components of a sighting's equation, stored on three rows
+driver-robot-kinematics-fit.adb	([Across_Columns (3 * I - 2, C), Across_Columns (3 * I - 1, C), Across_Columns (3 * I, C)]);	3	structure	the three components of a sighting's equation, stored on three rows
+driver-robot-kinematics-fit.adb	([Across_Columns (3 * I - 2, C), Across_Columns (3 * I - 1, C), Across_Columns (3 * I, C)]);	3	structure	the three components of a sighting's equation, stored on three rows
+driver-robot-kinematics-fit.adb	([Across_Columns (3 * I - 2, C), Across_Columns (3 * I - 1, C), Across_Columns (3 * I, C)]);	3	structure	the three components of a sighting's equation, stored on three rows
 driver-robot-kinematics-fit.adb	([[X (X'First), X (X'First + 1), X (X'First + 2)],	2	structure	the positions of a homography's eight free entries in the vector
 driver-robot-kinematics-fit.adb	(if P.Found then (-1.0 / Sqrt (P.A * P.A)) * P.A else [0.0, 0.0, -1.0]);	1.0	math	a plane's unit normal towards the eye is minus its inverse-depth vector over its length; facing the eye before it is found
 driver-robot-kinematics-fit.adb	(if P.Found then -1.0 / Sqrt (P.A * P.A) else 0.0);	1.0	math	a plane's offset is minus one over the length of its inverse-depth vector
@@ -1440,7 +1495,16 @@ driver-robot-kinematics-fit.adb	A : constant Vec3 := (if abs W (1) <= abs W (2) 
 driver-robot-kinematics-fit.adb	A := A - Ln (2.0) / 2.0;	2.0	numerics	half an octave each way when a single ratio brackets the focal length; the bracketing widens it as needed
 driver-robot-kinematics-fit.adb	A := A - Ln (2.0) / 2.0;	2.0	numerics	half an octave each way when a single ratio brackets the focal length; the bracketing widens it as needed
 driver-robot-kinematics-fit.adb	A, B : Positive := 1;	1	structure	indexes start at one
+driver-robot-kinematics-fit.adb	Across_Columns (3 * I - 3 + D, 2 * J - 2 + Axis) := Col (D);	2	structure	three rows per sighting, two columns per joint
+driver-robot-kinematics-fit.adb	Across_Columns (3 * I - 3 + D, 2 * J - 2 + Axis) := Col (D);	2	structure	three rows per sighting, two columns per joint
+driver-robot-kinematics-fit.adb	Across_Columns (3 * I - 3 + D, 2 * J - 2 + Axis) := Col (D);	3	structure	three rows per sighting, two columns per joint
+driver-robot-kinematics-fit.adb	Across_Columns (3 * I - 3 + D, 2 * J - 2 + Axis) := Col (D);	3	structure	three rows per sighting, two columns per joint
+driver-robot-kinematics-fit.adb	Across_Columns : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 3 * S, 1 .. Reduced);	3	structure	three rows per sighting
+driver-robot-kinematics-fit.adb	All_Own (2 * I - 1) := Sight (Sight'First + I - 1).Own;	2	structure	a sighting's two residuals, the horizontal and the vertical
+driver-robot-kinematics-fit.adb	All_Own (2 * I) := Sight (Sight'First + I - 1).Own;	2	structure	a sighting's two residuals, the horizontal and the vertical
+driver-robot-kinematics-fit.adb	All_Own : Real_Access := new Real_Array (1 .. 2 * S);	2	structure	two residuals to a sighting
 driver-robot-kinematics-fit.adb	All_R : Real_Access := new Real_Array (1 .. 2 * S);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	Along : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. S, 1 .. 3);	3	structure	the three components of a vector
 driver-robot-kinematics-fit.adb	Anchor : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	Anchor : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	Apart_Terms : constant Positive := (if Second_Eye then 8 else 16);	16	structure	a free homography of each side's answers: eight entries each
@@ -1459,6 +1523,7 @@ driver-robot-kinematics-fit.adb	Count : constant Positive := 6 + Per_Joint * N;	
 driver-robot-kinematics-fit.adb	Count : constant Positive := 6 + Per_Joint * N;	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Covariance := 0.5 * (Product + Transpose (Product));	0.5	math	the symmetric part of a matrix
 driver-robot-kinematics-fit.adb	Covariance => (Real (Count) / Real (Count - 3)) * (Mi * Spread * Mi),	3	statistics	the sandwich's small-sample factor: the points over the points less the plane's three parameters
+driver-robot-kinematics-fit.adb	Cross (B, Back * (Maps ((Sg.Frame - 1) * N + J) * (if Axis = 1 then E_1 (J) else E_2 (J))));	1	structure	a joint's first direction across its axis
 driver-robot-kinematics-fit.adb	D (J, T) := (Moved (Sigma) - Moved (-Sigma)) / (Sigma + Sigma);	2xSigma	math	a central difference: one standard deviation either way spans two
 driver-robot-kinematics-fit.adb	D (J, T).Place := (1.0 / Width) * (Up.Translation - Down.Translation);	1.0	math	a central difference: the change between one standard deviation either way, over the width it spans
 driver-robot-kinematics-fit.adb	D (J, T).Turn := (1.0 / Width) * Driver.Numerics.Log (Up.Rotation * Transpose (Down.Rotation));	1.0	math	a central difference: the change between one standard deviation either way, over the width it spans
@@ -1471,6 +1536,7 @@ driver-robot-kinematics-fit.adb	Dp (T) := Dp (T) + H * Real'Max (1.0, abs Depth 
 driver-robot-kinematics-fit.adb	Dy : constant Real := Y - Xv (Xv'First + S_First + 2);	2	structure	the similarity's terms in order: log scale, turn, two shifts
 driver-robot-kinematics-fit.adb	E (P) := 1.0;	1.0	math	a column of the identity: the inverse column by column
 driver-robot-kinematics-fit.adb	E (P) := 1.0;	1.0	math	a unit vector of the identity
+driver-robot-kinematics-fit.adb	Eigensystem (0.5 * (K + Transpose (K)), Values, Vectors);	0.5	math	the symmetric part of a matrix is half the matrix and its transpose
 driver-robot-kinematics-fit.adb	Eigensystem (0.5 * (Whitened + Transpose (Whitened)), Values, Vectors);	0.5	math	the symmetric part of a matrix
 driver-robot-kinematics-fit.adb	Ends : array (1 .. 2) of Real_Vector (1 .. Outputs);	2	math	a central difference: one standard deviation either way
 driver-robot-kinematics-fit.adb	F : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));	1.0	math	lengths scale by the inverse of the root mean square that is the unit
@@ -1480,6 +1546,7 @@ driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / 
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	Fit_Abs (Kf) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Fit_Abs (Kf) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	Focal : constant Real := (L.Fx + L.Fy) / 2.0;	2.0	math	the focal length: the mean of the two
 driver-robot-kinematics-fit.adb	Foot : constant Vec3 := (1.0 / Length ** 2) * P.A;	1.0	math	the plane A * X = 1: its point nearest the eye is A over its length squared
 driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	Free_First : constant Positive := (if Second_Eye then S_First else 1);	1	structure	the homography's entries come first, and are terms only when the eye's lens is unknown
@@ -1532,6 +1599,7 @@ driver-robot-kinematics-fit.adb	Link.Sigma := (if Second_Eye then S1 else Sqrt (
 driver-robot-kinematics-fit.adb	Link.Sigma := (if Second_Eye then S1 else Sqrt ((S1 ** 2 * Real (2 * Kept1 - 8) + S2 ** 2 * Real (2 * Kept2 - 8))	8	statistics	a homography's eight free entries: each side's degrees of freedom
 driver-robot-kinematics-fit.adb	Link.Sigma := (if Second_Eye then S1 else Sqrt ((S1 ** 2 * Real (2 * Kept1 - 8) + S2 ** 2 * Real (2 * Kept2 - 8))	8	statistics	a homography's eight free entries: each side's degrees of freedom
 driver-robot-kinematics-fit.adb	M_A (P_Count + 1, Anchor) := 1.0;	1.0	structure	the anchor joint's row
+driver-robot-kinematics-fit.adb	Middle : constant Real := (Low + Top) / 2.0;	2.0	math	the middle of an interval
 driver-robot-kinematics-fit.adb	Minimal : constant := 3;	3	math	three points fix a plane
 driver-robot-kinematics-fit.adb	Minimal : constant := 4;	4	math	four points fix a homography of a plane
 driver-robot-kinematics-fit.adb	N : constant Vec3 := (1.0 / Length) * P.A;	1.0	math	the unit direction of the inverse-depth vector
@@ -1555,6 +1623,9 @@ driver-robot-kinematics-fit.adb	Out_J (Out_J'First + J - 1).P := [X (O + 2), X (
 driver-robot-kinematics-fit.adb	Out_J (Out_J'First + J - 1).P := [X (O + 2), X (O + 3), X (O + 4)];	4	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Out_J (Out_J'First + J - 1).P := [X (O + 2), X (O + 3), X (O + 4)];	4	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Outputs : constant := 7;	7	structure	the placement's seven terms: its turn (three), its centre (three) and the log of its scale
+driver-robot-kinematics-fit.adb	Owns (2 * K - 1) := Sight (Sight'First + I - 1).Own;	2	structure	a sighting's two residuals, the horizontal and the vertical
+driver-robot-kinematics-fit.adb	Owns (2 * K) := Sight (Sight'First + I - 1).Own;	2	structure	a sighting's two residuals, the horizontal and the vertical
+driver-robot-kinematics-fit.adb	Owns : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals to a sighting
 driver-robot-kinematics-fit.adb	Per_Joint : constant := 6;	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Per_Joint : constant := 6;	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Project (Lens_Of_Terms (Terms_Of (Xv, 2)),	2	structure	the first side, then the second
@@ -1573,6 +1644,7 @@ driver-robot-kinematics-fit.adb	R2 : constant Real_Vector (1 .. 9) := [0.0, 0.0,
 driver-robot-kinematics-fit.adb	R2 : constant Real_Vector (1 .. 9) := [0.0, 0.0, 0.0, X, Y, 1.0, -V * X, -V * Y, -V];	9	structure	a homography's nine entries: the direct linear transform's unknowns
 driver-robot-kinematics-fit.adb	Ray (Lx, Kept (I).U, Kept (I).V), (Lx.Fx + Lx.Fy) / 2.0);	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	Ray (Lx, Sight (I).U, Sight (I).V), (Lx.Fx + Lx.Fy) / 2.0);	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
+driver-robot-kinematics-fit.adb	Reduced : constant Positive := 2 * N;	2	structure	two numbers across each joint's axis
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Report.Stage := 1;	1	structure	the stages' numbers
@@ -1593,7 +1665,9 @@ driver-robot-kinematics-fit.adb	S.State := (S.State * 48_271) mod 2_147_483_647;
 driver-robot-kinematics-fit.adb	S.State := (S.State * 48_271) mod 2_147_483_647;	48_271	math	the minimal standard generator's multiplier (Park, Miller and Stockmeyer, 1993)
 driver-robot-kinematics-fit.adb	S2 := (if Second_Eye then 1.0 else Noise (C2, F2, H2, Kept2));	1.0	structure	no answers of the second side to weigh: any unit
 driver-robot-kinematics-fit.adb	S_First : constant := 9;	9	structure	the similarity's terms follow the homography's eight
+driver-robot-kinematics-fit.adb	Scale : constant Real := Scale_Of (Sigma, All_Own (2 * I));	2	structure	a sighting's second residual
 driver-robot-kinematics-fit.adb	Scale := 1.0;	1.0	structure	the identity's scale until the link is found
+driver-robot-kinematics-fit.adb	Scales : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals to a sighting
 driver-robot-kinematics-fit.adb	Scatter => Squares / Real (Count - 3));	3	statistics	a plane's three terms: its residuals' degrees of freedom
 driver-robot-kinematics-fit.adb	Side_First : constant array (1 .. 2) of Positive := [S_First + Similarity_Terms,	2	structure	two sides
 driver-robot-kinematics-fit.adb	Side_State (D1, Terms_Of (Xv, 1), Move_Of (Xv, 1), P1, A1, B1);	1	structure	the first side, then the second
@@ -1604,6 +1678,9 @@ driver-robot-kinematics-fit.adb	Side_State (D2, Terms_Of (Xv, 2), Move_Of (Xv, 2
 driver-robot-kinematics-fit.adb	Side_State (D2, Terms_Of (Xv, 2), Move_Of (Xv, 2), P2, A2, B2);	2	structure	the first side, then the second
 driver-robot-kinematics-fit.adb	Side_State (D2.all, Terms_Of (Xv, 2), Move_Of (Xv, 2), P2, A2, B2);	2	structure	the first side, then the second
 driver-robot-kinematics-fit.adb	Side_State (D2.all, Terms_Of (Xv, 2), Move_Of (Xv, 2), P2, A2, B2);	2	structure	the first side, then the second
+driver-robot-kinematics-fit.adb	Size : constant Real := (if Now > 0.0 and then Old > 0.0 then Sqrt (Old / Now) else 1.0);	1.0	math	no change of size when there is none to compare
+driver-robot-kinematics-fit.adb	Slope : constant Real := D + R * (2.0 * L.K1 * R + 4.0 * L.K2 * R2 * R);	2.0	math	the derivative of r (1 + K1 r^2 + K2 r^4): 1 + 3 K1 r^2 + 5 K2 r^4, written as D + r (2 K1 r + 4 K2 r^3)
+driver-robot-kinematics-fit.adb	Slope : constant Real := D + R * (2.0 * L.K1 * R + 4.0 * L.K2 * R2 * R);	4.0	math	the derivative of r (1 + K1 r^2 + K2 r^4): 1 + 3 K1 r^2 + 5 K2 r^4, written as D + r (2 K1 r + 4 K2 r^3)
 driver-robot-kinematics-fit.adb	Sm (P, P) := A (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
 driver-robot-kinematics-fit.adb	Solve (Xf, 1.0);	1.0	statistics	every residual is in units of its own noise
 driver-robot-kinematics-fit.adb	Spread : constant Real := Sqrt (Real'Max (0.0, ((A11 - A22) / 2.0) ** 2 + A12 ** 2));	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
@@ -1631,6 +1708,7 @@ driver-robot-kinematics-fit.adb	Tuv_Inv : constant Mat3 := [[1.0 / Suv, 0.0, Cu]
 driver-robot-kinematics-fit.adb	Tuv_Inv : constant Mat3 := [[1.0 / Suv, 0.0, Cu], [0.0, 1.0 / Suv, Cv], [0.0, 0.0, 1.0]];	1.0	math	the conditioning and its inverse: a scaling and a shift in homogeneous coordinates
 driver-robot-kinematics-fit.adb	Tuv_Inv : constant Mat3 := [[1.0 / Suv, 0.0, Cu], [0.0, 1.0 / Suv, Cv], [0.0, 0.0, 1.0]];	1.0	math	the conditioning and its inverse: a scaling and a shift in homogeneous coordinates
 driver-robot-kinematics-fit.adb	Txy : constant Mat3 := [[Sxy, 0.0, -Cx * Sxy], [0.0, Sxy, -Cy * Sxy], [0.0, 0.0, 1.0]];	1.0	math	the conditioning and its inverse: a scaling and a shift in homogeneous coordinates
+driver-robot-kinematics-fit.adb	Typical : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5);	0.5	statistics	the median of a residual over its scale for a Gaussian: the normal's upper quartile
 driver-robot-kinematics-fit.adb	Values : Real_Vector (1 .. 9);	9	structure	a homography's nine entries: the direct linear transform's unknowns
 driver-robot-kinematics-fit.adb	Variance : Real_Array (1 .. 6 + 5 * N) := [others => Real'Last];	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Variance : Real_Array (1 .. 6 + 5 * N) := [others => Real'Last];	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
@@ -1641,6 +1719,7 @@ driver-robot-kinematics-fit.adb	Vy := 1.0;	1.0	math	a coordinate axis, a cosine,
 driver-robot-kinematics-fit.adb	W : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;	1.0	statistics	weights are inverse variances
 driver-robot-kinematics-fit.adb	W : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;	1.0	statistics	weights are inverse variances
 driver-robot-kinematics-fit.adb	W : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;	1.0	statistics	weights are inverse variances
+driver-robot-kinematics-fit.adb	Weight (I) := 1.0;	1.0	math	a sighting that fits begins at full weight
 driver-robot-kinematics-fit.adb	Width : constant Real := Sigma + Sigma;	2xSigma	math	a central difference: one standard deviation either way spans two
 driver-robot-kinematics-fit.adb	Wt (I) := (if Ga (I) ** 2 + Gb (I) ** 2 > 0.0 then 1.0 / (Ga (I) ** 2 + Gb (I) ** 2) else 0.0);	1.0	math	the algebraic residual normalized
 driver-robot-kinematics-fit.adb	X (1 .. 8) := Entries_Of (H1);	8	structure	a homography's eight free entries come first
@@ -1669,16 +1748,22 @@ driver-robot-kinematics-fit.adb	[X (X'First + 6), X (X'First + 7), 1.0]]);	1.0	m
 driver-robot-kinematics-fit.adb	[X (X'First + 6), X (X'First + 7), 1.0]]);	6	structure	the positions of a homography's eight free entries in the vector
 driver-robot-kinematics-fit.adb	[X (X'First + 6), X (X'First + 7), 1.0]]);	7	structure	the positions of a homography's eight free entries in the vector
 driver-robot-kinematics-fit.adb	and then (Driver.Conventions.Z * Tilt >= Ada.Numerics.Pi / 2.0	2.0	math	a quarter turn
-driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Sigma)	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I), Sigma);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Scale)	2	structure	a sighting's two residuals, the horizontal and the vertical
+driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I), Scale);	2	structure	a sighting's two residuals, the horizontal and the vertical
 driver-robot-kinematics-fit.adb	else Driver.Conventions.Z * (abs Z_Value - 0.5 * Driver.Conventions.Z));	0.5	math	the Huber function
 driver-robot-kinematics-fit.adb	elsif N > 1 then	1	structure	cells move several joints
 driver-robot-kinematics-fit.adb	exit when 2 * Used <= Count + Tracks;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	exit when B - A <= Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs A);	1.0	numerics	the scale floor of a finite difference and of a bracket width
+driver-robot-kinematics-fit.adb	exit when Lowered or else not Moves or else Lambda > Real'Last / 2.0;	2.0	numerics	where doubling the damping would overflow: the float cannot go further
+driver-robot-kinematics-fit.adb	exit when Lowered or else not Moves or else Lambda > Real'Last / 2.0;	2.0	numerics	where doubling the damping would overflow: the float cannot go further
+driver-robot-kinematics-fit.adb	exit when abs (Miss / Slope) <= Real'Epsilon * Real'Max (1.0, abs R);	1.0	numerics	a step below the float's own resolution of the radius (relative, and absolute below one) is the root to the machine
+driver-robot-kinematics-fit.adb	for Axis in 1 .. 2 loop	2	structure	the two directions across a joint's axis
 driver-robot-kinematics-fit.adb	for C in 1 .. 3 loop	3	math	a plane through three points, three coordinates each
 driver-robot-kinematics-fit.adb	for C in 1 .. 3 loop	3	structure	a homography's entries row by row, three to a row
 driver-robot-kinematics-fit.adb	for D in 1 .. 3 loop	3	math	three coordinates
 driver-robot-kinematics-fit.adb	for D in 1 .. 3 loop	3	math	three coordinates
+driver-robot-kinematics-fit.adb	for D in 1 .. 3 loop	3	structure	the three components of a vector
+driver-robot-kinematics-fit.adb	for D in 1 .. 3 loop	3	structure	the three components of a vector
 driver-robot-kinematics-fit.adb	for E in 1 .. 2 loop	2	math	a central difference: one standard deviation either way
 driver-robot-kinematics-fit.adb	for Frame in 2 .. Frames loop	2	structure	the keyframes and joints after the first
 driver-robot-kinematics-fit.adb	for Frame in 2 .. Frames loop	2	structure	the keyframes and joints after the first
@@ -1686,6 +1771,7 @@ driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two resi
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals to a sighting
 driver-robot-kinematics-fit.adb	for I in 2 * Answer - 1 .. 2 * Answer loop	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	for I in 2 * Answer - 1 .. 2 * Answer loop	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	for I in 2 * Link.Used + 1 .. Rows loop	2	structure	two residuals per answer, across and down; two sides' holds
@@ -1707,6 +1793,7 @@ driver-robot-kinematics-fit.adb	if 2 * Link.Used <= Apart_Terms then	2	structure
 driver-robot-kinematics-fit.adb	if All_In >= 1.0 then	1.0	math	a probability of one: every sample is of agreeing points
 driver-robot-kinematics-fit.adb	if Count <= 3 or else Determinant (M) = 0.0 then	3	statistics	more points than the plane's three parameters, or their spread is not measured
 driver-robot-kinematics-fit.adb	if I <= 2 * Link.Used then	2	structure	two residuals per answer, across and down; two sides' holds
+driver-robot-kinematics-fit.adb	if Median_Ratio (0.0) <= Typical then	0.0	math	no floor at all
 driver-robot-kinematics-fit.adb	if N < 2 then	2	math	two points fix a similarity of the plane
 driver-robot-kinematics-fit.adb	if N = 0 or else S = 0 or else Frames < 2 then	2	structure	the keyframes and joints after the first
 driver-robot-kinematics-fit.adb	if N > 1 and then P_Count > 0 then	1	structure	cells move several joints
@@ -2043,14 +2130,14 @@ driver-robot-kinematics.adb	and then Natural (R.Result.Tracks.Length) >= 3 * Que
 driver-robot-kinematics.adb	and then Place (1, 1) < Real'Last	1	structure	an uncertainty that is not known has its first diagonal entry unbounded
 driver-robot-kinematics.adb	and then Place (1, 1) < Real'Last	1	structure	an uncertainty that is not known has its first diagonal entry unbounded
 driver-robot-kinematics.adb	else [0.0, 0.0, 1.0 / X (3)]);	1.0	math	the plane across the line of sight at depth z has slope one over z along it
-driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
-driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
-driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
-driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
-driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
-driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
-driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	the axes of space: three
+driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
+driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
+driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
+driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
+driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
+driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
+driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for B in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for B in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for B in 1 .. 3 loop	3	structure	three coordinates

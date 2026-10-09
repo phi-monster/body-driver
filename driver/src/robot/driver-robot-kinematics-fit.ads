@@ -102,6 +102,17 @@ package Driver.Robot.Kinematics.Fit is
    --  axes the data barely determine (the focal length against the distortion),
    --  for the cost they carry is far below any fraction of it.
 
+   function Scale_Of (Floor, Own : Real) return Real;
+   --  The scale a residual of a sighting is judged at: what the model leaves of any sighting (Floor) and what the
+   --  matcher states of this one's place (Own, a sighting's own), as variances. Never zero.
+
+   function Floor_Of (R, Own : Real_Array) return Real
+     with Pre => R'Length = Own'Length;
+   --  The floor of the scales the residuals R are judged at beside the standard deviations Own their sightings
+   --  state (one per residual): the one at which the median of a residual over its scale is the Gaussian's, so a
+   --  residual of the size typical of its sighting is typical. With none stated it is the noise the residuals show
+   --  (the robust scale about zero); zero when what the sightings state accounts for the residuals by itself.
+
    function Terms (Joints : Natural) return Natural is (Lens_Terms + Joint_Terms * Joints);
    function Term_Of (Joint : Positive; T : Joint_Term) return Positive is
      (Lens_Terms + Joint_Terms * (Joint - 1) + Joint_Term'Pos (T) + 1);
@@ -139,6 +150,10 @@ package Driver.Robot.Kinematics.Fit is
       Track  : Positive := 1;
       U0, V0 : Real := 0.0;
       U, V   : Real := 0.0;
+      Own    : Real := 0.0;
+      --  The standard deviation the matcher states of where it saw the point again, in pixels, per axis; zero when
+      --  it states none. A matcher is the less sure of a point the farther it moved (its patch is warped more), and a
+      --  residual of such a sighting is typical at a larger size than one of a sighting that moved little.
    end record;
 
    type Sighting_Array is array (Positive range <>) of Sighting;

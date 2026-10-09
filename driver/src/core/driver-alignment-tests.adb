@@ -5,6 +5,7 @@ with Driver.Bytes;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Images;
+with Driver.Parallel_For;
 with Driver.Tests;
 with Driver.Uncertain;
 
@@ -803,6 +804,102 @@ package body Driver.Alignment.Tests is
              Natural'Image (Right_Disagreeing) & " of the right answers did not agree with their own field");
    end Field_Agreement;
 
+   procedure Wide_Window is
+      --  A prediction as uncertain as the aligner still searches, of a warp that shrinks the first picture to the
+      --  last of its sizes: the window is a few hundred pixels across at the only size left, and has a candidate at
+      --  every pixel of it, more than a task's stack holds. Asked of four tasks at once, as the keyframes' points
+      --  are, every point is answered, found or not, and none of the tasks dies.
+      type Bytes_Access is access Driver.Bytes.Byte_Array;
+      use type Driver.Bytes.Offset;
+      Columns : constant := 640;
+      Rows    : constant := 480;
+      Data    : constant Bytes_Access := new Driver.Bytes.Byte_Array (1 .. 3 * Columns * Rows);
+      Asked   : array (1 .. 4) of Boolean := [others => False];
+   begin
+      for Row in 0 .. Rows - 1 loop
+         for Column in 0 .. Columns - 1 loop
+            declare
+               V : constant Real := Brightness (Textured, Real (Column) + 0.5, Real (Row) + 0.5);
+               L : constant Driver.Bytes.Byte := Driver.Bytes.Byte (Integer'Max (0, Integer'Min (255, Integer (Real'Rounding (V)))));
+               K : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Row * Columns + Column));
+            begin
+               Data (K + 1) := L;
+               Data (K + 2) := L;
+               Data (K + 3) := L;
+            end;
+         end loop;
+      end loop;
+      declare
+         First  : constant Pyramid := Pyramid_Of (Driver.Images.Create (Columns, Rows, Data.all));
+         Shrink : constant Real := 0.5 ** (Levels (First) - 1);
+         Sigma  : constant Real := Largest_Sigma (First, First);
+
+         procedure Piece (Index : Positive) is
+            Answer : constant Alignment.Answer :=
+              Align (First, First,
+                     (From => (U => 300.0 + 20.0 * Real (Index), V => 240.0), To => (U => 320.0, V => 240.0),
+                      Linear => (UU => Shrink, UV => 0.0, VU => 0.0, VV => Shrink),
+                      Cov => (UU => Sigma ** 2, UV => 0.0, VV => Sigma ** 2), Linear_Sigma => Real'Last));
+            pragma Unreferenced (Answer);
+         begin
+            Asked (Index) := True;
+         end Piece;
+
+         procedure Run is new Driver.Parallel_For (Piece);
+      begin
+         Run (1, 4);
+         Check (Asked = [others => True], "a window of a few hundred pixels at the finest size left was not searched by every task");
+      end;
+   end Wide_Window;
+
+   procedure Settled is
+      --  A prediction that is right for two thirds of the points and states as much of the rest, which it puts a dozen
+      --  pixels from where they are: the window it makes refuses them. The others make a smooth field of the
+      --  keyframe's displacements, which says where those are; they are asked again from it and found where they
+      --  are, none wrong, and the keyframe's points all agree with the field.
+      Points  : constant Keyframes.Point_Array := Grid_Points;
+      Change  : constant Real_Array := [6.0, 0.0];
+      C       : Keyframes.Chain;
+      Given   : Keyframes.Prediction_Array := Model_Of (Points, Change, 0.2);
+      Answers : Keyframes.Answer_Array (Points'Range);
+      Agree   : Keyframes.Flag_Array (Points'Range);
+      Off     : Natural := 0;   --  the points the prediction put away from where they are
+      Seen, Wrong, Agreeing : Natural := 0;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 26);
+      Keyframes.Begin_Reference (C, Picture (Textured, Identity_Part, 0.0, 0.0, 0.8), Points);
+      for K in Points'Range loop
+         if K mod 3 = 0 then
+            Off := Off + 1;
+            Given (K).To := (U => Given (K).To.U + 12.0, V => Given (K).To.V - 9.0);
+         end if;
+      end loop;
+      Keyframes.Add (C, Picture (Textured, Linear_At (Change), Shift_At (Change, 1), Shift_At (Change, 2), 0.8),
+                     Change, Given, Answers, Agree);
+      for K in Points'Range loop
+         if Agree (K) then
+            Agreeing := Agreeing + 1;
+         end if;
+         if Answers (K).Verdict = Found then
+            Seen := Seen + 1;
+            declare
+               Truth : constant Driver.Images.Pixel :=
+                 Moved (Linear_At (Change), Shift_At (Change, 1), Shift_At (Change, 2), Points (K));
+            begin
+               if Sqrt ((Answers (K).To.U - Truth.U) ** 2 + (Answers (K).To.V - Truth.V) ** 2) > 1.0 then
+                  Wrong := Wrong + 1;
+               end if;
+            end;
+         end if;
+      end loop;
+      Check (Off > 0 and then Seen = Points'Length,
+             "the points a prediction put away from where they are were found at only" & Natural'Image (Seen)
+             & " of" & Natural'Image (Points'Length) & " (" & Natural'Image (Off) & " were put away)");
+      Check (Wrong = 0, Natural'Image (Wrong) & " answers more than a pixel from the truth after being asked again");
+      Check (Agreeing * 10 >= Points'Length * 9,
+             "only" & Natural'Image (Agreeing) & " of" & Natural'Image (Points'Length) & " points agree with the field");
+   end Settled;
+
    procedure Contaminated is
       --  An earlier keyframe turned the second joint as well as the first: its points moved by the second joint's
       --  share too, which a multiple of it carries along. The prediction from it states that part as an
@@ -828,6 +925,12 @@ package body Driver.Alignment.Tests is
 
    procedure Register is
    begin
+      Driver.Tests.Register
+        ("alignment.wide", "a window as wide as the aligner searches, at the finest size left, takes more of a task's stack than it has",
+         Wide_Window'Access);
+      Driver.Tests.Register
+        ("alignment.settled", "the points a prediction put away from where they are, which its window refused, are "
+         & "not asked again from the field the others make and found", Settled'Access);
       Driver.Tests.Register
         ("alignment.translation", "a texture shifted by a few pixels is not found where it is", Translation'Access);
       Driver.Tests.Register

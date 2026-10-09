@@ -102,26 +102,33 @@ package body Driver.Robot.Kinematics.Fit is
       Yd : constant Real := (V - L.Cy) / L.Fy;
       X  : Real := Xd;
       Y  : Real := Yd;
-      Last_Change : Real := Real'Last;
    begin
-      --  Undistort by fixed-point iteration, for as long as each step still
-      --  shrinks the change.
+      --  Undistort along the pixel's direction from the centre: its undistorted radius R has R (1 + K1 R^2 + K2 R^4)
+      --  the distorted one, found by Newton's method from the distorted one, as many steps at most as the float has
+      --  bits (a lens whose distortion is large is slow to a fixed point and never settles to one that is not a
+      --  contraction), and no further where the lens turns back (its slope no longer positive).
       if L.K1 /= 0.0 or else L.K2 /= 0.0 then
-         loop
-            declare
-               R2 : constant Real := X * X + Y * Y;
-               D  : constant Real := 1.0 + L.K1 * R2 + L.K2 * R2 * R2;
-               Xn : constant Real := (if D > 0.0 then Xd / D else X);
-               Yn : constant Real := (if D > 0.0 then Yd / D else Y);
-               Change : constant Real := abs (Xn - X) + abs (Yn - Y);
-            begin
-               exit when Change >= Last_Change;
-               X := Xn;
-               Y := Yn;
-               Last_Change := Change;
-               exit when Change = 0.0;
-            end;
-         end loop;
+         declare
+            Rd : constant Real := Sqrt (Xd * Xd + Yd * Yd);
+            R  : Real := Rd;
+         begin
+            for Step in 1 .. Real'Machine_Mantissa loop
+               declare
+                  R2    : constant Real := R * R;
+                  D     : constant Real := 1.0 + L.K1 * R2 + L.K2 * R2 * R2;
+                  Miss  : constant Real := R * D - Rd;
+                  Slope : constant Real := D + R * (2.0 * L.K1 * R + 4.0 * L.K2 * R2 * R);
+               begin
+                  exit when Miss = 0.0 or else Slope <= 0.0;
+                  R := R - Miss / Slope;
+                  exit when abs (Miss / Slope) <= Real'Epsilon * Real'Max (1.0, abs R);
+               end;
+            end loop;
+            if Rd > 0.0 then
+               X := Xd * R / Rd;
+               Y := Yd * R / Rd;
+            end if;
+         end;
       end if;
       return [X, Y, 1.0];
    end Ray;
@@ -183,6 +190,57 @@ package body Driver.Robot.Kinematics.Fit is
    begin
       return Sigma / (2.0 * Sqrt (Real (Count)) * F);
    end Median_Error;
+
+   --  The scale a residual is judged at, whose own sighting has a stated standard deviation Own: what the model leaves
+   --  of any sighting (Floor) and what the matcher states of this one, as variances.
+   function Scale_Of (Floor, Own : Real) return Real is (Real'Max (Sqrt (Floor ** 2 + Own ** 2), Real'Model_Small));
+
+   --  The floor of the scales the residuals R are judged at, beside the standard deviations Own their sightings
+   --  state (one per residual): the one at which the median of a residual over its scale is the Gaussian's, so a
+   --  residual of the size typical of its sighting is typical. With none stated it is Noise_Of; a floor of zero
+   --  when what the sightings state accounts for the residuals by itself.
+   function Floor_Of (R, Own : Real_Array) return Real is
+      Typical : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5);
+      High    : constant Real := Noise_Of (R);
+      Low     : Real := 0.0;
+      Top     : Real := High;
+
+      function Median_Ratio (Floor : Real) return Real is
+         Ratios : Real_Access := new Real_Array (1 .. R'Length);
+         Result : Real;
+      begin
+         for I in 1 .. R'Length loop
+            Ratios (I) := abs R (R'First + I - 1) / Scale_Of (Floor, Own (Own'First + I - 1));
+         end loop;
+         Result := Driver.Stats.Median (Ratios.all);
+         Free (Ratios);
+         return Result;
+      end Median_Ratio;
+   begin
+      if R'Length = 0 or else High <= 0.0 then
+         return 0.0;
+      end if;
+      if (for all O of Own => O = 0.0) then
+         return High;
+      end if;
+      if Median_Ratio (0.0) <= Typical then
+         return 0.0;
+      end if;
+      --  The ratio falls as the floor rises, from above the Gaussian's at none to below it at High.
+      for Step in 1 .. Real'Machine_Mantissa loop
+         declare
+            Middle : constant Real := (Low + Top) / 2.0;
+         begin
+            exit when Middle <= Low or else Middle >= Top;
+            if Median_Ratio (Middle) > Typical then
+               Low := Middle;
+            else
+               Top := Middle;
+            end if;
+         end;
+      end loop;
+      return Top;
+   end Floor_Of;
 
    function Huber (Z_Value : Real) return Real is
      (if abs Z_Value <= Driver.Conventions.Z then 1.0 else Driver.Conventions.Z / abs Z_Value);
@@ -319,7 +377,7 @@ package body Driver.Robot.Kinematics.Fit is
                   else
                      Moves := True;
                   end if;
-                  exit when Lowered or else not Moves;
+                  exit when Lowered or else not Moves or else Lambda > Real'Last / 2.0;
                   Lambda := 2.0 * Lambda;
                end;
             end loop;
@@ -558,33 +616,321 @@ package body Driver.Robot.Kinematics.Fit is
             Free (Views);
          end Residuals;
 
-         procedure Triangulate is
-            Num : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
-            Den : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
-         begin
-            for Sg of Sight loop
+         --  What the rotations leave of the sightings, found in one linear solve: a depth along every track's reference
+         --  ray, and for every joint the two numbers its axis point has across its axis. The keyframe's eye stands at
+         --  the rotation R and translation t of the joints' steps (t is linear in the axis points, whatever the
+         --  rotations are), and sees the point d H0 along its own ray B where B x R^T (d H0 - t) = 0: linear in the depth
+         --  and the axis points. The depths are eliminated track by track; the axis points are the vector the reduced
+         --  normal matrix has least (the scale of all lengths is free), with the sightings that fit weighted as
+         --  Huber weights them at their own angular residuals, until the sightings that fit are the same. The
+         --  nonlinear descent then starts from lengths that agree with one another, which the stages before it, that
+         --  tell the axes' directions and not their distances apart, leave to chance.
+         procedure Linear_Start is
+            Reduced : constant Positive := 2 * N;
+            type Mat3_Array is array (Positive range <>) of Mat3;
+            type Mat3_Access is access Mat3_Array;
+            procedure Free is new Ada.Unchecked_Deallocation (Mat3_Array, Mat3_Access);
+            Turns   : Mat3_Access := new Mat3_Array (1 .. Frames);
+            Maps    : Mat3_Access := new Mat3_Array (1 .. Frames * N);   --  per keyframe and joint: t = sum Maps * P
+            E_1, E_2 : array (1 .. N) of Vec3;
+            Poses   : Rigid_Access := new Rigid_Array (1 .. Frames);
+            Along   : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. S, 1 .. 3);
+            Across_Columns : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 3 * S, 1 .. Reduced);
+            Weight  : Real_Access := new Real_Array'(1 .. S => 0.0);
+            Own     : Real_Access := new Real_Array (1 .. S);
+            Fit_Now : Flags_Access := new Flags'(1 .. S => False);
+            Saa     : Real_Access := new Real_Array (1 .. Tracks);
+            Sag     : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Tracks, 1 .. Reduced);
+            Q       : Real_Vector (1 .. Reduced) := [others => 0.0];
+            Lengths : Real_Access := new Real_Array (1 .. Tracks);
+            Focal   : constant Real := (L.Fx + L.Fy) / 2.0;
+
+            --  The third-order column of the sighting I's equation for the unknown C.
+            function Col (I, C : Positive) return Vec3 is
+              ([Across_Columns (3 * I - 2, C), Across_Columns (3 * I - 1, C), Across_Columns (3 * I, C)]);
+
+            --  The axes' points of q, in the frame of the eye at rest.
+            function Point_Of (J : Positive; V : Real_Vector) return Vec3 is
+              (V (2 * J - 1) * E_1 (J) + V (2 * J) * E_2 (J));
+
+            --  Where the keyframe's eye stands for the points q gives the joints.
+            function Translation_Of (F : Positive; V : Real_Vector) return Vec3 is
+               T : Vec3 := Zero3;
+            begin
+               for J in 1 .. N loop
+                  T := T + Maps ((F - 1) * N + J) * Point_Of (J, V);
+               end loop;
+               return T;
+            end Translation_Of;
+
+            --  The weights of the sightings, the depths and the points they give, for the weights in Weight.
+            procedure Solve is
+               K : Driver.Numerics.Arrays.Real_Matrix (1 .. Reduced, 1 .. Reduced) := [others => [others => 0.0]];
+               Values  : Real_Vector (1 .. Reduced);
+               Vectors : Driver.Numerics.Arrays.Real_Matrix (1 .. Reduced, 1 .. Reduced);
+            begin
+               Saa.all := [others => 0.0];
+               Sag.all := [others => [others => 0.0]];
+               for I in 1 .. S loop
+                  if Weight (I) > 0.0 then
+                     declare
+                        T : constant Positive := Sight (Sight'First + I - 1).Track;
+                        A : constant Vec3 := [Along (I, 1), Along (I, 2), Along (I, 3)];
+                        W : constant Real := Weight (I);
+                     begin
+                        Saa (T) := Saa (T) + W * (A * A);
+                        for C in 1 .. Reduced loop
+                           Sag (T, C) := Sag (T, C) + W * (A * Col (I, C));
+                           for C2 in C .. Reduced loop
+                              K (C, C2) := K (C, C2) + W * (Col (I, C) * Col (I, C2));
+                           end loop;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+               for C in 1 .. Reduced loop
+                  for C2 in 1 .. C - 1 loop
+                     K (C, C2) := K (C2, C);
+                  end loop;
+               end loop;
+               for T in 1 .. Tracks loop
+                  if Saa (T) > 0.0 then
+                     for C in 1 .. Reduced loop
+                        for C2 in 1 .. Reduced loop
+                           K (C, C2) := K (C, C2) - Sag (T, C) * Sag (T, C2) / Saa (T);
+                        end loop;
+                     end loop;
+                  end if;
+               end loop;
+               Eigensystem (0.5 * (K + Transpose (K)), Values, Vectors);
+               for C in 1 .. Reduced loop
+                  Q (C) := Vectors (C, Reduced);
+               end loop;
                declare
-                  T  : constant Rigid := Eye_At (Joints, Changes_Of (Sg.Frame));
-                  H0 : constant Vec3 := Ray (L, Sg.U0, Sg.V0);
-                  Bv : constant Vec3 := T.Rotation * Ray (L, Sg.U, Sg.V);
-                  function Across (V : Vec3) return Vec3 is (V - (Dot (V, Bv) / Dot (Bv, Bv)) * Bv);
+                  Ahead, Behind : Natural := 0;
                begin
-                  Num (Sg.Track) := Num (Sg.Track) + Dot (Across (H0), Across (T.Translation));
-                  Den (Sg.Track) := Den (Sg.Track) + Dot (Across (H0), Across (H0));
+                  for T in 1 .. Tracks loop
+                     Lengths (T) := 0.0;
+                     if Saa (T) > 0.0 then
+                        declare
+                           Sum : Real := 0.0;
+                        begin
+                           for C in 1 .. Reduced loop
+                              Sum := Sum + Sag (T, C) * Q (C);
+                           end loop;
+                           Lengths (T) := Sum / Saa (T);
+                           if Lengths (T) > 0.0 then
+                              Ahead := Ahead + 1;
+                           elsif Lengths (T) < 0.0 then
+                              Behind := Behind + 1;
+                           end if;
+                        end;
+                     end if;
+                  end loop;
+                  if Behind > Ahead then
+                     Q := -Q;
+                     for T in 1 .. Tracks loop
+                        Lengths (T) := -Lengths (T);
+                     end loop;
+                  end if;
+               end;
+            end Solve;
+
+            --  Each sighting's angular residual at these lengths, in pixels at the focal length, the weights it now has
+            --  (Huber's at its own scale) and whether it fits (not significant against that scale); how many sightings
+            --  changed from fitting to not or the other way.
+            procedure Judge (Now : out Natural) is
+               Rho : Real_Access := new Real_Array (1 .. S);
+            begin
+               Now := 0;
+               for I in 1 .. S loop
+                  declare
+                     Sg : Sighting renames Sight (Sight'First + I - 1);
+                     T  : constant Positive := Sg.Track;
+                  begin
+                     Rho (I) := Real'Last;
+                     if Saa (T) > 0.0 and then Lengths (T) > 0.0 then
+                        declare
+                           H0   : constant Vec3 := Ray (L, Sg.U0, Sg.V0);
+                           B    : constant Vec3 := Ray (L, Sg.U, Sg.V);
+                           Seen : constant Vec3 :=
+                             Transpose (Turns (Sg.Frame)) * (Lengths (T) * H0 - Translation_Of (Sg.Frame, Q));
+                        begin
+                           if Dot (B, Seen) > 0.0 and then abs Seen > 0.0 then
+                              Rho (I) := Focal * Real'(abs Cross (B, Seen)) / (Real'(abs B) * Real'(abs Seen));
+                           end if;
+                        end;
+                     end if;
+                  end;
+               end loop;
+               declare
+                  Sub     : Real_Access := new Real_Array (1 .. S);
+                  Own_Sub : Real_Access := new Real_Array (1 .. S);
+                  Used    : Natural := 0;
+               begin
+                  for I in 1 .. S loop
+                     if Rho (I) < Real'Last then
+                        Used := Used + 1;
+                        Sub (Used) := Rho (I);
+                        Own_Sub (Used) := Own (I);
+                     end if;
+                  end loop;
+                  declare
+                     Floor : constant Real := (if Used > 0 then Floor_Of (Sub (1 .. Used), Own_Sub (1 .. Used)) else 0.0);
+                  begin
+                     for I in 1 .. S loop
+                        declare
+                           Scale : constant Real := Scale_Of (Floor, Own (I));
+                           Seen  : constant Boolean := Rho (I) < Real'Last and then Scale > Real'Model_Small;
+                           Fits  : constant Boolean := Seen and then not Driver.Uncertain.Significant (Rho (I), Scale);
+                        begin
+                           Weight (I) := (if Seen then Huber (Rho (I) / Scale) else 0.0);
+                           if Fits /= Fit_Now (I) then
+                              Now := Now + 1;
+                              Fit_Now (I) := Fits;
+                           end if;
+                        end;
+                     end loop;
+                  end;
+                  Free (Sub);
+                  Free (Own_Sub);
+               end;
+               Free (Rho);
+            end Judge;
+
+            Changed : Natural := Natural'Last;
+         begin
+            for F in 1 .. Frames loop
+               declare
+                  Change : constant Real_Array := Changes_Of (F);
+                  Turn   : Mat3 := Identity3;
+               begin
+                  for J in 1 .. N loop
+                     declare
+                        A    : Joint renames Joints (Joints'First + J - 1);
+                        Step : constant Mat3 := Rot (A.W, A.C * Change (J));
+                     begin
+                        Maps ((F - 1) * N + J) := Turn * (Identity3 - Step);
+                        Turn := Turn * Step;
+                     end;
+                  end loop;
+                  Turns (F) := Turn;
+                  Poses (F) := Eye_At (Joints, Change);
                end;
             end loop;
-            for T in 1 .. Tracks loop
-               Has (T) := Den (T) > 0.0 and then Num (T) / Den (T) > 0.0;
-               Depth (T) := (if Has (T) then Ln (Num (T) / Den (T)) else 0.0);
+            for J in 1 .. N loop
+               Perp (Joints (Joints'First + J - 1).W, E_1 (J), E_2 (J));
             end loop;
-            Free (Num);
-            Free (Den);
-         end Triangulate;
+            for I in 1 .. S loop
+               declare
+                  Sg   : Sighting renames Sight (Sight'First + I - 1);
+                  H0   : constant Vec3 := Ray (L, Sg.U0, Sg.V0);
+                  B    : constant Vec3 := Ray (L, Sg.U, Sg.V);
+                  Back : constant Mat3 := Transpose (Turns (Sg.Frame));
+                  A    : constant Vec3 := Cross (B, Back * H0);
+               begin
+                  Own (I) := Sg.Own;
+                  for D in 1 .. 3 loop
+                     Along (I, D) := A (D);
+                  end loop;
+                  for J in 1 .. N loop
+                     for Axis in 1 .. 2 loop
+                        declare
+                           Col : constant Vec3 :=
+                             Cross (B, Back * (Maps ((Sg.Frame - 1) * N + J) * (if Axis = 1 then E_1 (J) else E_2 (J))));
+                        begin
+                           for D in 1 .. 3 loop
+                              Across_Columns (3 * I - 3 + D, 2 * J - 2 + Axis) := Col (D);
+                           end loop;
+                        end;
+                     end loop;
+                  end loop;
+               end;
+            end loop;
+            --  The sightings the stages before it fit to begin with: the epipolar residual (which does not depend on
+            --  the lengths) not significant against the noise the residuals show.
+            declare
+               Rs : Real_Access := new Real_Array (1 .. S);
+            begin
+               for I in 1 .. S loop
+                  declare
+                     Sg     : Sighting renames Sight (Sight'First + I - 1);
+                     Rr     : Mat3;
+                     Tt     : Vec3;
+                  begin
+                     Relative (Poses (1), Poses (Sg.Frame), Rr, Tt);
+                     Rs (I) := Sampson (Rr, Tt, Ray (L, Sg.U0, Sg.V0), Ray (L, Sg.U, Sg.V), Focal);
+                  end;
+               end loop;
+               declare
+                  Floor : constant Real := Floor_Of (Rs.all, Own.all);
+               begin
+                  for I in 1 .. S loop
+                     declare
+                        Scale : constant Real := Scale_Of (Floor, Own (I));
+                     begin
+                        if not Driver.Uncertain.Significant (Rs (I), Scale) then
+                           Weight (I) := 1.0;
+                        end if;
+                     end;
+                  end loop;
+               end;
+               Free (Rs);
+            end;
+            for Round in 1 .. Real'Machine_Mantissa loop
+               Solve;
+               declare
+                  Now : Natural;
+               begin
+                  Judge (Now);
+                  exit when Now = 0 or else Now >= Changed;
+                  Changed := Now;
+               end;
+            end loop;
+            Solve;
+            declare
+               Now : Natural;
+            begin
+               Judge (Now);
+            end;
+            --  The lengths as the stages before it had them, in size: the eye's travel over the keyframes.
+            declare
+               Old, Now : Real := 0.0;
+            begin
+               for F in 1 .. Frames loop
+                  Old := Old + Poses (F).Translation * Poses (F).Translation;
+                  Now := Now + Translation_Of (F, Q) * Translation_Of (F, Q);
+               end loop;
+               declare
+                  Size : constant Real := (if Now > 0.0 and then Old > 0.0 then Sqrt (Old / Now) else 1.0);
+               begin
+                  for J in 1 .. N loop
+                     Joints (Joints'First + J - 1).P := Size * Point_Of (J, Q);
+                  end loop;
+                  for T in 1 .. Tracks loop
+                     Has (T) := Saa (T) > 0.0 and then Lengths (T) > 0.0;
+                     Depth (T) := (if Has (T) then Ln (Size * Lengths (T)) else 0.0);
+                  end loop;
+                  --  The descent starts from the sightings that fit these lengths.
+                  for I in 1 .. S loop
+                     Inlier (I) := Has (Sight (Sight'First + I - 1).Track) and then Fit_Now (I);
+                  end loop;
+               end;
+            end;
+            Free (Turns);
+            Free (Maps);
+            Free (Poses);
+            Free (Along);
+            Free (Across_Columns);
+            Free (Weight);
+            Free (Own);
+            Free (Fit_Now);
+            Free (Saa);
+            Free (Sag);
+            Free (Lengths);
+         end Linear_Start;
       begin
-         Triangulate;
-         for I in 1 .. S loop
-            Inlier (I) := Has (Sight (Sight'First + I - 1).Track);
-         end loop;
+         Linear_Start;
          To_X (L, Joints, X);
          loop
             declare
@@ -602,6 +948,8 @@ package body Driver.Robot.Kinematics.Fit is
                   Rn    : Real_Access := new Real_Array (1 .. 2 * Used);
                   Jp    : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 2 * Used, 1 .. Count);
                   Jd    : Real_Access := new Real_Array (1 .. 2 * Used);
+                  Owns  : Real_Access := new Real_Array (1 .. 2 * Used);   --  what the matcher stated, per residual
+                  Scales : Real_Access := new Real_Array (1 .. 2 * Used);  --  what each residual is judged at
                   K     : Natural := 0;
                   Sigma : Real;
                   Lambda : Real := Real'Model_Epsilon;
@@ -609,8 +957,8 @@ package body Driver.Robot.Kinematics.Fit is
                   function Cost (R : Real_Array) return Real is
                      C : Real := 0.0;
                   begin
-                     for V of R loop
-                        C := C + Huber_Cost (V / Sigma);
+                     for I in R'Range loop
+                        C := C + Huber_Cost (R (I) / Scales (I));
                      end loop;
                      return C;
                   end Cost;
@@ -619,20 +967,31 @@ package body Driver.Robot.Kinematics.Fit is
                      if Inlier (I) then
                         K := K + 1;
                         Index (K) := Real (I);
+                        Owns (2 * K - 1) := Sight (Sight'First + I - 1).Own;
+                        Owns (2 * K) := Sight (Sight'First + I - 1).Own;
                      end if;
                   end loop;
                   Residuals (X, Depth.all, Index, R0.all);
-                  Sigma := Noise_Of (R0.all);
-                  if Sigma <= 0.0 then
+                  Sigma := Floor_Of (R0.all, Owns.all);
+                  for I in 1 .. 2 * Used loop
+                     Scales (I) := Scale_Of (Sigma, Owns (I));
+                  end loop;
+                  if (for all Scale of Scales.all => Scale <= Real'Model_Small) then
                      Free (Index);
                      Free (R0);
                      Free (Rn);
                      Free (Jp);
                      Free (Jd);
+                     Free (Owns);
+                     Free (Scales);
                      exit;
                   end if;
                   Cost0 := Cost (R0.all);
-                  loop
+                  --  A step that still lowers the cost is taken again, as many times as the float has bits: each
+                  --  step of a convergent descent gains digits, and one that crawls down a valley the sightings
+                  --  leave flat has not found the fit they determine (the covariance then says what is left
+                  --  undetermined).
+                  for Round in 1 .. Real'Machine_Mantissa loop
                      --  The Jacobian: the parameters one by one; the depths all at
                      --  once, since each residual has one depth of its own.
                      --  The columns at once (Driver.Parallel_For): each moves its own
@@ -683,7 +1042,7 @@ package body Driver.Robot.Kinematics.Fit is
                         Bm.all := [others => [others => 0.0]];
                         for I in 1 .. 2 * Used loop
                            declare
-                              W : constant Real := Huber (R0 (I) / Sigma) / Sigma ** 2;
+                              W : constant Real := Huber (R0 (I) / Scales (I)) / Scales (I) ** 2;
                               T : constant Positive := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;
                            begin
                               for P in 1 .. Count loop
@@ -775,7 +1134,10 @@ package body Driver.Robot.Kinematics.Fit is
                                  Moves := True;
                               end if;
                               Free (Cl);
-                              exit when Lowered or else not Moves;
+                              --  Damping is doubled until a step lowers the cost or none moves a parameter; with
+                              --  normal equations no damping makes positive definite (a depth or a term of
+                              --  infinite information) it ends where the doubling can go no further.
+                              exit when Lowered or else not Moves or else Lambda > Real'Last / 2.0;
                               Lambda := 2.0 * Lambda;
                            end;
                         end loop;
@@ -921,7 +1283,7 @@ package body Driver.Robot.Kinematics.Fit is
                                           declare
                                              T : constant Positive := Of_Track ((I + 1) / 2);
                                           begin
-                                             Error (I) := Huber (R0 (I) / Sigma) * R0 (I);
+                                             Error (I) := Huber (R0 (I) / Scales (I)) * R0 (I);
                                              for P in 1 .. Reduced loop
                                                 declare
                                                    Jr : Real := 0.0;
@@ -934,7 +1296,7 @@ package body Driver.Robot.Kinematics.Fit is
                                                    if T /= Anchor and then C (T) > 0.0 then
                                                       Jr := Jr - Br (P, T) / C (T) * Jd (I);
                                                    end if;
-                                                   Rows (I, P) := Jr / Sigma ** 2;
+                                                   Rows (I, P) := Jr / Scales (I) ** 2;
                                                 end;
                                              end loop;
                                           end;
@@ -967,6 +1329,8 @@ package body Driver.Robot.Kinematics.Fit is
                   Free (Rn);
                   Free (Jp);
                   Free (Jd);
+                  Free (Owns);
+                  Free (Scales);
                end;
             end;
             --  The axes' tangent planes anew at the solution.
@@ -979,6 +1343,7 @@ package body Driver.Robot.Kinematics.Fit is
             declare
                All_Index : Real_Access := new Real_Array (1 .. S);
                All_R     : Real_Access := new Real_Array (1 .. 2 * S);
+               All_Own   : Real_Access := new Real_Array (1 .. 2 * S);
                Sigma     : Real;
                Now_Changed : Natural := 0;
                Fit_Abs   : Real_Access;
@@ -986,14 +1351,17 @@ package body Driver.Robot.Kinematics.Fit is
             begin
                for I in 1 .. S loop
                   All_Index (I) := Real (I);
+                  All_Own (2 * I - 1) := Sight (Sight'First + I - 1).Own;
+                  All_Own (2 * I) := Sight (Sight'First + I - 1).Own;
                end loop;
                Residuals (X, Depth.all, All_Index, All_R.all);
-               Sigma := Noise_Of (All_R.all);
+               Sigma := Floor_Of (All_R.all, All_Own.all);
                for I in 1 .. S loop
                   declare
-                     Fits : constant Boolean := Has (Sight (Sight'First + I - 1).Track) and then Sigma > 0.0
-                       and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Sigma)
-                       and then not Driver.Uncertain.Significant (All_R (2 * I), Sigma);
+                     Scale : constant Real := Scale_Of (Sigma, All_Own (2 * I));
+                     Fits  : constant Boolean := Has (Sight (Sight'First + I - 1).Track) and then Scale > Real'Model_Small
+                       and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Scale)
+                       and then not Driver.Uncertain.Significant (All_R (2 * I), Scale);
                   begin
                      if Fits /= Inlier (I) then
                         Now_Changed := Now_Changed + 1;
@@ -1020,6 +1388,7 @@ package body Driver.Robot.Kinematics.Fit is
                end if;
                Free (All_Index);
                Free (All_R);
+               Free (All_Own);
                exit when Now_Changed = 0 or else Now_Changed >= Changed;
                Changed := Now_Changed;
             end;
