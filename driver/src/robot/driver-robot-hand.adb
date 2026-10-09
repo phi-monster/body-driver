@@ -2,6 +2,7 @@ with Ada.Containers.Vectors;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
+with Driver.Conventions;
 with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Hand.Frames;
@@ -13,6 +14,7 @@ with Driver.Robot.Hand.Slide;
 with Driver.Robot.Hand.Sweep;
 with Driver.Robot.Hand.Tips;
 with Driver.Robot.Hand.Views;
+with Driver.Robot.Kinematics;
 with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
 
@@ -908,6 +910,56 @@ package body Driver.Robot.Hand is
    --  asked: the pose of a press is a function of the readings alone, and the
    --  pictures settle after the arm does.
 
+   function Asks_A_Translation (M : Model; A : Arm_Id; From, Target : Real_Array) return Boolean is
+      Arm_Is : constant Group_Id := Arm_Group (M, A);
+
+      function Pose_At (Arm : Real_Array) return Pose_Estimate is
+         O : Observation;
+      begin
+         for G in Group_Id'First .. Arm_Is loop
+            O.Readings.Append ((if G = Arm_Is then Arm else Real_Array'(1 .. 0 => 0.0)));
+         end loop;
+         return Tool_In_Arm (M, A, O);
+      end Pose_At;
+
+      Began : constant Pose_Estimate := Pose_At (From);
+      Goal  : constant Pose_Estimate := Pose_At (Target);
+   begin
+      --  Nothing is told of a push whose poses are not known: it is left to the watcher, as every push was.
+      return Began.Position_Covariance (1, 1) = Real'Last or else Goal.Position_Covariance (1, 1) = Real'Last
+        or else Driver.Numerics.Angle (Transpose (Began.Pose.Rotation) * Goal.Pose.Rotation)
+                <= Driver.Conventions.Z * Driver.Robot.Kinematics.Angle_Sigma (M, A);
+   end Asks_A_Translation;
+
+   function Latest_Push_Lowers (M : Model; A : Arm_Id) return Boolean is
+      Arm_Is : constant Group_Id := Arm_Group (M, A);
+   begin
+      if Driver.Robot.Steps.Episodes (M, Arm_Is) = 0 then
+         return True;
+      end if;
+      declare
+         E : constant Episode := Driver.Robot.Steps.Latest (M, Arm_Is);
+      begin
+         if E.Start < 1 or else not Driver.Robot.Channels.Has_Reading (M, Arm_Is, E.Start - 1)
+           or else not Driver.Robot.Channels.Has_Target (M, Arm_Is, E.Start)
+         then
+            return True;
+         end if;
+         declare
+            Size : constant Natural := Group_Size (M, Arm_Is);
+         begin
+            return Asks_A_Translation
+              (M, A,
+               From   => [for C in 1 .. Size => Driver.Robot.Channels.Reading (M, Arm_Is, E.Start - 1, C)],
+               Target => [for C in 1 .. Size => Driver.Robot.Channels.Target (M, Arm_Is, E.Start, C)]);
+         end;
+      end;
+   end Latest_Push_Lowers;
+   --  The arm's latest push, under way or ended, asked the tool a translation. A block is a press only when the push
+   --  that was blocked lowered the hand: A27's first press of hand 2 was an aim the arm itself stopped (its third
+   --  joint at +0.07, asked -0.05, the eye 12.39 above the table), the stream's watcher took the rest after it for a
+   --  press, and a tip 12.39 from the eye was fitted to it, then confirmed by two presses stopped in the air as well.
+
    function Arm_Pushed (M : Model; A : Arm_Id) return Boolean is
      (Natural (A) <= Arm_Count (M)
       and then Driver.Robot.Steps.Episodes (M, Arm_Group (M, A)) > 0
@@ -932,7 +984,8 @@ package body Driver.Robot.Hand is
       end loop;
       for Id in H.Data.Found.First_Index .. H.Data.Found.Last_Index loop
          Press_Beat (H, Id, M, O,
-                     Is_Blocked => Blocked (M, H.Data.Found (Id).Arm, O),
+                     Is_Blocked => Blocked (M, H.Data.Found (Id).Arm, O)
+                                   and then Latest_Push_Lowers (M, H.Data.Found (Id).Arm),
                      Is_Still   => Arm_At_Rest (M, H.Data.Found (Id).Arm, O),
                      Is_Pushing => Arm_Pushed (M, H.Data.Found (Id).Arm));
       end loop;
@@ -1179,9 +1232,12 @@ package body Driver.Robot.Hand is
    function Found (H : Hands; Id : Hand_Id) return Hand_Record is (H.Data.Found (Id));
 
    function Hand_Count (H : Hands) return Natural is (if H.Data = null then 0 else Natural (H.Data.Found.Length));
+
+   function Exists (H : Hands; Id : Hand_Id) return Boolean is (H.Data /= null and then Id <= H.Data.Found.Last_Index);
    function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id is (Found (H, Id).Group);
    function Arm_Of (H : Hands; Id : Hand_Id) return Arm_Id is (Found (H, Id).Arm);
    function Lobe_Count (H : Hands; Id : Hand_Id) return Positive is (Natural (Found (H, Id).Lobes.Length));
+   function Presses_Kept (H : Hands; Id : Hand_Id) return Natural is (Driver.Robot.Hand.Tips.Pressed (Found (H, Id).Book));
    function Own_Eye (H : Hands; Id : Hand_Id) return Eye_Id is (Found (H, Id).Eye);
 
    function Tip_Pixel (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Driver.Images.Pixel is

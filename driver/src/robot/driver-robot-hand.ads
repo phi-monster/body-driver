@@ -39,9 +39,21 @@ package Driver.Robot.Hand is
    --  Decider: finds and measures every hand of the booted body.
 
    function Hand_Count (H : Hands) return Natural;
+   function Exists (H : Hands; Id : Hand_Id) return Boolean;
+   --  The hand Id is there now. The estimators drop and renumber hands between two held beats (the roles are
+   --  read again, a recompute of the heavier estimates; A29), so a decider that keeps a Hand_Id from an earlier
+   --  beat asks before it reads: the queries below, asked of an Id past the last hand, raise.
+
+   function Asks_A_Translation (M : Model; A : Arm_Id; From, Target : Real_Array) return Boolean;
+   --  A push of the arm from readings From to readings Target asks the tool a translation: the rotation of the tool
+   --  at Target is that at From, to what the arm's fit can tell (Kinematics.Angle_Sigma, Z times it), as the steps of a
+   --  descent are (Pressing.Lowered) and the turn of an aim about the eye is not. True when the poses are not known.
+   --  A block counts toward a press only when the push that was blocked asked a translation (Observe).
    function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id;
    function Arm_Of (H : Hands; Id : Hand_Id) return Arm_Id;
    function Lobe_Count (H : Hands; Id : Hand_Id) return Positive;
+   function Presses_Kept (H : Hands; Id : Hand_Id) return Natural;
+   --  How many presses the hand's book keeps: the blocks of its descents, found in the stream.
 
    type Opening is (Open, Closed_Empty);
 
