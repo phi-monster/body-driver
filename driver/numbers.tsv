@@ -1057,9 +1057,9 @@ driver-robot-hand-measure.adb	Lean : constant Vec3 := Exp ((Side * Ada.Numerics.
 driver-robot-hand-measure.adb	Noise := Sqrt (2.0) * Reading_Noise (M, G, C);	2.0	statistics	the difference of two readings carries the channel's noise twice over
 driver-robot-hand-measure.adb	Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began));	1	structure	at least one asking: a view is asked for once it is pushed
 driver-robot-hand-measure.adb	else "" & Driver.Log.Image (By, 4) & ""	4	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	elsif Natural (Closers.Length) = 1 then	1	structure	one arm or hand needs no lanes; more than one are measured at once
 driver-robot-hand-measure.adb	elsif Steps.Stalled then "" & Driver.Log.Image (By, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	if Bound < Ada.Numerics.Pi / 2.0 and then not Checked and then Tilt = 0.0 then	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
+driver-robot-hand-measure.adb	if Natural (Closers.Length) = 1 then	1	structure	one hand needs no lanes; more than one are pressed at once
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Eye.Value, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
@@ -2025,6 +2025,7 @@ driver-robot-kinematics.adb	with Pre => On'First = 1	1	structure	indexes start a
 driver-robot-kinematics.adb	with Pre => S'First = 1 and then S'Length = Natural (U.Length) and then Natural (V.Length) = Natural (U.Length)	1	structure	indexes start at one
 driver-robot-lag.adb	Best : Real := 1.0;	1.0	math	a probability: no fit yet, so noise explains everything
 driver-robot-lag.adb	Child := 2 * Root;	2	structure	in a binary heap the children of node k are 2 k and 2 k + 1
+driver-robot-lag.adb	Gaps : Real_Access := new Real_Array (1 .. Natural'Max (1, Natural (List.Length)));	1	structure	at least one element, so an empty list allocates a buffer no smaller than one
 driver-robot-lag.adb	I : Positive := 1;	1	structure	arrays are indexed from one
 driver-robot-lag.adb	Ranks (L) := Real (I + J) / 2.0;	2.0	math	tied values share the mean of the ranks they span
 driver-robot-lag.adb	Sift (1, Stop - 1);	1	structure	the heap's root is node one, and the heap shrinks by one per extraction
@@ -2163,8 +2164,8 @@ driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure
 driver-robot.adb	Spread : constant Real := Sqrt (((P.Tilt_11 - P.Tilt_22) / 2.0) ** 2 + P.Tilt_12 ** 2);	2.0	math	the larger eigenvalue of a symmetric 2 x 2: the mean of the diagonal plus the root of the half difference squared and the off diagonal squared
 driver-robot.adb	function Up (M : Model) return Direction_Estimate is (Up_In_Arm (M, 1));	1	structure	the world is the first arm's reference frame
 driver-robot.adb	if M.Beats >= 2 * M.Graph_Evidence then	2	numerics	re-estimating when the evidence doubles keeps the number of re-estimates logarithmic in the stream
-driver-robot.adb	return "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
-driver-robot.adb	return "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
+driver-robot.adb	return "" & Image_Lag (M, E)'Image & (if Lag_Known (M, E) then "" else "") & "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
+driver-robot.adb	return "" & Image_Lag (M, E)'Image & (if Lag_Known (M, E) then "" else "") & "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
 driver-robot.adb	then Real'Max (0.0, (S (1, 1) + S (2, 2) + S (3, 3) - Driver.Numerics.Arrays."" (D, Driver.Numerics.Arrays."" (S, D))) / 2.0)	2.0	math	a small turn moves a line by its part across the line, shared by the two axes across it
 driver-robot.ads	C : Real := 1.0;	1.0	structure	a joint turns one radian per reading unit until fitted
 driver-robot.ads	Change_1, Change_2 : Real := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
