@@ -44,7 +44,9 @@ package body Driver.Robot.Hand.Pressing is
          end;
       end if;
       Result.Turn := Angle (Transpose (Tool.Pose.Rotation) * Result.Above.Rotation);
-      Result.Plan := Driver.Robot.Motion.Plan_Reach_In_Arm (M, Arm, O, (Pose => Result.Above, Position_Only => False));
+      --  The aim points the line of sight at "down" as the arm's eye saw the table: known to that direction's sigma.
+      Result.Plan := Driver.Robot.Motion.Plan_Reach_In_Arm
+        (M, Arm, O, (Pose => Result.Above, Position_Only => False), Goal_Turn_Sigma => Down.Sigma);
       if Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Planned then
          declare
             There : Observation := O;

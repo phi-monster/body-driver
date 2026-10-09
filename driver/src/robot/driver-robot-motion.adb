@@ -973,7 +973,8 @@ package body Driver.Robot.Motion is
    end Plan_Reach;
 
    function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal;
-                               Clearance : Real := Real'Last; Lever : Real := 0.0) return Plan is
+                               Clearance : Real := Real'Last; Lever : Real := 0.0;
+                               Goal_Turn_Sigma : Real := 0.0) return Plan is
       use Driver.Numerics.Arrays;
    begin
       if Natural (A) > Arm_Count (M) or else not Kinematics.Fitted (M, A) then
@@ -1028,7 +1029,7 @@ package body Driver.Robot.Motion is
                Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only and then B_Of = 1.0,
                                       Next, Position_Off, Turn_Off);
                if not Driver.Uncertain.Significant (Position_Off, Sigma)
-                 and then not Driver.Uncertain.Significant (Turn_Off, Sigma)
+                 and then not Driver.Uncertain.Significant (Turn_Off, Sqrt (Sigma ** 2 + Goal_Turn_Sigma ** 2))
                then
                   declare
                      Bow : constant Real :=

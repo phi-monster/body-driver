@@ -266,10 +266,16 @@ package Driver.Robot.Motion is
    --  caller makes by asking for a clearance.
 
    function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal;
-                               Clearance : Real := Real'Last; Lever : Real := 0.0) return Plan;
+                               Clearance : Real := Real'Last; Lever : Real := 0.0;
+                               Goal_Turn_Sigma : Real := 0.0) return Plan;
    --  The same, the goal a pose of the tool in the arm's own frame
    --  (Tool_In_Arm): it needs only the arm's kinematics, not its placement in
    --  the world; the Clearance and the Lever are in the arm's own unit.
+   --  Goal_Turn_Sigma is how well the goal's own turn is known, in radians: a
+   --  turn the solver leaves is a miss when it stands out of the fit's turn
+   --  sigma and the goal's together. An aim at "down" as the table shows it is
+   --  known no better than that direction; A87's hand 1 planned no aim of any
+   --  press, every one left 9e-4 rad from a goal judged by the fit alone.
 
    function Status (P : Plan) return Plan_Status;
    function Why (P : Plan) return String;
