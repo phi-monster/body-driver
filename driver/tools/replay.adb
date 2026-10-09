@@ -27,6 +27,12 @@
 --  can be scored against simulator truth whatever model produced them.
 --  Nothing here decides anything; the recorded replies did.
 --
+--  It prints the estimators' own log lines, each begun with "@" and the beat
+--  of the recording it was written at, and, last, the time the driver's work
+--  took (parsing the messages, the robot, hand and world estimators, the
+--  estimates computed apart), in seconds and milliseconds a beat, and how many
+--  beats it replayed.
+--
 --  The estimators' service calls are answered as Driver.Services describes
 --  for a replay: by the live service when --inst or --eye names one (a
 --  recording without service replies, or a new instrument asked again),
@@ -333,6 +339,7 @@ procedure Replay is
             end;
             Current := M.O;
             Beat := Beat + 1;
+            Driver.Log.Stamp (Beat);
          end if;
          Apart.Replay_Message (M);
       end;
