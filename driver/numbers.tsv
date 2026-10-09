@@ -777,8 +777,8 @@ driver-robot-graph.adb	if Whole_Eyes = Eyes and then Eyes >= 2 then	2	structure	
 driver-robot-hand-aims.adb	(if Size > Real'Model_Epsilon then Exp (Arctan (Size, Now * Goal) * ((1.0 / Size) * Axis))	1.0	math	a vector over its length is its unit vector
 driver-robot-hand-aims.adb	Next := 2.0 * Tilt;	2.0	numerics	a search for an unknown size grows geometrically, doubling
 driver-robot-hand-aims.adb	Next := Tilt / 2.0;	2.0	numerics	a search for the size an arm makes shrinks geometrically, halving
-driver-robot-hand-aims.adb	then Sqrt (2.0 * Sqrt (2.0) * Threshold (Scalar_Gate (Distance.Degrees_Of_Freedom)) * Distance.Sigma	2.0	math	two hits differ by s T^2 / 2 at least, over the noise of a difference of two, the root of 2 of one hit's
-driver-robot-hand-aims.adb	then Sqrt (2.0 * Sqrt (2.0) * Threshold (Scalar_Gate (Distance.Degrees_Of_Freedom)) * Distance.Sigma	2.0	math	two hits differ by s T^2 / 2 at least, over the noise of a difference of two, the root of 2 of one hit's
+driver-robot-hand-aims.adb	then Sqrt (2.0 * Sqrt (2.0) * Push / Distance.Value)	2.0	math	the hits of a tip and of a stop of the eye differ by s T^2 / 2: the tilt is the root of 2 over s times what must be told
+driver-robot-hand-aims.adb	then Sqrt (2.0 * Sqrt (2.0) * Push / Distance.Value)	2.0	statistics	the difference of two hits has the root of two of the tool place's noise
 driver-robot-hand-frames.adb	Across : constant Real := (Turn (1, 1) + Turn (2, 2) + Turn (3, 3) - U * (Turn * U)) / 2.0;	2.0	math	the mean of the turn's variance about the two axes across the line
 driver-robot-hand-lobes.adb	(((Real (C) + 0.5 - Tip.U) * Reach_U + (Real (R) + 0.5 - Tip.V) * Reach_V) / Length);	0.5	math	the centre of a pixel is half a pixel from its corner
 driver-robot-hand-lobes.adb	(((Real (C) + 0.5 - Tip.U) * Reach_U + (Real (R) + 0.5 - Tip.V) * Reach_V) / Length);	0.5	math	the centre of a pixel is half a pixel from its corner
@@ -908,6 +908,7 @@ driver-robot-hand-lobes.adb	return (if Region = 0 then 0.0 else Sqrt (Sum / (2.0
 driver-robot-hand-lobes.ads	and then Driver.Pixels.Frames (Anchor) >= 2;	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-lowering.adb	Enough : constant Boolean := T.Count > 2;	2	statistics	a scatter of shares needs more than two pushes before it, as a shortfall's does in the step tracker
 driver-robot-hand-lowering.adb	Lowering := Lowering / Real (Natural'Max (1, Where'Length));	1	structure	a hand has a point at the least (the tool's origin), so a mean never divides by nothing
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Aimed.Turn, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
@@ -915,10 +916,11 @@ driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Descended, 4)	4	format	di
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Least, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Yaw, 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& (if Pixel > 0.0 then Driver.Log.Image (Pixel, 4) & ""	4	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	& Driver.Log.Image (Aimed.Turn, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Aimed.Turn, 4) & "" & Ada.Strings.Unbounded.To_String (Report.Detail)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Descended, 4)));	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Driver.Robot.Hand.Aims.Spread (R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	1	structure	a one-element array of directions
+driver-robot-hand-measure.adb	& Driver.Log.Image (Driver.Robot.Hand.Aims.Spread (R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Least, 4) & "")	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Room.Value, 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Image (Step.Value, 4)	4	format	digits printed in a log line or a message

@@ -785,8 +785,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
             return False;
          end if;
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": pressing lobe" & Lobe'Image & " at "
-                          & (if Which = Open then "open" else "closed") & ", aimed by turning the hand "
-                          & Driver.Log.Image (Aimed.Turn, 4) & " rad"
+                          & (if Which = Open then "open" else "closed") & ", its line of sight tilted "
+                          & Driver.Log.Image (Driver.Robot.Hand.Aims.Spread (R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)
+                          & " rad from straight down, aimed by turning the hand " & Driver.Log.Image (Aimed.Turn, 4) & " rad"
                           & (if Known (First.Tip)
                              then ", " & Driver.Log.Image (First.Tip.Value, 4) & " +- " & Driver.Log.Image (First.Tip.Sigma, 4)
                                   & " above the surface the presses so far fixed"
@@ -932,7 +933,6 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Checked : Boolean := False;   --  the lobe's tip is confirmed by a second press from another pose
          Least   : Real := Real'Last;  --  the least tilt that tells the tip from a stop that does not move with it
          procedure Read_Agreed (O : Observation) is
-            pragma Unreferenced (O);
          begin
             Lost := not Present (Id, R);
             if Lost then
@@ -943,7 +943,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
             begin
                Agreed := Driver.Robot.Hand.Tips.Latest_Agrees (Book);
                Checked := Driver.Robot.Hand.Tips.Confirmed (Book, Lobe, Which);
-               Least := Driver.Robot.Hand.Aims.Least_Tilt (Driver.Robot.Hand.Tips.Distance (Book, Lobe, Which));
+               Least := Driver.Robot.Hand.Aims.Least_Tilt
+                 (Driver.Robot.Hand.Tips.Distance (Book, Lobe, Which), Driver.Robot.Hand.Pressing.Least_Push (M, R.Arm, O));
             end;
          end Read_Agreed;
       begin

@@ -863,11 +863,22 @@ point fit sits between them; and at the closed hand's own angle (0.020 and 0.029
 each other from the eye) the tilted presses were 1 to 5 degrees from the straight one and told nothing across the
 sight: the tip 3.82 along its line known to 0.092 needs 0.452 rad (Least_Tilt) to be told from a stop, the next
 tilt, double, was 0.041, under it, and each side ended after one press; the lobes were left 'not tested across the
-sight', their lateral region 6.9 mm wide, and the 7.4 to 7.8 mm they were off is that stated width. The first tilt
-of a side is now the hand's own angle and no less than the least (Aims.First_Tilt; the hand's own angle itself
-when the tip is so uncertain that the least is a right angle or more: the press at it is another look, which brought
-A31's hand 2 closed lobe 1 from 3.93 to 0.15), and the hull is not built: whether the open hand's flipping vertex
-needs it is for the first run that tilts as the least says.
+sight', their lateral region 6.9 mm wide, and the 7.4 to 7.8 mm they were off is that stated width. The first fix
+(8d17591) made the first tilt of a side the hand's own angle and no less than the least; A36 and A39, which ran it,
+showed the other side of it: the least was taken from the tip distance's sigma, which after one press carries the
+table plane's offset (15 per cent of the distance), so a closed lobe's first tilt was 1.14 to 1.2 rad, which the arm
+could not make ('a press stopped short of the table at 1.2185 rad', A36 and A39) or made by laying the hand down on
+its palm (A36's third press of open lobe 1: the truth has the finger's side on the table, vertex (0, -0.0124,
+-0.0263), the finger 84.9 degrees from straight down, the palm 1.6 mm above the table), while the same lobe
+after the plane was pinned (A37, 1.9 per cent) asked 0.36 and was pressed at 0.40, 0.55, 0.40. Two presses of one tip
+tell it from a stop of the eye by the difference of their hits, s T^2 / 2, whose noise is the tool's own place in
+each (Pressing.Least_Push), not the tip distance's sigma, which both presses share in its plane offset: so
+Least_Tilt takes the push, and the first tilt of a side is the least (Aims.First_Tilt: not the hand's own angle,
+0.020 for a closed hand and 0.84 to 1.2 for an open one, which neither is a tilt anything asks for), 0.28 rad
+for A36's first press (a push of 0.148 on 5.29), and the presses double from it while the tip rests on them. The
+hand's own angle only where no tilt under a right angle tells a stop (the distance not known or the tool's place
+not measured: the press at it is another look, which brought A31's hand 2 closed lobe 1 from 3.93 to 0.15). The
+hull and the finger-side press are the next lessons.
 
 **Lesson: the arm does not leave the table until the hand has rested on it, and a rest after the retreat is no
 press (A35).** A35's first press (the 7bd2880 build, hands from A32's body file): 'a press at the OPEN opening, at

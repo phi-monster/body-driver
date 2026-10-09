@@ -57,11 +57,13 @@ package body Driver.Robot.Hand.Aims.Tests is
       --  hits of a stop at the same height, straight and tilted by T, differ by
       --  the distance times T squared over 2, which is Z times the root of 2
       --  of the sigma at T = 0.239.
-      Least : constant Real := Least_Tilt ((Value => 4.826, Sigma => 0.0324, Degrees_Of_Freedom => 0));
+      Least : constant Real := Least_Tilt ((Value => 4.826, Sigma => 0.0324, Degrees_Of_Freedom => 0), 3.0 * 0.0324);
       Tilt, Bound : Real;
    begin
       Check (abs (Least - 0.2387) < 1.0e-3, "the least tilt of the tip A16 gave is" & Real'Image (Least));
-      Check (Least_Tilt (Unknown) = Real'Last, "a tilt is worth something with the tip's distance unknown");
+      Check (Least_Tilt (Unknown, 0.1) = Real'Last, "a tilt is worth something with the tip's distance unknown");
+      Check (Least_Tilt ((Value => 4.826, Sigma => 0.0324, Degrees_Of_Freedom => 0), Real'Last) = Real'Last,
+             "a tilt is worth something with the tool's noise unknown");
       --  The hand's own angle, 1.0, stopped on the arm: half of it, then a
       --  quarter, which is under the least: no more.
       Tilt := 1.0;
@@ -94,30 +96,34 @@ package body Driver.Robot.Hand.Aims.Tests is
    end Tilts_Follow_The_Arm;
 
    procedure The_First_Tilt_Is_Worth_Making is
-      --  A31's closed lobe 1 after its straight press: the tip 3.8156 along its line known to 0.0920, which a second
-      --  press tells from a stop at 0.45; the hand's own angle between its two lines of sight was 0.0203.
-      Least : constant Real := Least_Tilt ((Value => 3.8156, Sigma => 0.0920, Degrees_Of_Freedom => 0));
+      --  A36's first press of open lobe 1: the tip 5.2931 along its line, the tool's place known to a push of 0.148
+      --  (the doubling began from it): two presses tell a stop of the eye from the tip at 0.28 rad, whatever the
+      --  table plane's offset, which the 0.80 sigma of the tip's distance carries and a difference does not (the old
+      --  least from that sigma was 1.14 rad, which the arm could not make).
+      Least : constant Real := Least_Tilt ((Value => 5.2931, Sigma => 0.8036, Degrees_Of_Freedom => 0), 0.148);
       Right : constant Real := Ada.Numerics.Pi / 2.0;
    begin
-      Check (abs (Least - 0.4523) < 1.0e-3, "the least tilt of A31's closed lobe is" & Real'Image (Least));
+      Check (abs (Least - 0.2812) < 1.0e-3, "the least tilt of A36's first tip is" & Real'Image (Least));
+      --  A closed hand's lobes lie 0.0203 apart from the eye (A31) and an open hand's 0.84 (A36): neither is the tilt.
       Check (First_Tilt (0.0203, Least, Right) = Least,
              "the first tilt of a hand whose lobes lie 0.0203 apart is" & Real'Image (First_Tilt (0.0203, Least, Right))
-             & ", under the" & Real'Image (Least) & " that tells a tip from a stop");
-      Check (First_Tilt (0.9326, 0.4, Right) = 0.9326, "the first tilt of an open hand is not its own angle, 0.9326");
-      Check (First_Tilt (0.9326, 1.07, Right) = 1.07, "the first tilt is under the least that tells the tip from a stop, 1.07");
+             & ", not the" & Real'Image (Least) & " that tells a tip from a stop");
+      Check (First_Tilt (0.8397, Least, Right) = Least,
+             "the first tilt of an open hand is its own angle, 0.8397, and not the least" & Real'Image (Least));
       Check (First_Tilt (0.0203, Real'Last, Right) = 0.0203, "the first tilt of a tip at no known distance is not the hand's own angle");
-      --  A31's hand 2 closed lobe 1 after its first press: 5.48 along its line known to 3.93, for which no tilt under a
-      --  right angle tells a stop: the press at the hand's own angle is another look at it, which brought the sigma to 0.15.
-      Check (First_Tilt (0.1081, Least_Tilt ((Value => 5.4837, Sigma => 3.9309, Degrees_Of_Freedom => 0)), Right) = 0.1081,
+      --  A31's hand 2 closed lobe 1 after its first press: 5.48 along its line, a push of 8.0 (a tool that is not known
+      --  to a tenth of the distance): no tilt under a right angle tells a stop, and the press at the hand's own angle
+      --  is another look at it, which brought the sigma from 3.93 to 0.15.
+      Check (First_Tilt (0.1081, Least_Tilt ((Value => 5.4837, Sigma => 3.9309, Degrees_Of_Freedom => 0), 8.0), Right) = 0.1081,
              "a tip too uncertain for any tilt under a right angle to tell was not pressed at the hand's own angle");
       --  Not under what this side was found not to make.
-      Check (First_Tilt (0.0203, Least, 0.3) = 0.0203, "a first tilt was made past the tilt this side did not make");
+      Check (First_Tilt (0.0203, Least, 0.2) = 0.0203, "a first tilt was made past the tilt this side did not make");
    end The_First_Tilt_Is_Worth_Making;
 
    procedure Register is
    begin
-      Driver.Tests.Register ("hand.aims.first", "the first tilt of a side is under the least that tells a tip from a stop, "
-                             & "or is not the hand's own angle when that is more",
+      Driver.Tests.Register ("hand.aims.first", "the first tilt of a side is the hand's own angle or under the least that tells a tip from a stop, "
+                             & "or the least is taken from the tip's distance sigma, which carries the table's offset",
                              The_First_Tilt_Is_Worth_Making'Access);
       Driver.Tests.Register ("hand.aims.tilts", "a tilt the arm cannot make is asked again, or the tilts never end",
                              Tilts_Follow_The_Arm'Access);
