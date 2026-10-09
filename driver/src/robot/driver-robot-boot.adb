@@ -300,28 +300,31 @@ package body Driver.Robot.Boot is
                      Level  : Positive := 1;
                   begin
                      while Offset * Per_Unit (P.Channel) <= Half loop
-                        declare
-                           Pose : Real_Array := Start;
-                        begin
-                           Pose (P.Channel) := Start (P.Channel) + P.Sign * Offset;
-                           Go_To (G, Pose, Report);
-                           --  Every other level is held for its keyframe, the
-                           --  first and the widest included: keyframes over
-                           --  every scale from the matcher's limit to the widest
-                           --  turn, one per two doublings, fit as well as one per
-                           --  doubling (A9's arm: 59 keyframes against 97, the
-                           --  same against truth), and the holds are most of the
-                           --  sweep. An arm given up while it kept moving
-                           --  (chattering against what stops it) gives no
-                           --  keyframe there.
-                           if Report.At_Rest
-                             and then (Level mod 2 = 1 or else Report.Outcome /= Driver.Robot.Motion.Reached
-                                       or else 2.0 * Offset * Per_Unit (P.Channel) > Half)
-                           then
-                              Driver.Robot.Motion.Hold_For_Keyframe (M, A);
-                           end if;
-                           exit when Report.Outcome /= Driver.Robot.Motion.Reached;
-                        end;
+                        --  Every other level is visited and held for its
+                        --  keyframe, the first and the widest included:
+                        --  keyframes over every scale from the matcher's limit
+                        --  to the widest turn, one per two doublings, fit as
+                        --  well as one per doubling (A9's arm: 59 keyframes
+                        --  against 97, the same against truth). The levels
+                        --  between are not visited at all: the kinematics keep
+                        --  a keyframe wherever the arm and its eye come to rest
+                        --  at new readings, so a visited level is a keyframe
+                        --  and the settle it costs (A59: 75 to 100 keyframes an
+                        --  arm, every level). An arm given up while it kept
+                        --  moving (chattering against what stops it) gives no
+                        --  keyframe there.
+                        if Level mod 2 = 1 or else 2.0 * Offset * Per_Unit (P.Channel) > Half then
+                           declare
+                              Pose : Real_Array := Start;
+                           begin
+                              Pose (P.Channel) := Start (P.Channel) + P.Sign * Offset;
+                              Go_To (G, Pose, Report);
+                              if Report.At_Rest then
+                                 Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                              end if;
+                              exit when Report.Outcome /= Driver.Robot.Motion.Reached;
+                           end;
+                        end if;
                         Offset := 2.0 * Offset;
                         Level := Level + 1;
                      end loop;
