@@ -361,9 +361,28 @@ package body Driver.Robot.Lockin is
                   return False;
                elsif Pushes = 1 then
                   declare
-                     Before : constant Integer := Integer (Push_Start (Pusher, Natural (R))) - 1;
+                     Began  : constant Natural := Push_Start (Pusher, Natural (R));
+                     Before : constant Integer := Integer (Began) - 1;
                   begin
-                     return Before >= 0 and then Before < Natural (S.Settled_At.Length) and then S.Settled_At (Before);
+                     if Before < 0 or else Before >= Natural (S.Settled_At.Length) or else not S.Settled_At (Before) then
+                        return False;
+                     end if;
+                     --  Nor did another group move at any beat of the push: its
+                     --  picture goes on changing for beats after its readings
+                     --  stop, and the lock-in would credit that to this push
+                     --  (A62 and A63, the arms swept at once: arm 2 took eye 2,
+                     --  arm 1's, as a whole, and no hand was made of either
+                     --  closer).
+                     for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                        if G /= Pusher and then M.Groups (G).Commandable then
+                           for B2 in Began .. Natural (R) loop
+                              if Channels.Pushed (M, G, B2) or else Channels.Moving (M, G, B2) then
+                                 return False;
+                              end if;
+                           end loop;
+                        end if;
+                     end loop;
+                     return True;
                   end;
                end if;
                return True;
