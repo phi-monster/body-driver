@@ -734,7 +734,7 @@ package body Driver.Robot is
                end;
             end loop;
          end if;
-         return "change " & Driver.Log.Image (S.Change_1, 3) & " " & Driver.Log.Image (S.Change_2, 3)
+         return "lag" & Image_Lag (M, E)'Image & (if Lag_Known (M, E) then "" else " (unknown)") & ", change " & Driver.Log.Image (S.Change_1, 3) & " " & Driver.Log.Image (S.Change_2, 3)
            & (if S.Is_Still then ", still" else ", moving") & (if S.Watch_Done then ", settled" else ", settling")
            & ", flow at most " & Driver.Log.Image (Most_Px, 3) & " px, " & Driver.Log.Image (Most_Sigmas, 1)
            & " sigmas";
