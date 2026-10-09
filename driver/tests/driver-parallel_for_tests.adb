@@ -32,7 +32,8 @@ package body Driver.Parallel_For_Tests is
       At_Once (1, 0);
       Check (Got = [1 .. Count => 0], "an empty range did some work");
       At_Once (3, 3);
-      Check (Got (3) = Wanted (3) and then Got (1) = 0 and then Got (5) = 0, "a range of one did not do just its index");
+      Check (Got (3) = Wanted (3) and then Got (1) = 0 and then Got (5) = 0,
+             "a range of one did not do just its index");
    end Each_Index_Alone;
 
    --  An index that fails makes the call fail, once the others have ended:
