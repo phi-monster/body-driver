@@ -4857,6 +4857,7 @@ package body Driver.Robot.Tests is
       Seed          : Long_Long_Integer := 1;   --  the generator of the matches' errors starts here
       Lone_Box      : Boolean := False;   --  one small box stands on the table, in place of the others
       Arm_Noise     : Real := 0.1;        --  how far the arms' own matches err, pixels per coordinate
+      Last_Unmatched : Boolean := False;   --  no keyframe answers the arms' last reference point (nor does the head)
    end record;
 
    procedure Build_Two_Arms (M : in out Model; Scene : Rig_Scene) is
@@ -4906,6 +4907,9 @@ package body Driver.Robot.Tests is
                   --  As from the query eye's centre: its line of sight, turned.
                   Fit.Project (Asked, Seen_From.Rotation * Fit.Ray (Rig_Lens, U0, V0), U, V, Ahead);
                   Shown := Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0;
+               end if;
+               if Scene.Last_Unmatched and then I = Natural (Arms (From_Arm).Query_U.Length) - 1 then
+                  Shown := False;
                end if;
                if Shown then
                   Answered := Answered + 1;
@@ -5249,11 +5253,13 @@ package body Driver.Robot.Tests is
    --  what it does not show.
    function Head_Rig
      (Boxes : Boolean; Shows : Natural := Natural'Last; Unseen : Boolean := True; Lone : Boolean := False;
-      Arm_Noise : Real := 0.1; Head_Noise : Real := 0.1; Seed : Long_Long_Integer := 1)
+      Arm_Noise : Real := 0.1; Head_Noise : Real := 0.1; Seed : Long_Long_Integer := 1;
+      Last_Unmatched : Boolean := False)
       return Rig_Scene is
      ((Second => Far_Second, With_Boxes => Boxes, Head => True, Head_Pose => Head_Pose, Wrist_Sees => False,
        Unseen_Head => Unseen, Head_Lens => Off_Centre_Head, Head_Shows => Shows, Lone_Box => Lone,
-       Arm_Noise => Arm_Noise, Head_Noise => Head_Noise, Seed => Seed, others => <>));
+       Arm_Noise => Arm_Noise, Head_Noise => Head_Noise, Seed => Seed, Last_Unmatched => Last_Unmatched,
+       others => <>));
 
    --  How many sigmas away from the truth the model's fixed eye E is: the head at Head_Pose, in the world's unit,
    --  with Off_Centre_Head.
@@ -5383,6 +5389,24 @@ package body Driver.Robot.Tests is
          end;
       end;
    end Measure_The_Head;
+
+   --  The arm's fit has a track to the last reference point that a keyframe answered, and a head is placed through the
+   --  depths of all of them (a row of their gains for each reference point, whatever the fit's last track): A31's first
+   --  arm had 476 reference points and a fit of 475, "no covariance of its points' depths" was the head's reason, and
+   --  the head was not placed for the 4,200 beats between its second recompute and its third. Here no keyframe
+   --  answers the last reference point of either arm.
+   procedure Head_Is_Placed_Without_The_Last_Reference is
+      M : Model;
+   begin
+      Build_Two_Arms (M, Head_Rig (Boxes => True, Last_Unmatched => True));
+      Check (Driver.Robot.Kinematics.Fixed_Known (M, 3),
+             "the head is not placed, the last reference point of the arms having no answer: "
+             & Driver.Robot.Kinematics.Fixed_Why (M, 3));
+      if Driver.Robot.Kinematics.Fixed_Known (M, 3) then
+         Check (Head_Off (M, 3) <= Driver.Conventions.Z, "the head is" & Head_Off (M, 3)'Image
+                & " sigmas off the truth");
+      end if;
+   end Head_Is_Placed_Without_The_Last_Reference;
 
    --  Five true answers: the head's place is not determined, and the eye says so with a reason, not with numbers.
    procedure Head_Needs_Answers is
@@ -6812,6 +6836,10 @@ package body Driver.Robot.Tests is
                              & "the world within Z of its sigmas, or a line of sight through its pixels is off by more "
                              & "than its sigma, or a point along one does not land on its pixel",
                              Measure_The_Head'Access);
+      Driver.Tests.Register ("robot.head.last",
+                             "a fixed eye is not placed because no keyframe answers the arm's last reference point "
+                             & "(the fit has a track fewer than the arm has reference points, and the eye asks for "
+                             & "a row of depth gains for each)", Head_Is_Placed_Without_The_Last_Reference'Access);
       Driver.Tests.Register ("robot.head.few",
                              "a fixed eye is placed from five true answers, or says nothing of why not",
                              Head_Needs_Answers'Access);

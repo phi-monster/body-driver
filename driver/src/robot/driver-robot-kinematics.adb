@@ -728,7 +728,18 @@ package body Driver.Robot.Kinematics is
                                  end;
                               end loop;
                               --  How every depth moves with the fit's terms together, which a fixed eye
-                              --  placed by these points carries (Fit_Fixed_Eyes).
+                              --  placed by these points carries (Fit_Fixed_Eyes). The fit has a track to the
+                              --  last query that has a sighting: the queries after it, that no keyframe
+                              --  answered, have no depth (above) and none that moves with a term.
+                              declare
+                                 Terms : constant Natural :=
+                                   Natural (Ada.Numerics.Long_Elementary_Functions.Sqrt
+                                              (Real (Natural (Report.Covariance.Length))));
+                              begin
+                                 while Natural (Report.Depth_Gains.Length) < Queries * Terms loop
+                                    Report.Depth_Gains.Append (0.0);
+                                 end loop;
+                              end;
                               for X of Report.Depth_Gains loop
                                  Result.Depth_Gains.Append (X);
                               end loop;
