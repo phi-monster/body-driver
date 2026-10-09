@@ -27,6 +27,12 @@
 --  can be scored against simulator truth whatever model produced them.
 --  Nothing here decides anything; the recorded replies did.
 --
+--  It prints the estimators' own log lines, each begun with "@" and the beat
+--  of the recording it was written at, and, last, the time the driver's work
+--  took (parsing the messages, the robot, hand and world estimators, the
+--  estimates computed apart), in seconds and milliseconds a beat, and how many
+--  beats it replayed.
+--
 --  The estimators' service calls are answered as Driver.Services describes
 --  for a replay: by the live service when --inst or --eye names one (a
 --  recording without service replies, or a new instrument asked again),
@@ -251,7 +257,13 @@ procedure Replay is
       end case;
    end record;
 
+   --  Where a beat's time goes, written at the end: the driver's own work on
+   --  each beat, layer by layer, without the robot's.
+   type Part is (Parsing, Robot_Layer, Hand_Layer, World_Layer, Estimates_Apart);
+   Spent : array (Part) of Duration := [others => 0.0];
+
    procedure Robot_Part (M : Input) is
+      Start : Duration;
    begin
       if M.Reset then
          Episodes := Episodes + 1;
@@ -259,15 +271,22 @@ procedure Replay is
       end if;
       if M.Observed then
          Driver.Services.Replay_Beat (M.O.Beat);
+         Start := Driver.Clock.Seconds;
          Driver.Robot.Observe (Robot, M.O, M.Sent);
+         Spent (Robot_Layer) := Spent (Robot_Layer) + (Driver.Clock.Seconds - Start);
       end if;
    end Robot_Part;
 
    procedure Rest (M : Input) is
+      Start : Duration;
    begin
       if M.Observed then
+         Start := Driver.Clock.Seconds;
          Driver.Robot.Hand.Observe (Hands, Robot, M.O, M.Sent);
+         Spent (Hand_Layer) := Spent (Hand_Layer) + (Driver.Clock.Seconds - Start);
+         Start := Driver.Clock.Seconds;
          Driver.World.Observe (Scene, Robot, Hands, M.O, M.Sent);
+         Spent (World_Layer) := Spent (World_Layer) + (Driver.Clock.Seconds - Start);
          if Length (Estimates) > 0 and then Driver.Robot.Booted (Robot) then
             Write_Beat (M.O);
             Last_Obs := M.O;
@@ -278,8 +297,10 @@ procedure Replay is
    function Due return Boolean is (Driver.Robot.Estimates_Due (Robot));
 
    procedure Compute is
+      Start : constant Duration := Driver.Clock.Seconds;
    begin
       Driver.Robot.Compute_Estimates (Robot);
+      Spent (Estimates_Apart) := Spent (Estimates_Apart) + (Driver.Clock.Seconds - Start);
    end Compute;
 
    procedure Never (E : Ada.Exceptions.Exception_Occurrence) is null;
@@ -310,9 +331,15 @@ procedure Replay is
          M.Reset := Req.Kind = Driver.Protocol.Reset;
          M.Sent := Sent;
          if Observed then
-            Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), M.O);
+            declare
+               Start : constant Duration := Driver.Clock.Seconds;
+            begin
+               Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), M.O);
+               Spent (Parsing) := Spent (Parsing) + (Driver.Clock.Seconds - Start);
+            end;
             Current := M.O;
             Beat := Beat + 1;
+            Driver.Log.Stamp (Beat);
          end if;
          Apart.Replay_Message (M);
       end;
@@ -520,6 +547,15 @@ begin
             & " calls this replay made, the first at beat" & Natural'Image (Natural (Driver.Services.First_Unanswered))
             & ": from there the replay asks what the run did not, unless they are only the last beats' calls");
    end if;
+   declare
+      Text : Unbounded_String := To_Unbounded_String ("time spent:");
+   begin
+      for P in Part loop
+         Append (Text, " " & Part'Image (P) & " " & Image (Driver.Real (Spent (P)), 1) & " s ("
+                 & Image (1000.0 * Driver.Real (Spent (P)) / Driver.Real (Natural'Max (1, Beat)), 1) & " ms a beat)");
+      end loop;
+      Line (Core, To_String (Text));
+   end;
    Line (Core, "replayed" & Natural'Image (Beat) & " beats," & Natural'Image (Commanded_Beats)
          & " actions," & Natural'Image (Episodes) & " episode resets");
    if Length (Body_File) > 0 then
