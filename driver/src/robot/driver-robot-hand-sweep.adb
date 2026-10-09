@@ -17,6 +17,12 @@ package body Driver.Robot.Hand.Sweep is
 
    function Channels (S : State) return Positive is (S.Per_Channel.Element'Length);
 
+   procedure Set_Closer_Noise (S : in out State; Closer_Noise : Real_Array) is
+   begin
+      Driver.Robot.Hand.Views.Set_Closer_Noise (S.Views, Closer_Noise);
+      Driver.Robot.Hand.Selfsight.Set_Key_Noise (S.Memory, Closer_Noise);
+   end Set_Closer_Noise;
+
    function Status (S : State; Channel : Positive) return Progress is
      (S.Per_Channel.Constant_Reference.Element (Channel).Status);
 

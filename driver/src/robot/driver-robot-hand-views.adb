@@ -12,6 +12,11 @@ package body Driver.Robot.Hand.Views is
        Current      => View_Holders.Empty_Holder,
        Ends         => End_Holders.To_Holder ([Closer_Noise'Range => (others => <>)])));
 
+   procedure Set_Closer_Noise (T : in out Tracker; Closer_Noise : Real_Array) is
+   begin
+      T.Closer_Noise := Noise_Holders.To_Holder (Closer_Noise);
+   end Set_Closer_Noise;
+
    function Moved (A, B, Noise : Real_Array; Except : Natural := 0) return Boolean;
    --  Some closer reading other than the one numbered Except differs
    --  significantly: each reading carries its noise, so their difference

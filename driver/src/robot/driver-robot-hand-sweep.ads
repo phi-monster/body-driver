@@ -38,6 +38,11 @@ package Driver.Robot.Hand.Sweep is
    function Start (Width, Height : Positive; Channels : Positive; Closer_Noise : Real_Array) return State
      with Pre => Closer_Noise'Length = Channels;
 
+   procedure Set_Closer_Noise (S : in out State; Closer_Noise : Real_Array)
+     with Pre => Closer_Noise'Length = Channels (S);
+   --  The closer's noises as the caller now measures them, for its views and
+   --  for the settings its eye remembers (Views, Selfsight).
+
    procedure Observe
      (S          : in out State;
       Seen       : Observation;
