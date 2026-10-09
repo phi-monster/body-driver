@@ -162,20 +162,43 @@ package body Driver.Recording is
          raise;
    end Start_Shared;
 
-   procedure Write_Shared (Kind : Record_Kind; Payload : Byte_Array) is
+   Places : Natural := 0;   --  shared records so far; read and written only while the lock is held
+
+   procedure Write_Shared
+     (Kind    : Record_Kind;
+      Payload : Byte_Array;
+      Then_Do : not null access procedure (Place : Positive))
+   is
    begin
       Lock.Seize;
+      Places := Places + 1;
       if Is_Open (Shared) then
          Write (Shared, Kind, Payload);
          --  Each record reaches the file whole before the next one starts, so
          --  a process stopped from outside loses at most the record in flight.
          Flush (Shared.File);
       end if;
+      Then_Do (Places);
       Lock.Release;
    exception
       when others =>
          Lock.Release;
          raise;
+   end Write_Shared;
+
+   procedure Write_Shared (Kind : Record_Kind; Payload : Byte_Array; Place : out Positive) is
+      procedure Keep (P : Positive) is
+      begin
+         Place := P;
+      end Keep;
+   begin
+      Write_Shared (Kind, Payload, Keep'Access);
+   end Write_Shared;
+
+   procedure Write_Shared (Kind : Record_Kind; Payload : Byte_Array) is
+      procedure Nothing (Place : Positive) is null;
+   begin
+      Write_Shared (Kind, Payload, Nothing'Access);
    end Write_Shared;
 
    procedure Stop_Shared is

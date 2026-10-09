@@ -39,9 +39,28 @@ package Driver.Robot.Hand is
    --  Decider: finds and measures every hand of the booted body.
 
    function Hand_Count (H : Hands) return Natural;
+   function Exists (H : Hands; Id : Hand_Id) return Boolean;
+   --  The hand Id is there now. The estimators drop and renumber hands between two held beats (the roles are
+   --  read again, a recompute of the heavier estimates; A29), so a decider that keeps a Hand_Id from an earlier
+   --  beat asks before it reads: the queries below, asked of an Id past the last hand, raise.
+
+   function Asks_A_Translation (M : Model; A : Arm_Id; From, Target : Real_Array) return Boolean;
+   --  A push of the arm from readings From to readings Target asks the tool a translation: the rotation of the tool
+   --  at Target is that at From, to what the arm's fit can tell (Kinematics.Angle_Sigma, Z times it), as the steps of a
+   --  descent are (Pressing.Lowered) and the turn of an aim about the eye is not. True when the poses are not known.
+   --  A block counts toward a press only when the push that was blocked asked a translation (Observe).
+   function Arm_At_Rest (M : Model; A : Arm_Id; O : Observation) return Boolean;
+   --  The arm's own readings are at rest at the beat of O (Driver.Robot.Stillness): the watcher takes a press at the
+   --  first such beat after the hand is let go, and a decider that takes the hand away waits for it first.
+
+   function Longest_Push (M : Model; A : Arm_Id) return Natural;
+   --  How many beats the longest push the arm has had took, from its start to the beat it ended at: the most a body
+   --  that has answered pushes is known to take to come to rest, and so the most a decider waits for it to.
    function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id;
    function Arm_Of (H : Hands; Id : Hand_Id) return Arm_Id;
    function Lobe_Count (H : Hands; Id : Hand_Id) return Positive;
+   function Presses_Kept (H : Hands; Id : Hand_Id) return Natural;
+   --  How many presses the hand's book keeps: the blocks of its descents, found in the stream.
 
    type Opening is (Open, Closed_Empty);
 
@@ -330,7 +349,7 @@ private
    --  change none. Zero, no blind push, when the shift is not measured.
 
    type Descent_Steps is record
-      Fast    : Natural := 0;   --  doubling, each ending Z sigma or more above the predicted contact
+      Fast    : Natural := 0;   --  the push to Z sigma above the predicted contact (one, and cut to the eye's room)
       Band    : Natural := 0;   --  within that band, each the larger of the sigma and Least
       Blind   : Natural := 0;   --  doubling, nothing predicting the contact (before a prediction, or past its band)
       Capped  : Natural := 0;   --  of those, the steps cut to the eye's room above the surface
@@ -349,6 +368,13 @@ private
    --  (Driver.Robot.Hand.Lowering): the arm's readings went where the step asked and the
    --  hand lies on what it met.
 
+   function In_Free_Air (Stopped : Heights) return Boolean;
+   --  Whether a push that was not completed stopped in free air, so that what stopped it is the body's and not a
+   --  surface's: the tip stands above the contact the presses so far predict by more than Z of its own deviation.
+   --  Nothing is said of a tip nothing predicts (no press has fixed the surface under it), nor of one at the contact
+   --  or within its deviation of it: a table and a joint's end both leave a push short, and a push that rests is
+   --  the table's.
+
    procedure Descend
      (Above : not null access function return Heights;
       Least : Real;
@@ -361,9 +387,10 @@ private
    --  contact, whichever the presses tell, and the descent is not spent). Above
    --  is read before each step. Tip is the tip's height above the contact
    --  predicted under it, with its sigma, Unknown when nothing predicts it.
-   --  With a prediction, the steps double from Least for as long as each ends
-   --  Z sigma or more above the predicted contact, the last cut to end there;
-   --  within that band each step is the larger of the sigma and Least, so the
+   --  With a prediction the first push goes to Z sigma above the predicted
+   --  contact in one (it used to double from Least over it: thirteen pushes to
+   --  cover A22's 4.5 units, a stop of the arm's own in the air showing at the
+   --  sixth); within that band each step is the larger of the sigma and Least, so the
    --  tip meets the surface at most that far short of a step's end: the
    --  overshoot the prediction already admits, and less force and less sinking
    --  in where the tip is read. The band is as wide as the prediction says, Z

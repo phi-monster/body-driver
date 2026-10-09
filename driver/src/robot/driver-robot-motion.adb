@@ -132,6 +132,66 @@ package body Driver.Robot.Motion is
       end;
    end Step;
 
+   procedure Note_Stopped (M : in out Model; G : Group_Id; Noted : out Boolean) is
+   begin
+      Noted := False;
+      if Steps.Episodes (M, G) = 0 then
+         return;
+      end if;
+      declare
+         E : constant Episode := Steps.Latest (M, G);
+         C : constant Natural := Steps.Limiter (M, G, E);
+      begin
+         if C = 0 then
+            return;
+         end if;
+         declare
+            S     : Group_Stream renames M.Groups (G);
+            Start : constant Real := Channels.Reading (M, G, E.Start - 1, C);
+            Stop  : constant Real := Channels.Reading (M, G, E.End_At, C);
+            Up    : constant Boolean := Channels.Target (M, G, E.Start, C) > Start;
+            At_C  : constant Natural := C - 1;
+         begin
+            --  The vectors are laid out for the group's channels the first time a stop is noted.
+            if Natural (S.Has_Stopped_Low.Length) /= S.Size then
+               S.Has_Stopped_Low.Clear;
+               S.Has_Stopped_High.Clear;
+               S.Stopped_Low.Clear;
+               S.Stopped_High.Clear;
+               for I in 1 .. S.Size loop
+                  S.Has_Stopped_Low.Append (False);
+                  S.Has_Stopped_High.Append (False);
+                  S.Stopped_Low.Append (0.0);
+                  S.Stopped_High.Append (0.0);
+               end loop;
+            end if;
+            --  The furthest stop of a sense stands: every stop supports at least that much, and a stop where the
+            --  arm met itself is relaxed by a later one that went further.
+            if Up then
+               if not S.Has_Stopped_High (At_C) or else Stop > S.Stopped_High (At_C) then
+                  S.Has_Stopped_High.Replace_Element (At_C, True);
+                  S.Stopped_High.Replace_Element (At_C, Stop);
+                  Noted := True;
+               end if;
+            elsif not S.Has_Stopped_Low (At_C) or else Stop < S.Stopped_Low (At_C) then
+               S.Has_Stopped_Low.Replace_Element (At_C, True);
+               S.Stopped_Low.Replace_Element (At_C, Stop);
+               Noted := True;
+            end if;
+            Driver.Log.Line (Driver.Log.Robot, "body: group" & G'Image & " channel" & C'Image & " stopped at "
+                             & Driver.Log.Image (Stop, 6) & " asked " & Driver.Log.Image (Channels.Target (M, G, E.Start, C), 6)
+                             & " from " & Driver.Log.Image (Start, 6) & ", the push that began at beat" & E.Start'Image
+                             & " (the shortfall of the rest spread, or less): an end of the channel " & (if Up then "upwards" else "downwards"));
+         end;
+      end;
+   end Note_Stopped;
+
+   procedure Note_Stopped (M : in out Model; G : Group_Id) is
+      Ignored : Boolean;
+   begin
+      Note_Stopped (M, G, Ignored);
+   end Note_Stopped;
+
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
      (Kinematics.Keyframe_Step (M, A, Channel));
 
@@ -733,6 +793,34 @@ package body Driver.Robot.Motion is
       return Worst;
    end Stray;
 
+   --  Whether a path passes an end a channel has shown (Driver.Robot.End_Of), by more than the end's sigma and the
+   --  waypoint's (the fit's own floor, Floor, as a segment the solver closes is within it); says which and where.
+   function Passes_An_End (M : Model; G : Group_Id; P : Plan; Floor : Real; Why : out Unbounded_String) return Boolean is
+   begin
+      for W of P.Waypoints loop
+         for C in W'Range loop
+            for Way in Sense loop
+               declare
+                  Stop : constant Estimate := End_Of (M, G, C, Way);
+                  Past : constant Real := (if Way = Increasing then W (C) - Stop.Value else Stop.Value - W (C));
+               begin
+                  --  Past the end, not short of it by as much (Significant is two-sided).
+                  if Known (Stop) and then Past > 0.0
+                    and then Driver.Uncertain.Significant (Past, Sqrt (Stop.Sigma ** 2 + Floor ** 2))
+                  then
+                     Why := To_Unbounded_String
+                       ("channel" & C'Image & " of group" & G'Image & " would pass its end, "
+                        & (if Way = Increasing then "upwards" else "downwards") & " at " & Driver.Log.Image (Stop.Value, 6)
+                        & " where its stops were found, going to " & Driver.Log.Image (W (C), 6));
+                     return True;
+                  end if;
+               end;
+            end loop;
+         end loop;
+      end loop;
+      return False;
+   end Passes_An_End;
+
    function Plan_Reach (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal;
                         Clearance : Real := Real'Last; Lever : Real := 0.0) return Plan is
       use Driver.Numerics.Arrays;
@@ -882,6 +970,13 @@ package body Driver.Robot.Motion is
                                                       & Real'Image (Worst_Turn) & " rad away"),
                        Solves => Result.Solves, others => <>);
             end if;
+            declare
+               Why : Unbounded_String;
+            begin
+               if Passes_An_End (M, G, Result, Sigma, Why) then
+                  return (State => Unreachable, Reason => Why, Solves => Result.Solves, others => <>);
+               end if;
+            end;
             return Result;
          end;
       end;

@@ -39,6 +39,44 @@ package body Driver.Services is
       end Next;
    end Calls;
 
+   --  Asynchronous calls: each service has one worker task that serves its
+   --  queue in order; results wait in a protected table until collected.
+
+   type Job is record
+      T             : Ticket := 0;
+      Path, Request : Unbounded_String;
+      Beat          : Driver.Clock.Beat := 0;
+   end record;
+
+   package Job_Lists is new Ada.Containers.Indefinite_Ordered_Maps (Ticket, Job);
+   --  A reply that came in, and the place of its record in the recording's
+   --  order (Driver.Recording): the estimators see it from the first step
+   --  whose own record comes after it. 0: answered at once, nothing recorded.
+   type Arrived is record
+      R     : Reply;
+      Place : Natural := 0;
+   end record;
+
+   package Reply_Maps is new Ada.Containers.Indefinite_Ordered_Maps (Ticket, Arrived);
+
+   type Queue_Array is array (Service) of Job_Lists.Map;
+
+   protected Results is
+      procedure New_Ticket (T : out Ticket);
+      procedure Enqueue (S : Service; J : Job);
+      procedure Enqueue_Stop (S : Service);
+      entry Next_Brain (J : out Job);
+      entry Next_Instrument (J : out Job);
+      procedure Put (T : Ticket; R : Reply; Place : Natural);
+      function Has (T : Ticket) return Boolean;
+      function Place_Of (T : Ticket) return Natural;
+      procedure Take (T : Ticket; R : out Reply);
+   private
+      Last_Ticket : Ticket := 0;
+      Queues      : Queue_Array;
+      Ready       : Reply_Maps.Map;
+   end Results;
+
    function Head (S : Service; Submitted_At : String) return String is
       --  The first line of a call's records (Driver.Recording).
       N : Positive;
@@ -53,12 +91,23 @@ package body Driver.Services is
         (Driver.Recording.Service_Request, Driver.Bytes.To_Bytes (Call_Head & ASCII.LF & Path & ASCII.LF & Request));
    end Record_Request;
 
-   procedure Record_Reply (Call_Head : String; R : Reply) is
+   --  The reply's record; a reply to a submitted call (For_Ticket not 0) is
+   --  put among the results with the record's place before any other record
+   --  is written, so the estimators see it from exactly the steps a replay
+   --  gives it to.
+   procedure Record_Reply (Call_Head : String; R : Reply; For_Ticket : Ticket := 0) is
+      procedure Publish (Place : Positive) is
+      begin
+         if For_Ticket /= 0 then
+            Results.Put (For_Ticket, R, Place);
+         end if;
+      end Publish;
    begin
       Driver.Recording.Write_Shared
         (Driver.Recording.Service_Reply,
          Driver.Bytes.To_Bytes (Call_Head & ASCII.LF & (if R.Ok then "ok" else To_String (R.Why)) & ASCII.LF
-                                & To_String (R.Text)));
+                                & To_String (R.Text)),
+         Publish'Access);
    end Record_Reply;
 
    function Unconfigured (S : Service) return Boolean is (Endpoints (S).Port = 0);
@@ -67,9 +116,12 @@ package body Driver.Services is
      (Ok => False, Text => Null_Unbounded_String,
       Why => To_Unbounded_String ("no address was given for the " & Name (S) & " service"), Lasting => True);
 
-   function Recorded_Call (S : Service; Path, Request, Submitted_At : String) return Reply is
+   function Recorded_Call (S : Service; Path, Request, Submitted_At : String; For_Ticket : Ticket := 0) return Reply is
    begin
       if Unconfigured (S) then
+         if For_Ticket /= 0 then
+            Results.Put (For_Ticket, Not_Configured (S), 0);
+         end if;
          return Not_Configured (S);
       end if;
       declare
@@ -81,7 +133,7 @@ package body Driver.Services is
               Driver.Http.Post (To_String (Endpoints (S).Host), Endpoints (S).Port, Path, Request);
             R : constant Reply := (Ok => H.Ok, Text => H.Body_Text, Why => H.Why, Lasting => False);
          begin
-            Record_Reply (Call_Head, R);
+            Record_Reply (Call_Head, R, For_Ticket);
             return R;
          end;
       end;
@@ -160,35 +212,6 @@ package body Driver.Services is
       end;
    end Call_Streaming;
 
-   --  Asynchronous calls: each service has one worker task that serves its
-   --  queue in order; results wait in a protected table until collected.
-
-   type Job is record
-      T             : Ticket := 0;
-      Path, Request : Unbounded_String;
-      Beat          : Driver.Clock.Beat := 0;
-   end record;
-
-   package Job_Lists is new Ada.Containers.Indefinite_Ordered_Maps (Ticket, Job);
-   package Reply_Maps is new Ada.Containers.Indefinite_Ordered_Maps (Ticket, Reply);
-
-   type Queue_Array is array (Service) of Job_Lists.Map;
-
-   protected Results is
-      procedure New_Ticket (T : out Ticket);
-      procedure Enqueue (S : Service; J : Job);
-      procedure Enqueue_Stop (S : Service);
-      entry Next_Brain (J : out Job);
-      entry Next_Instrument (J : out Job);
-      procedure Put (T : Ticket; R : Reply);
-      function Has (T : Ticket) return Boolean;
-      procedure Take (T : Ticket; R : out Reply);
-   private
-      Last_Ticket : Ticket := 0;
-      Queues      : Queue_Array;
-      Ready       : Reply_Maps.Map;
-   end Results;
-
    protected body Results is
       procedure New_Ticket (T : out Ticket) is
       begin
@@ -219,16 +242,18 @@ package body Driver.Services is
          Queues (Instrument).Delete_First;
       end Next_Instrument;
 
-      procedure Put (T : Ticket; R : Reply) is
+      procedure Put (T : Ticket; R : Reply; Place : Natural) is
       begin
-         Ready.Include (T, R);
+         Ready.Include (T, (R => R, Place => Place));
       end Put;
 
       function Has (T : Ticket) return Boolean is (Ready.Contains (T));
 
+      function Place_Of (T : Ticket) return Natural is (Ready.Element (T).Place);
+
       procedure Take (T : Ticket; R : out Reply) is
       begin
-         R := Ready.Element (T);
+         R := Ready.Element (T).R;
          Ready.Delete (T);
       end Take;
    end Results;
@@ -247,7 +272,13 @@ package body Driver.Services is
             when Instrument => Results.Next_Instrument (J);
          end case;
          exit when J.T = 0;   --  the stop job from Shut_Down
-         Results.Put (J.T, Recorded_Call (S, To_String (J.Path), To_String (J.Request), Beat_Image (J.Beat)));
+         declare
+            R : constant Reply :=
+              Recorded_Call (S, To_String (J.Path), To_String (J.Request), Beat_Image (J.Beat), For_Ticket => J.T);
+            pragma Unreferenced (R);   --  put among the results with its record (Record_Reply)
+         begin
+            null;
+         end;
       end loop;
    end Worker;
 
@@ -303,7 +334,7 @@ package body Driver.Services is
             W : constant Waiting_Call := Waiting (I);
          begin
             if W.S = S and then W.Path = Path and then W.Request = Request then
-               Results.Put (W.T, R);
+               Results.Put (W.T, R, 0);
                Waiting.Delete (I);
                return;
             end if;
@@ -318,6 +349,19 @@ package body Driver.Services is
       Current_Beat := Beat;
    end Replay_Beat;
 
+   function Unanswered return Natural is (Natural (Waiting.Length));
+
+   function First_Unanswered return Driver.Clock.Beat is
+      First : Driver.Clock.Beat := Submitted_At.Element (Waiting.First_Element.T);
+   begin
+      for W of Waiting loop
+         if Driver.Clock."<" (Submitted_At.Element (W.T), First) then
+            First := Submitted_At.Element (W.T);
+         end if;
+      end loop;
+      return First;
+   end First_Unanswered;
+
    procedure End_Replay is
    begin
       Replaying := False;
@@ -330,7 +374,7 @@ package body Driver.Services is
    procedure Submit_Replayed (S : Service; Path, Request : String; T : Ticket) is
    begin
       if not Recorded (S) then
-         Results.Put (T, Call (S, Path, Request));
+         Results.Put (T, Call (S, Path, Request), 0);
          return;
       end if;
       for I in 1 .. Natural (Unclaimed.Length) loop
@@ -338,7 +382,7 @@ package body Driver.Services is
             U : constant Unclaimed_Reply := Unclaimed (I);
          begin
             if U.S = S and then U.Path = Path and then U.Request = Request then
-               Results.Put (T, U.R);
+               Results.Put (T, U.R, 0);
                Unclaimed.Delete (I);
                return;
             end if;
@@ -359,7 +403,7 @@ package body Driver.Services is
       if Unconfigured (S) then
          --  Answered at once, and no worker is started for a service that
          --  cannot be reached: a worker would outlive the program.
-         Results.Put (T, Not_Configured (S));
+         Results.Put (T, Not_Configured (S), 0);
          return T;
       end if;
       if Workers (S) = null then
@@ -370,9 +414,22 @@ package body Driver.Services is
       return T;
    end Submit;
 
+   Step_Place : Natural := Natural'Last;
+   --  The place of the record the current step began with (Step_Begins). The
+   --  main loop and the estimator task begin steps one at a time, and hand the
+   --  models to each other through protected objects.
+
+   procedure Step_Begins (Place : Positive) is
+   begin
+      Step_Place := Place;
+   end Step_Begins;
+
    function Ready (T : Ticket) return Boolean is
      (Results.Has (T)
-      and then (not Replaying or else Driver.Clock."<" (Submitted_At.Element (T), Current_Beat)));
+      and then (if Replaying then Driver.Clock."<" (Submitted_At.Element (T), Current_Beat)
+                else Results.Place_Of (T) < Step_Place));
+
+   function Came_In (T : Ticket) return Boolean is (Results.Has (T));
 
    function Collect (T : Ticket) return Reply is
       R : Reply;

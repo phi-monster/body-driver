@@ -1,6 +1,9 @@
 with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings.Fixed;
+with Driver.Beats;
 with Driver.Clock;
+with Driver.Commands;
 with Driver.Geometry;
 with Driver.Log;
 with Driver.Robot.Hand.Aims;
@@ -580,8 +583,409 @@ package body Driver.Robot.Hand.Pressing.Tests is
              "the least push is not where the aim's plan ends");
    end Least_Push_Is_Where_The_Aim_Leaves_The_Tool;
 
+   ---------------------------------------------------------------------------
+
+   --  An end on the model's first arm that the aim of Along at the least rotation passes and the aim turned a
+   --  quarter about the way down does not: set between the readings of the two on the joint they differ most in
+   --  (the rig has seen no reading, so the end is the one set). Far is that joint, Gap the readings' difference.
+   procedure Refuse_The_Least_Rotation (M : in out Model; O : Observation; Along : Vec3; Far : out Natural; Gap : out Real) is
+      Least, Turned : Aimed;
+   begin
+      Aim (M, 1, 1, O, Along, Least);
+      Aim (M, 1, 1, O, Along, Turned, Yaw => Ada.Numerics.Pi / 2.0);
+      Far := 1;
+      Gap := 0.0;
+      declare
+         Was    : constant Real_Array := Motion.Last_Readings (Least.Plan);
+         Is_Now : constant Real_Array := Motion.Last_Readings (Turned.Plan);
+         S      : Group_Stream renames M.Groups (1);
+      begin
+         for C in Was'Range loop
+            if abs (Was (C) - Is_Now (C)) > Gap then
+               Gap := abs (Was (C) - Is_Now (C));
+               Far := C;
+            end if;
+         end loop;
+         declare
+            Between  : constant Real := 0.5 * (Was (Far) + Is_Now (Far));
+            Above_It : constant Boolean := Was (Far) > Is_Now (Far);
+         begin
+            S.Stopped_High.Clear;
+            S.Has_Stopped_High.Clear;
+            S.Stopped_Low.Clear;
+            S.Has_Stopped_Low.Clear;
+            for C in Was'Range loop
+               S.Stopped_High.Append ((if C = Far and then Above_It then Between else 0.0));
+               S.Has_Stopped_High.Append (C = Far and then Above_It);
+               S.Stopped_Low.Append ((if C = Far and then not Above_It then Between else 0.0));
+               S.Has_Stopped_Low.Append (C = Far and then not Above_It);
+            end loop;
+         end;
+      end;
+   end Refuse_The_Least_Rotation;
+
+   --  A29: the estimators read the roles again between two held beats of the
+   --  decider, Find_Pairs found no hand of the closer, and the press in
+   --  progress, which read the hand it measures at an index it held, read one
+   --  that was gone (CONSTRAINT_ERROR in the boot). Here the first arm of the
+   --  rig above presses its hand's lobes under Measure, the arm and its closer
+   --  reaching what they are sent a beat later, and the closer is re-read as an
+   --  arm at the beat Drop, so that the next beat of the hand drops its hand:
+   --  Drop in every part of the run, the descents of the press among them. The
+   --  decider must end, the hand pressed or not, and never raise.
+   type Blocks is (Nothing, The_Least_Rotation, Every_Aim);
+   --  An end the arm showed that: is none, the aim of the first lobe at the least rotation passes, every aim passes.
+
+   procedure Run_Dropping_At
+     (Drop : Natural; Beats : out Natural; Finished, Raised, Dropped : out Boolean;
+      Turns_Stop_At : Real := Real'Last; Kept : out Natural; Left_At : out Real; Block : Blocks := Nothing;
+      Noted : out Natural)
+   is
+      M      : Model;
+      H      : Hands;
+      Sent   : Driver.Commands.Command;
+      Arm_At : Real_Array (1 .. Joint_Count) := [others => 0.0];
+      Pinch  : Real_Array (1 .. 1) := [1.0];
+      Idle   : constant Real_Array (1 .. Joint_Count) := [others => 0.0];
+      Done   : Boolean := False with Atomic;
+      Died   : Boolean := False with Atomic;
+
+      function Seen (Beat : Natural) return Observation is
+         O : Observation;
+      begin
+         O.Beat := Driver.Clock.Beat (Beat);
+         O.Readings.Append (Arm_At);
+         O.Readings.Append (Idle);
+         O.Readings.Append (Pinch);
+         O.Readings.Append (Real_Array'[1 => 0.0]);
+         for G in 1 .. 4 loop
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         end loop;
+         return O;
+      end Seen;
+   begin
+      Dropped := False;
+      Beats := 0;
+      Build (M, Placed);
+      --  Everything the rig measured stands; a recompute from this stream would find nothing.
+      M.From_File := [others => True];
+      --  The arm's pushes are judged as a boot leaves them judged: a delay the pushes show, and the shortfalls of free
+      --  pushes the body has seen.
+      for G in 1 .. 4 loop
+         M.Groups (Group_Id (G)).Delay_Beats := 2;
+         M.Groups (Group_Id (G)).Delay_Known := True;
+         M.Groups (Group_Id (G)).Free_Shortfalls.Append (0.0125);
+         M.Groups (Group_Id (G)).Free_Shortfalls.Append (1.0 / 300.0);
+         for K in 1 .. 4 loop
+            M.Groups (Group_Id (G)).Free_Shortfalls.Append (0.0);
+         end loop;
+      end loop;
+      for G in 1 .. 4 loop
+         Driver.Commands.Set_Target (Sent, Group_Id (G), (if G = 1 then Arm_At elsif G = 3 then Pinch
+                                                          elsif G = 2 then Idle else Real_Array'[1 => 0.0]));
+      end loop;
+      Driver.Robot.Observe (M, Seen (0), Sent);
+      declare
+         Far : Natural;
+         Gap : Real;
+      begin
+         case Block is
+            when Nothing =>
+               null;
+            when The_Least_Rotation =>
+               Refuse_The_Least_Rotation (M, Seen (0), Unit (Tips_True (1, Open)), Far, Gap);
+            when Every_Aim =>
+               --  Every joint has shown an end either way, and the arm has been seen at its start only (an end is no
+               --  nearer than the readings seen): a path that leaves the start passes one.
+               M.Groups (1).Stopped_High.Clear;
+               M.Groups (1).Has_Stopped_High.Clear;
+               M.Groups (1).Stopped_Low.Clear;
+               M.Groups (1).Has_Stopped_Low.Clear;
+               for C in 1 .. Joint_Count loop
+                  M.Groups (1).Stopped_High.Append (0.0);
+                  M.Groups (1).Has_Stopped_High.Append (True);
+                  M.Groups (1).Stopped_Low.Append (0.0);
+                  M.Groups (1).Has_Stopped_Low.Append (True);
+               end loop;
+         end case;
+      end;
+      Give_Hand (H, 1);
+      declare
+         task Decider;
+         task body Decider is
+         begin
+            Measure (H, M);
+            Done := True;
+         exception
+            when others =>
+               Driver.Beats.Release;
+               Died := True;
+               Done := True;
+         end Decider;
+      begin
+         for B in 1 .. 20_000 loop
+            exit when Done;
+            declare
+               O       : constant Observation := Seen (B);
+               Took    : Boolean := False;
+               Pending : Driver.Commands.Command;
+            begin
+               if B = Drop then
+                  M.Graph.Roles.Replace_Element (3, Arm);
+                  Dropped := True;
+               end if;
+               Driver.Robot.Observe (M, O, Sent);
+               Observe (H, M, O, Sent);
+               loop
+                  Driver.Beats.Offer (O.Beat, O, Sent, Took);
+                  exit when Took or else Done;
+                  delay 0.0;
+               end loop;
+               exit when not Took;
+               Driver.Beats.Await (Pending);
+               Beats := B;
+               --  The arm and its closer reach what they were sent.
+               if Driver.Commands.Has_Target (Pending, 1) then
+                  Driver.Commands.Set_Target (Sent, 1, Driver.Commands.Target (Pending, 1));
+                  Arm_At := Driver.Commands.Target (Sent, 1);
+                  --  A joint that turns the tool stops where it stops, whatever it was sent.
+                  for J in 4 .. Joint_Count loop
+                     Arm_At (J) := Real'Max (-Turns_Stop_At, Real'Min (Turns_Stop_At, Arm_At (J)));
+                  end loop;
+               end if;
+               if Driver.Commands.Has_Target (Pending, 3) then
+                  Driver.Commands.Set_Target (Sent, 3, Driver.Commands.Target (Pending, 3));
+                  Pinch := Driver.Commands.Target (Sent, 3);
+               end if;
+            end;
+         end loop;
+         if not Done then
+            abort Decider;
+         end if;
+      end;
+      Kept := (if Exists (H, 1) then Presses_Kept (H, 1) else 0);
+      Left_At := 0.0;
+      for X of Arm_At loop
+         Left_At := Left_At + abs X;
+      end loop;
+      Noted := 0;
+      for C in 1 .. Joint_Count loop
+         for Way in Driver.Robot.Sense loop
+            if Known (Driver.Robot.End_Of (M, 1, C, Way)) then
+               Noted := Noted + 1;
+            end if;
+         end loop;
+      end loop;
+      Finished := Done;
+      Raised := Died;
+   end Run_Dropping_At;
+
+   --  A block is a press only when the push that was blocked asked a translation,
+   --  as the steps of a descent do (Pressing.Lowered keeps the tool's rotation)
+   --  and the turn of an aim about the eye does not: A27's first press of hand 2
+   --  was an aim the arm itself stopped, and the stream's watcher took it for one.
+   --  The rig's first three joints slide the tool, the last three turn it.
+   procedure A_Turn_Is_Not_A_Lowering is
+      M : Model;
+      From : constant Real_Array (1 .. Joint_Count) := [0.01, -0.02, 0.03, 0.1, -0.1, 0.05];
+      function Moved (By : Real_Array) return Real_Array is
+      begin
+         return [for J in 1 .. Joint_Count => From (J) + By (J)];
+      end Moved;
+   begin
+      Build (M, Placed);
+      Check (Asks_A_Translation (M, 1, From, Moved ([0.3, 0.2, -0.4, 0.0, 0.0, 0.0])),
+             "a push that slid the tool and did not turn it is not a translation");
+      Check (not Asks_A_Translation (M, 1, From, Moved ([0.0, 0.0, 0.0, 0.5, 0.0, 0.0])),
+             "a turn of the tool by half a radian is a translation");
+      Check (not Asks_A_Translation (M, 1, From, Moved ([0.3, 0.2, -0.4, 0.0, 0.2, 0.0])),
+             "a slide with a turn of a fifth of a radian is a translation");
+      Check (Asks_A_Translation (M, 1, From, Moved ([0.3, 0.2, -0.4, 0.0, 0.0, 1.0e-6])),
+             "a turn of a millionth of a radian, under what the fit can tell, is not a translation");
+   end A_Turn_Is_Not_A_Lowering;
+
+   --  The arm's turning joints stop a tenth of a radian from their start, whatever they are sent: the aim of the
+   --  first press, half a radian, is a turn the arm cannot make. The stream's watcher took the block of an aim
+   --  for a press (A27) and a tip came to be fitted to it; the decider lowered the hand from where the arm
+   --  stopped. Now the aim is a push that asked a turn, which no press is, and    --  aim and halves the tilt; no tip is known from it.
+   procedure A_Blocked_Aim_Is_Not_A_Press is
+      Beats : Natural;
+      Finished, Raised, Dropped : Boolean;
+      Kept_Presses : Natural;
+      Left_Where : Real;
+      Ends_Noted : Natural;
+   begin
+      Run_Dropping_At (0, Beats, Finished, Raised, Dropped, Turns_Stop_At => 0.1, Kept => Kept_Presses, Left_At => Left_Where, Noted => Ends_Noted);
+      Check (Finished and then not Raised, "the decider did not end on a rig whose turning joints stop a tenth of a radian out");
+      Check (Kept_Presses = 0, "the block of an aim the arm could not complete was kept for a press:" & Kept_Presses'Image & " kept");
+      Check (Left_Where < 1.0e-9, "the arm was left" & Left_Where'Image & " rad from where it began, where the aims stopped it: it was not taken back");
+      --  The aim stopped in free air by the arm's own joints: what stopped it is noted as an end of the joint (the rig's
+      --  turning joints stop at a tenth of a radian out, and the aim asked 0.4 further of one of them).
+      Check (Ends_Noted > 0, "no end was noted of an aim the arm's own joints stopped in free air");
+   end A_Blocked_Aim_Is_Not_A_Press;
+
+   --  The poses that point a line of sight down are a circle of them, the hand turned about the way down through its
+   --  eye. (a) Every yaw keeps the line down and the eye where the least rotation left it, and the joints that reach
+   --  them differ; (b) an end a joint showed, set between the readings of the aim at the least rotation and those
+   --  of another yaw, refuses the one and plans the other.
+   procedure The_Aim_Turns_About_The_Way_Down is
+      Idle  : constant Real_Array (1 .. Joint_Count) := [others => 0.0];
+      Along : constant Vec3 := Unit (Tips_True (1, Open));
+      M     : Model;
+      O     : Observation;
+      Least : Aimed;
+      Quarter : constant Real := Ada.Numerics.Pi / 2.0;
+   begin
+      Build (M, Placed);
+      O := Observed (1, Idle, Idle, 0.0);
+      Aim (M, 1, 1, O, Along, Least);
+      Check (Least.Ok and then Motion.Status (Least.Plan) = Motion.Planned, "the aim at the least rotation is not planned");
+      declare
+         Turned : Aimed;
+      begin
+         Aim (M, 1, 1, O, Along, Turned, Yaw => Quarter);
+         Check (Turned.Ok and then Motion.Status (Turned.Plan) = Motion.Planned, "the aim turned a quarter is not planned");
+         Check (abs (Turned.Above.Rotation * Along - Least.Into) < 1.0e-9
+                and then abs (Turned.Above.Translation - Least.Above.Translation) < 1.0e-9,
+                "the aim turned a quarter does not point the line down, or it moved the eye (at the tool's origin)");
+         Check (Turned.Turn > Least.Turn, "the aim turned a quarter turns the tool by no more than the least rotation");
+         declare
+            Was    : constant Real_Array := Motion.Last_Readings (Least.Plan);
+            Is_Now : constant Real_Array := Motion.Last_Readings (Turned.Plan);
+            Far    : Natural;
+            Gap    : Real;
+            Refused, Accepted : Aimed;
+         begin
+            Check ((for some C in Was'Range => abs (Was (C) - Is_Now (C)) > 0.1),
+                   "a quarter turn about the way down changed no joint by a tenth of a radian");
+            --  An end on the joint they differ most in, between them, with the least rotation on its wrong side.
+            Refuse_The_Least_Rotation (M, O, Along, Far, Gap);
+            Aim (M, 1, 1, O, Along, Refused);
+            Aim (M, 1, 1, O, Along, Accepted, Yaw => Quarter);
+            Check (Motion.Status (Refused.Plan) = Motion.Unreachable
+                   and then Ada.Strings.Fixed.Index (Motion.Why (Refused.Plan), "would pass its end") > 0,
+                   "the aim at the least rotation passes the end on joint" & Far'Image & " and was planned: "
+                   & Motion.Why (Refused.Plan));
+            Check (Motion.Status (Accepted.Plan) = Motion.Planned,
+                   "the aim turned a quarter does not pass the end on joint" & Far'Image & " and was refused: "
+                   & Motion.Why (Accepted.Plan));
+            --  Aim_Reaching takes the turn that is planned, and says why the least rotation was not.
+            declare
+               Chosen    : Aimed;
+               Yawed     : Real;
+               Reaches, Unmeasured : Boolean;
+               Why       : Ada.Strings.Unbounded.Unbounded_String;
+               No_Tip    : constant Point_Estimate := (others => <>);
+               No_Table  : constant Driver.Geometry.Plane_Estimate := (others => <>);
+            begin
+               Aim_Reaching (M, 1, 1, O, Along, No_Tip, No_Table, Chosen, Yawed, Reaches, Unmeasured, Why);
+               Check (Reaches and then Yawed /= 0.0 and then not Unmeasured
+                      and then Ada.Strings.Unbounded.Index (Why, "would pass its end") > 0,
+                      "the aim past an end was not turned to one that is not: yaw" & Yawed'Image & ", reaches"
+                      & Reaches'Image & ", why: " & Ada.Strings.Unbounded.To_String (Why));
+               Check (Reaches and then Motion.Status (Chosen.Plan) = Motion.Planned
+                      and then abs (Chosen.Above.Rotation * Along - Chosen.Into) < 1.0e-9,
+                      "the aim turned past the end does not point the line down");
+               --  Every joint has shown an end where the arm stands: no turn is planned.
+               for C in 1 .. Joint_Count loop
+                  M.Groups (1).Stopped_High.Replace_Element (C - 1, 0.0);
+                  M.Groups (1).Has_Stopped_High.Replace_Element (C - 1, True);
+                  M.Groups (1).Stopped_Low.Replace_Element (C - 1, 0.0);
+                  M.Groups (1).Has_Stopped_Low.Replace_Element (C - 1, True);
+               end loop;
+               Aim_Reaching (M, 1, 1, O, Along, No_Tip, No_Table, Chosen, Yawed, Reaches, Unmeasured, Why);
+               Check (not Reaches and then not Unmeasured, "an aim was planned with every joint at an end");
+            end;
+            declare
+               Free : Model;
+               Chosen : Aimed;
+               Yawed : Real;
+               Reaches, Unmeasured : Boolean;
+               Why : Ada.Strings.Unbounded.Unbounded_String;
+            begin
+               Build (Free, Placed);
+               Aim_Reaching (Free, 1, 1, O, Along, (others => <>), (others => <>), Chosen, Yawed, Reaches, Unmeasured, Why);
+               Check (Reaches and then Yawed = 0.0 and then Ada.Strings.Unbounded.Length (Why) = 0,
+                      "with no end shown the aim was not the least rotation: yaw" & Yawed'Image);
+            end;
+         end;
+      end;
+   end The_Aim_Turns_About_The_Way_Down;
+
+   --  Under Measure, an aim that passes an end is turned about the way down until one does not, and a press none of
+   --  whose aims is planned costs the arm no move. The first lobe's aim at the least rotation passes an end: the arm
+   --  is taken to the aim turned another way, and the decider ends; every aim passes one: the arm is left where it
+   --  began and the decider ends.
+   procedure The_Aim_Is_Turned_Past_An_End is
+      Beats : Natural;
+      Finished, Raised, Dropped : Boolean;
+      Kept_Presses : Natural;
+      Left_Where : Real;
+      Ends_Noted : Natural;
+   begin
+      Run_Dropping_At (0, Beats, Finished, Raised, Dropped, Kept => Kept_Presses, Left_At => Left_Where,
+                       Block => The_Least_Rotation, Noted => Ends_Noted);
+      Check (Finished and then not Raised, "the decider did not end with an end in the way of the aim at the least rotation");
+      Check (Left_Where > 1.0e-6, "no aim was made with an end in the way of the aim at the least rotation: the hand was"
+             & " not turned about the way down to avoid it");
+      Run_Dropping_At (0, Beats, Finished, Raised, Dropped, Kept => Kept_Presses, Left_At => Left_Where, Block => Every_Aim, Noted => Ends_Noted);
+      Check (Finished and then not Raised, "the decider did not end with an end in the way of every aim");
+      Check (Left_Where < 1.0e-9, "the arm was moved" & Left_Where'Image & " with an end in the way of every aim");
+   end The_Aim_Is_Turned_Past_An_End;
+
+   procedure Hand_Dropped_Mid_Press is
+      Beats, Ignored : Natural;
+      Finished, Raised, Dropped : Boolean;
+      Pressed : Natural;
+      Kept_Presses : Natural;
+      Left_Where : Real;
+      Ends_Noted : Natural;
+   begin
+      Run_Dropping_At (0, Beats, Finished, Raised, Dropped, Kept => Kept_Presses, Left_At => Left_Where, Noted => Ends_Noted);
+      Check (Finished and then not Raised, "the decider did not end on the rig with no hand dropped");
+      Check (Beats > 100, "the rig's press ended in" & Beats'Image & " beats: the descents are not under test");
+      Pressed := Beats;
+      for Part in 1 .. 19 loop
+         Run_Dropping_At (Pressed * Part / 20, Ignored, Finished, Raised, Dropped, Kept => Kept_Presses, Left_At => Left_Where, Noted => Ends_Noted);
+         Check (Dropped, "no hand was dropped at part" & Part'Image & " of the run");
+         Check (Finished and then not Raised,
+                "the decider " & (if Raised then "raised" else "did not end") & " when the hand was dropped at part"
+                & Part'Image & " of its" & Pressed'Image & " beats");
+      end loop;
+   end Hand_Dropped_Mid_Press;
+
+   --  The most a decider waits for the arm to rest after it lets the hand go: as long as the longest push the arm has
+   --  had took, from its start to the beat it ended at, those still under way not counted.
+   procedure The_Longest_Push_Is_The_Longest_That_Ended is
+      M : Model;
+   begin
+      Build (M, Placed);
+      Check (Driver.Robot.Hand.Longest_Push (M, 1) = 0, "an arm that has had no push has a longest push");
+      M.Groups (1).Episodes.Append (Episode'(Start => 3, End_At => 9, Ended => True, others => <>));
+      M.Groups (1).Episodes.Append (Episode'(Start => 20, End_At => 51, Ended => True, others => <>));
+      M.Groups (1).Episodes.Append (Episode'(Start => 60, End_At => 120, Ended => False, others => <>));
+      M.Groups (1).Episodes.Append (Episode'(Start => 100, End_At => 105, Ended => True, others => <>));
+      Check (Driver.Robot.Hand.Longest_Push (M, 1) = 32,
+             "the longest push of 7, 32 and 6 beats, one of 61 under way, is" & Driver.Robot.Hand.Longest_Push (M, 1)'Image);
+   end The_Longest_Push_Is_The_Longest_That_Ended;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.measure.longest", "the wait for the arm to rest is not as long as its longest push, or counts one under way",
+                             The_Longest_Push_Is_The_Longest_That_Ended'Access);
+      Driver.Tests.Register ("hand.measure.aim",
+                             "the block of an aim the arm could not complete is taken for a press and a tip is fitted to it",
+                             A_Blocked_Aim_Is_Not_A_Press'Access);
+      Driver.Tests.Register ("hand.measure.yaw", "an aim that passes an end is not turned about the way down to a pose that does not, "
+                             & "or one that every turn passes moves the arm", The_Aim_Is_Turned_Past_An_End'Access);
+      Driver.Tests.Register ("hand.press.yaw", "an aim turned about the way down keeps the line down and the eye, or an end a joint "
+                             & "showed refuses the turn it lies between and not the other", The_Aim_Turns_About_The_Way_Down'Access);
+      Driver.Tests.Register ("hand.press.turn",
+                             "a block of an aim, a turn of the hand about its eye, is taken for a press into the table",
+                             A_Turn_Is_Not_A_Lowering'Access);
+      Driver.Tests.Register ("hand.measure.dropped",
+                             "a hand dropped by the estimators in the middle of a descent makes the decider raise",
+                             Hand_Dropped_Mid_Press'Access);
       Driver.Tests.Register ("hand.pressing.tips",
                              "a hand's presses measure its tips in the world's frame, which the arm's placement "
                              & "moves, or not at all with the arm not placed", Tips_Free_Of_Placement'Access);

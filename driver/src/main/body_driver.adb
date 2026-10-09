@@ -225,9 +225,10 @@ procedure Body_Driver is
       Took       : Boolean;
       Held       : Boolean;
       Went_Apart : Boolean := False;
+      Place      : Positive;
    begin
       Apart.Arrive (Held);
-      Driver.Recording.Write_Shared (Driver.Recording.Robot_Message, Data);
+      Driver.Recording.Write_Shared (Driver.Recording.Robot_Message, Data, Place);
       Driver.Protocol.Decode (Data, Req, Ok);
       if not Ok then
          Line (Core, "a robot message that is not a protocol message was ignored");
@@ -261,6 +262,8 @@ procedure Body_Driver is
             Apart.Hold_Back (M);
             Pending := Driver.Commands.Hold;
          else
+            --  A step for the services' replies, begun with this message's record.
+            Driver.Services.Step_Begins (Place);
             Apart.Take_In (M, Went_Apart);
             if Went_Apart then
                Pending := Driver.Commands.Hold;
