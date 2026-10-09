@@ -1,4 +1,4 @@
---  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT]
+--  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT] [--watch EYE]
 --
 --  Feeds a recording (Driver.Recording format, uncompressed; it is read once,
 --  forward, so "zstd -dc run.rec.zst | replay /dev/stdin ..." needs no copy on
@@ -31,7 +31,9 @@
 --  of the recording it was written at, and, last, the time the driver's work
 --  took (parsing the messages, the robot, hand and world estimators, the
 --  estimates computed apart), in seconds and milliseconds a beat, and how many
---  beats it replayed.
+--  beats it replayed. With --watch EYE, every beat also gives a line on that
+--  eye (Driver.Robot.Eye_Watch): how much its picture changed, whether it is
+--  still and settled, and how far its cells moved.
 --
 --  The estimators' service calls are answered as Driver.Services describes
 --  for a replay: by the live service when --inst or --eye names one (a
@@ -262,6 +264,9 @@ procedure Replay is
    type Part is (Parsing, Robot_Layer, Hand_Layer, World_Layer, Estimates_Apart);
    Spent : array (Part) of Duration := [others => 0.0];
 
+   --  With --watch, the eye followed beat by beat (Driver.Robot.Eye_Watch).
+   Watched : Natural := 0;
+
    procedure Robot_Part (M : Input) is
       Start : Duration;
    begin
@@ -274,6 +279,9 @@ procedure Replay is
          Start := Driver.Clock.Seconds;
          Driver.Robot.Observe (Robot, M.O, M.Sent);
          Spent (Robot_Layer) := Spent (Robot_Layer) + (Driver.Clock.Seconds - Start);
+         if Watched > 0 then
+            Line (Core, "eye" & Watched'Image & ": " & Driver.Robot.Eye_Watch (Robot, Driver.Robot.Eye_Id (Watched)));
+         end if;
       end if;
    end Robot_Part;
 
@@ -494,7 +502,8 @@ procedure Replay is
 
 begin
    if Argument_Count < 1 then
-      Line (Core, "usage: replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT]");
+      Line (Core, "usage: replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT]"
+            & " [--watch EYE]");
       Set_Exit_Status (Failure);
       return;
    end if;
@@ -508,6 +517,8 @@ begin
          Configure_Service (Driver.Services.Instrument, Argument (I + 1));
       elsif Argument (I) = "--eye" then
          Configure_Service (Driver.Services.Brain, Argument (I + 1));
+      elsif Argument (I) = "--watch" then
+         Watched := Natural'Value (Argument (I + 1));
       end if;
    end loop;
 

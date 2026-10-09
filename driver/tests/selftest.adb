@@ -10,6 +10,7 @@ with Driver.Core_Tests;
 with Driver.Distributions.Tests;
 with Driver.Geometry.Tests;
 with Driver.Instrument.Tests;
+with Driver.Parallel_For_Tests;
 with Driver.Pixels.Tests;
 with Driver.Robot.Hand.Tests;
 with Driver.Robot.Tests;
@@ -22,6 +23,7 @@ procedure Selftest is
 begin
    Driver.Core_Tests.Register;
    Driver.Apart_Tests.Register;
+   Driver.Parallel_For_Tests.Register;
    Driver.Distributions.Tests.Register;
    Driver.Alignment.Tests.Register;
    Driver.Geometry.Tests.Register;

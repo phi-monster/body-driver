@@ -71,7 +71,10 @@ private
 
    type Bit_Array is array (Natural range <>) of Boolean with Pack;
 
+   pragma Suppress (Tampering_Check);
    package Bit_Holders is new Ada.Containers.Indefinite_Holders (Bit_Array);
+   --  Read bit by bit over whole frames (Contains): a reference without the
+   --  tampering check is a plain pointer.
 
    type Mask is record
       Width, Height : Natural := 0;

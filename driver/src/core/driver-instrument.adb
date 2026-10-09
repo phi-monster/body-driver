@@ -1,3 +1,4 @@
+with Ada.Unchecked_Deallocation;
 with Driver.Base64;
 with Driver.Bytes;
 with Driver.Json;
@@ -5,6 +6,7 @@ with Driver.Json;
 package body Driver.Instrument is
 
    use Driver.Bytes;
+   use type Offset;
    use type Driver.Json.Kind;
    use type Driver.Json.Node;
 
@@ -33,6 +35,26 @@ package body Driver.Instrument is
       Row_Size : constant Natural := (Channels * W + Row_Alignment - 1) / Row_Alignment * Row_Alignment;
       Offset_Of_Pixels : constant Natural := File_Header + Info_Header;
       B        : Buffer;
+      type Pixels_Access is access Byte_Array;
+      procedure Free is new Ada.Unchecked_Deallocation (Byte_Array, Pixels_Access);
+      --  The rows bottom up, each pixel blue, green, red, each row padded with
+      --  zeros: written in place from the picture's own bytes, on the heap.
+      Pixels   : Pixels_Access := new Byte_Array'(1 .. Offset (Row_Size * H) => 0);
+      procedure Fill (RGB : Byte_Array) is
+      begin
+         for Row in 0 .. H - 1 loop
+            declare
+               To   : constant Offset := Pixels'First + Offset (Row_Size * (H - 1 - Row));
+               From : constant Offset := RGB'First + Offset (Channels * W * Row);
+            begin
+               for Column in 0 .. W - 1 loop
+                  Pixels (To + Offset (Channels * Column))     := RGB (From + Offset (Channels * Column) + 2);
+                  Pixels (To + Offset (Channels * Column) + 1) := RGB (From + Offset (Channels * Column) + 1);
+                  Pixels (To + Offset (Channels * Column) + 2) := RGB (From + Offset (Channels * Column));
+               end loop;
+            end;
+         end loop;
+      end Fill;
    begin
       B.Append ("BM");
       Put_Little (B, Offset_Of_Pixels + Row_Size * H, 4);
@@ -46,16 +68,9 @@ package body Driver.Instrument is
       Put_Little (B, 0, 4);                     --  no compression
       Put_Little (B, Row_Size * H, 4);
       Put_Little (B, 0, 4 * 4);                 --  resolution and palette: unused
-      for Row in reverse 0 .. H - 1 loop
-         for Column in 0 .. W - 1 loop
-            B.Append (Byte (Driver.Images.Blue (I, Column, Row)));
-            B.Append (Byte (Driver.Images.Green (I, Column, Row)));
-            B.Append (Byte (Driver.Images.Red (I, Column, Row)));
-         end loop;
-         for Pad in Channels * W + 1 .. Row_Size loop
-            B.Append (Byte'(0));
-         end loop;
-      end loop;
+      Driver.Images.Query (I, Fill'Access);
+      B.Append (Pixels.all);
+      Free (Pixels);
       return Driver.Base64.Encode (B.To_Array);
    end Bitmap;
 
