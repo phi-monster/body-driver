@@ -75,11 +75,15 @@ procedure Measure (H : in out Hands; M : in out Model) is
 
    package Group_Lists is new Ada.Containers.Vectors (Positive, Group_Id);
 
-   --  One hand, from its closer group: its closer swept and its lobes pressed, by the body's roles as they are
-   --  when each begins. The hands are measured at once (Driver.Beats.At_Once, a hand a lane): each moves only its
-   --  own arm and closer, reads and changes the models only in its held beats, and keeps what follows here, its
-   --  own, from one beat to the next.
-   procedure One_Hand (Closer : Group_Id) is
+   --  One part of one hand, from its closer group: its closer swept, or its lobes pressed, by the body's roles as
+   --  they are when each begins. The closers are swept one after another: a sweep reads the views its own eye has
+   --  of its fingers, and another arm moving in that eye's view spoils them (A59, both swept at once: no hand was
+   --  made of the closer whose eye saw the other arm move; A58 lost the ends of a view it had placed the lobes
+   --  from). The hands are pressed at once (Driver.Beats.At_Once, a hand a lane): each moves only its own arm and
+   --  closer, reads and changes the models only in its held beats, and keeps what follows here, its own, from one
+   --  beat to the next.
+   type Hand_Part is (Sweep_Part, Press_Part);
+   procedure One_Hand (Closer : Group_Id; Part : Hand_Part) is
 
       Lost : Boolean := False;
       --  Set by a read that found the hand under measure gone: the press in progress ends, the arm let go and taken
@@ -94,7 +98,6 @@ procedure Measure (H : in out Hands; M : in out Model) is
       --  Set by a press whose aim stopped on something of the arm's own that moved an end the arm showed
       --  (Driver.Robot.Motion.Note_Stopped): the same aim, planned again, is turned about the way down past it. Set
       --  afresh by each press.
-
 
       procedure Move_Group (G : Group_Id; Target : Real_Array; Followed : out Boolean) is
          --  One step of the group to Target, settled, and one more still beat so
@@ -528,8 +531,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
                pragma Unreferenced (O);
                P : constant Natural := Own_Pair (G);
             begin
+               --  Its ends are asked for again: the views can have moved on since the lobes were placed from them.
                if P > 0 and then Sweeps.Status (H.Data.Pairs (P).Sweep, C) = Sweeps.Measured
                  and then Sweeps.Closing_Known (H.Data.Pairs (P).Sweep, C)
+                 and then Sweeps.Has_Ends (H.Data.Pairs (P).Sweep, C)
                then
                   Known_Open := True;
                   Open_At := Driver.Robot.Hand.Views.Reading
@@ -1056,25 +1061,28 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Channels := (if P > 0 then Sweeps.Channels (H.Data.Pairs (P).Sweep) else 0);
       end Read_Group;
    begin
-      --  Sweep every channel of the closer when an eye on its arm watches it.
-      Hold_Beat (Read_Group'Access);
-      if Now then
-         --  The eye sees the closer's readings from the poses a deviation needs before the closer is moved, or
-         --  the arm gives it them.
-         declare
-            Enough : Boolean;
-         begin
-            Gather_Own_Poses (Closer, Driver.Robot.Hand.Selfsight.Needed, Enough);
-         end;
-         for C in 1 .. Channels loop
-            Sweep_Channel (Closer, C);
-         end loop;
-         for C in 1 .. Channels loop
-            Top_Up_Poses (Closer, C);
-         end loop;
-      elsif Is_One then
-         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & Closer'Image & " of arm" & Of_Arm'Image
-                          & " is not swept: no eye on its arm watches it, so no hand is made of it");
+      if Part = Sweep_Part then
+         --  Sweep every channel of the closer when an eye on its arm watches it.
+         Hold_Beat (Read_Group'Access);
+         if Now then
+            --  The eye sees the closer's readings from the poses a deviation needs before the closer is moved, or
+            --  the arm gives it them.
+            declare
+               Enough : Boolean;
+            begin
+               Gather_Own_Poses (Closer, Driver.Robot.Hand.Selfsight.Needed, Enough);
+            end;
+            for C in 1 .. Channels loop
+               Sweep_Channel (Closer, C);
+            end loop;
+            for C in 1 .. Channels loop
+               Top_Up_Poses (Closer, C);
+            end loop;
+         elsif Is_One then
+            Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & Closer'Image & " of arm" & Of_Arm'Image
+                             & " is not swept: no eye on its arm watches it, so no hand is made of it");
+         end if;
+         return;
       end if;
       --  Press every lobe of the hand at both openings. The hand is held by its closer group and found again
       --  where it is read, never by an index kept from an earlier beat: the estimators read the roles again between
@@ -1147,7 +1155,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
 
    procedure Hand_Lane (Lane : Positive) is
    begin
-      One_Hand (Closers (Lane));
+      One_Hand (Closers (Lane), Press_Part);
    end Hand_Lane;
 
    procedure Hands_At_Once is new Driver.Beats.At_Once (Hand_Lane);
@@ -1159,14 +1167,19 @@ begin
    Hold_Beat (Read_Closers'Access);
    if Closers.Is_Empty then
       Driver.Log.Line (Driver.Log.Robot, "hand: no closer was found, so nothing is swept or pressed");
-   elsif Natural (Closers.Length) = 1 then
-      One_Hand (Closers.First_Element);
    else
       for G of Closers loop
-         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " is measured with the"
-                          & Natural'Image (Natural (Closers.Length)) & " closers at once");
+         One_Hand (G, Sweep_Part);
       end loop;
-      Hands_At_Once (Positive (Closers.Length));
+      if Natural (Closers.Length) = 1 then
+         One_Hand (Closers.First_Element, Press_Part);
+      else
+         for G of Closers loop
+            Driver.Log.Line (Driver.Log.Robot, "hand: the hand of closer group" & G'Image & " is pressed with the"
+                             & Natural'Image (Natural (Closers.Length)) & " hands at once");
+         end loop;
+         Hands_At_Once (Positive (Closers.Length));
+      end if;
    end if;
    Hold_Beat (Read_Description'Access);
    Driver.Log.Line (Driver.Log.Robot, "hand: measured" & ASCII.LF & Ada.Strings.Unbounded.To_String (Text));
