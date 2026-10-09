@@ -34,6 +34,19 @@ package Driver.Robot.Motion is
    procedure Step (M : in out Model; Targets : Driver.Commands.Command; Report : out Step_Report);
    --  Sends the targets, waits until the body settles, and judges the step.
 
+   procedure Note_Stopped (M : in out Model; G : Group_Id);
+   --  The decider's word that the group's latest push, ended Blocked or Short, was stopped by the body itself and
+   --  not by a surface it was pressing: an aim, a step in free air, a probe. Only the caller can know that: a
+   --  table and a joint's end both leave a push short. It finds, from the stream alone, the channel that stopped
+   --  the push (Driver.Robot.Steps.Limiter: the channel whose share of its ask undelivered is larger than that of
+   --  every other channel asked, by more than Z standard deviations of the difference, each from the channel's own
+   --  reading noise and the group's free pushes' scatter; the only channel asked is that channel) and notes where
+   --  it stopped, in the sense it was asked, as an end of the channel (Driver.Robot.End_Of). Nothing is noted for
+   --  a push given up while its readings kept moving, one that was not blocked, or one no channel dominates (the
+   --  shortfall spread over the channels). The furthest stop seen of a sense stands: a stop where the arm met
+   --  itself is relaxed by a later one that went further. Like every decider call it is made between Next and
+   --  Send; it waits for nothing and asks for no estimate.
+
    procedure Hold (M : in out Model; Beats : Positive);
    --  Holds the body for that many beats.
 
@@ -121,7 +134,10 @@ package Driver.Robot.Motion is
      with Pre => Direction /= 0.0;
    --  Probe_Together with that one channel, from its own noise.
 
-   type Sense is (Increasing, Decreasing);
+   subtype Sense is Driver.Robot.Sense;
+   function Increasing return Sense renames Driver.Robot.Increasing;
+   function Decreasing return Sense renames Driver.Robot.Decreasing;
+   --  The way a reading is asked to go (Driver.Robot.Sense: a channel's end is found that way).
    type Sense_Counts is array (Sense) of Natural;
    type Sense_Flags is array (Sense) of Boolean;
 
@@ -209,6 +225,12 @@ package Driver.Robot.Motion is
    --  straight path leaves what the arm can reach is left: the joints' own
    --  line, which does reach, is taken, and the plan says how large it is
    --  (Worst_Bow).
+   --
+   --  A path that passes an end a channel has shown (Driver.Robot.End_Of) by
+   --  more than the end's sigma and the waypoint's is refused as Unreachable,
+   --  saying which channel and where; until a channel has shown one a path is
+   --  free past the readings seen. A waypoint at the end, within the noise, is
+   --  planned.
    --
    --  The segments of a chain are solved one from where the last ended, so
    --  the chain is continuous: with a clearance, a joint that the straight

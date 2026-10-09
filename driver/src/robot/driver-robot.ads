@@ -97,7 +97,7 @@ package Driver.Robot is
    --  group's push does to each eye (the lock-in), the body's graph (roles,
    --  arms, mounts) and the kinematics with their lenses.
    type Stored is
-     (Stored_Noise, Stored_Travel, Stored_Steps, Stored_Lags, Stored_Responses, Stored_Graph, Stored_Kinematics);
+     (Stored_Noise, Stored_Travel, Stored_Ends, Stored_Steps, Stored_Lags, Stored_Responses, Stored_Graph, Stored_Kinematics);
 
    procedure Load_Body
      (M   : in out Model;
@@ -239,6 +239,16 @@ package Driver.Robot is
    --  show). Unknown while the channel's noise is not measured, since nothing
    --  tells a step from it.
 
+   type Sense is (Increasing, Decreasing);
+   --  The way a channel's reading is asked to go.
+
+   function End_Of (M : Model; G : Group_Id; Channel : Positive; S : Sense) return Estimate;
+   --  The reading beyond which the channel was found not to follow when asked further that way: where a push that
+   --  the body itself stopped (Driver.Robot.Motion.Note_Stopped) left it, the furthest such a push left it, and no
+   --  nearer than the readings the channel has been seen at; its sigma is the channel's reading noise. Unknown until
+   --  the channel has shown an end, or while its noise is not measured: plans are free past the readings seen until
+   --  a channel has shown one, and Driver.Robot.Motion.Plan_Reach refuses a path past it.
+
    type Eye_Response is (Unmeasured, Nothing, Patch, Undecided, Whole);
    --  What pushing a group does to what an eye sees: nothing, a patch of the
    --  image moves, or the whole image moves (the eye rides on the group).
@@ -338,6 +348,9 @@ private
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
       Free_Shortfalls : Real_Vectors.Vector;   --  of every answered push that was not blocked, along its ask, in order
       Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
+      Stopped_Low, Stopped_High : Real_Vectors.Vector;   --  per channel, where a push the body stopped left it, the
+                                                         --  furthest down and up (End_Of); valid where the flags are
+      Has_Stopped_Low, Has_Stopped_High : Flag_Vectors.Vector;   --  a stop of that sense was noted for the channel
    end record;
 
    package Group_Stream_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Stream);

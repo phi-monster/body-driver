@@ -101,6 +101,18 @@ package body Driver.Robot.Body_File is
       end loop;
       Add ("]}," & LF);
 
+      --  Where a push the body stopped left each channel, the furthest down and up, and whether one did: the ends the
+      --  arm showed by stopping (Driver.Robot.Motion.Note_Stopped). A group none of whose channels showed an end has
+      --  empty vectors.
+      Add (" ""ends"": {""method"": " & Int (Ends_Method) & ", ""groups"": [");
+      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+         Add (Separator (G = M.Groups.First_Index) & "{""low"": " & Reals (M.Groups (G).Stopped_Low)
+              & ", ""has_low"": " & Flags (M.Groups (G).Has_Stopped_Low)
+              & ", ""high"": " & Reals (M.Groups (G).Stopped_High)
+              & ", ""has_high"": " & Flags (M.Groups (G).Has_Stopped_High) & "}");
+      end loop;
+      Add ("]}," & LF);
+
       --  The step responses: the longest wait for an answer, and every free
       --  push's shortfall.
       Add (" ""steps"": {""method"": " & Int (Steps_Method) & ", ""groups"": [");
@@ -418,6 +430,50 @@ package body Driver.Robot.Body_File is
             end if;
          end;
 
+         --  The ends the arm showed by stopping, on the noise (an end's sigma is its channel's).
+         declare
+            N  : constant Node := Field (Top, "ends");
+            Gs : constant Node := Field (N, "groups");
+         begin
+            if Restored (Stored_Noise) and then Method_Is (N, Ends_Method) and then Size (Gs) = Group_Count then
+               for I in 1 .. Group_Count loop
+                  declare
+                     S        : Group_Stream renames M.Groups (Group_Id (I));
+                     Low      : constant Real_Vectors.Vector := Reals_Of (Field (Item (Gs, I), "low"));
+                     High     : constant Real_Vectors.Vector := Reals_Of (Field (Item (Gs, I), "high"));
+                     Has_Low  : constant Flag_Vectors.Vector := Flags_Of (Field (Item (Gs, I), "has_low"));
+                     Has_High : constant Flag_Vectors.Vector := Flags_Of (Field (Item (Gs, I), "has_high"));
+                  begin
+                     if Natural (Low.Length) = Natural (Has_Low.Length) and then Natural (High.Length) = Natural (Has_High.Length)
+                       and then Natural (Low.Length) = Natural (High.Length)
+                       and then (Low.Is_Empty or else Natural (Low.Length) = S.Size)
+                     then
+                        --  What the model already holds stands beside what the file brings: the furthest stop of
+                        --  each sense.
+                        if Natural (S.Has_Stopped_Low.Length) /= Natural (Low.Length) then
+                           S.Stopped_Low := Low;
+                           S.Stopped_High := High;
+                           S.Has_Stopped_Low := Has_Low;
+                           S.Has_Stopped_High := Has_High;
+                        else
+                           for C in Low.First_Index .. Low.Last_Index loop
+                              if Has_Low (C) and then (not S.Has_Stopped_Low (C) or else Low (C) < S.Stopped_Low (C)) then
+                                 S.Has_Stopped_Low.Replace_Element (C, True);
+                                 S.Stopped_Low.Replace_Element (C, Low (C));
+                              end if;
+                              if Has_High (C) and then (not S.Has_Stopped_High (C) or else High (C) > S.Stopped_High (C)) then
+                                 S.Has_Stopped_High.Replace_Element (C, True);
+                                 S.Stopped_High.Replace_Element (C, High (C));
+                              end if;
+                           end loop;
+                        end if;
+                     end if;
+                  end;
+               end loop;
+               Restored (Stored_Ends) := True;
+            end if;
+         end;
+
          --  The step responses, on the noise.
          declare
             N  : constant Node := Field (Top, "steps");
@@ -681,6 +737,7 @@ package body Driver.Robot.Body_File is
            (case Q is
                when Stored_Noise      => "the readings' noise",
                when Stored_Travel     => "the readings' travel",
+               when Stored_Ends       => "the ends the arm showed by stopping",
                when Stored_Steps      => "the step responses",
                when Stored_Lags       => "the image lags",
                when Stored_Responses  => "the eyes' responses",

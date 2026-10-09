@@ -3272,7 +3272,6 @@ package body Driver.Robot.Tests is
    --  nothing tells whether its reading followed, it is asked the same and
    --  called blind, not dead.
    procedure Probe_Limits_And_Deadbands is
-      use type Driver.Robot.Motion.Sense;
       package Mo renames Driver.Robot.Motion;
       R        : Mo.Two_Way_Report;
       Up, Down : Real;
@@ -6355,6 +6354,310 @@ package body Driver.Robot.Tests is
              "a step that does not lower the cost is taken");
    end Refinement_Takes_Steps_That_Move_The_Fit;
 
+   ---------------------------------------------------------------------------
+   --  The ends a channel shows by stopping (Motion.Note_Stopped, End_Of, the planner's refusal).
+   --
+   --  The pushes are the arm's own, from A22's and A27's runs (third joint, beats in the names): a push the arm was
+   --  stopped in by itself leaves one channel far short of the rest, and one the table stopped leaves the shortfall
+   --  spread over the channels asked as the ask was.
+
+   Six : constant := 6;
+
+   --  A group of six channels, its noise measured and its free pushes few and tiny, as a boot leaves them, first seen at 1
+   --  (beyond every reading the pushes below stop at, so that what the channels have been seen at is theirs).
+   procedure Ends_Body (M : in out Model) is
+      Idle : Driver.Commands.Command;
+      O    : Observation;
+   begin
+      O.Readings.Append (Real_Array'(1 .. Six => 1.0));
+      O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+      O.Images.Append (Driver.Images.No_Image);
+      O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+      Driver.Commands.Set_Target (Idle, 1, Real_Array'(1 .. Six => 1.0));
+      Driver.Robot.Channels.Append (M, O, Idle);
+      M.Beats := M.Beats + 1;
+      for C in 1 .. Six loop
+         M.Noise.Append (1.0e-6);
+         M.Noise_Freedom.Append (100);
+      end loop;
+      for F of Real_Array'[1.0e-5, 2.0e-5, 0.0, 0.0, 0.0] loop
+         M.Groups (1).Free_Shortfalls.Append (F);
+      end loop;
+   end Ends_Body;
+
+   --  One push of the group as the step tracker would have followed it: held at Start, asked Aim, stopped at Stop and
+   --  at rest there. The episode is the one it would have judged.
+   procedure Ends_Push
+     (M : in out Model; Start, Aim, Stop : Real_Array; Blocked : Boolean := True; Rested : Boolean := True)
+   is
+      Sent   : Driver.Commands.Command;
+      Began  : Natural;
+      Length : Real := 0.0;
+      procedure Beat (Reading, Target : Real_Array) is
+         O : Observation;
+      begin
+         O.Readings.Append (Reading);
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         Driver.Commands.Set_Target (Sent, 1, Target);
+         Driver.Robot.Channels.Append (M, O, Sent);
+         M.Beats := M.Beats + 1;
+      end Beat;
+   begin
+      Beat (Start, Start);
+      Beat (Start, Start);
+      Began := M.Beats;
+      Beat (Start, Aim);
+      Beat (Stop, Aim);
+      Beat (Stop, Aim);
+      for C in 1 .. Six loop
+         Length := Length + (Aim (C) - Start (C)) ** 2;
+      end loop;
+      M.Groups (1).Episodes.Append
+        (Episode'(Start => Began, Ended => True, End_At => M.Beats - 1, Settled => True, Rested => Rested,
+                  Blocked => Blocked, Length => Ada.Numerics.Long_Elementary_Functions.Sqrt (Length), others => <>));
+   end Ends_Push;
+
+   --  Beat numbers are A27's (right arm, hand 2, third joint last but one; the fifth is the third joint of A22's press 2).
+   A27_6152_Start : constant Real_Array := [-0.0428, 0.4451, 0.3234, -0.7702, -0.2622, 0.4558];
+   A27_6152_Aim   : constant Real_Array := [-0.0403, 0.5985, -0.0485, -0.2437, -0.2609, 0.4581];
+   A27_6152_Stop  : constant Real_Array := [-0.0440, 0.5844, 0.0705, -0.2321, -0.2601, 0.4579];
+   A22_13827_Start : constant Real_Array := [0.1172, -0.0794, -0.0249, 0.0552, 0.5253, -0.9512];
+   A22_13827_Aim   : constant Real_Array := [0.1172, -0.1354, -0.0578, 0.0320, 0.5253, -0.9512];
+   A22_13827_Stop  : constant Real_Array := [0.1172, -0.1353, -0.0359, 0.0320, 0.5253, -0.9512];
+
+   procedure Limiter_Finds_The_Channel_That_Stopped is
+      --  (a) A27's aim at 6152: the third joint 0.119 short of 0.372 asked (32 per cent), the second 0.014 of 0.153
+      --      (9), the fourth gone past its target: the third is the limiter.
+      --  (b) A22's press 2 at 13827: the third joint 0.0219 of 0.0329 short, the rest on their targets: the third.
+      --  (c) a push that asked the third joint only: the third.
+      --  (d) the shares equal in three channels: none. (A27's push at 6277, the table's, fell short by 16, 28 and 22 per cent
+      --      of the three joints' asks; those differ by many sigmas of the readings' noise, so the limiter alone does
+      --      not tell a table's push from a joint's: the caller says whether the body stopped it, and the hand does
+      --      not say so of a press that rests on the table.)
+      --  (f) a push given up while moving, or not blocked: none.
+      function Limiter_Of (Start, Aim, Stop : Real_Array; Blocked, Rested : Boolean := True) return Natural is
+         M : Model;
+      begin
+         Ends_Body (M);
+         Ends_Push (M, Start, Aim, Stop, Blocked, Rested);
+         return Driver.Robot.Steps.Limiter (M, 1, Driver.Robot.Steps.Latest (M, 1));
+      end Limiter_Of;
+   begin
+      Check (Limiter_Of (A27_6152_Start, A27_6152_Aim, A27_6152_Stop) = 3,
+             "the aim the third joint stopped (A27, 6152) has limiter" & Limiter_Of (A27_6152_Start, A27_6152_Aim, A27_6152_Stop)'Image);
+      Check (Limiter_Of (A22_13827_Start, A22_13827_Aim, A22_13827_Stop) = 3,
+             "the push the third joint's end stopped (A22, 13827) has limiter"
+             & Limiter_Of (A22_13827_Start, A22_13827_Aim, A22_13827_Stop)'Image);
+      Check (Limiter_Of ([0.0, 0.0, -0.0228, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0],
+                         [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]) = 3,
+             "the push that asked the third joint only (A27, 6567) has another limiter");
+      Check (Limiter_Of ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.1, 0.1, 0.1, 0.0, 0.0, 0.0], [0.05, 0.05, 0.05, 0.0, 0.0, 0.0]) = 0,
+             "a push short by the same share in three channels has a limiter");
+      Check (Limiter_Of ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.1, 0.1, 0.0, 0.0, 0.0, 0.0], [0.05, 0.050001, 0.0, 0.0, 0.0, 0.0]) = 0,
+             "a channel short by a millionth more than another, within the scatter of free pushes, is the limiter");
+      Check (Limiter_Of ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.1, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0999999, 0.0, 0.0, 0.0, 0.0, 0.0]) = 0,
+             "the only channel asked, short by a ten-millionth of a unit, within the scatter of free pushes, is the limiter");
+      Check (Limiter_Of (A27_6152_Start, A27_6152_Aim, A27_6152_Stop, Rested => False) = 0,
+             "a push given up while its readings moved has a limiter");
+      Check (Limiter_Of (A27_6152_Start, A27_6152_Aim, A27_6152_Stop, Blocked => False) = 0,
+             "a push that was not blocked has a limiter");
+   end Limiter_Finds_The_Channel_That_Stopped;
+
+   procedure A_Lone_Channel_Is_The_Limiter_Only_If_Short_By_More_Than_Its_Scatter is
+      --  A group of one channel (a closer): nothing to compare it with, so it is the limiter when it fell short by
+      --  more than Z standard deviations of its noise and the group's free pushes, and not when it fell short by less.
+      function Limiter_Of (Aim, Stop : Real) return Natural is
+         M    : Model;
+         Sent : Driver.Commands.Command;
+         procedure Beat (Reading, Target : Real) is
+            O : Observation;
+         begin
+            O.Readings.Append (Real_Array'(1 => Reading));
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+            O.Images.Append (Driver.Images.No_Image);
+            O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+            Driver.Commands.Set_Target (Sent, 1, Real_Array'(1 => Target));
+            Driver.Robot.Channels.Append (M, O, Sent);
+            M.Beats := M.Beats + 1;
+         end Beat;
+      begin
+         Beat (1.0, 1.0);
+         Beat (0.0, 0.0);
+         Beat (0.0, 0.0);
+         M.Noise.Append (1.0e-6);
+         M.Noise_Freedom.Append (100);
+         for F of Real_Array'[1.0e-5, 2.0e-5, 0.0, 0.0, 0.0] loop
+            M.Groups (1).Free_Shortfalls.Append (F);
+         end loop;
+         Beat (0.0, Aim);
+         Beat (Stop, Aim);
+         Beat (Stop, Aim);
+         M.Groups (1).Episodes.Append
+           (Episode'(Start => 3, Ended => True, End_At => 5, Settled => True, Rested => True, Blocked => True,
+                     Length => abs Aim, others => <>));
+         return Driver.Robot.Steps.Limiter (M, 1, Driver.Robot.Steps.Latest (M, 1));
+      end Limiter_Of;
+   begin
+      Check (Limiter_Of (0.1, 0.0999999) = 0, "a lone channel short by 1e-7, within the scatter of free pushes, is the limiter");
+      Check (Limiter_Of (0.1, 0.05) = 1, "a lone channel short by half its ask is not the limiter");
+   end A_Lone_Channel_Is_The_Limiter_Only_If_Short_By_More_Than_Its_Scatter;
+
+   procedure Stops_Are_Noted_As_Ends is
+      --  The third joint, A27 hand 2's: it stopped against the arm itself at +0.0705 (beat 6152), then at its low end
+      --  -0.0368 (6567), then against the forearm at +0.0194 (6642). The end is the furthest stop of the sense, and
+      --  never nearer than the readings the channel has been seen at; nothing before a stop, nothing for a channel
+      --  whose noise is not measured, and the way up is its own.
+      M : Model;
+   begin
+      Ends_Body (M);
+      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing)), "an end before any stop");
+      Ends_Push (M, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
+      Driver.Robot.Motion.Note_Stopped (M, 1);
+      declare
+         End_Is : constant Estimate := Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing);
+      begin
+         Check (Known (End_Is) and then abs (End_Is.Value - 0.0705) < 1.0e-12 and then abs (End_Is.Sigma - 1.0e-6) < 1.0e-12,
+                "the first stop (+0.0705) is not the end, or its sigma is not the channel's noise");
+      end;
+      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Increasing)),
+             "a stop going down is an end going up");
+      Check (not Known (Driver.Robot.End_Of (M, 1, 2, Driver.Robot.Decreasing)),
+             "the second joint, short but not the limiter, has an end");
+      Ends_Push (M, [0.0, 0.0, 0.0705, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
+      Driver.Robot.Motion.Note_Stopped (M, 1);
+      Check (abs (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing).Value + 0.0368) < 1.0e-12,
+             "a stop that went further did not widen the end to -0.0368");
+      Ends_Push (M, [0.0, 0.0, 0.3, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0273, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0194, 0.0, 0.0, 0.0]);
+      Driver.Robot.Motion.Note_Stopped (M, 1);
+      Check (abs (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing).Value + 0.0368) < 1.0e-12,
+             "a stop where the arm met itself (+0.0194) moved the end it had found (-0.0368)");
+      --  The stops are readings, and a channel is never taken to end nearer than its readings seen, so the end the
+      --  model shows is the lowest reading when a stop was noted; what it kept of the stops is the furthest of them.
+      Check (M.Groups (1).Has_Stopped_Low (2) and then abs (M.Groups (1).Stopped_Low (2) + 0.0368) < 1.0e-12
+             and then not M.Groups (1).Has_Stopped_High (2),
+             "the stops kept are not the furthest down (-0.0368) of the three, or one is kept going up");
+      --  A push is a stop when its caller says so: the sixth joint asked up and stopped short, on a body of its own.
+      declare
+         Fresh : Model;
+      begin
+         Ends_Body (Fresh);
+         Ends_Push (Fresh, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.5], [0.0, 0.0, 0.0, 0.0, 0.0, 0.1]);
+         Check (not Known (Driver.Robot.End_Of (Fresh, 1, 6, Driver.Robot.Increasing)), "an end was found without the caller's word");
+         Driver.Robot.Motion.Note_Stopped (Fresh, 1);
+         --  Its stop at 0.1 is below the 1.0 it was first seen at, and an end is no nearer than a reading seen.
+         Check (Known (Driver.Robot.End_Of (Fresh, 1, 6, Driver.Robot.Increasing))
+                and then abs (Driver.Robot.End_Of (Fresh, 1, 6, Driver.Robot.Increasing).Value - 1.0) < 1.0e-12,
+                "the sixth joint asked up and stopped short at 0.1 has no end up there, or one below the 1.0 it was seen at");
+      end;
+      declare
+         Other : Model;
+      begin
+         Ends_Body (Other);
+         Ends_Push (Other, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
+         Driver.Robot.Motion.Note_Stopped (Other, 1);
+         Check (Known (Driver.Robot.End_Of (Other, 1, 3, Driver.Robot.Decreasing)), "the stop was not noted before the noise went");
+         Other.Noise.Clear;   --  the noise is not measured (a reload that lost it)
+         Check (not Known (Driver.Robot.End_Of (Other, 1, 3, Driver.Robot.Decreasing)),
+                "a channel whose noise is not measured showed an end");
+         declare
+            Unmeasured : Model;
+         begin
+            Ends_Body (Unmeasured);
+            Unmeasured.Noise.Clear;   --  nor was it when the push was
+            Ends_Push (Unmeasured, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
+            Driver.Robot.Motion.Note_Stopped (Unmeasured, 1);
+            Check (not Known (Driver.Robot.End_Of (Unmeasured, 1, 3, Driver.Robot.Decreasing)),
+                   "a push of a channel whose noise was not measured showed an end");
+         end;
+      end;
+      --  Seen, the channel is no nearer: the end is never above a reading the channel has been seen at.
+      declare
+         Seen : Model;
+      begin
+         Ends_Body (Seen);
+         Ends_Push (Seen, [0.0, 0.0, -0.0415, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0415, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0415, 0.0, 0.0, 0.0]);
+         Ends_Push (Seen, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
+         Driver.Robot.Motion.Note_Stopped (Seen, 1);
+         Check (abs (Driver.Robot.End_Of (Seen, 1, 3, Driver.Robot.Decreasing).Value + 0.0415) < 1.0e-12,
+                "an end above a reading the channel was seen at, which it can reach");
+      end;
+   end Stops_Are_Noted_As_Ends;
+
+   procedure Plan_Refuses_Past_An_End is
+      --  A goal past the first joint's travel (0.45) is planned when no end is known, refused when the first joint
+      --  has shown an end up at 0.3 inside the path, and planned when the end is at the goal's reading within the
+      --  noise or past it.
+      M : Model;
+      O : Observation;
+      function Planned_With (End_At : Real) return Driver.Robot.Motion.Plan is
+         S : Group_Stream renames M.Groups (1);
+      begin
+         S.Stopped_High.Clear;
+         S.Has_Stopped_High.Clear;
+         S.Stopped_Low.Clear;
+         S.Has_Stopped_Low.Clear;
+         for C in 1 .. 6 loop
+            S.Stopped_High.Append (if C = 1 then End_At else 0.0);
+            S.Has_Stopped_High.Append (C = 1 and then End_At < Real'Last);
+            S.Stopped_Low.Append (0.0);
+            S.Has_Stopped_Low.Append (False);
+         end loop;
+         return Driver.Robot.Motion.Plan_Reach
+           (M, 1, O, (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Beyond_Goal), Position_Only => False));
+      end Planned_With;
+      use type Driver.Robot.Motion.Plan_Status;
+   begin
+      Measured_Body (M);
+      O.Readings.Append (Real_Array'(1 .. 6 => 0.0));
+      Check (Driver.Robot.Motion.Status (Planned_With (Real'Last)) = Driver.Robot.Motion.Planned,
+             "a goal past the readings seen is not planned while no end is known");
+      declare
+         Refused : constant Driver.Robot.Motion.Plan := Planned_With (0.3);
+      begin
+         Check (Driver.Robot.Motion.Status (Refused) = Driver.Robot.Motion.Unreachable
+                and then Ada.Strings.Fixed.Index (Driver.Robot.Motion.Why (Refused), "would pass its end") > 0,
+                "a path past an end the first joint showed is planned, or refused for another reason: "
+                & Driver.Robot.Motion.Why (Refused));
+      end;
+      Check (Driver.Robot.Motion.Status (Planned_With (Beyond_Goal (1))) = Driver.Robot.Motion.Planned,
+             "a path that ends at the end (within the noise) is refused");
+      Check (Driver.Robot.Motion.Status (Planned_With (2.0)) = Driver.Robot.Motion.Planned,
+             "a path wholly short of an end is refused: " & Driver.Robot.Motion.Why (Planned_With (2.0)));
+   end Plan_Refuses_Past_An_End;
+
+   procedure Ends_Are_Kept_In_The_Body_File is
+      --  Written and read back, the body has the ends it showed, and the file the reloaded body writes is the same.
+      M, Back : Model;
+      Ok      : Boolean;
+      Why     : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      Measured_Body (M);
+      for C in 1 .. 6 loop
+         M.Groups (1).Stopped_Low.Append (-1.0 - 0.1 * Real (C));
+         M.Groups (1).Stopped_High.Append (0.5 * Real (C));
+         M.Groups (1).Has_Stopped_Low.Append (C mod 2 = 1);
+         M.Groups (1).Has_Stopped_High.Append (C mod 3 = 0);
+      end loop;
+      declare
+         Written : constant String := Driver.Robot.Body_File.Text (M);
+      begin
+         Driver.Robot.Body_File.Read (Back, Written, Ok, Why);
+         Check (Ok, "the body file was not read: " & Ada.Strings.Unbounded.To_String (Why));
+         Check (Reloaded (Back, Stored_Ends), "the ends were not reloaded");
+         for C in 1 .. 6 loop
+            Check (Known (Driver.Robot.End_Of (Back, 1, C, Driver.Robot.Decreasing)) = (C mod 2 = 1)
+                   and then Known (Driver.Robot.End_Of (Back, 1, C, Driver.Robot.Increasing)) = (C mod 3 = 0),
+                   "the reloaded body has other ends than the written one's on channel" & C'Image);
+         end loop;
+         Check (abs (Driver.Robot.End_Of (Back, 1, 3, Driver.Robot.Increasing).Value - 1.5) < 1.0e-9
+                and then abs (Driver.Robot.End_Of (Back, 1, 5, Driver.Robot.Decreasing).Value + 1.5) < 1.0e-9,
+                "the reloaded ends are other numbers than the written ones");
+         Check (Driver.Robot.Body_File.Text (Back) = Written, "the reloaded body writes another file");
+      end;
+   end Ends_Are_Kept_In_The_Body_File;
+
    procedure Register is
    begin
       Driver.Robot.Kinematics.Errors.Tests.Register;
@@ -6385,6 +6688,18 @@ package body Driver.Robot.Tests is
                              Plan_Stays_Within_Its_Clearance'Access);
       Driver.Tests.Register ("robot.still.reloaded", "a reloaded body creeping uncommanded below its visible step is "
                              & "not still, or Settle or Hold_For_Keyframe does not end on it", Reloaded_Creep_Is_Still'Access);
+      Driver.Tests.Register ("robot.ends.limiter", "a push stopped by one channel far short of the rest names another, or "
+                             & "one that spread its shortfall over the channels, one given up moving, or one not "
+                             & "blocked, names one", Limiter_Finds_The_Channel_That_Stopped'Access);
+      Driver.Tests.Register ("robot.ends.lone", "a lone channel short by less than the scatter of free pushes is the limiter, or "
+                             & "one short by half its ask is not", A_Lone_Channel_Is_The_Limiter_Only_If_Short_By_More_Than_Its_Scatter'Access);
+      Driver.Tests.Register ("robot.ends.noted", "a stop the caller called the body's is not an end, the furthest stop of "
+                             & "a sense does not stand, an end is nearer than the readings seen, or an unmeasured "
+                             & "channel shows one", Stops_Are_Noted_As_Ends'Access);
+      Driver.Tests.Register ("robot.ends.plan", "a path past an end a channel showed is planned, or one that ends at it is not",
+                             Plan_Refuses_Past_An_End'Access);
+      Driver.Tests.Register ("robot.ends.file", "the ends a body showed are not in its file, or the reloaded body writes another",
+                             Ends_Are_Kept_In_The_Body_File'Access);
       Driver.Tests.Register ("robot.plan.beyond", "a goal past the readings the arm has shown is not planned, its plan "
                              & "is not followed there, or a joint's end on the way is not met as Blocked or Short",
                              Plan_And_Follow_Beyond_The_Travel'Access);

@@ -819,6 +819,35 @@ the eye: a fit that puts it at or behind it is not a tip, and the presses fitted
 to it stopped on something else or belong to another tip. The tip is not Ok
 then and the presses on it do not agree (`hand.touch.behind`).
 
+**Lesson: the arm's third joint ends where the boot never asked, and a press that asks past it loses an aim or a
+descent (A22, A27).** Of the stops in the air of A22's hand 1 and A27's hand 2 that were traced to a joint, all were one joint's: the
+third (the elbow), at -0.0359 (A22 press 2, beats 13827-13834, asked -0.0578, the other five
+on their targets, the hand 8.7 cm above the table, the sixth push of a descent that doubled from 0.0005), at
+-0.0368 (A27 beat 6567, asked -0.1016) and at -0.0359 (A27, the truth's line 7041): the same value on two arms and two runs, a
+joint's low end; and at +0.0731 (A22 press 3, the second link 0.6 mm from the fifth), +0.0705 (A27's aim at 6152,
+asked -0.0485) and +0.0194 (A27 6642), which vary with the other joints: the arm met itself. The boot showed the
+joint at -0.0415 near its home pose and never asked past it, so nothing in the model knew. A channel's end is a
+property of the body, and every plan must refuse past it (one mechanism, in the model: `Driver.Robot.End_Of`,
+`Driver.Robot.Motion.Note_Stopped`, `Plan_Reach`, the body file's `ends`; designed with path A): a decider that
+knows its push was stopped by the body and not by a surface says so, `Steps.Limiter` names the channel by a
+significance test of each channel's part of the shortfall along the ask (its share of the ask times its own
+shortfall) against its own noise and the free pushes' scatter, and the reading it stopped at is kept; the end
+is the furthest stop of a sense, never nearer than the readings the channel has been seen at (a stop where the arm met
+itself is not proof that it cannot go further, and a plan that cannot go past a stop could never find that out);
+until a channel has shown one plans are free past the readings seen, so an aim that stops costs one aim. What the
+test cannot do is tell the table from the body: A27's push at 6277, on the table, fell short in three joints by 16,
+28 and 22 per cent of their asks, many sigmas of the noise apart, so the caller's word is what says a stop was the
+body's (the hand says it of an aim, always in free air, and of a descent whose tip stood above the contact the
+presses predict by more than Z of its sigma, and never of a press that rests). What the hand does with the ends:
+the poses that point a line of sight down are a circle of them, the hand turned about the way down through its eye
+(`Pressing.Aim_Reaching`, the eight multiples of an eighth of a turn from the least rotation), and the arm's joints
+reach some of the circle and not others (A22's lobe 2 aimed straight is 0.117 outside the readings the arm has shown
+at the least rotation and 0.103 inside them at 30 degrees); the first whose aim is planned, and whose descent to
+the contact the presses predict is planned too, is the aim; none is a tilt the arm cannot make from there and
+half of it is tried. (`robot.ends.*`, `hand.press.yaw`, `hand.measure.yaw`.) The faster descent (the first push to Z
+sigma above the predicted contact, not doubling from the least move over it) is the same sentence: the stop of the
+arm's own showed at the sixth of thirteen pushes.
+
 **Lesson: an aim the arm did not complete is not the start of a press (A27).**
 A27's hand 2 (the right arm) pressed lobe 1 first, straight: the aim, a turn of
 1.0762 rad about the eye, stopped the arm at the third joint +0.0705 for the

@@ -134,7 +134,6 @@ package body Driver.Robot.Boot is
       --  order no other group shares, for the lock-in to tell the groups
       --  apart; then settles.
       procedure Push_Both_Ways (G : Group_Id; Size : Positive; Factor : Real; Moved : out Boolean) is
-         use type Driver.Robot.Motion.Sense;
          Start  : constant Real_Array := Holds_Of (G, Size);
          Amount : Real_Array (1 .. Size) := [others => 0.0];
          Report : Driver.Robot.Motion.Step_Report;
@@ -176,7 +175,6 @@ package body Driver.Robot.Boot is
       --  when its reading followed no level either way), then pushes every
       --  channel both ways by that much (Push_Both_Ways).
       procedure Recognize (G : Group_Id; Size : Positive; From : Real) is
-         use type Driver.Robot.Motion.Sense;
          Amount : Real_Array (1 .. Size) := [others => 0.0];
          function Way (S : Driver.Robot.Motion.Sense) return String is
            (if S = Driver.Robot.Motion.Increasing then "upwards" else "downwards");
