@@ -1349,6 +1349,20 @@ package body Driver.Alignment is
       end;
    end Align_At;
 
+   function Largest_Window (First, Second : Pyramid) return Real is
+      Deepest : constant Natural := Natural'Min (Levels (First), Levels (Second)) - 1;
+      Widest  : Real := 0.0;
+   begin
+      for Step in 0 .. Deepest loop
+         declare
+            Reach : constant Natural := Half_Patch (Second.Sizes (Step).Width, Second.Sizes (Step).Height);
+         begin
+            Widest := Real'Max (Widest, Real (Reach - 1) * Real (Halving) ** Step);
+         end;
+      end loop;
+      return Widest;
+   end Largest_Window;
+
    function Align (First, Second : Pyramid; Query : Prediction) return Answer is
       Second_Top : constant Level := Second.Sizes (0);
       --  The prediction's covariance, and what a place on a grid of pixels cannot be known to beyond.

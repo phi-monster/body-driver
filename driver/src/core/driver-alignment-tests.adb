@@ -5,6 +5,7 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Images;
 with Driver.Tests;
+with Driver.Uncertain;
 
 package body Driver.Alignment.Tests is
 
@@ -447,6 +448,28 @@ package body Driver.Alignment.Tests is
       end if;
    end Aperture;
 
+   procedure Reach is
+      --  The widest window the aligner searches is the one Largest_Window says: a prediction whose window lies a tenth
+      --  inside it is searched, one a tenth outside it is refused as too wide.
+      First   : constant Pyramid := Pyramid_Of (Picture (Textured, Identity_Part, 0.0, 0.0, 0.0));
+      Widest  : constant Real := Largest_Window (First, First);
+      Gate    : constant Real := Driver.Uncertain.Threshold (Driver.Uncertain.Vector_Gate (2));
+
+      function Query_Of (Radius : Real) return Prediction is
+        (From => (U => 160.5, V => 120.5), To => (U => 160.5, V => 120.5),
+         Cov => (UU => (Radius / Gate) ** 2, UV => 0.0, VV => (Radius / Gate) ** 2), others => <>);
+
+      Inside  : constant Answer := Align (First, First, Query_Of (0.9 * Widest));
+      Outside : constant Answer := Align (First, First, Query_Of (1.1 * Widest));
+   begin
+      Check (Widest > 0.0, "no window is searched at all: " & Real'Image (Widest));
+      Check (Inside.Because /= Window_Too_Large,
+             "a window a tenth inside the widest (" & Real'Image (0.9 * Widest) & " px) was refused as too wide");
+      Check (Outside.Because = Window_Too_Large,
+             "a window a tenth outside the widest (" & Real'Image (1.1 * Widest) & " px) was searched: "
+             & Reason'Image (Outside.Because));
+   end Reach;
+
    procedure Window is
       --  A window wider than the pictures' patches carry at any level, and a mirrored warp: said so.
       First : constant Pyramid := Pyramid_Of (Picture (Textured, Identity_Part, 0.0, 0.0, 0.0));
@@ -495,6 +518,8 @@ package body Driver.Alignment.Tests is
       Driver.Tests.Register
         ("alignment.aperture", "the place along an edge is claimed as well known as the place across it",
          Aperture'Access);
+      Driver.Tests.Register
+        ("alignment.reach", "the widest window the aligner searches is not the one it says", Reach'Access);
       Driver.Tests.Register
         ("alignment.window", "a window wider than a patch carries, or a mirror, is compared", Window'Access);
    end Register;
