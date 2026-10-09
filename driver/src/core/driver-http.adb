@@ -205,6 +205,10 @@ package body Driver.Http is
    begin
       Create_Socket (S);
       Opened := True;
+      --  The body goes out right after the headers, not after the service has
+      --  acknowledged them (Nagle's algorithm against a delayed acknowledgement: 40
+      --  ms a call; Driver.Wire.Accept_Client).
+      Set_Socket_Option (S, IP_Protocol_For_TCP_Level, (No_Delay, True));
       Connect_Socket (S, (Family => Family_Inet, Addr => Addresses (Get_Host_By_Name (Host), 1),
                           Port => Port_Type (Port)));
       Send_Text (S, Request);

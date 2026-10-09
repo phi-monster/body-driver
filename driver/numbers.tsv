@@ -262,6 +262,7 @@ driver-base64.adb	Sextet : constant := 2 ** 6;	2	format	each base64 character ca
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	2	format	a partial group of three bytes still takes four characters
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	3	format	base64 takes three bytes at a time
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	4	format	three bytes make four characters
+driver-beats.adb	Mine : Positive := 1;	1	structure	a placeholder until Start gives the lane its number
 driver-brain-keyboard.adb	Rule ("");	"0	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
 driver-brain-keyboard.adb	Rule ("");	"1	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
 driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
@@ -722,8 +723,16 @@ driver-numerics.adb	[[1.0 - 2.0 * (Y * Y + Z * Z), 2.0 * (X * Y - W * Z), 2.0 * 
 driver-numerics.adb	[[1.0 - 2.0 * (Y * Y + Z * Z), 2.0 * (X * Y - W * Z), 2.0 * (X * Z + W * Y)],	2.0	math	identity: symmetric part, half-angle or quaternion formula
 driver-numerics.adb	[for I in 1 .. 3 => [for J in 1 .. 3 => A (I) * B (J)]];	3	structure	three dimensions
 driver-numerics.adb	[for I in 1 .. 3 => [for J in 1 .. 3 => A (I) * B (J)]];	3	structure	three dimensions
+driver-numerics.adb	for I in 1 .. 3 loop	3	structure	three dimensions
+driver-numerics.adb	for I in 1 .. 3 loop	3	structure	three dimensions
+driver-numerics.adb	for I in 1 .. 3 loop	3	structure	three dimensions
 driver-numerics.adb	for I in 2 .. 3 loop	2	structure	remaining columns of a 3 x 3 matrix
 driver-numerics.adb	for I in 2 .. 3 loop	3	structure	three dimensions
+driver-numerics.adb	for J in 1 .. 3 loop	3	structure	three dimensions
+driver-numerics.adb	for K in 1 .. 3 loop	3	structure	three dimensions
+driver-numerics.adb	for K in 1 .. 3 loop	3	structure	three dimensions
+driver-numerics.adb	for K in 1 .. 3 loop	3	structure	three dimensions
+driver-numerics.adb	for K in 1 .. 3 loop	3	structure	three dimensions
 driver-numerics.adb	if S > 0.0 and then C > -0.5 then	0.5	numerics	beyond 120 degrees the antisymmetric part loses the axis; use the symmetric part
 driver-numerics.adb	return (Theta / (2.0 * S)) * W;	2.0	math	identity: symmetric part, half-angle or quaternion formula
 driver-numerics.adb	return (W => (R (3, 2) - R (2, 3)) / S, X => S / 4.0,	4.0	math	Shepperd's quaternion formula
@@ -798,12 +807,14 @@ driver-robot-body_file.ads	Steps_Method : constant := 2;	2	format	the second ver
 driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log names
 driver-robot-boot.adb	& "" & Driver.Log.Image (Rests (G, E), 2)	2	format	digits printed in a log line or a message
+driver-robot-boot.adb	& (if Unswept.Length > 1 then "" & Unswept.Length'Image & "" else ""));	1	structure	one arm or hand needs no lanes; more than one are measured at once
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (S) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * Half / (Real (N) * Per_Unit (Swept (K)));	1.0	structure	a Hadamard entry is plus or minus one
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * Half / (Real (N) * Per_Unit (Swept (K)));	1.0	structure	a Hadamard entry is plus or minus one
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * Half / (Real (N) * Per_Unit (Swept (K)));	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	/ 2.0;	2.0	structure	a view keeps half of itself in sight while turning by half
+driver-robot-boot.adb	Arm : Arm_Id := 1;	1	structure	the default of a record field, overwritten where a pair is found
 driver-robot-boot.adb	Col := Col / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Doubled : constant Real := 2.0 ** 2;	2.0	math	a doubled push makes four times the energy: energy grows with the square of the push
@@ -835,14 +846,15 @@ driver-robot-boot.adb	S : String (1 .. 32);	32	format	wide enough for any Long_F
 driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
 driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
 driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
-driver-robot-boot.adb	and then (Level mod 2 = 1 or else Report.Outcome /= Driver.Robot.Motion.Reached	1	structure	the first level is held, and every other one from it
-driver-robot-boot.adb	and then (Level mod 2 = 1 or else Report.Outcome /= Driver.Robot.Motion.Reached	2	numerics	keyframes one per two doublings: the held levels turn the joint four times as far each, spanning every scale from the matcher's limit to the widest turn as one per doubling does (A9's arm: 59 keyframes against 97, the same fit against truth)
+driver-robot-boot.adb	if Level mod 2 = 1 or else 2.0 * Offset * Per_Unit (P.Channel) > Half then	1	math	the odd levels: one keyframe per two doublings
+driver-robot-boot.adb	if Level mod 2 = 1 or else 2.0 * Offset * Per_Unit (P.Channel) > Half then	2	math	every other level (mod 2)
+driver-robot-boot.adb	if Level mod 2 = 1 or else 2.0 * Offset * Per_Unit (P.Channel) > Half then	2.0	math	the next level doubles: past the widest when it would leave half the view
 driver-robot-boot.adb	if N > 1 then	1	structure	cells move several joints
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
-driver-robot-boot.adb	or else 2.0 * Offset * Per_Unit (P.Channel) > Half)	2.0	numerics	doubling search: the next level, which would turn the view past its half, is not taken, so this one is the widest
+driver-robot-boot.adb	if Unswept.Length = 1 then	1	structure	one arm or hand needs no lanes; more than one are measured at once
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-channels.adb	(Driver.Uncertain.Vector_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	math	the squared deviations are already in units of each channel's sigma
 driver-robot-channels.adb	Half : constant Real := 0.5;	0.5	math	the median of the absolute value of a unit Gaussian is its two-sided quantile at one half
@@ -1055,6 +1067,7 @@ driver-robot-hand-measure.adb	Positive'Max (1, (if Longest_Formed > 0 then Longe
 driver-robot-hand-measure.adb	else "" & Driver.Log.Image (By, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	elsif Steps.Stalled then "" & Driver.Log.Image (By, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	if Bound < Ada.Numerics.Pi / 2.0 and then not Checked and then Tilt = 0.0 then	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
+driver-robot-hand-measure.adb	if Natural (Closers.Length) = 1 then	1	structure	one hand needs no lanes; more than one are pressed at once
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Eye.Value, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
@@ -1242,6 +1255,7 @@ driver-robot-hand-views.adb	and then Significant (A (I) - B (B'First + I - A'Fir
 driver-robot-hand-views.adb	if Driver.Pixels.Frames (V.Frames) < 2 or else Driver.Pixels.Frames (Before.Frames) < 2 then	2	structure	a view of two frames: the first alone cannot show that the body held still
 driver-robot-hand-views.adb	if Driver.Pixels.Frames (V.Frames) < 2 or else Driver.Pixels.Frames (Before.Frames) < 2 then	2	structure	a view of two frames: the first alone cannot show that the body held still
 driver-robot-hand-views.adb	if Driver.Pixels.Frames (V.Frames) >= 2 then	2	statistics	a pixel's own variance needs two frames
+driver-robot-hand-views.adb	if not P.Low.Is_Empty and then Driver.Pixels.Frames (V.Frames) >= 2	2	structure	a view of one frame cannot show that the body held still: two are the least that do
 driver-robot-hand-views.adb	or else (Driver.Pixels.Frames (V.Frames) >= 2 and then not Comparable (T, P.Low.Element, V, C, Rest_Moved))	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
@@ -1290,7 +1304,8 @@ driver-robot-hand.adb	I : Positive := 1;	1	structure	the first pair
 driver-robot-hand.adb	Next : constant Ray_Estimate := Eye_Ray (M, P.Eye, (U => Px.U + 1.0, V => Px.V));	1.0	math	the next pixel along the row: the angle one pixel spans at the tip
 driver-robot-hand.adb	Offset := 2.0 * Offset;	2.0	math	the sweep doubles its step
 driver-robot-hand.adb	Past := Real'Max (2.0 * Past, Real'Max (G.Sigma, Least));	2.0	numerics	doubling steps past the band
-driver-robot-hand.adb	Sqrt (2.0) * Reading_Noise (M, R.Group, C)));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-hand.adb	Result (C) := Real'Max (Result (C), Step.Value / (Driver.Conventions.Z * Sqrt (2.0)));	2.0	statistics	the difference of two readings carries the sigma of each: the step is Z times the square root of two of it
+driver-robot-hand.adb	Sqrt (2.0) * Sigma (C)));	2.0	statistics	the difference of two readings carries the sigma of each: the square root of two times one
 driver-robot-hand.adb	if E.Start < 1 or else not Driver.Robot.Channels.Has_Reading (M, Arm_Is, E.Start - 1)	1	structure	a push needs the reading before it: it began at the second beat or later
 driver-robot-hand.adb	if E.Start < 1 or else not Driver.Robot.Channels.Has_Reading (M, Arm_Is, E.Start - 1)	1	structure	a push needs the reading before it: it began at the second beat or later
 driver-robot-hand.adb	if Pushes = 1 then	1	structure	the first push says whether the way answered
@@ -1892,6 +1907,9 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Lens.Fx, 2) & "" & Driver.Log.Im
 driver-robot-kinematics.adb	& Driver.Log.Image (Link.Sigma, 3) & "" & Driver.Log.Image (Link.F, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Link.Sigma, 3) & "" & Driver.Log.Image (Link.F, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (R2.Result.Scale_Sigma, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Placed), 1) & "");	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Real (Fitted - Start), 1) & ""	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Real (Placed - Fitted), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Alone, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Clipped, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Keyframe, 3) & ""	3	format	digits printed in a log line or a message
@@ -2020,6 +2038,7 @@ driver-robot-kinematics.adb	with Pre => On'First = 1	1	structure	indexes start a
 driver-robot-kinematics.adb	with Pre => S'First = 1 and then S'Length = Natural (U.Length) and then Natural (V.Length) = Natural (U.Length)	1	structure	indexes start at one
 driver-robot-lag.adb	Best : Real := 1.0;	1.0	math	a probability: no fit yet, so noise explains everything
 driver-robot-lag.adb	Child := 2 * Root;	2	structure	in a binary heap the children of node k are 2 k and 2 k + 1
+driver-robot-lag.adb	Gaps : Real_Access := new Real_Array (1 .. Natural'Max (1, Natural (List.Length)));	1	structure	at least one element, so an empty list allocates a buffer no smaller than one
 driver-robot-lag.adb	I : Positive := 1;	1	structure	arrays are indexed from one
 driver-robot-lag.adb	Ranks (L) := Real (I + J) / 2.0;	2.0	math	tied values share the mean of the ranks they span
 driver-robot-lag.adb	Sift (1, Stop - 1);	1	structure	the heap's root is node one, and the heap shrinks by one per extraction
@@ -2036,20 +2055,15 @@ driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Di
 driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));	2	math	the chi-square median with two degrees of freedom
 driver-robot-lockin.adb	(2.0 * Real (C.Freedom) * C.Variance ** 2 + 4.0 * C.Variance * Typical);	2.0	math	the variance of a chi-square statistic is twice its degrees of freedom
 driver-robot-lockin.adb	(2.0 * Real (C.Freedom) * C.Variance ** 2 + 4.0 * C.Variance * Typical);	4.0	math	the variance of a non-central chi-square statistic adds four times its non-centrality
+driver-robot-lockin.adb	Fit_Cells (1, N);	1	structure	the cells are numbered from one
 driver-robot-lockin.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	structure	a displacement has two components
 driver-robot-lockin.adb	Half : constant Real := 0.5;	0.5	math	a majority is more than half: a whole image moves when a significant majority of its cells do, and the cells far above the rest are what moves when they carry more than half the energy
 driver-robot-lockin.adb	High : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean + Z * Sigma) / Typical));	1.0	math	a share of the cells is at most all of them
 driver-robot-lockin.adb	Low : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));	1.0	math	a share of the cells is at most all of them
-driver-robot-lockin.adb	S.Gain_Variances.Append (0.0);	0.0	math	a cell that does not respond adds no gain
-driver-robot-lockin.adb	S.Gain_Variances.Append (0.0, Ada.Containers.Count_Type (Kept));	0.0	math	a cell that cannot show a displacement adds no gain
-driver-robot-lockin.adb	S.Gain_Variances.Append (4.0 * (Gu * Bu ** 2 + Gv * Bv ** 2));	4.0	math	the variance of a squared estimate b^2 with variance g is 4 g b^2 to first order
-driver-robot-lockin.adb	S.Gains.Append (0.0);	0.0	math	a cell that does not respond adds no gain
-driver-robot-lockin.adb	S.Gains.Append (0.0, Ada.Containers.Count_Type (Kept));	0.0	math	a cell that cannot show a displacement adds no gain
-driver-robot-lockin.adb	S.Noise.Append (Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0));	2.0	math	the mean of the two components' variances
+driver-robot-lockin.adb	Noise_Of (Cell) := Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0);	2.0	math	the mean of the two components' variances
 driver-robot-lockin.adb	S.Rest_Counts_Known := Rest > 1;	1	statistics	a spread takes two samples
-driver-robot-lockin.adb	S.Shifts.Append (0.0);	0.0	math	a cell that does not respond moves no pixels
-driver-robot-lockin.adb	S.Shifts.Append (0.0, Ada.Containers.Count_Type (Kept));	0.0	math	a cell that cannot show a displacement moves no pixels
 driver-robot-lockin.adb	Sigma : constant Real := 1.0 / Sqrt (Weights);	1.0	math	the standard error of a mean weighted by inverse variances is one over the root of the weights' sum
+driver-robot-lockin.adb	Spread_Of ((Cell - 1) * Kept + K) := 4.0 * (Gu * Bu ** 2 + Gv * Bv ** 2);	4.0	math	the variance of a squared estimate b^2 with variance g is 4 g b^2 to first order
 driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Dof (Cell, G)) * Noise (Cell - 1) ** 4);	1.0	math	the weight of an estimate is the inverse of its variance
 driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Dof (Cell, G)) * Noise (Cell - 1) ** 4);	2.0	math	a chi-square has a variance of twice its degrees of freedom
 driver-robot-lockin.adb	Weights := Weights + 1.0 / Variance_Of (C);	1.0	math	the weight of an estimate is the inverse of its variance
@@ -2145,7 +2159,11 @@ driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (
 driver-robot.adb	& "" & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	1	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	3	format	digits printed in a log line or a message
-driver-robot.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
+driver-robot.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & ""	1	format	digits printed in a log line or a message
+driver-robot.adb	& Driver.Log.Image (Real (Now - Mark), 1));	1	format	digits printed in a log line or a message
+driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Change (M, G, B, C) / Channels.Noise (M, G, C), 1));	1	format	digits printed in a log line or a message
+driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Reading (M, G, B, C), 6));	6	format	digits printed in a log line or a message
+driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Target (M, G, B, C), 6));	6	format	digits printed in a log line or a message
 driver-robot.adb	Best := (Value => Step, Sigma => Step * Sqrt (Spread) / (2.0 * Gain), Degrees_Of_Freedom => 0);	2.0	math	the sigma of Z / sqrt (G) from that of G: half its relative error
 driver-robot.adb	Best.Value := Real'Max (Best.Value, Driver.Conventions.Z * Noise * Sqrt (2.0));	2.0	math	a change is the difference of two readings, whose variance is twice one reading's
 driver-robot.adb	Mean : constant Real := (P.Tilt_11 + P.Tilt_22) / 2.0;	2.0	math	the larger eigenvalue of a symmetric 2 x 2: the mean of the diagonal plus the root of the half difference squared and the off diagonal squared
@@ -2157,9 +2175,10 @@ driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M
 driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
 driver-robot.adb	Spread : constant Real := Sqrt (((P.Tilt_11 - P.Tilt_22) / 2.0) ** 2 + P.Tilt_12 ** 2);	2.0	math	the larger eigenvalue of a symmetric 2 x 2: the mean of the diagonal plus the root of the half difference squared and the off diagonal squared
 driver-robot.adb	function Up (M : Model) return Direction_Estimate is (Up_In_Arm (M, 1));	1	structure	the world is the first arm's reference frame
+driver-robot.adb	if G > M.Groups.Last_Index or else B < 1 or else not Channels.Has_Reading (M, G, B) then	1	structure	a change needs the beat before
 driver-robot.adb	if M.Beats >= 2 * M.Graph_Evidence then	2	numerics	re-estimating when the evidence doubles keeps the number of re-estimates logarithmic in the stream
-driver-robot.adb	return "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
-driver-robot.adb	return "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
+driver-robot.adb	return "" & Image_Lag (M, E)'Image & (if Lag_Known (M, E) then "" else "") & "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
+driver-robot.adb	return "" & Image_Lag (M, E)'Image & (if Lag_Known (M, E) then "" else "") & "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
 driver-robot.adb	then Real'Max (0.0, (S (1, 1) + S (2, 2) + S (3, 3) - Driver.Numerics.Arrays."" (D, Driver.Numerics.Arrays."" (S, D))) / 2.0)	2.0	math	a small turn moves a line by its part across the line, shared by the two axes across it
 driver-robot.ads	C : Real := 1.0;	1.0	structure	a joint turns one radian per reading unit until fitted
 driver-robot.ads	Change_1, Change_2 : Real := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
@@ -2168,6 +2187,7 @@ driver-robot.ads	Frame : Positive := 1;	1	structure	keyframes are numbered from 
 driver-robot.ads	Frame : Positive := 1;	1	structure	keyframes are numbered from one
 driver-robot.ads	Rest_Factor : Real := 1.0;	1.0	math	before it is measured, a cell rests at its floor
 driver-robot.ads	Scale : Real := 1.0;	1.0	math	the identity's scale: the first arm is the world as it is
+driver-shared_for.adb	Shares (1, Natural'Min (Last - First + 1, Natural (System.Multiprocessors.Number_Of_CPUs)));	1	structure	the tasks are numbered from one, and a range counts both its ends
 driver-stats.adb	Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
 driver-stats.adb	Digit_Bits : constant := 8;	8	structure	a byte of the key per pass: the order statistic is exact for any digit width
 driver-stats.adb	Gaussian_MAD_To_Sigma : constant := 1.482_602_218_505_602;	1.482_602_218_505_602	statistics	1 / Phi^-1 (3/4): MAD to sigma for Gaussian data

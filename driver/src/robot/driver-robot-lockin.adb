@@ -3,11 +3,13 @@ with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Distributions;
+with Driver.Shared_For;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Lag;
 with Driver.Robot.Regression;
 with Driver.Stats;
+with Driver.Uncertain;
 
 package body Driver.Robot.Lockin is
 
@@ -361,9 +363,28 @@ package body Driver.Robot.Lockin is
                   return False;
                elsif Pushes = 1 then
                   declare
-                     Before : constant Integer := Integer (Push_Start (Pusher, Natural (R))) - 1;
+                     Began  : constant Natural := Push_Start (Pusher, Natural (R));
+                     Before : constant Integer := Integer (Began) - 1;
                   begin
-                     return Before >= 0 and then Before < Natural (S.Settled_At.Length) and then S.Settled_At (Before);
+                     if Before < 0 or else Before >= Natural (S.Settled_At.Length) or else not S.Settled_At (Before) then
+                        return False;
+                     end if;
+                     --  Nor did another group move at any beat of the push: its
+                     --  picture goes on changing for beats after its readings
+                     --  stop, and the lock-in would credit that to this push
+                     --  (A62 and A63, the arms swept at once: arm 2 took eye 2,
+                     --  arm 1's, as a whole, and no hand was made of either
+                     --  closer).
+                     for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                        if G /= Pusher and then M.Groups (G).Commandable then
+                           for B2 in Began .. Natural (R) loop
+                              if Channels.Pushed (M, G, B2) or else Channels.Moving (M, G, B2) then
+                                 return False;
+                              end if;
+                           end loop;
+                        end if;
+                     end loop;
+                     return True;
                   end;
                end if;
                return True;
@@ -437,6 +458,13 @@ package body Driver.Robot.Lockin is
                         Dof : Natural_Grid_Access :=
                           new Natural_Grid'[1 .. N => [M.Groups.First_Index .. M.Groups.Last_Index => 0]];
                         Textured : Flags_Access := new Flags'[1 .. N => False];
+                        --  Each cell's results, cell by cell: its noise, and for each regressor its gain, the gain's
+                        --  variance and its shift (nothing, where it does not respond). The cells are fitted at once
+                        --  and write only their own; the eye's vectors get them in order afterwards.
+                        Noise_Of  : Real_Access := new Real_Array'(1 .. N => Real'Last);
+                        Gain_Of   : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        Spread_Of : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        Shift_Of  : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         --  One cell: its displacements regressed on the pushes, over
                         --  the beats where the cell resolved one, and for every
                         --  group whether its block responds.
@@ -464,7 +492,7 @@ package body Driver.Robot.Lockin is
                               Fu    : constant Regression.Fit := Regression.Solve (Xc.all, U.all, Floor);
                               Fv    : constant Regression.Fit := Regression.Solve (Xc.all, V.all, Floor);
                            begin
-                              S.Noise.Append (Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0));
+                              Noise_Of (Cell) := Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0);
                               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
                                  declare
                                     First : Natural := 0;
@@ -513,14 +541,10 @@ package body Driver.Robot.Lockin is
                                           Gu : constant Real := Var_U (K + 1) / Fu.Scale ** 2;
                                           Gv : constant Real := Var_V (K + 1) / Fv.Scale ** 2;
                                        begin
-                                          S.Gains.Append (Bu ** 2 + Bv ** 2 - Gu - Gv);
-                                          S.Gain_Variances.Append (4.0 * (Gu * Bu ** 2 + Gv * Bv ** 2));
-                                          S.Shifts.Append (Sqrt (Fu.Beta (K + 1) ** 2 + Fv.Beta (K + 1) ** 2));
+                                          Gain_Of ((Cell - 1) * Kept + K) := Bu ** 2 + Bv ** 2 - Gu - Gv;
+                                          Spread_Of ((Cell - 1) * Kept + K) := 4.0 * (Gu * Bu ** 2 + Gv * Bv ** 2);
+                                          Shift_Of ((Cell - 1) * Kept + K) := Sqrt (Fu.Beta (K + 1) ** 2 + Fv.Beta (K + 1) ** 2);
                                        end;
-                                    else
-                                       S.Gains.Append (0.0);
-                                       S.Gain_Variances.Append (0.0);
-                                       S.Shifts.Append (0.0);
                                     end if;
                                  end loop;
                               end;
@@ -546,15 +570,14 @@ package body Driver.Robot.Lockin is
                            --  displacements than the fit has coefficients.
                            Textured (Cell) := Driver.Stats.Median (Cond.all) > 0.0 and then Here > Kept + 1;
                            Free (Cond);
-                           if not Textured (Cell) then
-                              S.Noise.Append (Real'Last);
-                              S.Gains.Append (0.0, Ada.Containers.Count_Type (Kept));
-                              S.Gain_Variances.Append (0.0, Ada.Containers.Count_Type (Kept));
-                              S.Shifts.Append (0.0, Ada.Containers.Count_Type (Kept));
-                              return;
+                           if Textured (Cell) then
+                              Fit_Resolved (Cell, Here);
                            end if;
-                           Fit_Resolved (Cell, Here);
                         end Fit_Cell;
+
+                        --  The cells are fitted at once, each processor taking the next cell nobody has: a cell's
+                        --  fit takes as many rounds as its weights need to settle, and some take many more.
+                        procedure Fit_Cells is new Driver.Shared_For (Fit_Cell);
                      begin
                         for R in 1 .. Rows loop
                            X (R, 1) := 1.0;
@@ -562,9 +585,19 @@ package body Driver.Robot.Lockin is
                               X (R, K + 1) := Pushed_Change (Cols (K).Group, Beat_Of (R) - Lag, Cols (K).Channel);
                            end loop;
                         end loop;
+                        Fit_Cells (1, N);
                         for Cell in 1 .. N loop
-                           Fit_Cell (Cell);
+                           S.Noise.Append (Noise_Of (Cell));
                         end loop;
+                        for I in 1 .. N * Kept loop
+                           S.Gains.Append (Gain_Of (I));
+                           S.Gain_Variances.Append (Spread_Of (I));
+                           S.Shifts.Append (Shift_Of (I));
+                        end loop;
+                        Free (Noise_Of);
+                        Free (Gain_Of);
+                        Free (Spread_Of);
+                        Free (Shift_Of);
                         for Cell in 1 .. N loop
                            S.Textured.Append (Textured (Cell));
                         end loop;
@@ -804,6 +837,24 @@ package body Driver.Robot.Lockin is
          end return;
       end;
    end Cell_Noise;
+
+   function Shows_Step (M : Model; E : Eye_Id; G : Group_Id; Step : Real_Array) return Boolean is
+      Noise : constant Real := Cell_Noise (M, E);
+   begin
+      if Noise = Real'Last then
+         return False;
+      end if;
+      for C in Step'Range loop
+         declare
+            Per_Unit : constant Real := Shift (M, E, G, C - Step'First + 1);
+         begin
+            if Per_Unit > 0.0 and then Driver.Uncertain.Significant (Step (C) * Per_Unit, Noise) then
+               return True;
+            end if;
+         end;
+      end loop;
+      return False;
+   end Shows_Step;
 
    function Shift (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Real is
       S      : Eye_Stream renames M.Eyes (E);

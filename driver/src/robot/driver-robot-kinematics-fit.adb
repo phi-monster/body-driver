@@ -65,10 +65,10 @@ package body Driver.Robot.Kinematics.Fit is
             Step  : Rigid;
          begin
             if A.Slide then
-               Step := (Rotation => Identity3, Translation => Theta * A.W);
+               Step := (Rotation => Identity3, Translation => [Theta * A.W (1), Theta * A.W (2), Theta * A.W (3)]);
             else
                Step.Rotation := Rot (A.W, Theta);
-               Step.Translation := A.P - Step.Rotation * A.P;
+               Step.Translation := Minus (A.P, Times (Step.Rotation, A.P));
             end if;
             T := T * Step;
          end;
@@ -79,19 +79,19 @@ package body Driver.Robot.Kinematics.Fit is
    --  How a point of eye A's frame appears in eye B's: X_B = R X_A + T.
    procedure Relative (A, B : Rigid; R : out Mat3; T : out Vec3) is
    begin
-      R := Transpose (B.Rotation) * A.Rotation;
-      T := Transpose (B.Rotation) * (A.Translation - B.Translation);
+      R := Times (Transposed (B.Rotation), A.Rotation);
+      T := Transposed_Times (B.Rotation, Minus (A.Translation, B.Translation));
    end Relative;
 
    --  The Sampson residual of the lines of sight H1 (eye A) and H2 (eye B)
    --  under X_B = R X_A + T, in the units of a pixel at focal length F.
    function Sampson (R : Mat3; T : Vec3; H1, H2 : Vec3; F : Real) return Real is
-      Y    : constant Vec3 := R * H1;
+      Y    : constant Vec3 := Times (R, H1);
       Ex1  : constant Vec3 := Cross (T, Y);
-      Etx2 : constant Vec3 := Transpose (R) * Cross (H2, T);
+      Etx2 : constant Vec3 := Transposed_Times (R, Cross (H2, T));
       Den  : constant Real := Sqrt (Ex1 (1) ** 2 + Ex1 (2) ** 2 + Etx2 (1) ** 2 + Etx2 (2) ** 2);
    begin
-      return (if Den > 0.0 then F * (H2 * Ex1) / Den else 0.0);
+      return (if Den > 0.0 then F * Dot (H2, Ex1) / Den else 0.0);
    end Sampson;
 
    ---------------------------------------------------------------------------
@@ -546,7 +546,9 @@ package body Driver.Robot.Kinematics.Fit is
             for K in 1 .. Index'Length loop
                declare
                   Sg : Sighting renames Sight (Sight'First + Natural (Index (K)) - 1);
-                  Pw : constant Vec3 := Exp (Dv (Sg.Track)) * Ray (Lx, Sg.U0, Sg.V0);
+                  D0 : constant Real := Exp (Dv (Sg.Track));
+                  H0 : constant Vec3 := Ray (Lx, Sg.U0, Sg.V0);
+                  Pw : constant Vec3 := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
                   U, V : Real;
                   Ahead : Boolean;
                begin

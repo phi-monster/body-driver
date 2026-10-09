@@ -11,6 +11,77 @@ package body Driver.Numerics is
 
    function Unit (V : Vec3) return Vec3 is (V / abs V);
 
+   --  Each sum is accumulated term by term from zero, as the general operators
+   --  accumulate it, so that a multiply-add the compiler fuses is fused the
+   --  same way in both.
+   function Times (M : Mat3; V : Vec3) return Vec3 is
+      R : Vec3;
+   begin
+      for I in 1 .. 3 loop
+         declare
+            S : Real := 0.0;
+         begin
+            for K in 1 .. 3 loop
+               S := S + M (I, K) * V (K);
+            end loop;
+            R (I) := S;
+         end;
+      end loop;
+      return R;
+   end Times;
+
+   function Transposed_Times (M : Mat3; V : Vec3) return Vec3 is
+      R : Vec3;
+   begin
+      for I in 1 .. 3 loop
+         declare
+            S : Real := 0.0;
+         begin
+            for K in 1 .. 3 loop
+               S := S + M (K, I) * V (K);
+            end loop;
+            R (I) := S;
+         end;
+      end loop;
+      return R;
+   end Transposed_Times;
+
+   function Times (A, B : Mat3) return Mat3 is
+      R : Mat3;
+   begin
+      for I in 1 .. 3 loop
+         for J in 1 .. 3 loop
+            declare
+               S : Real := 0.0;
+            begin
+               for K in 1 .. 3 loop
+                  S := S + A (I, K) * B (K, J);
+               end loop;
+               R (I, J) := S;
+            end;
+         end loop;
+      end loop;
+      return R;
+   end Times;
+
+   function Transposed (M : Mat3) return Mat3 is
+     [[M (1, 1), M (2, 1), M (3, 1)],
+      [M (1, 2), M (2, 2), M (3, 2)],
+      [M (1, 3), M (2, 3), M (3, 3)]];
+
+   function Plus (A, B : Vec3) return Vec3 is [A (1) + B (1), A (2) + B (2), A (3) + B (3)];
+
+   function Minus (A, B : Vec3) return Vec3 is [A (1) - B (1), A (2) - B (2), A (3) - B (3)];
+
+   function Dot (A, B : Vec3) return Real is
+      S : Real := 0.0;
+   begin
+      for K in 1 .. 3 loop
+         S := S + A (K) * B (K);
+      end loop;
+      return S;
+   end Dot;
+
    function Outer (A, B : Vec3) return Mat3 is
      [for I in 1 .. 3 => [for J in 1 .. 3 => A (I) * B (J)]];
 
@@ -28,7 +99,7 @@ package body Driver.Numerics is
       end if;
       --  sin and 1 - cos lose no precision until theta is far below 1e-8,
       --  where the first-order term above is exact to double precision.
-      return Identity3 + (Sin (Theta) / Theta) * K + ((1.0 - Cos (Theta)) / (Theta * Theta)) * (K * K);
+      return Identity3 + (Sin (Theta) / Theta) * K + ((1.0 - Cos (Theta)) / (Theta * Theta)) * Times (K, K);
    end Exp;
 
    function Log (R : Mat3) return Vec3 is
@@ -127,14 +198,15 @@ package body Driver.Numerics is
    end To_Quaternion;
 
    function "*" (A, B : Rigid) return Rigid is
-     (Rotation => A.Rotation * B.Rotation, Translation => A.Rotation * B.Translation + A.Translation);
+     (Rotation => Times (A.Rotation, B.Rotation), Translation => Plus (Times (A.Rotation, B.Translation), A.Translation));
 
-   function "*" (T : Rigid; P : Vec3) return Vec3 is (T.Rotation * P + T.Translation);
+   function "*" (T : Rigid; P : Vec3) return Vec3 is (Plus (Times (T.Rotation, P), T.Translation));
 
    function Inverse (T : Rigid) return Rigid is
-      Rt : constant Mat3 := Transpose (T.Rotation);
+      Rt : constant Mat3 := Transposed (T.Rotation);
+      Tt : constant Vec3 := Times (Rt, T.Translation);
    begin
-      return (Rotation => Rt, Translation => -(Rt * T.Translation));
+      return (Rotation => Rt, Translation => [-Tt (1), -Tt (2), -Tt (3)]);
    end Inverse;
 
 end Driver.Numerics;

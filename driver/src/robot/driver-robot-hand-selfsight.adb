@@ -11,6 +11,13 @@ package body Driver.Robot.Hand.Selfsight is
        Settings => Setting_Vectors.Empty_Vector,
        Clock    => 0));
 
+   procedure Set_Key_Noise (M : in out Memory; Key_Noise : Real_Array) is
+   begin
+      M.Noise := Real_Holders.To_Holder (Key_Noise);
+   end Set_Key_Noise;
+
+   function Key_Noise_Length (M : Memory) return Natural is (M.Noise.Element'Length);
+
    function Same (A, B, Noise : Real_Array) return Boolean is
      (A'Length = B'Length and then A'Length = Noise'Length
       and then (for all I in A'Range =>

@@ -27,6 +27,11 @@ package Driver.Commands is
 
    function Is_Hold (C : Command) return Boolean;
 
+   procedure Merge (Into : in out Command; From : Command; Clash : out Boolean);
+   --  Every target of From joins Into, as the lanes of one beat send theirs
+   --  (Driver.Beats.At_Once). A group both target keeps Into's and is a clash:
+   --  two lanes may not move one group.
+
 private
 
    use type Driver.Observations.Group_Id;

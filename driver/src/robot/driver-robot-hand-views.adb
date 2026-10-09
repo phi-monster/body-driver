@@ -12,6 +12,11 @@ package body Driver.Robot.Hand.Views is
        Current      => View_Holders.Empty_Holder,
        Ends         => End_Holders.To_Holder ([Closer_Noise'Range => (others => <>)])));
 
+   procedure Set_Closer_Noise (T : in out Tracker; Closer_Noise : Real_Array) is
+   begin
+      T.Closer_Noise := Noise_Holders.To_Holder (Closer_Noise);
+   end Set_Closer_Noise;
+
    function Moved (A, B, Noise : Real_Array; Except : Natural := 0) return Boolean;
    --  Some closer reading other than the one numbered Except differs
    --  significantly: each reading carries its noise, so their difference
@@ -84,49 +89,64 @@ package body Driver.Robot.Hand.Views is
             Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + C - 1);
             P     : End_Pair renames Ends (C);
          begin
-            if P.Low.Is_Empty
-              or else (Driver.Pixels.Frames (V.Frames) >= 2 and then not Comparable (T, P.Low.Element, V, C, Rest_Moved))
+            --  A view from another pose of the rest of the body, the closer at one of its ends: the body moved and the
+            --  closer did not, as when the arm carries the closer's eye to poses for its look at the robot itself
+            --  (Selfsight). It tells nothing of the ends, and the ends seen from where they were stay, to be told
+            --  apart by the look those poses give: the robot's own pixels are where they were in an eye the arm
+            --  carries, and only the world behind them moved. A70 to A74: arm 2's raises for poses started the
+            --  ends again from each raised view, they were never two again, the lobes were never placed again from
+            --  the poses gathered, and no hand was made of it.
+            if not P.Low.Is_Empty and then Driver.Pixels.Frames (V.Frames) >= 2
+              and then not Comparable (T, P.Low.Element, V, C, Rest_Moved)
+              and then (not Moved (P.Low.Element.Closer.Element, V.Closer.Element, T.Closer_Noise.Element)
+                        or else not Moved (P.High.Element.Closer.Element, V.Closer.Element, T.Closer_Noise.Element))
             then
-               --  The first view of this channel, or the background changed:
-               --  the old ends cannot be compared with what comes now. A view
-               --  of one frame says nothing of that: while the body comes to
-               --  rest from a push, every beat whose readings still move
-               --  against their noise is a view of its own (A11's arm, after
-               --  each closer push), and each would have thrown the ends away.
-               P := (Low => View_Holders.To_Holder (V), High => View_Holders.To_Holder (V), others => <>);
-            end if;
-            if Driver.Pixels.Frames (V.Frames) >= 2 then
-               P.Seen_Low := Real'Min (P.Seen_Low, Reading (V, C));
-               P.Seen_High := Real'Max (P.Seen_High, Reading (V, C));
-            end if;
-            if P.Low.Element.From /= V.From then
-               declare
-                  Low  : constant Real := Reading (P.Low.Element, C);
-                  High : constant Real := Reading (P.High.Element, C);
-                  Here : constant Real := Reading (V, C);
-                  Frames_Here : constant Natural := Driver.Pixels.Frames (V.Frames);
-               begin
-                  --  Beyond an end and showing more, or at it with more frames
-                  --  to say how still it was.
-                  if Significant (Low - Here, Noise) and then Here < Low then
-                     if Shows_More (P.Low.Element, V) then
+               null;
+            else
+               if P.Low.Is_Empty
+                 or else (Driver.Pixels.Frames (V.Frames) >= 2 and then not Comparable (T, P.Low.Element, V, C, Rest_Moved))
+               then
+                  --  The first view of this channel, or the background changed:
+                  --  the old ends cannot be compared with what comes now. A view
+                  --  of one frame says nothing of that: while the body comes to
+                  --  rest from a push, every beat whose readings still move
+                  --  against their noise is a view of its own (A11's arm, after
+                  --  each closer push), and each would have thrown the ends away.
+                  P := (Low => View_Holders.To_Holder (V), High => View_Holders.To_Holder (V), others => <>);
+               end if;
+               if Driver.Pixels.Frames (V.Frames) >= 2 then
+                  P.Seen_Low := Real'Min (P.Seen_Low, Reading (V, C));
+                  P.Seen_High := Real'Max (P.Seen_High, Reading (V, C));
+               end if;
+               if P.Low.Element.From /= V.From then
+                  declare
+                     Low  : constant Real := Reading (P.Low.Element, C);
+                     High : constant Real := Reading (P.High.Element, C);
+                     Here : constant Real := Reading (V, C);
+                     Frames_Here : constant Natural := Driver.Pixels.Frames (V.Frames);
+                  begin
+                     --  Beyond an end and showing more, or at it with more frames
+                     --  to say how still it was.
+                     if Significant (Low - Here, Noise) and then Here < Low then
+                        if Shows_More (P.Low.Element, V) then
+                           P.Low := View_Holders.To_Holder (V);
+                        end if;
+                     elsif not Significant (Low - Here, Noise)
+                       and then Frames_Here > Driver.Pixels.Frames (P.Low.Element.Frames)
+                     then
                         P.Low := View_Holders.To_Holder (V);
                      end if;
-                  elsif not Significant (Low - Here, Noise)
-                    and then Frames_Here > Driver.Pixels.Frames (P.Low.Element.Frames)
-                  then
-                     P.Low := View_Holders.To_Holder (V);
-                  end if;
-                  if Significant (Here - High, Noise) and then Here > High then
-                     if Shows_More (P.High.Element, V) then
+                     if Significant (Here - High, Noise) and then Here > High then
+                        if Shows_More (P.High.Element, V) then
+                           P.High := View_Holders.To_Holder (V);
+                        end if;
+                     elsif not Significant (Here - High, Noise)
+                       and then Frames_Here > Driver.Pixels.Frames (P.High.Element.Frames)
+                     then
                         P.High := View_Holders.To_Holder (V);
                      end if;
-                  elsif not Significant (Here - High, Noise)
-                    and then Frames_Here > Driver.Pixels.Frames (P.High.Element.Frames)
-                  then
-                     P.High := View_Holders.To_Holder (V);
-                  end if;
-               end;
+                  end;
+               end if;
             end if;
          end;
       end loop;

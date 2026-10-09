@@ -21,6 +21,21 @@ package Driver.Numerics with Pure is
 
    function Cross (A, B : Vec3) return Vec3;
 
+   --  The products of three-vectors and three-by-three matrices written out:
+   --  the same sums in the same order as the general operators of
+   --  Long_Real_Arrays, without their array machinery and the secondary stack
+   --  each result takes there (the arm fit computes tens of millions of them).
+   function Times (M : Mat3; V : Vec3) return Vec3 with Inline;
+   --  M V.
+   function Transposed_Times (M : Mat3; V : Vec3) return Vec3 with Inline;
+   --  The transpose of M times V.
+   function Times (A, B : Mat3) return Mat3 with Inline;
+   --  A B.
+   function Transposed (M : Mat3) return Mat3 with Inline;
+   function Plus (A, B : Vec3) return Vec3 with Inline;
+   function Minus (A, B : Vec3) return Vec3 with Inline;
+   function Dot (A, B : Vec3) return Real with Inline;
+
    function Unit (V : Vec3) return Vec3
      with Pre => abs V > 0.0;
 
@@ -72,7 +87,7 @@ package Driver.Numerics with Pure is
 
    function Inverse (T : Rigid) return Rigid;
 
-   function Rotate (T : Rigid; V : Vec3) return Vec3 is (T.Rotation * V);
+   function Rotate (T : Rigid; V : Vec3) return Vec3 is (Times (T.Rotation, V));
    --  A direction carried by T: rotation only.
 
 end Driver.Numerics;

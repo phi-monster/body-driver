@@ -35,6 +35,9 @@ package Driver.Robot.Hand.Views is
    type Tracker is private;
 
    function Start (Width, Height : Positive; Closer_Noise : Real_Array) return Tracker;
+   procedure Set_Closer_Noise (T : in out Tracker; Closer_Noise : Real_Array);
+   --  The closer's noises as the caller now measures them (Start says what
+   --  they are), for the readings to come.
    --  The closer's noises are each reading's standard deviation at rest
    --  (path A measures them); a zero noise means the reading repeats
    --  exactly. Its pushes part the views, so its readings are taken as

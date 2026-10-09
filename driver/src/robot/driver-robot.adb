@@ -185,6 +185,17 @@ package body Driver.Robot is
    --  is always measured.
    procedure Recompute (M : in out Model) is
       Start : constant Duration := Driver.Clock.Seconds;
+      --  Where the time went, stage by stage, for the line at the end.
+      Mark  : Duration := Start;
+      Parts : Ada.Strings.Unbounded.Unbounded_String;
+      procedure Took (Stage : String) is
+         Now : constant Duration := Driver.Clock.Seconds;
+      begin
+         Ada.Strings.Unbounded.Append
+           (Parts, (if Ada.Strings.Unbounded.Length (Parts) = 0 then "" else ", ") & Stage & " "
+                   & Driver.Log.Image (Real (Now - Mark), 1));
+         Mark := Now;
+      end Took;
    begin
       Channels.Measure (M);
       for S of M.Eyes loop
@@ -192,22 +203,31 @@ package body Driver.Robot is
             Stillness.Measure_Luma_Noise (S);
          end if;
       end loop;
+      Took ("channels");
       if not M.From_File (Stored_Lags) then
          Lag.Measure (M);
       end if;
+      Took ("lags");
       if not M.From_File (Stored_Responses) then
          Lockin.Measure_Rest_Noise (M);
+      end if;
+      Took ("rest noise");
+      if not M.From_File (Stored_Responses) then
          Lockin.Measure (M);
       end if;
+      Took ("lock-in");
       if not M.From_File (Stored_Graph) then
          Graph.Derive (M);
       end if;
+      Took ("graph");
       if not M.From_File (Stored_Kinematics) then
          Kinematics.Refit (M);
       end if;
+      Took ("kinematics");
       M.Graph_Evidence := M.Beats;
       Driver.Log.Line (Driver.Log.Robot, "estimated from" & M.Beats'Image & " beats in"
-                       & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
+                       & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s ("
+                       & Ada.Strings.Unbounded.To_String (Parts) & ")");
    end Recompute;
 
    --  A decider's call goes into the recording (kind E) inside its window,
@@ -734,12 +754,41 @@ package body Driver.Robot is
                end;
             end loop;
          end if;
-         return "change " & Driver.Log.Image (S.Change_1, 3) & " " & Driver.Log.Image (S.Change_2, 3)
+         return "lag" & Image_Lag (M, E)'Image & (if Lag_Known (M, E) then "" else " (unknown)") & ", change " & Driver.Log.Image (S.Change_1, 3) & " " & Driver.Log.Image (S.Change_2, 3)
            & (if S.Is_Still then ", still" else ", moving") & (if S.Watch_Done then ", settled" else ", settling")
            & ", flow at most " & Driver.Log.Image (Most_Px, 3) & " px, " & Driver.Log.Image (Most_Sigmas, 1)
            & " sigmas";
       end;
    end Eye_Watch;
+
+   function Group_Watch (M : Model; G : Group_Id) return String is
+      use Ada.Strings.Unbounded;
+      B    : constant Integer := M.Beats - 1;
+      Text : Unbounded_String;
+   begin
+      if G > M.Groups.Last_Index or else B < 1 or else not Channels.Has_Reading (M, G, B) then
+         return "no reading";
+      end if;
+      Append (Text, "readings");
+      for C in 1 .. M.Groups (G).Size loop
+         Append (Text, " " & Driver.Log.Image (Channels.Reading (M, G, B, C), 6));
+      end loop;
+      if Channels.Has_Reading (M, G, B - 1) and then Channels.Noise_Measured (M, G) then
+         Append (Text, ", change in sigmas");
+         for C in 1 .. M.Groups (G).Size loop
+            Append (Text, " " & Driver.Log.Image (Channels.Change (M, G, B, C) / Channels.Noise (M, G, C), 1));
+         end loop;
+      end if;
+      Append (Text, (if Channels.Moving (M, G, B) then ", moving" else ", still")
+              & (if Channels.Pushed (M, G, B) then ", pushed" else ""));
+      if Channels.Has_Target (M, G, B) then
+         Append (Text, ", target");
+         for C in 1 .. M.Groups (G).Size loop
+            Append (Text, " " & Driver.Log.Image (Channels.Target (M, G, B, C), 6));
+         end loop;
+      end if;
+      return To_String (Text);
+   end Group_Watch;
 
    function Image_Lag (M : Model; E : Eye_Id) return Integer is
      (if E <= M.Lags.Last_Index then M.Lags (E) else 0);

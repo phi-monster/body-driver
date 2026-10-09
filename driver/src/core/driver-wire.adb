@@ -170,6 +170,12 @@ package body Driver.Wire is
       Drop_Peer (C);
       C.Client := False;
       Accept_Socket (C.Listener, C.Peer, Address);
+      --  A reply goes out the moment it is written. With Nagle's algorithm the
+      --  payload of a frame, written after its header, waited for the robot's
+      --  acknowledgement of the header, which the robot delays: every reply
+      --  of a few bytes took 40 ms to arrive (A54: the robot's get_action 42 ms
+      --  a beat for the driver's 0.2).
+      Set_Socket_Option (C.Peer, IP_Protocol_For_TCP_Level, (No_Delay, True));
       Handshake (C, Ok);
       if Ok then
          C.Open := True;
@@ -192,6 +198,7 @@ package body Driver.Wire is
          B := Mask_Keys.Random (C.Keys);
       end loop;
       Create_Socket (C.Peer);
+      Set_Socket_Option (C.Peer, IP_Protocol_For_TCP_Level, (No_Delay, True));   --  as for a robot (Accept_Client)
       Connect_Socket (C.Peer, (Family => Family_Inet, Addr => Addresses (Get_Host_By_Name (Host), 1),
                                Port => Port_Type (Port)));
       declare
