@@ -29,10 +29,24 @@ package Driver.Robot.Motion is
       Delivered : Estimate;          --  delivered fraction of the commanded step
       Started   : Natural := 0;      --  how many beats the body had seen when the step was sent
       Detail    : Unbounded_String;  --  which channels, and by how much, for the log
+      Stopped   : Boolean := False;  --  the step was stopped where it stood, its caller's condition met
    end record;
 
-   procedure Step (M : in out Model; Targets : Driver.Commands.Command; Report : out Step_Report);
+   procedure Step
+     (M       : in out Model;
+      Targets : Driver.Commands.Command;
+      Report  : out Step_Report;
+      Stop    : access function return Boolean := null);
    --  Sends the targets, waits until the body settles, and judges the step.
+   --  Stop, when given, is asked at every beat of the wait (between Next and
+   --  Send, so it may read the latest observation): once it holds, every
+   --  targeted group is held where it was read at that beat, the push ends as
+   --  it ends against anything, and Stopped says so. A press stops when what
+   --  the hand watches tells it met something, before the arm's own readings
+   --  could (A69's first press at open: the closer, held open, was pushed
+   --  from 1.0 to 0.39 within six beats of the finger meeting the table, the
+   --  push was judged blocked 77 beats later, and the closer never came back
+   --  to its opening).
 
    procedure Note_Stopped (M : in out Model; G : Group_Id; Noted : out Boolean);
    --  The decider's word that the group's latest push, ended Blocked or Short, was stopped by the body itself and
@@ -295,9 +309,14 @@ package Driver.Robot.Motion is
    --  goal's unit (the arm's own for Plan_Reach_In_Arm). Zero when every
    --  segment keeps within the clearance, or none was asked.
 
-   procedure Follow (M : in out Model; P : Plan; Report : out Step_Report)
+   procedure Follow
+     (M      : in out Model;
+      P      : Plan;
+      Report : out Step_Report;
+      Stop   : access function return Boolean := null)
      with Pre => Status (P) = Planned;
-   --  Moves along a planned path, step by step, judging every step.
+   --  Moves along a planned path, step by step, judging every step; a step
+   --  stopped by Stop (see Step) ends the path there.
 
 private
 

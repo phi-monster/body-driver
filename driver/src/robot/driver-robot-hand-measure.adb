@@ -649,6 +649,21 @@ procedure Measure (H : in out Hands; M : in out Model) is
          end Read_Lower;
 
          Unplanned : Boolean := False;   --  a step could not be planned
+         Felt      : Boolean := False;   --  the last step was stopped: the closer was pushed off the opening
+
+         --  The closer was pushed off the opening the press is made at: its lobe met something, which the closer
+         --  tells at once and the arm's readings only once the push has stalled (Motion.Step's Stop). A69's first
+         --  press at open: the closer, held open, was pushed from 1.0 to 0.39 within six beats of the finger meeting
+         --  the table, the push was judged blocked 77 beats later, the arm then crept 450 beats as the closer came
+         --  back to 0.68, and the press was at no opening. Read between Next and Send, from the latest beat.
+         function Closer_Left return Boolean is
+            O    : constant Driver.Beats.Observation_View := Driver.Beats.Latest;
+            Seen : Opening;
+         begin
+            return Present (Id, R) and then Driver.Observations.Has_Reading (O.all, R.Group)
+              and then not (Opening_Of (R, M, O.Readings.Element (R.Group), Seen) and then Seen = Which);
+         end Closer_Left;
+
          procedure Lower (Step : Real; Reached : out Boolean) is
          begin
             By := Step;
@@ -662,8 +677,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
                Reached := False;
                return;
             end if;
-            Driver.Robot.Motion.Follow (M, Plan, Report);
-            Reached := Report.Outcome = Driver.Robot.Motion.Reached;
+            Driver.Robot.Motion.Follow (M, Plan, Report, Stop => Closer_Left'Access);
+            Felt := Report.Stopped;
+            Reached := Report.Outcome = Driver.Robot.Motion.Reached and then not Report.Stopped;
             if Reached then
                Descended := Descended + Step;
             end if;
@@ -858,6 +874,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
                                   & Driver.Log.Image (Descended, 4)
                              elsif Steps.Stalled then "stalled, the arm followed the last push by " & Driver.Log.Image (By, 4)
                                   & " and the hand did not go down with it, after lowering " & Driver.Log.Image (Descended, 4)
+                             elsif Felt then "stopped where the closer was pushed off its opening, the last push by "
+                                  & Driver.Log.Image (By, 4) & " after lowering " & Driver.Log.Image (Descended, 4)
                              else "blocked, the last push by " & Driver.Log.Image (By, 4) & " after lowering "
                                   & Driver.Log.Image (Descended, 4)));
          if Unplanned or else Steps.Spent then

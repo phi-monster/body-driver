@@ -4,6 +4,7 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Clock;
 with Driver.Log;
+with Driver.Observations;
 with Driver.Robot.Channels;
 with Driver.Robot.Steps;
 with Driver.Robot.Lockin;
@@ -79,7 +80,12 @@ package body Driver.Robot.Motion is
       Report.Outcome := (if not Blocked_Any then Reached elsif Moved_Some then Short else Blocked);
    end Judge;
 
-   procedure Step (M : in out Model; Targets : Driver.Commands.Command; Report : out Step_Report) is
+   procedure Step
+     (M       : in out Model;
+      Targets : Driver.Commands.Command;
+      Report  : out Step_Report;
+      Stop    : access function return Boolean := null)
+   is
       B : Driver.Clock.Beat;
    begin
       Report := (others => <>);
@@ -95,6 +101,21 @@ package body Driver.Robot.Motion is
 
          function Targeted (G : Group_Id) return Boolean is
            (Is_Commandable (M, G) and then Driver.Commands.Has_Target (Targets, G));
+
+         Stopped : Boolean := False;   --  Stop held, and every targeted group was held where it was read
+
+         --  Every targeted group held at what it reads at this beat.
+         function Held_Here return Driver.Commands.Command is
+            C : Driver.Commands.Command := Driver.Commands.Hold;
+            O : constant Driver.Beats.Observation_View := Driver.Beats.Latest;
+         begin
+            for G in 1 .. Groups loop
+               if Targeted (Group_Id (G)) and then Driver.Observations.Has_Reading (O.all, Group_Id (G)) then
+                  Driver.Commands.Set_Target (C, Group_Id (G), O.Readings.Element (Group_Id (G)));
+               end if;
+            end loop;
+            return C;
+         end Held_Here;
 
          --  Every push this step started is over.
          function Done return Boolean is
@@ -120,12 +141,19 @@ package body Driver.Robot.Motion is
             Waited := Waited + 1;
             declare
                Finished : constant Boolean := Done;
+               Halt     : constant Boolean := not Finished and then not Stopped and then Stop /= null and then Stop.all;
             begin
                if Finished then
                   Judge (M, Targets, Before, Waited, Report);
                   Report.Started := Started;
+                  Report.Stopped := Stopped;
                end if;
-               Driver.Beats.Send (Driver.Commands.Hold);
+               if Halt then
+                  Stopped := True;
+                  Driver.Beats.Send (Held_Here);
+               else
+                  Driver.Beats.Send (Driver.Commands.Hold);
+               end if;
                exit when Finished;
             end;
          end loop;
@@ -1082,7 +1110,12 @@ package body Driver.Robot.Motion is
    function Solve_Count (P : Plan) return Natural is (P.Solves);
    function Worst_Bow (P : Plan) return Real is (P.Bow);
 
-   procedure Follow (M : in out Model; P : Plan; Report : out Step_Report) is
+   procedure Follow
+     (M      : in out Model;
+      P      : Plan;
+      Report : out Step_Report;
+      Stop   : access function return Boolean := null)
+   is
    begin
       Report := (Outcome => Reached, others => <>);
       for W of P.Waypoints loop
@@ -1090,9 +1123,9 @@ package body Driver.Robot.Motion is
             C : Driver.Commands.Command;
          begin
             Driver.Commands.Set_Target (C, P.Group, W);
-            Step (M, C, Report);
+            Step (M, C, Report, Stop);
          end;
-         exit when Report.Outcome /= Reached;
+         exit when Report.Outcome /= Reached or else Report.Stopped;
       end loop;
    end Follow;
 

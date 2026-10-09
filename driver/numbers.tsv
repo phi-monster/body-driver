@@ -1040,6 +1040,8 @@ driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Least, 4) & ""	4	format	d
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Yaw, 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& (if Pixel > 0.0 then Driver.Log.Image (Pixel, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Aimed.Turn, 4) & "" & Ada.Strings.Unbounded.To_String (Report.Detail)	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Descended, 4)));	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Driver.Robot.Hand.Aims.Spread (R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	1	structure	a one-element array of directions
