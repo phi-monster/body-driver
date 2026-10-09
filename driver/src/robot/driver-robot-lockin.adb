@@ -9,6 +9,7 @@ with Driver.Robot.Flow;
 with Driver.Robot.Lag;
 with Driver.Robot.Regression;
 with Driver.Stats;
+with Driver.Uncertain;
 with System.Multiprocessors;
 
 package body Driver.Robot.Lockin is
@@ -846,6 +847,24 @@ package body Driver.Robot.Lockin is
          end return;
       end;
    end Cell_Noise;
+
+   function Shows_Step (M : Model; E : Eye_Id; G : Group_Id; Step : Real_Array) return Boolean is
+      Noise : constant Real := Cell_Noise (M, E);
+   begin
+      if Noise = Real'Last then
+         return False;
+      end if;
+      for C in Step'Range loop
+         declare
+            Per_Unit : constant Real := Shift (M, E, G, C - Step'First + 1);
+         begin
+            if Per_Unit > 0.0 and then Driver.Uncertain.Significant (Step (C) * Per_Unit, Noise) then
+               return True;
+            end if;
+         end;
+      end loop;
+      return False;
+   end Shows_Step;
 
    function Shift (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Real is
       S      : Eye_Stream renames M.Eyes (E);

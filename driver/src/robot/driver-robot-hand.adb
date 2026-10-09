@@ -15,6 +15,7 @@ with Driver.Robot.Hand.Sweep;
 with Driver.Robot.Hand.Tips;
 with Driver.Robot.Hand.Views;
 with Driver.Robot.Kinematics;
+with Driver.Robot.Lockin;
 with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
 
@@ -158,6 +159,40 @@ package body Driver.Robot.Hand is
       return K /= Before'Length;
    end Rest_Moved;
 
+   function Eye_Moved (M : Model; G : Group_Id; E : Eye_Id; Before, After : Real_Array) return Boolean is
+      --  Every other group's readings, as Rest_Of lays them out: a group that moves the whole of the eye's picture
+      --  (it carries the eye) moved by a step the eye's cells tell (Lockin.Shows_Step). Laid out otherwise,
+      --  something came or went: that is a change.
+      K : Natural := 0;
+   begin
+      if Before'Length /= After'Length then
+         return True;
+      end if;
+      for Other in 1 .. Group_Id'Base (Group_Count (M)) loop
+         if Other /= G then
+            declare
+               N : constant Natural := Group_Size (M, Other);
+            begin
+               if K + N > Before'Length then
+                  return True;
+               end if;
+               if Response (M, Other, E) = Whole then
+                  declare
+                     D : constant Real_Array (1 .. N) :=
+                       [for C in 1 .. N => After (After'First + K + C - 1) - Before (Before'First + K + C - 1)];
+                  begin
+                     if Driver.Robot.Lockin.Shows_Step (M, E, Other, D) then
+                        return True;
+                     end if;
+                  end;
+               end if;
+               K := K + N;
+            end;
+         end if;
+      end loop;
+      return K /= Before'Length;
+   end Eye_Moved;
+
    function All_Read (O : Observation) return Boolean is
      (for all G in O.Readings.First_Index .. O.Readings.Last_Index => Driver.Observations.Has_Reading (O, G));
 
@@ -243,6 +278,7 @@ package body Driver.Robot.Hand is
    procedure Feed (P : in out Pair; M : Model; O : Observation) is
       Complete : constant Boolean := All_Read (O) and then Driver.Observations.Has_Image (O, P.Eye);
       function Moved (Before, After : Real_Array) return Boolean is (Rest_Moved (M, P.Group, Before, After));
+      function Carried (Before, After : Real_Array) return Boolean is (Eye_Moved (M, P.Group, P.Eye, Before, After));
    begin
       --  A view of the pair's eye needs that eye's picture to have stopped
       --  changing (the one stop rule, Driver.Robot.Stillness): its validity
@@ -253,7 +289,7 @@ package body Driver.Robot.Hand is
       --  every beat started the view again, and none ever had two frames.
       Sweeps.Observe (P.Sweep, O, Still => Driver.Robot.Stillness.Eye_Settled (M, P.Eye) and then Complete,
                       Closer => O.Readings (P.Group), Rest => Rest_Of (O, P.Group), Image => O.Images (P.Eye),
-                      Rest_Moved => Moved'Access);
+                      Rest_Moved => Moved'Access, Eye_Moved => Carried'Access);
    end Feed;
 
    function Sizes_Text (R : Hand_Record) return String;

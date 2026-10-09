@@ -256,9 +256,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
       --  is measured from its own arm's motion and not from what the boot did before it: the boot's sweeps gave A22's
       --  closers dozens of poses at their start readings, and a reloaded body file gives none (A25h logged "0 poses,
       --  two are needed" at every round). The eye is raised along the way up the body measured (Up_In_Arm), heights
-      --  above the table: first by the least move whose readings an eye can see (a plan's last readings, tried by the
-      --  body's one test of motion before anything moves), then by twice that, and so on, until the eye has the poses
-      --  or cannot be raised further.
+      --  above the table: first by the least move that moves its picture by what its cells tell (a plan's last
+      --  readings, tried by Lockin.Shows_Step before anything moves), then by twice that, and so on, until the eye has
+      --  the poses or cannot be raised further.
       procedure Gather_Own_Poses (G : Group_Id; Wanted : Positive; Reached : out Boolean) is
          Placed : Boolean := False;   --  the closer is one an eye on an arm watches
          Arm    : Arm_Id := 1;
@@ -314,7 +314,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                end if;
                By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);
                Why := Ada.Strings.Unbounded.To_Unbounded_String
-                 ("no raise within the arm's reach moves its readings by what an eye sees");
+                 ("no raise within the arm's reach moves its eye's picture by what the eye's cells tell");
                for Doubling in 1 .. Real'Machine_Mantissa loop
                   --  A raise is made for the poses it gives the eye, whatever its turn: its
                   --  plan reaches the place, not the turn (A68 and A69: arm 2's raises
@@ -330,7 +330,11 @@ procedure Measure (H : in out Hands; M : in out Model) is
                      Goal : constant Real_Array := Driver.Robot.Motion.Last_Readings (Plan);
                      Step : constant Real_Array := [for I in Goal'Range => Goal (I) - Now (Now'First + I - Goal'First)];
                   begin
-                     if Driver.Robot.Channels.Visible (M, Group, Step) then
+                     --  A pose is one the eye was carried to (Hand.Eye_Moved): the raise moves its picture by what
+                     --  its cells tell, and a raise its readings show is not always one (A73: arm 2's first raises
+                     --  were of a few millionths, the least the tool's place told at its reference readings, and its
+                     --  eye gathered nine poses that told the fingers from nothing).
+                     if Driver.Robot.Lockin.Shows_Step (M, Eye, Group, Step) then
                         Ready := True;
                         return;
                      end if;

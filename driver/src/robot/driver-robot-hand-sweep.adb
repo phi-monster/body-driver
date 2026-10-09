@@ -108,11 +108,12 @@ package body Driver.Robot.Hand.Sweep is
       Closer     : Real_Array;
       Rest       : Real_Array;
       Image      : Driver.Images.Image;
-      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean)
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean;
+      Eye_Moved  : not null access function (Before, After : Real_Array) return Boolean)
    is
    begin
       Driver.Robot.Hand.Views.Observe (S.Views, Seen, Still, Closer, Rest, Image, Rest_Moved);
-      Driver.Robot.Hand.Selfsight.Observe (S.Memory, Closer, Rest, Still, Image, Rest_Moved);
+      Driver.Robot.Hand.Selfsight.Observe (S.Memory, Closer, Rest, Still, Image, Eye_Moved);
       for C in 1 .. Channels (S) loop
          if Ends_Moved (S, C) then
             Renew (S, C);
