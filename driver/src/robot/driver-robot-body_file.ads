@@ -4,7 +4,7 @@
 --  it, so a reload keeps what is still valid and re-measures only what a
 --  changed method would measure differently. A quantity is kept only when
 --  its inputs are kept too: the lags and the step responses rest on the
---  readings' noise, the lock-in on the noise and the lags, the graph on the
+--  readings' noise, the ends the arm showed on the noise, the lock-in on the noise and the lags, the graph on the
 --  lock-in, the kinematics on the graph and the lock-in. The file also
 --  carries a key, the shape of what the robot reports (group sizes, which
 --  groups take commands, image sizes): a file whose key differs from the
@@ -17,6 +17,7 @@ private package Driver.Robot.Body_File is
    --  Method versions; each goes up when the code that measures it changes.
    Noise_Method      : constant := 1;
    Travel_Method     : constant := 1;
+   Ends_Method       : constant := 1;
    Steps_Method      : constant := 2;
    Lag_Method        : constant := 2;
    Lockin_Method     : constant := 3;

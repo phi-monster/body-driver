@@ -81,4 +81,19 @@ private package Driver.Robot.Steps is
    function Latest (M : Model; G : Group_Id) return Episode
      with Pre => Episodes (M, G) > 0;
 
+   function Limiter (M : Model; G : Group_Id; E : Episode) return Natural;
+   --  The channel of the group that stopped the push E, 0 when none did. A push that ended at rest and was
+   --  blocked fell short along its ask by the sum, over the channels, of each one's share of the ask (its ask over
+   --  the ask's length, as Finish weighs them) times its own shortfall. The limiter is the channel whose part of
+   --  that is more than Z standard deviations above zero and above every other channel's, each against the noise
+   --  of its own readings over its share (two readings of it) and the scatter of the group's free pushes along
+   --  their ask, which is the whole shortfall's, one number a push, and so counts once in a difference of two
+   --  channels' parts, not once for each: one channel far short of the rest. A shortfall spread over the
+   --  channels in equal parts has none; a channel asked nothing the one test of motion sees contributes none,
+   --  however it moved. Only the caller knows what kind of stop it asked about (a table's and a joint's end both
+   --  leave a push short, the table's with its channels short by different shares, many sigmas of their noise
+   --  apart, as A27's push at 6277 was, 16, 28 and 22 per cent): this tells which channel, not whether the body
+   --  stopped it. The push's readings are read where Driver.Robot.Hand.Judge_Push reads them (the Episode keeps
+   --  no vectors).
+
 end Driver.Robot.Steps;
