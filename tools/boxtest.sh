@@ -30,16 +30,27 @@ NAMES=$(git -C "$ROOT" grep -h -o -E 'Register \("[A-Za-z0-9_.]+"' "$COMMIT" -- 
         | sed -E 's/Register \("//; s/"$//' | sort -u)
 COUNT=$(echo "$NAMES" | wc -l | tr -d ' ')
 echo "building $HASH on $BOX in $D for $COUNT tests"
-if ! git -C "$ROOT" archive --format=tar "$COMMIT" driver docs | zstd -q -c | "${SSH[@]}" "$BOX" "
-    set -e; mkdir -p '$D'; cd '$D'
-    zstd -dc | tar -x; cp -r /root/work/core/deps/alire driver/; cd driver
-    PATH=/root/alire/bin:\$HOME/.alire/bin:\$PATH nice -n 5 alr -n build > ../build.log 2>&1
-    ! grep -E ': (error|warning)[: ]' ../build.log" 2>&1 | quiet; then
+# The sources go up as one file, sent again while the connection fails (ssh's own status 255; a
+# connection held for a whole build was cut under load, and merge.sh took a passing merge back out
+# for a build that never started), and the build runs detached and is polled, like the tests.
+ARCHIVE=$(mktemp)
+trap 'rm -f "$ARCHIVE"' EXIT
+git -C "$ROOT" archive --format=tar "$COMMIT" driver docs | zstd -q -c > "$ARCHIVE" || exit 2
+sent=0
+for try in 1 2 3 4 5 6; do
+  if "${SSH[@]}" "$BOX" "mkdir -p '$D' && cat > '$D/sources.tar.zst'" < "$ARCHIVE" 2>/dev/null; then sent=1; break; fi
+  sleep 30
+done
+[ "$sent" = 1 ] || { echo "the sources could not be sent to $BOX"; exit 3; }
+#  Started once: a retry after a cut connection finds build.started and starts no second build.
+until "${SSH[@]}" "$BOX" "cd '$D' && { mkdir build.started 2>/dev/null || exit 0; } && setsid nohup sh -c 'zstd -dc sources.tar.zst | tar -x && cp -r /root/work/core/deps/alire driver/ && cd driver && PATH=/root/alire/bin:\$HOME/.alire/bin:\$PATH nice -n 5 alr -n build > ../build.log 2>&1; echo \$? > ../build.status' > /dev/null 2>&1 < /dev/null &" 2>/dev/null; do sleep 30; done
+until "${SSH[@]}" "$BOX" "test -f '$D/build.status'" 2>/dev/null; do sleep 30; done
+if ! "${SSH[@]}" "$BOX" "[ \"\$(cat '$D/build.status')\" = 0 ] && ! grep -E ': (error|warning)[: ]' '$D/build.log'" 2>&1 | quiet; then
   echo "the build on the box failed: $D/build.log"; exit 3
 fi
 # The runner waits its turn on the lock, then writes results.txt and, last, finished.
 RUNNER=$(mktemp)
-trap 'rm -f "$RUNNER"' EXIT
+trap 'rm -f "$ARCHIVE" "$RUNNER"' EXIT
 cat > "$RUNNER" <<'EOF'
 #!/bin/sh
 cd "$1/driver" && mkdir -p ../out
