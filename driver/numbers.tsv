@@ -1062,6 +1062,7 @@ driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & 
 driver-robot-hand-measure.adb	then Driver.Robot.Hand.Aims.Spread (Sight, [1 => R.Lobes (Lobe).Sights (Other_End).Ray.Direction.Unit_Vector])	1	structure	the one other line of sight of a lone lobe
 driver-robot-hand-presses.adb	- U * (Step.Covariance * U)) / 2.0);	2.0	math	the mean of the variance about the two axes across the move
 driver-robot-hand-presses.adb	U : constant Vec3 := (1.0 / Length) * Step.Mean;	1.0	math	a vector over its length is its unit vector
+driver-robot-hand-presses.adb	if W.Commands > 1 then	1	structure	the first command that takes effect after the block is the let-go; a second before the hand has rested is the retreat's
 driver-robot-hand-pressing.adb	Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);	1	structure	odd steps of the sequence of turns go one way, even steps the other: the turns about the way down alternate in sign
 driver-robot-hand-pressing.adb	Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);	1.0	structure	the sign of the turn: one way for the odd steps, the other for the even
 driver-robot-hand-pressing.adb	Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);	1.0	structure	the sign of the turn: one way for the odd steps, the other for the even

@@ -82,6 +82,11 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  something of its own, or short of it): a tilt this arm cannot make from where it stands, and not a press that
    --  stopped short of the table. Set afresh by each press.
 
+   Learned_An_End : Boolean := False;
+   --  Set by a press whose aim stopped on something of the arm's own that moved an end the arm showed
+   --  (Driver.Robot.Motion.Note_Stopped): the same aim, planned again, is turned about the way down past it. Set
+   --  afresh by each press.
+
    package Group_Lists is new Ada.Containers.Vectors (Positive, Group_Id);
 
    procedure Move_Group (G : Group_Id; Target : Real_Array; Followed : out Boolean) is
@@ -603,8 +608,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
 
       procedure Note_The_Stop (O : Observation) is
          pragma Unreferenced (O);
+         Noted : Boolean;
       begin
-         Driver.Robot.Motion.Note_Stopped (M, Arm_Is);
+         Driver.Robot.Motion.Note_Stopped (M, Arm_Is, Noted);
+         Learned_An_End := Learned_An_End or else Noted;
       end Note_The_Stop;
 
       Least : Real;   --  the least push, where the aim leaves the tool, kept above zero so that the doubling begins
@@ -670,6 +677,22 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end Above;
       Steps : Driver.Robot.Hand.Descent_Steps;
 
+      --  What the hand has found of its press since the let-go: the presses its book keeps, whether the arm's own
+      --  readings are at rest (Driver.Robot.Hand.Arm_At_Rest), and the most beats a push of the arm has taken.
+      Kept_Now : Natural := 0;
+      Resting  : Boolean := False;
+      Allowed  : Natural := 0;
+      procedure Read_Kept (O : Observation) is
+      begin
+         Lost := not Present (Id, R);
+         if Lost then
+            return;
+         end if;
+         Kept_Now := Driver.Robot.Hand.Tips.Pressed (H.Data.Found (Id).Book);
+         Resting := Driver.Robot.Hand.Arm_At_Rest (M, R.Arm, O);
+         Allowed := Driver.Robot.Hand.Longest_Push (M, R.Arm);
+      end Read_Kept;
+
       procedure Read_Arm (O : Observation) is
          --  The arm's group was found at the aim (Arm_Is) and is not looked up again: it is the arm's readings that
          --  are wanted here, and they are there whatever became of the hand.
@@ -693,6 +716,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end End_Lost;
    begin
       Aim_Short := False;
+      Learned_An_End := False;
       Hold_Beat (Read_Aim'Access);
       if Lost then
          End_Lost (Moved => False);
@@ -824,13 +848,63 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Move_Group (Arm_Is, Aim_At.Element);
          return False;
       end if;
-      --  Let go: the arm held where the block left it, so the hand rests; then
-      --  back to where the descent began.
-      Hold_Beat (Read_Arm'Access);
-      Move_Group (Arm_Is, Arm_Now.Element);
-      Move_Group (Arm_Is, Aim_At.Element);
-      return True;
+      --  Let go: the arm held where the block left it, so the hand rests there, and the arm does not leave until it
+      --  has. The watcher takes the press at that rest (Driver.Robot.Hand.Presses); a retreat begun while the readings
+      --  still ease back would give it the rest at the aim, where the hand is not on what it pressed (A35's first
+      --  press: a tip 11.4457 from the eye, the eye's height at the aim, for the 3.8 it was). The wait is for the
+      --  arm's own readings to be still, at most as long as the longest push the arm has had took to come to rest.
+      declare
+         Kept_Before : Natural;
+         Waited      : Natural := 0;
+      begin
+         Hold_Beat (Read_Kept'Access);
+         if Lost then
+            End_Lost (Moved => True);
+            return False;
+         end if;
+         Kept_Before := Kept_Now;
+         Hold_Beat (Read_Arm'Access);
+         Move_Group (Arm_Is, Arm_Now.Element);
+         loop
+            Hold_Beat (Read_Kept'Access);
+            exit when Lost or else Resting or else Waited >= Allowed;
+            Waited := Waited + 1;
+         end loop;
+         if Lost then
+            End_Lost (Moved => True);
+            return False;
+         end if;
+         if Kept_Now = Kept_Before then
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": no press of lobe" & Lobe'Image & " was found at the rest after"
+                             & " the let-go: the arm "
+                             & (if Resting then "rested, and the hand found no press in it"
+                                else "did not rest in" & Waited'Image & " beats, the longest a push of the arm took")
+                             & "; the arm is taken back to where the descent began");
+            Move_Group (Arm_Is, Aim_At.Element);
+            return False;
+         end if;
+         Move_Group (Arm_Is, Aim_At.Element);
+         return True;
+      end;
    end Press_Once;
+
+   --  A press; when its aim stopped on an end the arm showed by stopping there (Learned_An_End), the same press once
+   --  more: the aim is planned again with the end known, turned about the way down past it if it was in the way at the
+   --  pose it was first planned at, or not planned at all (Aim_Short) and no arm move is spent (A34: lobe 2 at open,
+   --  the fourth joint at -2.1746 for the -2.1870 asked, and the tilt then halved under the least that tells a tip).
+   function Press_Past_Its_Ends
+     (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening; Along : Vec3) return Boolean
+   is
+      Done : Boolean := Press_Once (Id, R, Lobe, Which, Along);
+   begin
+      if not Done and then not Lost and then Aim_Short and then Learned_An_End then
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the aim of a press of lobe" & Lobe'Image & " at "
+                          & (if Which = Open then "open" else "closed")
+                          & " stopped on an end the arm showed by it: the same aim is planned again past it");
+         Done := Press_Once (Id, R, Lobe, Which, Along);
+      end if;
+      return Done;
+   end Press_Past_Its_Ends;
 
    procedure Press_Lobe (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening) is
       Sight  : constant Vec3 := R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector;
@@ -885,7 +959,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                              & (if Which = Open then "open" else "closed") & " is not pressed: its tip is confirmed already");
             return;
          end if;
-         if not Press_Once (Id, R, Lobe, Which, Sight) then
+         if not Press_Past_Its_Ends (Id, R, Lobe, Which, Sight) then
             return;   --  Lost, or a press that could not be made: the next lobe is the caller's to go on to
          end if;
          Hold_Beat (Read_Agreed'Access);
@@ -910,17 +984,17 @@ procedure Measure (H : in out Hands; M : in out Model) is
             exit when Checked;
             declare
                Lean  : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;
-               Tilt  : Real := Scale;
                Bound : Real := Ada.Numerics.Pi / 2.0;   --  the least tilt this side was found not to make
+               Tilt  : Real := Driver.Robot.Hand.Aims.First_Tilt (Scale, Least, Bound);
                Made  : Natural := 0;
                Why   : Ada.Strings.Unbounded.Unbounded_String :=
                  Ada.Strings.Unbounded.To_Unbounded_String ("tilted to a right angle");
             begin
-               --  The hand's own angle, then double while the presses are ones
-               --  the tip rests on, half when one stops short of the table
+               --  The hand's own angle, and no less than the least that tells the tip from a stop (Aims.First_Tilt), then
+               --  double while the presses are ones the tip rests on, half when one stops short of the table
                --  (Driver.Robot.Hand.Aims.Next_Tilt).
                while Tilt > 0.0 and then Tilt < Bound loop
-                  if not Press_Once (Id, R, Lobe, Which, Driver.Robot.Hand.Aims.Tilted (Sight, Lean, Tilt)) then
+                  if not Press_Past_Its_Ends (Id, R, Lobe, Which, Driver.Robot.Hand.Aims.Tilted (Sight, Lean, Tilt)) then
                      if Lost then
                         return;   --  Press_Once said so
                      end if;

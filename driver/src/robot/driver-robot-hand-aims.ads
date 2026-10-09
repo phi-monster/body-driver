@@ -42,6 +42,16 @@ package Driver.Robot.Hand.Aims is
    --  when it exceeds Z times the square root of 2 of the tip's sigma. Real'Last
    --  when the distance is not known: no tilt is then told from another.
 
+   function First_Tilt (Scale, Least, Bound : Real) return Real;
+   --  The tilt of the first press of a lobe's tip on one side: the hand's own angle, Scale, and no less than
+   --  Least, which none under it is worth, when that is under Bound (the least tilt found not to be made). A
+   --  closed hand's two lobes lie almost along each other from the eye (A31's closed lobes: 0.020 rad), and a
+   --  tilted press at that angle tells nothing about a tip 3.8 along its line known to 0.092, which needs 0.45;
+   --  the next tilt, double, was under the least and the side ended: every closed lobe was left not tested
+   --  across its sight, 7.4 to 7.8 mm lateral from where the truth touched. Scale itself when no tilt under
+   --  Bound tells the tip from a stop (the distance not known, Least = Real'Last, or so uncertain that the
+   --  least is a right angle or more): a press at the hand's own angle is another look at it, as it was.
+
    procedure Next_Tilt (Tilt : in out Real; Stalled : Boolean; Bound : in out Real; Least : Real);
    --  The tilt of the next press of a lobe's tip on one side, after one at
    --  Tilt that stopped short of the table (Stalled: no tip rests on it) or

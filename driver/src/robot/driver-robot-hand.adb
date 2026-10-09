@@ -868,7 +868,8 @@ package body Driver.Robot.Hand is
       Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked or else Stalled_Now, Is_Pushing, Is_Still,
                                          Tool_In_Arm (M, R.Arm, O),
                                          O.Readings.Element (Arm_Group (M, R.Arm)), O.Readings.Element (R.Group),
-                                         Found, Press);
+                                         Found, Press,
+                                         Retargeted => Driver.Robot.Channels.Target_Changed (M, Arm_Group (M, R.Arm), Natural (O.Beat)));
       if not Found then
          return;
       end if;
@@ -909,6 +910,19 @@ package body Driver.Robot.Hand is
    --  The arm's own readings are at rest at the beat. The body's eyes are not
    --  asked: the pose of a press is a function of the readings alone, and the
    --  pictures settle after the arm does.
+
+   function Longest_Push (M : Model; A : Arm_Id) return Natural is
+      Longest : Natural := 0;
+   begin
+      if Natural (A) <= Arm_Count (M) then
+         for E of M.Groups (Arm_Group (M, A)).Episodes loop
+            if E.Ended and then E.End_At >= E.Start then
+               Longest := Natural'Max (Longest, E.End_At - E.Start + 1);
+            end if;
+         end loop;
+      end if;
+      return Longest;
+   end Longest_Push;
 
    function Asks_A_Translation (M : Model; A : Arm_Id; From, Target : Real_Array) return Boolean is
       Arm_Is : constant Group_Id := Arm_Group (M, A);

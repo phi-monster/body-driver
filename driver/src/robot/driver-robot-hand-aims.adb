@@ -81,6 +81,9 @@ package body Driver.Robot.Hand.Aims is
                  / Distance.Value)
       else Real'Last);
 
+   function First_Tilt (Scale, Least, Bound : Real) return Real is
+     (if Real'Max (Scale, Least) < Bound then Real'Max (Scale, Least) else Scale);
+
    procedure Next_Tilt (Tilt : in out Real; Stalled : Boolean; Bound : in out Real; Least : Real) is
       Next : Real;
    begin

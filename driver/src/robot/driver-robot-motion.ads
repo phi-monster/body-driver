@@ -34,7 +34,7 @@ package Driver.Robot.Motion is
    procedure Step (M : in out Model; Targets : Driver.Commands.Command; Report : out Step_Report);
    --  Sends the targets, waits until the body settles, and judges the step.
 
-   procedure Note_Stopped (M : in out Model; G : Group_Id);
+   procedure Note_Stopped (M : in out Model; G : Group_Id; Noted : out Boolean);
    --  The decider's word that the group's latest push, ended Blocked or Short, was stopped by the body itself and
    --  not by a surface it was pressing: an aim, a step in free air, a probe. Only the caller can know that: a
    --  table and a joint's end both leave a push short. It finds, from the stream alone, the channel that stopped
@@ -47,6 +47,11 @@ package Driver.Robot.Motion is
    --  shortfall spread over the channels). The furthest stop seen of a sense stands: a stop where the arm met
    --  itself is relaxed by a later one that went further. Like every decider call it is made between Next and
    --  Send; it waits for nothing and asks for no estimate.
+   --  Noted is True when the stop is a new end or moves one further: plans past it are refused from now, and a
+   --  decider whose aim stopped may plan the same aim again, now turned about the way down past the end it showed.
+
+   procedure Note_Stopped (M : in out Model; G : Group_Id);
+   --  The same, for a caller that does not ask whether it moved an end.
 
    procedure Hold (M : in out Model; Beats : Positive);
    --  Holds the body for that many beats.
