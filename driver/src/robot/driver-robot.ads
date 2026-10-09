@@ -297,6 +297,13 @@ package Driver.Robot is
    --  texture to show a displacement. Zero while there is no verdict.
 
    function Image_Lag (M : Model; E : Eye_Id) return Integer;
+
+   function Eye_Watch (M : Model; E : Eye_Id) return String;
+   --  For a replay that follows an eye beat by beat: its picture's mean change
+   --  against the frame before and the one before that (each pixel in units of
+   --  its noise), whether it is still and whether it has settled, and the
+   --  largest displacement of a resolved cell at this beat, in pixels and in
+   --  units of that cell's noise.
    --  How many beats the eye's images trail the readings they belong to:
    --  the image of beat B shows the body as read at beat B - Image_Lag; 0
    --  until measured.

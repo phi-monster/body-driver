@@ -706,6 +706,41 @@ package body Driver.Robot is
    function Resting_Motion (M : Model; G : Group_Id; E : Eye_Id) return Real is
      (Graph.Effect (M, G, E).Resting);
 
+   function Eye_Watch (M : Model; E : Eye_Id) return String is
+   begin
+      if E > M.Eyes.Last_Index then
+         return "no such eye";
+      end if;
+      declare
+         S       : Eye_Stream renames M.Eyes (E);
+         N       : constant Natural := Cells (S.Grid);
+         Count   : constant Natural := Natural (S.Du.Length);
+         Most_Px, Most_Sigmas : Real := 0.0;
+      begin
+         if N > 0 and then Count >= N and then Natural (S.Luma_Variance.Length) = N then
+            for C in 0 .. N - 1 loop
+               declare
+                  K     : constant Natural := Count - N + C;
+                  D     : constant Real := Sqrt (S.Du.Element (K) ** 2 + S.Dv.Element (K) ** 2);
+                  Floor : constant Real :=
+                    Flow.Noise_Floor (S.Condition.Element (K), S.Luma_Variance.Element (C) * S.Rest_Factor ** 2);
+               begin
+                  if S.Resolved.Element (K) then
+                     Most_Px := Real'Max (Most_Px, D);
+                     if Floor < Real'Last and then Floor > 0.0 then
+                        Most_Sigmas := Real'Max (Most_Sigmas, D / Floor);
+                     end if;
+                  end if;
+               end;
+            end loop;
+         end if;
+         return "change " & Driver.Log.Image (S.Change_1, 3) & " " & Driver.Log.Image (S.Change_2, 3)
+           & (if S.Is_Still then ", still" else ", moving") & (if S.Watch_Done then ", settled" else ", settling")
+           & ", flow at most " & Driver.Log.Image (Most_Px, 3) & " px, " & Driver.Log.Image (Most_Sigmas, 1)
+           & " sigmas";
+      end;
+   end Eye_Watch;
+
    function Image_Lag (M : Model; E : Eye_Id) return Integer is
      (if E <= M.Lags.Last_Index then M.Lags (E) else 0);
 
