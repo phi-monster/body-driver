@@ -8,6 +8,7 @@ with Driver.Robot.Channels;
 with Driver.Robot.Hand.Frames;
 with Driver.Robot.Hand.Lobes;
 with Driver.Robot.Hand.Lowering;
+with Driver.Robot.Hand.Pressing;
 with Driver.Robot.Hand.Presses;
 with Driver.Robot.Hand.Shape;
 with Driver.Robot.Hand.Slide;
@@ -966,11 +967,40 @@ package body Driver.Robot.Hand is
    end Press_Beat;
 
    function Arm_At_Rest (M : Model; A : Arm_Id; O : Observation) return Boolean is
-     (Natural (A) <= Arm_Count (M)
-      and then Driver.Robot.Stillness.Group_Still (M, Arm_Group (M, A), Natural (O.Beat)));
-   --  The arm's own readings are at rest at the beat. The body's eyes are not
-   --  asked: the pose of a press is a function of the readings alone, and the
-   --  pictures settle after the arm does.
+      G : Group_Id;
+   begin
+      if Natural (A) > Arm_Count (M) or else Natural (O.Beat) = 0 then
+         return False;
+      end if;
+      G := Arm_Group (M, A);
+      if not Driver.Robot.Channels.Has_Reading (M, G, Natural (O.Beat))
+        or else not Driver.Robot.Channels.Has_Reading (M, G, Natural (O.Beat) - 1)
+      then
+         return False;
+      end if;
+      declare
+         Before : Observation;
+         Now_At, Then_At : Pose_Estimate;
+         Least : constant Real := Driver.Robot.Hand.Pressing.Least_Push (M, A, O);
+      begin
+         Before.Readings := O.Readings;
+         Before.Readings.Replace_Element
+           (G, [for C in 1 .. Group_Size (M, G) => Driver.Robot.Channels.Reading (M, G, Natural (O.Beat) - 1, C)]);
+         Now_At := Tool_In_Arm (M, A, O);
+         Then_At := Tool_In_Arm (M, A, Before);
+         return Least < Real'Last
+           and then abs (Now_At.Pose.Translation - Then_At.Pose.Translation) < Least
+           and then Driver.Numerics.Angle (Transpose (Then_At.Pose.Rotation) * Now_At.Pose.Rotation)
+                      < Driver.Conventions.Z * Driver.Robot.Kinematics.Angle_Sigma (M, A);
+      end;
+   end Arm_At_Rest;
+   --  The tool stood still at the beat as far as its pose is known: it moved since the beat before by less than
+   --  the least move that tells from the noise of its place (Pressing.Least_Push) and turned by less than Z sigmas
+   --  of its turn. The body's eyes are not asked: the pose of a press is a function of the readings alone, and the
+   --  pictures settle after the arm does. The arm's readings were asked once, by the body's one test of motion, and
+   --  that test sees what the eyes can tell over every cell of them: a hand resting on the table crept by a
+   --  millionth of a radian a beat, more than eye 3 tells, and A78's hand 2 waited 2,900 beats after its let-go
+   --  for a rest its pose had reached at the first of them. Unknown where the tool's place is not measured.
 
    function Asks_A_Translation (M : Model; A : Arm_Id; From, Target : Real_Array) return Boolean is
       Arm_Is : constant Group_Id := Arm_Group (M, A);
