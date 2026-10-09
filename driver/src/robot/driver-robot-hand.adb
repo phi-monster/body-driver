@@ -813,6 +813,16 @@ package body Driver.Robot.Hand is
             then
                return;
             end if;
+            --  A push whose target stands the tool where it stood, as far as its place tells from its noise
+            --  (Pressing.Least_Push), asked the hand nothing, and a share of nothing is no number: A79's aim of a
+            --  press, whose push began at a target 3e-8 from where the tool stood while the arm went on 2.6 of
+            --  its units the way a joint's end let it, was judged a stall of 95,629,588 per cent, and the rest
+            --  after it was kept as a press of lobe 2 at closed, a tip 45 +- 89 units along its sight (760 mm).
+            if abs (Target.Pose.Translation - From.Pose.Translation)
+                 < Driver.Robot.Hand.Pressing.Least_Push (M, R.Arm, Seen_At (Before))
+            then
+               return;
+            end if;
             declare
                Closer : constant Natural := Group_Size (M, R.Group);
                Lobes  : constant Natural := Natural (R.Lobes.Length);
