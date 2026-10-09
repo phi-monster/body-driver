@@ -11,7 +11,11 @@ package Driver.Bytes is
    subtype Byte_Array is Ada.Streams.Stream_Element_Array;
    subtype Offset is Ada.Streams.Stream_Element_Offset;
 
+   pragma Suppress (Tampering_Check);
    package Holders is new Ada.Containers.Indefinite_Holders (Byte_Array, Ada.Streams."=");
+   --  Read byte by byte where pictures are encoded: without the tampering
+   --  check a reference to the held array is a plain pointer, not a
+   --  controlled object built and finalized at every read.
    --  An immutable heap copy of a byte array; read it in place through
    --  Holders.Constant_Reference to avoid copying large payloads.
 

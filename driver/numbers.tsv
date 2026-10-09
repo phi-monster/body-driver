@@ -434,6 +434,8 @@ driver-instrument.adb	Channels : constant := 3;	3	format	three colour bytes per 
 driver-instrument.adb	File_Header : constant := 14;	14	format	BMP: the file header is 14 bytes
 driver-instrument.adb	Info_Header : constant := 40;	40	format	BMP: the BITMAPINFOHEADER is 40 bytes
 driver-instrument.adb	M.Certainty := Driver.Json.Number (Doc, Driver.Json.Element (Doc, E, 3));	3	format	the service's answer is u, v, certainty
+driver-instrument.adb	Pixels (To + Offset (Channels * Column) + 2) := RGB (From + Offset (Channels * Column));	2	format	a bitmap pixel is blue, green, red: the byte two places on in one order is the first in the other
+driver-instrument.adb	Pixels (To + Offset (Channels * Column)) := RGB (From + Offset (Channels * Column) + 2);	2	format	a bitmap pixel is blue, green, red: the byte two places on in one order is the first in the other
 driver-instrument.adb	Put_Little (B, 0, 4 * 4);	4	format	BMP: four four-byte fields of resolution and palette
 driver-instrument.adb	Put_Little (B, 0, 4 * 4);	4	format	BMP: four four-byte fields of resolution and palette
 driver-instrument.adb	Put_Little (B, 0, 4);	4	format	BMP: a four-byte field
@@ -866,12 +868,16 @@ driver-robot-flow.adb	(Driver.Uncertain.Vector_Gate (2), Final,	2	structure	a di
 driver-robot-flow.adb	(Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;	2.0	math	the smaller eigenvalue of a symmetric 2 x 2 matrix, (trace - sqrt (trace^2 - 4 det)) / 2
 driver-robot-flow.adb	(Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;	4.0	math	the smaller eigenvalue of a symmetric 2 x 2 matrix, (trace - sqrt (trace^2 - 4 det)) / 2
 driver-robot-flow.adb	(if Condition > 0.0 then Sqrt (2.0 * Luma_Variance / Condition) else Real'Last);	2.0	math	a displacement between two frames carries both frames' pixel noise
+driver-robot-flow.adb	Fx : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_X) + 1);	1	structure	a fraction per column or row of the largest cell, numbered from one, with one to spare
+driver-robot-flow.adb	Fy : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_Y) + 1);	1	structure	a fraction per column or row of the largest cell, numbered from one, with one to spare
 driver-robot-flow.adb	Gx (I) := (At_Before (X + 1, Y) - At_Before (X - 1, Y)) / 2.0;	2.0	math	a central difference spans two pixels
+driver-robot-flow.adb	Gx : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_X * Most_Y));	1	structure	at least one element, so a grid without cells allocates an empty-sized buffer no smaller than one
 driver-robot-flow.adb	Gy (I) := (At_Before (X, Y + 1) - At_Before (X, Y - 1)) / 2.0;	2.0	math	a central difference spans two pixels
+driver-robot-flow.adb	Gy : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_X * Most_Y));	1	structure	at least one element, so a grid without cells allocates an empty-sized buffer no smaller than one
+driver-robot-flow.adb	Px : Index_Access := new Index_Array (0 .. Natural'Max (1, Most_X));	1	structure	at least one element, so a grid without cells allocates an empty-sized buffer no smaller than one
+driver-robot-flow.adb	Py : Index_Access := new Index_Array (0 .. Natural'Max (1, Most_Y));	1	structure	at least one element, so a grid without cells allocates an empty-sized buffer no smaller than one
 driver-robot-flow.adb	X0 := Natural'Max (X0, 1);	1	structure	the central difference needs the pixel before
-driver-robot-flow.adb	X1 : constant Natural := Natural'Min (Natural (Real'Floor (Xc)), W - 2);	2	structure	bilinear interpolation reads the pixel after its left neighbour, so that neighbour is at most the one before the last
 driver-robot-flow.adb	Y0 := Natural'Max (Y0, 1);	1	structure	the central difference needs the pixel before
-driver-robot-flow.adb	Y1 : constant Natural := Natural'Min (Natural (Real'Floor (Yc)), H - 2);	2	structure	bilinear interpolation reads the pixel below its upper neighbour, so that neighbour is at most the one before the last
 driver-robot-flow.adb	and then abs U <= Real (Nx) / 2.0 and then abs V <= Real (Ny) / 2.0;	2.0	structure	a translation beyond half the cell has moved most of the template out of the window it is matched in
 driver-robot-flow.adb	and then abs U <= Real (Nx) / 2.0 and then abs V <= Real (Ny) / 2.0;	2.0	structure	a translation beyond half the cell has moved most of the template out of the window it is matched in
 driver-robot-flow.adb	or else abs U > Real (Nx) / 2.0 or else abs V > Real (Ny) / 2.0;	2.0	structure	a translation beyond half the cell has moved most of the template out of the window it is matched in
@@ -1415,6 +1421,8 @@ driver-robot-kinematics-fit.adb	B := B + Ln (2.0) / 2.0;	2.0	numerics	half an oc
 driver-robot-kinematics-fit.adb	C : Real := 1.0;	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	C : constant Mat3 := (1.0 / Length ** 2) * (Pr * P.Covariance * Pr);	1.0	math	the normal's change is the inverse-depth vector's change across it over its length
 driver-robot-kinematics-fit.adb	Cl (T) := C (T) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
+driver-robot-kinematics-fit.adb	Columns (1, Count);	1	structure	the columns of the Jacobian are numbered from one
+driver-robot-kinematics-fit.adb	Columns (1, Parameters);	1	structure	the columns of the Jacobian are numbered from one
 driver-robot-kinematics-fit.adb	Cosine : constant Real := Real'Min (1.0, Real'Max (-1.0, Plane_Normal (A) * Plane_Normal (B)));	1.0	math	a cosine lies between minus one and one
 driver-robot-kinematics-fit.adb	Cosine : constant Real := Real'Min (1.0, Real'Max (-1.0, Plane_Normal (A) * Plane_Normal (B)));	1.0	math	a cosine lies between minus one and one
 driver-robot-kinematics-fit.adb	Count : constant Positive := 3 * N + 1;	3	structure	the positions of the parameters in the vector
@@ -1549,6 +1557,7 @@ driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	5	stru
 driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Rows : constant Positive := 2 * Link.Used + 2 * Side_Terms;	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	Rows : constant Positive := 2 * Link.Used + 2 * Side_Terms;	2	structure	two residuals per answer, across and down; two sides' holds
+driver-robot-kinematics-fit.adb	Rp : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	Rz : constant Mat3 := [[Cos (Th), -Sin (Th), 0.0], [Sin (Th), Cos (Th), 0.0], [0.0, 0.0, 1.0]];	1.0	math	a turn about the plane's normal: its axis is unmoved
 driver-robot-kinematics-fit.adb	S : Real := (if R = K then 1.0 else 0.0);	1.0	math	a column of the identity: the inverse column by column
 driver-robot-kinematics-fit.adb	S.State := (S.State * 48_271) mod 2_147_483_647;	2_147_483_647	math	the minimal standard generator's modulus, the prime 2^31 - 1 (Park and Miller)
@@ -1676,8 +1685,8 @@ driver-robot-kinematics-fit.adb	if Pass = 1 then	1	structure	the side solved onc
 driver-robot-kinematics-fit.adb	or else Driver.Distributions.F_Upper_Tail (Link.F, 4, 2 * Link.Used - Apart_Terms)	2	structure	two residuals per answer, across and down
 driver-robot-kinematics-fit.adb	or else Driver.Distributions.F_Upper_Tail (Link.F, 4, 2 * Link.Used - Apart_Terms)	4	statistics	the four constraints one homography for both sides adds: the F statistic's numerator degrees of freedom
 driver-robot-kinematics-fit.adb	or else not Driver.Uncertain.Significant (C, Sqrt (Variance (O + 5))))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
-driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate);	2	structure	two residuals per point, across and down
-driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate);	8	structure	a homography's eight free entries
+driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate, At_Once => True);	2	structure	two residuals a point, across and down
+driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate, At_Once => True);	8	math	a homography has eight free terms
 driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);	2	structure	two residuals per answer, across and down
 driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);	2	structure	two residuals per answer, across and down
 driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);	8	statistics	a homography's eight free entries: its residuals' degrees of freedom
@@ -2134,6 +2143,8 @@ driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (S
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
 driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then	2	statistics	a variance needs two frames
 driver-robot.adb	& "" & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & ""	2	format	digits printed in a log line or a message
+driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	1	format	digits printed in a log line or a message
+driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	3	format	digits printed in a log line or a message
 driver-robot.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
 driver-robot.adb	Best := (Value => Step, Sigma => Step * Sqrt (Spread) / (2.0 * Gain), Degrees_Of_Freedom => 0);	2.0	math	the sigma of Z / sqrt (G) from that of G: half its relative error
 driver-robot.adb	Best.Value := Real'Max (Best.Value, Driver.Conventions.Z * Noise * Sqrt (2.0));	2.0	math	a change is the difference of two readings, whose variance is twice one reading's
@@ -2147,6 +2158,8 @@ driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure
 driver-robot.adb	Spread : constant Real := Sqrt (((P.Tilt_11 - P.Tilt_22) / 2.0) ** 2 + P.Tilt_12 ** 2);	2.0	math	the larger eigenvalue of a symmetric 2 x 2: the mean of the diagonal plus the root of the half difference squared and the off diagonal squared
 driver-robot.adb	function Up (M : Model) return Direction_Estimate is (Up_In_Arm (M, 1));	1	structure	the world is the first arm's reference frame
 driver-robot.adb	if M.Beats >= 2 * M.Graph_Evidence then	2	numerics	re-estimating when the evidence doubles keeps the number of re-estimates logarithmic in the stream
+driver-robot.adb	return "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
+driver-robot.adb	return "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
 driver-robot.adb	then Real'Max (0.0, (S (1, 1) + S (2, 2) + S (3, 3) - Driver.Numerics.Arrays."" (D, Driver.Numerics.Arrays."" (S, D))) / 2.0)	2.0	math	a small turn moves a line by its part across the line, shared by the two axes across it
 driver-robot.ads	C : Real := 1.0;	1.0	structure	a joint turns one radian per reading unit until fitted
 driver-robot.ads	Change_1, Change_2 : Real := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
@@ -2195,6 +2208,7 @@ driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	16#FF#	for
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Mask or 126);	126	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Mask or 127);	127	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	I := I + 4;	4	format	a WebSocket mask is four bytes, used in turn (RFC 6455)
 driver-wire.adb	Key : Byte_Array (1 .. 4);	4	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Kind := (if Message = 1 then Text else Binary);	1	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Length : Unsigned_64 := Unsigned_64 (Two (2) and 16#7F#);	16#7F#	format	WebSocket framing and handshake (RFC 6455)
@@ -2207,7 +2221,11 @@ driver-wire.adb	Masked : constant Boolean := (Two (2) and 16#80#) /= 0;	16#80#	f
 driver-wire.adb	Nonce : Byte_Array (1 .. 16);	16	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	One : Byte_Array (1 .. 1);	1	structure	read the handshake one byte at a time
 driver-wire.adb	Opcode : constant Byte := Two (1) and 16#0F#;	16#0F#	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Payload (I) := Payload (I) xor Mask ((I - 1) mod 4 + 1);	4	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Payload (I + 2) := Payload (I + 2) xor Mask (3);	2	format	a WebSocket mask is four bytes, used in turn (RFC 6455)
+driver-wire.adb	Payload (I + 2) := Payload (I + 2) xor Mask (3);	2	format	a WebSocket mask is four bytes, used in turn (RFC 6455)
+driver-wire.adb	Payload (I + 3) := Payload (I + 3) xor Mask (4);	3	format	a WebSocket mask is four bytes, used in turn (RFC 6455)
+driver-wire.adb	Payload (I + 3) := Payload (I + 3) xor Mask (4);	3	format	a WebSocket mask is four bytes, used in turn (RFC 6455)
+driver-wire.adb	Payload (J) := Payload (J) xor Mask ((J - 1) mod 4 + 1);	4	format	a WebSocket mask is four bytes, used in turn (RFC 6455)
 driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .. Hex'First + 2 * Natural (I - 1) + 1) & "");	"16	format	SHA-1 digest as hexadecimal pairs
 driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .. Hex'First + 2 * Natural (I - 1) + 1) & "");	2	format	SHA-1 digest as hexadecimal pairs
 driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .. Hex'First + 2 * Natural (I - 1) + 1) & "");	2	format	SHA-1 digest as hexadecimal pairs
@@ -2221,6 +2239,8 @@ driver-wire.adb	Send_Frame (C, 10, Payload.all, Ok);	10	format	WebSocket framing
 driver-wire.adb	Status : constant String := "";	"1.1	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Status : constant String := "";	"101	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Two : Byte_Array (1 .. 2);	2	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Whole : constant Offset := Payload'First + (Payload'Length / 4) * 4 - 1;	4	format	a WebSocket mask is four bytes, used in turn (RFC 6455)
+driver-wire.adb	Whole : constant Offset := Payload'First + (Payload'Length / 4) * 4 - 1;	4	format	a WebSocket mask is four bytes, used in turn (RFC 6455)
 driver-wire.adb	X : Byte_Array (1 .. 2);	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	X : Byte_Array (1 .. 8);	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	elsif L < 2 ** 16 then	2	format	WebSocket framing and handshake (RFC 6455)

@@ -2,6 +2,7 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Distributions;
 with Driver.Numerics.Dense;
+with Driver.Parallel_For;
 with Driver.Robot.Regression;
 with Driver.Robot.Kinematics.Errors;
 with Driver.Stats;
@@ -201,6 +202,9 @@ package body Driver.Robot.Kinematics.Fit is
       Residuals  : Positive;
       Damping    : Real;   --  what the first step starts at; the fits that cross a flat valley start high
       with procedure Evaluate (X : Real_Array; R : out Real_Array);
+      At_Once    : Boolean := False;
+      --  Evaluate writes nothing but R, so the Jacobian's columns may be taken
+      --  at once (Driver.Parallel_For), each with its own residual array.
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real);
 
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real) is
@@ -226,18 +230,29 @@ package body Driver.Robot.Kinematics.Fit is
       loop
          --  Forward differences at the square root of the float's resolution
          --  relative to each parameter's size.
-         for K in 1 .. Parameters loop
-            declare
+         declare
+            procedure Column (K : Positive) is
                Xp : Real_Array := X;
                H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (X'First + K - 1));
+               Rk : Real_Access := new Real_Array (1 .. Residuals);
             begin
                Xp (Xp'First + K - 1) := Xp (Xp'First + K - 1) + H;
-               Evaluate (Xp, Rn.all);
+               Evaluate (Xp, Rk.all);
                for I in 1 .. Residuals loop
-                  J (I, K) := (Rn (I) - R0 (I)) / H;
+                  J (I, K) := (Rk (I) - R0 (I)) / H;
                end loop;
-            end;
-         end loop;
+               Free (Rk);
+            end Column;
+            procedure Columns is new Driver.Parallel_For (Column);
+         begin
+            if At_Once then
+               Columns (1, Parameters);
+            else
+               for K in 1 .. Parameters loop
+                  Column (K);
+               end loop;
+            end if;
+         end;
          declare
             A : Real_Matrix (1 .. Parameters, 1 .. Parameters) := [others => [others => 0.0]];
             G : Real_Vector (1 .. Parameters) := [others => 0.0];
@@ -620,18 +635,26 @@ package body Driver.Robot.Kinematics.Fit is
                   loop
                      --  The Jacobian: the parameters one by one; the depths all at
                      --  once, since each residual has one depth of its own.
-                     for P in 1 .. Count loop
-                        declare
+                     --  The columns at once (Driver.Parallel_For): each moves its own
+                     --  parameter, takes every residual again into its own array and
+                     --  writes only its own column.
+                     declare
+                        procedure Column (P : Positive) is
                            Xp : Real_Array := X;
                            H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));
+                           Rp : Real_Access := new Real_Array (1 .. 2 * Used);
                         begin
                            Xp (P) := Xp (P) + H;
-                           Residuals (Xp, Depth.all, Index, Rn.all);
+                           Residuals (Xp, Depth.all, Index, Rp.all);
                            for I in 1 .. 2 * Used loop
-                              Jp (I, P) := (Rn (I) - R0 (I)) / H;
+                              Jp (I, P) := (Rp (I) - R0 (I)) / H;
                            end loop;
-                        end;
-                     end loop;
+                           Free (Rp);
+                        end Column;
+                        procedure Columns is new Driver.Parallel_For (Column);
+                     begin
+                        Columns (1, Count);
+                     end;
                      declare
                         Dp : Real_Access := new Real_Array'(Depth.all);
                         H  : constant Real := Sqrt (Real'Model_Epsilon);
@@ -1645,7 +1668,8 @@ package body Driver.Robot.Kinematics.Fit is
                end loop;
             end Evaluate;
 
-            procedure Solve is new Robust_Fit (Count, Used, Driver.Conventions.Initial_Damping, Evaluate);
+            procedure Solve is new Robust_Fit
+              (Count, Used, Driver.Conventions.Initial_Damping, Evaluate, At_Once => True);
             X : Real_Array (1 .. Count) := [others => 0.0];
          begin
             for Xs of Sight loop
@@ -1973,7 +1997,8 @@ package body Driver.Robot.Kinematics.Fit is
                      Free (Poses);
                   end Evaluate;
 
-                  procedure Solve is new Robust_Fit (Count, Used, Driver.Conventions.Initial_Damping, Evaluate);
+                  procedure Solve is new Robust_Fit
+                    (Count, Used, Driver.Conventions.Initial_Damping, Evaluate, At_Once => True);
                begin
                   for I in 1 .. S loop
                      if Inlier (I) then
@@ -2872,7 +2897,7 @@ package body Driver.Robot.Kinematics.Fit is
             end loop;
          end Evaluate;
 
-         procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate);
+         procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate, At_Once => True);
          R : Real_Access := new Real_Array (1 .. 2 * Used);
       begin
          Solve (X, Sigma);

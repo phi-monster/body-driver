@@ -354,9 +354,23 @@ package body Driver.Wire is
                   Read_Exactly (C, Payload.all, Ok);
                end if;
                if Ok and then Masked then
-                  for I in Payload'Range loop
-                     Payload (I) := Payload (I) xor Mask ((I - 1) mod 4 + 1);
-                  end loop;
+                  --  Four bytes a turn against the key's four, the rest one by one:
+                  --  an observation is megabytes, and a remainder a byte is slow.
+                  declare
+                     Whole : constant Offset := Payload'First + (Payload'Length / 4) * 4 - 1;
+                     I     : Offset := Payload'First;
+                  begin
+                     while I <= Whole loop
+                        Payload (I) := Payload (I) xor Mask (1);
+                        Payload (I + 1) := Payload (I + 1) xor Mask (2);
+                        Payload (I + 2) := Payload (I + 2) xor Mask (3);
+                        Payload (I + 3) := Payload (I + 3) xor Mask (4);
+                        I := I + 4;
+                     end loop;
+                     for J in Whole + 1 .. Payload'Last loop
+                        Payload (J) := Payload (J) xor Mask ((J - 1) mod 4 + 1);
+                     end loop;
+                  end;
                end if;
                if Ok then
                   case Opcode is

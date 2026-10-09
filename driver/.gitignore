@@ -4,3 +4,5 @@
 /config/
 /obj-asan/
 /bin-asan/
+/obj-profile/
+/bin-profile/
