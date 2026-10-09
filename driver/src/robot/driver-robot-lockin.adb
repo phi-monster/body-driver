@@ -3,11 +3,13 @@ with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Distributions;
+with Driver.Parallel_For;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Lag;
 with Driver.Robot.Regression;
 with Driver.Stats;
+with System.Multiprocessors;
 
 package body Driver.Robot.Lockin is
 
@@ -456,6 +458,13 @@ package body Driver.Robot.Lockin is
                         Dof : Natural_Grid_Access :=
                           new Natural_Grid'[1 .. N => [M.Groups.First_Index .. M.Groups.Last_Index => 0]];
                         Textured : Flags_Access := new Flags'[1 .. N => False];
+                        --  Each cell's results, cell by cell: its noise, and for each regressor its gain, the gain's
+                        --  variance and its shift (nothing, where it does not respond). The cells are fitted at once
+                        --  and write only their own; the eye's vectors get them in order afterwards.
+                        Noise_Of  : Real_Access := new Real_Array'(1 .. N => Real'Last);
+                        Gain_Of   : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        Spread_Of : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        Shift_Of  : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         --  One cell: its displacements regressed on the pushes, over
                         --  the beats where the cell resolved one, and for every
                         --  group whether its block responds.
@@ -483,7 +492,7 @@ package body Driver.Robot.Lockin is
                               Fu    : constant Regression.Fit := Regression.Solve (Xc.all, U.all, Floor);
                               Fv    : constant Regression.Fit := Regression.Solve (Xc.all, V.all, Floor);
                            begin
-                              S.Noise.Append (Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0));
+                              Noise_Of (Cell) := Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0);
                               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
                                  declare
                                     First : Natural := 0;
@@ -532,14 +541,10 @@ package body Driver.Robot.Lockin is
                                           Gu : constant Real := Var_U (K + 1) / Fu.Scale ** 2;
                                           Gv : constant Real := Var_V (K + 1) / Fv.Scale ** 2;
                                        begin
-                                          S.Gains.Append (Bu ** 2 + Bv ** 2 - Gu - Gv);
-                                          S.Gain_Variances.Append (4.0 * (Gu * Bu ** 2 + Gv * Bv ** 2));
-                                          S.Shifts.Append (Sqrt (Fu.Beta (K + 1) ** 2 + Fv.Beta (K + 1) ** 2));
+                                          Gain_Of ((Cell - 1) * Kept + K) := Bu ** 2 + Bv ** 2 - Gu - Gv;
+                                          Spread_Of ((Cell - 1) * Kept + K) := 4.0 * (Gu * Bu ** 2 + Gv * Bv ** 2);
+                                          Shift_Of ((Cell - 1) * Kept + K) := Sqrt (Fu.Beta (K + 1) ** 2 + Fv.Beta (K + 1) ** 2);
                                        end;
-                                    else
-                                       S.Gains.Append (0.0);
-                                       S.Gain_Variances.Append (0.0);
-                                       S.Shifts.Append (0.0);
                                     end if;
                                  end loop;
                               end;
@@ -565,15 +570,23 @@ package body Driver.Robot.Lockin is
                            --  displacements than the fit has coefficients.
                            Textured (Cell) := Driver.Stats.Median (Cond.all) > 0.0 and then Here > Kept + 1;
                            Free (Cond);
-                           if not Textured (Cell) then
-                              S.Noise.Append (Real'Last);
-                              S.Gains.Append (0.0, Ada.Containers.Count_Type (Kept));
-                              S.Gain_Variances.Append (0.0, Ada.Containers.Count_Type (Kept));
-                              S.Shifts.Append (0.0, Ada.Containers.Count_Type (Kept));
-                              return;
+                           if Textured (Cell) then
+                              Fit_Resolved (Cell, Here);
                            end if;
-                           Fit_Resolved (Cell, Here);
                         end Fit_Cell;
+
+                        --  The cells shared among as many works as the machine has processors, every so many
+                        --  cells to each (the textured ones lie together), all fitted at once.
+                        Works : constant Positive := Natural'Min (N, Natural (System.Multiprocessors.Number_Of_CPUs));
+                        procedure Fit_Share (Work : Positive) is
+                           Cell : Natural := Work;
+                        begin
+                           while Cell <= N loop
+                              Fit_Cell (Cell);
+                              Cell := Cell + Works;
+                           end loop;
+                        end Fit_Share;
+                        procedure Fit_Shares is new Driver.Parallel_For (Fit_Share);
                      begin
                         for R in 1 .. Rows loop
                            X (R, 1) := 1.0;
@@ -581,9 +594,19 @@ package body Driver.Robot.Lockin is
                               X (R, K + 1) := Pushed_Change (Cols (K).Group, Beat_Of (R) - Lag, Cols (K).Channel);
                            end loop;
                         end loop;
+                        Fit_Shares (1, Works);
                         for Cell in 1 .. N loop
-                           Fit_Cell (Cell);
+                           S.Noise.Append (Noise_Of (Cell));
                         end loop;
+                        for I in 1 .. N * Kept loop
+                           S.Gains.Append (Gain_Of (I));
+                           S.Gain_Variances.Append (Spread_Of (I));
+                           S.Shifts.Append (Shift_Of (I));
+                        end loop;
+                        Free (Noise_Of);
+                        Free (Gain_Of);
+                        Free (Spread_Of);
+                        Free (Shift_Of);
                         for Cell in 1 .. N loop
                            S.Textured.Append (Textured (Cell));
                         end loop;
