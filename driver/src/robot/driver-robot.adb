@@ -6,6 +6,7 @@ with Ada.Text_IO;
 with Driver.Beats;
 with Driver.Bytes;
 with Driver.Clock;
+with Driver.Parallel_For;
 with Driver.Conventions;
 with Driver.Log;
 with Driver.Recording;
@@ -68,21 +69,11 @@ package body Driver.Robot is
       --  settle watch starts afresh when its frames show that beat, its lag
       --  later, so the first change it weighs is the move's own.
       Began_Moving : Boolean := False;
-   begin
-      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-         if M.Groups (G).Commandable and then Channels.Moving (M, G, M.Beats)
-           and then not (M.Beats > 0 and then Channels.Moving (M, G, M.Beats - 1))
-         then
-            Began_Moving := True;
-         end if;
-      end loop;
-      M.Began_Moving.Append (Began_Moving);
-      if M.Eyes.Is_Empty then
-         for E in O.Images.First_Index .. O.Images.Last_Index loop
-            M.Eyes.Append (Eye_Stream'(others => <>));
-         end loop;
-      end if;
-      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+
+      --  One eye's picture of this beat, into its own stream.
+      procedure One_Eye (Index : Positive) is
+         E : constant Eye_Id := Eye_Id (Index);
+      begin
          declare
             S    : Eye_Stream renames M.Eyes (E);
             Have : constant Boolean := E <= O.Images.Last_Index and then Driver.Observations.Has_Image (O, E);
@@ -165,7 +156,27 @@ package body Driver.Robot is
                S.Has_Previous := Same;
             end;
          end;
+      end One_Eye;
+
+      --  The eyes are measured at once: each reads the observation, the
+      --  model's beat count, its own lag and the flags of the beats that
+      --  began moving, and writes only its own stream.
+      procedure Each_Eye is new Driver.Parallel_For (One_Eye);
+   begin
+      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+         if M.Groups (G).Commandable and then Channels.Moving (M, G, M.Beats)
+           and then not (M.Beats > 0 and then Channels.Moving (M, G, M.Beats - 1))
+         then
+            Began_Moving := True;
+         end if;
       end loop;
+      M.Began_Moving.Append (Began_Moving);
+      if M.Eyes.Is_Empty then
+         for E in O.Images.First_Index .. O.Images.Last_Index loop
+            M.Eyes.Append (Eye_Stream'(others => <>));
+         end loop;
+      end if;
+      Each_Eye (Positive (M.Eyes.First_Index), Natural (M.Eyes.Last_Index));
    end Observe_Eyes;
 
    --  What came from a body file stands: it is not measured again in this
