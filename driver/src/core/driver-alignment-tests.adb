@@ -1,5 +1,6 @@
 with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
+with Driver.Alignment.Keyframes;
 with Driver.Bytes;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -11,6 +12,7 @@ package body Driver.Alignment.Tests is
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Tests;
+   use type Keyframes.Source;
 
    Gen : Ada.Numerics.Float_Random.Generator;
 
@@ -461,7 +463,20 @@ package body Driver.Alignment.Tests is
 
       Inside  : constant Answer := Align (First, First, Query_Of (0.9 * Widest));
       Outside : constant Answer := Align (First, First, Query_Of (1.1 * Widest));
+      Sigma   : constant Real := Largest_Sigma (First, First);
+      Round_Most  : constant Answer :=
+        Align (First, First, (From => (U => 160.5, V => 120.5), To => (U => 160.5, V => 120.5),
+                              Cov => (UU => Sigma ** 2, UV => 0.0, VV => Sigma ** 2), others => <>));
+      Round_Wider : constant Answer :=
+        Align (First, First, (From => (U => 160.5, V => 120.5), To => (U => 160.5, V => 120.5),
+                              Cov => (UU => (1.01 * Sigma) ** 2, UV => 0.0, VV => (1.01 * Sigma) ** 2),
+                              others => <>));
    begin
+      Check (Round_Most.Because /= Window_Too_Large, "a prediction of the largest sigma (" & Real'Image (Sigma)
+             & " px) was refused as too wide");
+      Check (Round_Wider.Because = Window_Too_Large,
+             "a prediction of a hundredth more than the largest sigma was searched: "
+             & Reason'Image (Round_Wider.Because));
       Check (Widest > 0.0, "no window is searched at all: " & Real'Image (Widest));
       Check (Inside.Because /= Window_Too_Large,
              "a window a tenth inside the widest (" & Real'Image (0.9 * Widest) & " px) was refused as too wide");
@@ -487,6 +502,268 @@ package body Driver.Alignment.Tests is
              "a window of a hundred pixels was searched: " & Reason'Image (A.Because));
       Check (B.Because = Bad_Warp, "a mirrored warp was compared: " & Reason'Image (B.Because));
    end Window;
+
+   ---------------------------------------------------------------------------
+   --  The keyframes of one reference (Driver.Alignment.Keyframes)
+
+   --  An arm turns two joints. The view of the plane it looks at moves with the first joint's amount by a shift, by
+   --  a stretch of the picture about its corner, and by a part of the shift that grows with the square of the
+   --  amount, which a line through the first keyframes does not follow; it moves with the second joint's amount by
+   --  a shift alone.
+   Per_Unit  : constant Real_Array := [0.5, -0.3];    --  the shift of the view, pixels per unit of the first joint
+   Squared   : constant Real_Array := [0.002, 0.001]; --  and pixels per unit squared
+   Other_Per_Unit : constant Real_Array := [0.2, 0.4];   --  and per unit of the second joint
+   Stretch   : constant Linear_Part := (UU => 0.0006, UV => 0.0003, VU => -0.0004, VV => 0.0005);
+   Readings_Noise : constant Real_Array := [0.001, 0.001];   --  of one reading of each joint
+   Pixels_Per_Reading : constant Real_Array := [0.583, 0.447];   --  how far a unit of each joint moves the view
+
+   function Linear_At (Change : Real_Array) return Linear_Part is
+     (UU => 1.0 + Change (1) * Stretch.UU, UV => Change (1) * Stretch.UV, VU => Change (1) * Stretch.VU,
+      VV => 1.0 + Change (1) * Stretch.VV);
+
+   function Shift_At (Change : Real_Array; Axis : Positive) return Real is
+     (Change (1) * Per_Unit (Axis) + Change (1) ** 2 * Squared (Axis) + Change (2) * Other_Per_Unit (Axis));
+
+   type Sweep_Outcome is record
+      Asked, Found    : Natural := 0;
+      Wrong           : Natural := 0;  --  the answers more than a pixel from the truth
+      Worst           : Real := 0.0;   --  the largest distance of an answer from the truth
+      Inside          : Natural := 0;  --  the points whose truth lay inside the window the prediction stated
+      Largest_Move    : Real := 0.0;   --  the farthest a point moved in the keyframe
+      Source          : Keyframes.Source := Keyframes.Supplied;
+      Window          : Real := 0.0;   --  the radius of the window the prediction stated at its first point
+      First_Reason    : Reason := Matched;   --  why the first refused point was refused
+      Stated          : Real := 0.0;   --  the stated standard deviation at the first point
+   end record;
+
+   --  One keyframe, at that change of the two joints' readings, predicted from the chain and added to it.
+   function Keyframe_Of
+     (C : in out Keyframes.Chain; Points : Keyframes.Point_Array; Change : Real_Array;
+      Shift : Real_Array := Pixels_Per_Reading; Offered : Keyframes.Prediction_Array := Keyframes.No_Offer)
+      return Sweep_Outcome
+   is
+      Gate    : constant Real := Driver.Uncertain.Threshold (Driver.Uncertain.Vector_Gate (2));
+      Image   : constant Driver.Images.Image :=
+        Picture (Textured, Linear_At (Change), Shift_At (Change, 1), Shift_At (Change, 2), 0.8);
+      Given   : Keyframes.Prediction_Array (Points'Range);
+      Answers : Keyframes.Answer_Array (Points'Range);
+      Result  : Sweep_Outcome;
+   begin
+      Keyframes.Predict (C, Change, Readings_Noise, Shift, Offered, Given, Result.Source);
+      Result.Window := Gate * Sqrt (Given (Points'First).Cov.UU + 1.0 / 12.0);
+      Result.Stated := Sqrt (Given (Points'First).Cov.UU);
+      Keyframes.Add (C, Image, Change, Given, Answers);
+      for K in Points'Range loop
+         declare
+            Truth : constant Driver.Images.Pixel :=
+              Moved (Linear_At (Change), Shift_At (Change, 1), Shift_At (Change, 2), Points (K));
+            Off   : constant Real := Sqrt ((Truth.U - Given (K).To.U) ** 2 + (Truth.V - Given (K).To.V) ** 2);
+         begin
+            Result.Asked := Result.Asked + 1;
+            Result.Largest_Move := Real'Max
+              (Result.Largest_Move, Sqrt ((Truth.U - Points (K).U) ** 2 + (Truth.V - Points (K).V) ** 2));
+            if Answers (K).Verdict = Found then
+               declare
+                  Error : constant Real :=
+                    Sqrt ((Answers (K).To.U - Truth.U) ** 2 + (Answers (K).To.V - Truth.V) ** 2);
+               begin
+                  Result.Found := Result.Found + 1;
+                  Result.Worst := Real'Max (Result.Worst, Error);
+                  if Error > 1.0 then
+                     Result.Wrong := Result.Wrong + 1;
+                  end if;
+               end;
+            elsif Result.First_Reason = Matched then
+               Result.First_Reason := Answers (K).Because;
+            end if;
+            if Off <= Gate * Sqrt (Given (K).Cov.UU + 1.0 / 12.0) then
+               Result.Inside := Result.Inside + 1;
+            end if;
+         end;
+      end loop;
+      return Result;
+   end Keyframe_Of;
+
+   function Grid_Points return Keyframes.Point_Array is
+      Columns : constant := 6;
+      Rows    : constant := 4;
+      Margin  : constant := 60.0;
+      Result  : Keyframes.Point_Array (1 .. Columns * Rows);
+   begin
+      for J in 0 .. Rows - 1 loop
+         for I in 0 .. Columns - 1 loop
+            Result (1 + J * Columns + I) :=
+              (U => Margin + Real (I) * (Real (Width) - 2.0 * Margin) / Real (Columns) + 0.37,
+               V => Margin + Real (J) * (Real (Height) - 2.0 * Margin) / Real (Rows) + 0.61);
+         end loop;
+      end loop;
+      return Result;
+   end Grid_Points;
+
+   procedure Sweep is
+      --  Four keyframes of a sweep that quadruples (a quarter of a unit to sixteen, the view moving from under a
+      --  pixel to a dozen): each is predicted from the ones before it, with the window its uncertainty makes, and
+      --  found where it is. The truth lies inside the stated window at nearly all points and every point is found.
+      --  A fifth, four times the fourth, is past what the prediction can follow (a fourfold extrapolation multiplies
+      --  the noise of the fields it rests on by dozens): its window is wider than the aligner searches, and it is
+      --  refused rather than answered wrongly.
+      Followed : constant := 4;
+      Points   : constant Keyframes.Point_Array := Grid_Points;
+      C        : Keyframes.Chain;
+      Outcomes : array (1 .. Followed + 1) of Sweep_Outcome;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 21);
+      Keyframes.Begin_Reference (C, Picture (Textured, Identity_Part, 0.0, 0.0, 0.8), Points);
+      for K in Outcomes'Range loop
+         declare
+            Amount : constant Real := 0.25 * 4.0 ** (K - 1);
+         begin
+            Outcomes (K) := Keyframe_Of (C, Points, [Amount, 0.0]);
+            if K <= Followed then
+               Check (Outcomes (K).Found = Outcomes (K).Asked,
+                      "keyframe" & Natural'Image (K) & " of a sweep (the view moved up to"
+                      & Real'Image (Outcomes (K).Largest_Move) & " px) was found at"
+                      & Natural'Image (Outcomes (K).Found) & " of" & Natural'Image (Outcomes (K).Asked) & " points");
+               Check (Outcomes (K).Worst < 0.2,
+                      "keyframe" & Natural'Image (K) & " of a sweep was found" & Real'Image (Outcomes (K).Worst)
+                      & " px from the truth");
+               Check (Outcomes (K).Source = (if K = 1 then Keyframes.New_Direction else Keyframes.Extrapolated),
+                      "keyframe" & Natural'Image (K) & " of a sweep was predicted as "
+                      & Keyframes.Source'Image (Outcomes (K).Source));
+            end if;
+         end;
+      end loop;
+      Check (Keyframes.Keyframes (C) = Outcomes'Length, "the chain holds" & Natural'Image (Keyframes.Keyframes (C))
+             & " keyframes, not" & Natural'Image (Outcomes'Length));
+      for K in Outcomes'Range loop
+         Check (Outcomes (K).Inside * 100 >= Outcomes (K).Asked * 95,
+                "the truth lay inside the stated window (" & Real'Image (Outcomes (K).Window) & " px) at only"
+                & Natural'Image (Outcomes (K).Inside) & " of" & Natural'Image (Outcomes (K).Asked)
+                & " points of keyframe" & Natural'Image (K) & " of the sweep");
+      end loop;
+      Check (Outcomes (Followed + 1).Wrong = 0,
+             "the keyframe past what the prediction follows (the view moved up to"
+             & Real'Image (Outcomes (Followed + 1).Largest_Move) & " px) gave"
+             & Natural'Image (Outcomes (Followed + 1).Wrong) & " answers more than a pixel from the truth, of"
+             & Natural'Image (Outcomes (Followed + 1).Found) & " found");
+   end Sweep;
+
+   procedure Directions is
+      --  A keyframe at the reference's own readings is the reference again (the same pose: the points have not
+      --  moved), and one that turns another joint than any earlier keyframe did is a new direction, predicted
+      --  from how far a unit of that joint moves the view, and found. A change that moves the view by no amount
+      --  known is predicted to have moved it as far as the aligner searches: nothing narrows the window, so a
+      --  texture that repeats within it may be refused, but nothing is answered wrongly.
+      Points  : constant Keyframes.Point_Array := Grid_Points;
+      Reference : constant Driver.Images.Image := Picture (Textured, Identity_Part, 0.0, 0.0, 0.8);
+      Widest  : constant Real := Largest_Window (Pyramid_Of (Reference), Pyramid_Of (Reference));
+      C, D    : Keyframes.Chain;
+      Still   : Sweep_Outcome;
+      First   : Sweep_Outcome;
+      Other   : Sweep_Outcome;
+      Unknown : Sweep_Outcome;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 22);
+      Keyframes.Begin_Reference (C, Reference, Points);
+      Still := Keyframe_Of (C, Points, [0.0, 0.0]);
+      First := Keyframe_Of (C, Points, [1.0, 0.0]);
+      Other := Keyframe_Of (C, Points, [0.0, 1.0]);
+      Keyframes.Begin_Reference (D, Reference, Points);
+      Unknown := Keyframe_Of (D, Points, [8.0, 0.0], Shift => [0.0, 0.0]);
+      Check (Still.Source = Keyframes.Same_Pose,
+             "a keyframe at the reference's readings was predicted as " & Keyframes.Source'Image (Still.Source));
+      Check (Still.Found = Still.Asked and then Still.Worst < 0.1,
+             "a keyframe at the reference's readings was found at" & Natural'Image (Still.Found) & " of"
+             & Natural'Image (Still.Asked) & " points," & Real'Image (Still.Worst) & " px off");
+      Check (First.Source = Keyframes.New_Direction,
+             "a joint's first keyframe was predicted as " & Keyframes.Source'Image (First.Source));
+      Check (Other.Source = Keyframes.New_Direction,
+             "the first keyframe of another joint was predicted as " & Keyframes.Source'Image (Other.Source));
+      Check (Other.Found = Other.Asked and then Other.Worst < 0.1,
+             "the first keyframe of another joint was found at" & Natural'Image (Other.Found) & " of"
+             & Natural'Image (Other.Asked) & " points," & Real'Image (Other.Worst) & " px off");
+      Check (Unknown.Source = Keyframes.New_Direction,
+             "a change of unknown shift was predicted as " & Keyframes.Source'Image (Unknown.Source));
+      Check (Unknown.Window <= Widest and then Unknown.Window > 0.9999 * Widest,
+             "a change of unknown shift was given a window of" & Real'Image (Unknown.Window) & " px, not the widest ("
+             & Real'Image (Widest) & ")");
+      Check (Unknown.Wrong = 0,
+             "a change of unknown shift (the view moved up to" & Real'Image (Unknown.Largest_Move) & " px) gave"
+             & Natural'Image (Unknown.Wrong) & " answers more than a pixel from the truth, of"
+             & Natural'Image (Unknown.Found) & " found");
+   end Directions;
+
+   --  A model that knows where every point goes in the keyframe at that change, to within the given standard deviation.
+   function Model_Of (Points : Keyframes.Point_Array; Change : Real_Array; Sigma : Real)
+     return Keyframes.Prediction_Array
+   is
+      Result : Keyframes.Prediction_Array (Points'Range);
+   begin
+      for K in Points'Range loop
+         Result (K) :=
+           (From => Points (K),
+            To => Moved (Linear_At (Change), Shift_At (Change, 1), Shift_At (Change, 2), Points (K)),
+            Linear => Linear_At (Change), Cov => (UU => Sigma ** 2, UV => 0.0, VV => Sigma ** 2),
+            Linear_Sigma => Real'Last);
+      end loop;
+      return Result;
+   end Model_Of;
+
+   procedure Offered_Model is
+      --  The caller has a model of its own (a fitted arm's). Where the chain's extrapolation cannot follow (the
+      --  view moved fifty pixels in a keyframe sixteen times the last), the model's prediction is used and the
+      --  points are found where it puts them; where the model states more uncertainty than the chain, the chain's
+      --  is used. The one that states the least wins, whichever it is.
+      Points   : constant Keyframes.Point_Array := Grid_Points;
+      C        : Keyframes.Chain;
+      Far, Near : Sweep_Outcome;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 24);
+      Keyframes.Begin_Reference (C, Picture (Textured, Identity_Part, 0.0, 0.0, 0.8), Points);
+      for K in 1 .. 4 loop
+         declare
+            Followed : constant Sweep_Outcome := Keyframe_Of (C, Points, [0.25 * 4.0 ** (K - 1), 0.0]);
+            pragma Unreferenced (Followed);
+         begin
+            null;
+         end;
+      end loop;
+      Far := Keyframe_Of (C, Points, [64.0, 0.0], Offered => Model_Of (Points, [64.0, 0.0], 0.2));
+      Near := Keyframe_Of (C, Points, [20.0, 0.0], Offered => Model_Of (Points, [20.0, 0.0], 8.0));
+      Check (Far.Source = Keyframes.Supplied,
+             "a keyframe the chain cannot follow, with a model that states 0.2 px, was predicted as "
+             & Keyframes.Source'Image (Far.Source) & " (stated " & Real'Image (Far.Stated) & " px)");
+      Check (Far.Found = Far.Asked and then Far.Worst < 0.2,
+             "a keyframe predicted by the model (the view moved up to" & Real'Image (Far.Largest_Move)
+             & " px) was found at" & Natural'Image (Far.Found) & " of" & Natural'Image (Far.Asked) & " points,"
+             & Real'Image (Far.Worst) & " px off");
+      Check (Near.Source = Keyframes.Extrapolated,
+             "a keyframe the chain follows, with a model that states 8 px, was predicted as "
+             & Keyframes.Source'Image (Near.Source));
+   end Offered_Model;
+
+   procedure Contaminated is
+      --  An earlier keyframe turned the second joint as well as the first: its points moved by the second joint's
+      --  share too, which a multiple of it carries along. The prediction from it states that part as an
+      --  uncertainty, and the truth lies inside the window it makes. (The first joint's four units and the second's
+      --  two move the view by a pixel more than the first alone would.)
+      Points : constant Keyframes.Point_Array := Grid_Points;
+      C      : Keyframes.Chain;
+      Mixed, Doubled : Sweep_Outcome;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 23);
+      Keyframes.Begin_Reference (C, Picture (Textured, Identity_Part, 0.0, 0.0, 0.8), Points);
+      Mixed := Keyframe_Of (C, Points, [4.0, 2.0]);
+      Doubled := Keyframe_Of (C, Points, [8.0, 0.0]);
+      Check (Doubled.Source = Keyframes.Extrapolated,
+             "a keyframe along an earlier one that also turned another joint was predicted as "
+             & Keyframes.Source'Image (Doubled.Source));
+      Check (Doubled.Inside * 100 >= Doubled.Asked * 95,
+             "the truth lay inside the stated window at only" & Natural'Image (Doubled.Inside) & " of"
+             & Natural'Image (Doubled.Asked) & " points of a keyframe predicted from one that turned another too");
+      Check (Mixed.Found = Mixed.Asked, "the mixed keyframe was found at" & Natural'Image (Mixed.Found) & " of"
+             & Natural'Image (Mixed.Asked) & " points");
+   end Contaminated;
 
    procedure Register is
    begin
@@ -522,6 +799,17 @@ package body Driver.Alignment.Tests is
         ("alignment.reach", "the widest window the aligner searches is not the one it says", Reach'Access);
       Driver.Tests.Register
         ("alignment.window", "a window wider than a patch carries, or a mirror, is compared", Window'Access);
+      Driver.Tests.Register
+        ("alignment.sweep", "the keyframes of a sweep are not found where the earlier ones put them", Sweep'Access);
+      Driver.Tests.Register
+        ("alignment.directions", "a keyframe at the reference's readings, or at another joint's, is not found",
+         Directions'Access);
+      Driver.Tests.Register
+        ("alignment.offered", "a model of the caller's that states less than the chain is not the one used",
+         Offered_Model'Access);
+      Driver.Tests.Register
+        ("alignment.contaminated", "a keyframe that also turned another joint is a node with no uncertainty of that",
+         Contaminated'Access);
    end Register;
 
 end Driver.Alignment.Tests;

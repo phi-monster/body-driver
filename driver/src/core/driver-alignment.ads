@@ -144,6 +144,12 @@ package Driver.Alignment is
    --  chooses how far it moves a keyframe by what the prediction can follow keeps its predicted displacement and
    --  the uncertainty of that at the gate inside it.
 
+   function Largest_Sigma (First, Second : Pyramid) return Real
+     with Pre => Levels (First) > 0 and then Levels (Second) > 0;
+   --  The largest standard deviation, along both axes alike, of a prediction whose window Align still searches
+   --  (Largest_Window less what a place on a grid of pixels cannot be known to beyond): the width of "anywhere
+   --  the aligner can look".
+
 private
 
    package Real_Holders is new Ada.Containers.Indefinite_Holders (Real_Array);

@@ -1363,6 +1363,18 @@ package body Driver.Alignment is
       return Widest;
    end Largest_Window;
 
+   function Largest_Sigma (First, Second : Pyramid) return Real is
+      Widest : constant Real := Largest_Window (First, Second);
+      Sigma  : Real := Sqrt (Real'Max (0.0, (Widest / Window_Multiple) ** 2 - Quantization));
+   begin
+      --  Align takes the radius of a round prediction as Window_Multiple * Sqrt (Sigma ** 2 + Quantization): step
+      --  down until that is no more than the widest, whatever the rounding of the inversion above.
+      while Sigma > 0.0 and then Window_Multiple * Sqrt (Sigma * Sigma + Quantization) > Widest loop
+         Sigma := Real'Pred (Sigma);
+      end loop;
+      return Sigma;
+   end Largest_Sigma;
+
    function Align (First, Second : Pyramid; Query : Prediction) return Answer is
       Second_Top : constant Level := Second.Sizes (0);
       --  The prediction's covariance, and what a place on a grid of pixels cannot be known to beyond.

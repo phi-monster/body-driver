@@ -140,6 +140,35 @@ driver-action-grids.adb	for DK in -1 .. 1 loop	1	structure	the cube itself and i
 driver-action-plants-live.adb	(if Known (R.Delivered) and then R.Delivered.Value < 1.0	1.0	math	the whole step delivered is a fraction of one
 driver-action-plants-live.adb	R.Beats := 1;	1	structure	an order that moves nothing lets exactly one beat pass
 driver-action-plants-live.adb	if N < 2 then	2	math	a nearest neighbour needs at least two samples
+driver-alignment-keyframes.adb	(for all K in Change'Range => not Driver.Uncertain.Significant (Change (K), Noise (K) * Sqrt (2.0)));	2.0	statistics	a difference of two readings has the noise of each: the root of two times one reading's
+driver-alignment-keyframes.adb	+ (Placed (K).Place.V - P.V - Move.Dv) ** 2) / 2.0	2.0	statistics	a variance per axis is half the sum of the squares over the two axes
+driver-alignment-keyframes.adb	Half_U : constant Real := Real (C.Width) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
+driver-alignment-keyframes.adb	Half_V : constant Real := Real (C.Height) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
+driver-alignment-keyframes.adb	Least_Points : constant := 2 * Terms;	2	statistics	as many points as would leave the scatter of a field as many degrees of freedom as it has coefficients
+driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	a warp that moves nothing is the identity: its diagonal is one
+driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	the weights of the fields are weights of the change from the identity: the one stays
+driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	the other diagonal entry's identity
+driver-alignment-keyframes.adb	Result.Sigma := Sqrt ((Su ** 2 + Sv ** 2) / 2.0);	2.0	statistics	a variance per axis is half the sum of the squares over the two axes
+driver-alignment-keyframes.adb	Shown := Shown + (Move.Du ** 2 + Move.Dv ** 2) / 2.0;	2.0	statistics	a variance per axis is half the sum of the squares over the two axes
+driver-alignment-keyframes.adb	Stay (0.0);	0.0	math	a keyframe at the reference's own readings has moved nothing: no spread
+driver-alignment-keyframes.adb	UV => (F.U (3) + F.U (5) * X + 2.0 * F.U (6) * Y) / Half_V,	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
+driver-alignment-keyframes.adb	VU => (F.V (2) + 2.0 * F.V (4) * X + F.V (5) * Y) / Half_U,	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
+driver-alignment-keyframes.adb	VV => 1.0 + (F.V (3) + F.V (5) * X + 2.0 * F.V (6) * Y) / Half_V);	1.0	math	a warp that moves nothing is the identity: its diagonal is one
+driver-alignment-keyframes.adb	VV => 1.0 + (F.V (3) + F.V (5) * X + 2.0 * F.V (6) * Y) / Half_V);	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
+driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess.W2 * (Slope_2.VV - 1.0)),	1.0	math	a warp that moves nothing is the identity: its diagonal is one
+driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess.W2 * (Slope_2.VV - 1.0)),	1.0	math	the weights of the fields are weights of the change from the identity: the one stays
+driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess.W2 * (Slope_2.VV - 1.0)),	1.0	math	the other diagonal entry's identity
+driver-alignment-keyframes.adb	X : constant Real := (P.U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
+driver-alignment-keyframes.adb	X : constant Real := (P.U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
+driver-alignment-keyframes.adb	Y : constant Real := (P.V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
+driver-alignment-keyframes.adb	Y : constant Real := (P.V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
+driver-alignment-keyframes.adb	abs (Own - Amounts (First)) * (if Second = 0 then 1.0 else abs (Own - Amounts (Second)));	1.0	math	an order-one extrapolation has one distance: the second factor is the empty product
+driver-alignment-keyframes.adb	function Order_Of (Second : Natural) return Positive is (if Second = 0 then 1 else Orders);	1	structure	one earlier keyframe gives an extrapolation of order one
+driver-alignment-keyframes.adb	return (UU => 1.0 + (F.U (2) + 2.0 * F.U (4) * X + F.U (5) * Y) / Half_U,	1.0	math	a warp that moves nothing is the identity: its diagonal is one
+driver-alignment-keyframes.adb	return (UU => 1.0 + (F.U (2) + 2.0 * F.U (4) * X + F.U (5) * Y) / Half_U,	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
+driver-alignment-keyframes.adb	return [1.0, X, Y, X * X, X * Y, Y * Y];	1.0	math	the first term of a quadratic is its constant
+driver-alignment-keyframes.ads	Orders : constant := 2;	2	structure	an extrapolation is linear (one earlier keyframe) or quadratic (two) in the amount
+driver-alignment-keyframes.ads	Terms : constant := 6;	6	math	a quadratic of two coordinates has six coefficients: one, two, three
 driver-alignment.adb	((C.VV * Du ** 2 - 2.0 * C.UV * Du * Dv + C.UU * Dv ** 2) / (C.UU * C.VV - C.UV ** 2));	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
 driver-alignment.adb	(Noise * (((T.Qu - P.Centre_U) ** 2 * P.Place_UU + 2.0 * (T.Qu - P.Centre_U) * (T.Qv - P.Centre_V) * P.Place_UV	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
 driver-alignment.adb	([Sx, Sy, Sx * Di, Sx * Dj, Sy * Di, Sy * Dj, -Template, -1.0]);	1.0	math	a pixel's residual falls by one for each level of offset: its derivative by the offset is minus one
