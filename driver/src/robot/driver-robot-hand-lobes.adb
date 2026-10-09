@@ -1494,7 +1494,8 @@ package body Driver.Robot.Hand.Lobes is
       Anchor           : Driver.Pixels.View;
       Anchored_At_Here : Boolean;
       Spread           : Real;
-      Attached         : Mask) return Located
+      Attached         : Mask;
+      Motion           : access procedure (Column, Row : Natural; U, V : out Real) := null) return Located
    is
       W      : constant Natural := Width (Changed);
       H      : constant Natural := Height (Changed);
@@ -1613,6 +1614,51 @@ package body Driver.Robot.Hand.Lobes is
             Result.There := Count (There_Set);
             Release;
             Result.Lobes := Lobes_Of_Sets (Here_Set, There_Set, Attached, Result.Doubt, Result.Parts_Here, Result.Parts_There);
+            --  The way each lobe goes from Here to There against the way the closer moves the picture there, the
+            --  lobes weighed by their pixels: against it, the ends were given each other's pixels.
+            if Motion /= null and then not Result.Lobes.Is_Empty then
+               declare
+                  With_It, Against_It : Natural := 0;
+               begin
+                  for L of Result.Lobes loop
+                     declare
+                        Mu, Mv : Real := 0.0;
+                        Pixels : Natural := 0;
+                        procedure Add (M : Mask) is
+                           U, V : Real;
+                        begin
+                           for R in 0 .. H - 1 loop
+                              for C in 0 .. W - 1 loop
+                                 if Contains (M, C, R) then
+                                    Motion (C, R, U, V);
+                                    Mu := Mu + U;
+                                    Mv := Mv + V;
+                                    Pixels := Pixels + 1;
+                                 end if;
+                              end loop;
+                           end loop;
+                        end Add;
+                        Along : Real;
+                     begin
+                        Add (L.Here);
+                        Add (L.There);
+                        Along := (L.Centre_There.U - L.Centre_Here.U) * Mu + (L.Centre_There.V - L.Centre_Here.V) * Mv;
+                        if Along > 0.0 then
+                           With_It := With_It + Pixels;
+                        elsif Along < 0.0 then
+                           Against_It := Against_It + Pixels;
+                        end if;
+                     end;
+                  end loop;
+                  if Against_It > With_It then
+                     Result.Turned := True;
+                     Result.Here := Count (There_Set);
+                     Result.There := Count (Here_Set);
+                     Result.Lobes := Lobes_Of_Sets (There_Set, Here_Set, Attached, Result.Doubt, Result.Parts_Here,
+                                                    Result.Parts_There);
+                  end if;
+               end;
+            end if;
             Result.How := (if Result.Lobes.Is_Empty then One_Sided else Placed);
          end;
       end;

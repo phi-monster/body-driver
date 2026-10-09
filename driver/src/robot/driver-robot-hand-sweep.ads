@@ -51,7 +51,11 @@ package Driver.Robot.Hand.Sweep is
       Rest       : Real_Array;
       Image      : Driver.Images.Image;
       Rest_Moved : not null access function (Before, After : Real_Array) return Boolean;
-      Eye_Moved  : not null access function (Before, After : Real_Array) return Boolean);
+      Eye_Moved  : not null access function (Before, After : Real_Array) return Boolean;
+      Motion     : access procedure (Channel : Positive; Column, Row : Natural; U, V : out Real) := null);
+   --  Motion, when given, is how the eye's picture moves at a pixel per unit
+   --  of a channel's reading (Lobes.From_Change tells the channel's ends apart
+   --  by it where the robot's look gives each end the other's pixels).
    --  One beat: the closer's readings, every other group's, the eye's image,
    --  the body's own test of whether the rest of it moved (Views: anything
    --  that moved can change the picture), and whether what moved moved the

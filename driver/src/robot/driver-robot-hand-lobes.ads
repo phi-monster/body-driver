@@ -142,6 +142,7 @@ package Driver.Robot.Hand.Lobes is
       Doubt          : Real := 0.0;    --  changed pixels expected to have been given to the wrong end: the mixture's own error
       Parts_Here     : Natural := 0;   --  parts of the pixels given to each end that are attached and larger than the doubt
       Parts_There    : Natural := 0;
+      Turned         : Boolean := False;  --  the robot's look gave each end the other's pixels, and the closer's motion turned them
    end record;
 
    function From_Change
@@ -150,7 +151,8 @@ package Driver.Robot.Hand.Lobes is
       Anchor           : Driver.Pixels.View;
       Anchored_At_Here : Boolean;
       Spread           : Real;
-      Attached         : Mask) return Located
+      Attached         : Mask;
+      Motion           : access procedure (Column, Row : Natural; U, V : out Real) := null) return Located
      with Pre => Driver.Images.Width (Changed) = Driver.Pixels.Width (Here)
                  and then Driver.Images.Height (Changed) = Driver.Pixels.Height (Here)
                  and then Driver.Pixels.Width (There) = Driver.Pixels.Width (Here)
@@ -182,6 +184,20 @@ package Driver.Robot.Hand.Lobes is
    --  differ where it did not.
    --
    --  The lobes are made of the pixels given to each end by Lobes_Of_Sets.
+   --
+   --  Motion, when given, is how the picture moves at a pixel as the closer goes
+   --  from Here's reading towards There's (per unit of the reading, from the
+   --  eye's own flow while only the closer moved; nothing where it did not
+   --  move). A lobe at There stands where its finger moved to from Here, so
+   --  the way from its centre at Here to its centre at There goes with that
+   --  motion. When the lobes, weighed by their pixels, go against it, the
+   --  robot's look gave each end the other's pixels, and they are given to the
+   --  ends the other way round (Turned): a glossy finger varies over the eye's
+   --  poses as much as the world does, and a dark world as little as the
+   --  robot (A79 and A82's hand 1, x5's black fingers before a black
+   --  keyboard: the closed fingers' pixels went to the open end and the open
+   --  ones' to the closed, the hand took its open reading for its closed one,
+   --  and its tips were 31 to 104 mm from the fingers').
 
    type Places is array (Positive range <>) of Natural;
    type Flags is array (Positive range <>) of Boolean;

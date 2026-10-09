@@ -38,6 +38,10 @@ package body Driver.Robot.Hand is
       Eye      : Eye_Id;
       Arm      : Arm_Id;
       Sweep    : Sweeps.State;
+      --  How the eye's picture moved per unit of each closer channel's reading, cell by cell (channel after
+      --  channel, the eye's cells in order): each cell's displacement at the beats only that channel moved, times
+      --  the channel's step there, summed (Accumulate).
+      Motion_U, Motion_V : Real_Vectors.Vector;
    end record;
 
    package Pair_Vectors is new Ada.Containers.Vectors (Positive, Pair);
@@ -284,7 +288,8 @@ package body Driver.Robot.Hand is
                             Eye   => E,
                             Arm   => Arm,
                             Sweep => Sweeps.Start (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)),
-                                                   Channels, Noise)));
+                                                   Channels, Noise),
+                            others => <>));
                         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " on arm" & Arm'Image
                                          & " is watched in eye" & E'Image & ", its own");
                      end;
@@ -295,13 +300,98 @@ package body Driver.Robot.Hand is
       end loop;
    end Find_Pairs;
 
+   procedure Accumulate (P : in out Pair; M : Model);
+   --  Adds the latest beat's picture motion to the pair's tally when one channel of the closer moved, by a step the
+   --  body's one test of motion sees, and no other commandable group moved: each resolved cell's displacement in the
+   --  picture that shows the step (the eye's image lag after it), times the step.
+
+   procedure Accumulate (P : in out Pair; M : Model) is
+      S    : Eye_Stream renames M.Eyes (P.Eye);
+      N    : constant Natural := Cells (S.Grid);
+      B    : constant Integer := M.Beats - 1;
+      R    : constant Integer := B - Integer'Max (0, Image_Lag (M, P.Eye));
+      Size : constant Natural := Group_Size (M, P.Group);
+   begin
+      if N = 0 or else Size = 0 or else R < 1 or else Natural (S.Du.Length) < (B + 1) * N
+        or else Natural (S.Resolved.Length) < (B + 1) * N
+        or else not Driver.Robot.Channels.Has_Reading (M, P.Group, R)
+        or else not Driver.Robot.Channels.Has_Reading (M, P.Group, R - 1)
+        or else not Driver.Robot.Channels.Moving (M, P.Group, R)
+      then
+         return;
+      end if;
+      for G in 1 .. Group_Id'Base (Group_Count (M)) loop
+         if G /= P.Group and then Is_Commandable (M, G) and then Driver.Robot.Channels.Moving (M, G, R) then
+            return;
+         end if;
+      end loop;
+      if Natural (P.Motion_U.Length) /= Size * N then
+         P.Motion_U.Clear;
+         P.Motion_V.Clear;
+         P.Motion_U.Append (0.0, Ada.Containers.Count_Type (Size * N));
+         P.Motion_V.Append (0.0, Ada.Containers.Count_Type (Size * N));
+      end if;
+      declare
+         Moved : Natural := 0;
+         Which : Positive := 1;
+      begin
+         for C in 1 .. Size loop
+            declare
+               Alone : Real_Array (1 .. Size) := [others => 0.0];
+            begin
+               Alone (C) := Driver.Robot.Channels.Change (M, P.Group, R, C);
+               if Driver.Robot.Channels.Visible (M, P.Group, Alone) then
+                  Moved := Moved + 1;
+                  Which := C;
+               end if;
+            end;
+         end loop;
+         if Moved /= 1 then
+            return;
+         end if;
+         declare
+            Step : constant Real := Driver.Robot.Channels.Change (M, P.Group, R, Which);
+            Base : constant Natural := (Which - 1) * N;
+         begin
+            for Cell in 0 .. N - 1 loop
+               if S.Resolved (B * N + Cell) then
+                  P.Motion_U.Replace_Element (Base + Cell, P.Motion_U (Base + Cell) + Step * S.Du (B * N + Cell));
+                  P.Motion_V.Replace_Element (Base + Cell, P.Motion_V (Base + Cell) + Step * S.Dv (B * N + Cell));
+               end if;
+            end loop;
+         end;
+      end;
+   end Accumulate;
+
    procedure Feed (P : in out Pair; M : Model; O : Observation);
 
    procedure Feed (P : in out Pair; M : Model; O : Observation) is
       Complete : constant Boolean := All_Read (O) and then Driver.Observations.Has_Image (O, P.Eye);
       function Moved (Before, After : Real_Array) return Boolean is (Rest_Moved (M, P.Group, Before, After));
       function Carried (Before, After : Real_Array) return Boolean is (Eye_Moved (M, P.Group, P.Eye, Before, After));
+
+      --  The tally at a pixel: its cell's (Accumulate). Cells are numbered row by row from the top-left one, a cell
+      --  covering the columns from its number times the width over the columns on (Flow.Bounds).
+      procedure Motion (Channel : Positive; Column, Row : Natural; U, V : out Real) is
+         G : constant Cell_Grid := M.Eyes (P.Eye).Grid;
+      begin
+         U := 0.0;
+         V := 0.0;
+         if G.Width > 0 and then G.Height > 0 and then Column < G.Width and then Row < G.Height then
+            declare
+               K : constant Natural :=
+                 (Channel - 1) * Cells (G) + ((Row + 1) * G.Rows - 1) / G.Height * G.Columns
+                 + ((Column + 1) * G.Columns - 1) / G.Width;
+            begin
+               if K < Natural (P.Motion_U.Length) then
+                  U := P.Motion_U (K);
+                  V := P.Motion_V (K);
+               end if;
+            end;
+         end if;
+      end Motion;
    begin
+      Accumulate (P, M);
       Sweeps.Set_Closer_Noise (P.Sweep, Closer_Sigma (M, P.Group));
       --  A view of the pair's eye needs that eye's picture to have stopped
       --  changing (the one stop rule, Driver.Robot.Stillness): its validity
@@ -312,7 +402,7 @@ package body Driver.Robot.Hand is
       --  every beat started the view again, and none ever had two frames.
       Sweeps.Observe (P.Sweep, O, Still => Driver.Robot.Stillness.Eye_Settled (M, P.Eye) and then Complete,
                       Closer => O.Readings (P.Group), Rest => Rest_Of (O, P.Group), Image => O.Images (P.Eye),
-                      Rest_Moved => Moved'Access, Eye_Moved => Carried'Access);
+                      Rest_Moved => Moved'Access, Eye_Moved => Carried'Access, Motion => Motion'Access);
    end Feed;
 
    function Sizes_Text (R : Hand_Record) return String;

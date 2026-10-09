@@ -54,11 +54,23 @@ package body Driver.Robot.Hand.Sweep is
                            and then Poses_Doubled (S, Channel)));
    end Ends_Moved;
 
-   procedure Renew (S : in out State; Channel : Positive);
+   procedure Renew
+     (S       : in out State;
+      Channel : Positive;
+      Motion  : access procedure (Channel : Positive; Column, Row : Natural; U, V : out Real));
    --  New ends: what changed between them decides whether anything is to be
    --  placed; a measurement of older ends no longer stands.
 
-   procedure Renew (S : in out State; Channel : Positive) is
+   procedure Renew
+     (S       : in out State;
+      Channel : Positive;
+      Motion  : access procedure (Channel : Positive; Column, Row : Natural; U, V : out Real))
+   is
+      --  How the picture moves per unit of this channel's reading, from the low end's reading towards the high one's.
+      procedure Channel_Motion (Column, Row : Natural; U, V : out Real) is
+      begin
+         Motion (Channel, Column, Row, U, V);
+      end Channel_Motion;
       Low      : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.Low_End (S.Views, Channel);
       High     : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.High_End (S.Views, Channel);
       Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Low.Frames, High.Frames);
@@ -88,7 +100,8 @@ package body Driver.Robot.Hand.Sweep is
               Driver.Robot.Hand.Selfsight.Anchor_For (S.Memory, (if At_Low then Low.Closer.Element else High.Closer.Element));
          begin
             Now.Located := Driver.Robot.Hand.Lobes.From_Change
-              (Compared.Changed, Low.Frames, High.Frames, Anchor, At_Low, Compared.Spread, Nothing);
+              (Compared.Changed, Low.Frames, High.Frames, Anchor, At_Low, Compared.Spread, Nothing,
+               Motion => (if Motion = null then null else Channel_Motion'Access));
             Now.Closing := Driver.Robot.Hand.Lobes.Direction (Now.Located.Lobes, Nothing);
             Now.Change := Driver.Robot.Hand.Lobes.Closing_Change (Now.Located.Lobes, Nothing);
             Now.Status := (if Now.Located.How = Driver.Robot.Hand.Lobes.Placed then Measured else Unplaced);
@@ -115,14 +128,15 @@ package body Driver.Robot.Hand.Sweep is
       Rest       : Real_Array;
       Image      : Driver.Images.Image;
       Rest_Moved : not null access function (Before, After : Real_Array) return Boolean;
-      Eye_Moved  : not null access function (Before, After : Real_Array) return Boolean)
+      Eye_Moved  : not null access function (Before, After : Real_Array) return Boolean;
+      Motion     : access procedure (Channel : Positive; Column, Row : Natural; U, V : out Real) := null)
    is
    begin
       Driver.Robot.Hand.Views.Observe (S.Views, Seen, Still, Closer, Rest, Image, Rest_Moved);
       Driver.Robot.Hand.Selfsight.Observe (S.Memory, Closer, Rest, Still, Image, Eye_Moved);
       for C in 1 .. Channels (S) loop
          if Ends_Moved (S, C) then
-            Renew (S, C);
+            Renew (S, C, Motion);
          elsif Status (S, C) = Waiting and then Driver.Robot.Hand.Views.Unseen_Travel (S.Views, C) then
             Set_Status (S, C, Nothing_Moves);
          end if;
@@ -211,7 +225,11 @@ package body Driver.Robot.Hand.Sweep is
               & " (" & Pixels_Text & ";" & Here.Located.Here'Image & " given to the low end,"
               & Here.Located.There'Image & " to the high end," & Here.Located.Unassigned'Image & " to neither, of doubt "
               & Driver.Log.Image (Here.Located.Doubt, 0) & " pixels, after" & Here.Located.Rounds'Image & " rounds; its parts:"
-              & Here.Located.Parts_Here'Image & " at the low end," & Here.Located.Parts_There'Image & " at the high end)";
+              & Here.Located.Parts_Here'Image & " at the low end," & Here.Located.Parts_There'Image & " at the high end"
+              & (if Here.Located.Turned
+                 then "; the robot's look gave each end the other's pixels, and the closer's own motion turned them"
+                 else "")
+              & ")";
       end case;
    end Account;
 
