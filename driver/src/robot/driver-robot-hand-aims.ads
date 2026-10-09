@@ -33,24 +33,27 @@ package Driver.Robot.Hand.Aims is
    --  The angle to the nearest other line of sight: the hand's own angular
    --  scale; zero when there are no others.
 
-   function Least_Tilt (Distance : Estimate) return Real;
-   --  The least tilt at which a second press can tell a tip from a stop on
-   --  something that does not move with the tilt. A tip s along its line of
-   --  sight, pressed straight, meets the surface s from the eye; the same
-   --  stop of the eye, pressed tilted by T, meets it s / cos T: the hits
-   --  differ by s T^2 / 2 at least, and that tells from the noise of two hits
-   --  when it exceeds Z times the square root of 2 of the tip's sigma. Real'Last
-   --  when the distance is not known: no tilt is then told from another.
+   function Least_Tilt (Distance : Estimate; Push : Real) return Real;
+   --  The least tilt at which two presses tell a tip's hit from the hit of a stop that does not move with the
+   --  tilt. A tip s along its line of sight, pressed straight, meets the surface s from the eye; the same stop of
+   --  the eye, pressed tilted by T, meets it s / cos T: the hits differ by s T^2 / 2 at least, and that tells from
+   --  the noise of the tool's place in the two (Push, Pressing.Least_Push: the smallest move of the tool that tells
+   --  from it) when it exceeds the square root of 2 of it. The noise of a DIFFERENCE of two hits is the tool's, not
+   --  the tip distance's own sigma: that carries the table plane's offset, which both presses share and the
+   --  difference does not (A36 and A39: a closed lobe's first press left the sigma 15 per cent of the distance and
+   --  the least tilt 1.2 rad, which the arm could not make, or made by laying the hand down on its palm; the
+   --  presses after the plane was pinned, 1.9 per cent, asked 0.36). Real'Last when the distance or the push is
+   --  not known: no tilt is then told from another.
 
    function First_Tilt (Scale, Least, Bound : Real) return Real;
-   --  The tilt of the first press of a lobe's tip on one side: the hand's own angle, Scale, and no less than
-   --  Least, which none under it is worth, when that is under Bound (the least tilt found not to be made). A
-   --  closed hand's two lobes lie almost along each other from the eye (A31's closed lobes: 0.020 rad), and a
-   --  tilted press at that angle tells nothing about a tip 3.8 along its line known to 0.092, which needs 0.45;
-   --  the next tilt, double, was under the least and the side ended: every closed lobe was left not tested
-   --  across its sight, 7.4 to 7.8 mm lateral from where the truth touched. Scale itself when no tilt under
-   --  Bound tells the tip from a stop (the distance not known, Least = Real'Last, or so uncertain that the
-   --  least is a right angle or more): a press at the hand's own angle is another look at it, as it was.
+   --  The tilt of the first press of a lobe's tip on one side: the least that tells the tip from a stop, when that
+   --  is under Bound (the least tilt found not to be made), and no more: the larger the tilt, the less the point
+   --  that leads is the tip (a pad's corner changes with the finger's roll, the palm touches), and the presses
+   --  double from it while the tip rests on them. Not the hand's own angle, Scale: a closed hand's two lobes lie
+   --  0.020 rad apart from the eye (A31) and an open hand's 0.84 to 1.2, and neither is a tilt anything asks for;
+   --  the aimed lobe is the lowest at any tilt away from the others. Scale itself when no tilt under Bound tells
+   --  the tip from a stop (the distance not known, or so uncertain that the least is a right angle or more): a
+   --  press at the hand's own angle is another look at it, as it was.
 
    procedure Next_Tilt (Tilt : in out Real; Stalled : Boolean; Bound : in out Real; Least : Real);
    --  The tilt of the next press of a lobe's tip on one side, after one at

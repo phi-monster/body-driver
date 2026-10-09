@@ -75,6 +75,7 @@ package body Driver.Robot.Hand is
       Judged   : Natural := 0;                        --  the beat the latest push judged for lowering began
       Stalled  : Natural := 0;                        --  the beat the latest push judged stalled began
       Stalls   : Natural := 0;                        --  how many pushes were judged stalled
+      Rests    : Natural := 0;                        --  how many presses the watcher found at a rest, used or not
       Depth    : Estimate;
       Axis     : Direction_Estimate;
       Unsized  : Unbounded_String;                    --  what of its sizes is not measured, and why
@@ -873,6 +874,7 @@ package body Driver.Robot.Hand is
       if not Found then
          return;
       end if;
+      R.Rests := R.Rests + 1;
       if Opening_Of (R, M, Press.Closer.Element, Which) then
          Driver.Robot.Hand.Tips.Add (R.Book, Press, Which, Measured_Slides (R, Id, O, Which));
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": a press at the " & Opening'Image (Which)
@@ -910,19 +912,6 @@ package body Driver.Robot.Hand is
    --  The arm's own readings are at rest at the beat. The body's eyes are not
    --  asked: the pose of a press is a function of the readings alone, and the
    --  pictures settle after the arm does.
-
-   function Longest_Push (M : Model; A : Arm_Id) return Natural is
-      Longest : Natural := 0;
-   begin
-      if Natural (A) <= Arm_Count (M) then
-         for E of M.Groups (Arm_Group (M, A)).Episodes loop
-            if E.Ended and then E.End_At >= E.Start then
-               Longest := Natural'Max (Longest, E.End_At - E.Start + 1);
-            end if;
-         end loop;
-      end if;
-      return Longest;
-   end Longest_Push;
 
    function Asks_A_Translation (M : Model; A : Arm_Id; From, Target : Real_Array) return Boolean is
       Arm_Is : constant Group_Id := Arm_Group (M, A);

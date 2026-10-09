@@ -39,9 +39,11 @@ package Driver.Action.Contact.Search is
       Open       : Vec3 := Zero3;   --  face centre with the closer open, tool frame
       Closed     : Vec3 := Zero3;   --  the same, closed on nothing
       Facing     : Vec3 := Zero3;   --  unit: the way the face looks
-      Half_Width : Real := 0.0;
-      Thickness  : Real := 0.0;
    end record;
+   --  A face is the lobe's end: no width or thickness of it is assumed. It
+   --  meets the samples of a thing that lie within the thing's own pitch of
+   --  its path, which the sampling cannot tell from the path.
+
 
    package Pad_Vectors is new Ada.Containers.Vectors (Positive, Pad);
 

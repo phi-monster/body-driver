@@ -333,6 +333,7 @@ package body Driver.Alignment is
       Count    : Natural := 0;
       H        : Real_Matrix (1 .. Parameters, 1 .. Parameters) := [others => [others => 0.0]];
       G        : Real_Vector (1 .. Parameters) := [others => 0.0];
+      Own_H    : Real_Matrix (1 .. Parameters, 1 .. Parameters) := [others => [others => 0.0]];
       Residual : Real_Array (1 .. N) := [others => 0.0];
       Seen     : Real_Array (1 .. N) := [others => 0.0];
       Present  : Mask_Array (1 .. N) := [others => False];
@@ -461,6 +462,8 @@ package body Driver.Alignment is
    procedure Pass
      (T        : Warp;
       Template : Real_Array;
+      Slope_U  : Real_Array;
+      Slope_V  : Real_Array;
       Valid    : Mask_Array;
       Half     : Natural;
       Luma : Real_Array;
@@ -473,6 +476,7 @@ package body Driver.Alignment is
       Result.Count := 0;
       Result.H := [others => [others => 0.0]];
       Result.G := [others => 0.0];
+      Result.Own_H := [others => [others => 0.0]];
       Result.Present := [others => False];
       Result.Residual := [others => 0.0];
       Result.Seen := [others => 0.0];
@@ -500,6 +504,23 @@ package body Driver.Alignment is
                            end loop;
                            Result.G (A) := Result.G (A) + Row (A) * R;
                         end loop;
+                        declare
+                           --  The slopes the second picture would have if it were the first, through the fitted gain
+                           --  and warp, which none of its noise is in.
+                           Det : constant Real := T.Linear.UU * T.Linear.VV - T.Linear.UV * T.Linear.VU;
+                           Own : constant Real_Vector (1 .. Parameters) :=
+                             Jacobian_Row
+                               (Di, Dj,
+                                T.Gain * (T.Linear.VV * Slope_U (K) - T.Linear.VU * Slope_V (K)) / Det,
+                                T.Gain * (T.Linear.UU * Slope_V (K) - T.Linear.UV * Slope_U (K)) / Det,
+                                Template (K));
+                        begin
+                           for A in 1 .. Parameters loop
+                              for B in A .. Parameters loop
+                                 Result.Own_H (A, B) := Result.Own_H (A, B) + Own (A) * Own (B);
+                              end loop;
+                           end loop;
+                        end;
                         Result.Rss := Result.Rss + R * R;
                         Result.Count := Result.Count + 1;
                         Result.Present (K) := True;
@@ -514,6 +535,11 @@ package body Driver.Alignment is
       for A in 1 .. Parameters loop
          for B in 1 .. A - 1 loop
             Result.H (A, B) := Result.H (B, A);
+         end loop;
+      end loop;
+      for A in 1 .. Parameters loop
+         for B in 1 .. A - 1 loop
+            Result.Own_H (A, B) := Result.Own_H (B, A);
          end loop;
       end loop;
    end Pass;
@@ -531,6 +557,7 @@ package body Driver.Alignment is
       Inverse        : Linear_Part;
       Half           : Natural;
       Template       : out Real_Array;
+      Slope_U, Slope_V : out Real_Array;
       Valid          : out Mask_Array)
    is
       K : Natural := 0;
@@ -548,6 +575,8 @@ package body Driver.Alignment is
             begin
                Sample (Luma, Width, Height, U, V, Value, Dx, Dy, Ok);
                Template (K) := Value;
+               Slope_U (K) := Dx;
+               Slope_V (K) := Dy;
                Valid (K) := Ok;
             end;
          end loop;
@@ -597,6 +626,8 @@ package body Driver.Alignment is
 
       Template : Real_Array (1 .. N);
       Valid    : Mask_Array (1 .. N);
+      Slope_U  : Real_Array (1 .. N);
+      Slope_V  : Real_Array (1 .. N);
 
       --  The place may lie as widely as the ridge says, the patch's own window: that holds a direction the pixels
       --  leave open where the prediction put it, and costs the directions they close nothing measurable.
@@ -622,12 +653,12 @@ package body Driver.Alignment is
 
       procedure Run (W : Warp; Into : out Pass_Result) is
       begin
-         Pass (W, Template, Valid, Half, B_Spline, B_Level.Width, B_Level.Height, Into);
+         Pass (W, Template, Slope_U, Slope_V, Valid, Half, B_Spline, B_Level.Width, B_Level.Height, Into);
       end Run;
    begin
       Info := (Fitted => Start, others => <>);
       Resample (A_Spline, A_Level.Width, A_Level.Height, Query.From.U / Scale, Query.From.V / Scale,
-                Identity_Part, Half, Template, Valid);
+                Identity_Part, Half, Template, Slope_U, Slope_V, Valid);
       --  Only the pixels within Limit of the point, when the patch is to be used in part.
       if Limit < Half then
          declare
@@ -773,6 +804,29 @@ package body Driver.Alignment is
             --  (the cluster-robust, or sandwich, covariance: the inverse information on either side of the sum of
             --  the squares of the parts' scores).
             declare
+               Own_H : Real_Matrix (1 .. Parameters, 1 .. Parameters) := Current.Own_H;
+               Own_G : Real_Vector (1 .. Parameters) := Current.G;
+               Own_Inv : Real_Matrix (1 .. Parameters, 1 .. Parameters);
+               Own_Ok  : Boolean;
+            begin
+               Add_Prior (Own_H, Own_G, T, Held, S2);
+               Information_Inverse (Own_H, Own_Inv, Own_Ok);
+               if not Own_Ok then
+                  Info.Informative := False;
+                  return;
+               end if;
+               declare
+                  Theirs : constant Place_Covariance :=
+                    (UU => S2 * Own_Inv (1, 1) * Info.Spread * Scale ** 2,
+                     UV => S2 * Own_Inv (1, 2) * Info.Spread * Scale ** 2,
+                     VV => S2 * Own_Inv (2, 2) * Info.Spread * Scale ** 2);
+               begin
+                  if Theirs.UU + Theirs.VV > Info.Cov.UU + Info.Cov.VV then
+                     Info.Cov := Theirs;
+                  end if;
+               end;
+            end;
+            declare
                Per_Axis : constant Positive := Positive (Real'Ceiling (Sqrt (2.0 * Real (Parameters))));
                Scores   : Real_Matrix (1 .. Per_Axis * Per_Axis, 1 .. Parameters) := [others => [others => 0.0]];
                Middle   : Real_Matrix (1 .. Parameters, 1 .. Parameters) := [others => [others => 0.0]];
@@ -797,7 +851,8 @@ package body Driver.Alignment is
                                    ((J + Integer (Half)) * Per_Axis / Side) * Per_Axis
                                    + (I + Integer (Half)) * Per_Axis / Side + 1;
                                  R   : constant Real := Current.Residual (K);
-                                 Row : constant Real_Vector (1 .. Parameters) := Jacobian_Row (Di, Dj, Sx, Sy, Template (K));
+                                 Row : constant Real_Vector (1 .. Parameters) :=
+                                   Jacobian_Row (Di, Dj, Sx, Sy, Template (K));
                               begin
                                  for A in 1 .. Parameters loop
                                     Scores (Cluster, A) := Scores (Cluster, A) + Row (A) * R;
@@ -898,6 +953,8 @@ package body Driver.Alignment is
       Template : Real_Array (1 .. N);
       Valid    : Mask_Array (1 .. N);
       Present  : Natural := 0;
+      Slope_U  : Real_Array (1 .. N);
+      Slope_V  : Real_Array (1 .. N);
 
       --  The window, at this level.
       Centre_U : constant Real := Query.To.U / Scale;
@@ -936,7 +993,7 @@ package body Driver.Alignment is
       function Pixel_Of (X, Y : Integer) return Real is (B_Luma (B_Luma'First + Y * B_Level.Width + X));
    begin
       Resample (A_Spline, A_Level.Width, A_Level.Height, Query.From.U / Scale, Query.From.V / Scale,
-                Inverse_Of (Query.Linear), Half, Template, Valid);
+                Inverse_Of (Query.Linear), Half, Template, Slope_U, Slope_V, Valid);
       for K in 1 .. N loop
          if Valid (K) then
             Present := Present + 1;

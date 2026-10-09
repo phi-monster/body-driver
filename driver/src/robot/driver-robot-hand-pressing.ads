@@ -70,6 +70,7 @@ package Driver.Robot.Hand.Pressing is
    function Least_Push (M : Model; Arm : Arm_Id; O : Observation) return Real;
    --  The smallest move of the tool that tells from its noise, where the tool
    --  is at O: Z times the root of the largest variance of its position there.
+   --  Real'Last where the tool's place is not measured.
    --  Aim gives it where the aim leaves the tool (Aimed.Least), which is where
    --  a press lowers it from, not where it stood before the aim: the arm's
    --  frame is the eye at its reference readings, where the tool's place is

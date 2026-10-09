@@ -120,6 +120,11 @@ package body Driver.Action.Execution.Tests is
    Names : constant array (Shapes'Range) of access constant String :=
      [new String'("bar"), new String'("block"), new String'("cylinder"), new String'("scissors"), new String'("cup")];
 
+   --  Two lobe ends touch at two points and no contact patch of a lobe is
+   --  assumed, so a thing whose every pinch line misses its centre of mass
+   --  (the flat scissors) is refused and left where it lies.
+   function Pinch_Holds_No_Turn (K : Positive) return Boolean is (Names (K).all = "scissors");
+
    procedure Each_Shape_Up is
    begin
       for K in Shapes'Range loop
@@ -131,6 +136,11 @@ package body Driver.Action.Execution.Tests is
             Sim.Add_Thing (W, Shapes (K), On_Table (0.1, 0.05, 0.4), Mu => 0.6);
             Ada.Text_IO.Put_Line ("      " & Names (K).all & ":");
             Run (W, Height_Want (1, True, Free), R);
+            if Pinch_Holds_No_Turn (K) then
+               Check (R.Final = Refused and then Sim.Truth (W, 1).Held_By = 0,
+                      "the " & Names (K).all & " was taken although no pinch of two lobe ends holds its turn");
+               goto Next_Shape;
+            end if;
             Check (R.Final = Free, "the " & Names (K).all & " lifted until free does not end free");
             Check (Sim.Lowest (W, 1) > 0.0 and then Sim.Truth (W, 1).Held_By = 1,
                    "the " & Names (K).all & " said to be free is not up in the hand");
@@ -138,6 +148,7 @@ package body Driver.Action.Execution.Tests is
             Check (R.Final = Settled and then Sim.Lowest (W, 1) > 0.05,
                    "the " & Names (K).all & " lifted until settled does not go well up");
          end;
+         <<Next_Shape>>
       end loop;
    end Each_Shape_Up;
 
@@ -153,10 +164,16 @@ package body Driver.Action.Execution.Tests is
             Sim.Add_Thing (W, Block (0.08, 0.08, 0.05), On_Table (-0.12, 0.08, 0.2), Mu => 0.6);
             Ada.Text_IO.Put_Line ("      " & Names (K).all & ":");
             Run (W, Interval_Want (Thing_Of (1), Onto, Thing_Of (2), Touched), R);
+            if Pinch_Holds_No_Turn (K) then
+               Check (R.Final = Refused and then Sim.Truth (W, 1).Held_By = 0,
+                      "the " & Names (K).all & " was taken although no pinch of two lobe ends holds its turn");
+               goto Next_Shape;
+            end if;
             Check (R.Final = Touched, "the " & Names (K).all & " put onto the block does not end touched");
             Check (Sim.Rests_On (W, 1, 2), "the " & Names (K).all & " does not rest on the block");
             Check (Sim.Truth (W, 1).Held_By = 0, "the " & Names (K).all & " put onto the block is not let go");
          end;
+         <<Next_Shape>>
       end loop;
    end Each_Shape_Onto_A_Block;
 

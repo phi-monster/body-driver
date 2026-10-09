@@ -279,6 +279,39 @@ package body Driver.Alignment.Tests is
              & " points: " & Describe (O));
    end Grained;
 
+   procedure Faint is
+      --  The second picture's texture is a few thousandths of the first's, under the pixels' own noise (half a
+      --  level, and the rounding to whole levels): the gradients the second picture has are the noise's, which
+      --  are far steeper than the texture's, and an information counted from them is far too high. Whatever the
+      --  aligner answers is within its own gate at nearly all axes (a Gaussian would have all but three in a
+      --  thousand); most of it is refused.
+      O : Outcome;
+      Gain : constant Real := 0.003;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 18);
+      O := Run (Textured, Identity_Part, 2.6, -1.4, 0.5, -0.7, 0.4, 1.5, Light_Gain => Gain,
+                Light_Offset => 128.0 * (1.0 - Gain));
+      Check (O.Axes = 0 or else O.Within_Gate * 100 >= O.Axes * 95,
+             "only" & Natural'Image (O.Within_Gate) & " of" & Natural'Image (O.Axes)
+             & " axes of a faint texture were within their own gates: " & Describe (O));
+   end Faint;
+
+   procedure Noisy is
+      --  A texture of the usual contrast under noise of eight levels: the noise's gradients are a fifth of the
+      --  texture's, and counted as its own they would make the answers a tenth too sure. The errors are within
+      --  their own gates at nearly all axes, and most points are found.
+      O : Outcome;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 19);
+      O := Run (Textured, Identity_Part, 2.6, -1.4, 8.0, -0.7, 0.4, 1.5, Columns => 12, Rows => 8);
+      Check (O.Found * 10 >= O.Asked * 8,
+             "a noisy texture was found at" & Natural'Image (O.Found) & " of" & Natural'Image (O.Asked)
+             & " points: " & Describe (O));
+      Check (O.Axes > 0 and then O.Within_Gate * 100 >= O.Axes * 95,
+             "only" & Natural'Image (O.Within_Gate) & " of" & Natural'Image (O.Axes)
+             & " axes of a noisy texture were within their own gates");
+   end Noisy;
+
    procedure Lit is
       --  The second picture is brighter as a whole (a fifth more light and twenty-five levels over), as when
       --  the exposure or the light moved: the fit carries a gain and an offset of the light, so that the place
@@ -444,6 +477,12 @@ package body Driver.Alignment.Tests is
         ("alignment.grain", "a grain of a few pixels' period is found a period off", Grained'Access);
       Driver.Tests.Register
         ("alignment.light", "a texture lit more brightly is found away from where it is", Lit'Access);
+      Driver.Tests.Register
+        ("alignment.faint", "a texture under the noise is answered with a precision that its noise gives",
+         Faint'Access);
+      Driver.Tests.Register
+        ("alignment.noisy", "a noisy texture is answered with a precision that its noise-free gradients give",
+         Noisy'Access);
       Driver.Tests.Register
         ("alignment.bent", "a texture bent by a wave is given a place more precise than the wave allows", Bent'Access);
       Driver.Tests.Register

@@ -56,12 +56,10 @@ package Driver.Action.Snapshots is
       Open_Tip   : Vec3 := Zero3;   --  the end of the lobe, opened fully, tool frame
       Closed_Tip : Vec3 := Zero3;   --  the same, closed on nothing
       Tip_Sigma  : Real := Real'Last;
-      Width      : Real := 0.0;     --  its section across its closing direction
-      Thickness  : Real := 0.0;     --  its section along its closing direction
    end record;
-   --  A lobe's touching face is half a Thickness ahead of its tip along its
-   --  closing direction; a lobe that does not move faces the meeting point
-   --  of the others.
+   --  A lobe is known by where its end is, open and closed on nothing, and
+   --  nothing of its shape is assumed: what of it meets a thing is its end.
+   --  A lobe that does not move faces the meeting point of the others.
 
    package Lobe_Vectors is new Ada.Containers.Vectors (Positive, Lobe_State);
 

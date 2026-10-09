@@ -149,9 +149,43 @@ package body Driver.Robot.Motion is
             S     : Group_Stream renames M.Groups (G);
             Start : constant Real := Channels.Reading (M, G, E.Start - 1, C);
             Stop  : constant Real := Channels.Reading (M, G, E.End_At, C);
-            Up    : constant Boolean := Channels.Target (M, G, E.Start, C) > Start;
+            Asked : constant Real := Channels.Target (M, G, E.Start, C);
+            Up    : constant Boolean := Asked > Start;
             At_C  : constant Natural := C - 1;
+            Pose  : Real_Vectors.Vector;
+
+            --  How close two readings of channel I must be to be one reading to this test. Two stops of a channel
+            --  that are two independent contacts fall anywhere in the channel's travel, and meet within a distance
+            --  D of one another with the probability 2 D over the travel; D is the distance at which that is no more
+            --  than the false alarm rate of Z, and no less than Z deviations of the difference of two readings (the
+            --  readings' noise, which is the whole of it where the readings are as coarse as a real robot's). The
+            --  controller leaves a stop a few thousandths of a radian from one push to the next (A22 and A27's third
+            --  joint: -0.0359, -0.0368, -0.0359), far above the noise of an exact simulator.
+            function Tolerance (I : Natural) return Real is
+              (if Channels.Noise (M, G, I + 1) < Real'Last
+               then Real'Max (Driver.Conventions.Z * Sqrt (2.0) * Channels.Noise (M, G, I + 1),
+                              Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z)
+                              * (S.High_Seen (I) - S.Low_Seen (I)) / 2.0)
+               else Real'Last);
+            function Agree (I : Natural; A, B : Real) return Boolean is
+              (Tolerance (I) < Real'Last and then abs (A - B) <= Tolerance (I));
+            function Apart (I : Natural; A, B : Real) return Boolean is
+              (Tolerance (I) < Real'Last and then abs (A - B) > Tolerance (I));
+
+            --  A stop made at another pose of the group: some other channel stood somewhere else.
+            function Another_Pose (Other : Real_Vectors.Vector) return Boolean is
+              (Natural (Other.Length) = S.Size
+               and then (for some I in 0 .. S.Size - 1 => I /= At_C and then Apart (I, Other (I), Pose (I))));
+
+            Where : constant String :=
+              "body: group" & G'Image & " channel" & C'Image & " stopped at " & Driver.Log.Image (Stop, 6) & " asked "
+              & Driver.Log.Image (Asked, 6) & " from " & Driver.Log.Image (Start, 6) & ", the push that began at beat"
+              & E.Start'Image;
+            Way : constant String := (if Up then "upwards" else "downwards");
          begin
+            for I in 0 .. S.Size - 1 loop
+               Pose.Append (Channels.Reading (M, G, E.End_At, I + 1));
+            end loop;
             --  The vectors are laid out for the group's channels the first time a stop is noted.
             if Natural (S.Has_Stopped_Low.Length) /= S.Size then
                S.Has_Stopped_Low.Clear;
@@ -165,23 +199,70 @@ package body Driver.Robot.Motion is
                   S.Stopped_High.Append (0.0);
                end loop;
             end if;
-            --  The furthest stop of a sense stands: every stop supports at least that much, and a stop where the
-            --  arm met itself is relaxed by a later one that went further.
-            if Up then
-               if not S.Has_Stopped_High (At_C) or else Stop > S.Stopped_High (At_C) then
-                  S.Has_Stopped_High.Replace_Element (At_C, True);
-                  S.Stopped_High.Replace_Element (At_C, Stop);
-                  Noted := True;
-               end if;
-            elsif not S.Has_Stopped_Low (At_C) or else Stop < S.Stopped_Low (At_C) then
-               S.Has_Stopped_Low.Replace_Element (At_C, True);
-               S.Stopped_Low.Replace_Element (At_C, Stop);
-               Noted := True;
+            if (if Up then S.Has_Stopped_High (At_C) else S.Has_Stopped_Low (At_C)) then
+               --  The end the channel has explains it; a stop beyond it is read as a reading, which widens the end, and
+               --  said, so that a far end hit after a near false one is not a quiet success in the log.
+               declare
+                  Found_At : constant Real := (if Up then S.Stopped_High (At_C) else S.Stopped_Low (At_C));
+               begin
+                  if (if Up then Stop > Found_At else Stop < Found_At) and then Apart (At_C, Stop, Found_At) then
+                     Driver.Log.Line (Driver.Log.Robot, Where & ": beyond the end found at " & Driver.Log.Image (Found_At, 6)
+                                      & ": the reading widens it");
+                  else
+                     Driver.Log.Line (Driver.Log.Robot, Where & ": at the end the channel has");
+                  end if;
+               end;
+            else
+               declare
+                  Found  : Boolean := False;   --  the same reading found again from another pose
+                  Twice  : Boolean := False;   --  the same reading from the same pose: the same contact
+                  Value  : Real := Stop;
+                  Before : Real := Stop;
+               begin
+                  for Old of S.Stops loop
+                     if Old.Channel = C and then Old.Up = Up and then Agree (At_C, Old.Value, Stop) then
+                        if Another_Pose (Old.Pose) then
+                           Found := True;
+                           Before := Old.Value;
+                           Value := (if Up then Real'Max (Value, Old.Value) else Real'Min (Value, Old.Value));
+                        else
+                           Twice := True;
+                        end if;
+                     end if;
+                  end loop;
+                  if Found then
+                     declare
+                        K : Natural := S.Stops.First_Index;
+                     begin
+                        while K <= S.Stops.Last_Index loop
+                           if S.Stops (K).Channel = C and then S.Stops (K).Up = Up
+                             and then Agree (At_C, S.Stops (K).Value, Stop)
+                           then
+                              S.Stops.Delete (K);
+                           else
+                              K := K + 1;
+                           end if;
+                        end loop;
+                     end;
+                     if Up then
+                        S.Has_Stopped_High.Replace_Element (At_C, True);
+                        S.Stopped_High.Replace_Element (At_C, Value);
+                     else
+                        S.Has_Stopped_Low.Replace_Element (At_C, True);
+                        S.Stopped_Low.Replace_Element (At_C, Value);
+                     end if;
+                     Noted := True;
+                     Driver.Log.Line (Driver.Log.Robot, Where & ": found again from another pose (" & Driver.Log.Image (Before, 6)
+                                      & " before): an end of the channel " & Way);
+                  elsif Twice then
+                     Driver.Log.Line (Driver.Log.Robot, Where & ": the same reading from the same pose as before, the same contact");
+                  elsif Channels.Noise (M, G, C) < Real'Last then
+                     S.Stops.Append (Stop_Record'(Channel => C, Up => Up, Value => Stop, Pose => Pose));
+                     Driver.Log.Line (Driver.Log.Robot, Where & ": noted; it is an end of the channel " & Way
+                                      & " when the channel stops at this reading from another pose");
+                  end if;
+               end;
             end if;
-            Driver.Log.Line (Driver.Log.Robot, "body: group" & G'Image & " channel" & C'Image & " stopped at "
-                             & Driver.Log.Image (Stop, 6) & " asked " & Driver.Log.Image (Channels.Target (M, G, E.Start, C), 6)
-                             & " from " & Driver.Log.Image (Start, 6) & ", the push that began at beat" & E.Start'Image
-                             & " (the shortfall of the rest spread, or less): an end of the channel " & (if Up then "upwards" else "downwards"));
          end;
       end;
    end Note_Stopped;

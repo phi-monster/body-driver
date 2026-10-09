@@ -275,24 +275,20 @@ package body Driver.Action.Snapshots.Tests is
        Depth    => (Value => Depth, Sigma => Sigma, Degrees_Of_Freedom => 0),
        Fraction => (Value => 0.0, Sigma => Sigma, Degrees_Of_Freedom => 0)));
 
-   function Gripper (Arm : Arm_Id; Hand : Hand_Id; Opening, Width, Thickness, Depth, Sigma : Real)
-     return Hand_State
-   is
+   function Gripper (Arm : Arm_Id; Hand : Hand_Id; Opening, Depth, Sigma : Real) return Hand_State is
       H : Hand_State := Hand_Of (Arm, Hand, Depth, Sigma);
    begin
       for Sign in -1 .. 1 loop
          if Sign /= 0 then
-            H.Lobes.Append (Lobe_State'(Open_Tip   => [Real (Sign) * (Opening + Thickness) / 2.0, 0.0, Depth],
-                             Closed_Tip => [Real (Sign) * Thickness / 2.0, 0.0, Depth],
-                             Tip_Sigma  => Sigma, Width => Width, Thickness => Thickness));
+            H.Lobes.Append (Lobe_State'(Open_Tip   => [Real (Sign) * Opening / 2.0, 0.0, Depth],
+                             Closed_Tip => [0.0, 0.0, Depth],
+                             Tip_Sigma  => Sigma));
          end if;
       end loop;
       return H;
    end Gripper;
 
-   function Five_Lobes (Arm : Arm_Id; Hand : Hand_Id; Radius, Width, Thickness, Depth, Sigma : Real)
-     return Hand_State
-   is
+   function Five_Lobes (Arm : Arm_Id; Hand : Hand_Id; Radius, Closed_Radius, Depth, Sigma : Real) return Hand_State is
       H : Hand_State := Hand_Of (Arm, Hand, Depth, Sigma);
    begin
       for K in 0 .. 4 loop
@@ -300,9 +296,9 @@ package body Driver.Action.Snapshots.Tests is
             A : constant Real := 2.0 * Pi * Real (K) / 5.0;
             D : constant Vec3 := [Cos (A), Sin (A), 0.0];
          begin
-            H.Lobes.Append (Lobe_State'(Open_Tip   => (Radius + Thickness / 2.0) * D + [0.0, 0.0, Depth],
-                             Closed_Tip => (Width + Thickness / 2.0) * D + [0.0, 0.0, Depth],
-                             Tip_Sigma  => Sigma, Width => Width, Thickness => Thickness));
+            H.Lobes.Append (Lobe_State'(Open_Tip   => Radius * D + [0.0, 0.0, Depth],
+                             Closed_Tip => Closed_Radius * D + [0.0, 0.0, Depth],
+                             Tip_Sigma  => Sigma));
          end;
       end loop;
       return H;

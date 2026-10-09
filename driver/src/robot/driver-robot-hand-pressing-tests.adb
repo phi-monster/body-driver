@@ -954,25 +954,8 @@ package body Driver.Robot.Hand.Pressing.Tests is
       end loop;
    end Hand_Dropped_Mid_Press;
 
-   --  The most a decider waits for the arm to rest after it lets the hand go: as long as the longest push the arm has
-   --  had took, from its start to the beat it ended at, those still under way not counted.
-   procedure The_Longest_Push_Is_The_Longest_That_Ended is
-      M : Model;
-   begin
-      Build (M, Placed);
-      Check (Driver.Robot.Hand.Longest_Push (M, 1) = 0, "an arm that has had no push has a longest push");
-      M.Groups (1).Episodes.Append (Episode'(Start => 3, End_At => 9, Ended => True, others => <>));
-      M.Groups (1).Episodes.Append (Episode'(Start => 20, End_At => 51, Ended => True, others => <>));
-      M.Groups (1).Episodes.Append (Episode'(Start => 60, End_At => 120, Ended => False, others => <>));
-      M.Groups (1).Episodes.Append (Episode'(Start => 100, End_At => 105, Ended => True, others => <>));
-      Check (Driver.Robot.Hand.Longest_Push (M, 1) = 32,
-             "the longest push of 7, 32 and 6 beats, one of 61 under way, is" & Driver.Robot.Hand.Longest_Push (M, 1)'Image);
-   end The_Longest_Push_Is_The_Longest_That_Ended;
-
    procedure Register is
    begin
-      Driver.Tests.Register ("hand.measure.longest", "the wait for the arm to rest is not as long as its longest push, or counts one under way",
-                             The_Longest_Push_Is_The_Longest_That_Ended'Access);
       Driver.Tests.Register ("hand.measure.aim",
                              "the block of an aim the arm could not complete is taken for a press and a tip is fitted to it",
                              A_Blocked_Aim_Is_Not_A_Press'Access);

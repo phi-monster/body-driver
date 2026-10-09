@@ -446,6 +446,129 @@ package body Driver.Robot.Tests is
       end if;
    end Estimate_In_A_Task;
 
+   --  A gripper held at an opening while the arm moves the whole hand in its own eye (A29: 8136 beats of presses turned
+   --  both grippers into arms, and the boot died of it): the rows of a gripper's push that count are the ones where
+   --  nothing else moves its picture. Two kinds of press leave the picture moving under the gripper's push without a
+   --  push of the arm under way: the arm moves though no push of it is under way (one that ended or was given up while
+   --  it kept moving), and the picture goes on changing after the arm has stopped (the tail of its motion, a hand that
+   --  settles against the table); in both the picture's motion is the arm's, and credited to the gripper it makes the
+   --  whole picture its effect. Twenty presses of each kind after the body was recognized: the gripper is a closer
+   --  still, as it was.
+   procedure Presses_Leave_A_Closer_A_Closer is
+      type Kind_Of_Press is (Arm_Moves_Unpushed, Picture_Tail);
+
+      --  One beat of the rig whose picture follows the arm a halving behind it, as a rendered view settles: the gripper
+      --  shows at once, the arm's view closes half of what is left to the arm's reading every beat.
+      procedure Step_With_Tail (M : in out Model; R : in out Rig; Target : Rig_State; Tail : in out Rig_State) is
+         O    : Observation;
+         Sent : Driver.Commands.Command;
+      begin
+         R.Previous := R.Now;
+         R.Now := Target;
+         R.Shown := Tail;
+         R.Shown.Closer := R.Previous.Closer;
+         for C in 1 .. 2 loop
+            Tail.Arm_1 (C) := Tail.Arm_1 (C) + 0.5 * (R.Now.Arm_1 (C) - Tail.Arm_1 (C));
+            Tail.Arm_2 (C) := Tail.Arm_2 (C) + 0.5 * (R.Now.Arm_2 (C) - Tail.Arm_2 (C));
+         end loop;
+         Driver.Commands.Set_Target (Sent, 1, Target.Arm_1);
+         Driver.Commands.Set_Target (Sent, 2, Target.Arm_2);
+         Driver.Commands.Set_Target (Sent, 3, [Target.Closer]);
+         Driver.Commands.Set_Target (Sent, 4, [Target.Part]);
+         Driver.Commands.Set_Target (Sent, 5, [Target.Idle]);
+         O.Beat := Driver.Clock.Beat (R.Beat);
+         for E in 1 .. 3 loop
+            O.Images.Append (Render (E, R.Shown));
+            O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         end loop;
+         O.Readings.Append (R.Now.Arm_1);
+         O.Readings.Append (R.Now.Arm_2);
+         O.Readings.Append (Real_Array'(1 => R.Now.Closer));
+         O.Readings.Append (Real_Array'(1 => R.Now.Part));
+         O.Readings.Append (Real_Array'(1 => R.Now.Idle));
+         O.Readings.Append (Real_Array'(1 => R.Now.Arm_1 (1) + R.Now.Arm_2 (1)));
+         O.Readings.Append (Real_Array'(1 => 7.0));
+         for G in 1 .. 7 loop
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         end loop;
+         Observe (M, O, Sent);
+         R.Beat := R.Beat + 1;
+      end Step_With_Tail;
+
+      procedure Run (Kind : Kind_Of_Press; Before, After : out Group_Role) is
+         M    : Model;
+         R    : Rig;
+         Rest : constant Rig_State := (others => <>);
+         Tail : Rig_State := Rest;
+      begin
+         for B in 1 .. 5 loop
+            Step (M, R, Rest);
+         end loop;
+         Exercise (M, R, Arm_1, 0.1, 8);
+         Exercise (M, R, Arm_2, 0.1, 8);
+         Exercise (M, R, Closer, 0.1, 8);
+         Exercise (M, R, Part, 0.1, 8);
+         Exercise (M, R, Idle, 0.1, 8);
+         Estimate_Now (M);
+         Before := Role (M, 3);
+         for Press in 1 .. 20 loop
+            case Kind is
+               when Arm_Moves_Unpushed =>
+                  --  The gripper is asked away and back, and the arm, asked nothing, moves with it each time: out
+                  --  as the gripper is asked away, and back as it is asked back.
+                  for K in 1 .. 6 loop
+                     declare
+                        Goal    : Rig_State := Rest;
+                        Reading : Rig_State := Rest;
+                     begin
+                        Goal.Closer := (if K in 1 .. 3 then 0.1 else 0.0);
+                        Reading.Closer := Goal.Closer;
+                        if K in 1 .. 3 then
+                           Reading.Arm_1 := [0.1, 0.05];
+                        end if;
+                        Step (M, R, Goal, Reading);
+                     end;
+                  end loop;
+                  for K in 1 .. 4 loop
+                     Step (M, R, Rest);
+                  end loop;
+               when Picture_Tail =>
+                  --  The arm is asked away and back, and the gripper asked two beats after it stopped, while the
+                  --  picture is still closing on the arm.
+                  declare
+                     Out_Goal : Rig_State := Rest;
+                  begin
+                     Out_Goal.Arm_1 := [0.1, 0.05];
+                     Step_With_Tail (M, R, Out_Goal, Tail);
+                     Step_With_Tail (M, R, Out_Goal, Tail);
+                     Step_With_Tail (M, R, Rest, Tail);
+                     Step_With_Tail (M, R, Rest, Tail);
+                     Out_Goal := Rest;
+                     Out_Goal.Closer := 0.1;
+                     Step_With_Tail (M, R, Out_Goal, Tail);
+                     Step_With_Tail (M, R, Out_Goal, Tail);
+                     Step_With_Tail (M, R, Rest, Tail);
+                     Step_With_Tail (M, R, Rest, Tail);
+                  end;
+                  for K in 1 .. 12 loop
+                     Step_With_Tail (M, R, Rest, Tail);
+                  end loop;
+            end case;
+         end loop;
+         Estimate_Now (M);
+         After := Role (M, 3);
+      end Run;
+
+      Before, After : Group_Role;
+   begin
+      for Kind in Kind_Of_Press loop
+         Run (Kind, Before, After);
+         Check (Before = Closer, "the gripper is a closer before its presses (" & Kind'Image & "), got " & Before'Image);
+         Check (After = Closer, "the gripper is" & After'Image & " after twenty presses (" & Kind'Image
+                & "), not a closer");
+      end loop;
+   end Presses_Leave_A_Closer_A_Closer;
+
    --  A group that moves a patch in arm 1's eye while another eye is still
    --  undecided about it (a live x5's right arm at its first read: a patch
    --  in the left wrist's eye, the right wrist's eye undecided at 267 of 525
@@ -578,6 +701,77 @@ package body Driver.Robot.Tests is
                 & " of" & F.Textured'Image & " cells responding");
       end;
    end Carried_Eye_Partly_Textureless;
+
+   --  Cells too noisy to tell a motion show it together, by the mean of their energies over the typical energy. A
+   --  mean is moved as far as one cell likes: the fingers of a hand in view are a few cells that show 10 ** 4 times
+   --  what the rest of the picture does (A29's closer, at 8136 beats: 37 of 371 noisy cells carried 99.8 % of their
+   --  energy, the mean was 560 times the typical, every noisy cell was credited with showing the motion, and the
+   --  hand's closer was called an arm). The cells far above are the ones that show it, and when they carry the
+   --  energy the rest is read without them; a whole picture's nearer parts, a few cells that show several times the
+   --  typical energy, do not take the rest of the picture's share from it.
+   procedure Noisy_Cells_Far_Above_The_Rest is
+      use Driver.Robot.Lockin;
+      G       : Generator;
+      Cells   : constant := 400;
+      Typical : constant Real := 1.0;
+      Var     : constant Real := 0.5;   --  with one degree of freedom: a spread of 1.6 typical energies a cell
+
+      --  Noisy cells: a share of them show the typical energy, a few show Far times it and respond.
+      function Pool_Of (Showing : Real; Far_Cells : Natural; Far : Real) return Noisy_Cell_Array is
+         Spread : constant Real := Sqrt (2.0 * Var ** 2 + 4.0 * Var * Typical);
+         Result : Noisy_Cell_Array (1 .. Cells);
+      begin
+         for K in Result'Range loop
+            Result (K) :=
+              (Energy   => (if K <= Far_Cells then Far * Typical else (if Uniform (G) < Showing then Typical else 0.0))
+                           + Spread * Gaussian (G),
+               Variance => Var, Freedom => 1, Responds => K <= Far_Cells);
+         end loop;
+         return Result;
+      end Pool_Of;
+
+      Hands   : constant Noisy_Cell_Array := Pool_Of (0.0, 40, 1.0E4);
+      All_Show : constant Noisy_Cell_Array := Pool_Of (1.0, 4, 8.0);
+      None_Show : constant Noisy_Cell_Array := Pool_Of (0.0, 0, 0.0);
+      Heavy   : constant Noisy_Cell_Array := Pool_Of (1.0, 4, 100.0);
+      By_Hands, By_Agreed, By_All, By_None, By_Heavy : Shown;
+   begin
+      --  The cells that can tell do not show the motion between them, as the hand's are not the whole picture.
+      By_Hands := Cells_Shown (Hands, Typical, Able_Disagree => True);
+      --  They do, and a few cells that show a great deal are a whole picture's nearer parts.
+      By_Agreed := Cells_Shown (Hands, Typical, Able_Disagree => False);
+      By_All := Cells_Shown (All_Show, Typical, Able_Disagree => True);
+      By_None := Cells_Shown (None_Show, Typical, Able_Disagree => True);
+      By_Heavy := Cells_Shown (Heavy, Typical, Able_Disagree => True);
+      Check (By_Hands.Least >= 40, "the cells far above the rest are not counted as showing the motion:"
+             & By_Hands.Least'Image);
+      Check (By_Hands.Most * 2 < Cells, "forty cells that show ten thousand times the typical energy make the other"
+             & " 360, that show nothing, show it: up to" & By_Hands.Most'Image & " of" & Cells'Image);
+      Check (By_Agreed.Least * 2 > Cells, "the cells that can tell agree that the picture moves whole, and the cells"
+             & " far above the rest are read apart from it: up to" & By_Agreed.Least'Image & " of" & Cells'Image);
+      Check (By_None.Most * 2 < Cells, "cells that show nothing show it:" & By_None.Most'Image & " of"
+             & Cells'Image);
+      Check (By_All.Least * 2 > Cells, "cells that all show the typical energy, four of them eight times as much,"
+             & " are not credited with showing it:" & By_All.Least'Image & " of" & Cells'Image);
+      Check (By_Heavy.Least * 2 > Cells, "four cells at a hundred times the typical energy, among cells that all show"
+             & " it, take the others' share from them:" & By_Heavy.Least'Image & " of" & Cells'Image);
+      --  A29's closer at 8136 beats: 75 of its 154 cells that can tell showed the motion; A29's second arm in the first
+      --  arm's eye: 41 of 64; the arms in their own eyes, at their first recomputes: 122 of 134, 103 of 108 (A31).
+      Check (Cells_Disagree (75, 79), "75 of 154 cells that can tell show a motion, and they agree that it is whole");
+      Check (Cells_Disagree (41, 23), "41 of 64 cells that can tell show a motion, and they agree that it is whole");
+      Check (not Cells_Disagree (122, 12), "122 of 134 cells that can tell show a motion, and they disagree");
+      Check (not Cells_Disagree (103, 5), "103 of 108 cells that can tell show a motion, and they disagree");
+      Check (not Cells_Disagree (5, 0) and then not Cells_Disagree (0, 0),
+             "five cells that can tell, all showing it, or none, are enough to disagree");
+      Check (Judge (168, 525, 446, 446, Able_Disagree => True) /= Whole,
+             "a picture that most of the cells that can tell do not show is called whole by the others");
+      Check (Judge (168, 525, 446, 446, Able_Disagree => False) = Whole,
+             "a picture that most of the cells that can tell show, and most of the rest are credited, is not whole");
+      Check (Judge (168, 525, 168, 202, Able_Disagree => True) = Patch,
+             "a minority of cells showing the motion, the rest not (a hand's fingers), is not called a patch");
+      Check (Judge (3, 525, 3, 14, Able_Disagree => False) = Nothing,
+             "three cells of 525 respond to a push, which the per-cell test alarms on by chance: the group moves it");
+   end Noisy_Cells_Far_Above_The_Rest;
 
    --  A group only ever pushed together with another is not classified:
    --  what the eyes saw cannot be told from what its partner did.
@@ -2820,7 +3014,6 @@ package body Driver.Robot.Tests is
       Ok    : Boolean;
       Beats : Natural;
       Levels : Natural := 0;   --  the sweep's single-joint levels of arm 1 held for keyframes, both ways
-      Every  : Natural := 0;   --  all its single-joint levels, both ways
       Poses  : Natural;
       Poses_2 : Natural;
    begin
@@ -2838,7 +3031,6 @@ package body Driver.Robot.Tests is
             begin
                if First > 0.0 and then Shift > 0.0 then
                   while Offset * Shift <= Half loop
-                     Every := Every + 2;
                      if Level mod 2 = 1 or else 2.0 * Offset * Shift > Half then
                         Levels := Levels + 2;
                      end if;
@@ -2854,9 +3046,20 @@ package body Driver.Robot.Tests is
       Check (Levels > 0, "arm 1 was not swept");
       Check (Poses >= Levels, "arm 1 could give" & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
       --  The levels between are passed as soon as the arm stops, before the
-      --  picture settles: no keyframe there.
-      Check (Poses < Every, "arm 1 was held for a keyframe at every one of its" & Every'Image & " levels (" & Poses'Image
-             & " poses)");
+      --  picture settles: no keyframe there. The same boot with pictures that settle at once gives a keyframe at every
+      --  level (and at the poses the recognition's pushes stand at, which wait for the pictures to settle: both have
+      --  them).
+      declare
+         Ideal                                 : Model;
+         Ideal_Done, Ideal_Ok                  : Boolean;
+         Ideal_Beats, Ideal_Poses, Ideal_Poses_2 : Natural;
+      begin
+         Boot_On_Rig (Ideal, False, Ideal_Done, Ideal_Ok, Ideal_Beats, Ideal_Poses, Ideal_Poses_2);
+         Check (Ideal_Done, "the boot with pictures that settle at once did not finish");
+         Check (Poses < Ideal_Poses,
+                "arm 1 was held for a keyframe at" & Poses'Image & " poses, as many as when pictures settle at once ("
+                & Ideal_Poses'Image & "), though the levels between the held ones are passed before the picture settles");
+      end;
    end Boot_With_Settling_Views;
 
    --  A boot keeps what it measured when it fails later. The rig's boot is
@@ -3084,6 +3287,168 @@ package body Driver.Robot.Tests is
              "the probe whose noise was lost took" & Lost'Image & " levels, the same probe with its noise kept"
              & Kept'Image & ": its first step was taken before the noise was measured again");
    end Probe_Reads_After_It_Measures;
+
+   --  The rig of the drooping-joint probe, its arm 1 (which eye 1 sees) probed from 0.2, which the eye sees at once, after
+   --  the model has lost the noise of the arm's first joint, so that the probe asks for the estimates as it begins. With Wait
+   --  beats, the estimates are computed apart from the main loop (Driver.Robot.Compute_Apart): the decider that asks for them
+   --  waits (Driver.Beats), the model takes in Wait beats of rest, computes them, and the decider goes on in the beat after,
+   --  as Driver.Apart has the main loop do. Seen: the probe confirmed the level the eye saw.
+   procedure Probe_Through_Apart_Estimates
+     (Wait : Natural; Seen : out Boolean; Excursion : out Real; Finished : out Boolean)
+   is
+      M     : Model;
+      Done  : Boolean := False with Atomic;
+      Slow  : Boolean := False with Atomic;   --  the estimates the probe asks for take the Wait beats
+      Got   : Driver.Robot.Motion.Probe_Report;
+
+      task Decider;
+      task body Decider is
+         W : Natural;
+         procedure Estimate is
+         begin
+            Estimate_Now (M);
+         end Estimate;
+         procedure Lose_Noise is
+         begin
+            M.Noise.Replace_Element (0, Real'Last);   --  group 1's first channel
+            M.Noise_Freedom.Replace_Element (0, 0);
+         end Lose_Noise;
+      begin
+         Driver.Robot.Motion.Settle (M, W);
+         Driver.Robot.Motion.Hold (M, 100);
+         for K in 1 .. 16 loop
+            declare
+               C  : Driver.Commands.Command;
+               SR : Driver.Robot.Motion.Step_Report;
+            begin
+               --  Arm 1, which eye 1 sees, for the body's delay and the eyes' lag.
+               Driver.Commands.Set_Target (C, 1, [(if K mod 2 = 1 then 0.1 else 0.0), 0.0]);
+               Driver.Robot.Motion.Step (M, C, SR);
+               Driver.Robot.Motion.Hold (M, 2 + K mod 4);
+            end;
+         end loop;
+         Driver.Beats.Within_A_Beat (Estimate'Access);
+         Driver.Robot.Motion.Gather_Rest (M, 2);
+         Driver.Beats.Within_A_Beat (Lose_Noise'Access);
+         Slow := True;
+         Driver.Robot.Motion.Probe_Together (M, [1 => (Group => 1, Channel => 1)], 1.0, 0.2, Got);
+         Done := True;
+      exception
+         when others =>
+            Driver.Beats.Release;
+            Done := True;
+      end Decider;
+
+      Now, Shown : Rig_State;
+      Sent    : Driver.Commands.Command;
+      Rng     : Generator;
+      Counted : Natural := 0;   --  observations given to the model
+
+      function Observation_At (Beat : Natural) return Observation is
+         O : Observation;
+      begin
+         O.Beat := Driver.Clock.Beat (Beat);
+         for E in 1 .. 3 loop
+            O.Images.Append (Render (E, Shown));
+            O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         end loop;
+         O.Readings.Append (Now.Arm_1);
+         O.Readings.Append (Now.Arm_2);
+         O.Readings.Append (Real_Array'(1 => Now.Closer));
+         O.Readings.Append (Real_Array'(1 => Now.Part));
+         O.Readings.Append (Real_Array'(1 => Now.Idle + 1.0e-13 * Gaussian (Rng)));
+         for G in 1 .. 5 loop
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         end loop;
+         return O;
+      end Observation_At;
+   begin
+      Seen := False;
+      Excursion := 0.0;
+      if Wait > 0 then
+         Driver.Robot.Compute_Apart (M);
+      end if;
+      begin
+         loop
+            exit when Done;
+            declare
+               O       : constant Observation := Observation_At (Counted);
+               Took    : Boolean := False;
+               Pending : Driver.Commands.Command;
+            begin
+               if Counted = 0 then
+                  Driver.Commands.Set_Target (Sent, 1, Now.Arm_1);
+                  Driver.Commands.Set_Target (Sent, 2, Now.Arm_2);
+                  Driver.Commands.Set_Target (Sent, 3, [Now.Closer]);
+                  Driver.Commands.Set_Target (Sent, 4, [Now.Part]);
+                  Driver.Commands.Set_Target (Sent, 5, [Now.Idle]);
+               end if;
+               Observe (M, O, Sent);
+               Counted := Counted + 1;
+               --  The estimates due (the evidence doubled, or a decider asked): the model goes on taking in rest
+               --  while they are computed (all the Wait beats only for the probe's: the rest the model has counted
+               --  stays what a boot has by then), and the decider that waited goes on in the beat after.
+               if Driver.Robot.Estimates_Due (M) then
+                  for K in 1 .. (if Slow then Wait else 0) loop
+                     Observe (M, Observation_At (Counted), Sent);
+                     Counted := Counted + 1;
+                  end loop;
+                  Driver.Robot.Compute_Estimates (M);
+                  Driver.Beats.Estimates_Adopted;
+               end if;
+               loop
+                  Driver.Beats.Offer (O.Beat, O, Sent, Took);
+                  exit when Took or else Done;
+                  delay 0.0;
+               end loop;
+               exit when not Took;
+               Driver.Beats.Await (Pending);
+               for G in Group_Id range 1 .. 5 loop
+                  if Driver.Commands.Has_Target (Pending, G) then
+                     Driver.Commands.Set_Target (Sent, G, Driver.Commands.Target (Pending, G));
+                  end if;
+               end loop;
+               Shown := Now;
+               Now.Arm_1 := Driver.Commands.Target (Sent, 1);
+               Now.Arm_2 := Driver.Commands.Target (Sent, 2);
+               Now.Closer := Driver.Commands.Target (Sent, 3) (1);
+               Now.Part := Driver.Commands.Target (Sent, 4) (1);
+               Now.Idle := Driver.Commands.Target (Sent, 5) (1);
+            end;
+         end loop;
+      exception
+         when others =>
+            abort Decider;
+            raise;
+      end;
+      if not Done then
+         abort Decider;
+      end if;
+      Finished := Done;
+      Seen := Got.Seen;
+      Excursion := Got.Excursion;
+   end Probe_Through_Apart_Estimates;
+
+   --  An eye sees the joint of an arm move at the first amount: the probe confirms that amount, whether the estimates it
+   --  asks for as it begins come back in the same beat or beats later. Read before the estimates, the first beat no look has
+   --  judged is as old as the wait, the first look counts a false alarm's chance for every beat of it, the chance passes
+   --  one, and no run of moves makes that level certain: the probe is sure only at the next, twice the amount an eye needs
+   --  to see the joint, where the boot's pushes after it are taken from.
+   procedure Probe_Confirms_Through_Apart_Estimates is
+      In_Place, Apart                        : Boolean;
+      In_Place_Amount, Apart_Amount          : Real;
+      Done_1, Done_2                         : Boolean;
+   begin
+      Probe_Through_Apart_Estimates (0, In_Place, In_Place_Amount, Done_1);
+      Probe_Through_Apart_Estimates (300, Apart, Apart_Amount, Done_2);
+      Check (Done_1 and then Done_2, "a probe through the estimates did not finish");
+      Check (In_Place and then In_Place_Amount = 0.2,
+             "the probe of an arm's joint, the estimates in place, was sure of" & In_Place_Amount'Image
+             & " (seen:" & In_Place'Image & "), not of the 0.2 the eye saw at once");
+      Check (Apart and then Apart_Amount = In_Place_Amount,
+             "the probe of an arm's joint, the estimates back 300 beats later, was sure of" & Apart_Amount'Image
+             & " (seen:" & Apart'Image & "), not of the" & In_Place_Amount'Image & " it was sure of in place");
+   end Probe_Confirms_Through_Apart_Estimates;
 
    --  ── Probing a channel both ways ──
    --
@@ -4491,6 +4856,7 @@ package body Driver.Robot.Tests is
       Seed          : Long_Long_Integer := 1;   --  the generator of the matches' errors starts here
       Lone_Box      : Boolean := False;   --  one small box stands on the table, in place of the others
       Arm_Noise     : Real := 0.1;        --  how far the arms' own matches err, pixels per coordinate
+      Last_Unmatched : Boolean := False;   --  no keyframe answers the arms' last reference point (nor does the head)
    end record;
 
    procedure Build_Two_Arms (M : in out Model; Scene : Rig_Scene) is
@@ -4540,6 +4906,9 @@ package body Driver.Robot.Tests is
                   --  As from the query eye's centre: its line of sight, turned.
                   Fit.Project (Asked, Seen_From.Rotation * Fit.Ray (Rig_Lens, U0, V0), U, V, Ahead);
                   Shown := Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0;
+               end if;
+               if Scene.Last_Unmatched and then I = Natural (Arms (From_Arm).Query_U.Length) - 1 then
+                  Shown := False;
                end if;
                if Shown then
                   Answered := Answered + 1;
@@ -4883,11 +5252,13 @@ package body Driver.Robot.Tests is
    --  what it does not show.
    function Head_Rig
      (Boxes : Boolean; Shows : Natural := Natural'Last; Unseen : Boolean := True; Lone : Boolean := False;
-      Arm_Noise : Real := 0.1; Head_Noise : Real := 0.1; Seed : Long_Long_Integer := 1)
+      Arm_Noise : Real := 0.1; Head_Noise : Real := 0.1; Seed : Long_Long_Integer := 1;
+      Last_Unmatched : Boolean := False)
       return Rig_Scene is
      ((Second => Far_Second, With_Boxes => Boxes, Head => True, Head_Pose => Head_Pose, Wrist_Sees => False,
        Unseen_Head => Unseen, Head_Lens => Off_Centre_Head, Head_Shows => Shows, Lone_Box => Lone,
-       Arm_Noise => Arm_Noise, Head_Noise => Head_Noise, Seed => Seed, others => <>));
+       Arm_Noise => Arm_Noise, Head_Noise => Head_Noise, Seed => Seed, Last_Unmatched => Last_Unmatched,
+       others => <>));
 
    --  How many sigmas away from the truth the model's fixed eye E is: the head at Head_Pose, in the world's unit,
    --  with Off_Centre_Head.
@@ -5017,6 +5388,24 @@ package body Driver.Robot.Tests is
          end;
       end;
    end Measure_The_Head;
+
+   --  The arm's fit has a track to the last reference point that a keyframe answered, and a head is placed through the
+   --  depths of all of them (a row of their gains for each reference point, whatever the fit's last track): A31's first
+   --  arm had 476 reference points and a fit of 475, "no covariance of its points' depths" was the head's reason, and
+   --  the head was not placed for the 4,200 beats between its second recompute and its third. Here no keyframe
+   --  answers the last reference point of either arm.
+   procedure Head_Is_Placed_Without_The_Last_Reference is
+      M : Model;
+   begin
+      Build_Two_Arms (M, Head_Rig (Boxes => True, Last_Unmatched => True));
+      Check (Driver.Robot.Kinematics.Fixed_Known (M, 3),
+             "the head is not placed, the last reference point of the arms having no answer: "
+             & Driver.Robot.Kinematics.Fixed_Why (M, 3));
+      if Driver.Robot.Kinematics.Fixed_Known (M, 3) then
+         Check (Head_Off (M, 3) <= Driver.Conventions.Z, "the head is" & Head_Off (M, 3)'Image
+                & " sigmas off the truth");
+      end if;
+   end Head_Is_Placed_Without_The_Last_Reference;
 
    --  Five true answers: the head's place is not determined, and the eye says so with a reason, not with numbers.
    procedure Head_Needs_Answers is
@@ -6523,84 +6912,99 @@ package body Driver.Robot.Tests is
    end A_Lone_Channel_Is_The_Limiter_Only_If_Short_By_More_Than_Its_Scatter;
 
    procedure Stops_Are_Noted_As_Ends is
-      --  The third joint, A27 hand 2's: it stopped against the arm itself at +0.0705 (beat 6152), then at its low end
-      --  -0.0368 (6567), then against the forearm at +0.0194 (6642). The end is the furthest stop of the sense, and
-      --  never nearer than the readings the channel has been seen at; nothing before a stop, nothing for a channel
-      --  whose noise is not measured, and the way up is its own.
+      --  The third joint, A27 hand 2's: it stopped against the arm itself at +0.0705 (beat 6152), at its low end
+      --  -0.0368 (6567), against the forearm at +0.0194 (6642), and at its low end again, -0.0359 (7041), from another
+      --  pose. A stop is an end of its channel when the channel stops at the same reading, to within what two contacts
+      --  would not meet by chance, from another pose of the other channels: until then it is noted, and no plan
+      --  is refused. Nothing for a channel whose noise is not measured, and the way up is its own.
       M : Model;
       Noted : Boolean;
+      Third_Joint_Down : Boolean;
    begin
       Ends_Body (M);
       Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing)), "an end before any stop");
+      --  (a) A27's aim at 6152, the third joint stopped at +0.0705: one stop, noted, no end.
       Ends_Push (M, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
       Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
-      Check (Noted, "the first stop of the third joint moved no end");
+      Check (not Noted and then Natural (M.Groups (1).Stops.Length) = 1, "the first stop of the third joint moved an end or was not kept");
+      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing)), "one stop made an end");
+      --  (b) -0.0368 from a pose with the other joints elsewhere: the readings differ by a tenth of a radian, not an end.
+      Ends_Push (M, [0.0, 0.0, 0.0705, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
+      Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
+      Check (not Noted and then Natural (M.Groups (1).Stops.Length) = 2, "two stops a tenth of a radian apart made an end");
+      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing)), "two stops at different readings made an end");
+      --  (c) The same reading again from the same pose is the same contact seen twice.
+      Ends_Push (M, [0.0, 0.0, 0.0705, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
+      Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
+      Check (not Noted and then Natural (M.Groups (1).Stops.Length) = 2, "the same stop from the same pose was kept or made an end");
+      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing)), "a stop seen twice from one pose made an end");
+      --  (d) -0.0359 from another pose, 0.9 thousandths of a radian from the second: found again, an end.
+      Ends_Push (M, [0.1, 0.2, 0.3, 0.3, 0.1, 0.1], [0.1, 0.2, -0.1016, 0.3, 0.1, 0.1], [0.1, 0.2, -0.0359, 0.3, 0.1, 0.1]);
+      Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
+      Check (Noted, "a stop found again from another pose moved no end");
       declare
          End_Is : constant Estimate := Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing);
       begin
-         Check (Known (End_Is) and then abs (End_Is.Value - 0.0705) < 1.0e-12 and then abs (End_Is.Sigma - 1.0e-6) < 1.0e-12,
-                "the first stop (+0.0705) is not the end, or its sigma is not the channel's noise");
+         Third_Joint_Down := Known (End_Is) and then abs (End_Is.Value + 0.0368) < 1.0e-12 and then abs (End_Is.Sigma - 1.0e-6) < 1.0e-12;
       end;
-      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Increasing)),
-             "a stop going down is an end going up");
-      Check (not Known (Driver.Robot.End_Of (M, 1, 2, Driver.Robot.Decreasing)),
-             "the second joint, short but not the limiter, has an end");
-      Ends_Push (M, [0.0, 0.0, 0.0705, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
-      Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
-      Check (Noted, "a stop that went further moved no end");
-      Check (abs (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing).Value + 0.0368) < 1.0e-12,
-             "a stop that went further did not widen the end to -0.0368");
+      Check (Third_Joint_Down, "the end found twice (-0.0368, -0.0359) is not the furthest of the two, or its sigma is not the channel's noise");
+      Check (Natural (M.Groups (1).Stops.Length) = 1, "the stops that made the end were kept as stops as well");
+      Check (not Known (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Increasing)), "a stop going down is an end going up");
+      Check (not Known (Driver.Robot.End_Of (M, 1, 2, Driver.Robot.Decreasing)), "the second joint, short but not the limiter, has an end");
+      --  (e) A stop where the arm met itself, against an end the channel has: the end explains it, nothing is kept.
       Ends_Push (M, [0.0, 0.0, 0.3, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0273, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0194, 0.0, 0.0, 0.0]);
       Driver.Robot.Motion.Note_Stopped (M, 1, Noted);
-      Check (not Noted, "a stop nearer than the end moved it");
+      Check (not Noted and then Natural (M.Groups (1).Stops.Length) = 1, "a stop short of the end it explained was kept or moved the end");
       Check (abs (Driver.Robot.End_Of (M, 1, 3, Driver.Robot.Decreasing).Value + 0.0368) < 1.0e-12,
              "a stop where the arm met itself (+0.0194) moved the end it had found (-0.0368)");
-      --  The stops are readings, and a channel is never taken to end nearer than its readings seen, so the end the
-      --  model shows is the lowest reading when a stop was noted; what it kept of the stops is the furthest of them.
+      --  The stops are readings, and a channel is never taken to end nearer than its readings seen.
       Check (M.Groups (1).Has_Stopped_Low (2) and then abs (M.Groups (1).Stopped_Low (2) + 0.0368) < 1.0e-12
              and then not M.Groups (1).Has_Stopped_High (2),
-             "the stops kept are not the furthest down (-0.0368) of the three, or one is kept going up");
+             "the end kept is not the furthest down (-0.0368) of the two, or one is kept going up");
       --  A push is a stop when its caller says so: the sixth joint asked up and stopped short, on a body of its own.
       declare
          Fresh : Model;
       begin
          Ends_Body (Fresh);
          Ends_Push (Fresh, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.5], [0.0, 0.0, 0.0, 0.0, 0.0, 0.1]);
-         Check (not Known (Driver.Robot.End_Of (Fresh, 1, 6, Driver.Robot.Increasing)), "an end was found without the caller's word");
+         Check (Natural (Fresh.Groups (1).Stops.Length) = 0, "a stop was kept without the caller's word");
          Driver.Robot.Motion.Note_Stopped (Fresh, 1);
-         --  Its stop at 0.1 is below the 1.0 it was first seen at, and an end is no nearer than a reading seen.
-         Check (Known (Driver.Robot.End_Of (Fresh, 1, 6, Driver.Robot.Increasing))
-                and then abs (Driver.Robot.End_Of (Fresh, 1, 6, Driver.Robot.Increasing).Value - 1.0) < 1.0e-12,
-                "the sixth joint asked up and stopped short at 0.1 has no end up there, or one below the 1.0 it was seen at");
+         Check (Natural (Fresh.Groups (1).Stops.Length) = 1 and then not Known (Driver.Robot.End_Of (Fresh, 1, 6, Driver.Robot.Increasing)),
+                "the sixth joint asked up and stopped short at 0.1 made an end, or was not kept");
       end;
       declare
-         Other : Model;
+         Unmeasured : Model;
       begin
-         Ends_Body (Other);
-         Ends_Push (Other, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
-         Driver.Robot.Motion.Note_Stopped (Other, 1);
-         Check (Known (Driver.Robot.End_Of (Other, 1, 3, Driver.Robot.Decreasing)), "the stop was not noted before the noise went");
-         Other.Noise.Clear;   --  the noise is not measured (a reload that lost it)
-         Check (not Known (Driver.Robot.End_Of (Other, 1, 3, Driver.Robot.Decreasing)),
-                "a channel whose noise is not measured showed an end");
-         declare
-            Unmeasured : Model;
-         begin
-            Ends_Body (Unmeasured);
-            Unmeasured.Noise.Clear;   --  nor was it when the push was
-            Ends_Push (Unmeasured, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
-            Driver.Robot.Motion.Note_Stopped (Unmeasured, 1);
-            Check (not Known (Driver.Robot.End_Of (Unmeasured, 1, 3, Driver.Robot.Decreasing)),
-                   "a push of a channel whose noise was not measured showed an end");
-         end;
+         Ends_Body (Unmeasured);
+         Unmeasured.Noise.Clear;   --  the noise is not measured
+         Ends_Push (Unmeasured, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
+         Driver.Robot.Motion.Note_Stopped (Unmeasured, 1);
+         Check (Natural (Unmeasured.Groups (1).Stops.Length) = 0 and then not Known (Driver.Robot.End_Of (Unmeasured, 1, 3, Driver.Robot.Decreasing)),
+                "a push of a channel whose noise was not measured was kept or showed an end");
       end;
-      --  Seen, the channel is no nearer: the end is never above a reading the channel has been seen at.
+      --  A stop going up does not make an end with one going down at the same reading, and the other way about.
+      declare
+         Ways : Model;
+      begin
+         Ends_Body (Ways);
+         Ends_Push (Ways, [0.0, 0.0, 0.3, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
+         Driver.Robot.Motion.Note_Stopped (Ways, 1);
+         Ends_Push (Ways, [0.1, 0.2, -0.3, 0.3, 0.1, 0.1], [0.1, 0.2, 0.2, 0.3, 0.1, 0.1], [0.1, 0.2, -0.0368, 0.3, 0.1, 0.1]);
+         Driver.Robot.Motion.Note_Stopped (Ways, 1);
+         Check (Natural (Ways.Groups (1).Stops.Length) = 2 and then not Known (Driver.Robot.End_Of (Ways, 1, 3, Driver.Robot.Decreasing))
+                and then not Known (Driver.Robot.End_Of (Ways, 1, 3, Driver.Robot.Increasing)),
+                "a stop going up and one going down at one reading made an end");
+      end;
+      --  Seen, the channel is no nearer: an end found at -0.0368 and -0.0359 is not above a reading the channel has been
+      --  seen at (-0.0415, the home pose of A27's boot).
       declare
          Seen : Model;
       begin
          Ends_Body (Seen);
          Ends_Push (Seen, [0.0, 0.0, -0.0415, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0415, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0415, 0.0, 0.0, 0.0]);
-         Ends_Push (Seen, A27_6152_Start, A27_6152_Aim, A27_6152_Stop);
+         Ends_Push (Seen, [0.0, 0.0, 0.3, 0.0, 0.0, 0.0], [0.0, 0.0, -0.1016, 0.0, 0.0, 0.0], [0.0, 0.0, -0.0368, 0.0, 0.0, 0.0]);
+         Driver.Robot.Motion.Note_Stopped (Seen, 1);
+         Ends_Push (Seen, [0.1, 0.2, 0.3, 0.3, 0.1, 0.1], [0.1, 0.2, -0.1016, 0.3, 0.1, 0.1], [0.1, 0.2, -0.0359, 0.3, 0.1, 0.1]);
          Driver.Robot.Motion.Note_Stopped (Seen, 1);
          Check (abs (Driver.Robot.End_Of (Seen, 1, 3, Driver.Robot.Decreasing).Value + 0.0415) < 1.0e-12,
                 "an end above a reading the channel was seen at, which it can reach");
@@ -6662,6 +7066,17 @@ package body Driver.Robot.Tests is
          M.Groups (1).Has_Stopped_Low.Append (C mod 2 = 1);
          M.Groups (1).Has_Stopped_High.Append (C mod 3 = 0);
       end loop;
+      --  Two stops not yet found again, each with the pose it was made from.
+      for K in 1 .. 2 loop
+         declare
+            Pose : Real_Vectors.Vector;
+         begin
+            for C in 1 .. 6 loop
+               Pose.Append (0.1 * Real (K) + 0.01 * Real (C));
+            end loop;
+            M.Groups (1).Stops.Append (Stop_Record'(Channel => 1 + K, Up => K = 1, Value => 0.7 * Real (K), Pose => Pose));
+         end;
+      end loop;
       declare
          Written : constant String := Driver.Robot.Body_File.Text (M);
       begin
@@ -6676,6 +7091,10 @@ package body Driver.Robot.Tests is
          Check (abs (Driver.Robot.End_Of (Back, 1, 3, Driver.Robot.Increasing).Value - 1.5) < 1.0e-9
                 and then abs (Driver.Robot.End_Of (Back, 1, 5, Driver.Robot.Decreasing).Value + 1.5) < 1.0e-9,
                 "the reloaded ends are other numbers than the written ones");
+         Check (Natural (Back.Groups (1).Stops.Length) = 2 and then Back.Groups (1).Stops (2).Channel = 3
+                and then not Back.Groups (1).Stops (2).Up and then abs (Back.Groups (1).Stops (2).Value - 1.4) < 1.0e-9
+                and then abs (Back.Groups (1).Stops (2).Pose (3) - 0.24) < 1.0e-9 and then Back.Groups (1).Stops (1).Up,
+                "the reloaded body has other stops than the written one's, or their poses");
          Check (Driver.Robot.Body_File.Text (Back) = Written, "the reloaded body writes another file");
       end;
    end Ends_Are_Kept_In_The_Body_File;
@@ -6693,6 +7112,8 @@ package body Driver.Robot.Tests is
                              Probe_Limits_And_Deadbands'Access);
       Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
+      Driver.Tests.Register ("robot.probe.apart", "a probe that asks for the estimates as it begins loses what an eye saw "
+                             & "when they come back beats later", Probe_Confirms_Through_Apart_Estimates'Access);
       Driver.Tests.Register ("robot.probe.lost", "a probe whose channel's noise was lost measures it again before "
                              & "it reads anything and takes its first step from it",
                              Probe_Reads_After_It_Measures'Access);
@@ -6782,6 +7203,10 @@ package body Driver.Robot.Tests is
                              & "the world within Z of its sigmas, or a line of sight through its pixels is off by more "
                              & "than its sigma, or a point along one does not land on its pixel",
                              Measure_The_Head'Access);
+      Driver.Tests.Register ("robot.head.last",
+                             "a fixed eye is not placed because no keyframe answers the arm's last reference point "
+                             & "(the fit has a track fewer than the arm has reference points, and the eye asks for "
+                             & "a row of depth gains for each)", Head_Is_Placed_Without_The_Last_Reference'Access);
       Driver.Tests.Register ("robot.head.few",
                              "a fixed eye is placed from five true answers, or says nothing of why not",
                              Head_Needs_Answers'Access);
@@ -6899,12 +7324,18 @@ package body Driver.Robot.Tests is
                              & "the body settles at", Settle_Past_A_Patch_Flickering_At_Rest'Access);
       Driver.Tests.Register ("robot.keyframe.jitter", "an arm held away from rest whose reading jitters more than it did "
                              & "at rest gives no keyframe though its eye is still", Keyframe_Despite_Held_Jitter'Access);
+      Driver.Tests.Register ("robot.roles.presses", "a gripper held at an opening while the arm moves the whole hand in its "
+                             & "own eye is called an arm after enough presses", Presses_Leave_A_Closer_A_Closer'Access);
       Driver.Tests.Register ("robot.roles.undecided", "a group some eye is still undecided about is called a closer or a "
                              & "part, though that eye may ride on it", Undecided_Eye_Leaves_Group_Unclassified'Access);
       Driver.Tests.Register ("robot.roles.noisy", "an eye that a group carries is called a patch of it because part of its "
                              & "picture is too faintly textured for its cells to tell the group's push, or a patch "
                              & "among well-textured cells is called the whole picture",
                              Carried_Eye_Partly_Textureless'Access);
+      Driver.Tests.Register ("robot.roles.far", "a few cells that show a motion thousands of times the typical energy "
+                             & "(the fingers of a hand in view) make every cell too noisy to tell show it, and a "
+                             & "closer is called an arm",
+                             Noisy_Cells_Far_Above_The_Rest'Access);
       Driver.Tests.Register ("robot.unprobed", "a group never pushed on its own is given a role from what moved "
                              & "with it", Unprobed_Group_Stays_Unclassified'Access);
       Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "

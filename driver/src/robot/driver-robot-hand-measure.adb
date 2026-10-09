@@ -677,21 +677,21 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end Above;
       Steps : Driver.Robot.Hand.Descent_Steps;
 
-      --  What the hand has found of its press since the let-go: the presses its book keeps, whether the arm's own
-      --  readings are at rest (Driver.Robot.Hand.Arm_At_Rest), and the most beats a push of the arm has taken.
-      Kept_Now : Natural := 0;
-      Resting  : Boolean := False;
-      Allowed  : Natural := 0;
-      procedure Read_Kept (O : Observation) is
+      --  What the hand has found of its press since the let-go: the presses its watcher found at a rest, and the most
+      --  beats a decider waits for one: no wait is longer than all the waiting so far, the stream's length (it is the
+      --  hand settling on what it pressed that ends the wait, Driver.Robot.Hand.Presses, and a creep that decays does).
+      Rests_Now : Natural := 0;
+      Allowed   : Natural := 0;
+      procedure Read_Rests (O : Observation) is
+         pragma Unreferenced (O);
       begin
          Lost := not Present (Id, R);
          if Lost then
             return;
          end if;
-         Kept_Now := Driver.Robot.Hand.Tips.Pressed (H.Data.Found (Id).Book);
-         Resting := Driver.Robot.Hand.Arm_At_Rest (M, R.Arm, O);
-         Allowed := Driver.Robot.Hand.Longest_Push (M, R.Arm);
-      end Read_Kept;
+         Rests_Now := H.Data.Found (Id).Rests;
+         Allowed := M.Beats;
+      end Read_Rests;
 
       procedure Read_Arm (O : Observation) is
          --  The arm's group was found at the aim (Arm_Is) and is not looked up again: it is the arm's readings that
@@ -785,8 +785,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
             return False;
          end if;
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": pressing lobe" & Lobe'Image & " at "
-                          & (if Which = Open then "open" else "closed") & ", aimed by turning the hand "
-                          & Driver.Log.Image (Aimed.Turn, 4) & " rad"
+                          & (if Which = Open then "open" else "closed") & ", its line of sight tilted "
+                          & Driver.Log.Image (Driver.Robot.Hand.Aims.Spread (R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)
+                          & " rad from straight down, aimed by turning the hand " & Driver.Log.Image (Aimed.Turn, 4) & " rad"
                           & (if Known (First.Tip)
                              then ", " & Driver.Log.Image (First.Tip.Value, 4) & " +- " & Driver.Log.Image (First.Tip.Sigma, 4)
                                   & " above the surface the presses so far fixed"
@@ -849,36 +850,35 @@ procedure Measure (H : in out Hands; M : in out Model) is
          return False;
       end if;
       --  Let go: the arm held where the block left it, so the hand rests there, and the arm does not leave until it
-      --  has. The watcher takes the press at that rest (Driver.Robot.Hand.Presses); a retreat begun while the readings
-      --  still ease back would give it the rest at the aim, where the hand is not on what it pressed (A35's first
-      --  press: a tip 11.4457 from the eye, the eye's height at the aim, for the 3.8 it was). The wait is for the
-      --  arm's own readings to be still, at most as long as the longest push the arm has had took to come to rest.
+      --  has. The watcher takes the press when the hand has settled on what it pressed (Driver.Robot.Hand.Presses); a
+      --  retreat begun while the readings still ease back would give it the rest at the aim, where the hand is not on
+      --  what it pressed (A35's first press: a tip 11.4457 from the eye, the eye's height at the aim, for the 3.8 it
+      --  was). The wait ends when the watcher has found the press, or at the stream's length (it never comes to that
+      --  while the hand's creep decays).
       declare
-         Kept_Before : Natural;
-         Waited      : Natural := 0;
+         Rests_Before : Natural;
+         Waited       : Natural := 0;
       begin
-         Hold_Beat (Read_Kept'Access);
+         Hold_Beat (Read_Rests'Access);
          if Lost then
             End_Lost (Moved => True);
             return False;
          end if;
-         Kept_Before := Kept_Now;
+         Rests_Before := Rests_Now;
          Hold_Beat (Read_Arm'Access);
          Move_Group (Arm_Is, Arm_Now.Element);
          loop
-            Hold_Beat (Read_Kept'Access);
-            exit when Lost or else Resting or else Waited >= Allowed;
+            Hold_Beat (Read_Rests'Access);
+            exit when Lost or else Rests_Now > Rests_Before or else Waited >= Allowed;
             Waited := Waited + 1;
          end loop;
          if Lost then
             End_Lost (Moved => True);
             return False;
          end if;
-         if Kept_Now = Kept_Before then
+         if Rests_Now = Rests_Before then
             Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": no press of lobe" & Lobe'Image & " was found at the rest after"
-                             & " the let-go: the arm "
-                             & (if Resting then "rested, and the hand found no press in it"
-                                else "did not rest in" & Waited'Image & " beats, the longest a push of the arm took")
+                             & " the let-go: the arm did not rest in" & Waited'Image & " beats, the stream's length"
                              & "; the arm is taken back to where the descent began");
             Move_Group (Arm_Is, Aim_At.Element);
             return False;
@@ -933,7 +933,6 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Checked : Boolean := False;   --  the lobe's tip is confirmed by a second press from another pose
          Least   : Real := Real'Last;  --  the least tilt that tells the tip from a stop that does not move with it
          procedure Read_Agreed (O : Observation) is
-            pragma Unreferenced (O);
          begin
             Lost := not Present (Id, R);
             if Lost then
@@ -944,7 +943,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
             begin
                Agreed := Driver.Robot.Hand.Tips.Latest_Agrees (Book);
                Checked := Driver.Robot.Hand.Tips.Confirmed (Book, Lobe, Which);
-               Least := Driver.Robot.Hand.Aims.Least_Tilt (Driver.Robot.Hand.Tips.Distance (Book, Lobe, Which));
+               Least := Driver.Robot.Hand.Aims.Least_Tilt
+                 (Driver.Robot.Hand.Tips.Distance (Book, Lobe, Which), Driver.Robot.Hand.Pressing.Least_Push (M, R.Arm, O));
             end;
          end Read_Agreed;
       begin
