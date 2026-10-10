@@ -276,8 +276,13 @@ procedure Score is
          end if;
          if Known then
             Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Recorded.Length), O);
+            --  Both groups of a command key's pair, each under its own path: which is the reading the driver tells by how
+            --  they change (Driver.Twins), and the truth pairs by the path of the reading.
             for G in Layout.Groups.First_Index .. Layout.Groups.Last_Index loop
                B.Readings.Include (To_String (Layout.Groups (G).Path), O.Readings.Element (G));
+               if Length (Layout.Groups (G).Echo_Path) > 0 and then O.Echoes.Element (G)'Length > 0 then
+                  B.Readings.Include (To_String (Layout.Groups (G).Echo_Path), O.Echoes.Element (G));
+               end if;
             end loop;
             Recorded.Append (B);
          end if;

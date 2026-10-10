@@ -68,6 +68,7 @@ with Driver.Robot;
 with Driver.Robot.Boot;
 with Driver.Robot.Hand;
 with Driver.Services;
+with Driver.Twins;
 with Driver.Uncertain;
 with Driver.World;
 
@@ -94,6 +95,12 @@ procedure Replay is
    More     : Boolean := True;
 
    Layout   : Driver.Observations.Layout;
+   Twins    : Driver.Twins.Watch;   --  which group of each command key's pair is its reading, as the driver finds it
+
+   --  Where a group's readings are in the observation: its layout path, or its echo path when the driver found its
+   --  pair the other way round (Driver.Twins).
+   function Reading_Path (G : Driver.Observations.Group_Id) return Ada.Strings.Unbounded.Unbounded_String is
+     (if Driver.Twins.Reading_Is_Echo_Path (Twins, G) then Layout.Groups (G).Echo_Path else Layout.Groups (G).Path);
    Known    : Boolean := False;
    Beat     : Natural := 0;
    Episodes : Natural := 0;
@@ -183,7 +190,7 @@ procedure Replay is
             H : constant Hand_Id := Hand_Id (Id);
          begin
             Append (Line_Text, (if Id > 1 then "," else "") & "{""arm"":" & Natural'Image (Natural (Arm_Of (Hands, H)))
-                    & ",""closer"":""" & To_String (Layout.Groups (Closer_Group (Hands, H)).Path) & """,""lobes"":[");
+                    & ",""closer"":""" & To_String (Reading_Path (Closer_Group (Hands, H))) & """,""lobes"":[");
             for Lobe in 1 .. Lobe_Count (Hands, H) loop
                Append (Line_Text, (if Lobe > 1 then ",{" else "{"));
                for At_Opening in Opening loop
@@ -352,6 +359,7 @@ procedure Replay is
                Start : constant Duration := Driver.Clock.Seconds;
             begin
                Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), M.O);
+               Driver.Twins.Order (Twins, Layout, M.O, Sent);
                Spent (Parsing) := Spent (Parsing) + (Driver.Clock.Seconds - Start);
             end;
             Current := M.O;

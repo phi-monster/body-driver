@@ -32,6 +32,7 @@ package body Driver.Robot.Channels is
             if S.Size = 0 and then G <= O.Readings.Last_Index and then O.Readings.Element (G)'Length > 0 then
                S.Size := O.Readings.Element (G)'Length;
                S.Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));
+               S.Twin_Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));
                S.Targets.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));
             end if;
          end;
@@ -42,6 +43,46 @@ package body Driver.Robot.Channels is
             Aimed : constant Boolean := S.Size > 0 and then Driver.Commands.Has_Target (Sent, G)
                                         and then Driver.Commands.Target (Sent, G)'Length = S.Size;
          begin
+            --  The pair of this group's command key was found the other way round at this beat (Driver.Twins): what
+            --  was kept for its readings was its echo, and the echo kept was its readings. Both turn round, and the
+            --  range seen with them; the estimates are redone at once.
+            if G <= O.Turned.Last_Index and then O.Turned (G)
+              and then Natural (S.Twin_Values.Length) = Natural (S.Values.Length)
+            then
+               declare
+                  Kept : constant Real_Vectors.Vector := S.Values;
+               begin
+                  S.Values := S.Twin_Values;
+                  S.Twin_Values := Kept;
+               end;
+               S.Low_Seen.Clear;
+               S.High_Seen.Clear;
+               for B in 0 .. Natural (S.Present.Length) - 1 loop
+                  if S.Present (B) then
+                     for C in 0 .. S.Size - 1 loop
+                        declare
+                           V : constant Real := S.Values (B * S.Size + C);
+                        begin
+                           if Natural (S.Low_Seen.Length) < S.Size then
+                              S.Low_Seen.Append (V);
+                              S.High_Seen.Append (V);
+                           else
+                              S.Low_Seen.Replace_Element (C, Real'Min (S.Low_Seen (C), V));
+                              S.High_Seen.Replace_Element (C, Real'Max (S.High_Seen (C), V));
+                           end if;
+                        end;
+                     end loop;
+                  end if;
+               end loop;
+               M.Due := True;
+            end if;
+            if G <= O.Echoes.Last_Index and then O.Echoes.Element (G)'Length = S.Size then
+               for V of O.Echoes.Element (G) loop
+                  S.Twin_Values.Append (V);
+               end loop;
+            else
+               S.Twin_Values.Append (0.0, Ada.Containers.Count_Type (S.Size));
+            end if;
             S.Present.Append (Have);
             if Have then
                for V of O.Readings.Element (G) loop

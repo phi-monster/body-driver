@@ -62,6 +62,7 @@ package Driver.Observations is
    package Reading_Vectors is new Ada.Containers.Indefinite_Vectors (Group_Id, Real_Array);
    package Image_Vectors is new Ada.Containers.Vectors (Camera_Id, Driver.Images.Image, Driver.Images."=");
    package Depth_Vectors is new Ada.Containers.Indefinite_Vectors (Camera_Id, Real_Array);
+   package Turn_Vectors is new Ada.Containers.Vectors (Group_Id, Boolean);
 
    type Observation is record
       Beat        : Driver.Clock.Beat := 0;
@@ -69,10 +70,12 @@ package Driver.Observations is
       Images      : Image_Vectors.Vector;  --  one per camera; No_Image when missing this beat
       Readings    : Reading_Vectors.Vector;--  one per group; empty when missing this beat
       Echoes      : Reading_Vectors.Vector;--  one per group; the echoed command, or empty
+      Turned      : Turn_Vectors.Vector;   --  one per group; True at the beat its reading and its echo were found to
+                                           --  be the other way round from the layout's order (Driver.Twins)
       Depth       : Depth_Vectors.Vector;  --  one per camera; empty when not reported
       Instruction : Unbounded_String;
    end record;
-   --  Images, Readings, Echoes and Depth always have one element per camera
+   --  Images, Readings, Echoes, Turned and Depth always have one element per camera
    --  or group of the layout, so an index never shifts when something is
    --  missing for a beat.
 

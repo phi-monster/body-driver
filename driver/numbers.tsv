@@ -866,6 +866,8 @@ driver-robot-channels.adb	Phi : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 
 driver-robot-channels.adb	Phi : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
 driver-robot-channels.adb	S.Targets.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Targets.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
+driver-robot-channels.adb	S.Twin_Values.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without an echo; Present marks the beats a reading came, and an echo comes with it
+driver-robot-channels.adb	S.Twin_Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without an echo; Present marks the beats a reading came, and an echo comes with it
 driver-robot-channels.adb	S.Values.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	if Back and then Round > 1 then	1	structure	a round brings back the marks of the one before the last only from its third round on

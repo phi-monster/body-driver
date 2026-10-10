@@ -31,6 +31,7 @@ being written are added here as those layers land.
 | `the robot connected` | a client finished the handshake |
 | `the robot disconnected; waiting for it on the same port` | the client went away; nothing measured is lost, and a client that connects again is served on |
 | `the robot reports:` | the first observation was recognized; one line per camera, group and unused leaf follows (below) |
+| `group <g>: its readings are at <path>, the robot's echo of its command at <path>: the echo changed with the command and only with it, the readings did not` | the two groups of a command key were told apart by how they change (Driver.Twins): the one given at the second path is the reading when it differs from the layout line's order, and the readings kept so far turn round with it |
 | `waiting: the driver needs at least one camera and one group of readings, got <layout>` | the observation lacks a camera or a group; the next one is looked at again |
 | `a robot message that is not a protocol message was ignored` | a message that is not msgpack, or not a map |
 | `the body could not be measured; holding still` | the boot found the body breaking the porting contract; the reason was logged by the boot; every reply holds |
