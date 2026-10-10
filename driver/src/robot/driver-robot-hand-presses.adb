@@ -50,7 +50,11 @@ package body Driver.Robot.Hand.Presses is
                W.State := Driven;
                W.Commands := 0;
                W.Approach := (if W.Stood then Moved_Into (W.Last_Still, Tool) else (others => <>));
-            elsif Still then
+            elsif Still and then not Pushing then
+               --  Where the tool stood still while free, no push under way: a push that met the table holds the tool
+               --  still against it, as far as its pose tells, for as long as the push takes to be judged blocked, and
+               --  that pose is the block's, not where the press came from (A90: every press's way was unknown, given
+               --  to no lobe, and no tip was fitted).
                W.Stood := True;
                W.Last_Still := Tool;
             end if;

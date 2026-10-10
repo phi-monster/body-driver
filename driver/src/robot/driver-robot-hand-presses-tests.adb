@@ -154,6 +154,31 @@ package body Driver.Robot.Hand.Presses.Tests is
              & (if Got'Length > 0 then Got (1).Beat'Image else " none"));
    end Let_Go_Answered_Late;
 
+   procedure Held_Before_The_Verdict is
+      --  A90's presses: the push that met the table held the tool still against it, as far as its pose tells, for the
+      --  beats the push took to be judged blocked; the way the press came is the way the tool moved from where it last
+      --  stood still with no push under way, not from where the push held it (from which it did not move at all, and
+      --  the press, its way unknown, was given to no lobe).
+      Stream : constant Stream_Kind :=
+        [1  => (False, False, True, 0.200),   --  free, at rest above the table
+         2  => (False, False, True, 0.200),
+         3  => (False, True, False, 0.150),   --  the descent
+         4  => (False, True, False, 0.110),
+         5  => (False, True, True, 0.0980),   --  against the table, still, the push not judged yet
+         6  => (False, True, True, 0.0980),
+         7  => (False, True, True, 0.0980),
+         8  => (True, False, True, 0.0980),   --  judged blocked: the stop
+         9  => (False, True, False, 0.0985),  --  the let-go
+         10 => (False, False, True, 0.0990)]; --  at rest: the press
+      Got : constant Found_Array := Run (Stream);
+   begin
+      Check (Got'Length = 1, "the stream gave" & Got'Length'Image & " presses, not one");
+      if Got'Length = 1 then
+         Check (Got (1).Event.Approach.Sigma < Real'Last and then Got (1).Event.Approach.Unit_Vector (1) > 0.999,
+                "the way the press came is not the way the tool moved from where it stood free");
+      end if;
+   end Held_Before_The_Verdict;
+
    procedure Hold_Begins_No_Push is
       --  A35's first press: the push that met the table ended blocked while the arm was still easing back; the hold at
       --  the readings the block left asked the arm nothing the step tracker sees, so no push began and the verdict
@@ -222,6 +247,9 @@ package body Driver.Robot.Hand.Presses.Tests is
       Driver.Tests.Register ("hand.presses.late",
                              "a body that answers the let-go late is read at the stop, not after the let-go",
                              Let_Go_Answered_Late'Access);
+      Driver.Tests.Register ("hand.presses.held",
+                             "a push that holds the tool still against the table before it is judged blocked leaves the press's way unknown",
+                             Held_Before_The_Verdict'Access);
    end Register;
 
 end Driver.Robot.Hand.Presses.Tests;
