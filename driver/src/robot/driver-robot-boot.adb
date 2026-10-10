@@ -359,11 +359,8 @@ package body Driver.Robot.Boot is
                type Stop is (Climbing, Not_Followed, Blocked, Widest);
                Offset  : Real_Array (1 .. 2 * Size) := [others => 0.0];
                State   : array (1 .. 2 * Size) of Stop := [others => Blocked];
-               --  Per push: the beats the arm was held for its latest keyframe, the last offset followed, and
-               --  whether the level between that and an unfollowed one was tried.
+               --  Per push: the beats the arm was held for its latest keyframe.
                Held_From, Held_To : array (1 .. 2 * Size) of Natural := [others => 0];
-               Held_Offset : Real_Array (1 .. 2 * Size) := [others => 0.0];
-               Retried     : array (1 .. 2 * Size) of Boolean := [others => False];
                --  Per channel: the largest offset a followed keyframe of it was taken at.
                Reached : Real_Array (1 .. Size) := [others => 0.0];
                Swept   : array (1 .. Size) of Positive;
@@ -547,18 +544,10 @@ package body Driver.Robot.Boot is
                                  if Followed_Now then
                                     Followed_In_Pass := Followed_In_Pass + 1;
                                     Reached (P.Channel) := Real'Max (Reached (P.Channel), Offset (I));
-                                    Held_Offset (I) := Offset (I);
-                                    Retried (I) := False;
                                     Offset (I) := 2.0 * Offset (I);
                                     if Offset (I) * Per_Unit (P.Channel) > Half then
                                        State (I) := Widest;
                                     end if;
-                                 elsif not Retried (I) and then Held_Offset (I) > 0.0 then
-                                    --  Once, half way back towards the last level followed: the
-                                    --  aligner follows an extrapolation to about a patch of
-                                    --  displacement, and the level between may still lie within it.
-                                    Retried (I) := True;
-                                    Offset (I) := (Held_Offset (I) + Offset (I)) / 2.0;
                                  else
                                     State (I) := Not_Followed;
                                  end if;
