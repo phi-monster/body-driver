@@ -302,7 +302,17 @@ package body Driver.Robot.Motion is
    end Note_Stopped;
 
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
-     (Kinematics.Keyframe_Step (M, A, Channel));
+      Step  : constant Real := Kinematics.Keyframe_Step (M, A, Channel);
+      Noise : constant Real := Channels.Noise (M, Arm_Group (M, A), Channel);
+   begin
+      --  The step, and what the readings' noise can take off a turn asked of
+      --  exactly it: a keyframe counts as a joint's own, and is kept at all,
+      --  from the step on, and a turn of the step itself lands below it half
+      --  the time (fake body V6, arm 1: the first joint's turns of its step,
+      --  38 units, left no keyframe through eleven rounds, and the fit said
+      --  the joint had none of its own).
+      return (if Step > 0.0 and then Noise < Real'Last then Step + Driver.Conventions.Z * Sqrt (2.0) * Noise else Step);
+   end Sweep_Start;
 
    procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id) is
       B    : Driver.Clock.Beat;

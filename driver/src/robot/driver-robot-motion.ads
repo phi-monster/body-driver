@@ -90,10 +90,12 @@ package Driver.Robot.Motion is
    --  what both the view and the matcher can tell: Z times the larger of
    --  the cells' displacement noise (Lockin.Cell_Noise) and the matcher's
    --  (Kinematics.Match_Noise, from the still twin), over how far the view
-   --  moves per reading unit of the joint (Lockin.Shift); a keyframe that
-   --  moves less tells the kinematics nothing, and A9's showed it makes the
-   --  fit worse. Zero when the arm carries no eye or the shift or the cells'
-   --  noise is not measured.
+   --  moves per reading unit of the joint (Lockin.Shift), the keyframe step,
+   --  plus what the readings' noise can take off a turn (Z of the noise of a
+   --  difference of two readings), so that the turn lands at the step or
+   --  beyond; a keyframe that moves less tells the kinematics nothing, and
+   --  A9's showed it makes the fit worse. Zero when the arm carries no eye or
+   --  the shift or the cells' noise is not measured.
 
    procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id);
    --  Holds the body until the arm can give its kinematics a keyframe: its
