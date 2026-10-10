@@ -1079,6 +1079,46 @@ package body Driver.Robot.Lockin is
       return False;
    end Shows_Step;
 
+   function Column_Of (S : Eye_Stream; G : Group_Id; Channel : Positive) return Natural is
+      Kept : constant Natural := Natural (S.Kept_Groups.Length);
+   begin
+      for K in 0 .. Kept - 1 loop
+         if S.Kept_Groups (K) = Natural (G) and then S.Kept_Channels (K) = Channel then
+            return K + 1;
+         end if;
+      end loop;
+      return 0;
+   end Column_Of;
+
+   procedure Gain_Of
+     (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive; Gain, Spread : out Real; Measured : out Boolean)
+   is
+      S      : Eye_Stream renames M.Eyes (E);
+      Kept   : constant Natural := Natural (S.Kept_Groups.Length);
+      Column : constant Natural := Column_Of (S, G, Channel);
+   begin
+      Gain := 0.0;
+      Spread := 0.0;
+      Measured := Column > 0;
+      if Measured then
+         for Cell in 0 .. Natural (S.Gains.Length) / Kept - 1 loop
+            Gain := Gain + S.Gains (Cell * Kept + Column - 1);
+            Spread := Spread + S.Gain_Variances (Cell * Kept + Column - 1);
+         end loop;
+      end if;
+   end Gain_Of;
+
+   function Seen (Gain, Spread : Real) return Boolean is
+     (Gain > Driver.Conventions.Z * Sqrt (Real'Max (0.0, Spread)));
+
+   function Seen (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Boolean is
+      Gain, Spread : Real;
+      Measured     : Boolean;
+   begin
+      Gain_Of (M, E, G, Channel, Gain, Spread, Measured);
+      return Measured and then Seen (Gain, Spread);
+   end Seen;
+
    function Shift (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Real is
       S      : Eye_Stream renames M.Eyes (E);
       Kept   : constant Natural := Natural (S.Kept_Groups.Length);
@@ -1091,6 +1131,9 @@ package body Driver.Robot.Lockin is
          end if;
       end loop;
       if Column = 0 then
+         return 0.0;
+      end if;
+      if not Seen (M, E, G, Channel) then
          return 0.0;
       end if;
       for Cell in 0 .. Natural (S.Shifts.Length) / Kept - 1 loop

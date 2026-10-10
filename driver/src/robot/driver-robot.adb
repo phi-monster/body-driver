@@ -667,28 +667,20 @@ package body Driver.Robot is
    begin
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
-            S    : Eye_Stream renames M.Eyes (E);
-            Kept : constant Natural := Natural (S.Kept_Groups.Length);
-            N    : constant Natural := (if Kept = 0 then 0 else Natural (S.Gains.Length) / Kept);
-            Column : Natural := 0;
+            Gain, Spread : Real;
+            Measured     : Boolean;
          begin
-            for K in 0 .. Kept - 1 loop
-               if S.Kept_Groups (K) = Natural (G) and then S.Kept_Channels (K) = Channel then
-                  Column := K + 1;
-               end if;
-            end loop;
-            if Column > 0 and then Response (M, G, E) in Patch | Undecided | Whole then
+            Lockin.Gain_Of (M, E, G, Channel, Gain, Spread, Measured);
+            if Measured and then Response (M, G, E) in Patch | Undecided | Whole then
                declare
-                  Gain, Spread : Real := 0.0;
                begin
-                  for Cell in 0 .. N - 1 loop
-                     Gain := Gain + S.Gains (Cell * Kept + Column - 1);
-                     Spread := Spread + S.Gain_Variances (Cell * Kept + Column - 1);
-                  end loop;
                   --  A step is seen when the displacement pattern it causes,
                   --  matched against the eye's cells, stands out of their
-                  --  noise: a test of one degree, passed from Z / sqrt (Gain) on.
-                  if Gain > 0.0 then
+                  --  noise: a test of one degree, passed from Z / sqrt (Gain) on;
+                  --  and only by an eye that sees the channel move it at all
+                  --  (Lockin.Seen): a summed gain that is positive by chance
+                  --  gives a step that means nothing.
+                  if Lockin.Seen (Gain, Spread) then
                      declare
                         Step : constant Real := Driver.Conventions.Z / Sqrt (Gain);
                      begin

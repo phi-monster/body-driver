@@ -1232,16 +1232,22 @@ package body Driver.Robot.Tests is
       end;
       --  A step far above the noise is unchanged, and a change between the
       --  noise and the step, which the noise alone calls motion (a joint held
-      --  away from rest jitters far more than it did at rest), is none.
+      --  away from rest jitters far more than it did at rest), is none. The
+      --  gain credited is significant (a hundred, its variance one): a gain
+      --  within its own spread of zero is no response (Lockin.Seen), and a
+      --  gain of one with a variance of one gives no step at all.
       declare
          M : Model;
       begin
          Creep (M, 1);
          Credit (M, 1.0);
          Channels.Measure (M);
+         Check (not Known (Visible_Step (M, 1, 1)), "a gain within its spread of zero gives a visible step");
+         Check (Lockin.Shift (M, 1, 1, 1) = 0.0, "a gain within its spread of zero gives a shift");
+         M.Eyes (1).Gains.Replace_Element (0, 100.0);
          Check (Reading_Noise (M, 1, 1) < Real'Last, "the group's noise is unmeasured");
-         Check_Close (Visible_Step (M, 1, 1).Value, Driver.Conventions.Z, 1.0e-12,
-                      "the lock-in's step of Z over the root of a gain of 1 is not kept");
+         Check_Close (Visible_Step (M, 1, 1).Value, Driver.Conventions.Z / 10.0, 1.0e-12,
+                      "the lock-in's step of Z over the root of a gain of 100 is not kept");
          Check (not Channels.Visible (M, 1, [0.5 * Visible_Step (M, 1, 1).Value]),
                 "a change far above the noise but below what any eye sees is motion");
          Check (Channels.Visible (M, 1, [2.0 * Visible_Step (M, 1, 1).Value]),
