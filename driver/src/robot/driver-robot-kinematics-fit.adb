@@ -319,7 +319,9 @@ package body Driver.Robot.Kinematics.Fit is
                   else
                      Moves := True;
                   end if;
-                  exit when Lowered or else not Moves;
+                  --  No further than a float goes (as Fixed.Refine): past it the damping is infinite, the damped matrix no
+                  --  number, never positive definite, and nothing would end the loop.
+                  exit when Lowered or else not Moves or else Lambda >= Real'Last / 2.0;
                   Lambda := 2.0 * Lambda;
                end;
             end loop;
@@ -778,7 +780,9 @@ package body Driver.Robot.Kinematics.Fit is
                                  Moves := True;
                               end if;
                               Free (Cl);
-                              exit when Lowered or else not Moves;
+                              --  No further than a float goes (as Fixed.Refine): past it the damping is infinite, the damped matrix no
+                              --  number, never positive definite, and nothing would end the loop.
+                              exit when Lowered or else not Moves or else Lambda >= Real'Last / 2.0;
                               Lambda := 2.0 * Lambda;
                            end;
                         end loop;

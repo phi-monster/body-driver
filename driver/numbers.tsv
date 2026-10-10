@@ -801,7 +801,7 @@ driver-robot-body_file.ads	Ends_Method : constant := 2;	2	format	the second vers
 driver-robot-body_file.ads	Graph_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Kinematics_Method : constant := 7;	7	structure	the kinematics method version: the joints' order along the arm is stored, and every joint's unit is measured
 driver-robot-body_file.ads	Lag_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
-driver-robot-body_file.ads	Lockin_Method : constant := 3;	3	format	the third version of this method; the body file records it so a reload re-measures what a later version measures differently
+driver-robot-body_file.ads	Lockin_Method : constant := 4;	4	structure	the lock-in method version: a held group's motion no cell of an eye can see keeps a push's beat
 driver-robot-body_file.ads	Noise_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Steps_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
@@ -1522,8 +1522,8 @@ driver-robot-kinematics-fit.adb	Jd (I) := (Rn (I) - R0 (I)) / (H * Real'Max (1.0
 driver-robot-kinematics-fit.adb	Jd : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Jp : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 2 * Used, 1 .. Count);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	K : Real_Matrix (1 .. 3, 1 .. Terms) := [others => [others => 0.0]];	3	math	three coordinates
-driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	a reprojection has two residuals, across and down
+driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	K1 => T (T'First + 4), K2 => T (T'First + 5)));	4	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
 driver-robot-kinematics-fit.adb	K1 => T (T'First + 4), K2 => T (T'First + 5)));	5	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
 driver-robot-kinematics-fit.adb	K1 => X (X'First + 4), K2 => X (X'First + 5)));	4	structure	the positions of the parameters in the vector
@@ -1717,6 +1717,8 @@ driver-robot-kinematics-fit.adb	else Driver.Conventions.Z * (abs Z_Value - 0.5 *
 driver-robot-kinematics-fit.adb	elsif N > 1 then	1	structure	cells move several joints
 driver-robot-kinematics-fit.adb	exit when 2 * Used <= Count + Tracks;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	exit when B - A <= Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs A);	1.0	numerics	the scale floor of a finite difference and of a bracket width
+driver-robot-kinematics-fit.adb	exit when Lowered or else not Moves or else Lambda >= Real'Last / 2.0;	2.0	numerics	the damping stops short of a float's end: twice it would overflow to infinity (as Fixed.Refine)
+driver-robot-kinematics-fit.adb	exit when Lowered or else not Moves or else Lambda >= Real'Last / 2.0;	2.0	numerics	the damping stops short of a float's end: twice it would overflow to infinity (as Fixed.Refine)
 driver-robot-kinematics-fit.adb	exit when not Told or else Pass = 2;	2	structure	the four entries solved once unweighted, once weighted to Sampson residuals
 driver-robot-kinematics-fit.adb	for C in 1 .. 3 loop	3	math	a plane through three points, three coordinates each
 driver-robot-kinematics-fit.adb	for C in 1 .. 3 loop	3	structure	a homography's entries row by row, three to a row
@@ -1745,8 +1747,8 @@ driver-robot-kinematics-fit.adb	for P in 2 .. 4 loop	2	structure	the four entrie
 driver-robot-kinematics-fit.adb	for P in 2 .. 4 loop	2	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	for P in 2 .. 4 loop	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	for P in 2 .. 4 loop	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
-driver-robot-kinematics-fit.adb	for Pass in 1 .. 2 loop	2	structure	the side solved once unweighted, once weighted to Sampson residuals
 driver-robot-kinematics-fit.adb	for Pass in 1 .. 2 loop	2	structure	the four entries solved once unweighted, once weighted to Sampson residuals
+driver-robot-kinematics-fit.adb	for Pass in 1 .. 2 loop	2	structure	the side solved once unweighted, once weighted to Sampson residuals
 driver-robot-kinematics-fit.adb	for Q in 1 .. 9 loop	9	structure	a homography's nine entries: the direct linear transform's unknowns
 driver-robot-kinematics-fit.adb	for Q in P .. 4 loop	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	for R in 1 .. 3 loop	3	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
@@ -2076,6 +2078,7 @@ driver-robot-kinematics.adb	X3 : constant Real := F.Tracks (3 * I + 2);	2	struct
 driver-robot-kinematics.adb	X3 : constant Real := F.Tracks (3 * I + 2);	3	structure	two residual components per sighting
 driver-robot-kinematics.adb	and then (Fresh or else (Natural (R.Frames.Length) = 1 and then Beat > R.Frames (1).Beat));	1	structure	the reference alone so far: the next keyframe at its pose is its still twin
 driver-robot-kinematics.adb	elsif C'Length = 1 then Ada.Strings.Fixed.Trim (C (C'First)'Image, Ada.Strings.Left)	1	format	the last joint of the order, without a comma after it
+driver-robot-kinematics.adb	exit when Lowered or else not Moves or else Lambda >= Real'Last / 2.0;	2.0	numerics	the damping stops short of a float's end: twice it would overflow to infinity (as Fixed.Refine)
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates
@@ -2153,7 +2156,7 @@ driver-robot-lockin.adb	X (R, 1) := 1.0;	1.0	math	the intercept column of a regr
 driver-robot-lockin.adb	elsif Pushes = 1 then	1	structure	one group is pushed: its push is a reference only if the picture had settled when it began
 driver-robot-lockin.adb	if All_Columns = 0 or else M.Beats < 2 then	2	structure	a displacement needs two frames
 driver-robot-lockin.adb	if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 then	1	structure	the beat before the one an image shows must exist
-driver-robot-lockin.adb	if Pushes > 1 then	1	structure	a row is a reference only while at most one group is pushed
+driver-robot-lockin.adb	if Pushes > 1 or else (Pushes = 0 and then Held_Moving) then	1	structure	at most one group pushed at a beat the regression explains
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: its linear term, twice Z squared
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, twice Z squared times (2 Q - K)
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: twice the critical value in 2 Q - K

@@ -291,7 +291,33 @@ package body Driver.Robot.Lockin is
 
       function Push_Start (G : Group_Id; Beat : Natural) return Natural is
         (Starts ((Natural (G) - 1) * M.Beats + Beat + 1));
+
+      --  What the measure before this one knew of every group in every eye, for telling a held group's motion that
+      --  no cell of an eye can see (Usable): its verdict, every channel's pixels per reading unit, the eye's cell noise.
+      Total_Channels : Natural := 0;
+      Channel_Of     : array (1 .. Groups) of Natural := [others => 0];   --  the channels of the groups before it
+      Was_Verdict    : array (1 .. Groups * Eyes) of Eye_Response := [others => Unmeasured];
+      Was_Noise      : array (1 .. Eyes) of Real := [others => Real'Last];
+      Was_Shift      : Real_Access;
    begin
+      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+         Channel_Of (Natural (G)) := Total_Channels;
+         Total_Channels := Total_Channels + M.Groups (G).Size;
+      end loop;
+      Was_Shift := new Real_Array'(1 .. Eyes * Total_Channels => 0.0);
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         Was_Noise (Natural (E)) := Cell_Noise (M, E);
+         for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+            declare
+               K : constant Natural := (Natural (G) - 1) * Eyes + Natural (E);   --  as Graph.Effect has it
+            begin
+               Was_Verdict (K) := (if K <= Natural (M.Graph.Effects.Length) then M.Graph.Effects (K).Verdict else Unmeasured);
+            end;
+            for C in 1 .. M.Groups (G).Size loop
+               Was_Shift ((Natural (E) - 1) * Total_Channels + Channel_Of (Natural (G)) + C) := Shift (M, E, G, C);
+            end loop;
+         end loop;
+      end loop;
       M.Graph.Effects.Clear;
       M.Graph.Effects.Append (Eye_Effect'(others => <>), Ada.Containers.Count_Type (Groups * Eyes));
       for S of M.Groups loop
@@ -301,6 +327,7 @@ package body Driver.Robot.Lockin is
       end loop;
       if All_Columns = 0 or else M.Beats < 2 then
          Free (Starts);
+         Free (Was_Shift);
          return;
       end if;
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -354,20 +381,55 @@ package body Driver.Robot.Lockin is
             --  A beat of the eye can be explained when its displacement was
             --  measured, every commandable group's readings exist for the
             --  beat it shows and the one before, at most one group was being
-            --  pushed then, no other group's reading moved (a push that
-            --  coincides with another group's motion is no reference for
-            --  either: their effects cannot be told apart, and a group that
-            --  moves with no push under way, one that ended or was given up
-            --  while it kept moving, moves its picture all the same), and the
-            --  push, if there is one, began from a picture that had settled,
+            --  pushed then, no other group's reading moved but as the push's
+            --  own reaction (a push that coincides with another group's motion
+            --  is no reference for either: their effects cannot be told apart,
+            --  and a group that moves with no push under way, one that ended or
+            --  was given up while it kept moving, moves its picture all the
+            --  same; a held group that stood until the push began and, once it is
+            --  under way, moves by less than any cell of this eye can see
+            --  (Unseen) moves nothing of its picture, and the regression gives
+            --  a held group's motion no weight: A94's left closer shook its arm
+            --  at every beat of its pushes, none was kept, and no eye ever
+            --  measured it; an arm that moves with the gripper by as much as its
+            --  own pushes still leaves the beat out, A29's), and the push, if
+            --  there is one, began from a picture that had settled,
             --  at the beat before it began: the tail of an earlier motion is
             --  not the push's effect. (That beat, not the one that shows the
             --  push's first reading: the watch restarts at the lag the eye
             --  had when the beat was taken, which is not yet measured early.)
+            --  A held group's step at a reading beat moves this eye's picture by less than one cell tells: the eye
+            --  showed nothing of the group, or no channel's step times its pixels per reading unit is significant
+            --  against the cells' noise (Shows_Step, as the measure before this one had them). Not known of a group
+            --  this eye has not measured.
+            function Unseen (G : Group_Id; Beat : Natural) return Boolean is
+               V : constant Eye_Response := Was_Verdict ((Natural (G) - 1) * Eyes + Natural (E));
+            begin
+               if V = Nothing then
+                  return True;
+               elsif V = Unmeasured or else Was_Noise (Natural (E)) = Real'Last then
+                  return False;
+               end if;
+               for C in 1 .. M.Groups (G).Size loop
+                  declare
+                     Per_Unit : constant Real :=
+                       Was_Shift ((Natural (E) - 1) * Total_Channels + Channel_Of (Natural (G)) + C);
+                  begin
+                     if Per_Unit > 0.0
+                       and then Driver.Uncertain.Significant (Channels.Change (M, G, Beat, C) * Per_Unit, Was_Noise (Natural (E)))
+                     then
+                        return False;
+                     end if;
+                  end;
+               end loop;
+               return True;
+            end Unseen;
+
             function Usable (B : Natural) return Boolean is
                R      : constant Integer := B - Lag;
                Pushes : Natural := 0;
                Pusher : Group_Id := M.Groups.First_Index;
+               Held_Moving : Boolean := False;   --  a group not pushed moved at the beat
             begin
                if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 then
                   return False;
@@ -380,11 +442,11 @@ package body Driver.Robot.Lockin is
                         Pushes := Pushes + 1;
                         Pusher := G;
                      elsif Channels.Moving (M, G, R) then
-                        return False;
+                        Held_Moving := True;
                      end if;
                   end if;
                end loop;
-               if Pushes > 1 then
+               if Pushes > 1 or else (Pushes = 0 and then Held_Moving) then
                   return False;
                elsif Pushes = 1 then
                   declare
@@ -394,10 +456,11 @@ package body Driver.Robot.Lockin is
                      if Before < 0 or else Before >= Natural (S.Settled_At.Length) or else not S.Settled_At (Before) then
                         return False;
                      end if;
-                     --  Nor did another group move at any beat of the push, nor
-                     --  within the eye's settling tail before it: its picture
-                     --  goes on changing for beats after its readings stop, and
-                     --  the lock-in would credit that to this push (A62 and A63,
+                     --  Nor was another group pushed at any beat of the push or
+                     --  within the eye's settling tail before it, nor did it move
+                     --  in that tail: its picture goes on changing for beats after
+                     --  its readings stop, and the lock-in would credit that to
+                     --  this push (A62 and A63,
                      --  the arms swept at once: arm 2 took eye 2, arm 1's, as a
                      --  whole; with the push's own beats only, A79 to A85 still
                      --  gave arm 2 eye 2 WHOLE after their sweeps, A85's with 240
@@ -405,7 +468,9 @@ package body Driver.Robot.Lockin is
                      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
                         if G /= Pusher and then M.Groups (G).Commandable then
                            for B2 in Integer'Max (0, Integer (Began) - Tail) .. Natural (R) loop
-                              if Channels.Pushed (M, G, B2) or else Channels.Moving (M, G, B2) then
+                              if Channels.Pushed (M, G, B2)
+                                or else (Channels.Moving (M, G, B2) and then (B2 < Began or else not Unseen (G, B2)))
+                              then
                                  return False;
                               end if;
                            end loop;
@@ -687,6 +752,7 @@ package body Driver.Robot.Lockin is
          end;
       end loop;
       Free (Starts);
+      Free (Was_Shift);
    end Measure;
 
    procedure Measure_Rest_Noise (M : in out Model) is
