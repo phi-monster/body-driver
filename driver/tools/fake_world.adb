@@ -58,6 +58,7 @@ package body Fake_World is
    function Inside (P : Vec3; S : Solid) return Boolean;
    function Overlap (A, B : Solid) return Boolean;
    function Penetrates (W : World; A : Positive) return Boolean;
+   function Lowest (W : World; A : Positive) return Real;
    procedure Mark_Touching (W : in out World; A : Positive);
    function Droop (L : Link; Tool : Vec3) return Real;
    procedure Move_Arm (W : in out World; A : Positive);
@@ -256,10 +257,8 @@ package body Fake_World is
             Con  : constant Real := Random (W, 0.3, 0.7);
             Sc   : constant Real := Random (W, 30.0, 150.0);
             Gl   : constant Real := Random (W, 0.0, 0.3);
-            X    : constant Real := Random (W, -0.5, 0.5);
-            Y    : constant Real := Random (W, -0.15, 0.45);
-            Turn : constant Real := Random (W, 0.0, Pi);
             Mat  : Material;
+            Placed : Boolean := False;
          begin
             if Pick < 0.4 then
                Mat := (Kind => Noise, Albedo => [R, Gr, B], Contrast => Con, Scale => Sc, Gloss => 0.1);
@@ -268,8 +267,26 @@ package body Fake_World is
             else
                Mat := (Kind => Stripes, Albedo => [R, Gr, B], Contrast => Con, Scale => Sc, Gloss => 0.1);
             end if;
-            Add_Box (W, "thing" & Trim (N), [Hx, Hy, Hz],
-                     (Rotation => About ([0.0, 0.0, 1.0], Turn), Translation => [X, Y, W.Table_Z + Hz]), Mat, 0, 0);
+            --  A thing is placed where no part of the body stands at rest: the
+            --  boot starts with the hands free, as the lab's layouts have them.
+            for Try in 1 .. 20 loop
+               exit when Placed;
+               declare
+                  X    : constant Real := Random (W, -0.5, 0.5);
+                  Y    : constant Real := Random (W, -0.15, 0.45);
+                  Turn : constant Real := Random (W, 0.0, Pi);
+                  Pose : constant Rigid :=
+                    (Rotation => About ([0.0, 0.0, 1.0], Turn), Translation => [X, Y, W.Table_Z + Hz]);
+                  S    : constant Solid :=
+                    (Name => To_Unbounded_String ("thing" & Trim (N)), Kind => Box, Half => [Hx, Hy, Hz], Local => Pose,
+                     Pose => Pose, Mat => Mat, Link => 0, Arm => 0, Finger => False);
+               begin
+                  if not (for some O of W.Solids => O.Link > 0 and then Overlap (S, O)) then
+                     W.Solids.Append (S);
+                     Placed := True;
+                  end if;
+               end;
+            end loop;
          end;
       end loop;
    end Add_Things;
@@ -307,6 +324,7 @@ package body Fake_World is
       begin
          Add_Camera (W, "eye_fixed", 0, 0, Look (Pos, Minus (Aim, Pos), [0.0, 0.0, 1.0]), Width, Height, 0.45);
       end;
+      Forward (W);
       Add_Things (W);
       --  Two constants the robot reports beside its readings, as the lab's
       --  simulator does (a rate and an index).
@@ -321,6 +339,26 @@ package body Fake_World is
          W.Groups.Append (G);
       end;
       Forward (W);
+      --  The body rests with its hands clear of the table: the elbow is raised
+      --  until the lowest point of the arm stands well above it, and the
+      --  echoes of the commands start at the rest positions.
+      for A in 1 .. W.Arms loop
+         declare
+            Elbow : constant Positive := W.Tools (A) - 3;
+         begin
+            for Lift in 1 .. 80 loop
+               exit when Lowest (W, A) >= W.Table_Z + 0.04;
+               W.Links (Elbow).Q := W.Links (Elbow).Q + 0.02 / W.Links (Elbow).Unit;
+               W.Links (Elbow).Target := W.Links (Elbow).Q;
+               Forward (W);
+            end loop;
+         end;
+      end loop;
+      for G of W.Groups loop
+         for I in 1 .. Natural (G.Joints.Length) loop
+            G.Echoed (I) := W.Links (G.Joints (I)).Target;
+         end loop;
+      end loop;
    end Build;
 
    ---------------------------------------------------------------------------
@@ -410,6 +448,20 @@ package body Fake_World is
       end loop;
       return False;
    end Penetrates;
+
+   --  The lowest point of arm A's solids in the world.
+   function Lowest (W : World; A : Positive) return Real is
+      Z : Real := Real'Last;
+   begin
+      for S of W.Solids loop
+         if S.Arm = A then
+            for P of Corners (S) loop
+               Z := Real'Min (Z, P (3));
+            end loop;
+         end if;
+      end loop;
+      return Z;
+   end Lowest;
 
    procedure Mark_Touching (W : in out World; A : Positive) is
    begin
