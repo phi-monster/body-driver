@@ -2192,6 +2192,35 @@ package body Driver.Robot.Kinematics is
       end if;
    end Pose_Covariance;
 
+   function Followed (M : Model; A : Arm_Id; Readings : Real_Array) return Boolean is
+      K : constant Natural := Index_Of (M, A);
+   begin
+      if K = 0 then
+         return False;
+      end if;
+      declare
+         R : Arm_Evidence renames M.Kinematics (K);
+      begin
+         for F in reverse 2 .. Natural (R.Frames.Length) loop
+            if Natural (R.Frames (F).Readings.Length) = Readings'Length
+              and then (for all C in Readings'Range =>
+                          (declare
+                              Step : constant Real := Keyframe_Step (M, A, C);
+                              Away : constant Real := abs (R.Frames (F).Readings (C - 1) - Readings (C));
+                           begin (if Step > 0.0 then Away < Step else Away = 0.0)))
+            then
+               for S of R.Matches loop
+                  if S.Frame = F and then S.Eye = 0 then
+                     return S.Followed;
+                  end if;
+               end loop;
+               return False;
+            end if;
+         end loop;
+         return False;
+      end;
+   end Followed;
+
    function Fitted (M : Model; A : Arm_Id) return Boolean is
      (Index_Of (M, A) > 0 and then M.Kinematics (Index_Of (M, A)).Result.Fitted);
 

@@ -1,8 +1,11 @@
+with Ada.Characters.Handling;
 with Ada.Containers.Vectors;
 with Ada.Strings;
 with Ada.Strings.Fixed;
+with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Driver.Beats;
+with Driver.Clock;
 with Driver.Commands;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -293,6 +296,28 @@ package body Driver.Robot.Boot is
             end Read_Plan;
             Start  : constant Real_Array := Holds_Of (G, Size);
             Report : Driver.Robot.Motion.Step_Report;
+
+            --  The keyframes of a round are aligned, and the arm fitted again from
+            --  them, before the next round is moved (Estimate_Now): what the next
+            --  round asks rests on what this one showed.
+            procedure Measure_The_Round is
+               B : Driver.Clock.Beat;
+            begin
+               Driver.Beats.Next (B);
+               Estimate_Now (M);
+               Driver.Beats.Send (Driver.Commands.Hold);
+            end Measure_The_Round;
+
+            --  Whether the keyframe at the readings asked was followed (Kinematics.Followed) and whether the arm
+            --  is fitted now, read in a held beat.
+            Asked        : Real_Array (1 .. Size) := Start;
+            Followed_Now : Boolean := False;
+            Fitted_Now   : Boolean := False;
+            procedure Read_Followed is
+            begin
+               Followed_Now := Driver.Robot.Kinematics.Followed (M, A, Asked);
+               Fitted_Now := Driver.Robot.Kinematics.Fitted (M, A);
+            end Read_Followed;
          begin
             Driver.Beats.Within_A_Beat (Read_Plan'Access);
             if Eye = 0 then
@@ -310,107 +335,197 @@ package body Driver.Robot.Boot is
                begin
                   Shuffle (Order (1 .. Count), Rng);
                end Draw_Order;
+               --  Per push: the offset of its next level, whether it climbs on, and why it stopped.
+               type Stop is (Climbing, Not_Followed, Blocked, Widest);
+               Offset  : Real_Array (1 .. 2 * Size) := [others => 0.0];
+               State   : array (1 .. 2 * Size) of Stop := [others => Blocked];
+               --  Per channel: the largest offset a followed keyframe of it was taken at.
+               Reached : Real_Array (1 .. Size) := [others => 0.0];
+               Swept   : array (1 .. Size) of Positive;
+               N       : Natural := 0;
+               Rounds, Passes : Natural := 0;
+
+               --  The push's keyframe: the joint moved by the push's offset from the
+               --  held pose, held still there for the kinematics, and brought back.
+               --  Blocked short of it, the push stops (an arm that chatters against
+               --  what stops it gives no keyframe there).
+               procedure Take (I : Positive) is
+                  P    : Push renames Order (I);
+                  Pose : Real_Array := Start;
+               begin
+                  Pose (P.Channel) := Start (P.Channel) + P.Sign * Offset (I);
+                  Go_To (G, Pose, Report);
+                  if Report.At_Rest then
+                     Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                  end if;
+                  if Report.Outcome /= Driver.Robot.Motion.Reached then
+                     State (I) := Blocked;
+                  end if;
+                  Go_To (G, Start, Report);
+               end Take;
+
+               --  Every swept joint at once, in cells whose signs no two share
+               --  (the rows of a Sylvester-Hadamard matrix after its first, its
+               --  columns after its first): a joint's own frames tell its axis
+               --  but not how far that axis is from the others', which only
+               --  frames that move several joints show. Each joint moves by its
+               --  share: a part of the offset its own keyframes were followed to,
+               --  so that the cell moves the view no farther than the aligner
+               --  followed one joint, or the fitted arm predicts.
+               procedure Together (Share : Real_Array) is
+                  Rows : Positive := 1;
+               begin
+                  while Rows < N + 1 loop
+                     Rows := 2 * Rows;
+                  end loop;
+                  for Row in 1 .. Rows - 1 loop
+                     declare
+                        Pose : Real_Array := Start;
+                     begin
+                        for K in 1 .. N loop
+                           declare
+                              Bits : Natural := 0;
+                              R    : Natural := Row;
+                              Col  : Natural := K;
+                           begin
+                              --  H (Row, K) = (-1) ** (the bits Row and K share)
+                              while R > 0 and then Col > 0 loop
+                                 if R mod 2 = 1 and then Col mod 2 = 1 then
+                                    Bits := Bits + 1;
+                                 end if;
+                                 R := R / 2;
+                                 Col := Col / 2;
+                              end loop;
+                              Pose (Swept (K)) := Start (Swept (K)) + (if Bits mod 2 = 0 then 1.0 else -1.0) * Share (Swept (K));
+                           end;
+                        end loop;
+                        Go_To (G, Pose, Report);
+                        if Report.At_Rest then
+                           Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                        end if;
+                     end;
+                  end loop;
+                  Go_To (G, Start, Report);
+               end Together;
+
+               function Image (X : Real_Array) return String is
+                  Text : Ada.Strings.Unbounded.Unbounded_String;
+               begin
+                  for V of X loop
+                     Ada.Strings.Unbounded.Append (Text, " " & Driver.Log.Image (V, 3));
+                  end loop;
+                  return Ada.Strings.Unbounded.To_String (Text);
+               end Image;
             begin
                for C in 1 .. Size loop
                   if Per_Unit (C) > 0.0 and then First (C) > 0.0 then
                      Order (Count + 1) := (Channel => C, Sign => 1.0);
                      Order (Count + 2) := (Channel => C, Sign => -1.0);
+                     Offset (Count + 1) := First (C);
+                     Offset (Count + 2) := First (C);
+                     State (Count + 1) := Climbing;
+                     State (Count + 2) := Climbing;
                      Count := Count + 2;
+                     N := N + 1;
+                     Swept (N) := C;
                   else
                      Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " channel" & C'Image
                                       & " does not move its eye; not swept");
                   end if;
                end loop;
                Driver.Beats.Within_A_Beat (Draw_Order'Access);
-               for P of Order (1 .. Count) loop
+               --  Keyframes over every scale from the matcher's limit to the widest
+               --  turn: each push climbs a ladder of offsets that double from the
+               --  keyframe step, one level a round, every push alive in the round
+               --  before the next, and the round's keyframes are measured before
+               --  the next round. A push climbs as far as its keyframes are followed
+               --  (Kinematics.Followed: the aligner found its points from windows no
+               --  wider than a patch, from what the keyframes before it showed, or
+               --  from the fitted arm's own prediction), as far as the joint goes,
+               --  and no farther than a turn that moves the view by half of it. A
+               --  level not followed is not climbed past: the aligner follows an
+               --  extrapolation to about a patch of displacement (A22, A23), and a
+               --  fake body's eye over a grain with no coarser structure followed
+               --  one level of four (T6, arm 1: 190 of 229 points at the first,
+               --  none at the next, the sweep's 42 keyframes aligned 1689 of 9618).
+               --  When every push has stopped, the joints move together at the
+               --  offsets they were followed to (the frames that tell their order),
+               --  and the arm is fitted from all of it. A fitted arm predicts the
+               --  keyframes the aligner alone could not follow: the pushes that
+               --  stopped unfollowed climb again from where they stopped, in
+               --  another pass, until a pass follows nothing new.
+               loop
+                  Passes := Passes + 1;
                   declare
-                     Offset : Real := First (P.Channel);
-                     Level  : Positive := 1;
+                     Followed_In_Pass : Natural := 0;
                   begin
-                     while Offset * Per_Unit (P.Channel) <= Half loop
-                        --  Every other level is visited and held for its
-                        --  keyframe, the first and the widest included:
-                        --  keyframes over every scale from the matcher's limit
-                        --  to the widest turn, one per two doublings, fit as
-                        --  well as one per doubling (A9's arm: 59 keyframes
-                        --  against 97, the same against truth). The levels
-                        --  between are not visited at all: the kinematics keep
-                        --  a keyframe wherever the arm and its eye come to rest
-                        --  at new readings, so a visited level is a keyframe
-                        --  and the settle it costs (A59: 75 to 100 keyframes an
-                        --  arm, every level). An arm given up while it kept
-                        --  moving (chattering against what stops it) gives no
-                        --  keyframe there.
-                        if Level mod 2 = 1 or else 2.0 * Offset * Per_Unit (P.Channel) > Half then
-                           declare
-                              Pose : Real_Array := Start;
-                           begin
-                              Pose (P.Channel) := Start (P.Channel) + P.Sign * Offset;
-                              Go_To (G, Pose, Report);
-                              if Report.At_Rest then
-                                 Driver.Robot.Motion.Hold_For_Keyframe (M, A);
-                              end if;
-                              exit when Report.Outcome /= Driver.Robot.Motion.Reached;
-                           end;
-                        end if;
-                        Offset := 2.0 * Offset;
-                        Level := Level + 1;
+                     while (for some I in 1 .. Count => State (I) = Climbing) loop
+                        Rounds := Rounds + 1;
+                        for I in 1 .. Count loop
+                           if State (I) = Climbing then
+                              Take (I);
+                           end if;
+                        end loop;
+                        Measure_The_Round;
+                        for I in 1 .. Count loop
+                           if State (I) = Climbing then
+                              declare
+                                 P : Push renames Order (I);
+                              begin
+                                 Asked := Start;
+                                 Asked (P.Channel) := Start (P.Channel) + P.Sign * Offset (I);
+                                 Driver.Beats.Within_A_Beat (Read_Followed'Access);
+                                 if Followed_Now then
+                                    Followed_In_Pass := Followed_In_Pass + 1;
+                                    Reached (P.Channel) := Real'Max (Reached (P.Channel), Offset (I));
+                                    Offset (I) := 2.0 * Offset (I);
+                                    if Offset (I) * Per_Unit (P.Channel) > Half then
+                                       State (I) := Widest;
+                                    end if;
+                                 else
+                                    State (I) := Not_Followed;
+                                 end if;
+                              end;
+                           end if;
+                        end loop;
                      end loop;
-                  end;
-                  Go_To (G, Start, Report);
-               end loop;
-               --  Then every swept joint at once, in cells whose signs no two
-               --  share (the rows of a Sylvester-Hadamard matrix after its first,
-               --  its columns after its first): a joint's own frames tell its
-               --  axis but not how far that axis is from the others', which only
-               --  frames that move several joints show. Each joint moves the view
-               --  by its share of half of it, so the cell keeps most of the view.
-               declare
-                  Swept : array (1 .. Size) of Positive;
-                  N     : Natural := 0;
-                  Rows  : Positive := 1;
-               begin
-                  for C in 1 .. Size loop
-                     if Per_Unit (C) > 0.0 and then First (C) > 0.0 then
-                        N := N + 1;
-                        Swept (N) := C;
-                     end if;
-                  end loop;
-                  while Rows < N + 1 loop
-                     Rows := 2 * Rows;
-                  end loop;
-                  if N > 1 then
-                     for Row in 1 .. Rows - 1 loop
+                     declare
+                        Stops : Ada.Strings.Unbounded.Unbounded_String;
+                     begin
+                        for I in 1 .. Count loop
+                           Ada.Strings.Unbounded.Append
+                             (Stops, " " & Ada.Characters.Handling.To_Lower (State (I)'Image));
+                        end loop;
+                        Driver.Log.Line
+                          (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image & " followed"
+                           & Followed_In_Pass'Image & " keyframes in" & Rounds'Image & " rounds so far; the joints"
+                           & " are followed to offsets" & Image (Reached) & ", the pushes stopped by"
+                           & Ada.Strings.Unbounded.To_String (Stops));
+                     end;
+                     if N > 1 and then Followed_In_Pass > 0 then
                         declare
-                           Pose : Real_Array := Start;
+                           Share : Real_Array (1 .. Size) := [others => 0.0];
                         begin
                            for K in 1 .. N loop
-                              declare
-                                 Bits : Natural := 0;
-                                 R    : Natural := Row;
-                                 Col  : Natural := K;
-                              begin
-                                 --  H (Row, K) = (-1) ** (the bits Row and K share)
-                                 while R > 0 and then Col > 0 loop
-                                    if R mod 2 = 1 and then Col mod 2 = 1 then
-                                       Bits := Bits + 1;
-                                    end if;
-                                    R := R / 2;
-                                    Col := Col / 2;
-                                 end loop;
-                                 Pose (Swept (K)) := Start (Swept (K))
-                                   + (if Bits mod 2 = 0 then 1.0 else -1.0) * Half / (Real (N) * Per_Unit (Swept (K)));
-                              end;
+                              Share (Swept (K)) := Reached (Swept (K)) / Real (N);
                            end loop;
-                           Go_To (G, Pose, Report);
-                           if Report.At_Rest then
-                              Driver.Robot.Motion.Hold_For_Keyframe (M, A);
-                           end if;
+                           Together (Share);
                         end;
+                        Measure_The_Round;
+                     end if;
+                     Driver.Beats.Within_A_Beat (Read_Followed'Access);
+                     exit when Followed_In_Pass = 0 or else not Fitted_Now;
+                     --  The fitted arm predicts: the pushes that stopped unfollowed climb again.
+                     exit when (for all I in 1 .. Count => State (I) /= Not_Followed);
+                     for I in 1 .. Count loop
+                        if State (I) = Not_Followed then
+                           State (I) := Climbing;
+                        end if;
                      end loop;
-                     Go_To (G, Start, Report);
-                  end if;
-               end;
+                  end;
+               end loop;
+               Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " swept in" & Passes'Image & " passes of"
+                                & Rounds'Image & " rounds, " & (if Fitted_Now then "fitted" else "not fitted"));
             end;
             declare
                Waited_Here : Natural;   --  each arm's own: arms are swept at once
