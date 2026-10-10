@@ -213,8 +213,93 @@ package body Driver.Lanes_Tests is
       Check (Raised, "two lanes moved one group in one beat and nothing failed");
    end Two_Lanes_May_Not_Move_One_Group;
 
+   --  A decider aborted while it runs lanes (a test's ran out of beats and was aborted inside At_Once) leaves the
+   --  channel as if the lanes had ended: the beats offered next are taken by nobody and nothing fails, and a
+   --  plain decider takes beats again. Before, the channel went on serving the dead lanes' gates, local to the
+   --  call that was gone: the next beat offered read freed memory (hand.measure.gone in the full suite: a hang
+   --  in one run, a ceiling violation in two).
+   procedure Aborted_Lanes_Leave_The_Channel is
+      procedure Wait_Forever (Lane : Positive) is
+         pragma Unreferenced (Lane);
+         B : Driver.Clock.Beat;
+      begin
+         Windows.Enter;
+         loop
+            Driver.Beats.Next (B);
+            Driver.Beats.Send (Driver.Commands.Hold);
+         end loop;
+      end Wait_Forever;
+
+      procedure Lanes_Forever is new Driver.Beats.At_Once (Wait_Forever);
+
+      O     : Driver.Observations.Observation;
+      Took  : Boolean;
+      Reply : Driver.Commands.Command;
+   begin
+      Windows.Reset;
+      declare
+         task Decider;
+         task body Decider is
+         begin
+            Lanes_Forever (2);
+         exception
+            when others =>
+               null;
+         end Decider;
+      begin
+         --  Beats are offered until both lanes have begun and one beat was taken and answered: no beat is held
+         --  when the decider is aborted.
+         for Beat in 1 .. 2_000 loop
+            O.Beat := Driver.Clock.Beat (Beat);
+            Driver.Beats.Offer (Driver.Clock.Beat (Beat), O, Driver.Commands.Hold, Took);
+            if Took then
+               Driver.Beats.Await (Reply);
+            end if;
+            exit when Windows.Most = 2 and then Took;
+            delay 0.001;
+         end loop;
+         Check (Windows.Most = 2, "the two lanes did not begin");
+         abort Decider;
+      end;   --  the block waits for the aborted decider and its lanes to end
+      for Beat in 2_001 .. 2_010 loop
+         O.Beat := Driver.Clock.Beat (Beat);
+         Driver.Beats.Offer (Driver.Clock.Beat (Beat), O, Driver.Commands.Hold, Took);
+         Check (not Took, "a beat was taken after the lanes' decider was aborted");
+      end loop;
+      declare
+         Done : Boolean := False with Atomic;
+         task Plain;
+         task body Plain is
+            B : Driver.Clock.Beat;
+         begin
+            Driver.Beats.Next (B);
+            Driver.Beats.Send (Driver.Commands.Hold);
+            Done := True;
+         end Plain;
+         Taken_Again : Boolean := False;
+      begin
+         for Beat in 2_011 .. 4_000 loop
+            O.Beat := Driver.Clock.Beat (Beat);
+            Driver.Beats.Offer (Driver.Clock.Beat (Beat), O, Driver.Commands.Hold, Took);
+            if Took then
+               Driver.Beats.Await (Reply);
+               Taken_Again := True;
+            end if;
+            exit when Done;
+            delay 0.001;
+         end loop;
+         Check (Taken_Again, "a plain decider took no beat after the aborted lanes");
+         if not Done then
+            abort Plain;
+         end if;
+      end;
+   end Aborted_Lanes_Leave_The_Channel;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("core.lanes_aborted", "a decider aborted in At_Once leaves the channel serving the "
+                             & "dead lanes' gates: the next beat offered reads freed memory",
+                             Aborted_Lanes_Leave_The_Channel'Access);
       Driver.Tests.Register ("core.lanes", "lanes share the beats one window at a time, their targets merged",
                              Two_Lanes_Share_The_Beats'Access);
       Driver.Tests.Register ("core.lanes_failure", "a failed lane is raised by At_Once once the others have ended",

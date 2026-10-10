@@ -1,5 +1,6 @@
 with Ada.Containers.Vectors;
 with Ada.Exceptions;
+with Ada.Finalization;
 with Ada.Strings.Unbounded;
 with Ada.Task_Attributes;
 
@@ -238,6 +239,19 @@ package body Driver.Beats is
    function Held return Boolean is
      (if Lane_Of.Value = 0 then Channel.Is_Held else Channel.Lane_Held (Lane_Of.Value));
 
+   --  Leaves the channel and clears the doors when the block that runs the lanes is left, however it is left:
+   --  when every lane has ended, when the block raises, and when the decider running the lanes is aborted (a
+   --  test's was, in At_Once, and the channel went on serving the dead lanes' gates, local to the call that
+   --  was gone: the next beat offered read freed memory, and the suite hung in one run and raised a ceiling
+   --  violation in two).
+   type Session is new Ada.Finalization.Limited_Controlled with null record;
+   overriding procedure Finalize (S : in out Session);
+   procedure Finalize (S : in out Session) is
+   begin
+      Channel.Leave;
+      Doors.Clear;
+   end Finalize;
+
    procedure At_Once (Lanes : Positive) is
       Own : array (1 .. Lanes) of aliased Gate;
 
@@ -298,14 +312,14 @@ package body Driver.Beats is
          Channel.Join (Gates);
       end;
       declare
+         Guard   : Session;   --  finalized after the runners have ended, before Own goes
+         pragma Unreferenced (Guard);
          Runners : array (1 .. Lanes) of Runner;
       begin
          for I in Runners'Range loop
             Runners (I).Start (I);
          end loop;
-      end;   --  every lane has ended here
-      Channel.Leave;
-      Doors.Clear;
+      end;   --  every lane has ended here, and the channel is left
       Failure.Raise_Kept;
    end At_Once;
 
