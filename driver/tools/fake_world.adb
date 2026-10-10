@@ -62,6 +62,7 @@ package body Fake_World is
    procedure Mark_Touching (W : in out World; A : Positive);
    function Droop (L : Link; Tool : Vec3) return Real;
    procedure Move_Arm (W : in out World; A : Positive);
+   procedure Report (W : in out World);
 
    function Random (W : in out World) return Real is
      (Real (Ada.Numerics.Float_Random.Random (W.Rng)));
@@ -293,7 +294,7 @@ package body Fake_World is
 
    procedure Build (W : in out World; Seed : Natural; Width, Height : Positive) is
       Wood : constant Material :=
-        (Kind => Grain, Albedo => [0.62, 0.50, 0.38], Contrast => 0.08, Scale => 40.0, Gloss => 0.05);
+        (Kind => Grain, Albedo => [0.62, 0.50, 0.38], Contrast => 0.3, Scale => 60.0, Gloss => 0.05);
       Wall : constant Material :=
         (Kind => Noise, Albedo => [0.75, 0.74, 0.70], Contrast => 0.15, Scale => 3.0, Gloss => 0.0);
       Dark : constant Material :=
@@ -359,6 +360,7 @@ package body Fake_World is
             G.Echoed (I) := W.Links (G.Joints (I)).Target;
          end loop;
       end loop;
+      Report (W);
    end Build;
 
    ---------------------------------------------------------------------------
@@ -679,28 +681,21 @@ package body Fake_World is
          Move_Arm (W, A);
       end loop;
       Forward (W);
+      Report (W);
    end Step;
 
    ---------------------------------------------------------------------------
    --  What the robot reports
 
-   function Readings (W : in out World; G : Positive) return Real_Array is
-      Count : constant Natural := Natural (W.Groups (G).Joints.Length);
+   --  Draws this beat's readings of every group, noise and all, once.
+   procedure Report (W : in out World) is
    begin
-      if Count = 0 then
-         declare
-            R : Real_Array (1 .. Natural (W.Groups (G).Values.Length));
-         begin
-            for I in R'Range loop
-               R (I) := W.Groups (G).Values (I);
-            end loop;
-            return R;
-         end;
-      end if;
-      declare
-         R : Real_Array (1 .. Count);
-      begin
-         for I in R'Range loop
+      for G in W.Groups.First_Index .. W.Groups.Last_Index loop
+         W.Groups (G).Reported.Clear;
+         for V of W.Groups (G).Values loop
+            W.Groups (G).Reported.Append (V);
+         end loop;
+         for I in 1 .. Natural (W.Groups (G).Joints.Length) loop
             declare
                J     : constant Positive := W.Groups (G).Joints (I);
                Unit  : constant Real := W.Links (J).Unit;
@@ -724,11 +719,19 @@ package body Fake_World is
                      Q := Q + W.Quirk.Reading_Noise * Draw;
                   end;
                end if;
-               R (I) := Q;
+               W.Groups (G).Reported.Append (Q);
             end;
          end loop;
-         return R;
-      end;
+      end loop;
+   end Report;
+
+   function Readings (W : World; G : Positive) return Real_Array is
+      R : Real_Array (1 .. Natural (W.Groups (G).Reported.Length));
+   begin
+      for I in R'Range loop
+         R (I) := W.Groups (G).Reported (I);
+      end loop;
+      return R;
    end Readings;
 
    function Echo (W : World; G : Positive) return Real_Array is

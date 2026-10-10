@@ -98,6 +98,7 @@ package Fake_World is
       Commandable : Boolean := False;
       Scalar      : Boolean := False;
       Echoed      : Real_Vectors.Vector;   --  the last command received, in reading units
+      Reported    : Real_Vectors.Vector;   --  this beat's readings, noise and all, drawn once a beat (Step)
    end record;
 
    package Group_Vectors is new Ada.Containers.Vectors (Positive, Group);
@@ -171,8 +172,9 @@ package Fake_World is
    procedure Step (W : in out World);
    --  One beat of the body's motion.
 
-   function Readings (W : in out World; G : Positive) return Real_Array;
-   --  What group G reports this beat, in reading units (the quirks' noise is drawn here).
+   function Readings (W : World; G : Positive) return Real_Array;
+   --  What group G reports this beat, in reading units: the same values however often they are asked
+   --  (the truth beside the run repeats them, and the scorer pairs the two by them).
 
    function Echo (W : World; G : Positive) return Real_Array;
    --  The last command the robot received for group G, in reading units.

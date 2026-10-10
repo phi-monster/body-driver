@@ -18,7 +18,9 @@ BIN=${BIN:-$ROOT/driver/bin}
 RUNS=${FAKE_RUNS:-$HOME/fakeruns}
 R=$RUNS/$NAME
 [ -e "$R" ] && { echo "$R already exists; pick another name"; exit 5; }
-mkdir -p "$R"
+mkdir -p "$R/bin"
+# The run keeps its own copies of the tools, so a build during the run changes nothing it runs or scores with.
+cp -p "$BIN/body_driver" "$BIN/fake_robot" "$BIN/replay" "$BIN/score" "$R/bin/"
 PORT=${FAKE_PORT:-$((9500 + SEED % 400))}
 LIM=${FAKE_MINUTES:-60}
 { echo "seed $SEED"; echo "port $PORT"; echo "driver $(md5 -q "$BIN/body_driver" 2>/dev/null || md5sum "$BIN/body_driver" | cut -d' ' -f1)";
@@ -26,10 +28,10 @@ LIM=${FAKE_MINUTES:-60}
 mkfifo "$R/run.rec.fifo"
 zstd -q -T2 -3 -o "$R/run.rec.zst" < "$R/run.rec.fifo" &
 ZST=$!
-"$BIN/body_driver" --listen "$PORT" --body "$R/body.json" --record "$R/run.rec.fifo" > "$R/driver.log" 2>&1 &
+"$R/bin/body_driver" --listen "$PORT" --body "$R/body.json" --record "$R/run.rec.fifo" > "$R/driver.log" 2>&1 &
 DRV=$!
 for _ in $(seq 1 120); do grep -q "listening on port" "$R/driver.log" 2>/dev/null && break; sleep 0.5; done
-"$BIN/fake_robot" --connect "127.0.0.1:$PORT" --seed "$SEED" --out "$R" --stop "$R/stop" "$@" > "$R/fake.log" 2>&1 &
+"$R/bin/fake_robot" --connect "127.0.0.1:$PORT" --seed "$SEED" --out "$R" --stop "$R/stop" "$@" > "$R/fake.log" 2>&1 &
 FAKE=$!
 end=$(( $(date +%s) + LIM * 60 )); why=limit
 while [ "$(date +%s)" -lt "$end" ]; do
@@ -49,7 +51,7 @@ wait "$ZST" 2>/dev/null
 rm -f "$R/run.rec.fifo" "$R/stop"
 { echo "end $(date +%FT%T)"; echo "stop $why"; } >> "$R/meta.txt"
 echo "$NAME: $why ($(grep -c "" "$R/truth.jsonl") truth lines)"
-zstd -q -dc "$R/run.rec.zst" | "$BIN/replay" /dev/stdin --estimates "$R/estimates.jsonl" > "$R/replay.log" 2>&1
+zstd -q -dc "$R/run.rec.zst" | "$R/bin/replay" /dev/stdin --estimates "$R/estimates.jsonl" > "$R/replay.log" 2>&1
 tail -2 "$R/replay.log"
 SCR=(); [ -f "$R/scramble.json" ] && SCR=(--scramble "$R/scramble.json")
-zstd -q -dc "$R/run.rec.zst" | "$BIN/score" "${SCR[@]}" "$R/estimates.jsonl" /dev/stdin "$R/truth.jsonl" | tee "$R/score.txt"
+zstd -q -dc "$R/run.rec.zst" | "$R/bin/score" "${SCR[@]}" "$R/estimates.jsonl" /dev/stdin "$R/truth.jsonl" | tee "$R/score.txt"
