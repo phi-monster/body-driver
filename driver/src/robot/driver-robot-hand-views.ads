@@ -8,8 +8,12 @@
 --  reading the channel was seen still at, among the views whose other
 --  readings equal those of the view it compares with: the two ends of that
 --  channel's travel, with the rest of the body, and so the background,
---  unchanged between them. Nothing here knows what a finger is; the readings
---  and images are plain data. Each view keeps the observation it began with,
+--  unchanged between them; and, between the ends, one view at every other
+--  reading the channel was seen still at (its stops: an end a wider view
+--  replaced, a view the sweep's steps stood still at), so that what the eye
+--  saw of the hand is kept at every setting of the closer it stood at, not at
+--  two. Nothing here knows what a finger is; the readings and images are
+--  plain data. Each view keeps the observation it began with,
 --  so the body's geometry at that beat can be asked for later.
 
 with Ada.Containers.Indefinite_Holders;
@@ -103,13 +107,27 @@ package Driver.Robot.Hand.Views is
      with Pre => Has_Ends (T, Channel);
    --  The closer's readings while each end's view was taken, without copying the view.
 
+   function Stops (T : Tracker; Channel : Positive) return Natural;
+   --  How many views the tracker keeps between the channel's ends: one at
+   --  every reading the channel was seen still at along its travel (two frames
+   --  or more, comparable with the ends, significantly apart from them and
+   --  from each other), the view with the most frames at each. Zero without
+   --  ends.
+
+   function Stop (T : Tracker; Channel : Positive; K : Positive) return View
+     with Pre => K <= Stops (T, Channel);
+   --  The K-th of them, from the reading nearest the low end to the one
+   --  nearest the high end.
+
 private
 
    package View_Holders is new Ada.Containers.Indefinite_Holders (View);
+   package View_Vectors is new Ada.Containers.Vectors (Positive, View);
    package Noise_Holders renames Reading_Holders;
 
    type End_Pair is record
       Low, High : View_Holders.Holder;
+      Between   : View_Vectors.Vector;  --  the stops, by their reading of the channel, ascending
       Seen_Low  : Real := Real'Last;    --  the lowest and highest readings seen still,
       Seen_High : Real := Real'First;   --  each in a view of two frames or more
    end record;
