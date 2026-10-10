@@ -280,9 +280,7 @@ package body Driver.Action.Snapshots.Tests is
    begin
       for Sign in -1 .. 1 loop
          if Sign /= 0 then
-            H.Lobes.Append (Lobe_State'(Open_Tip   => [Real (Sign) * Opening / 2.0, 0.0, Depth],
-                             Closed_Tip => [0.0, 0.0, Depth],
-                             Tip_Sigma  => Sigma));
+            H.Lobes.Append (Straight ([Real (Sign) * Opening / 2.0, 0.0, Depth], [0.0, 0.0, Depth], Sigma));
          end if;
       end loop;
       return H;
@@ -296,9 +294,7 @@ package body Driver.Action.Snapshots.Tests is
             A : constant Real := 2.0 * Pi * Real (K) / 5.0;
             D : constant Vec3 := [Cos (A), Sin (A), 0.0];
          begin
-            H.Lobes.Append (Lobe_State'(Open_Tip   => Radius * D + [0.0, 0.0, Depth],
-                             Closed_Tip => Closed_Radius * D + [0.0, 0.0, Depth],
-                             Tip_Sigma  => Sigma));
+            H.Lobes.Append (Straight (Radius * D + [0.0, 0.0, Depth], Closed_Radius * D + [0.0, 0.0, Depth], Sigma));
          end;
       end loop;
       return H;

@@ -1768,18 +1768,16 @@ package body Driver.Robot.Hand is
    --  The tip at the closer reading of O, between the two measured openings
    --  along the settings the eye saw the lobe at (Tip_Between).
 
-   function Tip_Now_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate is
+   function Tip_Along (H : Hands; Id : Hand_Id; Lobe : Positive; Reading : Real) return Point_Estimate is
       R       : constant Hand_Record := Found (H, Id);
-      C       : constant Positive := R.Lobes (Lobe).Channel;
       Opened  : constant Point_Estimate := Tip_In_Tool (H, Id, Lobe, Open);
       Shut    : constant Point_Estimate := Tip_In_Tool (H, Id, Lobe, Closed_Empty);
       Unknown_Tip : Point_Estimate;
    begin
-      if not Driver.Observations.Has_Reading (O, R.Group) or else not Known (Opened) or else not Known (Shut) then
+      if not Known (Opened) or else not Known (Shut) then
          return Unknown_Tip;
       end if;
       declare
-         Now  : constant Real_Array := O.Readings.Element (R.Group);
          Seen : Setting_Sights (1 .. Natural (R.Lobes (Lobe).Stops.Length));
       begin
          for K in Seen'Range loop
@@ -1788,8 +1786,19 @@ package body Driver.Robot.Hand is
                          Ray     => R.Lobes (Lobe).Stops (K).Sight.Ray);
          end loop;
          return Tip_Between (Opened, Shut, Opening_Reading (R, Lobe, Open), Opening_Reading (R, Lobe, Closed_Empty),
-                             Now (Now'First + C - 1), Seen);
+                             Reading, Seen);
       end;
+   end Tip_Along;
+
+   function Tip_Now_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate is
+      R : constant Hand_Record := Found (H, Id);
+      C : constant Positive := R.Lobes (Lobe).Channel;
+      Unknown_Tip : Point_Estimate;
+   begin
+      if not Driver.Observations.Has_Reading (O, R.Group) then
+         return Unknown_Tip;
+      end if;
+      return Tip_Along (H, Id, Lobe, O.Readings.Element (R.Group) (O.Readings.Element (R.Group)'First + C - 1));
    end Tip_Now_In_Tool;
 
    function Tip_Now (H : Hands; M : Model; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate is

@@ -221,11 +221,13 @@ package body Driver.Action.Contact.Search.Tests is
             H : Hand_State := X.S.Hands (1);
             L : Lobe_State := H.Lobes (3);
          begin
-            if Change = 1 then
-               L.Closed_Tip := L.Closed_Tip + [0.0, 0.0, 20.0 * Sigma];
-            else
-               L.Open_Tip := L.Open_Tip + [0.0, 0.0, 20.0 * Sigma];
-            end if;
+            declare
+               Which : constant Positive := (if Change = 1 then L.Path.Last_Index else L.Path.First_Index);
+               N     : Tip_Node := L.Path (Which);
+            begin
+               N.Tip := N.Tip + [0.0, 0.0, 20.0 * Sigma];
+               L.Path.Replace_Element (Which, N);
+            end;
             H.Lobes.Replace_Element (3, L);
             X.S.Hands.Replace_Element (1, H);
             Check (Effector_Of (X.S, 1).Repeats = 1, "a hand with one lobe unlike the others is taken to repeat"

@@ -90,6 +90,11 @@ package Driver.Robot.Hand is
      with Pre => S <= Settings (H, Id, Lobe);
    --  The S-th, from the open opening (1) to the closed one (the last).
 
+   function Tip_Along (H : Hands; Id : Hand_Id; Lobe : Positive; Reading : Real) return Point_Estimate;
+   --  The lobe's tip in the tool frame at a reading of its channel: Tip_Between
+   --  with the tips its presses measured at the openings and the sights its
+   --  eye saw it on at the settings between. Unknown while an opening's tip is.
+
    function Tip_Between
      (Opened, Shut : Point_Estimate; Open_At, Closed_At, Reading : Real; Seen : Setting_Sights) return Point_Estimate;
    --  A lobe's tip at a reading of its channel, from the tips the presses

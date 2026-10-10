@@ -75,31 +75,31 @@ package body Driver.Action.Contact.Search is
                --  Its tips open and closed on nothing are apart, each known
                --  to its tip sigma.
                function Moves (L : Lobe_State) return Boolean is
-                 (Significant (Point_Estimate'(Mean => L.Open_Tip, Covariance => (L.Tip_Sigma ** 2) * Identity3),
-                               Point_Estimate'(Mean => L.Closed_Tip, Covariance => (L.Tip_Sigma ** 2) * Identity3)));
+                 (Significant (Point_Estimate'(Mean => Open_Tip (L), Covariance => (Tip_Sigma (L) ** 2) * Identity3),
+                               Point_Estimate'(Mean => Closed_Tip (L), Covariance => (Tip_Sigma (L) ** 2) * Identity3)));
             begin
                --  A lobe that does not move faces the point where the moving
                --  ones meet when closed on nothing.
                for L of H.Lobes loop
                   if Moves (L) then
-                     Meet := Meet + L.Closed_Tip;
+                     Meet := Meet + Closed_Tip (L);
                      Moving := Moving + 1;
                   end if;
                end loop;
                for L of H.Lobes loop
-                  Tip_Sum := Tip_Sum + L.Open_Tip;
+                  Tip_Sum := Tip_Sum + Open_Tip (L);
                   Tips := Tips + 1;
-                  Tip_Sd := Real'Max (Tip_Sd, L.Tip_Sigma);
+                  Tip_Sd := Real'Max (Tip_Sd, Tip_Sigma (L));
                   declare
-                     Toward : constant Vec3 := (if Moving > 0 then Meet / Real (Moving) - L.Open_Tip else Zero3);
+                     Toward : constant Vec3 := (if Moving > 0 then Meet / Real (Moving) - Open_Tip (L) else Zero3);
                   begin
                      if Moves (L) or else abs Toward > 0.0 then
                         declare
                            Facing : constant Vec3 :=
-                             (if Moves (L) then Unit (L.Closed_Tip - L.Open_Tip) else Unit (Toward));
+                             (if Moves (L) then Unit (Closed_Tip (L) - Open_Tip (L)) else Unit (Toward));
                         begin
-                           E.Pads.Append (Pad'(Closer => C, Open => L.Open_Tip,
-                                               Closed => (if Moves (L) then L.Closed_Tip else L.Open_Tip),
+                           E.Pads.Append (Pad'(Closer => C, Open => Open_Tip (L),
+                                               Closed => (if Moves (L) then Closed_Tip (L) else Open_Tip (L)),
                                                Facing => Facing));
                         end;
                      end if;
@@ -114,7 +114,7 @@ package body Driver.Action.Contact.Search is
       for H of S.Hands loop
          if H.Arm = A and then Known (H.Fraction) then
             for L of H.Lobes loop
-               E.Ends.Append (Sample'(Point  => L.Open_Tip + H.Fraction.Value * (L.Closed_Tip - L.Open_Tip),
+               E.Ends.Append (Sample'(Point  => Open_Tip (L) + H.Fraction.Value * (Closed_Tip (L) - Open_Tip (L)),
                                       Normal => E.Along));
             end loop;
          end if;
