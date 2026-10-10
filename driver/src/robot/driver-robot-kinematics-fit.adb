@@ -1,6 +1,8 @@
+with Ada.Calendar;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Distributions;
+with Driver.Log;
 with Driver.Numerics.Dense;
 with Driver.Parallel_For;
 with Driver.Robot.Regression;
@@ -1515,10 +1517,30 @@ package body Driver.Robot.Kinematics.Fit is
                     and then (Driver.Conventions.Z * Tilt >= Ada.Numerics.Pi / 2.0
                               or else not Driver.Uncertain.Significant (C, Sqrt (Variance (O + 5))))
                   then
-                     Report.Determined := False;
-                     Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
-                       ("the sightings leave joint" & J'Image & " undetermined: its axis to" & Real'Image (Tilt)
-                        & " rad, its scale" & Real'Image (C) & " +-" & Real'Image (Sqrt (Variance (O + 5))));
+                     declare
+                        --  What the joint had to show itself by: the sightings that fit in the keyframes that moved
+                        --  it, and the most it turned in them by the scale it has now.
+                        Seen_Moving : Natural := 0;
+                        Swept       : Real := 0.0;
+                     begin
+                        for I in 1 .. S loop
+                           declare
+                              Move : constant Real :=
+                                Changes (Changes'First (1) + Sight (Sight'First + I - 1).Frame - 1, Changes'First (2) + J - 1);
+                           begin
+                              if Inlier (I) and then Move /= 0.0 then
+                                 Seen_Moving := Seen_Moving + 1;
+                                 Swept := Real'Max (Swept, abs (C * Move));
+                              end if;
+                           end;
+                        end loop;
+                        Report.Determined := False;
+                        Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
+                          ("the sightings leave joint" & J'Image & " undetermined: its axis to" & Real'Image (Tilt)
+                           & " rad, its scale" & Real'Image (C) & " +-" & Real'Image (Sqrt (Variance (O + 5)))
+                           & "; of the sightings that fit," & Seen_Moving'Image & " are in keyframes that moved it, at most"
+                           & Real'Image (Swept) & " rad by that scale");
+                     end;
                   end if;
                end;
             end loop;
@@ -1551,7 +1573,8 @@ package body Driver.Robot.Kinematics.Fit is
       Joints     : out Joint_Array;
       Chain      : out Chain_Order;
       L          : out Lens;
-      Report     : out Fit_Report)
+      Report     : out Fit_Report;
+      Who        : String := "")
    is
       N      : constant Natural := Visible'Length;
       Frames : constant Natural := Changes'Length (1);
@@ -1604,10 +1627,35 @@ package body Driver.Robot.Kinematics.Fit is
       Track_Depths : Real_Lists.Vector;
       Usable : Flags (1 .. N) := [others => False];
 
+      --  How long each stage took, for the boot's account of where its time went (A98's second arm sat in its fit
+      --  for more than 45 minutes with nothing to say where).
+      Stage_Began : Ada.Calendar.Time := Ada.Calendar.Clock;
+      procedure Close_Stage is
+         use type Ada.Calendar.Time;
+         Now : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+      begin
+         if Report.Stage > 0 then
+            Report.Seconds.Append (Real (Now - Stage_Began));
+         end if;
+         Stage_Began := Now;
+      end Close_Stage;
+      procedure Enter (Stage : Positive) is
+      begin
+         Close_Stage;
+         Report.Stage := Stage;
+         if Who /= "" then
+            Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " enters stage" & Stage'Image & " of its fit"
+                             & (if Report.Seconds.Is_Empty then ""
+                                else ", the stage before it having taken "
+                                     & Driver.Log.Image (Report.Seconds.Last_Element, 1) & " s"));
+         end if;
+      end Enter;
+
       procedure Fail (Why : String) is
       begin
          Report.Why := Ada.Strings.Unbounded.To_Unbounded_String (Why);
          L := Lens0;
+         Close_Stage;
       end Fail;
 
       --  The eye at every keyframe under the joints.
@@ -1670,7 +1718,7 @@ package body Driver.Robot.Kinematics.Fit is
 
       ---------------------------------------------------------------------------
       --  Stage 1: every joint alone.
-      Report.Stage := 1;
+      Enter (1);
       declare
          Moving : Boolean := False;
 
@@ -2290,7 +2338,7 @@ package body Driver.Robot.Kinematics.Fit is
       --  plane (2), the side of the eye (1) and the logarithm of the size of
       --  its turn per reading unit (1; its sign is stage 1's); then the log
       --  focal length.
-      Report.Stage := 2;
+      Enter (2);
       declare
          Count : constant Positive := 4 * N + 1;
          Base  : constant Joint_Array := Joints;
@@ -2391,7 +2439,7 @@ package body Driver.Robot.Kinematics.Fit is
       --  has one depth, so the ratio of the depths each joint's keyframes give
       --  it is the inverse ratio of their distances; the sign of each joint's
       --  distance puts the points in front.
-      Report.Stage := 3;
+      Enter (3);
       declare
          Tracks : Natural := 0;
       begin
@@ -2562,7 +2610,7 @@ package body Driver.Robot.Kinematics.Fit is
       --  synthetic arm, its readings scaled: two joints at 0.60 and 0.82 of
       --  their turns after stage 2). The lens, the joints and every point's
       --  depth come out of it, for the order.
-      Report.Stage := 4;
+      Enter (4);
       --  Without a keyframe that moved two joints at once the order is not told and the fit cannot end: it ends here,
       --  before the refinement, which from a focal length the joints alone did not tell can creep for most of an hour
       --  (A93's right arm at 3184 beats, its readings drawn: two replays on the box sat in it for more than half an hour).
@@ -2962,7 +3010,7 @@ package body Driver.Robot.Kinematics.Fit is
       end;
 
       --  Stage 5: the tracks.
-      Report.Stage := 5;
+      Enter (5);
       Refine_Tracks (Changes, Sight, Joints, Order, L, Report);
       declare
          Sum : Real := 0.0;
@@ -3015,6 +3063,7 @@ package body Driver.Robot.Kinematics.Fit is
       end;
       Chain := Order;
       Report.Fitted := Report.Determined;
+      Close_Stage;
    end Fit;
 
    function Depth_Known (Depth, Sigma : Real) return Boolean is

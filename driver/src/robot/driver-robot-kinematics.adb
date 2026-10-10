@@ -160,6 +160,18 @@ package body Driver.Robot.Kinematics is
       elsif C'Length = 1 then Ada.Strings.Fixed.Trim (C (C'First)'Image, Ada.Strings.Left)
       else Ada.Strings.Fixed.Trim (C (C'First)'Image, Ada.Strings.Left) & ", " & Chain_Image (C (C'First + 1 .. C'Last)));
 
+   --  How long each stage of a fit took, in seconds.
+   function Stages_Image (Report : Fit.Fit_Report) return String is
+      Text : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      for K in Report.Seconds.First_Index .. Report.Seconds.Last_Index loop
+         Ada.Strings.Unbounded.Append
+           (Text, (if K = Report.Seconds.First_Index then "; its stages took " else ", ")
+                  & Driver.Log.Image (Report.Seconds (K), 1));
+      end loop;
+      return Ada.Strings.Unbounded.To_String (Text) & (if Report.Seconds.Is_Empty then "" else " s");
+   end Stages_Image;
+
    --  The evidence is an arm's now: the graph still lists its group as an
    --  arm, under that number, carrying that eye. Evidence is kept by group,
    --  so an arm renumbered by a new one keeps it; an arm that stopped being
@@ -1105,7 +1117,7 @@ package body Driver.Robot.Kinematics is
                      --  keyframe taken after it refines every term, and moves none of
                      --  the lengths the world was measured in.
                      Fit.Fit (Changes.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width, M.Eyes (R.Eye).Grid.Height,
-                              R.Result.Unit_Frames, Joints, Chain, Lens, Report);
+                              R.Result.Unit_Frames, Joints, Chain, Lens, Report, Who => "arm" & R.Arm'Image);
                      --  The table its eye sees, away from it towards the eye,
                      --  and its tracks' points: Up is the first arm's (the world
                      --  is that eye's reference frame), and the points place the
@@ -1218,7 +1230,8 @@ package body Driver.Robot.Kinematics is
                                         & Driver.Log.Image (Report.Errors.Clipped, 3)
                                    else "")
                            else "not fitted (stage" & Report.Stage'Image & "): "
-                                & Ada.Strings.Unbounded.To_String (Report.Why)));
+                                & Ada.Strings.Unbounded.To_String (Report.Why))
+                        & Stages_Image (Report));
                   end;
                   Free (Moving);
                end;

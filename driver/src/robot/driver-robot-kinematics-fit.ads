@@ -235,6 +235,7 @@ package Driver.Robot.Kinematics.Fit is
       Depth_Gains  : Real_Lists.Vector;   --  per track, row by row, how the logarithm of its depth moves
                                           --  with each term of Covariance (the others' depths at their
                                           --  best): the share of its uncertainty every depth has in common
+      Seconds      : Real_Lists.Vector;   --  per stage reached, from the first, how long the fit spent in it
    end record;
 
    function Depth_Known (Depth, Sigma : Real) return Boolean;
@@ -252,7 +253,8 @@ package Driver.Robot.Kinematics.Fit is
       Joints     : out Joint_Array;
       Chain      : out Chain_Order;
       L          : out Lens;
-      Report     : out Fit_Report)
+      Report     : out Fit_Report;
+      Who        : String := "")   --  what is fitted, for a line at every stage it enters; none when empty
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length
                  and then Chain'Length = Visible'Length and then Unit_Frames <= Changes'Length (1);
    --  The covariance is the inverse normal equations around the spread of the
