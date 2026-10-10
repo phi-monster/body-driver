@@ -411,6 +411,17 @@ package body Driver.Robot.Boot is
                   Go_To (G, Start, Report);
                end Together;
 
+               --  Each swept joint's share of a frame that moves them together: its part of the offset it was
+               --  followed to, and no less than its first level (Together).
+               function Shares return Real_Array is
+                  Share : Real_Array (1 .. Size) := [others => 0.0];
+               begin
+                  for K in 1 .. N loop
+                     Share (Swept (K)) := Real'Max (First (Swept (K)), Reached (Swept (K)) / Real (N));
+                  end loop;
+                  return Share;
+               end Shares;
+
                function Image (X : Real_Array) return String is
                   Text : Ada.Strings.Unbounded.Unbounded_String;
                begin
@@ -469,6 +480,17 @@ package body Driver.Robot.Boot is
                               Take (I);
                            end if;
                         end loop;
+                        --  Until the arm is fitted, every round ends with the joints
+                        --  moving together at the offsets followed so far: the fit
+                        --  needs frames that move several joints to tell their
+                        --  order, and a fitted arm predicts what the aligner alone
+                        --  cannot follow, so the sooner it exists the fewer pushes
+                        --  stop unfollowed (Y10, arm 1: thirteen rounds of ladders
+                        --  passed stages 0 to 3 at every round and waited at stage 4
+                        --  for the last).
+                        if N > 1 and then not Fitted_Now then
+                           Together (Shares);
+                        end if;
                         Measure_The_Round;
                         for I in 1 .. Count loop
                            if State (I) = Climbing then
@@ -505,15 +527,11 @@ package body Driver.Robot.Boot is
                            & " are followed to offsets" & Image (Reached) & ", the pushes stopped by"
                            & Ada.Strings.Unbounded.To_String (Stops));
                      end;
-                     if N > 1 and then Followed_In_Pass > 0 then
-                        declare
-                           Share : Real_Array (1 .. Size) := [others => 0.0];
-                        begin
-                           for K in 1 .. N loop
-                              Share (Swept (K)) := Real'Max (First (Swept (K)), Reached (Swept (K)) / Real (N));
-                           end loop;
-                           Together (Share);
-                        end;
+                     --  A fitted arm ends the pass with the joints together at the
+                     --  widest offsets followed (the rounds before the fit had their
+                     --  own); its predictions go into these frames.
+                     if N > 1 and then Followed_In_Pass > 0 and then Fitted_Now then
+                        Together (Shares);
                         Measure_The_Round;
                      end if;
                      Driver.Beats.Within_A_Beat (Read_Followed'Access);
