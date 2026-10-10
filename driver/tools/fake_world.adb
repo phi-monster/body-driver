@@ -167,8 +167,8 @@ package body Fake_World is
       --  over the finger roots looking steeply down them, and the fingers filled its picture from top to bottom, so
       --  that the closer's sweep moved most of its cells and the body took the closer for the group carrying the eye.
       Eye_Back  : constant Real := Random (W, 0.03, 0.05);
-      Eye_Above : constant Real := Random (W, 0.05, 0.07);
-      Tilt      : constant Real := Random (W, 0.2, 0.35);
+      Eye_Above : constant Real := Random (W, 0.10, 0.13);
+      Tilt      : constant Real := Random (W, 0.55, 0.7);
       Grey  : constant Material :=
         (Kind => Flat, Albedo => [0.26, 0.26, 0.29], Contrast => 0.0, Scale => 1.0, Gloss => 0.2);
       Black : constant Material :=
@@ -378,7 +378,7 @@ package body Fake_World is
         (Kind => Grain, Albedo => [0.62, 0.50, 0.38], Contrast => (if T.Plain_Table then 0.0 else 0.3), Scale => 60.0,
          Gloss => 0.05);
       Wall : constant Material :=
-        (Kind => Noise, Albedo => [0.75, 0.74, 0.70], Contrast => 0.15, Scale => 3.0, Gloss => 0.0);
+        (Kind => Noise, Albedo => [0.75, 0.74, 0.70], Contrast => 0.35, Scale => 8.0, Gloss => 0.0);
       Dark : constant Material :=
         (Kind => Flat, Albedo => [0.2, 0.2, 0.2], Contrast => 0.0, Scale => 1.0, Gloss => 0.0);
    begin

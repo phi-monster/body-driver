@@ -139,8 +139,20 @@ package body Driver.Robot.Boot is
          Report : Driver.Robot.Motion.Step_Report;
          Order  : Push_Array (1 .. 2 * Size);
          Count  : Natural := 0;
+         --  The round's cost, for the log: the beats it took, and those spent settling between the pushes.
+         Began_At, Ended_At : Natural := 0;
+         Settled  : Natural := 0;
+         procedure Read_Beat is
+         begin
+            Began_At := M.Beats;
+         end Read_Beat;
+         procedure Read_End is
+         begin
+            Ended_At := M.Beats;
+         end Read_End;
       begin
          Moved := False;
+         Driver.Beats.Within_A_Beat (Read_Beat'Access);
          for R of Recognized loop
             if R.Ref.Group = G and then R.Ref.Channel <= Size and then R.Amount > 0.0 then
                Amount (R.Ref.Channel) := Factor * R.Amount;
@@ -166,10 +178,16 @@ package body Driver.Robot.Boot is
                Go_To (G, Away, Report);
                Moved := Moved or else Report.Outcome = Driver.Robot.Motion.Reached;
                Driver.Robot.Motion.Settle (M, Waited);
+               Settled := Settled + Waited;
                Go_To (G, Start, Report);
             end;
          end loop;
          Driver.Robot.Motion.Settle (M, Waited);
+         Settled := Settled + Waited;
+         Driver.Beats.Within_A_Beat (Read_End'Access);
+         Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " pushed" & Count'Image & " ways at"
+                          & Integer'Image (Integer (Factor)) & " times its amounts in" & Integer'Image (Ended_At - Began_At)
+                          & " beats, of which" & Settled'Image & " settling between the pushes");
       end Push_Both_Ways;
 
       --  Finds how far each channel of the group must move for an eye to see
