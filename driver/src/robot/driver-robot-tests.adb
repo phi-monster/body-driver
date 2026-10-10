@@ -1751,9 +1751,9 @@ package body Driver.Robot.Tests is
             E : constant Episode := M.Groups (1).Episodes (5);
          begin
             Check (E.Ended and then E.Settled, "the push against the obstacle never ends while the joint chatters");
-            Check (not E.Ended or else not E.Settled or else E.End_At - E.Closest_At <= 2 * (E.Closest_At - E.Start) + 1,
-                   "the push against the obstacle ends" & Natural'Image (E.End_At - E.Closest_At)
-                   & " beats after it last came closer," & Natural'Image (E.Closest_At - E.Start) & " beats after it began");
+            Check (not E.Ended or else not E.Settled or else E.End_At - E.Progress_At <= 2 * (E.Progress_At - E.Start) + 1,
+                   "the push against the obstacle ends" & Natural'Image (E.End_At - E.Progress_At)
+                   & " beats after it last came nearer or farther," & Natural'Image (E.Progress_At - E.Start) & " beats after it began");
             Check (E.Blocked and then not E.Rested, "the push against the obstacle is not judged blocked, still moving");
          end;
          declare
@@ -1868,11 +1868,11 @@ package body Driver.Robot.Tests is
             Check (E.Ended and then E.Settled, "the push against the table never ends while its joint moves about it");
             if E.Ended and then E.Settled then
                Check (E.Blocked and then not E.Rested, "the push against the table is not judged blocked, still moving");
-               Check (E.Closest_At - E.Start <= 3,
+               Check (E.Progress_At - E.Start <= 3,
                       "an extreme of the chatter is taken for the push's closest point, at"
-                      & Natural'Image (E.Closest_At - E.Start));
-               Check (E.End_At - E.Closest_At <= Integer'Max (E.Closest_At - E.Start, Wait) + 1,
-                      "the push ends" & Natural'Image (E.End_At - E.Closest_At) & " beats after it last came closer");
+                      & Natural'Image (E.Progress_At - E.Start));
+               Check (E.End_At - E.Progress_At <= Integer'Max (E.Progress_At - E.Start, Wait) + 1,
+                      "the push ends" & Natural'Image (E.End_At - E.Progress_At) & " beats after it last came nearer or farther");
             end if;
          end;
          declare
@@ -1943,14 +1943,88 @@ package body Driver.Robot.Tests is
             Check (E.Ended and then E.Settled, "the push never ends while another joint of its group moves about");
             if E.Ended and then E.Settled then
                Check (E.Blocked and then not E.Rested, "the push is not judged blocked, still moving");
-               Check (E.Closest_At - E.Start <= 3,
-                      "a rise of 1e-7 is taken for the push's closest point, at" & Natural'Image (E.Closest_At - E.Start));
-               Check (E.End_At - E.Closest_At <= Integer'Max (E.Closest_At - E.Start, Wait) + 1,
-                      "the push ends" & Natural'Image (E.End_At - E.Closest_At) & " beats after it last came closer");
+               Check (E.Progress_At - E.Start <= 3,
+                      "a rise of 1e-7 is taken for the push's closest point, at" & Natural'Image (E.Progress_At - E.Start));
+               Check (E.End_At - E.Progress_At <= Integer'Max (E.Progress_At - E.Start, Wait) + 1,
+                      "the push ends" & Natural'Image (E.End_At - E.Progress_At) & " beats after it last came nearer or farther");
             end if;
          end;
       end if;
    end Step_Ends_Beside_A_Moving_Joint;
+
+   --  A86's arm 2 let go from a press: the hold took the readings two beats
+   --  before it took effect, while the arm chattered against the table, and
+   --  asked a step of that chatter; the arm sprang back off the table, past
+   --  that step along its ask and farther off it, and then moved about by
+   --  1e-4 every three beats for as long as it was watched. Pushes 1 to 4 go
+   --  back and forth by 0.01 on the first channel; push 5 asks it 1.0 and
+   --  stops at 0.45; push 6, the hold, asks 0.002 of each channel, and the
+   --  arm springs back by 0.02 along the first and 0.005 against the second,
+   --  0.85 of what is left at every beat, with a cycle of 1e-4, 0 and -1e-4
+   --  on both from its first beat on. The hold is under way while the arm
+   --  springs back by more than it moves about, and then given up, still
+   --  moving: followed along its ask alone, it came nearer its target at its
+   --  first beat by more than it asked and was never given up.
+   procedure Step_Ends_After_A_Spring_Back is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Cycle : constant Real := 1.0e-4;
+      Hold  : constant Natural := 120;
+      Target, Reading : Real_Array (1 .. 2) := [0.0, 0.0];
+
+      --  How far the arm has sprung back, as a part of all it springs back, B beats into the hold.
+      function Sprung (B : Natural) return Real is (1.0 - 0.85 ** (B - Hold));
+   begin
+      for B in 0 .. 400 loop
+         --  The estimates at 64, 128 and 256 beats measured the lock-in afresh.
+         if B = 64 or else B = 128 or else B = 256 then
+            Put_Eye (M, 2);
+         end if;
+         if B in 40 | 46 | 52 | 58 then
+            Target (1) := (if B in 40 | 52 then 0.01 else 0.0);
+         elsif B in 41 | 47 | 53 | 59 then
+            Reading (1) := Target (1);
+         elsif B = 90 then
+            Target (1) := 1.0;
+         elsif B in 91 .. 93 then
+            Reading (1) := (case B is when 91 => 0.25, when 92 => 0.4, when others => 0.45);
+         elsif B = Hold then
+            Target := [0.452, 0.002];
+         elsif B > Hold then
+            Reading := [0.45 + 0.02 * Sprung (B) + Cycle * Real (1 - B mod 3), -0.005 * Sprung (B) + Cycle * Real (1 - B mod 3)];
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(Reading (1) + 1.0e-12 * Gaussian (Rng), Reading (2) + 1.0e-12 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target (1), Target (2)]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Known (Visible_Step (M, 1, 1)), "the eye's visible step is known");
+      Check (Steps.Episodes (M, 1) = 6, "six pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 6 then
+         declare
+            E    : constant Episode := M.Groups (1).Episodes (6);
+            Wait : constant Natural := M.Groups (1).Delay_Beats;
+         begin
+            Check (E.Ended and then E.Settled, "the hold never ends while the arm moves about where it sprang back to");
+            if E.Ended and then E.Settled then
+               Check (not E.Rested, "the hold is not given up still moving");
+               Check (0.02 * (Sprung (E.End_At) - Sprung (E.End_At - 1)) < Cycle,
+                      "the hold ends at beat" & Natural'Image (E.End_At - Hold) & " of the spring back, while the arm"
+                      & " springs back by more than it moves about");
+               Check (E.End_At - E.Progress_At <= Integer'Max (E.Progress_At - E.Start, Wait) + 1,
+                      "the hold ends" & Natural'Image (E.End_At - E.Progress_At)
+                      & " beats after it last came nearer or farther");
+            end if;
+         end;
+      end if;
+   end Step_Ends_After_A_Spring_Back;
 
    --  A joint an eye watches, read exactly as a simulator reads it: every push
    --  closes all but 1.45 % of its ask in one beat and stops there, which is
@@ -7282,6 +7356,9 @@ package body Driver.Robot.Tests is
                              & "its chatter is given up", Step_Ends_Against_Rising_Chatter'Access);
       Driver.Tests.Register ("robot.steps.aside", "a push whose own reading sets a new extreme now and then by less than the step an "
                              & "eye can see never ends while another joint of its group moves about", Step_Ends_Beside_A_Moving_Joint'Access);
+      Driver.Tests.Register ("robot.steps.springback", "a hold that asked a step of the chatter it read never ends while the arm "
+                             & "moves about where it sprang back to, or ends while the arm still springs back by more than it moves about",
+                             Step_Ends_After_A_Spring_Back'Access);
       Driver.Tests.Register ("robot.steps.sight", "a push of a joint an eye watches is called blocked though it stopped "
                              & "short by less than the eye can see, or asked less than the eye can see", Step_Short_Of_Sight'Access);
       Driver.Tests.Register ("robot.steps.letgo",

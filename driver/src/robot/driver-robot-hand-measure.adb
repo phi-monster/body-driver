@@ -896,6 +896,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          --  while the hand's creep decays).
          declare
             Rests_Before : Natural;
+            Longest      : Natural;
             Waited       : Natural := 0;
          begin
             Hold_Beat (Read_Rests'Access);
@@ -904,11 +905,14 @@ procedure Measure (H : in out Hands; M : in out Model) is
                return False;
             end if;
             Rests_Before := Rests_Now;
+            --  The stream's length at the let-go: read again at every beat of the wait, it grew with the wait and never
+            --  bounded it (A86's hand 2 waited 5,600 beats, to the end of the run).
+            Longest := Allowed;
             Hold_Beat (Read_Arm'Access);
             Move_Group (Arm_Is, Arm_Now.Element);
             loop
                Hold_Beat (Read_Rests'Access);
-               exit when Lost or else Rests_Now > Rests_Before or else Waited >= Allowed;
+               exit when Lost or else Rests_Now > Rests_Before or else Waited >= Longest;
                Waited := Waited + 1;
             end loop;
             if Lost then

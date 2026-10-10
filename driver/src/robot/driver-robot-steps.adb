@@ -110,85 +110,118 @@ package body Driver.Robot.Steps is
    procedure Start (M : in out Model; G : Group_Id; Beat : Natural) is
       S : Group_Stream renames M.Groups (G);
       E : Episode;
-      Length : Real := 0.0;
+      Length, Near : Real := 0.0;
    begin
       S.From.Clear;
       S.Ask.Clear;
+      S.Asks.Clear;
       for C in 1 .. S.Size loop
          S.From.Append (Channels.Reading (M, G, Beat - 1, C));
          S.Ask.Append (Channels.Target (M, G, Beat, C) - Channels.Reading (M, G, Beat - 1, C));
          Length := Length + S.Ask.Last_Element ** 2;
+         S.Asks.Append (Channels.Visible (M, G, [for I in 1 .. S.Size => (if I = C then S.Ask.Last_Element else 0.0)]));
+         if S.Asks.Last_Element then
+            Near := Near + S.Ask.Last_Element ** 2;
+         end if;
       end loop;
       E.Start := Beat;
       E.Length := Sqrt (Length);
       E.Moved := Channels.Moving (M, G, Beat);
       E.Moved_At := Beat;
-      --  Where it starts from: nothing of the ask made yet.
-      E.Closest_At := Beat - 1;
-      E.Closest := 0.0;
+      --  Where it starts from: its whole ask away from its target, nowhere from where it began.
+      E.Progress_At := Beat - 1;
+      E.Nearest := (Value => Sqrt (Near), others => <>);
+      E.Farthest := (Value => 0.0, others => <>);
       S.Episodes.Append (E);
    end Start;
 
-   --  Counts the beat's progress along the ask among those since the push
-   --  came closest to its target (Welford's running mean and sum of squares).
-   procedure Note (E : in out Episode; Along : Real) is
-      Off : constant Real := Along - E.Mean_Along;
+   --  Counts the quantity at the beat among those since its extreme (Welford's running mean and sum of squares).
+   procedure Note (X : in out Extreme; Value : Real) is
+      Off : constant Real := Value - X.Mean;
    begin
-      E.Followed := E.Followed + 1;
-      E.Mean_Along := E.Mean_Along + Off / Real (E.Followed);
-      E.Spread_Along := E.Spread_Along + Off * (Along - E.Mean_Along);
+      X.Followed := X.Followed + 1;
+      X.Mean := X.Mean + Off / Real (X.Followed);
+      X.Spread := X.Spread + Off * (Value - X.Mean);
    end Note;
 
-   --  Whether a push came closer to its target by Gain than its closest point
-   --  was, by more than its own chatter makes: held against something, a push
+   --  Whether a quantity of a push went past its extreme by Gain by more
+   --  than the group's own chatter makes: held against something, a group
    --  moves about, and the new extreme of that movement is no progress (a
    --  stick-slip against a table sets new extremes for as long as it is
    --  watched, at rarer and rarer beats, each a visible step). The beats
-   --  since its closest point, that one included, say how much it moves
+   --  since the extreme, that one included, say how much the quantity moves
    --  about, and a gain is the difference of two of them. With fewer than
-   --  two there is no chatter to tell it from: a push that comes closer at
-   --  every beat never has any.
-   function Beyond_Chatter (E : Episode; Gain : Real) return Boolean is
-     (E.Followed < 2
-      or else Driver.Uncertain.Significant
-                (Gain, Sqrt (2.0 * E.Spread_Along / Real (E.Followed - 1)), E.Followed - 1));
+   --  two there is no chatter to tell it from: a push that gains at every
+   --  beat never has any.
+   function Beyond_Chatter (X : Extreme; Gain : Real) return Boolean is
+     (X.Followed < 2
+      or else Driver.Uncertain.Significant (Gain, Sqrt (2.0 * X.Spread / Real (X.Followed - 1)), X.Followed - 1));
 
-   --  Follows how close the moving push under way has come to its target,
-   --  and gives it up when it is plainly going nowhere: still short of its
-   --  target by a step the motion test would see, it has not come closer for
-   --  as long as it took to come as close as it did, nor for less than the
-   --  wait a push of the group may take to answer (a new target cannot show
-   --  sooner). Coming closer is a step the motion test sees and its own
-   --  chatter does not make (Beyond_Chatter).
+   --  Follows the moving push under way, in the channels it asked a step
+   --  the one test of motion sees, and gives it up when its group is plainly
+   --  going nowhere: it has come neither nearer its target nor farther from
+   --  where it began for as long as it took to come as near or as far as it
+   --  did, nor for less than the wait a push of the group may take to answer
+   --  (a new target cannot show sooner). Coming nearer or farther is a step
+   --  that test sees and the group's own chatter does not make
+   --  (Beyond_Chatter). Nearer: a push that swings about its target as it
+   --  settles comes nearer at every swing, and is no more given up than one
+   --  coming to it from one side. Farther: an arm let go from a press springs
+   --  back off what it pressed, away from the hold that let it go, and is
+   --  not done until it has. A86's arm 2 was let go by a hold of the readings
+   --  two beats before it took effect, while the arm chattered by 3e-3
+   --  against the table: the hold asked 1.85e-3, the arm sprang back 0.02 off
+   --  it over 30 beats, and moved about by 1e-4 every three beats for the
+   --  5,600 beats the run had left. Followed along its ask alone, the push
+   --  came nearer at its first beat by more than it asked, and the beats
+   --  after, past its target, could never be short of it again: never given
+   --  up, it was under way to the end of the run, and the hand waited for its
+   --  press as long. A group that moves about, at its target, past it or
+   --  short of it, is going nowhere wherever it is. A channel the push asked
+   --  nothing that test sees is moved by something else, as Finish judges it.
    procedure Follow (M : in out Model; G : Group_Id; Beat : Natural; Wait : Natural) is
-      S     : Group_Stream renames M.Groups (G);
-      E     : Episode := S.Episodes.Last_Element;
-      Along : Real := 0.0;
+      S         : Group_Stream renames M.Groups (G);
+      E         : Episode := S.Episodes.Last_Element;
+      Away, Way : Real_Array (1 .. S.Size) := [others => 0.0];
+      Near, Far, Asked : Real := 0.0;
+      Nearer, Farther  : Boolean;
    begin
-      if E.Length = 0.0 or else not Channels.Has_Reading (M, G, Beat) then
+      if not Channels.Has_Reading (M, G, Beat) then
          return;
       end if;
-      for C in 1 .. S.Size loop
-         Along := Along + S.Ask (C - 1) / E.Length * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));
-      end loop;
-      if Along > E.Closest and then Channels.Visible (M, G, Along_Ask (S, E.Length, Along - E.Closest))
-        and then Beyond_Chatter (E, Along - E.Closest)
-      then
-         E.Closest := Along;
-         E.Closest_At := Beat;
-         E.Followed := 0;
-         E.Mean_Along := 0.0;
-         E.Spread_Along := 0.0;
-         Note (E, Along);
-         S.Episodes.Replace_Element (S.Episodes.Last_Index, E);
-      else
-         Note (E, Along);
-         S.Episodes.Replace_Element (S.Episodes.Last_Index, E);
-         if E.Closest < E.Length and then Channels.Visible (M, G, Along_Ask (S, E.Length, E.Length - E.Closest))
-           and then Beat - E.Closest_At > Integer'Max (E.Closest_At - E.Start, Wait)
-         then
-            Finish (M, G, Beat, Answered => True, Settled => True, Rested => False);
+      for C in Away'Range loop
+         if S.Asks (C - 1) then
+            Away (C) := Channels.Reading (M, G, Beat, C) - S.From (C - 1);
+            Way (C) := S.Ask (C - 1);
+            Near := Near + (S.Ask (C - 1) - Away (C)) ** 2;
+            Far := Far + Away (C) ** 2;
+            Asked := Asked + S.Ask (C - 1) ** 2;
          end if;
+      end loop;
+      Near := Sqrt (Near);
+      Far := Sqrt (Far);
+      Asked := Sqrt (Asked);
+      --  Nearer by a step seen along the ask, farther by one seen along the way the group went.
+      Nearer := Near < E.Nearest.Value
+        and then Channels.Visible (M, G, [for C in Way'Range => Way (C) * (E.Nearest.Value - Near) / Asked])
+        and then Beyond_Chatter (E.Nearest, E.Nearest.Value - Near);
+      Farther := Far > E.Farthest.Value
+        and then Channels.Visible (M, G, [for C in Away'Range => Away (C) * (Far - E.Farthest.Value) / Far])
+        and then Beyond_Chatter (E.Farthest, Far - E.Farthest.Value);
+      if Nearer then
+         E.Nearest := (Value => Near, others => <>);
+      end if;
+      if Farther then
+         E.Farthest := (Value => Far, others => <>);
+      end if;
+      Note (E.Nearest, Near);
+      Note (E.Farthest, Far);
+      if Nearer or else Farther then
+         E.Progress_At := Beat;
+      end if;
+      S.Episodes.Replace_Element (S.Episodes.Last_Index, E);
+      if Beat - E.Progress_At > Integer'Max (E.Progress_At - E.Start, Wait) then
+         Finish (M, G, Beat, Answered => True, Settled => True, Rested => False);
       end if;
    end Follow;
 
