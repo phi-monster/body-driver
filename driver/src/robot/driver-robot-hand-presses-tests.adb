@@ -34,7 +34,13 @@ package body Driver.Robot.Hand.Presses.Tests is
    type Commands_Kind is array (Positive range <>) of Boolean;
    --  The beats at which a new command for the arm takes effect.
 
-   function Run (Stream : Stream_Kind; Commanded : Commands_Kind := [1 .. 0 => False]) return Found_Array is
+   type Asked_Kind is array (Positive range <>) of Real;
+   --  The height of the tool each of those commands asks for; zero, not given.
+
+   function Run
+     (Stream : Stream_Kind; Commanded : Commands_Kind := [1 .. 0 => False]; Asked : Asked_Kind := [1 .. 0 => 0.0])
+      return Found_Array
+   is
       W     : Watcher;
       Found : Boolean;
       Press : Event;
@@ -45,7 +51,8 @@ package body Driver.Robot.Hand.Presses.Tests is
       for B in Stream'Range loop
          Observe (W, Driver.Clock.Beat (B), Stream (B).Blocked, Stream (B).Pushing, Stream (B).Still,
                   Pose_At (Stream (B).Height), [1 => Stream (B).Height], [1 => 0.04], Found, Press,
-                  Retargeted => B in Commanded'Range and then Commanded (B));
+                  Retargeted => B in Commanded'Range and then Commanded (B),
+                  Asked      => (if B in Asked'Range and then Asked (B) > 0.0 then Pose_At (Asked (B)) else (others => <>)));
          if Found then
             Count := Count + 1;
             Got (Count) := (Beat => Driver.Clock.Beat (B), Height => Stream (B).Height, Event => Press);
@@ -230,6 +237,43 @@ package body Driver.Robot.Hand.Presses.Tests is
              & (if Got'Length > 0 then Got (1).Beat'Image & ", height" & Got (1).Height'Image else " none"));
    end Retreat_Before_The_Rest_Is_No_Press;
 
+   procedure Back_From_The_Block_Is_No_Press is
+      --  A light press (Driver.Robot.Hand.Descend): a long step meets the table and the arm is taken back to where that
+      --  step began before the hand rests on it; a halving step, and the arm back to where the descent began; then the
+      --  press, one push from there, its hold and its rest. One press, the last, its way measured from the descent's
+      --  start: the moves back are retreats, not let-goes, and the rests after them are not presses.
+      Stream : constant Stream_Kind :=
+        [1  => (False, False, True, 0.200),     --  where the descent began
+         2  => (False, True, False, 0.170),
+         3  => (False, False, True, 0.150),     --  a step reached
+         4  => (False, True, False, 0.120),     --  a long step
+         5  => (True, False, False, 0.098),     --  meets the table
+         6  => (True, False, False, 0.097),
+         7  => (False, True, False, 0.130),     --  back to where it began
+         8  => (False, False, True, 0.150),
+         9  => (False, True, False, 0.130),     --  a step of the halving, reached
+         10 => (False, False, True, 0.124),
+         11 => (False, True, False, 0.170),     --  back to where the descent began
+         12 => (False, False, True, 0.200),
+         13 => (False, True, False, 0.120),     --  the press
+         14 => (True, False, False, 0.0985),
+         15 => (True, False, False, 0.0985),    --  its hold takes effect
+         16 => (True, False, True, 0.0990)];    --  and rests
+      Commanded : constant Commands_Kind (1 .. 16) := [2 | 4 | 7 | 9 | 11 | 13 | 15 => True, others => False];
+      Asked     : constant Asked_Kind (1 .. 16) :=
+        [2 => 0.150, 4 => 0.050, 7 => 0.150, 9 => 0.124, 11 => 0.200, 13 => 0.0975, 15 => 0.0985, others => 0.0];
+      Got : constant Found_Array := Run (Stream, Commanded, Asked);
+   begin
+      Check (Got'Length = 1 and then Got (1).Beat = 16,
+             "a light press gave" & Got'Length'Image & " presses, the first at beat"
+             & (if Got'Length > 0 then Got (1).Beat'Image & ", height" & Got (1).Height'Image else " none"));
+      if Got'Length = 1 then
+         --  Down in the world is +x in the tool, which points down.
+         Check (Got (1).Event.Approach.Sigma < Real'Last and then Got (1).Event.Approach.Unit_Vector (1) > 0.999,
+                "the light press's way is not the way the tool came from where the descent began");
+      end if;
+   end Back_From_The_Block_Is_No_Press;
+
    procedure Register is
    begin
       Driver.Tests.Register ("hand.presses.hold", "a hold that began no push is not the let-go, or the rest after the "
@@ -250,6 +294,8 @@ package body Driver.Robot.Hand.Presses.Tests is
       Driver.Tests.Register ("hand.presses.held",
                              "a push that holds the tool still against the table before it is judged blocked leaves the press's way unknown",
                              Held_Before_The_Verdict'Access);
+      Driver.Tests.Register ("hand.presses.back", "a move back from what a step met before the hand rested is taken for "
+                             & "a let-go, or the press after it is lost or given no way", Back_From_The_Block_Is_No_Press'Access);
    end Register;
 
 end Driver.Robot.Hand.Presses.Tests;

@@ -1386,7 +1386,7 @@ driver-robot-hand.adb	(Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Funct
 driver-robot-hand.adb	(Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (Over / Step + 1.0, 2.0))));	2.0	math	the base of doubling
 driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Driver.Log.Image (E.Sigma, 4) else "");	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Driver.Log.Image (E.Sigma, 4) else "");	4	format	digits printed in a log line or a message
-driver-robot-hand.adb	Allowed := Allowed + 2 * Natural (Real'Ceiling (Threshold (Scalar_Gate (G.Degrees_Of_Freedom)))) + 1	2	structure	a band is two Z sigma wide, in steps of one sigma
+driver-robot-hand.adb	Allowed := Allowed + 2 * Natural (Real'Ceiling (Threshold (Scalar_Gate (Seen.Tip.Degrees_Of_Freedom)))) + 1	2	structure	a band is two Z sigma wide, in steps of one sigma
 driver-robot-hand.adb	Allowed := Doublings (Room, Least) + 2;	2	structure	the step cut to the room, and the one that finds none left
 driver-robot-hand.adb	Append (Said_By, "" & (if Said.Point = 1 then "" else ""	1	structure	the first point of the hand is the tool's origin
 driver-robot-hand.adb	Append (Text, "" & Driver.Log.Image (Shift.By, 2) & "" & Driver.Log.Image (Shift.Sigma, 2)	2	format	digits printed in a log line or a message
@@ -1395,6 +1395,7 @@ driver-robot-hand.adb	Append (Text, "" & Driver.Log.Image (Shift.By, 2) & "");	2
 driver-robot-hand.adb	Append (Text, "" & Driver.Log.Image (Shift.Peak, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	Append (Text, (if L > 1 then "" else "") & "" & L'Image & ""	1	structure	a separator stands before every lobe but the first
 driver-robot-hand.adb	Append (Text, (if L > 1 then "" else "") & "" & L'Image & "");	1	structure	the first lobe is said with no separator before it
+driver-robot-hand.adb	By := (Bottom - Top) / 2.0;	2.0	math	halving: the next step goes down half the span the contact lies in
 driver-robot-hand.adb	Count : Natural := 1;	1	structure	the tool's origin is the first point of the hand
 driver-robot-hand.adb	Fast := 2.0 * Fast;	2.0	math	the descent doubles its step until the band
 driver-robot-hand.adb	I : Hand_Id := 1;	1	structure	the first hand

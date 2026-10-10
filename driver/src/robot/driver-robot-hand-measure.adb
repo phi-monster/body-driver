@@ -645,6 +645,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Least : Real;   --  the least push, where the aim leaves the tool, kept above zero so that the doubling begins
          By : Real := 0.0;
          Descended : Real := 0.0;   --  how far the pushes that were reached have lowered the tool
+         Step_From : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  the arm's readings where the last step began
+         Step_Reached : Boolean := False;   --  and the arm went the whole of it
          procedure Read_Lower (O : Observation) is
          begin
             Lost := not Present (Id, R);
@@ -653,6 +655,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
             end if;
             Plan := Driver.Robot.Hand.Pressing.Lowered (M, R.Arm, O, Aimed.Into, By);
             Stalls := H.Data.Found (Id).Stalls;
+            Step_From := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (O.Readings.Element (Arm_Is));
          end Read_Lower;
 
          Unplanned : Boolean := False;   --  a step could not be planned
@@ -671,26 +674,59 @@ procedure Measure (H : in out Hands; M : in out Model) is
               and then not (Opening_Of (R, M, O.Readings.Element (R.Group), Seen) and then Seen = Which);
          end Closer_Left;
 
-         procedure Lower (Step : Real; Reached : out Boolean) is
+         procedure Lower (Step : Real; Outcome : out Driver.Robot.Hand.Lowered) is
          begin
             By := Step;
+            Step_Reached := False;
             Hold_Beat (Read_Lower'Access);
             if Lost then
-               Reached := False;
+               Outcome := Driver.Robot.Hand.Ended;
                return;
             end if;
             if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
                Unplanned := True;
-               Reached := False;
+               Outcome := Driver.Robot.Hand.Ended;
                return;
             end if;
             Driver.Robot.Motion.Follow (M, Plan, Report, Stop => Closer_Left'Access);
             Felt := Report.Stopped;
-            Reached := Report.Outcome = Driver.Robot.Motion.Reached and then not Report.Stopped;
-            if Reached then
+            Step_Reached := Report.Outcome = Driver.Robot.Motion.Reached and then not Report.Stopped;
+            if Step_Reached then
                Descended := Descended + Step;
+               Outcome := Driver.Robot.Hand.Reached;
+            else
+               Outcome := Driver.Robot.Hand.Met;
             end if;
          end Lower;
+
+         --  Back to where the last step began, or to where the descent began, by the arm's readings there; the stall
+         --  count read again where it stands, so that the next step's verdict is its own, and the closer brought back to
+         --  the opening the press is made at when what the step met pushed it off. Reached is False when the arm or the
+         --  closer does not get there.
+         procedure Back (To_Start : Boolean; Reached : out Boolean) is
+            procedure Read_Stalls (O : Observation) is
+               pragma Unreferenced (O);
+            begin
+               Lost := not Present (Id, R);
+               if not Lost then
+                  Stalls := H.Data.Found (Id).Stalls;
+               end if;
+            end Read_Stalls;
+         begin
+            Move_Group (Arm_Is, (if To_Start then Aim_At.Element else Step_From.Element), Reached);
+            if To_Start then
+               Descended := 0.0;
+            elsif Step_Reached then
+               Descended := Descended - By;
+            end if;
+            Hold_Beat (Read_Stalls'Access);
+            if Reached and then not Lost and then not Closer_At (R, Which) then
+               Move_Group (R.Group, R.Readings (Which).Element);
+               Reached := Closer_At (R, Which);
+            end if;
+            Reached := Reached and then not Lost;
+            Felt := False;
+         end Back;
 
          function Above return Driver.Robot.Hand.Heights is
             --  The lobe's tip above the surface the presses so far fixed, and the
@@ -710,6 +746,15 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   Result.Tip := Driver.Robot.Hand.Pressing.Gap
                     (M, R.Arm, O, Driver.Robot.Hand.Tips.Tip (B, Lobe, Which), Driver.Robot.Hand.Tips.Surface (B), Aimed.Into);
                   Result.Eye := Driver.Robot.Hand.Pressing.Gap (M, R.Arm, O, Eye, Table_In_Arm (M, R.Arm), Aimed.Into);
+                  --  How far the tool stands below where the descent began, by the arm's fit now at both readings.
+                  declare
+                     At_Start : Observation;
+                  begin
+                     At_Start.Readings := O.Readings;
+                     At_Start.Readings.Replace_Element (Arm_Is, Aim_At.Element);
+                     Result.Down := (Tool_In_Arm (M, R.Arm, O).Pose.Translation
+                                     - Tool_In_Arm (M, R.Arm, At_Start).Pose.Translation) * Aimed.Into;
+                  end;
                   --  The watcher judges every push from the stream (Driver.Robot.Hand.Lowering), as the press is found:
                   --  one verdict, here as in a replay. It has judged the step before this one stalled.
                   Result.Stalled := H.Data.Found (Id).Stalls > Stalls;
@@ -845,7 +890,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                                 then "; the eye " & Driver.Log.Image (First.Eye.Value, 4) & " above the table"
                                 else "; the eye's height above the table unknown"));
          end;
-         Driver.Robot.Hand.Descend (Above'Access, Least, Lower'Access, Steps);
+         Driver.Robot.Hand.Descend (Above'Access, Least, Lower'Access, Back'Access, Steps);
          if Lost then
             End_Lost (Moved => True);
             return False;
@@ -853,7 +898,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          if Steps.Stalled then
             --  The last step was followed and took the hand nowhere: it is not part of the lowering.
             Descended := Descended - By;
-         elsif not Unplanned and then not Steps.Spent then
+         elsif not Unplanned and then not Steps.Spent and then not Steps.Unbacked then
             --  The last push was not completed. When the tip stands above the contact the presses so far predict by more
             --  than Z of its sigma the hand is in free air, and what stopped the push is the body's: the channel that
             --  fell short of the rest has stopped at an end, and says so (A22's press 2 at beat 13827, the third joint at
@@ -878,8 +923,12 @@ procedure Measure (H : in out Hands; M : in out Model) is
                           & Steps.Fast'Image & " fast and" & Steps.Band'Image
                           & " within Z sigma of the contact its presses predict," & Steps.Blind'Image
                           & " doubling from " & Driver.Log.Image (Least, 4) & " with nothing predicting it (before a prediction, or past its band),"
-                          & Steps.Capped'Image & " cut to the eye's room above the table; "
+                          & Steps.Capped'Image & " cut to the eye's room above the table," & Steps.Probes'Image
+                          & " halving the span the contact lay in once a step met something more than the least push past where"
+                          & " nothing was, the arm taken back" & Steps.Backs'Image & " times, and" & Steps.Pressed'Image
+                          & " from where the descent began to no more than the least push past that span; "
                           & (if Unplanned then "then it cannot press lower: " & Driver.Robot.Motion.Why (Plan)
+                             elsif Steps.Unbacked then "then the arm did not get back from what a step met: nothing is pressed"
                              elsif Steps.Spent then "then the eye has no room left above the table, or the steps that cover it were made,"
                                   & " and nothing was met, after lowering "
                                   & Driver.Log.Image (Descended, 4)
@@ -889,7 +938,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                                   & Driver.Log.Image (By, 4) & " after lowering " & Driver.Log.Image (Descended, 4)
                              else "blocked, the last push by " & Driver.Log.Image (By, 4) & " after lowering "
                                   & Driver.Log.Image (Descended, 4)));
-         if Unplanned or else Steps.Spent then
+         if Unplanned or else Steps.Spent or else Steps.Unbacked then
             --  Nothing was met and no more steps are made, or the next step is one the arm cannot be taken through (an
             --  end a channel showed is on the way down, with nothing predicting the contact to have told so before): the
             --  hand goes back to where the descent began, as after a press, for the presses after it begin there. A

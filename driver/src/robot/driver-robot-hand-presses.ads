@@ -40,8 +40,14 @@
 --  function of, since an arm's frame and unit are what its fit makes them and
 --  move when it is fitted again.
 --
---  A driver that retreats without letting go gives the rest after its
---  retreat, which is not where the hand touched: a press needs its let-go.
+--  A command that takes the tool back nearer where it stood still before the
+--  push than where the block left it is no let-go: the hand left what it
+--  pressed before it rested on it, and no press is found. A let-go holds the
+--  arm where the block left it. A descent whose step met something further
+--  past where nothing was than the least push the tool tells takes the hand
+--  back before it rests, and halves the span the contact lies in, so that the
+--  press it lets go of is a light one (Driver.Robot.Hand.Descend): those moves
+--  back are retreats, not presses.
 
 with Ada.Containers.Indefinite_Holders;
 with Driver.Clock;
@@ -71,12 +77,14 @@ package Driver.Robot.Hand.Presses is
       Closer  : Real_Array;
       Found   : out Boolean;
       Press   : out Event;
-      Retargeted : Boolean := False);
+      Retargeted : Boolean := False;
+      Asked   : Pose_Estimate := (others => <>));
    --  One beat of one arm, Arm its readings; Blocked the verdict on its
    --  latest push, Pushing that push still under way, Still its own readings
    --  at rest, Retargeted a new command for the arm took effect at the beat
-   --  (Driver.Robot.Channels.Target_Changed). Found is True at the beat a press
-   --  ends.
+   --  (Driver.Robot.Channels.Target_Changed), Asked the tool where the readings
+   --  that command asks for would put it (unknown when not given). Found is
+   --  True at the beat a press ends.
 
 private
 
@@ -92,6 +100,7 @@ private
       Last_Still : Pose_Estimate;      --  where the tool last stood still while free
       Approach   : Direction_Estimate; --  measured at the first blocked beat
       Commands   : Natural := 0;       --  the new commands that took effect since the block
+      Block_At   : Pose_Estimate;      --  the tool at the first blocked beat
    end record;
 
 end Driver.Robot.Hand.Presses;

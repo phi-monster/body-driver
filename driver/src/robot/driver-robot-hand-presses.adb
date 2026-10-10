@@ -39,8 +39,15 @@ package body Driver.Robot.Hand.Presses is
       Closer  : Real_Array;
       Found   : out Boolean;
       Press   : out Event;
-      Retargeted : Boolean := False)
+      Retargeted : Boolean := False;
+      Asked   : Pose_Estimate := (others => <>))
    is
+      --  The command takes the tool back nearer where it stood before the push than where the block left it: a
+      --  retreat, which a hold at the readings the block left (the arm easing back a little since) never is.
+      function Away return Boolean is
+        (W.Stood and then Known (Position (Asked))
+         and then abs (Asked.Pose.Translation - W.Last_Still.Pose.Translation)
+                    < abs (Asked.Pose.Translation - W.Block_At.Pose.Translation));
    begin
       Found := False;
       Press := (others => <>);
@@ -49,6 +56,7 @@ package body Driver.Robot.Hand.Presses is
             if Blocked then
                W.State := Driven;
                W.Commands := 0;
+               W.Block_At := Tool;
                W.Approach := (if W.Stood then Moved_Into (W.Last_Still, Tool) else (others => <>));
             elsif Still and then not Pushing then
                --  Where the tool stood still while free, no push under way: a push that met the table holds the tool
@@ -63,11 +71,16 @@ package body Driver.Robot.Hand.Presses is
             --  effect: a hold at the readings the block left asks the arm nothing it can see, begins no push
             --  for the step tracker, and is a let-go all the same (A35's first press: the arm still easing back
             --  at the hold, the retreat the next command).
-            if Retargeted then
-               W.Commands := W.Commands + 1;
-            end if;
-            if not Blocked or else W.Commands > 0 then
-               W.State := Let_Go;
+            if Retargeted and then Away then
+               --  Taken away before letting go: no press, and free again at the next rest unblocked.
+               W.State := Settling;
+            else
+               if Retargeted then
+                  W.Commands := W.Commands + 1;
+               end if;
+               if not Blocked or else W.Commands > 0 then
+                  W.State := Let_Go;
+               end if;
             end if;
          when Let_Go =>
             if Retargeted then

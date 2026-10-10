@@ -341,21 +341,32 @@ private
    --  own contrast, which a still view tells; a fraction of a pixel may
    --  change none. Zero, no blind push, when the shift is not measured.
 
+   type Lowered is (Reached, Met, Ended);
+   --  How a step of a descent ended: Reached, the tool went down the step and met nothing; Met, it met something
+   --  short of the step's end (the arm was blocked, or what the hand watches stopped the push, Motion.Step's Stop);
+   --  Ended, the step could not be made, or the press it is part of is over (the hand is gone).
+
    type Descent_Steps is record
       Fast    : Natural := 0;   --  the push to Z sigma above the predicted contact (one, and cut to the eye's room)
       Band    : Natural := 0;   --  within that band, each the larger of the sigma and Least
       Blind   : Natural := 0;   --  doubling, nothing predicting the contact (before a prediction, or past its band)
       Capped  : Natural := 0;   --  of those, the steps cut to the eye's room above the surface
+      Probes  : Natural := 0;   --  once something was met: from the deepest place nothing was, half the span left
+      Backs   : Natural := 0;   --  the tool taken back after a step met something, before the press
+      Pressed : Natural := 0;   --  the pushes from where the descent began to within Least past the contact
       Spent   : Boolean := False;   --  ended with the eye no room left to go down, and nothing met
       Stalled : Boolean := False;   --  ended by a step the arm followed and the hand did not go down with
+      Unbacked : Boolean := False;  --  ended by a move back the arm did not complete: nothing is pressed
    end record;
 
-   function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Blind);
+   function Total (S : Descent_Steps) return Natural is (S.Fast + S.Band + S.Blind + S.Probes + S.Pressed);
 
    type Heights is record
       Tip     : Estimate := Unknown;   --  the tip above the contact predicted under it, along the way down
       Eye     : Estimate := Unknown;   --  the eye above the surface, along the way down
       Stalled : Boolean := False;      --  the step before was followed by the arm and the hand did not go down with it
+      Down    : Real := Real'Last;     --  how far the tool stands below where the descent began, along the way down,
+                                       --  from the arm's readings now and there; Real'Last when it is not measured
    end record;
    --  Stalled is read with the heights, from the judgment of the push the stream gave
    --  (Driver.Robot.Hand.Lowering): the arm's readings went where the step asked and the
@@ -371,7 +382,8 @@ private
    procedure Descend
      (Above : not null access function return Heights;
       Least : Real;
-      Lower : not null access procedure (By : Real; Reached : out Boolean);
+      Lower : not null access procedure (By : Real; Outcome : out Lowered);
+      Back  : not null access procedure (To_Start : Boolean; Reached : out Boolean);
       Steps : out Descent_Steps)
      with Pre => Least > 0.0;
    --  A press's descent: each step lowers the tool By, until one does not
@@ -407,6 +419,37 @@ private
    --  5.80 with the eye 10.0 units above the table: a lowering to 11.65, 5.68
    --  rad of joint motion, of which the arm made 13.6 per cent before it
    --  folded on itself.)
+   --
+   --  The press is light: it is made by a push from where the descent began
+   --  that ends no more than Least past the deepest place the tool went and
+   --  met nothing, so that it presses on the surface by no more than the
+   --  least move the tool tells, from as far as the descent came (the way it
+   --  pressed is measured over that, Driver.Robot.Hand.Presses). A step that
+   --  meets something further past that than Least is not the press: the arm
+   --  is taken back (Back, to where that step began), and the span the
+   --  contact lies in is narrowed until it is no longer than Least; then the
+   --  arm goes back to where the descent began (Back with To_Start), and the
+   --  press is one push to Least past the span's near end, which is past its
+   --  far end. Where the step that met something stopped the tool, by its
+   --  readings (Down), is the span's far end when it is nearer than the
+   --  step's: the tool went past the contact, never short of it, unless
+   --  something of its own stopped it in the air, and then the press meets
+   --  nothing and the descent goes on from there as before. A surface that
+   --  does not give stops the tool at the contact (the table did, at every
+   --  press of A79 and A90 that reached it), so the first step of the span
+   --  goes to Least short of that stop: meeting nothing, the span is no
+   --  longer than Least at once; meeting something, the surface gave, and the
+   --  span is halved, by steps that go down half of it, a step that meets
+   --  something taken back. A doubling's last step is as long as all the
+   --  steps before it, and a press pushed on with it loads the hand with as
+   --  much: A90's presses at open, their last pushes 2.1 to 4.8 units,
+   --  squeezed the open fingers 9 to 46 mm shut by the truth (a tip measured
+   --  on a finger that was not where the opening puts it; the table did not
+   --  give: of the presses that reached it all but two left the fingers'
+   --  lowest point within 0.6 mm of its top, those two 3.6 and 5.8 mm into
+   --  it), and the arm took some 75 beats to settle at each let-go. A move
+   --  back the arm does not complete ends the descent, Unbacked, with nothing
+   --  pressed.
 
    function Sweepable (H : Hands; M : Model; G : Group_Id) return Boolean;
    --  The group is a closer by the body's roles now, and the hand watches it

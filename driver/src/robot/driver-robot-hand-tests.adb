@@ -123,98 +123,106 @@ package body Driver.Robot.Hand.Tests is
       --  the surface ten times as stiff: a step that would end below the
       --  surface is cut short at it, the tip settling where the two push back
       --  equally, a tenth of the way in of the step's overshoot past the
-      --  surface. From 0.2 above it, the tool's Least 0.001:
-      --  (a) the contact predicted where it is, its sigma 0.002: the overshoot
-      --      at contact is at most the larger of the two, within about as many
-      --      steps as doubling from Least takes to cover the descent, and the
-      --      band's twice Z;
-      --  (b) nothing predicting it: fast, doubling from Least, and blocked by
-      --      the step that meets the surface, about a doubling's number of
-      --      steps (the owner's rule, 10-05: the most aggressive choice);
+      --  surface; taken back, the tip is where the step began, or where the
+      --  descent did. From 0.2 above it, the tool's Least 0.001, every press
+      --  is light: the push it ends with comes from where the descent began
+      --  and overshoots the surface by no more than Least, whatever the steps
+      --  before it met (the open fingers of 10.10's presses were pushed shut by
+      --  9 to 46 mm under last pushes of a doubling's length, A90 by the truth):
+      --  (a) the contact predicted where it is, its sigma 0.002: one fast step,
+      --      the band's, the halving of the span the step that met the surface
+      --      leaves, and the press;
+      --  (b) nothing predicting it: doubling from Least until a step meets the
+      --      surface, the halving of what that step leaves, and the press;
       --  (c) predicted 3 Z sigma too low, as when an obstacle the eyes did not
-      --      see lies under the tip: the fast part meets it, and its overshoot
-      --      is that step's, past the bound: the known failure, stated here;
-      --  (d) where it is predicted, the tip read at contact lies within the
-      --      bound of the surface.
-      --  The old descent, doubling until blocked, overshoots by about half the
-      --  descent and reads the tip that much in.
+      --      see lies under the tip: the fast step meets it, and the press is
+      --      as light;
+      --  (d) where it is predicted, the tip read at contact lies within Least of
+      --      the surface;
+      --  (e) predicted 10 too high: past the band the steps double again, and
+      --      the press is as light.
       Least     : constant Real := 0.001;
       Sigma     : constant Real := 0.002;
       Stiffer   : constant Real := 10.0;
       Z         : constant Real := Threshold (Scalar_Gate);
+      Start     : Real := 0.0;   --  where the descent began
       Tip, Over : Real := 0.0;
+      Began     : Real := 0.0;   --  where the last step began
       Predicted : Real := 0.0;
       Predict   : Boolean := True;
-      Last_Step : Real := 0.0;
+      Last_Was_Press : Boolean := False;   --  the last step came from where the descent began
       Steps     : Descent_Steps;
-      procedure Lower (By : Real; Reached : out Boolean) is
+      procedure Lower (By : Real; Outcome : out Lowered) is
          Target : constant Real := Tip - By;
       begin
-         Last_Step := By;
-         Reached := Target >= 0.0;
-         if Reached then
+         Last_Was_Press := Tip = Start;
+         Began := Tip;
+         if Target >= 0.0 then
             Tip := Target;
+            Outcome := Reached;
          else
             Over := -Target;
             Tip := Target / (1.0 + Stiffer);
+            Outcome := Met;
          end if;
       end Lower;
+      procedure Back (To_Start : Boolean; Reached : out Boolean) is
+      begin
+         Tip := (if To_Start then Start else Began);
+         Reached := True;
+      end Back;
       function Above return Heights is
-        ((Tip => (if Predict then (Value => Tip - Predicted, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown),
-          Eye => Unknown, others => <>));
+        ((Tip  => (if Predict then (Value => Tip - Predicted, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown),
+          Eye  => Unknown,
+          Down => Start - Tip,
+          others => <>));
       procedure Press (From : Real) is
       begin
+         Start := From;
          Tip := From;
          Over := 0.0;
-         Descend (Above'Access, Least, Lower'Access, Steps);
+         Descend (Above'Access, Least, Lower'Access, Back'Access, Steps);
       end Press;
-      Bound : constant Real := Real'Max (Sigma, Least);
+      function Log2 (X : Real) return Natural is
+        (Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (X, 2.0))));
+      --  Past Least by no more than the rounding of the sums the descent is made of.
+      function Light return Boolean is (Over <= Least + Start * Real'Epsilon);
+      function Said return String is
+        (Steps.Fast'Image & " fast," & Steps.Band'Image & " banded," & Steps.Blind'Image & " blind,"
+         & Steps.Probes'Image & " halving," & Steps.Pressed'Image & " pressing and" & Steps.Backs'Image & " back");
    begin
       Predicted := 0.0;
       Predict := True;
       Press (0.2);
-      Check (Over <= Bound, "(a) the press overshot the predicted contact by" & Over'Image & ", past" & Bound'Image);
-      Check (Total (Steps) <= Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (0.2 / Least, 2.0)))
-                              + 2 * Natural (Real'Ceiling (Z)) + 1
-             and then Steps.Blind = 0 and then Steps.Fast > 0 and then Steps.Band > 0,
-             "(a) the press took" & Steps.Fast'Image & " fast," & Steps.Band'Image & " banded and" & Steps.Blind'Image
-             & " blind steps");
-      Check (Steps.Fast = 1 and then Total (Steps) <= 2 * Natural (Real'Ceiling (Z)) + 2,
-             "(a) the press took" & Steps.Fast'Image & " fast and" & Total (Steps)'Image
-             & " steps in all, not one to cover the descent and the band's");
-      Check (abs Tip <= Bound, "(d) the tip read at contact lies" & Real'Image (abs Tip) & " from the surface");
+      Check (Light and then Last_Was_Press,
+             "(a) the press overshot the predicted contact by" & Over'Image & ", past Least, or was not made from where"
+             & " the descent began: " & Said);
+      Check (Steps.Fast = 1 and then Steps.Blind = 0 and then Steps.Pressed = 1
+             and then Total (Steps) <= 2 * Natural (Real'Ceiling (Z)) + Log2 (Sigma / Least) + 4,
+             "(a) the press took" & Said & " steps, not one to cover the descent, the band's, its halving and the press");
+      Check (abs Tip <= Least, "(d) the tip read at contact lies" & Real'Image (abs Tip) & " from the surface");
       Predict := False;
       Press (0.2);
-      --  Doubling from Least, the step that meets the surface is the first
-      --  whose sum passes the descent: some 2^k Least past it at most.
-      Check (Over > 0.0 and then Over <= Last_Step,
-             "(b) with nothing predicting the surface the press was not blocked by its step, overshooting by"
-             & Over'Image);
-      Check (Steps.Fast = 0 and then Steps.Band = 0 and then Steps.Blind = Total (Steps)
-             and then Total (Steps) <= Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log
-                                                                 (0.2 / Least + 1.0, 2.0))),
-             "(b) with nothing predicting the surface the press took" & Steps.Fast'Image & " fast," & Steps.Band'Image
-             & " banded and" & Steps.Blind'Image & " blind steps, not a doubling's worth");
+      Check (Over > 0.0 and then Light and then Last_Was_Press,
+             "(b) with nothing predicting the surface the press overshot it by" & Over'Image & ": " & Said);
+      Check (Steps.Fast = 0 and then Steps.Band = 0 and then Steps.Pressed = 1
+             and then Steps.Blind <= Log2 (0.2 / Least + 1.0)
+             and then Steps.Probes <= Log2 (0.2 / Least) + 1,
+             "(b) with nothing predicting the surface the press took" & Said & " steps, not a doubling's worth, its"
+             & " halving and the press");
       Predicted := -3.0 * Z * Sigma;
       Predict := True;
       Press (0.2);
-      Check (Over > Bound and then Over <= Last_Step,
-             "(c) an obstacle the prediction misses was met with an overshoot of" & Over'Image
-             & ", not by the fast step past the bound");
-      --  (e) the press that fixed the tip was stopped above the surface by something under it, so
-      --  the prediction is a bound and the surface is 10 below where it says. The band ends, the steps
-      --  double again, and the surface is met within a doubling's worth of steps more than (a) takes,
-      --  not by creeping at the band's size to the end of the room (A17's second press).
+      Check (Light and then Last_Was_Press and then Steps.Probes > 0,
+             "(c) an obstacle the prediction misses was pressed with an overshoot of" & Over'Image & ": " & Said);
       Predicted := 10.0;
       Predict := True;
       Press (10.2);
-      Check (Over > 0.0 and then Over <= Last_Step, "(e) the surface 10 below the predicted contact was not met by a step");
-      Check (Total (Steps) <= Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (10.2 / Least, 2.0)))
-                              + 2 * Natural (Real'Ceiling (Z)) + Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (10.2 / Sigma, 2.0)))
-                              + 3,
-             "(e) the press took" & Steps.Fast'Image & " fast," & Steps.Band'Image & " banded and" & Steps.Blind'Image
-             & " blind steps to reach a surface 10 below the prediction");
-      Check (Steps.Blind > 0, "(e) the steps past the band were not doubling again");
+      Check (Over > 0.0 and then Light and then Last_Was_Press,
+             "(e) the surface 10 below the predicted contact was pressed with an overshoot of" & Over'Image & ": " & Said);
+      Check (Steps.Blind > 0 and then Total (Steps) <= Log2 (10.2 / Least) + 2 * Natural (Real'Ceiling (Z))
+                                                       + Log2 (10.2 / Sigma) + Log2 (10.2 / Least) + 5,
+             "(e) the press took" & Said & " steps to reach a surface 10 below the prediction");
    end Press_Overshoot;
 
    procedure Eye_Room_Caps_The_Steps is
@@ -238,22 +246,27 @@ package body Driver.Robot.Hand.Tests is
       Steps  : Descent_Steps;
       Pushes : Natural := 0;
       Slides : Boolean := False;   --  the hand slides: its steps are reached and lower nothing
-      procedure Lower (By : Real; Reached : out Boolean) is
+      procedure Lower (By : Real; Outcome : out Lowered) is
       begin
          Pushes := Pushes + 1;
          if not Slides then
             Tip := Tip - By;
          end if;
          Lowest := Real'Min (Lowest, Tip + 0.05);
-         Reached := Pushes < 40;   --  the arm gives way until the test ends it
+         Outcome := (if Pushes < 40 then Reached else Met);   --  the arm gives way until the test ends it
       end Lower;
+      procedure Back (To_Start : Boolean; Reached : out Boolean) is
+         pragma Unreferenced (To_Start);
+      begin
+         Reached := False;   --  nothing more is asked of the arm once it stopped giving way
+      end Back;
       function Above return Heights is
         ((Tip => Unknown,
           Eye => (if Known_Eye then (Value => Tip + 0.05, Sigma => Sigma, Degrees_Of_Freedom => 0) else Unknown),
           others => <>));
    begin
       Tip := 0.2;
-      Descend (Above'Access, Least, Lower'Access, Steps);
+      Descend (Above'Access, Least, Lower'Access, Back'Access, Steps);
       Check (Steps.Spent, "the eye went on lowering past the table: " & Pushes'Image & " pushes, the eye at"
              & Real'Image (Lowest));
       Check (Lowest >= Z * Sigma - 1.0e-12, "a step took the eye to" & Real'Image (Lowest) & ", nearer the table than Z sigma");
@@ -263,8 +276,8 @@ package body Driver.Robot.Hand.Tests is
       Known_Eye := False;
       Pushes := 0;
       Tip := 0.2;
-      Descend (Above'Access, Least, Lower'Access, Steps);
-      Check (not Steps.Spent and then Steps.Capped = 0 and then Pushes = 40,
+      Descend (Above'Access, Least, Lower'Access, Back'Access, Steps);
+      Check (not Steps.Spent and then Steps.Capped = 0 and then Steps.Blind = 40 and then Pushes = 40,
              "with the eye's height unknown the steps were stopped: " & Pushes'Image & " pushes");
       --  (d) steps the arm reaches, none of which lowers the eye (a hand that slides along the table
       --  it met, as A17's did for 6000 beats): the eye's room stays, and the steps end on the schedule
@@ -273,7 +286,7 @@ package body Driver.Robot.Hand.Tests is
       Pushes := 0;
       Tip := 0.2;
       Slides := True;
-      Descend (Above'Access, Least, Lower'Access, Steps);
+      Descend (Above'Access, Least, Lower'Access, Back'Access, Steps);
       Check (Steps.Spent and then Pushes <= 10 and then Pushes >= 8,
              "steps that did not lower the eye went on for" & Pushes'Image & " pushes, not the schedule's 10");
    end Eye_Room_Caps_The_Steps;
@@ -281,36 +294,53 @@ package body Driver.Robot.Hand.Tests is
    procedure Stalled_Descent is
       --  A hand lowered onto a table its tip is predicted 0.34 above (sigma 0.04), as A17's third press was: the
       --  arm follows every step, the hand goes down with each until its tip is on the table, and the steps after
-      --  that are followed by the arm and take the hand nowhere. The descent ends at the first of them, a press
-      --  and not a descent spent: the room the eye has is nearly all there, and a descent that ran on to spend it
-      --  would be the press thrown away.
+      --  that are followed by the arm and take the hand no further. The descent ends in a press and not a descent
+      --  spent: the room the eye has is nearly all there, and a descent that ran on to spend it would be the press
+      --  thrown away. The press is as light as any: the step the hand stopped going down with is longer than Least,
+      --  so the arm is taken back and the span halved, and the press is the push from where the descent began.
       Least  : constant Real := 0.001;
       Sigma  : constant Real := 0.04;
-      Tip    : Real := 0.34;   --  its height above the table
+      Start  : constant Real := 0.34;
+      Tip    : Real := Start;   --  its height above the table
+      Began  : Real := Start;
       Pushes : Natural := 0;
       Steps  : Descent_Steps;
-      Stalled : Boolean := False;   --  the last step was followed and took the hand nowhere
-      procedure Lower (By : Real; Reached : out Boolean) is
+      Stalled : Boolean := False;   --  the last step was followed and the hand stopped on the table
+      Over    : Real := 0.0;        --  how far the last step asked past the table
+      procedure Lower (By : Real; Outcome : out Lowered) is
       begin
          Pushes := Pushes + 1;
-         Reached := True;   --  the arm follows every step
+         Began := Tip;
+         Outcome := Reached;   --  the arm follows every step
+         Over := Real'Max (0.0, By - Tip);
          if Tip - By >= 0.0 then
             Tip := Tip - By;
+            Stalled := False;
          else
+            Tip := 0.0;
             Stalled := True;
          end if;
       end Lower;
+      procedure Back (To_Start : Boolean; Reached : out Boolean) is
+      begin
+         Tip := (if To_Start then Start else Began);
+         Stalled := False;
+         Reached := True;
+      end Back;
       function Above return Heights is
         ((Tip     => (Value => Tip, Sigma => Sigma, Degrees_Of_Freedom => 0),
           Eye     => (Value => Tip + 2.0, Sigma => 0.001, Degrees_Of_Freedom => 0),
-          Stalled => Stalled));
+          Stalled => Stalled,
+          Down    => Real'Last));
    begin
-      Descend (Above'Access, Least, Lower'Access, Steps);
+      Descend (Above'Access, Least, Lower'Access, Back'Access, Steps);
       Check (Steps.Stalled and then not Steps.Spent, "the descent of a hand that stopped going down ended stalled:"
              & Steps.Stalled'Image & ", spent:" & Steps.Spent'Image);
       Check (Pushes = Total (Steps) and then Pushes < 40, "the descent took" & Pushes'Image & " pushes");
-      Check (Tip < 0.2, "the hand was stopped at" & Real'Image (Tip) & " above the table, the tip not pressed onto it"
-             & " as far as the free steps took it");
+      Check (Tip = 0.0 and then Over <= Least + Start * Real'Epsilon and then Steps.Pressed = 1,
+             "the hand was stopped at" & Real'Image (Tip) & " above the table, or pressed onto it by a step"
+             & Real'Image (Over) & " past it, after" & Steps.Fast'Image & " fast," & Steps.Band'Image & " banded,"
+             & Steps.Probes'Image & " halving," & Steps.Pressed'Image & " pressing and" & Steps.Backs'Image & " back");
    end Stalled_Descent;
 
    procedure Held_Closer is
@@ -705,8 +735,8 @@ package body Driver.Robot.Hand.Tests is
                              Upper_End'Access);
       Driver.Tests.Register ("hand.measure.unformed", "a push whose view never forms is waited for without end (A12)",
                              Views_Never_Form'Access);
-      Driver.Tests.Register ("hand.measure.press", "a press overshoots the contact by more than its prediction admits, "
-                             & "or creeps when nothing predicts it", Press_Overshoot'Access);
+      Driver.Tests.Register ("hand.measure.press", "a press overshoots the surface by more than the least push, or is "
+                             & "not made from where its descent began", Press_Overshoot'Access);
       Driver.Tests.Register ("hand.measure.room", "a step lowers the eye below the table its arm's own eye saw",
                              Eye_Room_Caps_The_Steps'Access);
       Driver.Tests.Register ("hand.measure.stall", "a hand the arm follows and that stops going down is pushed on to the "

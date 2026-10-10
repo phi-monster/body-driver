@@ -1036,11 +1036,27 @@ package body Driver.Robot.Hand is
          return;
       end if;
       --  A push that stalled is a block as far as the press is concerned: the verdict stands until the next push begins.
-      Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked or else Stalled_Now, Is_Pushing, Is_Still,
-                                         Tool_In_Arm (M, R.Arm, O),
-                                         O.Readings.Element (Arm_Group (M, R.Arm)), O.Readings.Element (R.Group),
-                                         Found, Press,
-                                         Retargeted => Driver.Robot.Channels.Target_Changed (M, Arm_Group (M, R.Arm), Natural (O.Beat)));
+      --  A new command's readings, as a tool pose, tell a let-go from a retreat (Presses).
+      declare
+         G          : constant Group_Id := Arm_Group (M, R.Arm);
+         Retargeted : constant Boolean := Driver.Robot.Channels.Target_Changed (M, G, Natural (O.Beat));
+         Asked      : Pose_Estimate;
+      begin
+         if Retargeted and then Driver.Robot.Channels.Has_Target (M, G, Natural (O.Beat)) then
+            declare
+               Wanted : Real_Array (1 .. Group_Size (M, G));
+            begin
+               for C in Wanted'Range loop
+                  Wanted (C) := Driver.Robot.Channels.Target (M, G, Natural (O.Beat), C);
+               end loop;
+               Asked := Pose_Of (Wanted);
+            end;
+         end if;
+         Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked or else Stalled_Now, Is_Pushing, Is_Still,
+                                            Tool_In_Arm (M, R.Arm, O),
+                                            O.Readings.Element (G), O.Readings.Element (R.Group),
+                                            Found, Press, Retargeted => Retargeted, Asked => Asked);
+      end;
       if not Found then
          return;
       end if;
@@ -1311,121 +1327,211 @@ package body Driver.Robot.Hand is
    procedure Descend
      (Above : not null access function return Heights;
       Least : Real;
-      Lower : not null access procedure (By : Real; Reached : out Boolean);
+      Lower : not null access procedure (By : Real; Outcome : out Lowered);
+      Back  : not null access procedure (To_Start : Boolean; Reached : out Boolean);
       Steps : out Descent_Steps)
    is
       Fast    : Real := Least;   --  the next step of the fast part, doubling
       Past    : Real := 0.0;     --  the last step past the band, doubling
-      Reached : Boolean;
+      Outcome : Lowered;
       Allowed : Natural := Natural'Last;   --  the steps the schedule takes to cover the eye's room: no more are made
-      First   : Boolean := True;
+      Seen    : Heights;
+
+      --  Seeking, the contact is looked for as the presses so far predict it, or by doubling; Halving, a step met
+      --  something and the span the contact lies in is halved from its near end; Pressing, the span is no longer
+      --  than Least and the tool stands where the descent began, for the press.
+      type Phase is (Seeking, Halving, Pressing);
+      State  : Phase := Seeking;
+      --  Along the way down from where the descent began: the deepest the tool went and met nothing, where it stands
+      --  while seeking and halving; and, once a step met something, the farthest the contact can be.
+      Top    : Real := 0.0;
+      Bottom : Real := 0.0;
+      Moved  : Boolean := False;   --  a step was reached: the tool no longer stands where the descent began
+      At_Stop : Boolean := False;  --  the span's far end is where the step that met something stopped the tool
+      Done   : Boolean := False;
 
       --  How many steps doubling from Step takes to cover Over.
       function Doublings (Over, Step : Real) return Natural is
         (Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (Over / Step + 1.0, 2.0))));
+
+      --  Back, to where the descent began for the press when the span is no longer than Least, else to the near end
+      --  of the span, where the step that met something began. Done when the arm does not get there.
+      procedure Go_Back is
+         Got_There : Boolean;
+         To_Start  : constant Boolean := Bottom - Top <= Least;
+      begin
+         Back (To_Start, Got_There);
+         Steps.Backs := Steps.Backs + 1;
+         if not Got_There then
+            Steps.Unbacked := True;
+            Done := True;
+         elsif To_Start then
+            State := Pressing;
+            Moved := False;
+         else
+            State := Halving;
+         end if;
+      end Go_Back;
    begin
       Steps := (others => <>);
-      loop
+      Seen := Above.all;
+      --  The arm followed the aim and the hand did not go down with it: the hand lies on what it met, and the descent
+      --  is the press, a bound or a contact, not spent.
+      if Seen.Stalled then
+         Steps.Stalled := True;
+         return;
+      end if;
+      if Known (Seen.Eye) then
          declare
-            type Kind is (Doubling, Banded, Blind);
-            Seen : constant Heights := Above.all;
-            G    : Estimate renames Seen.Tip;
-            By   : Real := Least;
-            How  : Kind := Blind;
+            Room : constant Real :=
+              Seen.Eye.Value - Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
          begin
-            --  The arm followed the step before and the hand did not go down with it: the hand lies on what it met,
-            --  and the descent is the press, a bound or a contact, not spent.
-            if Seen.Stalled then
-               Steps.Stalled := True;
-               exit;
-            end if;
-            if First then
-               First := False;
-               if Known (Seen.Eye) then
-                  declare
-                     Room : constant Real :=
-                       Seen.Eye.Value - Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
-                  begin
-                     if Room >= Least then
-                        --  Doubling from Least covers the room, the last step cut to it and the one
-                        --  that finds none left; a prediction adds its band and the doubling past it.
-                        Allowed := Doublings (Room, Least) + 2;
-                        if Known (G) then
-                           Allowed := Allowed + 2 * Natural (Real'Ceiling (Threshold (Scalar_Gate (G.Degrees_Of_Freedom)))) + 1
-                             + Doublings (Room, Real'Max (G.Sigma, Least));
-                        end if;
-                     end if;
-                  end;
+            if Room >= Least then
+               --  Doubling from Least covers the room, the last step cut to it and the one
+               --  that finds none left; a prediction adds its band and the doubling past it.
+               Allowed := Doublings (Room, Least) + 2;
+               if Known (Seen.Tip) then
+                  Allowed := Allowed + 2 * Natural (Real'Ceiling (Threshold (Scalar_Gate (Seen.Tip.Degrees_Of_Freedom)))) + 1
+                    + Doublings (Room, Real'Max (Seen.Tip.Sigma, Least));
                end if;
             end if;
-            --  Steps that were reached and went on without the tool meeting anything are not lowering it:
-            --  they end, on the schedule, not on the clock (A17: 6000 beats of steps the hand slid under).
-            if Total (Steps) >= Allowed then
-               Steps.Spent := True;
-               exit;
-            end if;
-            if Known (G) then
-               declare
-                  Spread : constant Real := Threshold (Scalar_Gate (G.Degrees_Of_Freedom)) * G.Sigma;
-                  --  How far the tip may go before it is within Z sigma of the
-                  --  predicted contact.
-                  Room : constant Real := G.Value - Spread;
-               begin
-                  if Room >= Least then
-                     --  The prediction says where the contact is: the first push goes to Z sigma above it, in
-                     --  one (the steps used to double from Least over it, thirteen pushes of ten beats to cover
-                     --  A22's 4.5 units, and a stop of the arm's own in the air showed at the sixth of them).
-                     By := Room;
-                     How := Doubling;
-                  elsif G.Value + Spread > 0.0 then
-                     By := Real'Max (G.Sigma, Least);
-                     How := Banded;
+         end;
+      end if;
+      loop
+         declare
+            type Kind is (Doubling, Banded, Blind, Probe, Press);
+            G   : constant Estimate := Seen.Tip;
+            By  : Real := Least;
+            How : Kind := Blind;
+         begin
+            case State is
+               when Halving =>
+                  --  A surface that does not give stops the tool where the contact is, as the table did every
+                  --  press of A79 and A90 that reached it: the first step goes to Least short of that, and when it
+                  --  meets nothing the span is no longer than Least. When it meets something, the surface gave, and
+                  --  the span is halved.
+                  if At_Stop then
+                     By := Bottom - Least - Top;
                   else
-                     --  The band is behind and nothing was met: the contact is not
-                     --  where it was predicted, as when the press that fixed the tip
-                     --  was stopped above the surface by something under it, and the
-                     --  prediction is only a bound. Steps of the band's size would
-                     --  creep to the table (A17: 6000 beats, then the hand slid
-                     --  along it, each small push reached): they double again.
-                     if Past = 0.0 then
-                        Driver.Log.Line
-                          (Driver.Log.Robot,
-                           "hand: the tip has gone past the contact its presses predict and the band of its sigma"
-                           & " about it, and met nothing (it is predicted" & Driver.Log.Image (G.Value, 4)
-                           & " above it now): the steps double again");
-                     end if;
-                     Past := Real'Max (2.0 * Past, Real'Max (G.Sigma, Least));
-                     By := Past;
+                     By := (Bottom - Top) / 2.0;
                   end if;
-               end;
-            else
-               --  Nothing predicts the contact: doubling until a step is
-               --  not reached, the overshoot as it comes.
-               By := Fast;
-               Fast := 2.0 * Fast;
-            end if;
-            --  The eye stays above the surface, whatever the tip does.
-            if Known (Seen.Eye) then
-               declare
-                  Room : constant Real :=
-                    Seen.Eye.Value - Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
-               begin
-                  if Room < Least then
+                  At_Stop := False;
+                  How := Probe;
+               when Pressing =>
+                  --  To Least past the near end of the span: past its far end, which a push to it exactly would only
+                  --  reach when the contact is there, and no more than Least past the contact.
+                  By := Top + Least;
+                  How := Press;
+               when Seeking =>
+                  --  Steps that were reached and went on without the tool meeting anything are not lowering it:
+                  --  they end, on the schedule, not on the clock (A17: 6000 beats of steps the hand slid under).
+                  if Steps.Fast + Steps.Band + Steps.Blind >= Allowed then
                      Steps.Spent := True;
                      exit;
-                  elsif By > Room then
-                     By := Room;
-                     Steps.Capped := Steps.Capped + 1;
                   end if;
-               end;
-            end if;
+                  if Known (G) then
+                     declare
+                        Spread : constant Real := Threshold (Scalar_Gate (G.Degrees_Of_Freedom)) * G.Sigma;
+                        --  How far the tip may go before it is within Z sigma of the
+                        --  predicted contact.
+                        Room : constant Real := G.Value - Spread;
+                     begin
+                        if Room >= Least then
+                           --  The prediction says where the contact is: the first push goes to Z sigma above it, in
+                           --  one (the steps used to double from Least over it, thirteen pushes of ten beats to cover
+                           --  A22's 4.5 units, and a stop of the arm's own in the air showed at the sixth of them).
+                           By := Room;
+                           How := Doubling;
+                        elsif G.Value + Spread > 0.0 then
+                           By := Real'Max (G.Sigma, Least);
+                           How := Banded;
+                        else
+                           --  The band is behind and nothing was met: the contact is not
+                           --  where it was predicted, as when the press that fixed the tip
+                           --  was stopped above the surface by something under it, and the
+                           --  prediction is only a bound. Steps of the band's size would
+                           --  creep to the table (A17: 6000 beats, then the hand slid
+                           --  along it, each small push reached): they double again.
+                           if Past = 0.0 then
+                              Driver.Log.Line
+                                (Driver.Log.Robot,
+                                 "hand: the tip has gone past the contact its presses predict and the band of its sigma"
+                                 & " about it, and met nothing (it is predicted" & Driver.Log.Image (G.Value, 4)
+                                 & " above it now): the steps double again");
+                           end if;
+                           Past := Real'Max (2.0 * Past, Real'Max (G.Sigma, Least));
+                           By := Past;
+                        end if;
+                     end;
+                  else
+                     --  Nothing predicts the contact: doubling until a step meets something.
+                     By := Fast;
+                     Fast := 2.0 * Fast;
+                  end if;
+                  --  The eye stays above the surface, whatever the tip does.
+                  if Known (Seen.Eye) then
+                     declare
+                        Room : constant Real :=
+                          Seen.Eye.Value - Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
+                     begin
+                        if Room < Least then
+                           Steps.Spent := True;
+                           exit;
+                        elsif By > Room then
+                           By := Room;
+                           Steps.Capped := Steps.Capped + 1;
+                        end if;
+                     end;
+                  end if;
+            end case;
             case How is
                when Doubling => Steps.Fast := Steps.Fast + 1;
                when Banded   => Steps.Band := Steps.Band + 1;
                when Blind    => Steps.Blind := Steps.Blind + 1;
+               when Probe    => Steps.Probes := Steps.Probes + 1;
+               when Press    => Steps.Pressed := Steps.Pressed + 1;
             end case;
-            Lower (By, Reached);
-            exit when not Reached;
+            Lower (By, Outcome);
+            exit when Outcome = Ended;
+            Seen := Above.all;
+            --  A step the arm followed and the hand did not go down with met something all the same: the hand lies on
+            --  what it met (A17's third press).
+            if Outcome = Reached and then Seen.Stalled then
+               Outcome := Met;
+               Steps.Stalled := True;
+            else
+               Steps.Stalled := False;
+            end if;
+            if Outcome = Reached then
+               if State = Pressing then
+                  --  Nothing where the span said: what stopped the step that bounded it is not there now, and the
+                  --  contact is looked for again from here.
+                  Top := Bottom;
+                  State := Seeking;
+               else
+                  Top := Top + By;
+               end if;
+               Moved := True;
+               if State = Halving and then Bottom - Top <= Least then
+                  Go_Back;
+               end if;
+            elsif State = Pressing
+              or else (not Moved and then By <= Least)
+            then
+               --  The press: a push from where the descent began, ending no more than Least past where nothing was met.
+               exit;
+            else
+               --  Something met further than Least past where nothing was: the span the contact lies in, its far end
+               --  where the tool stopped when that is nearer (it went past the contact, not short of it), and back.
+               Bottom := Top + By;
+               At_Stop := not Steps.Stalled and then Seen.Down > Top and then Seen.Down < Bottom;
+               if At_Stop then
+                  Bottom := Seen.Down;
+               end if;
+               Steps.Stalled := False;
+               Go_Back;
+            end if;
+            exit when Done;
          end;
       end loop;
    end Descend;
