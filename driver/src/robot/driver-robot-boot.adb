@@ -137,12 +137,21 @@ package body Driver.Robot.Boot is
       --  amount an eye sees it move at, never into a way at its end, in an
       --  order no other group shares, for the lock-in to tell the groups
       --  apart; then settles.
-      procedure Push_Both_Ways (G : Group_Id; Size : Positive; Factor : Real; Moved : out Boolean) is
+      --  Only: the channels to push (every channel when none is marked). The pushes are chained: each
+      --  channel is pushed from where the last push left the group, settled before and after as before, and the
+      --  group comes back to its hold once at the end, not after every channel (the way back cost as much as
+      --  the way out: a round of a six-joint group took a thousand beats, four rounds ten thousand, item 17).
+      type Channel_Flags is array (Positive range <>) of Boolean;
+      procedure Push_Both_Ways
+        (G : Group_Id; Size : Positive; Factor : Real; Moved : out Boolean; Only : Channel_Flags := [1 .. 0 => False])
+      is
          Start  : constant Real_Array := Holds_Of (G, Size);
+         Here   : Real_Array := Start;
          Amount : Real_Array (1 .. Size) := [others => 0.0];
          Report : Driver.Robot.Motion.Step_Report;
          Order  : Push_Array (1 .. 2 * Size);
          Count  : Natural := 0;
+         Any_Only : constant Boolean := (for some F of Only => F);
          --  The round's cost, for the log: the beats it took, and those spent settling between the pushes.
          Began_At, Ended_At : Natural := 0;
          Settled  : Natural := 0;
@@ -158,7 +167,9 @@ package body Driver.Robot.Boot is
          Moved := False;
          Driver.Beats.Within_A_Beat (Read_Beat'Access);
          for R of Recognized loop
-            if R.Ref.Group = G and then R.Ref.Channel <= Size and then R.Amount > 0.0 then
+            if R.Ref.Group = G and then R.Ref.Channel <= Size and then R.Amount > 0.0
+              and then (not Any_Only or else (R.Ref.Channel <= Only'Last and then Only (R.Ref.Channel)))
+            then
                Amount (R.Ref.Channel) := Factor * R.Amount;
                for S in Driver.Robot.Motion.Sense loop
                   if not R.Ended (S) then
@@ -172,20 +183,23 @@ package body Driver.Robot.Boot is
          Shuffle (Order (1 .. Count), Rng);
          for P of Order (1 .. Count) loop
             declare
-               Away : Real_Array := Start;
+               Away : Real_Array := Here;
             begin
-               Away (P.Channel) := Start (P.Channel) + P.Sign * Amount (P.Channel);
+               Away (P.Channel) := Here (P.Channel) + P.Sign * Amount (P.Channel);
                --  Each push from a body at rest, its pictures settled: what the eyes see move is the push's own, and
                --  not the tail of the push before it, which the lock-in would credit to this one (Lockin.Measure
-               --  leaves out a push that began from a picture still changing).
+               --  leaves out a push that began from a picture still changing). The pose it is pushed from is
+               --  wherever the pushes before left the group: the lock-in regresses on the readings' changes, and
+               --  the amounts are the smallest an eye sees, so the group stays about its hold.
                Driver.Robot.Motion.Settle (M, Waited);
                Go_To (G, Away, Report);
                Moved := Moved or else Report.Outcome = Driver.Robot.Motion.Reached;
                Driver.Robot.Motion.Settle (M, Waited);
                Settled := Settled + Waited;
-               Go_To (G, Start, Report);
+               Here := Holds_Of (G, Size);
             end;
          end loop;
+         Go_To (G, Start, Report);
          Driver.Robot.Motion.Settle (M, Waited);
          Settled := Settled + Waited;
          Driver.Beats.Within_A_Beat (Read_End'Access);
@@ -834,12 +848,27 @@ package body Driver.Robot.Boot is
                            Factor : array (1 .. Count) of Real := [others => 1.0];
                            Again  : array (1 .. Count) of Boolean;
                            Spent  : array (1 .. Count) of Boolean := [others => False];   --  pushed as far as it goes
+                           function Most_Channels return Natural is
+                              Most : Natural := 0;
+                           begin
+                              for G in 1 .. Count loop
+                                 Most := Natural'Max (Most, Sizes (G));
+                              end loop;
+                              return Most;
+                           end Most_Channels;
+                           --  Per group and channel: an eye still undecided about the group, or shown a patch that
+                           --  may grow, does not yet see the channel move it (Lockin.Seen). A round pushes those
+                           --  channels again, and every channel when no eye tells one from another: the old round
+                           --  pushed every channel of the group both ways, whatever was already seen (item 17).
+                           Needed : array (1 .. Count, 1 .. Natural'Max (1, Most_Channels)) of Boolean :=
+                             [others => [others => False]];
                            --  What a round that doubles the push makes of the motion the cells that did not respond
                            --  show together: their energies grow with the square of the push, and so does the sum.
                            Doubled : constant Real := 2.0 ** 2;
 
                            procedure Read_Open is
                            begin
+                              Needed := [others => [others => False]];
                               for G in 1 .. Count loop
                                  Again (G) := False;
                                  for E in 1 .. Eyes loop
@@ -851,6 +880,11 @@ package body Driver.Robot.Boot is
                                        Cells (G, E) := Textured_Cells (M, Group_Id (G), Eye_Id (E));
                                        Shows (G, E) := Response (M, Group_Id (G), Eye_Id (E));
                                        Rests (G, E) := Resting_Motion (M, Group_Id (G), Eye_Id (E));
+                                       for C in 1 .. Sizes (G) loop
+                                          if not Lockin.Seen (M, Eye_Id (E), Group_Id (G), C) then
+                                             Needed (G, C) := True;
+                                          end if;
+                                       end loop;
                                        Again (G) := not Spent (G)
                                          and then (Again (G) or else Last (G, E) < 0
                                                    or else Grew (Last (G, E), Now (G, E), Cells (G, E))
@@ -888,8 +922,12 @@ package body Driver.Robot.Boot is
                                        & " times its amounts");
                                     declare
                                        Moved : Boolean;
+                                       Only  : Channel_Flags (1 .. Sizes (G));
                                     begin
-                                       Push_Both_Ways (Group_Id (G), Sizes (G), Factor (G), Moved);
+                                       for C in Only'Range loop
+                                          Only (C) := Needed (G, C);
+                                       end loop;
+                                       Push_Both_Ways (Group_Id (G), Sizes (G), Factor (G), Moved, Only);
                                        if not Moved then
                                           Spent (G) := True;
                                           Driver.Log.Line
