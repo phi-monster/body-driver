@@ -291,31 +291,49 @@ package body Driver.Robot.Kinematics is
                         Fresh : Boolean := True;
                      begin
                         --  A view worth matching shows something new: against every
-                        --  keyframe, some channel moved by at least the step its eye
-                        --  can see (Visible_Step). None is taken before those steps
-                        --  are measured. The second keyframe is the reference's
-                        --  still twin, at its pose.
-                        for F of R.Frames loop
-                           declare
-                              Apart : Boolean := False;
-                           begin
-                              for C in Now'Range loop
-                                 declare
-                                    V : constant Estimate := Visible_Step (M, G, C);
-                                 begin
-                                    if Known (V) and then abs (Now (C) - F.Readings (C - 1)) >= V.Value then
-                                       Apart := True;
-                                    end if;
-                                 end;
-                              end loop;
-                              Fresh := Fresh and then Apart;
-                           end;
-                        end loop;
+                        --  keyframe, some channel moved by at least the step the
+                        --  matcher tells apart (Keyframe_Step: Z of the larger of the
+                        --  cells' displacement noise and the aligner's own error, over
+                        --  the pixels the eye's picture moves per unit of the channel),
+                        --  the step the fit itself judges a keyframe's motion by. The
+                        --  step the eye can see at all (Visible_Step), which the lock-in
+                        --  tells over many beats and every cell, lies far below what one
+                        --  pair of pictures resolves: on the fake body 7 microradians of
+                        --  the wrist, a thousandth of a pixel, and a settling arm gave a
+                        --  keyframe every other beat, 304 by beat 4224 against 41. Where
+                        --  the matcher's step is not measured yet (no cell responds to the
+                        --  channel), the step the eye can see stands in. None is taken
+                        --  before either is measured. The second keyframe is the
+                        --  reference's still twin, at its pose.
                         declare
+                           Steps   : Real_Array (Now'Range) := [others => 0.0];
                            Seeable : Boolean := False;
                         begin
                            for C in Now'Range loop
-                              Seeable := Seeable or else Known (Visible_Step (M, G, C));
+                              declare
+                                 Told : constant Real := Keyframe_Step (M, Arm, C);
+                                 Seen : constant Estimate := Visible_Step (M, G, C);
+                              begin
+                                 if Told > 0.0 then
+                                    Steps (C) := Told;
+                                    Seeable := True;
+                                 elsif Known (Seen) then
+                                    Steps (C) := Seen.Value;
+                                    Seeable := True;
+                                 end if;
+                              end;
+                           end loop;
+                           for F of R.Frames loop
+                              declare
+                                 Apart : Boolean := False;
+                              begin
+                                 for C in Now'Range loop
+                                    if Steps (C) > 0.0 and then abs (Now (C) - F.Readings (C - 1)) >= Steps (C) then
+                                       Apart := True;
+                                    end if;
+                                 end loop;
+                                 Fresh := Fresh and then Apart;
+                              end;
                            end loop;
                            Fresh := Seeable
                              and then (Fresh or else (Natural (R.Frames.Length) = 1 and then Beat > R.Frames (1).Beat));
