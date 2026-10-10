@@ -124,6 +124,7 @@ package Fake_World is
       Image_Lag     : Boolean := True;   --  a picture shows the body as it stood the beat before
       Settle        : Boolean := True;   --  a picture accumulates over beats after a change of view
       Settle_Share  : Real := 0.25;      --  the share of a new frame that enters the accumulation each beat
+      Image_Noise   : Real := 0.7;       --  the sensor's noise on every picture, in grey levels: no picture at rest repeats exactly
       Zero_Noise    : Boolean := True;   --  readings at rest repeat exactly; after a push they jitter in the last bits
       Drift         : Boolean := True;   --  readings creep without a command, far below anything visible
       Delay_Beats   : Natural := 1;      --  beats before a command takes effect

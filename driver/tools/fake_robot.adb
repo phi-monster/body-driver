@@ -25,7 +25,7 @@
 --  cost it beats in proportion.
 --  --quirk turns one of Fake_World's quirks on or off (image_lag, settle,
 --  zero_noise, drift, droop, creep, give, soft_closer, bounce; delay=N beats;
---  settle_share=X; reading_noise=X).
+--  settle_share=X; image_noise=X grey levels; reading_noise=X).
 
 with Ada.Calendar;
 with Ada.Characters.Handling;
@@ -57,6 +57,7 @@ procedure Fake_Robot is
    use Driver;
    use Driver.Numerics;
    use Fake_World;
+   use type Interfaces.Unsigned_64;
 
    package String_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, String);
    package String_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, String);
@@ -129,6 +130,7 @@ procedure Fake_Robot is
    procedure Send_Plain (Message_Type : String);
    procedure Send_Call (Func_Name : String; With_Observation : Boolean; Reply : in out Driver.Bytes.Buffer);
    procedure Take_Action (Reply : Driver.Bytes.Buffer);
+   function Noise_Gauss return Real;
    procedure Take_Pictures;
    procedure Dump_Pictures;
    procedure Apply_Quirk (Setting : String);
@@ -712,6 +714,23 @@ procedure Fake_Robot is
    ---------------------------------------------------------------------------
    --  Pictures
 
+   --  The sensor's noise: a cheap generator of its own (xorshift, four uniforms summed), since it is drawn for
+   --  every value of every picture.
+   Noise_State : Interfaces.Unsigned_64 := 88172645463325252;
+
+   function Noise_Gauss return Real is
+      use Interfaces;
+      S : Real := 0.0;
+   begin
+      for I in 1 .. 4 loop
+         Noise_State := Noise_State xor Shift_Left (Noise_State, 13);
+         Noise_State := Noise_State xor Shift_Right (Noise_State, 7);
+         Noise_State := Noise_State xor Shift_Left (Noise_State, 17);
+         S := S + Real (Noise_State mod 2 ** 24) / Real (2 ** 24);
+      end loop;
+      return (S - 2.0) * 1.7320508075688772;
+   end Noise_Gauss;
+
    procedure Take_Pictures is
    begin
       for C in W.Cameras.First_Index .. W.Cameras.Last_Index loop
@@ -722,7 +741,13 @@ procedure Fake_Robot is
             Fake_Render.Render (W, Cam, Scratch (C).all);
             for I in Scratch (C)'Range loop
                Cam.Shown (I) := (1.0 - Share) * Cam.Shown (I) + Share * Scratch (C) (I);
-               Pixels (C) (Driver.Bytes.Offset (I)) := Driver.Bytes.Byte (Integer (Real'Floor (Cam.Shown (I) + 0.5)));
+               declare
+                  Noise : constant Real := (if W.Quirk.Image_Noise > 0.0 then W.Quirk.Image_Noise * Noise_Gauss else 0.0);
+                  Seen  : constant Real := Cam.Shown (I) + Noise;
+               begin
+                  Pixels (C) (Driver.Bytes.Offset (I)) :=
+                    Driver.Bytes.Byte (Integer (Real'Floor (Real'Max (0.0, Real'Min (255.0, Seen)) + 0.5)));
+               end;
             end loop;
             Cam.Fresh := False;
          end;
@@ -793,6 +818,8 @@ procedure Fake_Robot is
          W.Quirk.Settle := On;
       elsif Name = "settle_share" then
          W.Quirk.Settle_Share := Real'Value (Value);
+      elsif Name = "image_noise" then
+         W.Quirk.Image_Noise := Real'Value (Value);
       elsif Name = "zero_noise" then
          W.Quirk.Zero_Noise := On;
       elsif Name = "drift" then
@@ -847,6 +874,7 @@ begin
    Ada.Directories.Create_Path (To_String (Out_Dir));
    Build (W, Seed, Width, Height);
    Scramble_Seed := Seed * 7919 + 17;
+   Noise_State := Interfaces.Unsigned_64 (Seed) * 6364136223846793005 + 1442695040888963407;
    Random.Reset (Scramble_Rng, Integer (Scramble_Seed));
    for C in W.Cameras.First_Index .. W.Cameras.Last_Index loop
       Pixels (C) := new Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset (3 * Width * Height));
