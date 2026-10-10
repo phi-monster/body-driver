@@ -796,11 +796,26 @@ package body Driver.Robot.Kinematics is
                Because (A.Because) := Because (A.Because) + 1;
             end loop;
             Set_Of (F, R, Given.all, Answers.all, Agree.all, Set);
-            for Seen of Set.Found loop
-               if Seen then
-                  Found := Found + 1;
-               end if;
-            end loop;
+            declare
+               Here : Natural := 0;
+               Text : Ada.Strings.Unbounded.Unbounded_String;
+            begin
+               for Seen of Set.Found loop
+                  if Seen then
+                     Here := Here + 1;
+                  end if;
+               end loop;
+               Found := Found + Here;
+               --  Each keyframe's line, for the study of what the aligner finds at what motion: the change of every
+               --  channel from the reference, how the prediction was made, and how many points were found.
+               for C in 1 .. N loop
+                  Ada.Strings.Unbounded.Append (Text, " " & Driver.Log.Image (Change (C), 5));
+               end loop;
+               Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe" & F'Image & " at beat"
+                                & R.Frames (F).Beat'Image & ", change" & Ada.Strings.Unbounded.To_String (Text)
+                                & ", predicted " & Ada.Characters.Handling.To_Lower (From'Image) & ":" & Here'Image
+                                & " of" & Queries'Image & " points found");
+            end;
             R.Matches.Append (Set);
             R.Aligned := F;
             --  A keyframe that refused nothing for its prediction needs its picture no more.
