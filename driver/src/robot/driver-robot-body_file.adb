@@ -787,6 +787,9 @@ package body Driver.Robot.Body_File is
            & "; to measure again: " & (if Length (Again) > 0 then Again else To_Unbounded_String ("nothing"));
       end;
       Ok := True;
+      --  The steps the one test of motion reads come from what was reloaded (the responses and the gains), as
+      --  they come from a measure: kept here for every reader of a body file.
+      Store_Visible_Steps (M);
    exception
       when Constraint_Error =>
          Why := To_Unbounded_String ("not a body file this driver wrote: a value is out of range");

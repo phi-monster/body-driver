@@ -328,9 +328,6 @@ package body Driver.Robot is
       Why  : out Ada.Strings.Unbounded.Unbounded_String) is
    begin
       Body_File.Read (M, Text, Ok, Why);
-      if Ok then
-         Store_Visible_Steps (M);
-      end if;
    end Load_Body_Text;
 
    function Reloaded (M : Model; Q : Stored) return Boolean is (M.From_File (Q));
