@@ -1384,6 +1384,10 @@ package body Driver.Robot.Tests is
                end if;
             end;
          end loop;
+         --  What the eye's judge would say of the frame: still unless the bump on a tenth of the pixels stands
+         --  Z of their noise above the rest they are judged against (the judge reads each pixel against the
+         --  rest view; the rig has no view, so it reads the bump).
+         S.Is_Still := abs Bump <= Driver.Conventions.Z * Sqrt (Level);
          Stillness.Watch (S, Began_Moving => False);
          S.Before := S.Previous;
          S.Previous := S.Current;
@@ -1398,8 +1402,6 @@ package body Driver.Robot.Tests is
          Level_Now : Real := Bump;
       begin
          S.Watch_Done := False;
-         S.Watch_Have := False;
-         S.Watch_Peak := 0.0;
          while Taken < Within loop
             Next (Kind, Beat + Taken, Level_Now);
             Taken := Taken + 1;
@@ -1418,6 +1420,11 @@ package body Driver.Robot.Tests is
          declare
             Taken : Natural;
          begin
+            --  Each picture is an eye of its own: what rest changes by is measured on it alone.
+            S.Rest_Changes.Clear;
+            S.Rest_Change := Real'Last;
+            S.Rest_Scale := 0.0;
+            S.Rest_Counted := 0;
             Next (Kind, 0, 0.0);
             Next (Kind, 1, 0.0);
             Next (Kind, 2, 0.0);
