@@ -56,8 +56,9 @@
 
 with Driver.Images;
 
-private with Ada.Containers.Indefinite_Holders;
 private with Ada.Containers.Vectors;
+private with Ada.Finalization;
+private with System.Atomic_Counters;
 
 package Driver.Alignment is
 
@@ -70,6 +71,24 @@ package Driver.Alignment is
 
    function Levels (P : Pyramid) return Natural;
    --  The number of sizes, the full one included.
+
+   function Level_Width (P : Pyramid; Level : Natural) return Natural
+     with Pre => Level < Levels (P);
+   function Level_Height (P : Pyramid; Level : Natural) return Natural
+     with Pre => Level < Levels (P);
+   --  The size of the picture at a level: each side halved Level times.
+
+   procedure Sample_Level
+     (P : Pyramid; Level : Natural; U, V : Real; Value, Du, Dv : out Real; Ok : out Boolean)
+     with Pre => Level < Levels (P);
+   --  The picture at a level, read between its pixels by the cubic spline through them: its value and its slopes along
+   --  u and v at the place (U, V) (corner-origin coordinates of that level's pixels, the first pixel's centre at a
+   --  half), in levels of luma per pixel of that level. Not Ok when the sixteen pixels around the place are not all
+   --  in the picture.
+
+   Halving : constant := 2;
+   --  Each size of the pyramid is this many times smaller across than the one before: a prediction this many times
+   --  narrower is searched at a size the pictures are this many times finer at.
 
    type Linear_Part is record
       UU, UV, VU, VV : Real := 0.0;
@@ -105,7 +124,7 @@ package Driver.Alignment is
      (Matched,
       Outside_Picture,    --  the whole window lies beyond the second picture
       Edge_Of_Picture,    --  the point is in the picture but its patch is mostly out of it
-      Window_Too_Large,   --  wider than a patch of the coarsest level can carry
+      Window_Too_Large,   --  as wide as the picture: it says nothing of where to look
       Bad_Warp,           --  a mirror, or a change of scale beyond what one level compares
       No_Texture,         --  the patch has no structure to compare
       Ambiguous,          --  another place explains the patch as well as the best
@@ -129,21 +148,67 @@ package Driver.Alignment is
       --  How many other fits of the patch (its middle, the coarser levels) the covariance rests on: it is a sample
       --  covariance, so a difference over its sigma follows Student's t with that many degrees of freedom
       --  (Driver.Uncertain), not the Gaussian.
+      Narrow : Boolean := False;
+      --  The prediction's window was no wider than a patch at the full size, so it was searched where the pictures are
+      --  finest. A window wider than that is searched at a coarser size, where several places that a patch cannot tell
+      --  apart may lie within it and a wrong one may be taken for the place; such an answer is not one to rest a fit on
+      --  before something better than the prediction has been found out about the move.
    end record;
    --  To, Cov and Linear are meaningful only when the verdict is Found.
 
    function Align (First, Second : Pyramid; Query : Prediction) return Answer
      with Pre => Levels (First) > 0 and then Levels (Second) > 0;
 
+   function Largest_Window (First, Second : Pyramid) return Real
+     with Pre => Levels (First) > 0 and then Levels (Second) > 0;
+   --  The radius, in pixels of the full-size pictures, of the widest window of places Align searches for a point
+   --  between these two pictures: half the second picture's smaller side. The prediction's covariance, taken at
+   --  the gate for two dimensions, must lie within it, or the answer is Window_Too_Large: a window as wide as the
+   --  picture says nothing of where to look. A window wider than a patch at every size of the pictures is searched
+   --  at the size where it is the least wider than its patch, which tells the place no better than that size
+   --  allows and often cannot tell it from another (Ambiguous).
+
+   function Largest_Sigma (First, Second : Pyramid) return Real
+     with Pre => Levels (First) > 0 and then Levels (Second) > 0;
+   --  The largest standard deviation, along both axes alike, of a prediction whose window Align still searches
+   --  (Largest_Window less what a place on a grid of pixels cannot be known to beyond): the width of "anywhere
+   --  the aligner can look".
+
+   function Window_Radius (Sigma : Real) return Real;
+   --  The radius, in pixels, of the window of a prediction whose standard deviation is Sigma along both axes: as far
+   --  as a vector of two dimensions is significant, and a place on a grid of pixels cannot be known to beyond.
+
 private
 
-   package Real_Holders is new Ada.Containers.Indefinite_Holders (Real_Array);
+   --  An array of reals made once and read after by any number of alignments at once (Driver.Parallel_For). The
+   --  levels that share it count themselves with an atomic counter, and reading it writes nothing. (A reference
+   --  into an Ada.Containers.Indefinite_Holders element counts itself in a field of the holder that every reader
+   --  writes without a lock: read by tasks together, the count is lost, the holder never returns to zero and
+   --  refuses its own finalization.)
+   type Reals_Access is access Real_Array;
+
+   type Counted is limited record
+      Count  : System.Atomic_Counters.Atomic_Counter;
+      Values : Reals_Access;
+   end record;
+
+   type Counted_Access is access Counted;
+
+   type Shared_Reals is new Ada.Finalization.Controlled with record
+      Held : Counted_Access;
+   end record;
+
+   overriding procedure Adjust (Item : in out Shared_Reals);
+   overriding procedure Finalize (Item : in out Shared_Reals);
 
    type Level is record
       Width, Height : Natural := 0;
-      Luma, Spline  : Real_Holders.Holder;   --  the pixels, and the coefficients of the cubic spline through them
+      Luma, Spline  : Shared_Reals;   --  the pixels, and the coefficients of the cubic spline through them
    end record;
 
+   --  A pyramid is read by several points' alignments at once too: a reference into its vector without the
+   --  tampering check is a plain pointer, where the check's counters are written by every reader.
+   pragma Suppress (Tampering_Check);
    package Level_Vectors is new Ada.Containers.Vectors (Natural, Level);
 
    type Pyramid is record

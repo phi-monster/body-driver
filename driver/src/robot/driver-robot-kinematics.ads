@@ -3,20 +3,35 @@
 --  For every arm whose eye rides on it (Driver.Robot.Graph), a keyframe is
 --  kept whenever the arm and its eye are both at rest and the arm's readings
 --  differ from every keyframe kept so far: the readings, and what the eye
---  saw. The first keyframe is the reference. The instrument is asked where
---  the reference's query points went in every later keyframe, both ways
---  round, and the answers are kept with the keyframe they belong to. The
---  query points are the centres of the reference eye's cells that respond
---  to the arm's own push (the lock-in): those show the world, not the hand
---  that rides with the eye.
+--  saw. The first keyframe is the reference. Driver.Alignment finds where
+--  the reference's query points went in every later keyframe (Align_New), each
+--  keyframe predicted from the ones before it (Driver.Alignment.Keyframes), and
+--  the answers are kept with the keyframe they belong to. The query points are
+--  the centres of the reference eye's cells that respond to the arm's own push
+--  (the lock-in): those show the world, not the hand that rides with the eye.
 --
---  Every request is submitted and its reply read on a later beat
---  (Driver.Services), so the same evidence follows from a recording.
+--  What other eyes show of the reference is asked of the instrument: a request
+--  is submitted and its reply read on a later beat (Driver.Services), so the
+--  same evidence follows from a recording.
 
 private package Driver.Robot.Kinematics is
 
    procedure Observe (M : in out Model; O : Observation);
    --  One beat, after the readings and the eyes were taken in.
+
+   procedure Align_New (M : in out Model);
+
+   function Realign (M : in out Model) return Boolean;
+   --  Aligns again the keyframes whose first alignment refused points for the uncertainty of the prediction it was
+   --  given (a keyframe the arm's earlier keyframes could not carry the prediction to), now that the fitted arm
+   --  predicts them: those it predicts with less uncertainty than they were aligned from. True when it changed any.
+   --  Aligns every keyframe of every arm that was taken and not aligned yet,
+   --  in the order they were taken: where the reference's query points are in
+   --  it, with the answer's own uncertainty. Called with the estimates, after
+   --  the noise of the readings and the lock-in's shifts are measured and
+   --  before Refit; a replay therefore aligns the same keyframes at the same
+   --  places of the stream. Nothing is aligned while a channel's noise is not
+   --  measured.
 
    function Held_Still (M : Model; A : Arm_Id; Beat : Natural) return Boolean;
    --  A keyframe can be taken of the arm at the latest beat: its readings do
@@ -26,15 +41,16 @@ private package Driver.Robot.Kinematics is
    --  and a real camera's exposure does too).
 
    function Matched (M : Model; A : Arm_Id) return Natural;
-   --  How many keyframes of the arm have their matches back.
+   --  How many keyframes of the arm have their answers.
 
    function Match_Noise (M : Model; A : Arm_Id) return Real;
-   --  How far the matcher errs on the arm's eye: the noise of a round trip,
-   --  the robust scale about zero of every answer's return to its query,
-   --  both coordinates, in pixels (Refit judges by it which keyframes moved
-   --  enough to tell the fit anything); 0 before any answer. The arm's
-   --  second keyframe is a still twin of its reference, taken at the same
-   --  pose, so the matcher's own error is known before any move.
+   --  How far the aligner errs on the arm's eye: the scatter of what a smooth
+   --  field of displacements leaves of the points it found in the keyframes
+   --  the arm moved to (Driver.Alignment.Keyframes.Scatter), in pixels (Refit
+   --  judges by it which keyframes moved enough to tell the fit anything); 0
+   --  before any such keyframe is aligned. A still twin of the reference
+   --  cannot say: the aligner's own error on two identical pictures is far
+   --  under its error on pictures that moved.
 
    function Keyframe_Step (M : Model; A : Arm_Id; Channel : Positive) return Real;
    --  The smallest change of the arm's channel that moves the view of the eye
@@ -48,18 +64,16 @@ private package Driver.Robot.Kinematics is
    --  the sweep's base, ten times the lock-in's step, a twentieth of this).
 
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean;
-   --  The arm's still twin was taken and its match answered or refused, or
-   --  the instrument can never answer: Match_Noise will not change before
-   --  the arm moves.
+   --  The arm's still twin of its reference was taken.
 
    function Pending (M : Model) return Natural;
    --  Match requests of every arm not answered yet.
 
    procedure Refit (M : in out Model);
-   --  Fits every arm whose matches changed since its last fit
-   --  (Driver.Robot.Kinematics.Fit). Its sightings are the matches whose
-   --  round trip comes back to where it started, within the noise of all the
-   --  round trips.
+   --  Fits every arm whose answers changed since its last fit
+   --  (Driver.Robot.Kinematics.Fit). Its sightings are the answers of
+   --  keyframes the points moved in by more than the aligner errs, whose
+   --  uncertainty is not more than Z times the keyframe's typical one.
 
    function Eye_In_Reference (M : Model; A : Arm_Id; Readings : Real_Array) return Rigid;
    --  The arm's eye at those readings, in the frame of its eye at the

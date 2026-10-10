@@ -11,8 +11,38 @@ package body Driver.Alignment is
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
 
-   type Real_Access is access Real_Array;
-   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
+   subtype Real_Access is Reals_Access;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Reals_Access);
+   procedure Free_Counted is new Ada.Unchecked_Deallocation (Counted, Counted_Access);
+
+   overriding procedure Adjust (Item : in out Shared_Reals) is
+   begin
+      if Item.Held /= null then
+         System.Atomic_Counters.Increment (Item.Held.Count);
+      end if;
+   end Adjust;
+
+   overriding procedure Finalize (Item : in out Shared_Reals) is
+   begin
+      if Item.Held /= null then
+         if System.Atomic_Counters.Decrement (Item.Held.Count) then
+            Free (Item.Held.Values);
+            Free_Counted (Item.Held);
+         end if;
+         Item.Held := null;
+      end if;
+   end Finalize;
+
+   --  A copy of the values, made to be shared and not written again.
+   function Shared (Values : Real_Array) return Shared_Reals is
+     (Ada.Finalization.Controlled with Held => new Counted'(Count => <>, Values => new Real_Array'(Values)));
+
+   --  The values themselves, made to be shared and not written again; the caller's access is given up.
+   procedure Adopt (Item : out Shared_Reals; Values : in out Real_Access) is
+   begin
+      Item := (Ada.Finalization.Controlled with Held => new Counted'(Count => <>, Values => Values));
+      Values := null;
+   end Adopt;
 
    type Mask_Array is array (Positive range <>) of Boolean;
 
@@ -27,9 +57,6 @@ package body Driver.Alignment is
    --  The side of a patch that reaches Half pixels either side of its point.
 
    Least_Side : constant Positive := Side_Of (Least_Half);
-
-   Halving : constant := 2;
-   --  Each size of the pyramid is this many times smaller across than the one before.
 
    Finest : constant := 0;
    --  The size of the pyramid that is the picture itself.
@@ -105,9 +132,8 @@ package body Driver.Alignment is
       for Column in 0 .. Width - 1 loop
          Filter_Line (Spline.all, Spline'First + Column, Width, Height);
       end loop;
-      Result := (Width => Width, Height => Height, Luma => Real_Holders.To_Holder (Pixels),
-                 Spline => Real_Holders.To_Holder (Spline.all));
-      Free (Spline);
+      Result := (Width => Width, Height => Height, Luma => Shared (Pixels), Spline => <>);
+      Adopt (Result.Spline, Spline);
       return Result;
    end Make_Level;
 
@@ -253,6 +279,18 @@ package body Driver.Alignment is
          Ok := True;
       end;
    end Sample;
+
+   function Level_Width (P : Pyramid; Level : Natural) return Natural is (P.Sizes (Level).Width);
+
+   function Level_Height (P : Pyramid; Level : Natural) return Natural is (P.Sizes (Level).Height);
+
+   procedure Sample_Level
+     (P : Pyramid; Level : Natural; U, V : Real; Value, Du, Dv : out Real; Ok : out Boolean)
+   is
+      Size : Driver.Alignment.Level renames P.Sizes (Level);
+   begin
+      Sample (Size.Spline.Held.Values.all, Size.Width, Size.Height, U, V, Value, Du, Dv, Ok);
+   end Sample_Level;
 
    ---------------------------------------------------------------------------
    --  How smooth a field of residuals or pixels is
@@ -599,6 +637,40 @@ package body Driver.Alignment is
       Informative : Boolean := False;  --  the normal equations could be solved
    end record;
 
+   type Summary_Array is array (Positive range <>) of Summary;
+   type Summary_Access is access Summary_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Summary_Array, Summary_Access);
+
+   type Natural_Array is array (Positive range <>) of Natural;
+   type Natural_Access is access Natural_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Natural_Array, Natural_Access);
+
+   --  What a search of a window keeps for every place of it. A window of a few hundred pixels across at a fine level
+   --  has some hundreds of thousands of them, more than a task's stack holds (the stack of a task that a Parallel_For
+   --  starts is a fraction of the main task's): these arrays live on the heap and go with the search, however it ends.
+   type Candidates (Count : Natural) is new Ada.Finalization.Limited_Controlled with record
+      Rho   : Reals_Access := new Real_Array'(1 .. Count => -2.0);   --  -2: not a candidate
+      Peaks : Natural_Access := new Natural_Array'(1 .. Count => 0);
+   end record;
+
+   overriding procedure Finalize (Item : in out Candidates) is
+   begin
+      Free (Item.Rho);
+      Free (Item.Peaks);
+   end Finalize;
+
+   --  And of the places that are peaks of their own: the fit of each, and how well it scores.
+   type Peak_Fits (Count : Natural) is new Ada.Finalization.Limited_Controlled with record
+      Fits  : Summary_Access := new Summary_Array (1 .. Count);
+      Score : Reals_Access := new Real_Array'(1 .. Count => Real'First);
+   end record;
+
+   overriding procedure Finalize (Item : in out Peak_Fits) is
+   begin
+      Free (Item.Fits);
+      Free (Item.Score);
+   end Finalize;
+
    --  Gauss-Newton on the whole warp at the level of the pictures' halvings Step, from Start (given at the full
    --  size), directly on the pixels.
    procedure Fit_Level
@@ -615,10 +687,8 @@ package body Driver.Alignment is
       Scale   : constant Real := Real (Halving) ** Step;
       A_Level : Level renames First.Sizes (Step);
       B_Level : Level renames Second.Sizes (Step);
-      A_Spline_Ref : constant Real_Holders.Constant_Reference_Type := A_Level.Spline.Constant_Reference;
-      B_Spline_Ref : constant Real_Holders.Constant_Reference_Type := B_Level.Spline.Constant_Reference;
-      A_Spline : Real_Array renames A_Spline_Ref.Element.all;
-      B_Spline : Real_Array renames B_Spline_Ref.Element.all;
+      A_Spline : Real_Array renames A_Level.Spline.Held.Values.all;
+      B_Spline : Real_Array renames B_Level.Spline.Held.Values.all;
 
       Half : constant Natural := Grow * Half_Patch (A_Level.Width, A_Level.Height);
       Side : constant Positive := Side_Of (Half);
@@ -917,7 +987,8 @@ package body Driver.Alignment is
 
    function Fail (Why : Reason; Verdict : Alignment.Verdict := Not_Found) return Answer is
      ((Verdict => Verdict, Because => Why, To => (U => 0.0, V => 0.0), Cov => (others => 0.0),
-       Linear => Identity_Part, Correlation => 0.0, Fit_Rms => 0.0, Patch_Rms => 0.0, Degrees_Of_Freedom => 0));
+       Linear => Identity_Part, Correlation => 0.0, Fit_Rms => 0.0, Patch_Rms => 0.0, Degrees_Of_Freedom => 0,
+       Narrow => False));
 
    --  The squared length of a displacement in the standard deviations of a covariance (its Mahalanobis length).
    function Squared_Length (Du, Dv : Real; C : Place_Covariance) return Real is
@@ -927,6 +998,118 @@ package body Driver.Alignment is
      Log ((1.0 - Driver.Distributions.Gaussian_Two_Sided_Tail (Z)) / Driver.Distributions.Gaussian_Two_Sided_Tail (Z));
    --  How much likelier (in logarithm) the best place must be than the best other place for it to be called the
    --  place at the significance Z stands for: the odds at which the chance of the other being the place is that tail.
+
+   --  How many independent observations a patch holds, for its correlation with a picture that has nothing to do
+   --  with it: Bartlett's count, the pixels over the sum of the squares of the patch's own autocorrelation over all
+   --  lags (a patch whose pixels agree with their neighbours far off holds fewer observations than it has pixels,
+   --  and a texture of one wavelength holds a few), never fewer than one nor more than its pixels.
+   function Independent_Samples (Template : Real_Array; Valid : Mask_Array; Side : Positive) return Real is
+      Count : Natural := 0;
+      Sum   : Real := 0.0;
+      Half  : constant Natural := (Side - 1) / 2;
+   begin
+      for K in Template'Range loop
+         if Valid (K) then
+            Count := Count + 1;
+            Sum := Sum + Template (K);
+         end if;
+      end loop;
+      if Count < 2 then
+         return 1.0;
+      end if;
+      declare
+         Mean : constant Real := Sum / Real (Count);
+         Spread : Real := 0.0;
+         Squares : Real := 1.0;   --  the lag at nothing, whose autocorrelation is one
+      begin
+         for K in Template'Range loop
+            if Valid (K) then
+               Spread := Spread + (Template (K) - Mean) ** 2;
+            end if;
+         end loop;
+         Spread := Spread / Real (Count);
+         if Spread <= 0.0 then
+            return 1.0;
+         end if;
+         --  Every lag once on one side of nothing (the other side's is the same), doubled.
+         for Dy in 0 .. Half loop
+            for Dx in (if Dy = 0 then 1 else -Half) .. Half loop
+               declare
+                  Pairs : Natural := 0;
+                  Total : Real := 0.0;
+               begin
+                  for Row in 0 .. Side - 1 - Dy loop
+                     for Column in Integer'Max (0, -Dx) .. Integer'Min (Side - 1, Side - 1 - Dx) loop
+                        declare
+                           A : constant Positive := Template'First + Row * Side + Column;
+                           B : constant Positive := A + Dy * Side + Dx;
+                        begin
+                           if Valid (A) and then Valid (B) then
+                              Pairs := Pairs + 1;
+                              Total := Total + (Template (A) - Mean) * (Template (B) - Mean);
+                           end if;
+                        end;
+                     end loop;
+                  end loop;
+                  if Pairs > 0 then
+                     Squares := Squares + 2.0 * (Total / Real (Pairs) / Spread) ** 2;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         return Real'Min (Real (Count), Real'Max (1.0, Real (Count) / Squares));
+      end;
+   end Independent_Samples;
+
+   --  Whether an answer beats chance: where the prediction leaves several independent places of the patch open
+   --  (its one-standard-deviation ellipse holds as many), a correlation as high as the best of that many unrelated
+   --  places reaches, at the significance of the one gate shared among them, is no evidence of a match. The
+   --  correlation of a patch of so many independent observations with an unrelated picture follows Student's t
+   --  with that many less two degrees of freedom. Where the prediction leaves one place open its own belief is the
+   --  evidence the pixels need not add to.
+   function Beats_Chance
+     (First : Pyramid; Query : Prediction; Plain : Place_Covariance; Linear : Linear_Part; Correlation : Real)
+      return Boolean
+   is
+      Top   : Level renames First.Sizes (0);
+      Half  : constant Natural := Half_Patch (Top.Width, Top.Height);
+      Side  : constant Positive := Side_Of (Half);
+      N     : constant Positive := Side * Side;
+      Template : Real_Array (1 .. N);
+      Slope_U  : Real_Array (1 .. N);
+      Slope_V  : Real_Array (1 .. N);
+      Valid    : Mask_Array (1 .. N);
+      Present  : Natural := 0;
+   begin
+      Resample (Top.Spline.Held.Values.all, Top.Width, Top.Height, Query.From.U, Query.From.V, Inverse_Of (Linear),
+                Half, Template, Slope_U, Slope_V, Valid);
+      for K in 1 .. N loop
+         if Valid (K) then
+            Present := Present + 1;
+         end if;
+      end loop;
+      if Present < 2 then
+         return True;
+      end if;
+      declare
+         Independent : constant Real := Independent_Samples (Template, Valid, Side);
+         Area   : constant Real :=
+           Ada.Numerics.Pi * Sqrt (Real'Max (0.0, Plain.UU * Plain.VV - Plain.UV ** 2));
+         Places : constant Real := Area * Independent / Real (Present);
+      begin
+         if Places <= 1.0 then
+            return True;
+         end if;
+         declare
+            Freedom : constant Positive := Positive'Max (1, Natural (Real'Floor (Independent)) - 2);
+            T       : constant Real :=
+              Driver.Distributions.Student_T_Quantile
+                (Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / Places, Freedom);
+         begin
+            return Correlation >= T / Sqrt (Real (Freedom) + T ** 2);
+         end;
+      end;
+   end Beats_Chance;
 
    --  The search of the window at the level Coarse, and the refinement down to the full size.
    function Align_At
@@ -940,15 +1123,13 @@ package body Driver.Alignment is
       Scale   : constant Real := Real (Halving) ** Coarse;
       A_Level : Level renames First.Sizes (Coarse);
       B_Level : Level renames Second.Sizes (Coarse);
-      A_Spline_Ref : constant Real_Holders.Constant_Reference_Type := A_Level.Spline.Constant_Reference;
-      B_Luma_Ref : constant Real_Holders.Constant_Reference_Type := B_Level.Luma.Constant_Reference;
-      A_Spline : Real_Array renames A_Spline_Ref.Element.all;
-      B_Luma : Real_Array renames B_Luma_Ref.Element.all;
+      A_Spline : Real_Array renames A_Level.Spline.Held.Values.all;
+      B_Luma : Real_Array renames B_Level.Luma.Held.Values.all;
 
       Half : constant Natural := Grow * Half_Patch (A_Level.Width, A_Level.Height);
       Side : constant Positive := Side_Of (Half);
       N    : constant Positive := Side * Side;
-      Top_Half : constant Natural := Half_Patch (Second.Sizes (0).Width, Second.Sizes (0).Height);
+      Top_Half : constant Natural := Half_Patch (First.Sizes (0).Width, First.Sizes (0).Height);   --  the patch the fit ends on
 
       Template : Real_Array (1 .. N);
       Valid    : Mask_Array (1 .. N);
@@ -975,11 +1156,12 @@ package body Driver.Alignment is
       Across : constant Positive := High_X - Low_X + 1;
       Down   : constant Positive := High_Y - Low_Y + 1;
 
-      Rho    : Real_Array (1 .. Across * Down) := [others => -2.0];   --  -2: not a candidate
+      Window_Candidates : Candidates (Across * Down);
+      Rho    : Real_Array renames Window_Candidates.Rho.all;
       Tested : Natural := 0;
       Flat   : Natural := 0;
 
-      Peaks      : array (1 .. Across * Down) of Natural := [others => 0];
+      Peaks      : Natural_Array renames Window_Candidates.Peaks.all;
       Peak_Count : Natural := 0;
 
       --  The place of a cell, at this level's scale, and the pixel it is the centre of.
@@ -1114,7 +1296,8 @@ package body Driver.Alignment is
 
       declare
          Tries  : constant Positive := Peak_Count + 1;   --  every peak, and the place the prediction itself says
-         Fits   : array (1 .. Peak_Count + 1) of Summary;
+         Peak_Scratch : Peak_Fits (Peak_Count + 1);
+         Fits   : Summary_Array renames Peak_Scratch.Fits.all;
          Nearest : constant Positive :=
            Integer'Min (Down - 1, Integer'Max (0, Integer (Real'Rounding (Centre_V - (Real (Low_Y) + 0.5))))) * Across
            + Integer'Min (Across - 1, Integer'Max (0, Integer (Real'Rounding (Centre_U - (Real (Low_X) + 0.5))))) + 1;
@@ -1199,7 +1382,7 @@ package body Driver.Alignment is
             Noise  : constant Real := Fits (Reference).Noise;
             Spread : constant Real := Fits (Reference).Spread;
             Pixels : constant Real := Real (Fits (Reference).Count);
-            Score  : array (1 .. Peak_Count + 1) of Real := [others => Real'First];
+            Score  : Real_Array renames Peak_Scratch.Score.all;
          begin
             for K in 1 .. Tries loop
                if Fits (K).Informative then
@@ -1279,7 +1462,7 @@ package body Driver.Alignment is
             --  noise allows. Where nothing depends on the choice the variants agree and add nothing.
             declare
                Last_Half  : constant Natural :=
-                 Grow * Half_Patch (Second.Sizes (Finest).Width, Second.Sizes (Finest).Height);
+                 Grow * Half_Patch (First.Sizes (Finest).Width, First.Sizes (Finest).Height);
                Deepest    : constant Natural := Natural'Min (Levels (First), Levels (Second)) - 1;
                Shift_U, Shift_V : Real_Array (1 .. Most_Variants);
                Other      : Summary;
@@ -1344,13 +1527,31 @@ package body Driver.Alignment is
             return (Verdict => Found, Because => Matched, To => (U => Answer_U, V => Answer_V), Cov => Cov,
                     Linear => Fitted.Fitted.Linear, Correlation => Fitted.Correlation,
                     Fit_Rms => Sqrt (Fitted.Rss / Real (Fitted.Count)), Patch_Rms => Fitted.Patch,
-                    Degrees_Of_Freedom => Variants);
+                    Degrees_Of_Freedom => Variants, Narrow => False);
          end;
       end;
    end Align_At;
 
-   function Align (First, Second : Pyramid; Query : Prediction) return Answer is
-      Second_Top : constant Level := Second.Sizes (0);
+   function Largest_Window (First, Second : Pyramid) return Real is
+     (Real'Min (Real (Second.Sizes (0).Width), Real (Second.Sizes (0).Height)) / 2.0);
+
+   function Window_Radius (Sigma : Real) return Real is (Window_Multiple * Sqrt (Sigma * Sigma + Quantization));
+
+   function Largest_Sigma (First, Second : Pyramid) return Real is
+      Widest : constant Real := Largest_Window (First, Second);
+      Sigma  : Real := Sqrt (Real'Max (0.0, (Widest / Window_Multiple) ** 2 - Quantization));
+   begin
+      --  Align takes the radius of a round prediction as Window_Multiple * Sqrt (Sigma ** 2 + Quantization): step
+      --  down until that is no more than the widest, whatever the rounding of the inversion above.
+      while Sigma > 0.0 and then Window_Multiple * Sqrt (Sigma * Sigma + Quantization) > Widest loop
+         Sigma := Real'Pred (Sigma);
+      end loop;
+      return Sigma;
+   end Largest_Sigma;
+
+   --  Align for pictures at about the same scale: the warp's scale within one halving.
+   function Align_Matched (First, Second : Pyramid; Query : Prediction) return Answer is
+      Second_Top : Level renames Second.Sizes (0);
       --  The prediction's covariance, and what a place on a grid of pixels cannot be known to beyond.
       Plain      : constant Place_Covariance :=
         (UU => Query.Cov.UU + Quantization, UV => Query.Cov.UV, VV => Query.Cov.VV + Quantization);
@@ -1360,9 +1561,10 @@ package body Driver.Alignment is
       Largest_Scale, Smallest_Scale : Real;
       Det : constant Real := Query.Linear.UU * Query.Linear.VV - Query.Linear.UV * Query.Linear.VU;
    begin
-      --  The warp must be one the levels compare: no mirror, and no more than a halving's change of scale.
+      --  The warp must be one the levels compare: no mirror, and no direction made smaller by more than a halving
+      --  (the pictures' pixels would be skipped over there; made larger, they are read between).
       Singular_Values (Query.Linear, Largest_Scale, Smallest_Scale);
-      if Det <= 0.0 or else Largest_Scale > Real (Halving) or else Smallest_Scale < 1.0 / Real (Halving) then
+      if Det <= 0.0 or else Smallest_Scale < 1.0 / Real (Halving) then
          return Fail (Bad_Warp);
       end if;
       --  Beyond the picture altogether.
@@ -1371,40 +1573,144 @@ package body Driver.Alignment is
       then
          return Fail (Outside_Picture, Not_In_View);
       end if;
-      --  The level the window is searched at: the finest where it is no wider than a patch there.
+      --  The level the window is searched at: the finest where it is no wider than a patch there; where it is wider
+      --  than a patch at every level, the level where it is the least wider than its patch, so long as the window
+      --  is narrower than the picture (Largest_Window).
       declare
          Deepest : constant Natural := Natural'Min (Levels (First), Levels (Second)) - 1;
+         Chosen  : Natural := 0;
+         Narrow  : Boolean := False;
+         Least   : Real := Real'Last;
       begin
          for Step in 0 .. Deepest loop
             declare
-               H : constant Natural := Half_Patch (Second.Sizes (Step).Width, Second.Sizes (Step).Height);
+               H    : constant Natural := Half_Patch (Second.Sizes (Step).Width, Second.Sizes (Step).Height);
+               Need : constant Real := Radius / Real (Halving) ** Step + 1.0;
             begin
-               if Radius / Real (Halving) ** Step + 1.0 <= Real (H) then
-                  declare
-                     Level_Used : constant Natural := Step;
-                     Answered   : constant Answer := Align_At (First, Second, Query, Level_Used, Plain, Radius, 1);
-                  begin
-                     --  What a patch of the usual size cannot decide for lack of what lies around the point (it is
-                     --  ambiguous, tells the place no better than the window does, or is carried off by what the
-                     --  patch holds) may be decided by one twice as wide, the factor of a level of the pictures.
-                     if Answered.Verdict = Not_Found
-                       and then Answered.Because in Ambiguous | Uninformative | No_Evidence | Left_Window | Not_Settled
-                     then
-                        declare
-                           Wider : constant Answer := Align_At (First, Second, Query, Level_Used, Plain, Radius, 2);
-                        begin
-                           if Wider.Verdict = Found then
-                              return Wider;
-                           end if;
-                        end;
-                     end if;
-                     return Answered;
-                  end;
+               if Need <= Real (H) then
+                  Chosen := Step;
+                  Narrow := True;
+                  exit;
+               elsif Need / Real (H) < Least then
+                  Least := Need / Real (H);
+                  Chosen := Step;
                end if;
             end;
          end loop;
+         if not Narrow and then Radius > Largest_Window (First, Second) then
+            return Fail (Window_Too_Large);
+         end if;
+         declare
+            Level_Used : constant Natural := Chosen;
+
+            --  An answer stands only if it beats chance among the places the prediction leaves open.
+            function Checked (Found : Answer) return Answer is
+              (if Found.Verdict = Driver.Alignment.Found
+                    and then not Beats_Chance (First, Query, Plain, Found.Linear, Found.Correlation)
+               then Fail (No_Evidence) else Found);
+
+            Answered   : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 1));
+
+            --  Whether the window was one a patch carries at the finest size (and was searched there).
+            Fine_Window : constant Boolean := Narrow and then Level_Used = Finest;
+
+            function Marked (Found : Answer) return Answer is (Found with delta Narrow => Fine_Window);
+         begin
+            --  What a patch of the usual size cannot decide for lack of what lies around the point (it is
+            --  ambiguous, tells the place no better than the window does, or is carried off by what the
+            --  patch holds) may be decided by one twice as wide, the factor of a level of the pictures.
+            if Answered.Verdict = Not_Found
+              and then Answered.Because in Ambiguous | Uninformative | No_Evidence | Left_Window | Not_Settled
+            then
+               declare
+                  Wider : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2));
+               begin
+                  if Wider.Verdict = Found then
+                     return Marked (Wider);
+                  end if;
+               end;
+            end if;
+            return Marked (Answered);
+         end;
       end;
-      return Fail (Window_Too_Large);
+   end Align_Matched;
+
+   --  The pictures from the level Down on: the halvings of the same picture, the first of them the full size now.
+   function Shifted (P : Pyramid; Down : Natural) return Pyramid is
+      Result : Pyramid;
+   begin
+      for K in Down .. P.Sizes.Last_Index loop
+         Result.Sizes.Append (P.Sizes (K));
+      end loop;
+      return Result;
+   end Shifted;
+
+   function Scaled (L : Linear_Part; By : Real) return Linear_Part is
+     ((UU => L.UU * By, UV => L.UV * By, VU => L.VU * By, VV => L.VV * By));
+
+   function Align (First, Second : Pyramid; Query : Prediction) return Answer is
+      Largest, Smallest : Real;
+   begin
+      Singular_Values (Query.Linear, Largest, Smallest);
+      --  A warp that changes the scale by more than a halving compares the pictures at levels that differ: the
+      --  one that shows the point larger is halved until the two show it at about one size (its coordinates, the
+      --  warp and the prediction's covariance with it), and the answer is carried back.
+      if Query.Linear.UU * Query.Linear.VV - Query.Linear.UV * Query.Linear.VU <= 0.0 or else Smallest <= 0.0 then
+         return Align_Matched (First, Second, Query);
+      end if;
+      declare
+         --  The first picture is halved until no direction of it is made smaller by more than a halving; where the
+         --  warp only enlarges, the second is halved until its smallest enlargement is about one.
+         Shrinks : constant Boolean := Smallest < 1.0 / Real (Halving);
+         Down    : constant Natural :=
+           (if Shrinks then Natural (Real'Rounding (Log (1.0 / Smallest, Real (Halving))))
+            elsif Smallest > 1.0 then Natural (Real'Rounding (Log (Smallest, Real (Halving))))
+            else 0);
+         Size    : constant Real := Real (Halving) ** Down;
+      begin
+         if Down = 0 or else (Shrinks and then Down >= Levels (First))
+           or else (not Shrinks and then Down >= Levels (Second))
+         then
+            return Align_Matched (First, Second, Query);
+         elsif Shrinks then
+            declare
+               Smaller : constant Pyramid := Shifted (First, Down);
+               Result  : Answer :=
+                 Align_Matched
+                   (Smaller, Second,
+                    (From => (U => Query.From.U / Size, V => Query.From.V / Size), To => Query.To,
+                     Linear => Scaled (Query.Linear, Size), Cov => Query.Cov,
+                     Linear_Sigma => (if Query.Linear_Sigma < Real'Last then Query.Linear_Sigma * Size
+                                      else Real'Last)));
+            begin
+               if Result.Verdict = Found then
+                  Result.Linear := Scaled (Result.Linear, 1.0 / Size);
+               end if;
+               return Result;
+            end;
+         else
+            declare
+               Smaller : constant Pyramid := Shifted (Second, Down);
+               Result  : Answer :=
+                 Align_Matched
+                   (First, Smaller,
+                    (From => Query.From, To => (U => Query.To.U / Size, V => Query.To.V / Size),
+                     Linear => Scaled (Query.Linear, 1.0 / Size),
+                     Cov => (UU => Query.Cov.UU / Size ** 2, UV => Query.Cov.UV / Size ** 2,
+                             VV => Query.Cov.VV / Size ** 2),
+                     Linear_Sigma => (if Query.Linear_Sigma < Real'Last then Query.Linear_Sigma / Size
+                                      else Real'Last)));
+            begin
+               if Result.Verdict = Found then
+                  Result.To := (U => Result.To.U * Size, V => Result.To.V * Size);
+                  Result.Cov := (UU => Result.Cov.UU * Size ** 2, UV => Result.Cov.UV * Size ** 2,
+                                 VV => Result.Cov.VV * Size ** 2);
+                  Result.Linear := Scaled (Result.Linear, Size);
+               end if;
+               return Result;
+            end;
+         end if;
+      end;
    end Align;
 
 end Driver.Alignment;

@@ -9,6 +9,7 @@ with Driver.Distributions;
 with Driver.Images;
 with Driver.Instrument;
 with Driver.Observations;
+with Driver.Stats;
 with Driver.Beats;
 with Driver.Log;
 with Driver.Numerics.Dense;
@@ -846,12 +847,10 @@ package body Driver.Robot.Tests is
    end Keyframe_Despite_Held_Jitter;
 
    --  An arm at rest takes its reference keyframe and then a still twin of
-   --  it at the same pose, whose match measures the matcher's own error
-   --  before the arm moves (on the rig, which has no instrument, the match
-   --  is refused for good, and the twin counts as answered). The sweep then
-   --  starts where both the view and the matcher can tell a move: given a
-   --  matcher that errs by 0.5 pixels, far more than the cells' noise, at Z
-   --  times that over the view's shift.
+   --  it at the same pose (the sweep waits for it). The aligner's own error
+   --  is not known from two identical pictures, so the sweep starts where the
+   --  cells tell a move, and where the aligner can once keyframes the arm moved
+   --  to are aligned: Z times the larger of the two over the view's shift.
    procedure Twin_Before_The_Sweep is
       M    : Model;
       R    : Rig;
@@ -880,30 +879,11 @@ package body Driver.Robot.Tests is
          end loop;
          Check (Twins = 1, "arm 1 at rest has" & Twins'Image & " still twins of its reference, not one");
       end;
-      Check (Driver.Robot.Kinematics.Twin_Answered (M, 1), "the twin of an arm whose matches are refused for good is waited for");
-      --  A matcher whose round trips come back half a pixel off, both ways.
-      for E of M.Kinematics loop
-         if E.Group = 1 then
-            declare
-               Set : Match_Set;
-            begin
-               Set.Frame := 2;
-               for I in 0 .. Natural (E.Query_U.Length) - 1 loop
-                  Set.To_U.Append (E.Query_U (I));
-                  Set.To_V.Append (E.Query_V (I));
-                  Set.Back_U.Append (E.Query_U (I) + (if I mod 2 = 0 then 0.5 else -0.5));
-                  Set.Back_V.Append (E.Query_V (I) + (if I mod 2 = 0 then -0.5 else 0.5));
-                  Set.Found.Append (True);
-               end loop;
-               E.Matches.Append (Set);
-            end;
-         end if;
-      end loop;
+      Check (Driver.Robot.Kinematics.Twin_Answered (M, 1), "the arm's still twin was not taken");
       declare
-         Noise : constant Real := Driver.Robot.Kinematics.Match_Noise (M, 1);
+         Noise : constant Real :=
+           Real'Max (Lockin.Cell_Noise (M, 1), Driver.Robot.Kinematics.Match_Noise (M, 1));
       begin
-         Check (Noise > Lockin.Cell_Noise (M, 1), "the matcher's half-pixel error is not measured above the cells' noise:"
-                & Noise'Image);
          for C in 1 .. 2 loop
             declare
                Start : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
@@ -1016,9 +996,10 @@ package body Driver.Robot.Tests is
    end Settle_Past_A_Patch_Flickering_At_Rest;
 
    --  The sweep starts each joint where its eye's view moves by what one cell
-   --  of it tells: Z times the cells' displacement noise. The visible step,
-   --  which a matched filter over every cell sees, moves the view by far less
-   --  than any one point of a match can be told.
+   --  of it tells and the aligner can tell: Z times the larger of the cells'
+   --  displacement noise and the aligner's scatter on the keyframes the arm has
+   --  moved to. The visible step, which a matched filter over every cell sees,
+   --  moves the view by far less than any one point of a match can be told.
    procedure Sweep_Starts_Where_A_Cell_Tells is
       M : Model;
    begin
@@ -1027,7 +1008,8 @@ package body Driver.Robot.Tests is
          declare
             Start : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
             Shift : constant Real := Lockin.Shift (M, 1, 1, C);
-            Noise : constant Real := Lockin.Cell_Noise (M, 1);
+            Noise : constant Real :=
+              Real'Max (Lockin.Cell_Noise (M, 1), Driver.Robot.Kinematics.Match_Noise (M, 1));
          begin
             Check (Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last, "arm 1's sweep plan is not measured");
             if Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last then
@@ -1047,8 +1029,8 @@ package body Driver.Robot.Tests is
       M : Model;
       R : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
    begin
-      R.Pending.Append
-        (Pending_Match'(Frame  => 2,
+      R.World_Pending.Append
+        (Pending_Match'(Frame  => 1,
                         Eye    => 0,
                         Points => 1,
                         Ticket => Driver.Instrument.Submit_Match
@@ -4007,7 +3989,7 @@ package body Driver.Robot.Tests is
                         V := V + Noise * Gaussian (Rng) + Shared_V + Track_V (K) + Local_V (K);
                         if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
                            Seen := Seen + 1;
-                           All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V);
+                           All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V, Own => 0.0, Own_Freedom => 0);
                         end if;
                      end;
                   end loop;
@@ -5647,10 +5629,10 @@ package body Driver.Robot.Tests is
       function Why (M : Model) return String is (Driver.Robot.Kinematics.Fixed_Why (M, 3));
    begin
       --  Answers off by 36 pixels (a twentieth of the picture): in most scenes made with other errors the eye's focal
-      --  lengths come out unsure (seeds 2 to 13 with the arms the fit finds since it measures the readings' units
-      --  and order: eleven so, and seed 3 by the cost not being quadratic over the covariance's range; seed 4 was the
-      --  quadratic one before). Seed 1 is the scene that places the eye otherwise: its principal point unsure by more
-      --  than the picture, and a distortion the noise made.
+      --  lengths come out unsure (seeds 2 to 13: eleven so, and seed 4 by the cost not being quadratic over the
+      --  covariance's range; which seed that is moves with the arms' fits: it was seed 3 for two commits on 10-10).
+      --  Seed 1 is the scene that places the eye otherwise: its principal point unsure by more than the picture, and a
+      --  distortion the noise made.
       Build_Two_Arms (Noisy, Head_Rig (Boxes => True, Head_Noise => 36.0, Seed => 1));
       Driver.Log.Line (Driver.Log.Robot, "head test (36 px, seed 1): "
                        & (if Driver.Robot.Kinematics.Fixed_Known (Noisy, 3) then "placed"
@@ -5659,8 +5641,8 @@ package body Driver.Robot.Tests is
       Check (Ada.Strings.Fixed.Index (Why (Noisy), "principal point") > 0,
              "the reason is not that the principal point is not located within half the picture: '" & Why (Noisy)
              & "'");
-      Build_Two_Arms (Quadratic, Head_Rig (Boxes => True, Head_Noise => 36.0, Seed => 3));
-      Driver.Log.Line (Driver.Log.Robot, "head test (36 px, seed 3): "
+      Build_Two_Arms (Quadratic, Head_Rig (Boxes => True, Head_Noise => 36.0, Seed => 4));
+      Driver.Log.Line (Driver.Log.Robot, "head test (36 px, seed 4): "
                        & (if Driver.Robot.Kinematics.Fixed_Known (Quadratic, 3) then "placed"
                           else "not placed: " & Why (Quadratic)));
       Check (not Driver.Robot.Kinematics.Fixed_Known (Quadratic, 3), "a head whose answers err by 36 pixels is placed");
@@ -7261,8 +7243,47 @@ package body Driver.Robot.Tests is
       end;
    end Ends_Are_Kept_In_The_Body_File;
 
+   procedure Scales_Beside_Stated_Sigmas is
+      --  Residuals each of the spread of a common floor (a tenth of a pixel: what the model leaves of any sighting)
+      --  and what its sighting states, which grows from nothing to a pixel and a half as the view moved the more. The
+      --  noise they show together is several times the floor; the floor read from them beside what is stated is
+      --  the common one, so the sightings that moved far, whose residuals are large for what they state, are not taken
+      --  for outliers by the noise of those that moved little. With nothing stated the floor is that noise.
+      Count   : constant := 2000;
+      Floor   : constant Real := 0.1;
+      R, Own, None : Real_Array (1 .. Count);
+      Rng     : Generator;
+   begin
+      for I in 1 .. Count loop
+         Own (I) := 1.5 * Real (I) / Real (Count);
+         None (I) := 0.0;
+         R (I) := Ada.Numerics.Long_Elementary_Functions.Sqrt (Floor ** 2 + Own (I) ** 2) * Gaussian (Rng);
+      end loop;
+      declare
+         Read  : constant Real := Driver.Robot.Kinematics.Fit.Floor_Of (R, Own);
+         Alone : constant Real := Driver.Robot.Kinematics.Fit.Floor_Of (R, None);
+         Shown : Real_Array (1 .. Count);
+      begin
+         for I in 1 .. Count loop
+            Shown (I) := abs R (I);
+         end loop;
+         Check_Close (Read, Floor, 0.03, "the floor read beside what the sightings state, from residuals whose floor is"
+                      & Real'Image (Floor) & ", is" & Real'Image (Read));
+         Check (Alone > 3.0 * Floor,
+                "the noise the residuals show together is not several times their floor:" & Real'Image (Alone));
+         Check_Close (Alone, Driver.Stats.Median (Shown)
+                      / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5), 1.0E-9,
+                      "with nothing stated the floor is not the noise the residuals show");
+         Check (Driver.Robot.Kinematics.Fit.Scale_Of (0.0, 0.0) > 0.0, "a residual with neither floor nor stated has no scale");
+         Check_Close (Driver.Robot.Kinematics.Fit.Scale_Of (0.3, 0.4), 0.5, 1.0E-12, "a scale is the floor and what is stated, as variances");
+      end;
+   end Scales_Beside_Stated_Sigmas;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("robot.kinematics.scales", "the floor of the scales residuals are judged at is the noise "
+                             & "they show together though their sightings state more as they moved further, so those "
+                             & "that moved far are outliers", Scales_Beside_Stated_Sigmas'Access);
       Driver.Robot.Kinematics.Errors.Tests.Register;
       Driver.Robot.Kinematics.Fixed.Tests.Register;
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
