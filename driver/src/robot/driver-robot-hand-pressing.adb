@@ -1,5 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Robot.Hand.Aims;
+with Driver.Robot.Kinematics;
 
 package body Driver.Robot.Hand.Pressing is
 
@@ -56,6 +57,29 @@ package body Driver.Robot.Hand.Pressing is
          end;
       end if;
    end Aim;
+
+   function Off_Aim (M : Model; Arm : Arm_Id; O : Observation; A : Aimed) return Aim_Offset is
+      Sigma : constant Real := Driver.Robot.Kinematics.Angle_Sigma (M, Arm);
+      Down  : constant Direction_Estimate := Up_In_Arm (M, Arm);
+      Tool  : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
+   begin
+      if not A.Ok or else Tool.Position_Covariance (1, 1) = Real'Last then
+         return (others => <>);
+      end if;
+      if Sigma = Real'Last then
+         return (others => <>);
+      end if;
+      declare
+         Values  : Vec3;
+         Vectors : Mat3;
+      begin
+         Symmetric_Eigensystem (Tool.Position_Covariance, Values, Vectors);
+         return (Place       => abs (Tool.Pose.Translation - A.Above.Translation),
+                 Place_Sigma => Sqrt (Sigma ** 2 + Real'Max (Values (1), Real'Max (Values (2), Values (3)))),
+                 Turn        => Angle (Transpose (Tool.Pose.Rotation) * A.Above.Rotation),
+                 Turn_Sigma  => (if Down.Sigma < Real'Last then Sqrt (Sigma ** 2 + Down.Sigma ** 2) else Real'Last));
+      end;
+   end Off_Aim;
 
    procedure Aim_Reaching
      (M       : Model;

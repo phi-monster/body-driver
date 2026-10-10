@@ -627,6 +627,13 @@ procedure Measure (H : in out Hands; M : in out Model) is
             end;
          end Read_Aim;
 
+         Off : Driver.Robot.Hand.Pressing.Aim_Offset;   --  where the aim's move left the tool, against the aim
+         procedure Read_Reached (O : Observation) is
+         begin
+            Arm_Now := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (O.Readings.Element (Arm_Is));
+            Off := Driver.Robot.Hand.Pressing.Off_Aim (M, R.Arm, O, Aimed);
+         end Read_Reached;
+
          procedure Note_The_Stop (O : Observation) is
             pragma Unreferenced (O);
             Noted : Boolean;
@@ -786,16 +793,20 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Plan := Aimed.Plan;
          Least := Real'Max (Real'Model_Epsilon, Aimed.Least);
          Driver.Robot.Motion.Follow (M, Plan, Report);
-         Hold_Beat (Read_Arm'Access);
+         Hold_Beat (Read_Reached'Access);
          --  An aim the arm did not complete is not a press: it stopped on something of its own or short of the pose,
          --  and lowering the hand from where it stands would press at no pose this aim chose (A27's first press of
          --  hand 2, the third joint at +0.07 for the -0.05 asked, lowered from there and fitted as the tip, 12.39 from
-         --  the eye). The arm goes back to where the aim began, and the caller is told a tilt cannot be made.
-         if Report.Outcome /= Driver.Robot.Motion.Reached then
+         --  the eye). The arm goes back to where the aim began, and the caller is told a tilt cannot be made. Whether
+         --  it completed it is the tool's pose against the aim's (Pressing.At_Aim), whatever the joints' verdict.
+         if not Driver.Robot.Hand.Pressing.At_Aim (Off) then
             Aim_Short := True;
             Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the arm did not reach the aim of a press of lobe" & Lobe'Image
                              & " at " & (if Which = Open then "open" else "closed") & ", turning the hand "
                              & Driver.Log.Image (Aimed.Turn, 4) & " rad (" & Ada.Strings.Unbounded.To_String (Report.Detail)
+                             & " the tool stands " & Driver.Log.Image (Off.Place, 5) & " from the aim's place, told against "
+                             & Driver.Log.Image (Off.Place_Sigma, 5) & ", and turned " & Driver.Log.Image (Off.Turn, 5)
+                             & " rad from its turn, told against " & Driver.Log.Image (Off.Turn_Sigma, 5)
                              & "): no press is made from where it stopped, and the arm is taken back to where the aim began");
             Hold_Beat (Note_The_Stop'Access);   --  the aim is in free air: what stopped it is the body's, and noted
             Move_Group (Arm_Is, Began.Element);

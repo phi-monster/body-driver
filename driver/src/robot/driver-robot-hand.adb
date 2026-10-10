@@ -303,10 +303,13 @@ package body Driver.Robot.Hand is
    procedure Accumulate (P : in out Pair; M : Model);
    --  Adds the latest beat's picture motion to the pair's tally when one channel of the closer moved, by a step the
    --  body's one test of motion sees: each resolved cell's displacement in the picture that shows the step (the eye's
-   --  image lag after it), times the step. What else moved meanwhile is not the closer's steps and goes the way they
-   --  do no more than any other way; a beat was once dropped when another group moved by the one test, and the arm
-   --  holding the closer creeps by a millionth of a radian a beat that the test sees (A88's hand 1 tallied nothing,
-   --  and its ends were not turned).
+   --  image lag after it), times the step; and when no other commandable group's step at that beat moves this eye's
+   --  picture by what its cells tell (Lockin.Shows_Step): a beat whose picture another group moved shows that motion
+   --  as well, and the world moves past a closer carried with its eye (A88's replay with every such beat tallied:
+   --  28,242 of the lobes' pixels went with the closer's motion and 34,938 against it, and the ends the robot's look
+   --  had given right were turned wrong). Whether another group moved by the body's one test of motion is not the
+   --  question: the arm holding the closer creeps by a millionth of a radian a beat, which that test sees and no cell
+   --  of the eye does (A88's hand 1 tallied nothing so, and its wrong ends were not turned).
 
    procedure Accumulate (P : in out Pair; M : Model) is
       S    : Eye_Stream renames M.Eyes (P.Eye);
@@ -347,6 +350,15 @@ package body Driver.Robot.Hand is
          if Moved /= 1 then
             return;
          end if;
+         for G in 1 .. Group_Id'Base (Group_Count (M)) loop
+            if G /= P.Group and then Is_Commandable (M, G) and then Driver.Robot.Channels.Has_Reading (M, G, R)
+              and then Driver.Robot.Channels.Has_Reading (M, G, R - 1)
+              and then Driver.Robot.Lockin.Shows_Step
+                (M, P.Eye, G, [for C in 1 .. Group_Size (M, G) => Driver.Robot.Channels.Change (M, G, R, C)])
+            then
+               return;
+            end if;
+         end loop;
          declare
             Step : constant Real := Driver.Robot.Channels.Change (M, P.Group, R, Which);
             Base : constant Natural := (Which - 1) * N;

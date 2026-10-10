@@ -22,6 +22,7 @@
 with Ada.Strings.Unbounded;
 with Driver.Geometry;
 with Driver.Robot.Motion;
+with Driver.Uncertain;
 
 package Driver.Robot.Hand.Pressing is
 
@@ -33,6 +34,30 @@ package Driver.Robot.Hand.Pressing is
       Least : Real := Real'Last;  --  the smallest move of the tool that tells from its noise, where the aim leaves it
       Plan  : Driver.Robot.Motion.Plan;   --  from the tool as at O to Above; unset unless Ok
    end record;
+
+   --  How far the tool stands off where an aim put it, and what tells it from there.
+   type Aim_Offset is record
+      Place      : Real := Real'Last;   --  how far its place is off the aim's,
+      Place_Sigma : Real := Real'Last;  --  and the sigma it is told against
+      Turn       : Real := Real'Last;   --  how far its turn is off the aim's, radians,
+      Turn_Sigma : Real := Real'Last;   --  and the sigma it is told against
+   end record;
+
+   function Off_Aim (M : Model; Arm : Arm_Id; O : Observation; A : Aimed) return Aim_Offset;
+   --  The tool as at O against A.Above, each told against the sigma the aim was planned to (the fit's angle sigma,
+   --  as Driver.Robot.Motion.Plan_Reach_In_Arm plans it, place and turn alike) with the sigma of what the tool's
+   --  pose is told from there: its place's, the root of the largest variance of its position as at O, and the turn
+   --  of the way down the aim pointed along. Unknown where any of them is.
+
+   function At_Aim (Off : Aim_Offset) return Boolean is
+     (Off.Place_Sigma < Real'Last and then Off.Turn_Sigma < Real'Last
+      and then not Driver.Uncertain.Significant (Off.Place, Off.Place_Sigma)
+      and then not Driver.Uncertain.Significant (Off.Turn, Off.Turn_Sigma));
+   --  The tool stands where the aim put it, as far as anything tells: neither its place nor its turn significantly
+   --  off. What the press needs of an aim is the tool's pose, not the joints':
+   --  a large aim that ends within a few ten-thousandths of its joints' targets, the arm's own sag under its load
+   --  where it stands, is judged short against the free pushes of the boot that never carried that load (A89's hand
+   --  2: every aim "delivered 1.000 of" 1.36 to 1.46, "blocked", and no press was made in the whole boot).
 
    procedure Aim
      (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed; Yaw : Real := 0.0);
