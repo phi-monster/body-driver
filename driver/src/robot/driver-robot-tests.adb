@@ -197,6 +197,11 @@ package body Driver.Robot.Tests is
    --  closer shakes arm 1's reading by a ten-millionth of the closer's
    --  change (a reaction).
 
+   --  Of the latest Boot_On_Rig: how many times arm 1 was held still for a keyframe at a new pose at a beat where
+   --  eye 1's picture still changed by a level or more from the beat before, after the arm's last move (the rig's
+   --  own account of its flicker): a keyframe waits for the picture to settle, so this must stay zero.
+   Unsettled_Stills : Natural := 0;
+
    Rig_Width  : constant := 64;
    Rig_Height : constant := 48;
    Px_Per_Unit : constant := 4.0;
@@ -2771,6 +2776,7 @@ package body Driver.Robot.Tests is
    begin
       Beats := 0;
       Still_Poses := 0;
+      Unsettled_Stills := 0;
       Arm_2_Poses := 0;
       begin
       for B in 0 .. Bound loop
@@ -2876,6 +2882,19 @@ package body Driver.Robot.Tests is
             then
                Still_Poses := Still_Poses + 1;
                Poses (Still_Poses) := Now.Arm_1;
+               --  The picture changed this beat by a level or more (the flicker's step from the beat before: what
+               --  a byte picture can show), as the rig made it: a keyframe held then was held on a picture still
+               --  changing. The flicker's remaining offset is no change.
+               if Settling and then Since < Natural'Last
+                 and then (if Since = 0 then Trail else Trail * 0.3 * 0.7 ** (Since - 1)) >= 1.0
+               then
+                  Unsettled_Stills := Unsettled_Stills + 1;
+                  Driver.Log.Line (Driver.Log.Robot, "rig: arm 1 held still at beat" & M.Beats'Image & " with since"
+                                   & Since'Image & ", trail " & Driver.Log.Image (Trail, 2) & ", pose "
+                                   & Driver.Log.Image (Now.Arm_1 (1), 5) & " " & Driver.Log.Image (Now.Arm_1 (2), 5)
+                                   & ", group 1 moving " & Boolean'Image (Channels.Moving (M, 1, M.Beats - 1))
+                                   & ", eye 1 settled " & Boolean'Image (Driver.Robot.Stillness.Eye_Settled (M, 1)));
+               end if;
             end if;
             for A in 1 .. Arm_Count (M) loop
                if Arm_Group (M, Arm_Id (A)) = 2 and then Now.Arm_2 /= [0.0, 0.0]
@@ -3114,10 +3133,13 @@ package body Driver.Robot.Tests is
                        & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
       Check (Levels > 0, "arm 1 was not swept");
       Check (Poses >= Levels, "arm 1 could give" & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
-      --  The levels between are passed as soon as the arm stops, before the
-      --  picture settles: no keyframe there. The same boot with pictures that settle at once gives a keyframe at every
-      --  level (and at the poses the recognition's pushes stand at, which wait for the pictures to settle: both have
-      --  them).
+      --  A keyframe waits for the picture to settle: arm 1 is never held still for one while eye 1's picture
+      --  still flickers by a level or more after its move (the rig counts those). The same boot with pictures
+      --  that settle at once finishes too. (The sweep once visited every other level and passed the rest before
+      --  the picture settled, so that this boot held fewer poses than the ideal one; now every level is held until
+      --  the picture settles, and the counts tell nothing.)
+      Check (Unsettled_Stills = 0, "arm 1 was held still for a keyframe" & Unsettled_Stills'Image
+             & " times at a beat where its picture still changed by a level or more");
       declare
          Ideal                                 : Model;
          Ideal_Done, Ideal_Ok                  : Boolean;
@@ -3125,9 +3147,7 @@ package body Driver.Robot.Tests is
       begin
          Boot_On_Rig (Ideal, False, Ideal_Done, Ideal_Ok, Ideal_Beats, Ideal_Poses, Ideal_Poses_2);
          Check (Ideal_Done, "the boot with pictures that settle at once did not finish");
-         Check (Poses < Ideal_Poses,
-                "arm 1 was held for a keyframe at" & Poses'Image & " poses, as many as when pictures settle at once ("
-                & Ideal_Poses'Image & "), though the levels between the held ones are passed before the picture settles");
+         Check (Ideal_Poses > 0, "arm 1 was never held still for a keyframe when pictures settle at once");
       end;
    end Boot_With_Settling_Views;
 
