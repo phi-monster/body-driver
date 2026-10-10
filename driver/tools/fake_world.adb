@@ -12,7 +12,7 @@ package body Fake_World is
    --  How far a hand may go into what it pressed, as a share of the push
    --  that was blocked (the lab's robot: a fraction of a millimetre).
    Give_Share : constant := 0.02;
-   Give_Depth : constant := 0.003;   --  and no deeper than this below the table: V1B21's finger sank 6.6 mm pushed and
+   Give_Depth : constant := 0.003;   --  and no deeper than this into what blocks it: V1B21's finger sank 6.6 mm pushed and
                                      --  rested 2.5 mm in; a give that went on forever walked a blocked closer half its
                                      --  range in 400 beats (S4)
 
@@ -62,6 +62,7 @@ package body Fake_World is
    function Inside (P : Vec3; S : Solid) return Boolean;
    function Overlap (A, B : Solid) return Boolean;
    function Penetrates (W : World; A : Positive) return Boolean;
+   function Deepest (W : World; A : Positive) return Real;
    function Lowest (W : World; A : Positive) return Real;
    procedure Mark_Touching (W : in out World; A : Positive);
    function Droop (L : Link; Tool : Vec3) return Real;
@@ -563,6 +564,33 @@ package body Fake_World is
       return False;
    end Penetrates;
 
+   --  How far any of arm A's solids goes into the table or into a thing of the world: the deepest corner, metres;
+   --  zero when none does.
+   function Deepest (W : World; A : Positive) return Real is
+      D : Real := 0.0;
+   begin
+      for S of W.Solids loop
+         if S.Arm = A then
+            for P of Corners (S) loop
+               D := Real'Max (D, W.Table_Z - P (3));
+               for O of W.Solids loop
+                  if O.Arm = 0 and then O.Kind = Box then
+                     declare
+                        Q : constant Vec3 := Inverse (O.Pose) * P;
+                     begin
+                        if abs Q (1) < O.Half (1) and then abs Q (2) < O.Half (2) and then abs Q (3) < O.Half (3) then
+                           D := Real'Max (D, Real'Min (O.Half (1) - abs Q (1),
+                                                     Real'Min (O.Half (2) - abs Q (2), O.Half (3) - abs Q (3))));
+                        end if;
+                     end;
+                  end if;
+               end loop;
+            end loop;
+         end if;
+      end loop;
+      return D;
+   end Deepest;
+
    --  The lowest point of arm A's solids in the world.
    function Lowest (W : World; A : Positive) return Real is
       Z : Real := Real'Last;
@@ -640,6 +668,7 @@ package body Fake_World is
       Wanted       : array (W.Links.First_Index .. W.Links.Last_Index) of Real;
       Was_Touching : Boolean := False;
       Tool_Before  : constant Vec3 := W.Links (W.Tools (A)).Pose.Translation;
+      Sunk         : constant Real := Deepest (W, A);   --  how far the arm already gave into what blocks it
       Closer       : constant Natural := W.Closers (A);
       Z_Wanted     : Real;
       Lo, Hi       : Real := 0.0;
@@ -703,7 +732,7 @@ package body Fake_World is
                end if;
             end;
          end loop;
-         Place (Lo + (if W.Quirk.Give and then Lowest (W, A) > W.Table_Z - Give_Depth then Give_Share * (1.0 - Lo) else 0.0));
+         Place (Lo + (if W.Quirk.Give and then Sunk < Give_Depth then Give_Share * (1.0 - Lo) else 0.0));
          --  An open closer pressed on the surface is pressed shut by the descent the surface blocked.
          if W.Quirk.Soft_Closer and then Closer > 0 then
             declare
