@@ -1037,6 +1037,8 @@ driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Least, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Place, 5) & ""	5	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Turn_Sigma, 5)	5	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Yaw, 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& (if Pixel > 0.0 then Driver.Log.Image (Pixel, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Aimed.Turn, 4) & "" & Ada.Strings.Unbounded.To_String (Report.Detail)	4	format	digits printed in a log line or a message
@@ -1047,6 +1049,8 @@ driver-robot-hand-measure.adb	& Driver.Log.Image (Descended, 4)));	4	format	digi
 driver-robot-hand-measure.adb	& Driver.Log.Image (Driver.Robot.Hand.Aims.Spread (R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	1	structure	a one-element array of directions
 driver-robot-hand-measure.adb	& Driver.Log.Image (Driver.Robot.Hand.Aims.Spread (R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Least, 4) & "")	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place_Sigma, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place_Sigma, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Room.Value, 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Image (Step.Value, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Image (Step.Value, 4)	6	format	digits printed in a log line or a message
@@ -1199,6 +1203,9 @@ driver-robot-hand-sweep.adb	or else (High >= 2 and then High >= 2 * Was.Element 
 driver-robot-hand-sweep.adb	or else (High >= 2 and then High >= 2 * Was.Element (Channel).Poses_High);	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
 driver-robot-hand-sweep.adb	return (Low >= 2 and then Low >= 2 * Was.Element (Channel).Poses_Low)	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
 driver-robot-hand-sweep.adb	return (Low >= 2 and then Low >= 2 * Was.Element (Channel).Poses_Low)	2	statistics	two poses at the least for a deviation, and twice the poses the last placing had: a doubling rule, as the estimates run at doubling beats
+driver-robot-hand-tips.adb	& "" & Driver.Log.Image (Slid_Angle (K, T (K.Lobe) (K.Opening)), 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-hand-tips.adb	& Driver.Log.Image (T (K.Lobe) (K.Opening).Travel, 4) & "" & Driver.Log.Image (K.Hit, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand-tips.adb	& Driver.Log.Image (T (K.Lobe) (K.Opening).Travel, 4) & "" & Driver.Log.Image (K.Hit, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);	1	structure	a hand's presses are fitted on one surface
 driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);	1	structure	the presses of a hand are fitted on one surface
 driver-robot-hand-tips.adb	Gap : constant Real := Sqrt (((A - C) / 2.0) ** 2 + Off ** 2);	2.0	math	the middle and the half gap of a two by two covariance, whose roots are the middle plus and minus the root of the half gap squared and the cross term squared
@@ -1964,7 +1971,10 @@ driver-robot-kinematics.adb	Driver.Stats.Median (Trips.all) / Driver.Distributio
 driver-robot-kinematics.adb	Ends : array (1 .. 2) of Vec3;	2	math	a central difference: one standard deviation either way
 driver-robot-kinematics.adb	F.Table_Response (2 * T + Term - 1)];	2	structure	the third row of the plane's response
 driver-robot-kinematics.adb	Free_Terms : constant Natural := Fit.Lens_Terms + (if In_World then 3 else 0);	3	structure	the turn's three terms follow the lens's
+driver-robot-kinematics.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Q (Q'First + K - 1));	1.0	numerics	a finite-difference step scales with the reading, and with one where the reading is smaller than one, so that it stays above the reading's own rounding
 driver-robot-kinematics.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (K));	1.0	numerics	the scale floor of a finite difference
+driver-robot-kinematics.adb	J (I + 3, K) := W (I) / H;	3	structure	the turn's three rows of the Jacobian follow the place's three
+driver-robot-kinematics.adb	J : Real_Matrix (1 .. 6, 1 .. N);	6	structure	a pose has six ways to move: three of place and three of turn
 driver-robot-kinematics.adb	J : array (1 .. 3, 1 .. Free_Terms) of Real := [others => [others => 0.0]];	3	structure	three coordinates
 driver-robot-kinematics.adb	K := K + 2;	2	structure	two coordinates per round trip
 driver-robot-kinematics.adb	Lambda := 2.0 * Lambda;	2.0	numerics	the damping doubles after a step that did not help
@@ -2014,6 +2024,7 @@ driver-robot-kinematics.adb	for B in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for B in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for D in 1 .. 3 loop	3	math	three coordinates
 driver-robot-kinematics.adb	for E in 1 .. 2 loop	2	math	a central difference: one standard deviation either way
+driver-robot-kinematics.adb	for I in 1 .. 3 loop	3	structure	the three axes of space
 driver-robot-kinematics.adb	for P in 1 .. 3 loop	3	structure	the three components of a vector, the three terms of a turn
 driver-robot-kinematics.adb	for P in 1 .. 3 loop	3	structure	the three components of a vector, the three terms of a turn
 driver-robot-kinematics.adb	for P in 1 .. 3 loop	3	structure	three coordinates
@@ -2089,8 +2100,11 @@ driver-robot-motion.adb	& (if Way = Increasing then "" else "") & "" & Driver.Lo
 driver-robot-motion.adb	& Driver.Log.Image (Asked, 6) & "" & Driver.Log.Image (Start, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Asked, 6) & "" & Driver.Log.Image (Start, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (E.Length, 4)	4	format	digits printed in a log line or a message
+driver-robot-motion.adb	& Driver.Log.Image (Failed_At, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-motion.adb	& Driver.Log.Image (Kinematics.Conditioning (M, A, Failed_From), 6)),	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	(Driver.Uncertain.Scalar_Gate (Channels.Noise_Freedom (M, G, Channel))) * Sigma * Sqrt (2.0);	2.0	math	a change is the difference of two readings
 driver-robot-motion.adb	(if M.Eyes (E).Rest_Counts_Known then 1.0 / Real (M.Eyes (E).Rest_Count_Beats + 1) else Tail);	1.0	math	the order statistic: one in n plus one
+driver-robot-motion.adb	(if Q'Length = 0 then "" else Readings_Image (Q (Q'First .. Q'Last - 1)) & "" & Driver.Log.Image (Q (Q'Last), 6));	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	* (S.High_Seen (I) - S.Low_Seen (I)) / 2.0)	2.0	math	two independent stops fall anywhere in the channel's travel and meet within D of one another with probability 2 D over the travel: D is that probability, the false alarm rate of Z, times the travel over two
 driver-robot-motion.adb	Amount := 2.0 * Amount;	2.0	structure	the probe doubles
 driver-robot-motion.adb	Driver.Log.Line (Driver.Log.Robot, Where & "" & Driver.Log.Image (Before, 6)	6	format	digits printed in a log line or a message
@@ -2151,12 +2165,12 @@ driver-robot-regression.adb	return (if U <= Huber_K then 1.0 else Huber_K / U);	
 driver-robot-regression.ads	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean	1	structure	a count that is no best of many is one test
 driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
 driver-robot-steps.adb	(X.Followed < 2	2	structure	a scatter needs two beats; with fewer there is no chatter to tell a gain from
-driver-robot-steps.adb	or else Driver.Uncertain.Significant (Gain, Sqrt (2.0 * X.Spread / Real (X.Followed - 1)), X.Followed - 1));	2.0	math	a gain is the difference of two beats' values of the quantity, whose variance is twice one beat's
 driver-robot-steps.adb	Own (C) := (Unit * Sqrt (2.0) * Sigma) ** 2;	2.0	statistics	a shortfall is the difference of two readings, the one before the push and the one where it stopped: the root of two of the reading noise
 driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
 driver-robot-steps.adb	if Natural (M.Groups (G).Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	if Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	if not (E.Ended and then E.Rested and then E.Blocked) or else E.Length <= 0.0 or else E.Start < 1	1	structure	a push needs the reading before it: it began at the second beat or later
+driver-robot-steps.adb	or else Driver.Uncertain.Significant (Gain, Sqrt (2.0 * X.Spread / Real (X.Followed - 1)), X.Followed - 1));	2.0	math	a gain is the difference of two beats' values of the quantity, whose variance is twice one beat's
 driver-robot-stillness.adb	Adds_Up : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0);	2.0	math	changes that do not push the same way add as roots of squares: over two beats a picture that only makes noise changes by the square root of two times what it changes over one, a drift by twice
 driver-robot-stillness.adb	S.Change_1 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	S.Change_2 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
@@ -2441,10 +2455,3 @@ driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mo
 driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mod 8) mod 2 = 1 then	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mod 8) mod 2 = 1 then	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	if What = "" and then N = 2 then	2	format	the field count or a field's place in a W record (Replay_Write)
-driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Place, 5) & ""	5	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place_Sigma, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place_Sigma, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Turn_Sigma, 5)	5	format	digits printed in a log line or a message
-driver-robot-hand-tips.adb	& "" & Driver.Log.Image (Slid_Angle (K, T (K.Lobe) (K.Opening)), 4) & ""	4	format	digits printed in a log line or a message
-driver-robot-hand-tips.adb	& Driver.Log.Image (T (K.Lobe) (K.Opening).Travel, 4) & "" & Driver.Log.Image (K.Hit, 4)	4	format	digits printed in a log line or a message
-driver-robot-hand-tips.adb	& Driver.Log.Image (T (K.Lobe) (K.Opening).Travel, 4) & "" & Driver.Log.Image (K.Hit, 4)	4	format	digits printed in a log line or a message

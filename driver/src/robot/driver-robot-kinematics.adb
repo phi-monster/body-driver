@@ -1796,6 +1796,50 @@ package body Driver.Robot.Kinematics is
       Turn_Off := (if Position_Only then 0.0 else Sqrt (R0 (4) ** 2 + R0 (5) ** 2 + R0 (6) ** 2));
    end Solve_Pose;
 
+   function Conditioning (M : Model; A : Arm_Id; Q : Real_Array) return Real is
+      use Driver.Numerics.Arrays;
+      use Ada.Numerics.Long_Elementary_Functions;
+      N : constant Natural := Q'Length;
+   begin
+      if N = 0 or else Index_Of (M, A) = 0 or else not M.Kinematics (Index_Of (M, A)).Result.Fitted then
+         return 0.0;
+      end if;
+      declare
+         T0 : constant Rigid := Eye_In_Reference (M, A, Q);
+         J  : Real_Matrix (1 .. 6, 1 .. N);
+      begin
+         for K in 1 .. N loop
+            declare
+               Xp : Real_Array := Q;
+               H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Q (Q'First + K - 1));
+               Tp : Rigid;
+               D  : Vec3;
+               W  : Vec3;
+            begin
+               Xp (Xp'First + K - 1) := Xp (Xp'First + K - 1) + H;
+               Tp := Eye_In_Reference (M, A, Xp);
+               D := Tp.Translation - T0.Translation;
+               W := Driver.Numerics.Log (Transpose (T0.Rotation) * Tp.Rotation);
+               for I in 1 .. 3 loop
+                  J (I, K) := D (I) / H;
+                  J (I + 3, K) := W (I) / H;
+               end loop;
+            end;
+         end loop;
+         declare
+            Values : constant Real_Vector := Eigenvalues (Transpose (J) * J);
+            Least  : Real := Real'Last;
+            Most   : Real := 0.0;
+         begin
+            for V of Values loop
+               Least := Real'Min (Least, V);
+               Most := Real'Max (Most, V);
+            end loop;
+            return (if Most > 0.0 then Sqrt (Real'Max (0.0, Least) / Most) else 0.0);
+         end;
+      end;
+   end Conditioning;
+
    function Nearest_Readings (M : Model; A : Arm_Id; Near, Readings : Real_Array) return Real_Array is
       Result : Real_Array (Readings'Range) := Readings;
       I      : constant Natural := Index_Of (M, A);

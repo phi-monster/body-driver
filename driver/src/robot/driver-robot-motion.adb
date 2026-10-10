@@ -367,6 +367,10 @@ package body Driver.Robot.Motion is
 
    function Ln (X : Real) return Real renames Ada.Numerics.Long_Elementary_Functions.Log;
 
+   --  Readings for a log line, each to the six places the group lines give them (Driver.Robot.Group_Watch).
+   function Readings_Image (Q : Real_Array) return String is
+     (if Q'Length = 0 then "" else Readings_Image (Q (Q'First .. Q'Last - 1)) & " " & Driver.Log.Image (Q (Q'Last), 6));
+
    --  The probes may try as many levels as a float has bits of precision.
    Levels : constant Positive := Real'Machine_Mantissa;
 
@@ -997,6 +1001,8 @@ package body Driver.Robot.Motion is
             Result : Plan := (State => Planned, Reason => Null_Unbounded_String, Group => G, others => <>);
             Failed : Boolean := False;
             Worst_Position, Worst_Turn : Real := 0.0;
+            Failed_From : Real_Array (1 .. Size) := Start;   --  the readings the segment that failed was solved from
+            Failed_At   : Real := 0.0;                       --  and how far along the path it began
 
             --  The pose a fraction of the way from the start to the goal:
             --  straight in position, about one axis in turn.
@@ -1075,6 +1081,8 @@ package body Driver.Robot.Motion is
                   Failed := True;
                   Worst_Position := Position_Off;
                   Worst_Turn := Turn_Off;
+                  Failed_From := Q;
+                  Failed_At := A_Of;
                end if;
             end Reach;
 
@@ -1088,7 +1096,10 @@ package body Driver.Robot.Motion is
                return (State => Unreachable,
                        Reason => To_Unbounded_String ("the arm's fitted model leaves the goal"
                                                       & Real'Image (Worst_Position) & " model units and"
-                                                      & Real'Image (Worst_Turn) & " rad away"),
+                                                      & Real'Image (Worst_Turn) & " rad away, from "
+                                                      & Driver.Log.Image (Failed_At, 4) & " of the way, at readings"
+                                                      & Readings_Image (Failed_From) & " where the arm's conditioning is "
+                                                      & Driver.Log.Image (Kinematics.Conditioning (M, A, Failed_From), 6)),
                        Solves => Result.Solves, others => <>);
             end if;
             declare

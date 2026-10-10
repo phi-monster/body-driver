@@ -111,6 +111,11 @@ private package Driver.Robot.Kinematics is
    --  from Goal. Q gives every joint that turns as the reading nearest Start
    --  (Nearest_Readings): the same pose, the way the arm is nearest to go.
 
+   function Conditioning (M : Model; A : Arm_Id; Q : Real_Array) return Real;
+   --  How near the arm stands at readings Q to a pose where its eye cannot move every way: the least singular value
+   --  of the fitted model's Jacobian of the eye's place (model units) and turn (radians) by the readings, over the
+   --  greatest; 0 where some way of the eye is lost, 1 where every way is as easy. Zero for a model not fitted.
+
    function Nearest_Readings (M : Model; A : Arm_Id; Near, Readings : Real_Array) return Real_Array
      with Pre => Near'Length = Readings'Length,
           Post => Nearest_Readings'Result'Length = Readings'Length;

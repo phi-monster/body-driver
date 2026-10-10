@@ -372,12 +372,19 @@ package body Driver.Robot.Hand.Tips is
       declare
          T : constant Sight_Table := Sights_Of (B);
       begin
+         Append (Text, "; lines of sight known:");
+         for L in T'Range loop
+            Append (Text, " lobe" & L'Image & (if T (L) (Open).Known then " open" else "") & (if T (L) (Closed_Empty).Known then " closed" else ""));
+         end loop;
          for K of B.Kept loop
             if K.Lobe in T'Range then
                Append (Text, "; lobe" & K.Lobe'Image & " " & (if K.Opening = Open then "open" else "closed")
                        & ", slid up to " & Driver.Log.Image (Slid_Angle (K, T (K.Lobe) (K.Opening)), 4) & " of "
                        & Driver.Log.Image (T (K.Lobe) (K.Opening).Travel, 4) & " rad, hit " & Driver.Log.Image (K.Hit, 4)
                        & (if K.Agrees then ", rests" else ", left out"));
+            else
+               Append (Text, "; at " & (if K.Opening = Open then "open" else "closed") & " given to no lobe, "
+                       & (if K.Event.Approach.Sigma < Real'Last then "pressing along a way known" else "the way it pressed unknown"));
             end if;
          end loop;
       end;
