@@ -34,6 +34,9 @@
 --  finger's farthest vertex along the tool's approach (from the tool link
 --  towards the fingers) is reported beside it.
 --
+--  score --scramble FILE ... scores a scrambled run (harness/robodojo_scramble): FILE is the draw the scrambler
+--  wrote beside it, and the recorded beats are paired with the truth through it.
+--
 --  score --check RECORDING TRUTH CLOSER LINK... checks the scorer itself: it
 --  makes estimates from the truth (tools at the given links, eyes at the
 --  cameras, rays from the lenses, one hand on the first link, read by the
@@ -290,15 +293,93 @@ procedure Score is
       Driver.Recording.Close (R);
    end Read_Recording;
 
+   ---------------------------------------------------------------------------
+   --  A scrambled run (harness/robodojo_scramble): the draw the simulator's side gave the driver, read from the
+   --  file the scrambler wrote beside the run (score --scramble FILE ...). The driver was given every key under a
+   --  drawn name and every group's channels in a drawn order, each with its own sign, scale and zero.
+
+   Scrambled : Boolean := False;
+   package Text_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, String);
+   Drawn_Names : Text_Maps.Map;   --  real key -> the name the driver was given
+   Draw_Order, Draw_Sign, Draw_Scale, Draw_Zero : Value_Maps.Map;   --  per real last key of a group
+
+   procedure Read_Scramble (Path : String) is
+      use Driver.Json;
+      F       : Ada.Text_IO.File_Type;
+      Content : Unbounded_String;
+      Doc     : Document;
+      Ok      : Boolean;
+      Why     : Unbounded_String;
+   begin
+      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+      while not Ada.Text_IO.End_Of_File (F) loop
+         Append (Content, Ada.Text_IO.Get_Line (F));
+      end loop;
+      Ada.Text_IO.Close (F);
+      Parse (To_String (Content), Doc, Ok, Why);
+      if not Ok then
+         raise Program_Error with "the scramble file " & Path & " does not parse: " & To_String (Why);
+      end if;
+      declare
+         Names  : constant Node := Lookup (Doc, Root (Doc), "names");
+         Groups : constant Node := Lookup (Doc, Root (Doc), "groups");
+      begin
+         for I in 1 .. Count (Doc, Names) loop
+            Drawn_Names.Include (Member_Name (Doc, Names, I), Text (Doc, Member_Value (Doc, Names, I)));
+         end loop;
+         for I in 1 .. Count (Doc, Groups) loop
+            declare
+               Key : constant String := Member_Name (Doc, Groups, I);
+               G   : constant Node := Member_Value (Doc, Groups, I);
+            begin
+               Draw_Order.Include (Key, Numbers_Of (Doc, Lookup (Doc, G, "order")));
+               Draw_Sign.Include (Key, Numbers_Of (Doc, Lookup (Doc, G, "sign")));
+               Draw_Scale.Include (Key, Numbers_Of (Doc, Lookup (Doc, G, "scale")));
+               Draw_Zero.Include (Key, Numbers_Of (Doc, Lookup (Doc, G, "zero")));
+            end;
+         end loop;
+      end;
+      Scrambled := True;
+   end Read_Scramble;
+
+   function Drawn (Key : String) return String is
+     (if Scrambled and then Drawn_Names.Contains (Key) then Drawn_Names (Key) else Key);
+
+   --  A truth state's values as the driver was given them: channel I is sign times scale times channel Order (I)
+   --  of the real group, plus zero, in the scrambler's order of operations. The scales are powers of two and the
+   --  signs one either way, so the product is exact and the sum rounds once, here as there: the values agree to
+   --  the bit, and the pairing stays exact.
+   function Through_Draw (Key : String; T : Real_Array) return Real_Array is
+   begin
+      if not Scrambled or else not Draw_Order.Contains (Key)
+        or else Value_Maps.Element (Draw_Order, Key)'Length /= T'Length
+      then
+         return T;
+      end if;
+      declare
+         O : constant Real_Array := Draw_Order (Key);
+         S : constant Real_Array := Draw_Sign (Key);
+         K : constant Real_Array := Draw_Scale (Key);
+         Z : constant Real_Array := Draw_Zero (Key);
+         Y : Real_Array (1 .. T'Length);
+      begin
+         for I in Y'Range loop
+            Y (I) := S (S'First + I - 1) * K (K'First + I - 1) * T (T'First + Natural (O (O'First + I - 1)))
+                     + Z (Z'First + I - 1);
+         end loop;
+         return Y;
+      end;
+   end Through_Draw;
+
    function Same_State (B : Recorded_Beat; L : Truth_Line) return Boolean is
       Common : Natural := 0;
    begin
       for C in L.State.Iterate loop
          declare
-            Key : constant String := "state/" & Value_Maps.Key (C);
+            Key : constant String := Drawn ("state") & "/" & Drawn (Value_Maps.Key (C));
          begin
             if B.Readings.Contains (Key) then
-               if B.Readings (Key) /= Value_Maps.Element (C) then
+               if B.Readings (Key) /= Through_Draw (Value_Maps.Key (C), Value_Maps.Element (C)) then
                   return False;
                end if;
                Common := Common + 1;
@@ -1651,33 +1732,42 @@ procedure Score is
 
    use Ada.Command_Line;
 
+   --  "--scramble FILE" first, when the run was scrambled; the arguments after it are as without it.
+   Skip : constant Natural := (if Argument_Count >= 2 and then Argument (1) = "--scramble" then 2 else 0);
+   function Count return Natural is (Argument_Count - Skip);
+   function Arg (N : Positive) return String is (Argument (Skip + N));
+
 begin
-   if Argument_Count = 5 and then Argument (1) = "--project" then
-      Read_Truth (Argument (3));
-      Read_Recording (Argument (2));
+   if Skip > 0 then
+      Read_Scramble (Argument (2));
+   end if;
+   if Count = 5 and then Arg (1) = "--project" then
+      Read_Truth (Arg (3));
+      Read_Recording (Arg (2));
       Pair_Beats;
-      Project (Natural'Value (Argument (4)), Positive'Value (Argument (5)));
+      Project (Natural'Value (Arg (4)), Positive'Value (Arg (5)));
       return;
    end if;
-   if Argument_Count >= 5 and then Argument (1) = "--check" then
-      Read_Truth (Argument (3));
-      Read_Recording (Argument (2));
+   if Count >= 5 and then Arg (1) = "--check" then
+      Read_Truth (Arg (3));
+      Read_Recording (Arg (2));
       Pair_Beats;
       declare
          Links : Name_Vectors.Vector;
       begin
-         for I in 5 .. Argument_Count loop
-            Links.Append (Argument (I));
+         for I in 5 .. Count loop
+            Links.Append (Arg (I));
          end loop;
-         Synthesize (Argument (4), Links);
+         Synthesize (Arg (4), Links);
       end;
-   elsif Argument_Count = 3 then
-      Read_Truth (Argument (3));
-      Read_Recording (Argument (2));
+   elsif Count = 3 then
+      Read_Truth (Arg (3));
+      Read_Recording (Arg (2));
       Pair_Beats;
-      Read_Estimates (Argument (1));
+      Read_Estimates (Arg (1));
    else
-      Line (Core, "usage: score ESTIMATES RECORDING TRUTH, or score --check RECORDING TRUTH CLOSER LINK...");
+      Line (Core, "usage: score [--scramble FILE] ESTIMATES RECORDING TRUTH, or score [--scramble FILE] --check RECORDING "
+            & "TRUTH CLOSER LINK...");
       Set_Exit_Status (Failure);
       return;
    end if;
