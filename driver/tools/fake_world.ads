@@ -171,6 +171,7 @@ package Fake_World is
       Tools   : Index_Vectors.Vector;   --  per arm, the link the hand hangs from
       Closers : Index_Vectors.Vector;   --  per arm, the link whose joint closes the hand (0 for none)
       Kinds   : Kind_Vectors.Vector;    --  per arm, what it ends in
+      Hand_Reach : Real_Vectors.Vector; --  per arm, how far from its tool its hand's parts reach, over the table
       Links   : Link_Vectors.Vector;
       Groups  : Group_Vectors.Vector;
       Cameras : Camera_Vectors.Vector;

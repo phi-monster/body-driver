@@ -200,6 +200,7 @@ package body Fake_World is
       Add_Box (W, Prefix & "palm", [0.05, 0.012, 0.014], Moved_To (0.0, L6 + 0.012, 0.0), Grey, J6, A);
       W.Tools.Append (J6);
       W.Kinds.Append (Kind);
+      W.Hand_Reach.Append (Open_Width + Finger_Length);
       G.Name := To_Unbounded_String ("arm" & Trim (A) & "_joints");
       G.Commandable := True;
       declare
@@ -291,6 +292,24 @@ package body Fake_World is
    --  Things on the table: a flat slab of fine stripes in front of the first
    --  arm (the keyboard the lab's table had), and a few boxes.
    procedure Add_Things (W : in out World) is
+      --  Nothing is placed within a hand's reach of its tool, over the table: the boot starts with the hands
+      --  free, and nothing stands between the fingers for a closer's sweep to push about (the first box run had a
+      --  box under arm 1's hand, and the closer's pushes moved most of its eye's picture).
+      function Under_A_Hand (S : Solid) return Boolean is
+      begin
+         for A in 1 .. W.Arms loop
+            declare
+               T  : constant Vec3 := W.Links (W.Tools (A)).Pose.Translation;
+               Dx : constant Real := S.Pose.Translation (1) - T (1);
+               Dy : constant Real := S.Pose.Translation (2) - T (2);
+            begin
+               if Sqrt (Dx ** 2 + Dy ** 2) < W.Hand_Reach (A) + Real'Max (S.Half (1), S.Half (2)) then
+                  return True;
+               end if;
+            end;
+         end loop;
+         return False;
+      end Under_A_Hand;
       Keys  : constant Material :=
         (Kind => Stripes, Albedo => [0.15, 0.15, 0.17], Contrast => 0.6, Scale => 125.0, Gloss => 0.1);
       Base1 : constant Vec3 := W.Links (1).Origin.Translation;
@@ -338,7 +357,7 @@ package body Fake_World is
                     (Name => To_Unbounded_String ("thing" & Trim (N)), Kind => Box, Half => [Hx, Hy, Hz], Local => Pose,
                      Pose => Pose, Mat => Mat, Link => 0, Arm => 0, Finger => False);
                begin
-                  if not (for some O of W.Solids => O.Link > 0 and then Overlap (S, O)) then
+                  if not (for some O of W.Solids => O.Link > 0 and then Overlap (S, O)) and then not Under_A_Hand (S) then
                      W.Solids.Append (S);
                      Placed := True;
                   end if;
@@ -400,7 +419,6 @@ package body Fake_World is
          Add_Camera (W, "eye_fixed", 0, 0, Look (Pos, Minus (Aim, Pos), [0.0, 0.0, 1.0]), Width, Height, 0.45);
       end;
       Forward (W);
-      Add_Things (W);
       --  Two constants the robot reports beside its readings, as the lab's
       --  simulator does (a rate and an index).
       declare
@@ -429,6 +447,8 @@ package body Fake_World is
             end loop;
          end;
       end loop;
+      --  The things go on the table once the body rests as it will boot: none within a hand's reach.
+      Add_Things (W);
       for G of W.Groups loop
          for I in 1 .. Natural (G.Joints.Length) loop
             G.Echoed (I) := W.Links (G.Joints (I)).Target;
