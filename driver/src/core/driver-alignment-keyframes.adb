@@ -667,13 +667,34 @@ package body Driver.Alignment.Keyframes is
    function Scatter (C : Chain) return Real is
       Sigmas : Real_Array (1 .. Natural (C.Frames.Length));
       Count  : Natural := 0;
+      --  Measured where nothing moved when such a keyframe has a field (the
+      --  reference's still twin: the points are found again in a picture
+      --  that differs by the sensor's noise alone, and what the field leaves
+      --  is the aligner's own error); else over the keyframes that moved,
+      --  where what the field leaves is also what the scene's depth adds to
+      --  a smooth field, and grows with the motion. The keyframe step rests on
+      --  this error, and the sweep, the keyframes it keeps and the fit's
+      --  reading of which joints a keyframe moved all rest on the step: on a
+      --  fake body whose arm eye saw boxes, the error over the moved frames
+      --  grew from 0.2 to 0.5 px during the sweep, the step with it, and the
+      --  levels the ladders had climbed no longer counted as motion (V4: no
+      --  joint had a keyframe of its own after 64 followed keyframes, and the
+      --  frames that moved the joints together were not even new).
+      procedure Gather (Moved : Boolean) is
+      begin
+         Count := 0;
+         for F of C.Frames loop
+            if F.Moved = Moved and then F.Field.Valid then
+               Count := Count + 1;
+               Sigmas (Count) := F.Field.Sigma;
+            end if;
+         end loop;
+      end Gather;
    begin
-      for F of C.Frames loop
-         if F.Moved and then F.Field.Valid then
-            Count := Count + 1;
-            Sigmas (Count) := F.Field.Sigma;
-         end if;
-      end loop;
+      Gather (Moved => False);
+      if Count = 0 then
+         Gather (Moved => True);
+      end if;
       return (if Count = 0 then 0.0 else Driver.Stats.Median (Sigmas (1 .. Count)));
    end Scatter;
 
