@@ -98,6 +98,37 @@ package Driver.Robot.Hand.Sweep is
    --  What the last placing of the channel's changed pixels made of them, for
    --  the log.
 
+   type Stop_Tip is record
+      Known  : Boolean := False;       --  the lobe was found at the stop, with a tip
+      Tip    : Driver.Images.Pixel;    --  where its tip is in the picture there
+      Centre : Driver.Images.Pixel;    --  the centre of its pixels there
+      Region : Driver.Images.Mask;     --  its pixels there
+   end record;
+
+   type Stop_Tips is array (Positive range <>) of Stop_Tip;
+   --  One per lobe of the channel, in the order of Lobes_Of.
+
+   function Stops (S : State; Channel : Positive) return Natural
+     with Pre => Status (S, Channel) = Measured;
+   --  The readings between the channel's ends it stood still at (Views.Stops),
+   --  each with what the placing made of the change between the anchored end
+   --  and the view there: the same placing as the ends', so that a lobe's tip
+   --  is known at every setting the eye saw it still at, not at its two ends
+   --  only. Zero until the ends' lobes are placed.
+
+   function Stop_Reading (S : State; Channel : Positive; K : Positive) return Real
+     with Pre => K <= Stops (S, Channel);
+   --  The channel's reading at the K-th stop, from the low end towards the high one.
+
+   function Stop_View (S : State; Channel : Positive; K : Positive) return Views.View
+     with Pre => K <= Stops (S, Channel);
+   --  The still view taken there.
+
+   function Tips_At_Stop (S : State; Channel : Positive; K : Positive) return Stop_Tips
+     with Pre => K <= Stops (S, Channel);
+   --  Each lobe at the stop: the lobe of the stop's placing whose pixels at the anchored end are most those of the
+   --  lobe of the ends' placing there; not Known when none of them is, or the one that is has no tip.
+
    function Closed_End_Is_High (S : State; Channel : Positive) return Boolean
      with Pre => Status (S, Channel) = Measured;
 
@@ -119,8 +150,20 @@ package Driver.Robot.Hand.Sweep is
 
 private
 
+   package Tip_Holders is new Ada.Containers.Indefinite_Holders (Stop_Tips);
+
+   type Stop_State is record
+      Reading : Real := 0.0;
+      From    : Driver.Clock.Beat := 0;   --  which of the views' stops it is: the beat its view began
+      Tips    : Tip_Holders.Holder;
+   end record;
+
+   package Stop_Vectors is new Ada.Containers.Vectors (Positive, Stop_State);
+
    type Channel_State is record
       Status      : Progress := Waiting;
+      Stops       : Stop_Vectors.Vector;      --  the stops' placings, by reading
+      Stops_Seen  : Natural := 0;             --  how many stops the views had when they were placed
       Low_From    : Driver.Clock.Beat := 0;   --  which views were analysed, to notice new ends
       High_From   : Driver.Clock.Beat := 0;
       Analysed    : Boolean := False;
