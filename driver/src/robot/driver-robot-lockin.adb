@@ -301,12 +301,28 @@ package body Driver.Robot.Lockin is
       Was_Verdict    : array (1 .. Groups * Eyes) of Eye_Response := [others => Unmeasured];
       Was_Noise      : array (1 .. Eyes) of Real := [others => Real'Last];
       Was_Shift      : Real_Access;
+      Step_Table     : Real_Access;
+      function Steps_Of (G : Group_Id) return Real_Array is
+        (Step_Table (Channel_Of (Natural (G)) + 1 .. Channel_Of (Natural (G)) + M.Groups (G).Size));
    begin
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          Channel_Of (Natural (G)) := Total_Channels;
          Total_Channels := Total_Channels + M.Groups (G).Size;
       end loop;
       Was_Shift := new Real_Array'(1 .. Eyes * Total_Channels => 0.0);
+      --  Every channel's visible step as the body has it when the measure begins, before any eye's gains, which
+      --  it rests on, are cleared and made again: the one test of motion is asked at every beat of every group
+      --  below, and the step summed every cell of every eye at each asking.
+      Step_Table := new Real_Array'(1 .. Total_Channels => Real'Last);
+      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+         declare
+            Steps : constant Real_Array := Channels.Steps_Of (M, G);
+         begin
+            for C in Steps'Range loop
+               Step_Table (Channel_Of (Natural (G)) + C) := Steps (C);
+            end loop;
+         end;
+      end loop;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          Was_Noise (Natural (E)) := Cell_Noise (M, E);
          for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -330,6 +346,7 @@ package body Driver.Robot.Lockin is
       if All_Columns = 0 or else M.Beats < 2 then
          Free (Starts);
          Free (Was_Shift);
+         Free (Step_Table);
          return;
       end if;
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -367,7 +384,7 @@ package body Driver.Robot.Lockin is
             begin
                for B in 0 .. Natural'Min (M.Beats, Natural (S.Settled_At.Length)) - 1 loop
                   if (for some G in M.Groups.First_Index .. M.Groups.Last_Index =>
-                        M.Groups (G).Commandable and then (Channels.Pushed (M, G, B) or else Channels.Moving (M, G, B)))
+                        M.Groups (G).Commandable and then (Channels.Pushed (M, G, B) or else Channels.Moving (M, G, B, Steps_Of (G))))
                   then
                      Last := B;
                      Waiting := True;
@@ -483,7 +500,7 @@ package body Driver.Robot.Lockin is
                            if Channels.Pushed (M, G, B) then
                               Pushed := B + 1;
                            end if;
-                           if Channels.Moving (M, G, B) then
+                           if Channels.Moving (M, G, B, Steps_Of (G)) then
                               Moved := B + 1;
                               if not Unseen (G, B) then
                                  Seen := B + 1;
@@ -517,7 +534,7 @@ package body Driver.Robot.Lockin is
                      elsif Channels.Pushed (M, G, R) then
                         Pushes := Pushes + 1;
                         Pusher := G;
-                     elsif Channels.Moving (M, G, R) then
+                     elsif Channels.Moving (M, G, R, Steps_Of (G)) then
                         Held_Moving := True;
                      end if;
                   end if;
@@ -865,6 +882,7 @@ package body Driver.Robot.Lockin is
       end loop;
       Free (Starts);
       Free (Was_Shift);
+      Free (Step_Table);
    end Measure;
 
    procedure Measure_Rest_Noise (M : in out Model) is

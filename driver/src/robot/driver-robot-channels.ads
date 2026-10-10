@@ -85,6 +85,18 @@ private package Driver.Robot.Channels is
    --  without a reading at Beat or Beat - 1, or before noise is measured.
    --  Push ends, the step tracker, stillness and keyframes all ask it.
 
+   function Visible (M : Model; G : Group_Id; D : Real_Array; Steps : Real_Array) return Boolean
+     with Pre => D'First = 1 and then D'Length = Group_Size (M, G) and then Steps'Length = D'Length;
+   function Moving (M : Model; G : Group_Id; Beat : Natural; Steps : Real_Array) return Boolean
+     with Pre => Steps'Length = Group_Size (M, G);
+   --  The same, with the channels' visible steps given (Steps_Of: a channel's Visible_Step, Real'Last where
+   --  none is known), for a caller that asks at every beat of every group: the step sums every cell of every
+   --  eye each time it is measured, and the lock-in's measure, which clears and makes the gains it rests on eye by
+   --  eye, takes every channel's once before it begins.
+
+   function Steps_Of (M : Model; G : Group_Id) return Real_Array;
+   --  Every channel's Visible_Step, Real'Last where none is known.
+
    function Asked (M : Model; G : Group_Id; Beat : Natural) return Boolean;
    --  A push starts at Beat: the target in effect changed and asks for
    --  motion, some channel's target differing significantly from the

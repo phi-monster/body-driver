@@ -472,20 +472,17 @@ package body Driver.Robot.Channels is
       end;
    end Measure;
 
-   function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean is
+   function Visible (M : Model; G : Group_Id; D : Real_Array; Steps : Real_Array) return Boolean is
       Seen : Real_Array := D;   --  the changes an eye could tell
    begin
       for C in Seen'Range loop
-         declare
-            V : constant Estimate := Visible_Step (M, G, C);
-         begin
-            --  A channel an eye watches changed by less than that eye can see
-            --  is no change: below that no eye can tell, however the held
-            --  reading jitters.
-            if Known (V) and then abs Seen (C) < V.Value then
-               Seen (C) := 0.0;
-            end if;
-         end;
+         --  A channel an eye watches changed by less than that eye can see
+         --  is no change: below that no eye can tell, however the held
+         --  reading jitters.
+         if Steps (Steps'First + C - Seen'First) < Real'Last and then abs Seen (C) < Steps (Steps'First + C - Seen'First)
+         then
+            Seen (C) := 0.0;
+         end if;
       end loop;
       --  What an eye could tell is motion when it is also significant against
       --  the noise: the change of two readings has twice the variance of one.
@@ -495,7 +492,25 @@ package body Driver.Robot.Channels is
       return Significant_Change (M, G, Seen, Sqrt (2.0));
    end Visible;
 
-   function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean is
+   function Steps_Of (M : Model; G : Group_Id) return Real_Array is
+      Steps : Real_Array (1 .. M.Groups (G).Size) := [others => Real'Last];
+   begin
+      for C in Steps'Range loop
+         declare
+            V : constant Estimate := Visible_Step (M, G, C);
+         begin
+            if Known (V) then
+               Steps (C) := V.Value;
+            end if;
+         end;
+      end loop;
+      return Steps;
+   end Steps_Of;
+
+   function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean is
+     (Visible (M, G, D, Steps_Of (M, G)));
+
+   function Moving (M : Model; G : Group_Id; Beat : Natural; Steps : Real_Array) return Boolean is
    begin
       if Beat = 0 or else not Has_Reading (M, G, Beat) or else not Has_Reading (M, G, Beat - 1) then
          return False;
@@ -506,8 +521,11 @@ package body Driver.Robot.Channels is
          for C in D'Range loop
             D (C) := Change (M, G, Beat, C);
          end loop;
-         return Visible (M, G, D);
+         return Visible (M, G, D, Steps);
       end;
    end Moving;
+
+   function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean is
+     (Moving (M, G, Beat, Steps_Of (M, G)));
 
 end Driver.Robot.Channels;

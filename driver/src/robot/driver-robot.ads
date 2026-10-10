@@ -428,8 +428,6 @@ private
                                                          --  down and up (End_Of); valid where the flags are
       Has_Stopped_Low, Has_Stopped_High : Flag_Vectors.Vector;   --  an end of that sense was found for the channel
       Stops       : Stop_Vectors.Vector;   --  the stops that have not been found again from another pose
-      Step_Values, Step_Sigmas : Real_Vectors.Vector;   --  per channel, the visible step as the lock-in's measure
-      Step_Known  : Flag_Vectors.Vector;                --  last left it (Store_Visible_Steps); empty before one
    end record;
 
    package Group_Stream_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Stream);
@@ -703,9 +701,5 @@ private
       From_File      : Stored_Flags := [others => False];   --  reloaded, so not measured again (Load_Body)
       Report         : Ada.Strings.Unbounded.Unbounded_String;   --  what the last estimate found, for Describe
    end record;
-
-   procedure Store_Visible_Steps (M : in out Model);
-   --  Every channel's Visible_Step as the lock-in's measure has it now, kept in its group's stream for every
-   --  call of Visible_Step until the next measure: after Lockin.Measure, and after a body file gave the responses.
 
 end Driver.Robot;
