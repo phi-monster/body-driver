@@ -64,9 +64,47 @@ package Driver.Robot.Hand is
    --  arm is not placed in the world.
 
    function Tip_Now (H : Hands; M : Model; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate;
-   --  A lobe's tip at the closer reading of O, on the straight path between
-   --  its two measured ends in the proportion its channel is closed; in the
+   --  A lobe's tip at the closer reading of O, between its two measured
+   --  openings along the settings its eye saw it at (Tip_Between); in the
    --  world as Tip is.
+
+   --  The closer's reading is continuous, and a lobe is not two looks: what
+   --  its eye saw of it is kept at every setting of the closer it stood still
+   --  at during the sweep, its two openings and the stops between them. A
+   --  press measures the tip at the openings; at a stop the eye's line of
+   --  sight to the tip is measured, and the tip along it is interpolated
+   --  from the openings, the interpolation's error carried with it.
+   type Setting_Sight is record
+      Reading : Real := 0.0;        --  the lobe's channel's reading at the setting
+      Known   : Boolean := False;   --  the eye saw the lobe's tip there
+      Ray     : Ray_Estimate;       --  the line of sight to it, tool frame
+   end record;
+
+   type Setting_Sights is array (Positive range <>) of Setting_Sight;
+
+   function Settings (H : Hands; Id : Hand_Id; Lobe : Positive) return Positive;
+   --  How many settings of its closer the lobe was seen still at by its own
+   --  eye: its two openings and the stops of the sweep between them; at least 2.
+
+   function Setting_Sight_At (H : Hands; Id : Hand_Id; Lobe : Positive; S : Positive) return Setting_Sight
+     with Pre => S <= Settings (H, Id, Lobe);
+   --  The S-th, from the open opening (1) to the closed one (the last).
+
+   function Tip_Between
+     (Opened, Shut : Point_Estimate; Open_At, Closed_At, Reading : Real; Seen : Setting_Sights) return Point_Estimate;
+   --  A lobe's tip at a reading of its channel, from the tips the presses
+   --  measured at its two openings (at the readings Open_At and Closed_At,
+   --  significantly apart) and the lines of sight its eye saw it on at the
+   --  settings between them (Seen, in any order; those not Known or not
+   --  between the openings are left out). At a seen setting the tip is the
+   --  point of its line of sight nearest the straight path between the
+   --  openings' tips, and how far that path lies from the line is carried as
+   --  the tip's error in every direction: nothing of the way between two
+   --  settings is assumed, so what the straight path got wrong across the
+   --  line it may have got as wrong along it. Between two settings (the
+   --  openings among them) the tip is interpolated in the reading, its
+   --  covariance with it; beyond an opening, the straight path goes on.
+   --  Unknown when an opening's tip is.
 
    type Tip_Kind is (Loaded, Free);
    --  Which finger a tip is of. A pressed finger slides along its own axis

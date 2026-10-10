@@ -56,9 +56,19 @@ package body Driver.Robot.Hand is
       Reach : Real := 0.0;
    end record;
 
+   --  What the eye saw of a lobe at a stop of the sweep between its openings: its tip's line of sight and its look.
+   type Stop_Sight is record
+      Reading : Real := 0.0;
+      Sight   : Hand.Sight;
+      Patch   : Driver.Robot.Hand.Slide.Patch;
+   end record;
+
+   package Stop_Vectors is new Ada.Containers.Vectors (Positive, Stop_Sight);
+
    type Lobe_Record is record
       Channel : Positive;
       Sights  : Sight_Array;
+      Stops   : Stop_Vectors.Vector;   --  between the openings, by the channel's reading, ascending
       Patches : Patch_Array;   --  what its tip looked like at each opening, in the views of the sweep
       Way     : Closing_Way;
       Shape   : Driver.Robot.Hand.Shape.Lobe_Shape;   --  its surface as its own eye saw it, up to scale
@@ -591,8 +601,10 @@ package body Driver.Robot.Hand is
                Low  : constant Driver.Robot.Hand.Views.View := Sweeps.Low_End (P.Sweep, C);
                High : constant Driver.Robot.Hand.Views.View := Sweeps.High_End (P.Sweep, C);
                Closed_High : constant Boolean := Sweeps.Closed_End_Is_High (P.Sweep, C);
+               Lobe_No : Natural := 0;
             begin
                for L of Sweeps.Lobes_Of (P.Sweep, C) loop
+                  Lobe_No := Lobe_No + 1;
                   declare
                      At_Low  : constant Sight := Seen_Tip (Low, L.Tip_Known_Here, L.Tip_Here, L.Here, L.Centre_Here);
                      At_High : constant Sight := Seen_Tip (High, L.Tip_Known_There, L.Tip_There, L.There, L.Centre_There);
@@ -601,11 +613,33 @@ package body Driver.Robot.Hand is
                         then Closing_Way_Of (From => (if Closed_High then L.Tip_Here else L.Tip_There),
                                              To   => (if Closed_High then L.Tip_There else L.Tip_Here))
                         else (others => <>));
+                     Stops   : Stop_Vectors.Vector;
                   begin
+                     --  The stops of the sweep between the ends: the lobe's tip as the eye saw it at each.
+                     for K in 1 .. Sweeps.Stops (P.Sweep, C) loop
+                        declare
+                           V    : constant Driver.Robot.Hand.Views.View := Sweeps.Stop_View (P.Sweep, C, K);
+                           Tips : constant Sweeps.Stop_Tips := Sweeps.Tips_At_Stop (P.Sweep, C, K);
+                        begin
+                           if Lobe_No <= Tips'Last then
+                              declare
+                                 T : Sweeps.Stop_Tip renames Tips (Lobe_No);
+                              begin
+                                 Stops.Append
+                                   (Stop_Sight'(Reading => Sweeps.Stop_Reading (P.Sweep, C, K),
+                                                Sight   => Seen_Tip (V, T.Known, T.Tip, T.Region, T.Centre),
+                                                Patch   => (if Way.Known and then T.Known
+                                                            then Patch_At (V, T.Region, T.Centre, T.Tip, Way)
+                                                            else Driver.Robot.Hand.Slide.Empty)));
+                              end;
+                           end if;
+                        end;
+                     end loop;
                      Made.Lobes.Append
                        (Lobe_Record'(Channel => C,
                                      Sights  => [Open         => (if Closed_High then At_Low else At_High),
                                                  Closed_Empty => (if Closed_High then At_High else At_Low)],
+                                     Stops   => Stops,
                                      Patches =>
                                        [Open         => (if Way.Known
                                                          then Patch_At ((if Closed_High then Low else High),
@@ -678,6 +712,7 @@ package body Driver.Robot.Hand is
          Made.Lobes.Append
            (Lobe_Record'(Channel => 1,
                          Sights  => Row,
+                         Stops   => <>,
                          Patches => [others => Driver.Robot.Hand.Slide.Empty],
                          Way     => <>,
                          Shape   => Driver.Robot.Hand.Shape.Unfitted ("the hand was given, not swept"),
@@ -1630,9 +1665,103 @@ package body Driver.Robot.Hand is
      return Point_Estimate is
      (In_World (H, M, Id, O, Tip_In_Tool (H, Id, Lobe, At_Opening)));
 
+   function Opening_Reading (R : Hand_Record; Lobe : Positive; Which : Opening) return Real is
+     (R.Readings (Which).Element (R.Readings (Which).Element'First + R.Lobes (Lobe).Channel - 1));
+   --  The lobe's channel's reading at the opening.
+
+   function Settings (H : Hands; Id : Hand_Id; Lobe : Positive) return Positive is
+     (2 + Natural (Found (H, Id).Lobes (Lobe).Stops.Length));
+
+   function Setting_Sight_At (H : Hands; Id : Hand_Id; Lobe : Positive; S : Positive) return Setting_Sight is
+      R    : constant Hand_Record := Found (H, Id);
+      L    : Lobe_Record renames R.Lobes (Lobe);
+      Last : constant Positive := 2 + Natural (L.Stops.Length);
+   begin
+      if S = 1 or else S = Last then
+         declare
+            Which : constant Opening := (if S = 1 then Open else Closed_Empty);
+         begin
+            return (Reading => Opening_Reading (R, Lobe, Which), Known => L.Sights (Which).Known, Ray => L.Sights (Which).Ray);
+         end;
+      end if;
+      declare
+         --  The stops are kept by the reading, ascending; the settings run from the open opening to the closed one.
+         Ascending : constant Boolean := Opening_Reading (R, Lobe, Closed_Empty) > Opening_Reading (R, Lobe, Open);
+         K         : constant Positive := (if Ascending then S - 1 else Last - S);
+         Stop      : Stop_Sight renames L.Stops (K);
+      begin
+         return (Reading => Stop.Reading, Known => Stop.Sight.Known, Ray => Stop.Sight.Ray);
+      end;
+   end Setting_Sight_At;
+
+   function Tip_Between
+     (Opened, Shut : Point_Estimate; Open_At, Closed_At, Reading : Real; Seen : Setting_Sights) return Point_Estimate
+   is
+      Unknown_Tip : Point_Estimate;
+      Span : constant Real := Closed_At - Open_At;
+      function Fraction_Of (R : Real) return Real is ((R - Open_At) / Span);
+      --  The straight path between the openings' tips, at a share of the way.
+      function Straight (G : Real) return Point_Estimate is
+        (Mean       => Opened.Mean + G * (Shut.Mean - Opened.Mean),
+         Covariance => ((1.0 - G) ** 2) * Opened.Covariance + (G ** 2) * Shut.Covariance);
+      --  The tip at a seen setting: the point of its line of sight nearest the straight path's, the pull as error.
+      function Pulled (S : Setting_Sight) return Point_Estimate;
+      function Pulled (S : Setting_Sight) return Point_Estimate is
+         X     : constant Point_Estimate := Straight (Fraction_Of (S.Reading));
+         E     : constant Vec3 := S.Ray.Origin.Mean;
+         D     : constant Vec3 := S.Ray.Direction.Unit_Vector;
+         On    : constant Vec3 := E + Real'((X.Mean - E) * D) * D;
+         Pull  : constant Vec3 := X.Mean - On;
+      begin
+         return (Mean => On, Covariance => X.Covariance + Real'(Pull * Pull) * Identity3);
+      end Pulled;
+      F : Real;
+      --  The settings on either side of the reading, the openings among them, as shares of the way and tips.
+      Lower_F : Real := 0.0;
+      Upper_F : Real := 1.0;
+      Lower, Upper : Point_Estimate;
+   begin
+      if not Known (Opened) or else not Known (Shut) or else Span = 0.0 then
+         return Unknown_Tip;
+      end if;
+      F := Fraction_Of (Reading);
+      if F <= 0.0 or else F >= 1.0 then
+         return Straight (F);
+      end if;
+      Lower := Opened;
+      Upper := Shut;
+      for S of Seen loop
+         if S.Known and then S.Ray.Direction.Sigma < Real'Last then
+            declare
+               G : constant Real := Fraction_Of (S.Reading);
+            begin
+               if G > 0.0 and then G < 1.0 then
+                  if G <= F and then G >= Lower_F then
+                     Lower_F := G;
+                     Lower := Pulled (S);
+                  end if;
+                  if G >= F and then G <= Upper_F then
+                     Upper_F := G;
+                     Upper := Pulled (S);
+                  end if;
+               end if;
+            end;
+         end if;
+      end loop;
+      if Upper_F = Lower_F then
+         return Lower;
+      end if;
+      declare
+         T : constant Real := (F - Lower_F) / (Upper_F - Lower_F);
+      begin
+         return (Mean       => Lower.Mean + T * (Upper.Mean - Lower.Mean),
+                 Covariance => ((1.0 - T) ** 2) * Lower.Covariance + (T ** 2) * Upper.Covariance);
+      end;
+   end Tip_Between;
+
    function Tip_Now_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate;
-   --  The tip at the closer reading of O, on the straight path between the
-   --  two measured ends in the proportion the lobe's channel is closed.
+   --  The tip at the closer reading of O, between the two measured openings
+   --  along the settings the eye saw the lobe at (Tip_Between).
 
    function Tip_Now_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate is
       R       : constant Hand_Record := Found (H, Id);
@@ -1645,16 +1774,16 @@ package body Driver.Robot.Hand is
          return Unknown_Tip;
       end if;
       declare
-         Now     : constant Real_Array := O.Readings.Element (R.Group);
-         From    : constant Real_Array := R.Readings (Open).Element;
-         To      : constant Real_Array := R.Readings (Closed_Empty).Element;
-         Reading : constant Real := Now (Now'First + C - 1);
-         Start   : constant Real := From (From'First + C - 1);
-         --  The ends were measured at significantly different readings.
-         F       : constant Real := (Reading - Start) / (To (To'First + C - 1) - Start);
+         Now  : constant Real_Array := O.Readings.Element (R.Group);
+         Seen : Setting_Sights (1 .. Natural (R.Lobes (Lobe).Stops.Length));
       begin
-         return (Mean       => Opened.Mean + F * (Shut.Mean - Opened.Mean),
-                 Covariance => ((1.0 - F) ** 2) * Opened.Covariance + (F ** 2) * Shut.Covariance);
+         for K in Seen'Range loop
+            Seen (K) := (Reading => R.Lobes (Lobe).Stops (K).Reading,
+                         Known   => R.Lobes (Lobe).Stops (K).Sight.Known,
+                         Ray     => R.Lobes (Lobe).Stops (K).Sight.Ray);
+         end loop;
+         return Tip_Between (Opened, Shut, Opening_Reading (R, Lobe, Open), Opening_Reading (R, Lobe, Closed_Empty),
+                             Now (Now'First + C - 1), Seen);
       end;
    end Tip_Now_In_Tool;
 

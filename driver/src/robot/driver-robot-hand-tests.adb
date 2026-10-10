@@ -23,6 +23,8 @@ with Driver.Tests;
 
 package body Driver.Robot.Hand.Tests is
 
+   use Driver.Numerics.Arrays;
+
    use Driver.Tests;
 
    procedure Unmeasured_Body is
@@ -721,12 +723,52 @@ package body Driver.Robot.Hand.Tests is
       Check (not In_Free_Air (Above (1000.0, Real'Last)), "a tip whose deviation is not known is in free air");
    end Free_Air_Is_Above_The_Contact_By_More_Than_Z;
 
+   procedure Tip_Along_The_Settings is
+      --  A finger that curls: its tip goes from open to closed on a quarter circle of 3 cm about (0.03, 0, 0.03) in
+      --  the tool frame; the presses measured its tips at the openings (open at reading 1, closed at 0), and the
+      --  eye saw it at the setting half way, along a line of sight through where the tip truly was.
+      Opened   : constant Point_Estimate := (Mean => [0.03, 0.0, 0.06], Covariance => 1.0e-6 * Identity3);
+      Shut     : constant Point_Estimate := (Mean => [0.0, 0.0, 0.03], Covariance => 1.0e-6 * Identity3);
+      Mid_True : constant Vec3 :=
+        [0.03 - 0.03 * Ada.Numerics.Long_Elementary_Functions.Cos (Ada.Numerics.Pi / 4.0), 0.0,
+         0.03 + 0.03 * Ada.Numerics.Long_Elementary_Functions.Sin (Ada.Numerics.Pi / 4.0)];
+      Straight_Mid : constant Vec3 := [0.015, 0.0, 0.045];
+      Eye      : constant Vec3 := [0.0, -0.05, 0.10];
+      Line     : constant Ray_Estimate :=
+        (Origin    => (Mean => Eye, Covariance => [others => [others => 0.0]]),
+         Direction => (Unit_Vector => Unit (Mid_True - Eye), Sigma => 0.0));
+      Seen     : constant Setting_Sights := [1 => (Reading => 0.5, Known => True, Ray => Line)];
+      None     : constant Setting_Sights (1 .. 0) := [];
+      T0 : constant Point_Estimate := Tip_Between (Opened, Shut, 1.0, 0.0, 0.5, None);
+      T1 : constant Point_Estimate := Tip_Between (Opened, Shut, 1.0, 0.0, 0.5, Seen);
+      T2 : constant Point_Estimate := Tip_Between (Opened, Shut, 1.0, 0.0, 0.75, Seen);
+      T3 : constant Point_Estimate := Tip_Between (Opened, Shut, 1.0, 0.0, 1.0, Seen);
+      T4 : constant Point_Estimate := Tip_Between (Opened, Shut, 1.0, 0.0, 1.2, Seen);
+      Pull : constant Real := abs (Straight_Mid - T1.Mean);
+   begin
+      Check (abs (T0.Mean - Straight_Mid) < 1.0e-12, "without a seen setting the tip is not on the straight path");
+      Check (abs (Cross (T1.Mean - Eye, Line.Direction.Unit_Vector)) < 1.0e-9,
+             "at a seen setting the tip is not on the line of sight");
+      Check (abs (T1.Mean - Mid_True) < abs (Straight_Mid - Mid_True),
+             "the line of sight did not bring the tip nearer the truth than the straight path:"
+             & Real'Image (abs (T1.Mean - Mid_True)) & " against" & Real'Image (abs (Straight_Mid - Mid_True)));
+      Check (Pull > 0.001 and then T1.Covariance (1, 1) >= Pull ** 2 and then T1.Covariance (3, 3) >= Pull ** 2,
+             "the pull onto the line of sight," & Real'Image (Pull) & ", is not carried as the tip's error");
+      Check (abs (T2.Mean - 0.5 * (Opened.Mean + T1.Mean)) < 1.0e-12,
+             "between the open opening and the seen setting the tip is not interpolated between their tips");
+      Check (abs (T3.Mean - Opened.Mean) < 1.0e-12, "at the open opening the tip is not the open tip");
+      Check (abs (T4.Mean - (Opened.Mean - 0.2 * (Shut.Mean - Opened.Mean))) < 1.0e-12,
+             "beyond the open opening the straight path does not go on");
+   end Tip_Along_The_Settings;
+
    procedure Register is
    begin
       Driver.Tests.Register ("hand.measure.air", "a push stopped on the table, or where nothing predicts the table, is said "
                              & "to be the body's, or one stopped in the air is not", Free_Air_Is_Above_The_Contact_By_More_Than_Z'Access);
       Driver.Tests.Register ("hand.measure.gone", "a hand dropped by the estimators between two beats of a press "
                              & "makes the decider raise", Dropped_Hand'Access);
+      Driver.Tests.Register ("hand.settings", "a tip between the openings is the straight path, not the line of sight the eye "
+                             & "saw it on at the settings between", Tip_Along_The_Settings'Access);
       Driver.Tests.Register ("hand.unmeasured", "an unmeasured body makes the hand fail or invent a hand",
                              Unmeasured_Body'Access);
       Driver.Tests.Register ("hand.measure.account", "a closer no hand is made of ends the measurement without a "
