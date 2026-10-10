@@ -12,6 +12,9 @@ package body Fake_World is
    --  How far a hand may go into what it pressed, as a share of the push
    --  that was blocked (the lab's robot: a fraction of a millimetre).
    Give_Share : constant := 0.02;
+   Give_Depth : constant := 0.003;   --  and no deeper than this below the table: V1B21's finger sank 6.6 mm pushed and
+                                     --  rested 2.5 mm in; a give that went on forever walked a blocked closer half its
+                                     --  range in 400 beats (S4)
 
    --  Reading units of an open closer pressed shut, per metre of descent the
    --  surface blocked.
@@ -700,7 +703,7 @@ package body Fake_World is
                end if;
             end;
          end loop;
-         Place (Lo + (if W.Quirk.Give then Give_Share * (1.0 - Lo) else 0.0));
+         Place (Lo + (if W.Quirk.Give and then Lowest (W, A) > W.Table_Z - Give_Depth then Give_Share * (1.0 - Lo) else 0.0));
          --  An open closer pressed on the surface is pressed shut by the descent the surface blocked.
          if W.Quirk.Soft_Closer and then Closer > 0 then
             declare
