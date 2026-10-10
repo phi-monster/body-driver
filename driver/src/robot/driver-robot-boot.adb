@@ -8,6 +8,7 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Log;
 with Driver.Robot.Body_File;
+with Driver.Robot.Kinematics;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Regression;
@@ -260,8 +261,15 @@ package body Driver.Robot.Boot is
             G := Arm_Group (M, A);
             Size := Group_Size (M, G);
          end Read_Size;
+         --  The reference of the arm's kinematics is the pose it is swept from (Kinematics.Begin_Anew): the
+         --  recognition rounds left it where they found it.
+         procedure Begin_Anew is
+         begin
+            Driver.Robot.Kinematics.Begin_Anew (M, A);
+         end Begin_Anew;
       begin
          Driver.Beats.Within_A_Beat (Read_Size'Access);
+         Driver.Beats.Within_A_Beat (Begin_Anew'Access);
          Driver.Robot.Motion.Hold_For_Twin (M, A);
          declare
             First, Per_Unit : Real_Array (1 .. Size) := [others => 0.0];

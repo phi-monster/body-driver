@@ -463,6 +463,20 @@ package body Driver.Robot.Kinematics is
       end;
    end Twin_Answered;
 
+   procedure Begin_Anew (M : in out Model; A : Arm_Id) is
+      K : constant Natural := Index_Of (M, A);
+   begin
+      if K > 0 then
+         declare
+            R : Arm_Evidence renames M.Kinematics (K);
+         begin
+            Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & A'Image & " begins anew at beat" & M.Beats'Image
+                             & ", dropping" & R.Frames.Length'Image & " keyframes");
+            M.Kinematics.Replace_Element (K, (Arm => R.Arm, Group => R.Group, Eye => R.Eye, others => <>));
+         end;
+      end if;
+   end Begin_Anew;
+
    function Matched (M : Model; A : Arm_Id) return Natural is
      (if Index_Of (M, A) > 0 then Natural (M.Kinematics (Index_Of (M, A)).Matches.Length) else 0);
 
@@ -813,7 +827,8 @@ package body Driver.Robot.Kinematics is
                end loop;
                Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe" & F'Image & " at beat"
                                 & R.Frames (F).Beat'Image & ", change" & Ada.Strings.Unbounded.To_String (Text)
-                                & ", predicted " & Ada.Characters.Handling.To_Lower (From'Image) & ":" & Here'Image
+                                & ", predicted " & Ada.Characters.Handling.To_Lower (From'Image) & " stating "
+                                & Driver.Log.Image (Stated_By (Given.all), 1) & " px:" & Here'Image
                                 & " of" & Queries'Image & " points found");
             end;
             R.Matches.Append (Set);

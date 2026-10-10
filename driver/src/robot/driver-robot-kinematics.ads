@@ -66,6 +66,19 @@ private package Driver.Robot.Kinematics is
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean;
    --  The arm's still twin of its reference was taken.
 
+   procedure Begin_Anew (M : in out Model; A : Arm_Id);
+   --  Drops what the arm's kinematics gathered so far: the next still frame
+   --  of its eye is its reference, the one after its twin. The boot calls it
+   --  in a held beat where the arm's sweep begins, so that the reference is
+   --  the pose the arm is swept from: the fit tells which joints a keyframe
+   --  moved by its change from the reference, and the recognition rounds
+   --  leave an arm where they found it, not where its first frame was taken
+   --  (fake body T6, arm 1: 173 units of channel 2 off, one and a half
+   --  steps, so every keyframe of its sweep moved two joints and no joint
+   --  but that one had a keyframe of its own; A10's arm 2 lay a twentieth
+   --  of a step off and fitted). An arm that carries no eye has nothing to
+   --  drop.
+
    function Pending (M : Model) return Natural;
    --  Match requests of every arm not answered yet.
 
