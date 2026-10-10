@@ -216,11 +216,13 @@ package body Driver.Robot is
          Lockin.Measure (M);
       end if;
       Took ("lock-in");
-      Store_Visible_Steps (M);
       if not M.From_File (Stored_Graph) then
          Graph.Derive (M);
       end if;
       Took ("graph");
+      --  The steps the one test of motion reads from now on: after the graph, whose derivation may change what an
+      --  eye is taken to show of a group (Response), which the step rests on.
+      Store_Visible_Steps (M);
       if not M.From_File (Stored_Kinematics) then
          Kinematics.Align_New (M);
          Kinematics.Refit (M);
