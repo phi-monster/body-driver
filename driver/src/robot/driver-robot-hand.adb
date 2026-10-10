@@ -15,6 +15,7 @@ with Driver.Robot.Hand.Sweep;
 with Driver.Robot.Hand.Tips;
 with Driver.Robot.Hand.Views;
 with Driver.Robot.Kinematics;
+with Driver.Robot.Lockin;
 with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
 
@@ -125,6 +126,30 @@ package body Driver.Robot.Hand is
       end;
    end Rest_Of;
 
+   function Closer_Sigma (M : Model; G : Group_Id) return Real_Array is
+      --  The standard deviation of each of the closer's readings as the body's one test of motion sees them
+      --  (Channels.Visible): a change below the step an eye can see (Visible_Step) is none, so the sigma of a
+      --  reading whose change of two of them is significant from that step on, or the reading's own noise where
+      --  that is larger or no eye has told a step. Its settings, its views' readings and its openings are told
+      --  apart by it. In a simulator a reading repeats to its last digit and its noise is none, and any digit told
+      --  them apart (A74: arm 2's raises jostled its closer by what no eye sees, its poses went to a setting of
+      --  their own, the setting of its ends never had them, and no hand was made of it).
+      N      : constant Natural := Group_Size (M, G);
+      Result : Real_Array (1 .. N);
+   begin
+      for C in 1 .. N loop
+         declare
+            Step : constant Estimate := Visible_Step (M, G, C);
+         begin
+            Result (C) := Reading_Noise (M, G, C);
+            if Known (Step) then
+               Result (C) := Real'Max (Result (C), Step.Value / (Driver.Conventions.Z * Sqrt (2.0)));
+            end if;
+         end;
+      end loop;
+      return Result;
+   end Closer_Sigma;
+
    function Rest_Moved (M : Model; G : Group_Id; Before, After : Real_Array) return Boolean is
       --  Every other group's readings, as Rest_Of lays them out, through the
       --  body's own one test of motion: a channel an eye watches moves only
@@ -157,6 +182,40 @@ package body Driver.Robot.Hand is
       end loop;
       return K /= Before'Length;
    end Rest_Moved;
+
+   function Eye_Moved (M : Model; G : Group_Id; E : Eye_Id; Before, After : Real_Array) return Boolean is
+      --  Every other group's readings, as Rest_Of lays them out: a group that moves the whole of the eye's picture
+      --  (it carries the eye) moved by a step the eye's cells tell (Lockin.Shows_Step). Laid out otherwise,
+      --  something came or went: that is a change.
+      K : Natural := 0;
+   begin
+      if Before'Length /= After'Length then
+         return True;
+      end if;
+      for Other in 1 .. Group_Id'Base (Group_Count (M)) loop
+         if Other /= G then
+            declare
+               N : constant Natural := Group_Size (M, Other);
+            begin
+               if K + N > Before'Length then
+                  return True;
+               end if;
+               if Response (M, Other, E) = Whole then
+                  declare
+                     D : constant Real_Array (1 .. N) :=
+                       [for C in 1 .. N => After (After'First + K + C - 1) - Before (Before'First + K + C - 1)];
+                  begin
+                     if Driver.Robot.Lockin.Shows_Step (M, E, Other, D) then
+                        return True;
+                     end if;
+                  end;
+               end if;
+               K := K + N;
+            end;
+         end if;
+      end loop;
+      return K /= Before'Length;
+   end Eye_Moved;
 
    function All_Read (O : Observation) return Boolean is
      (for all G in O.Readings.First_Index .. O.Readings.Last_Index => Driver.Observations.Has_Reading (O, G));
@@ -217,11 +276,8 @@ package body Driver.Robot.Hand is
                   if Own and then Driver.Observations.Has_Image (O, E) and then not Has_Pair (D, G, E) then
                      declare
                         Channels : constant Positive := O.Readings.Element (G)'Length;
-                        Noise    : Real_Array (1 .. Channels);
+                        Noise    : constant Real_Array (1 .. Channels) := Closer_Sigma (M, G);
                      begin
-                        for C in Noise'Range loop
-                           Noise (C) := Reading_Noise (M, G, C);
-                        end loop;
                         D.Pairs.Append
                           (Pair'(Group => G,
                             Eye   => E,
@@ -243,7 +299,9 @@ package body Driver.Robot.Hand is
    procedure Feed (P : in out Pair; M : Model; O : Observation) is
       Complete : constant Boolean := All_Read (O) and then Driver.Observations.Has_Image (O, P.Eye);
       function Moved (Before, After : Real_Array) return Boolean is (Rest_Moved (M, P.Group, Before, After));
+      function Carried (Before, After : Real_Array) return Boolean is (Eye_Moved (M, P.Group, P.Eye, Before, After));
    begin
+      Sweeps.Set_Closer_Noise (P.Sweep, Closer_Sigma (M, P.Group));
       --  A view of the pair's eye needs that eye's picture to have stopped
       --  changing (the one stop rule, Driver.Robot.Stillness): its validity
       --  is its eye's, not the far arm's. Whether the rest of the body moved
@@ -253,7 +311,7 @@ package body Driver.Robot.Hand is
       --  every beat started the view again, and none ever had two frames.
       Sweeps.Observe (P.Sweep, O, Still => Driver.Robot.Stillness.Eye_Settled (M, P.Eye) and then Complete,
                       Closer => O.Readings (P.Group), Rest => Rest_Of (O, P.Group), Image => O.Images (P.Eye),
-                      Rest_Moved => Moved'Access);
+                      Rest_Moved => Moved'Access, Eye_Moved => Carried'Access);
    end Feed;
 
    function Sizes_Text (R : Hand_Record) return String;
@@ -571,17 +629,18 @@ package body Driver.Robot.Hand is
    --  opening within their noise and not those of the other.
 
    function Opening_Of (R : Hand_Record; M : Model; Readings : Real_Array; Which : out Opening) return Boolean is
+      Sigma : constant Real_Array := Closer_Sigma (M, R.Group);
       function At_It (O : Opening) return Boolean is
          Measured : constant Real_Array := R.Readings (O).Element;
       begin
          if Measured'Length /= Readings'Length then
             return False;
          end if;
-         --  Each reading and the one measured at the opening carry the
-         --  channel's noise, so their difference carries it twice over.
+         --  Each reading and the one measured at the opening carry the channel's sigma as the body's one test of
+         --  motion sees it (Closer_Sigma), so their difference carries it twice over.
          return (for all C in 1 .. Readings'Length =>
                    not Significant (Readings (Readings'First + C - 1) - Measured (Measured'First + C - 1),
-                                    Sqrt (2.0) * Reading_Noise (M, R.Group, C)));
+                                    Sqrt (2.0) * Sigma (C)));
       end At_It;
    begin
       Which := Open;

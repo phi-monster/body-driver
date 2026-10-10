@@ -1,4 +1,5 @@
---  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT] [--watch EYE] [--dump DIR EYE EVERY]
+--  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT] [--watch EYE]
+--         [--readings GROUP] [--dump DIR EYE EVERY] [--dump-only]
 --
 --  Feeds a recording (Driver.Recording format, uncompressed; it is read once,
 --  forward, so "zstd -dc run.rec.zst | replay /dev/stdin ..." needs no copy on
@@ -33,7 +34,9 @@
 --  estimates computed apart), in seconds and milliseconds a beat, and how many
 --  beats it replayed. With --watch EYE, every beat also gives a line on that
 --  eye (Driver.Robot.Eye_Watch): how much its picture changed, whether it is
---  still and settled, and how far its cells moved.
+--  still and settled, and how far its cells moved; with --readings GROUP, one
+--  on that group (Driver.Robot.Group_Watch): its readings, their change in
+--  units of their noise, whether it moved and was pushed, and its target.
 --  With --dump DIR EYE EVERY, the eye's picture at every EVERY-th beat is written
 --  to DIR/eyeEYE_BEAT.ppm (a study's way of seeing what the estimators saw).
 --
@@ -267,8 +270,10 @@ procedure Replay is
    type Part is (Parsing, Robot_Layer, Hand_Layer, World_Layer, Estimates_Apart);
    Spent : array (Part) of Duration := [others => 0.0];
 
-   --  With --watch, the eye followed beat by beat (Driver.Robot.Eye_Watch).
+   --  With --watch, the eye followed beat by beat (Driver.Robot.Eye_Watch); with --readings, the group
+   --  (Driver.Robot.Group_Watch).
    Watched : Natural := 0;
+   Followed : Natural := 0;
 
    --  With --dump, the eye's picture every so many beats, written as a PPM.
    Dump_Dir   : Unbounded_String;
@@ -311,6 +316,10 @@ procedure Replay is
          Spent (Robot_Layer) := Spent (Robot_Layer) + (Driver.Clock.Seconds - Start);
          if Watched > 0 then
             Line (Core, "eye" & Watched'Image & ": " & Driver.Robot.Eye_Watch (Robot, Driver.Robot.Eye_Id (Watched)));
+         end if;
+         if Followed > 0 then
+            Line (Core, "group" & Followed'Image & ": "
+                  & Driver.Robot.Group_Watch (Robot, Driver.Observations.Group_Id (Followed)));
          end if;
          if Dump_Every > 0 and then Natural (M.O.Beat) mod Dump_Every = 0 and then Driver.Observations.Has_Image (M.O, Driver.Observations.Camera_Id (Dump_Eye)) then
             Write_Ppm (To_String (Dump_Dir) & "/eye" & Ada.Strings.Fixed.Trim (Natural'Image (Dump_Eye), Ada.Strings.Left)
@@ -541,7 +550,7 @@ procedure Replay is
 begin
    if Argument_Count < 1 then
       Line (Core, "usage: replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT]"
-            & " [--watch EYE]");
+            & " [--watch EYE] [--readings GROUP]");
       Set_Exit_Status (Failure);
       return;
    end if;
@@ -563,6 +572,8 @@ begin
          Dump_Dir := To_Unbounded_String (Argument (I + 1));
          Dump_Eye := Natural'Value (Argument (I + 2));
          Dump_Every := Natural'Value (Argument (I + 3));
+      elsif Argument (I) = "--readings" then
+         Followed := Natural'Value (Argument (I + 1));
       end if;
    end loop;
 

@@ -49,6 +49,27 @@ package Driver.Beats is
    --  the only window in which a decider may read and change the models.
    --  Code that must run only there, or never there, asks this.
 
+   generic
+      with procedure Work (Lane : Positive);
+   procedure At_Once (Lanes : Positive);
+   --  Decider side, outside a held beat: runs Work (1) .. Work (Lanes) at once,
+   --  each a decider of its own (a lane) on a task of its own, and returns
+   --  when every one has ended. Every beat goes to the lanes waiting in Next,
+   --  one after another: a lane's window (from its Next to its Send) is never
+   --  open while another's is, so the models are read and changed by one lane
+   --  at a time as by one decider, and what each lane sends is merged into
+   --  the one reply of the beat (Driver.Commands.Merge). Each lane moves its
+   --  own groups: two lanes targeting one group in a beat is an error that
+   --  ends the second. A lane busy elsewhere misses the beat, and its groups
+   --  hold. Next, Send, Held, Release, Within_A_Beat and Wait_For_Estimates
+   --  act for the lane of the task that calls them. An exception a lane
+   --  raised is raised again by At_Once once every lane has ended; a lane
+   --  that ends while it holds a beat answers it with a hold.
+
+   function Lane return Natural;
+   --  The lane of the calling task: 0 for the decider itself, 1 and up for
+   --  the lanes of At_Once.
+
    procedure Within_A_Beat (During : not null access procedure);
    --  Decider side: takes the next beat, runs During in its window (the
    --  models hold still until it returns) and answers the beat with a hold,

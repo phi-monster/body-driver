@@ -80,8 +80,11 @@ package Driver.Robot.Hand.Pressing is
    --  to 0.2).
 
    function Lowered
-     (M : Model; Arm : Arm_Id; O : Observation; Into : Vec3; By : Real) return Driver.Robot.Motion.Plan;
-   --  A plan to the tool as at O moved By along Into.
+     (M : Model; Arm : Arm_Id; O : Observation; Into : Vec3; By : Real; Turn_Free : Boolean := False)
+      return Driver.Robot.Motion.Plan;
+   --  A plan to the tool as at O moved By along Into: turned as it is, or,
+   --  Turn_Free, turned as the arm reaches the place (a move made for the
+   --  new poses it gives, where the turn does not matter).
 
    function Gap
      (M       : Model;

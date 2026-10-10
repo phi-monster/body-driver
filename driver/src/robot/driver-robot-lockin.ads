@@ -105,4 +105,14 @@ private package Driver.Robot.Lockin is
    --  the median over the cells that respond to its group; zero when none
    --  does or it was not measured.
 
+   function Shows_Step (M : Model; E : Eye_Id; G : Group_Id; Step : Real_Array) return Boolean;
+   --  A step of the group's readings moves the eye's image by what its cells
+   --  tell from their noise: some channel's step times the pixels the image
+   --  moves per unit of it (Shift) is significant against one cell's noise
+   --  (Cell_Noise). What the step does to the picture, not only that the
+   --  picture changed: A72 and A73's renderer drifted every eye's picture
+   --  after any move, a probe saw arm 2 move at a few millionths of a radian,
+   --  and steps that small moved its eye against nothing. False until both
+   --  are measured.
+
 end Driver.Robot.Lockin;

@@ -145,11 +145,17 @@ package body Driver.Robot.Lag is
    --  identifiable up to the median stretch between one burst of pushes and
    --  the next (pushes that each cut the last one short, a ramp, are one
    --  burst; bursts of groups that start on the same beat are one start).
-   --  Without two bursts, every shift the stream allows.
+   --  Without two bursts, by the same reasoning, up to the median stretch
+   --  between one push and the next within the burst: a single burst of pushes
+   --  at a steady rhythm aligns with itself shifted by any number of pushes
+   --  (A56: the bursts of the first probe, a push every seven beats, gave eye
+   --  2 a lag of 35 beats and eye 3 one of 31, and every probe after waited
+   --  that long to look). Without two pushes, every shift the stream allows.
    function Identifiable (M : Model; Last : Natural) return Natural is
       package Natural_Vectors is new Ada.Containers.Vectors (Positive, Natural);
       package Sorting is new Natural_Vectors.Generic_Sorting;
-      Starts : Natural_Vectors.Vector;
+      Starts : Natural_Vectors.Vector;   --  where a burst starts
+      Pushes : Natural_Vectors.Vector;   --  where any push starts
    begin
       for S of M.Groups loop
          if S.Commandable then
@@ -160,27 +166,36 @@ package body Driver.Robot.Lag is
                   if not Cut then
                      Starts.Append (E.Start);
                   end if;
+                  Pushes.Append (E.Start);
                   Cut := E.Ended and then not E.Settled;
                end loop;
             end;
          end if;
       end loop;
       Sorting.Sort (Starts);
+      Sorting.Sort (Pushes);
       declare
-         Gaps : Real_Access := new Real_Array (1 .. Natural (Starts.Length));
-         K    : Natural := 0;
+         --  The median stretch between distinct starts of a list, 0 for none.
+         function Median_Gap (List : Natural_Vectors.Vector) return Natural is
+            Gaps : Real_Access := new Real_Array (1 .. Natural'Max (1, Natural (List.Length)));
+            K    : Natural := 0;
+         begin
+            for I in List.First_Index + 1 .. List.Last_Index loop
+               if List (I) > List (I - 1) then
+                  K := K + 1;
+                  Gaps (K) := Real (List (I) - List (I - 1));
+               end if;
+            end loop;
+            return Result : constant Natural := (if K = 0 then 0 else Natural (Driver.Stats.Median (Gaps (1 .. K)))) do
+               Free (Gaps);
+            end return;
+         end Median_Gap;
+         Between_Bursts : constant Natural := Median_Gap (Starts);
+         Between_Pushes : constant Natural := Median_Gap (Pushes);
       begin
-         for I in Starts.First_Index + 1 .. Starts.Last_Index loop
-            if Starts (I) > Starts (I - 1) then
-               K := K + 1;
-               Gaps (K) := Real (Starts (I) - Starts (I - 1));
-            end if;
-         end loop;
-         return Result : constant Natural :=
-           (if K = 0 then Last else Natural'Min (Last, Natural (Driver.Stats.Median (Gaps (1 .. K)))))
-         do
-            Free (Gaps);
-         end return;
+         return Natural'Min (Last, (if Between_Bursts > 0 then Between_Bursts
+                                    elsif Between_Pushes > 0 then Between_Pushes
+                                    else Last));
       end;
    end Identifiable;
 

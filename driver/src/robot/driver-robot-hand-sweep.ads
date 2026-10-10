@@ -38,6 +38,11 @@ package Driver.Robot.Hand.Sweep is
    function Start (Width, Height : Positive; Channels : Positive; Closer_Noise : Real_Array) return State
      with Pre => Closer_Noise'Length = Channels;
 
+   procedure Set_Closer_Noise (S : in out State; Closer_Noise : Real_Array)
+     with Pre => Closer_Noise'Length = Channels (S);
+   --  The closer's noises as the caller now measures them, for its views and
+   --  for the settings its eye remembers (Views, Selfsight).
+
    procedure Observe
      (S          : in out State;
       Seen       : Observation;
@@ -45,9 +50,15 @@ package Driver.Robot.Hand.Sweep is
       Closer     : Real_Array;
       Rest       : Real_Array;
       Image      : Driver.Images.Image;
-      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean);
+      Rest_Moved : not null access function (Before, After : Real_Array) return Boolean;
+      Eye_Moved  : not null access function (Before, After : Real_Array) return Boolean);
    --  One beat: the closer's readings, every other group's, the eye's image,
-   --  and the body's own test of whether the rest of it moved (Views).
+   --  the body's own test of whether the rest of it moved (Views: anything
+   --  that moved can change the picture), and whether what moved moved the
+   --  eye against its surroundings (Selfsight: a pose of the eye is one the
+   --  eye was carried to; another arm moving in its view moves no world
+   --  behind the fingers, and A72's arm 1, sweeping and pressing, gave arm
+   --  2's closer 358 such poses at its open reading and no hand).
 
    function Channels (S : State) return Positive;
 

@@ -8,7 +8,10 @@
 # compressed while it is written (the driver records into a FIFO that zstd reads), so a live boot,
 # about 2.7 MB a beat, never holds a raw recording on disk; truth.jsonl is compressed at the end.
 # truth.jsonl is the simulator's side-file truth for scoring (harness/robodojo_truth), which the
-# driver never sees; its geometry goes to the shared store /root/rec/geometry. The run stops when
+# driver never sees; its geometry goes to the shared store /root/rec/geometry. Every run is scrambled (harness/robodojo_scramble):
+# the driver is given the readings renamed, reordered and with each channel its own sign, scale and zero; the
+# draw goes to scramble.json beside the run, for the scorer, and the seed to sim.log. BD_SCRAMBLE=0 turns it
+# off, BD_SCRAMBLE_SEED fixes the draw (a body file is the body under the draw it was kept under). The run stops when
 # the driver exits, when /root/q/done_NAME appears, or at the limit.
 # The brain (127.0.0.1:8078) and the instrument (127.0.0.1:8077) must already be serving; the
 # brain's sampling settings are passed through BL_BRAIN_SAMPLING.
@@ -48,7 +51,7 @@ ss -ltn | grep -q ":8077 " || (cd /root/instruments && bash run.sh 9>&-) || {
   ss -ltn | grep -q ":8077 " || { echo "instrument service did not start"; exit 2; }; }
 
 { echo "task $TASK"; echo "cfg $CFG"; echo "seed $SEED"; echo "driver $(md5sum "$BIN" | cut -d' ' -f1)";
-  echo "body ${BODY:-none}"; echo "start $(date +%FT%T)"; } > "$R/meta.txt"
+  echo "body ${BODY:-none}"; echo "scramble ${BD_SCRAMBLE:-1} ${BD_SCRAMBLE_SEED:-drawn}"; echo "start $(date +%FT%T)"; } > "$R/meta.txt"
 
 mkfifo "$R/run.rec.fifo"
 # Level 17 finds each picture in the one a beat before it: a recording takes a seventh of the room
@@ -60,7 +63,7 @@ BL_BRAIN_SAMPLING="${BL_BRAIN_SAMPLING:-$QWEN_CARD}" setsid nohup "$BIN" --liste
   --inst 127.0.0.1:8077 ${BODY:+--body "$BODY"} --record "$R/run.rec.fifo" </dev/null >"$R/driver.log" 2>&1 9>&- &
 sleep 2
 cd /root/RoboDojo
-BD_TRUTH="$R/truth.jsonl" BD_TRUTH_GEOMETRY=/root/rec/geometry OMNI_KIT_ACCEPT_EULA=YES PATH=/venv/RoboDojo/bin:$PATH \
+BD_TRUTH="$R/truth.jsonl" BD_TRUTH_GEOMETRY=/root/rec/geometry BD_SCRAMBLE_MAP="$R/scramble.json" OMNI_KIT_ACCEPT_EULA=YES PATH=/venv/RoboDojo/bin:$PATH \
   BD_STEP_LIM="${BD_STEP_LIM:-3000}" setsid nohup \
   bash scripts/eval_policy.sh --root_dir /root/RoboDojo --task_name "$TASK" --env_cfg_type "$CFG" --device_id "$SLOT" \
   --policy_name l3_link --port "$PORT" --protocol ws --policy_server_url "ws://127.0.0.1:$PORT" --seed "$SEED" \

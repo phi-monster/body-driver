@@ -16,4 +16,16 @@ package body Driver.Commands is
 
    function Is_Hold (C : Command) return Boolean is (C.Targets.Is_Empty);
 
+   procedure Merge (Into : in out Command; From : Command; Clash : out Boolean) is
+   begin
+      Clash := False;
+      for P in From.Targets.Iterate loop
+         if Into.Targets.Contains (Target_Maps.Key (P)) then
+            Clash := True;
+         else
+            Into.Targets.Insert (Target_Maps.Key (P), Target_Maps.Element (P));
+         end if;
+      end loop;
+   end Merge;
+
 end Driver.Commands;

@@ -100,10 +100,16 @@ package body Driver.Robot.Hand.Views.Tests is
          Check (Driver.Pixels.Frames (Low_End (T, 1).Frames) = 2 and then Low_End (T, 1).From = 8,
                 "the closed end is not its own view");
       end if;
-      --  The arm moves: what was seen before is no longer comparable.
+      --  The arm moves, the closer at an end, as when the arm carries the closer's eye to another pose: the ends
+      --  seen before stay, the robot's own pixels being where they were in an eye the arm carries.
       Beat (True, 0.0, 70, Arm => 0.3); Beat (True, 0.0, 70, Arm => 0.3);
       Beat (False, 0.0, 70, Arm => 0.3);
-      Check (not Has_Ends (T, 1), "ends were kept across a move of the arm");
+      Check (Has_Ends (T, 1) and then Low_End (T, 1).From = 8 and then High_End (T, 1).From = 0,
+             "the ends were not kept across a move of the arm with the closer at an end");
+      --  The closer moves at the new pose: what was seen before is no longer comparable, and the ends start again.
+      Beat (True, 0.5, 80, Arm => 0.3); Beat (True, 0.5, 80, Arm => 0.3);
+      Beat (False, 0.5, 80, Arm => 0.3);
+      Check (not Has_Ends (T, 1), "ends were kept across a move of the arm and of the closer");
    end Ends_Of_A_Sweep;
 
    --  The block at a level the closer's reading does not touch, on a background lit

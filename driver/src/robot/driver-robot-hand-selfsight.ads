@@ -49,6 +49,13 @@ package Driver.Robot.Hand.Selfsight is
    --  is within it, twice over; a zero noise means the reading repeats
    --  exactly.
 
+   procedure Set_Key_Noise (M : in out Memory; Key_Noise : Real_Array)
+     with Pre => Key_Noise'Length = Key_Noise_Length (M);
+   --  The keys' noise as the caller now measures it, for the readings to come
+   --  and the settings kept.
+
+   function Key_Noise_Length (M : Memory) return Natural;
+
    procedure Observe
      (M          : in out Memory;
       Key        : Real_Array;

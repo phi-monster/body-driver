@@ -1,3 +1,4 @@
+with Driver.Log;
 with Ada.Containers;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
@@ -314,6 +315,10 @@ package body Driver.Robot.Channels is
                      end loop;
                   end if;
                end loop;
+               if Answered and then (not M.Groups (G).Delay_Known or else Delay_Beats /= M.Groups (G).Delay_Beats) then
+                  Driver.Log.Line (Driver.Log.Robot, "group" & G'Image & " answers a push within" & Delay_Beats'Image
+                                   & " beats, the longest wait of its pushes from their start to its readings' first motion");
+               end if;
                M.Groups (G).Delay_Beats := Delay_Beats;
                M.Groups (G).Delay_Known := Answered;
             end if;

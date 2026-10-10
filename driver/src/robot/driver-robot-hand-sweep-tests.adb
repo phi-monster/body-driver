@@ -116,7 +116,7 @@ package body Driver.Robot.Hand.Sweep.Tests is
    begin
       Observe (S, At_Beat (B), Still, [1 => R], [1 => Real (Pose)],
                Frame (R, (if Looks.Moving_Arm then Pose else 0), 1, Looks.Light, Looks.Fingers, Looks.Wide, Looks.Floating),
-               Exact'Access);
+               Exact'Access, Exact'Access);
       B := B + 1;
    end Observe_Frame;
 
@@ -224,19 +224,19 @@ package body Driver.Robot.Hand.Sweep.Tests is
             procedure Hold (R : Real; Count : Positive) is
             begin
                for I in 1 .. Count loop
-                  Observe (S, At_Beat (B), True, [1 => R], [1 => Real (Boot_Poses)], Frame_At (R), Exact'Access);
+                  Observe (S, At_Beat (B), True, [1 => R], [1 => Real (Boot_Poses)], Frame_At (R), Exact'Access, Exact'Access);
                   B := B + 1;
                end loop;
             end Hold;
             procedure Move (R : Real) is
             begin
-               Observe (S, At_Beat (B), False, [1 => R], [1 => Real (Boot_Poses)], Frame_At (R), Exact'Access);
+               Observe (S, At_Beat (B), False, [1 => R], [1 => Real (Boot_Poses)], Frame_At (R), Exact'Access, Exact'Access);
                B := B + 1;
             end Move;
          begin
             for P in Pose_Array'Range loop
                for I in 1 .. 3 loop
-                  Observe (S, At_Beat (B), True, [1 => 1.0], [1 => Real (P)], Poses (P), Exact'Access);
+                  Observe (S, At_Beat (B), True, [1 => 1.0], [1 => Real (P)], Poses (P), Exact'Access, Exact'Access);
                   B := B + 1;
                end loop;
             end loop;
@@ -384,13 +384,13 @@ package body Driver.Robot.Hand.Sweep.Tests is
       S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0]);
    begin
       for I in 1 .. 3 loop
-         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 1.0], [1 => 0.0], Frame (1.0), Exact'Access);
+         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 1.0], [1 => 0.0], Frame (1.0), Exact'Access, Exact'Access);
       end loop;
-      Observe (S, At_Beat (4), False, [1 => 0.5], [1 => 0.0], Frame (1.0), Exact'Access);
+      Observe (S, At_Beat (4), False, [1 => 0.5], [1 => 0.0], Frame (1.0), Exact'Access, Exact'Access);
       for I in 5 .. 7 loop
-         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 0.0], [1 => 0.0], Frame (1.0), Exact'Access);
+         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 0.0], [1 => 0.0], Frame (1.0), Exact'Access, Exact'Access);
       end loop;
-      Observe (S, At_Beat (8), False, [1 => 0.5], [1 => 0.0], Frame (1.0), Exact'Access);
+      Observe (S, At_Beat (8), False, [1 => 0.5], [1 => 0.0], Frame (1.0), Exact'Access, Exact'Access);
       Check (Status (S, 1) = Nothing_Moves, "a push that changes nothing was placed: " & Account (S, 1));
    end Nothing_Seen;
 
@@ -440,7 +440,7 @@ package body Driver.Robot.Hand.Sweep.Tests is
       procedure Beat_On (Still : Boolean) is
          Arm : constant Real := (if Left > 0 then Disturbance * 0.1 ** (Settling - Left) else 0.0);
       begin
-         Observe (S, At_Beat (B), Still, [1 => Reading], [1 => Arm], Shown_At (Reading), Arm_Moved'Access);
+         Observe (S, At_Beat (B), Still, [1 => Reading], [1 => Arm], Shown_At (Reading), Arm_Moved'Access, Arm_Moved'Access);
          B := B + 1;
          Left := (if Left > 0 then Left - 1 else 0);
       end Beat_On;
