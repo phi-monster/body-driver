@@ -54,9 +54,11 @@ package Driver.Alignment.Keyframes is
    --  How many keyframes have been aligned.
 
    function Scatter (C : Chain) return Real;
-   --  How far the aligner errs here: the median, over the keyframes that were not predicted to be the reference again
-   --  (the same pose) and whose field has enough points, of the robust scale of what the smooth field of the
-   --  displacements of their found points leaves of them, in pixels; zero when there is none.
+   --  How far the aligner errs here, in pixels: the median, over the keyframes predicted to be the reference again
+   --  (the same pose: the reference's still twin) whose field has enough points, of the robust scale of what the
+   --  smooth field of the displacements of their found points leaves of them; where no such keyframe has a field,
+   --  the same over the keyframes that moved (there what the field leaves also holds what the scene's depth adds,
+   --  and grows with the motion); zero when there is none.
 
    type Source is (Same_Pose, Extrapolated, New_Direction, Supplied);
    --  Same_Pose: the change of readings is none the noise can tell. Extrapolated: from earlier keyframes whose
