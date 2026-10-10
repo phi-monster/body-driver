@@ -1,3 +1,4 @@
+with Ada.Exceptions;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Fixed;
 with Driver.Beats;
@@ -680,6 +681,14 @@ package body Driver.Robot.Hand.Tests is
             if not Done then
                abort Decider;
             end if;
+         exception
+            when E : others =>
+               --  The block waits for the decider before anything leaves it, an exception included: a decider left
+               --  waiting in Next for a beat nobody offers hangs the suite (the full run of 10-11 sat here for an
+               --  hour, every worker idle). Ended, the exception is the test's failure.
+               abort Decider;
+               Check (False, "the main loop raised " & Ada.Exceptions.Exception_Information (E)
+                      & " with the hand dropped at beat" & Drop'Image);
          end;
          Finished := Done;
          Raised := Died;
