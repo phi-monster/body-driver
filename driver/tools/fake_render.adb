@@ -114,9 +114,12 @@ package body Fake_Render is
          when Stripes =>
             T := Sin (2.0 * Ada.Numerics.Pi * Su) * 0.7 + 0.3 * Noise2 (3.0 * Su, 3.0 * Sv);
          when Grain =>
-            --  Streaks along one axis that wander a little, as wood does.
-            T := Sin (2.0 * Ada.Numerics.Pi * (0.3 * Su + 0.8 * Noise2 (0.1 * Su, 0.6 * Sv))) * 0.6
-              + 0.4 * Noise2 (Su, 6.0 * Sv);
+            --  Streaks along one axis that wander, two incommensurate families of them over noise at two scales, as
+            --  wood does: one family of even streaks is a periodic texture, and a flow that tracks it aliases by
+            --  a period whenever the picture moves more than half of one between two beats.
+            T := 0.35 * Sin (2.0 * Ada.Numerics.Pi * (0.3 * Su + 0.8 * Noise2 (0.1 * Su, 0.6 * Sv)))
+              + 0.25 * Sin (2.0 * Ada.Numerics.Pi * (0.73 * Su + 1.1 * Noise2 (0.17 * Su + 3.0, 0.4 * Sv)))
+              + 0.4 * Noise2 (Su, 6.0 * Sv) + 0.3 * Noise2 (3.0 * Su + 7.0, 18.0 * Sv);
       end case;
       return 1.0 + M.Contrast * T;
    end Shade_Of;

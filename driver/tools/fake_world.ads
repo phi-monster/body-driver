@@ -73,6 +73,7 @@ package Fake_World is
       Target     : Real := 0.0;              --  the target in effect, in reading units
       Lo, Hi     : Real := 0.0;              --  the joint's own ends, in reading units
       Tau        : Real := 1.0;              --  beats of the first-order response
+      Rate       : Real := 0.0;              --  the most the position changes in a beat, radians or metres; 0 is unlimited
       Droop_Gain : Real := 0.0;              --  radians of sag per metre of horizontal lever, revolute joints
       Mirror     : Natural := 0;             --  a link whose position this one copies (the other finger)
       Pose       : Rigid := Identity;        --  the link's frame in the world, from Forward

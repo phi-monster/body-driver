@@ -179,15 +179,24 @@ package body Fake_World is
       Low  : constant array (1 .. 6) of Real := [-2.9, -1.6, -2.0, -1.8, -3.0, -1.8];
       High : constant array (1 .. 6) of Real := [2.9, 1.6, 1.5, 1.8, 3.0, 1.8];
       Sag  : array (1 .. 6) of Real;
+      Speed : array (1 .. 6) of Real;
 
       function Joint (Name : String; Parent : Positive; Origin : Rigid; Axis : Vec3; N : Positive) return Link is
         (Name => To_Unbounded_String (Prefix & Name), Parent => Parent, Arm => A, Kind => Revolute, Origin => Origin,
          Axis => Axis, Unit => Arm_Unit, Q => Rest (N) / Arm_Unit, Target => Rest (N) / Arm_Unit,
-         Lo => Low (N) / Arm_Unit, Hi => High (N) / Arm_Unit, Tau => Tau, Droop_Gain => Sag (N), others => <>);
+         Lo => Low (N) / Arm_Unit, Hi => High (N) / Arm_Unit, Tau => Tau, Droop_Gain => Sag (N), Rate => Speed (N),
+         others => <>);
       G : Group;
    begin
       for N in Sag'Range loop
          Sag (N) := Random (W, 0.0005, 0.002);
+      end loop;
+      --  How fast a joint can turn: a real arm's controller limits it to about one to two and a half radians a
+      --  second, 0.08 to 0.25 rad a beat at ten beats a second. Without the limit a joint followed a target of
+      --  half a radian within three beats, the wrist eye's picture jumped by far more than a flow cell between two
+      --  frames, and the lock-in's gains collapsed under the sweep (R4: the visible steps grew three hundredfold).
+      for N in Speed'Range loop
+         Speed (N) := Random (W, 0.08, 0.25);
       end loop;
       Add_Link (W, (Name => To_Unbounded_String (Prefix & "base"), Parent => 0, Arm => 0, Kind => Fixed,
                     Origin => Moved_To (Base_X, Base_Y, W.Table_Z), others => <>), Base);
@@ -661,7 +670,12 @@ package body Fake_World is
                   T     : constant Real := L.Target - Sag;
                   Share : constant Real := 1.0 - Exp (-1.0 / L.Tau);
                   From  : constant Real := L.Q - L.Bounce;
-                  Q     : constant Real := From + (T - From) * Share;
+                  --  The first-order step, no faster than the joint turns.
+                  Step  : constant Real :=
+                    (if L.Rate > 0.0 and then abs ((T - From) * Share) > L.Rate / L.Unit
+                     then (if T > From then L.Rate / L.Unit else -L.Rate / L.Unit)
+                     else (T - From) * Share);
+                  Q     : constant Real := From + Step;
                begin
                   Wanted (I) := Real'Max (L.Lo, Real'Min (L.Hi, Q));
                end;
