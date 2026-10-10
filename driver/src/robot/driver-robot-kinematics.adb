@@ -2202,12 +2202,22 @@ package body Driver.Robot.Kinematics is
          R : Arm_Evidence renames M.Kinematics (K);
       begin
          for F in reverse 2 .. Natural (R.Frames.Length) loop
+            --  At those readings: within the keyframe step, or within what the readings' noise can put between
+            --  a reading and the readings asked for (Z of the noise of a difference of two readings), whichever
+            --  is more. Where the aligner errs by a hundredth of a pixel the step is smaller than the noise, and
+            --  a keyframe taken where it was asked lay more than a step away (fake body Y10, arm 2: eleven of
+            --  twelve pushes ended unfollowed with their keyframes found).
             if Natural (R.Frames (F).Readings.Length) = Readings'Length
               and then (for all C in Readings'Range =>
                           (declare
-                              Step : constant Real := Keyframe_Step (M, A, C);
-                              Away : constant Real := abs (R.Frames (F).Readings (C - 1) - Readings (C));
-                           begin (if Step > 0.0 then Away < Step else Away = 0.0)))
+                              Step  : constant Real := Keyframe_Step (M, A, C);
+                              Noise : constant Real := Channels.Noise (M, R.Group, C);
+                              Reach : constant Real :=
+                                Real'Max (Step, (if Noise < Real'Last
+                                                 then Driver.Conventions.Z * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Noise
+                                                 else 0.0));
+                              Away  : constant Real := abs (R.Frames (F).Readings (C - 1) - Readings (C));
+                           begin (if Reach > 0.0 then Away < Reach else Away = 0.0)))
             then
                for S of R.Matches loop
                   if S.Frame = F and then S.Eye = 0 then
