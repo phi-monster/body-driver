@@ -1217,8 +1217,8 @@ package body Driver.Robot.Kinematics.Fit is
                                  Pd : Boolean;
                                  --  The reduced terms are in units that differ by as many orders of magnitude as the
                                  --  fit's parameters do (a log focal length, pixels, radians, lengths): the matrix
-                                 --  is made positive definite or not by its correlations, each term in units of its
-                                 --  own standard error, and not by the sizes of its entries.
+                                 --  is made positive definite or not by its correlations, each term in units of the
+                                 --  standard error it would have were the others known, and not by the sizes of its entries.
                                  Equal : Real_Array (1 .. Reduced) := [others => 0.0];
                               begin
                                  Free (Seen_Of);
