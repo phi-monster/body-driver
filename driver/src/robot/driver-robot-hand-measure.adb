@@ -1207,7 +1207,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   else
                      Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": lobe" & L'Image & " at "
                                       & (if Which = Open then "open" else "closed")
-                                      & " is not pressed: its tip is not seen in the hand's eye at this opening");
+                                      & " is not pressed: its line of sight at this opening is not known (its tip is not seen in"
+                                      & " the hand's eye there, or the arm is not fitted, so the eye has no place in the tool frame)");
                   end if;
                end loop;
             elsif Which = Open then

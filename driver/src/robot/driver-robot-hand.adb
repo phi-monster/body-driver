@@ -561,10 +561,15 @@ package body Driver.Robot.Hand is
                then Arctan (abs Cross (Line.Direction.Unit_Vector, Next.Direction.Unit_Vector),
                             Line.Direction.Unit_Vector * Next.Direction.Unit_Vector)
                else 0.0);
+            Ray   : constant Ray_Estimate := Driver.Robot.Hand.Frames.Into (Eye_In_Tool (M, P.Eye, V.Seen), Line);
          begin
-            return (Known  => True,
+            --  A sight is known when its line is: the eye's lens and its place in the tool frame are the arm's
+            --  fit's, and until the arm is fitted a tip seen in the picture has no line of sight to press along
+            --  (the first fake body: its arm's focal length undetermined, its hand swept, and the press's aim
+            --  asked the direction of a zero vector).
+            return (Known  => Ray.Direction.Sigma < Real'Last and then abs Ray.Direction.Unit_Vector > 0.0,
                     Pixel  => Px,
-                    Ray    => Driver.Robot.Hand.Frames.Into (Eye_In_Tool (M, P.Eye, V.Seen), Line),
+                    Ray    => Ray,
                     Spread => Pitch * Driver.Robot.Hand.Lobes.Tip_Spread
                                         (Driver.Robot.Hand.Lobes.Tip_Cap (Region, Centre, Px), Px),
                     Pitch  => Pitch);
