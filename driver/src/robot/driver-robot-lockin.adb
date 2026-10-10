@@ -370,6 +370,10 @@ package body Driver.Robot.Lockin is
             S     : Eye_Stream renames M.Eyes (E);
             N     : constant Natural := Cells (S.Grid);
             Lag   : constant Integer := (if E <= M.Lags.Last_Index then M.Lags (E) else 0);
+            --  Where the eye's time goes, for the log: the marks of the usable beats, the rows assembled, the
+            --  cells fitted (timed below), and what follows the fit.
+            Eye_Began   : constant Duration := Driver.Clock.Seconds;
+            Marks_Took, Rows_Took : Duration := 0.0;
             Rows  : Natural := 0;
 
             --  How long the eye's picture goes on settling after the body stops moving: from the last beat any
@@ -592,6 +596,7 @@ package body Driver.Robot.Lockin is
                      Rows := Rows + 1;
                   end if;
                end loop;
+               Marks_Took := Driver.Clock.Seconds - Eye_Began;
             end if;
             --  A regression needs more observations than coefficients.
             if Rows > All_Columns + 1 then
@@ -784,6 +789,7 @@ package body Driver.Robot.Lockin is
                            Started : constant Duration := Driver.Clock.Seconds;
                            Fitted, Passes, Most, Stuck : Natural := 0;
                         begin
+                           Rows_Took := Started - Eye_Began - Marks_Took;
                            Fit_Cells (1, N);
                            for Cell in 1 .. N loop
                               if Textured (Cell) then
@@ -797,7 +803,9 @@ package body Driver.Robot.Lockin is
                              (Driver.Log.Robot, "lock-in: eye" & E'Image & ":" & Rows'Image & " rows," & Kept'Image
                               & " columns, settling tail" & Tail'Image & " beats," & Fitted'Image & " of" & N'Image
                               & " cells fitted in "
-                              & Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & " s, with" & Passes'Image
+                              & Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & " s (the marks took "
+                              & Driver.Log.Image (Real (Marks_Took), 1) & " s, the rows "
+                              & Driver.Log.Image (Real (Rows_Took), 1) & " s before them), with" & Passes'Image
                               & " reweighting passes in all," & Most'Image & " the most in a cell," & Stuck'Image
                               & " cells with a fit that did not converge");
                         end;
