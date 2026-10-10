@@ -25,7 +25,10 @@
 --  cost it beats in proportion.
 --  --quirk turns one of Fake_World's quirks on or off (image_lag, settle,
 --  zero_noise, drift, droop, creep, give, soft_closer, bounce; delay=N beats;
---  settle_share=X; image_noise=X grey levels; reading_noise=X).
+--  settle_share=X; image_noise=X grey levels; reading_noise=X). --hands KIND,KIND
+--  forces what each arm ends in (pair, hook, thumb, fingers; drawn unless given),
+--  --eyeless N leaves arm N without an eye of its own, --eye-up N points arm N's
+--  eye ahead at the wall, --table plain gives a table with no texture.
 
 with Ada.Calendar;
 with Ada.Characters.Handling;
@@ -78,6 +81,7 @@ procedure Fake_Robot is
    Scrambled  : Boolean := True;
    Dump_Every : Natural := 0;
    Rate       : Real := 10.0;   --  beats a second; 0 runs as fast as the driver answers
+   Shape      : Template;
 
    W : World;
 
@@ -866,13 +870,30 @@ begin
    Scrambled := Option ("--scramble", "1") /= "0";
    Dump_Every := Natural'Value (Option ("--dump", "0"));
    Rate := Real'Value (Option ("--rate", "10.0"));
+   declare
+      Hands : constant String := Option ("--hands");
+      Comma : constant Natural := Ada.Strings.Fixed.Index (Hands, ",");
+      function Kind_Of (Name : String) return Hand_Kind is
+        (if Name = "pair" then Pair elsif Name = "hook" then Hook elsif Name = "thumb" then Pair_And_Thumb
+         elsif Name = "fingers" then Fingers elsif Name = "" or else Name = "drawn" then Drawn
+         else raise Program_Error with "no hand called " & Name);
+   begin
+      if Comma > 0 then
+         Shape.Hands := [Kind_Of (Hands (Hands'First .. Comma - 1)), Kind_Of (Hands (Comma + 1 .. Hands'Last))];
+      elsif Hands'Length > 0 then
+         Shape.Hands := [others => Kind_Of (Hands)];
+      end if;
+      Shape.Eyeless := Natural'Value (Option ("--eyeless", "0"));
+      Shape.Eye_Up := Natural'Value (Option ("--eye-up", "0"));
+      Shape.Plain_Table := Option ("--table", "grain") = "plain";
+   end;
    for I in 1 .. Ada.Command_Line.Argument_Count - 1 loop
       if Ada.Command_Line.Argument (I) = "--quirk" then
          Apply_Quirk (Ada.Command_Line.Argument (I + 1));
       end if;
    end loop;
    Ada.Directories.Create_Path (To_String (Out_Dir));
-   Build (W, Seed, Width, Height);
+   Build (W, Seed, Width, Height, Shape);
    Scramble_Seed := Seed * 7919 + 17;
    Noise_State := Interfaces.Unsigned_64 (Seed) * 6364136223846793005 + 1442695040888963407;
    Random.Reset (Scramble_Rng, Integer (Scramble_Seed));
@@ -939,7 +960,7 @@ begin
          Send_Call ("get_action", False, R);
          Take_Action (R);
          Wire_Time := Wire_Time + (Clock - T2);
-         if Dump_Every > 0 and then W.Beat mod Dump_Every = 1 then
+         if Dump_Every > 0 and then W.Beat mod Dump_Every = 1 mod Dump_Every then
             Dump_Pictures;
          end if;
          if W.Beat mod 200 = 0 then

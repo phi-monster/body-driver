@@ -51,7 +51,8 @@ package body Fake_World is
    function Look (Position, Forward_Dir, Up : Vec3) return Rigid;
    procedure Add_Camera (W : in out World; Name : String; Link_Index, Arm : Natural; Mount : Rigid;
                          Width, Height : Positive; Focal_Share : Real);
-   procedure Build_Arm (W : in out World; A : Positive; Side : Real; Width, Height : Positive);
+   procedure Build_Arm (W : in out World; A : Positive; Side : Real; Width, Height : Positive; Kind : Hand_Kind;
+                        With_Eye, Eye_Up : Boolean);
    procedure Add_Things (W : in out World);
    function Motion (L : Link; Q : Real) return Rigid;
    function Corners (S : Solid) return Corner_Array;
@@ -145,7 +146,8 @@ package body Fake_World is
       W.Cameras.Append (C);
    end Add_Camera;
 
-   procedure Build_Arm (W : in out World; A : Positive; Side : Real; Width, Height : Positive) is
+   procedure Build_Arm (W : in out World; A : Positive; Side : Real; Width, Height : Positive; Kind : Hand_Kind;
+                        With_Eye, Eye_Up : Boolean) is
       Base_X : constant Real := Side * Random (W, 0.25, 0.35);
       Base_Y : constant Real := Random (W, -0.52, -0.42);
       L0 : constant Real := Random (W, 0.05, 0.08);
@@ -166,7 +168,7 @@ package body Fake_World is
       Black : constant Material :=
         (Kind => Flat, Albedo => [0.04, 0.04, 0.04], Contrast => 0.0, Scale => 1.0, Gloss => 0.6);
       Prefix : constant String := "arm" & Trim (A) & "/";
-      Base, J1, J2, J3, J4, J5, J6, F1, F2 : Positive;
+      Base, J1, J2, J3, J4, J5, J6, F1, F2, T1 : Positive;
       Rest : constant array (1 .. 6) of Real := [0.0, -0.3, -0.3, -0.6, 0.0, 0.0];   --  radians
       Low  : constant array (1 .. 6) of Real := [-2.9, -1.6, -2.0, -1.8, -3.0, -1.8];
       High : constant array (1 .. 6) of Real := [2.9, 1.6, 1.5, 1.8, 3.0, 1.8];
@@ -197,24 +199,7 @@ package body Fake_World is
       Add_Link (W, Joint ("tool", J5, Moved_To (0.0, L5, 0.0), [1.0, 0.0, 0.0], 6), J6);
       Add_Box (W, Prefix & "palm", [0.05, 0.012, 0.014], Moved_To (0.0, L6 + 0.012, 0.0), Grey, J6, A);
       W.Tools.Append (J6);
-      --  The fingers: two plates sliding apart along the tool's x, one joint
-      --  read (the share of the way open, 1 open, 0 closed) and its mirror.
-      Add_Link (W, (Name => To_Unbounded_String (Prefix & "finger1"), Parent => J6, Arm => A, Kind => Prismatic,
-                    Origin => Moved_To (0.0, L6 + 0.024, 0.0), Axis => [1.0, 0.0, 0.0], Unit => Open_Width / 2.0,
-                    Q => 1.0, Target => 1.0, Lo => 0.0, Hi => 1.0, Tau => Tau, others => <>), F1);
-      Add_Box (W, Prefix & "finger1", [0.005, Finger_Length / 2.0, 0.01],
-               Moved_To (0.005, Finger_Length / 2.0, 0.0), Black, F1, A, Finger => True);
-      Add_Link (W, (Name => To_Unbounded_String (Prefix & "finger2"), Parent => J6, Arm => A, Kind => Prismatic,
-                    Origin => Moved_To (0.0, L6 + 0.024, 0.0), Axis => [-1.0, 0.0, 0.0], Unit => Open_Width / 2.0,
-                    Q => 1.0, Target => 1.0, Lo => 0.0, Hi => 1.0, Tau => Tau, Mirror => F1, others => <>), F2);
-      Add_Box (W, Prefix & "finger2", [0.005, Finger_Length / 2.0, 0.01],
-               Moved_To (-0.005, Finger_Length / 2.0, 0.0), Black, F2, A, Finger => True);
-      W.Closers.Append (F1);
-      --  The wrist eye: above the root of the fingers, looking steeply down
-      --  along them, so that they stand in the lower part of its picture and
-      --  the table beyond them in the upper part.
-      Add_Camera (W, "eye_arm" & Trim (A), J6, A,
-                  Look ([0.0, L6 + 0.03, 0.055], [0.0, Cos (Tilt), -Sin (Tilt)], [0.0, 0.0, 1.0]), Width, Height, 0.62);
+      W.Kinds.Append (Kind);
       G.Name := To_Unbounded_String ("arm" & Trim (A) & "_joints");
       G.Commandable := True;
       declare
@@ -226,10 +211,81 @@ package body Fake_World is
          end loop;
       end;
       W.Groups.Append (G);
-      G := (Name => To_Unbounded_String ("arm" & Trim (A) & "_closer"), Commandable => True, others => <>);
-      G.Joints.Append (F1);
-      G.Echoed.Append (1.0);
-      W.Groups.Append (G);
+      case Kind is
+         when Pair | Pair_And_Thumb =>
+            --  Two plates sliding apart along the tool's x, one joint read (the
+            --  share of the way open, 1 open, 0 closed) and its mirror; with a
+            --  thumb, a plate that comes down on them from above on a second
+            --  channel of the same group.
+            Add_Link (W, (Name => To_Unbounded_String (Prefix & "finger1"), Parent => J6, Arm => A, Kind => Prismatic,
+                          Origin => Moved_To (0.0, L6 + 0.024, 0.0), Axis => [1.0, 0.0, 0.0], Unit => Open_Width / 2.0,
+                          Q => 1.0, Target => 1.0, Lo => 0.0, Hi => 1.0, Tau => Tau, others => <>), F1);
+            Add_Box (W, Prefix & "finger1", [0.005, Finger_Length / 2.0, 0.01],
+                     Moved_To (0.005, Finger_Length / 2.0, 0.0), Black, F1, A, Finger => True);
+            Add_Link (W, (Name => To_Unbounded_String (Prefix & "finger2"), Parent => J6, Arm => A, Kind => Prismatic,
+                          Origin => Moved_To (0.0, L6 + 0.024, 0.0), Axis => [-1.0, 0.0, 0.0], Unit => Open_Width / 2.0,
+                          Q => 1.0, Target => 1.0, Lo => 0.0, Hi => 1.0, Tau => Tau, Mirror => F1, others => <>), F2);
+            Add_Box (W, Prefix & "finger2", [0.005, Finger_Length / 2.0, 0.01],
+                     Moved_To (-0.005, Finger_Length / 2.0, 0.0), Black, F2, A, Finger => True);
+            W.Closers.Append (F1);
+            G := (Name => To_Unbounded_String ("arm" & Trim (A) & "_closer"), Commandable => True, others => <>);
+            G.Joints.Append (F1);
+            G.Echoed.Append (1.0);
+            if Kind = Pair_And_Thumb then
+               Add_Link (W, (Name => To_Unbounded_String (Prefix & "thumb"), Parent => J6, Arm => A, Kind => Prismatic,
+                             Origin => Moved_To (0.0, L6 + 0.024, 0.005), Axis => [0.0, 0.0, 1.0], Unit => 0.04,
+                             Q => 1.0, Target => 1.0, Lo => 0.0, Hi => 1.0, Tau => Tau, others => <>), T1);
+               Add_Box (W, Prefix & "thumb", [0.015, Finger_Length / 2.0, 0.005],
+                        Moved_To (0.0, Finger_Length / 2.0, 0.005), Black, T1, A, Finger => True);
+               G.Joints.Append (T1);
+               G.Echoed.Append (1.0);
+            end if;
+            W.Groups.Append (G);
+         when Hook =>
+            --  No closer: one prong slanting down from the palm, which presses and hooks and never closes.
+            Add_Link (W, (Name => To_Unbounded_String (Prefix & "hook"), Parent => J6, Arm => A, Kind => Fixed,
+                          Origin => (Rotation => About ([1.0, 0.0, 0.0], -1.0), Translation => [0.0, L6 + 0.024, 0.0]),
+                          others => <>), F1);
+            Add_Box (W, Prefix & "hook", [0.008, Finger_Length / 2.0, 0.006], Moved_To (0.0, Finger_Length / 2.0, 0.0),
+                     Black, F1, A, Finger => True);
+            W.Closers.Append (0);
+         when Fingers =>
+            --  Five fingers side by side, each turning about the tool's x to
+            --  curl down, each read as a group of its own (as a humanoid's
+            --  hand reports them): 0 straight, 1 curled.
+            W.Closers.Append (0);
+            for F in 1 .. 5 loop
+               declare
+                  Fl : Positive;
+               begin
+                  Add_Link (W, (Name => To_Unbounded_String (Prefix & "finger" & Trim (F)), Parent => J6, Arm => A,
+                                Kind => Revolute, Origin => Moved_To (Real (F - 3) * 0.02, L6 + 0.024, 0.0),
+                                Axis => [-1.0, 0.0, 0.0], Unit => 1.5, Q => 0.0, Target => 0.0, Lo => 0.0, Hi => 1.0,
+                                Tau => Tau, others => <>), Fl);
+                  Add_Box (W, Prefix & "finger" & Trim (F), [0.007, Finger_Length / 2.0, 0.006],
+                           Moved_To (0.0, Finger_Length / 2.0, 0.0), Black, Fl, A, Finger => True);
+                  G := (Name => To_Unbounded_String ("arm" & Trim (A) & "_finger" & Trim (F)), Commandable => True,
+                        others => <>);
+                  G.Joints.Append (Fl);
+                  G.Echoed.Append (0.0);
+                  W.Groups.Append (G);
+               end;
+            end loop;
+         when Drawn =>
+            raise Program_Error with "a hand to build must be drawn first";
+      end case;
+      --  The wrist eye: above the root of the fingers, looking steeply down
+      --  along them, so that they stand in the lower part of its picture and
+      --  the table beyond them in the upper part; or ahead at the wall.
+      if With_Eye then
+         declare
+            Pitch : constant Real := (if Eye_Up then -0.3 else Tilt);
+         begin
+            Add_Camera (W, "eye_arm" & Trim (A), J6, A,
+                        Look ([0.0, L6 + 0.03, 0.055], [0.0, Cos (Pitch), -Sin (Pitch)], [0.0, 0.0, 1.0]),
+                        Width, Height, 0.62);
+         end;
+      end if;
    end Build_Arm;
 
    --  Things on the table: a flat slab of fine stripes in front of the first
@@ -292,9 +348,10 @@ package body Fake_World is
       end loop;
    end Add_Things;
 
-   procedure Build (W : in out World; Seed : Natural; Width, Height : Positive) is
+   procedure Build (W : in out World; Seed : Natural; Width, Height : Positive; T : Template) is
       Wood : constant Material :=
-        (Kind => Grain, Albedo => [0.62, 0.50, 0.38], Contrast => 0.3, Scale => 60.0, Gloss => 0.05);
+        (Kind => Grain, Albedo => [0.62, 0.50, 0.38], Contrast => (if T.Plain_Table then 0.0 else 0.3), Scale => 60.0,
+         Gloss => 0.05);
       Wall : constant Material :=
         (Kind => Noise, Albedo => [0.75, 0.74, 0.70], Contrast => 0.15, Scale => 3.0, Gloss => 0.0);
       Dark : constant Material :=
@@ -311,8 +368,25 @@ package body Fake_World is
       Add_Plane (W, "wall_right", (Rotation => About ([0.0, 1.0, 0.0], -Pi / 2.0), Translation => [1.6, 0.0, 0.8]),
                  Wall);
       W.Arms := 2;
-      Build_Arm (W, 1, -1.0, Width, Height);
-      Build_Arm (W, 2, 1.0, Width, Height);
+      declare
+         Kinds : Hand_Kinds := T.Hands;
+         Draws : Ada.Numerics.Float_Random.Generator;
+      begin
+         --  The hands have a generator of their own: forcing one leaves every other draw of the body as it was.
+         Ada.Numerics.Float_Random.Reset (Draws, Integer (Seed) * 31 + 7);
+         for A in Kinds'Range loop
+            declare
+               Pick : constant Real := Real (Ada.Numerics.Float_Random.Random (Draws));
+            begin
+               if Kinds (A) = Drawn then
+                  Kinds (A) := (if Pick < 0.5 then Pair elsif Pick < 0.7 then Hook
+                                elsif Pick < 0.85 then Pair_And_Thumb else Fingers);
+               end if;
+            end;
+         end loop;
+         Build_Arm (W, 1, -1.0, Width, Height, Kinds (1), T.Eyeless /= 1, T.Eye_Up = 1);
+         Build_Arm (W, 2, 1.0, Width, Height, Kinds (2), T.Eyeless /= 2, T.Eye_Up = 2);
+      end;
       --  The fixed eye above and behind the arms, looking down at the table between them.
       declare
          Px  : constant Real := Random (W, -0.05, 0.05);
@@ -755,6 +829,10 @@ package body Fake_World is
       function V (X : Vec3) return String is ("(" & Img (X (1)) & ", " & Img (X (2)) & ", " & Img (X (3)) & ")");
    begin
       Put ("seed" & W.Seed'Image & ": table top at z = " & Img (W.Table_Z) & " m," & W.Arms'Image & " arms");
+      for A in 1 .. W.Arms loop
+         Put ("arm" & A'Image & " ends in " & Hand_Kind'Image (W.Kinds (A))
+              & (if (for some C of W.Cameras => C.Arm = A) then ", with an eye of its own" else ", with no eye of its own"));
+      end loop;
       for I in W.Links.First_Index .. W.Links.Last_Index loop
          declare
             L : Link renames W.Links (I);

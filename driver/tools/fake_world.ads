@@ -136,6 +136,25 @@ package Fake_World is
       Reading_Noise : Real := 0.0;       --  a real robot's reading noise, in reading units; the simulator's is 0
    end record;
 
+   --  What an arm ends in. Drawn: the seed decides.
+   type Hand_Kind is (Drawn, Pair, Hook, Pair_And_Thumb, Fingers);
+   --  Pair            two plates sliding apart on one channel, 1 open and 0 closed (the lab's gripper)
+   --  Hook            one prong slanting down from the palm: it presses and hooks, and nothing closes
+   --  Pair_And_Thumb  the pair, and a plate that comes down on them on a second channel of the same group
+   --  Fingers         five fingers side by side that curl down, each read as a group of its own
+
+   type Hand_Kinds is array (1 .. 2) of Hand_Kind;
+
+   package Kind_Vectors is new Ada.Containers.Vectors (Positive, Hand_Kind);
+
+   --  What a test forces on the drawn body; the rest the seed decides.
+   type Template is record
+      Hands       : Hand_Kinds := [others => Drawn];
+      Eyeless     : Natural := 0;        --  the arm with no eye of its own; 0 for none
+      Eye_Up      : Natural := 0;        --  the arm whose eye looks ahead at the wall, not down at the table; 0 for none
+      Plain_Table : Boolean := False;    --  a table with no texture at all
+   end record;
+
    type Due_Target is record
       Due   : Natural := 0;
       Joint : Positive := 1;
@@ -151,6 +170,7 @@ package Fake_World is
       Arms    : Natural := 0;
       Tools   : Index_Vectors.Vector;   --  per arm, the link the hand hangs from
       Closers : Index_Vectors.Vector;   --  per arm, the link whose joint closes the hand (0 for none)
+      Kinds   : Kind_Vectors.Vector;    --  per arm, what it ends in
       Links   : Link_Vectors.Vector;
       Groups  : Group_Vectors.Vector;
       Cameras : Camera_Vectors.Vector;
@@ -160,9 +180,11 @@ package Fake_World is
       Pending : Due_Vectors.Vector;   --  targets the delay has not let through yet
    end record;
 
-   procedure Build (W : in out World; Seed : Natural; Width, Height : Positive);
+   procedure Build (W : in out World; Seed : Natural; Width, Height : Positive; T : Template);
    --  Draws the body and the world of Seed, with cameras of Width x Height,
-   --  and puts the body at its rest pose.
+   --  what T forces forced, and puts the body at its rest pose. The hands are
+   --  drawn from a generator of their own, so that forcing them changes
+   --  nothing else of the body.
 
    procedure Forward (W : in out World);
    --  Every link's, solid's and camera's pose in the world from the joints' positions.
