@@ -162,6 +162,12 @@ package Driver.Robot.Hand.Tips is
    --  The surface as the presses and the prior make it, in the frame of the
    --  presses' poses; unknown until the presses fit it.
 
+   function Fit_Account (B : Book) return String;
+   --  What the last fit of the finger as it stood under each press made of the presses kept: whether it was solved,
+   --  and for every press given to a lobe, the lobe and opening, the angle its finger can have slid by as the fit took
+   --  it (Touch.Press.Slide_Angle: the whole travel where the slide was not measured), its hit, and whether the tip
+   --  rests on it.
+
 private
 
    package Slid_Vectors is new Ada.Containers.Vectors (Positive, Slid);

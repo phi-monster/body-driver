@@ -2445,3 +2445,6 @@ driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Place, 5) & ""	5	form
 driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place_Sigma, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place_Sigma, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Turn_Sigma, 5)	5	format	digits printed in a log line or a message
+driver-robot-hand-tips.adb	& "" & Driver.Log.Image (Slid_Angle (K, T (K.Lobe) (K.Opening)), 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-hand-tips.adb	& Driver.Log.Image (T (K.Lobe) (K.Opening).Travel, 4) & "" & Driver.Log.Image (K.Hit, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand-tips.adb	& Driver.Log.Image (T (K.Lobe) (K.Opening).Travel, 4) & "" & Driver.Log.Image (K.Hit, 4)	4	format	digits printed in a log line or a message

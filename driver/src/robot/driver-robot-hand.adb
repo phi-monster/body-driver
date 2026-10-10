@@ -1053,7 +1053,8 @@ package body Driver.Robot.Hand is
                           & (if Driver.Robot.Hand.Tips.Latest_Agrees (R.Book)
                              then "a tip rests on it"
                              else "no tip rests on it (it stopped short of the table, or no tip is fixed)")
-                          & "; the tips at this opening: " & Tips_Said (R, Which));
+                          & "; the tips at this opening: " & Tips_Said (R, Which)
+                          & "; the fit of the presses: " & Driver.Robot.Hand.Tips.Fit_Account (R.Book));
          Size_Up (R, Id);
       else
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image

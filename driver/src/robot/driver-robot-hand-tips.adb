@@ -1,5 +1,7 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
+with Driver.Log;
 
 package body Driver.Robot.Hand.Tips is
 
@@ -358,6 +360,29 @@ package body Driver.Robot.Hand.Tips is
          return Real'Min (Sight.Travel, Sight.Pitch * Sqrt (S.Pixels ** 2 + S.Pixels_Sigma ** 2));
       end;
    end Slid_Angle;
+
+   function Fit_Account (B : Book) return String is
+      use Ada.Strings.Unbounded;
+      Text : Unbounded_String :=
+        To_Unbounded_String (if B.Fitted.Is_Empty then "not fitted" elsif Fit_Ok (B) then "solved" else "not solved");
+   begin
+      if B.Sights.Is_Empty then
+         return To_String (Text);
+      end if;
+      declare
+         T : constant Sight_Table := Sights_Of (B);
+      begin
+         for K of B.Kept loop
+            if K.Lobe in T'Range then
+               Append (Text, "; lobe" & K.Lobe'Image & " " & (if K.Opening = Open then "open" else "closed")
+                       & ", slid up to " & Driver.Log.Image (Slid_Angle (K, T (K.Lobe) (K.Opening)), 4) & " of "
+                       & Driver.Log.Image (T (K.Lobe) (K.Opening).Travel, 4) & " rad, hit " & Driver.Log.Image (K.Hit, 4)
+                       & (if K.Agrees then ", rests" else ", left out"));
+            end if;
+         end loop;
+      end;
+      return To_String (Text);
+   end Fit_Account;
 
    procedure Refit (B : in out Book) is
       T     : constant Sight_Table := Sights_Of (B);
