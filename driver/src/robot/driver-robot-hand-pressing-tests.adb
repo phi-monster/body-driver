@@ -101,8 +101,9 @@ package body Driver.Robot.Hand.Pressing.Tests is
       Terms : constant Natural := Fit.Terms (Joint_Count);
    begin
       R.Fitted := True;
-      for J of Truth loop
-         R.Joints.Append (Joint_Fit'(W => J.W, P => J.P, C => J.C, Slide => J.Slide));
+      for K in Truth'Range loop
+         R.Joints.Append (Joint_Fit'(W => Truth (K).W, P => Truth (K).P, C => Truth (K).C, Slide => Truth (K).Slide));
+         R.Chain.Append (K - Truth'First + 1);   --  built in the order of its readings
          R.Reference.Append (0.0);
       end loop;
       R.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);

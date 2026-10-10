@@ -92,10 +92,16 @@ from the rest pose confirms no end by itself: its stops share one pose.
 model that has seen no robot takes the file's groups and eyes, so a measured
 body can be loaded and planned on with no robot connected.
 
-### The kinematics (method 6)
+### The kinematics (method 7)
 
 Per arm, `kinematics.arms` holds:
 
+- `chain`: the arm's joints along it, from its base to the eye, each by its
+  reading's place in the group (1 for the first). The robot reports its
+  joints in any order; the fit finds the order from the keyframes that moved
+  several joints at once (method 7; method 6 took the readings' order, as
+  the x5 gives it). Each joint's `c` is its turn (radians) or slide (the
+  arm's unit) per reading unit, measured: the readings may be in any unit.
 - `joints`, `lens` and `covariance`: the fit of the arm and of the eye it
   carries, in the eye's frame at the arm's reference readings (`reference`):
   the arm's own frame, in the arm's own unit. The unit is the first fit's:

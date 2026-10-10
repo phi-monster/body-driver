@@ -209,7 +209,8 @@ package body Driver.Robot.Body_File is
          begin
             Add (Separator (K = M.Kinematics.First_Index) & LF & "  {""arm"": " & Int (Integer (R.Arm))
                  & ", ""group"": " & Int (Integer (R.Group)) & ", ""eye"": " & Int (Integer (R.Eye))
-                 & ", ""fitted"": " & Flag (F.Fitted) & ", ""reference"": " & Reals (F.Reference) & ", ""joints"": [");
+                 & ", ""fitted"": " & Flag (F.Fitted) & ", ""reference"": " & Reals (F.Reference)
+                 & ", ""chain"": " & Counts (F.Chain) & ", ""joints"": [");
             for J in F.Joints.First_Index .. F.Joints.Last_Index loop
                Add (Separator (J = F.Joints.First_Index) & "{""w"": " & Three (F.Joints (J).W)
                     & ", ""p"": " & Three (F.Joints (J).P) & ", ""c"": " & Num (F.Joints (J).C)
@@ -646,6 +647,7 @@ package body Driver.Robot.Body_File is
                   begin
                      R.Result.Fitted := Truth (X, "fitted");
                      R.Result.Reference := Reals_Of (Field (X, "reference"));
+                     R.Result.Chain := Counts_Of (Field (X, "chain"));
                      for J in 1 .. Size (Js) loop
                         R.Result.Joints.Append
                           (Joint_Fit'(W     => Three_Of (Field (Item (Js, J), "w")),

@@ -574,6 +574,7 @@ private
       Fitted    : Boolean := False;
       Reference : Real_Vectors.Vector;    --  the readings of the reference keyframe
       Joints    : Joint_Fit_Vectors.Vector;
+      Chain     : Count_Vectors.Vector;   --  the joints along the arm from its base, by their readings' places (Kinematics.Fit)
       Lens      : Lens_Fit;
       Used      : Natural := 0;           --  sightings in the last fit
       Median_Px, Sigma_Px : Real := 0.0;

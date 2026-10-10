@@ -3,39 +3,69 @@
 --  (legacy/driver/src/kinem.adb), rewritten to measured noise, the one
 --  significance rule and no tuning numbers.
 --
---  The arm is a chain of joints read in the order of its readings. Joint j
---  turns the eye about an axis (unit W, through the point P nearest the
---  reference eye) by C times its reading change, or slides it along W by C
---  times its reading change. Everything is in the reference eye's frame: the
---  eye at the reference readings (the first keyframe), z along its optical
---  axis, x along +U, y along +V. The eye at readings Q is
+--  The arm is a chain of joints. Joint j turns the eye about an axis (unit
+--  W, through the point P nearest the reference eye) by C times its reading
+--  change, or slides it along W by C times its reading change. C is the
+--  reading's unit, which no robot is asked to report in any one way (radians,
+--  degrees, an encoder's steps, a scale the scrambler drew): the fit measures
+--  it with the rest. The joints compose in their order along the arm, from
+--  its base to the eye, which is not the order of the readings either (a
+--  scrambled run gives them in any order): the fit measures that too (Chain).
+--  Everything is in the reference eye's frame: the eye at the reference
+--  readings (the first keyframe), z along its optical axis, x along +U, y
+--  along +V. The eye at readings Q is
 --
---     T (Q) = exp (S_1 (Q_1 - Q0_1)) ... exp (S_N (Q_N - Q0_N)),
+--     T (Q) = exp (S_c1 (Q_c1 - Q0_c1)) ... exp (S_cN (Q_cN - Q0_cN)),
 --
---  so a point X of the reference frame is seen by the eye at Q at
---  Inverse (T (Q)) * X. Images fix lengths only up to one factor; the fit
---  fixes it by making the root mean square of the eye positions over the
---  unit's keyframes one model unit: all the keyframes of an arm's first fit,
---  and afterwards those of the first fit (Fit's Unit_Frames), so that a
---  keyframe taken later refines every term and moves no length.
+--  c1 the joint nearest the base and cN the one nearest the eye, so a point X
+--  of the reference frame is seen by the eye at Q at Inverse (T (Q)) * X.
+--  Images fix lengths only up to one factor; the fit fixes it by making the
+--  root mean square of the eye positions over the unit's keyframes one model
+--  unit: all the keyframes of an arm's first fit, and afterwards those of the
+--  first fit (Fit's Unit_Frames), so that a keyframe taken later refines
+--  every term and moves no length.
 --
---  The stages, as the legacy driver had them:
+--  The stages, as the legacy driver had them but for the readings' units and
+--  order, which it took from the x5 (radians, in the order of its chain):
 --  1. every joint alone, from the keyframes where only it moved (the others
---     within the step their eye can see): its axis direction and on which
---     side of the eye it lies, over a grid of directions and focal lengths,
---     the side solved in closed form, scored by the median Sampson residual;
---     the focal length shared by the joints;
---  2. the joints together with the focal length, by robust least squares;
+--     within the step their eye can see): its axis direction, how far it
+--     turns per reading unit, and on which side of the eye the axis lies, over
+--     a grid of directions and focal lengths. About each direction each of
+--     its widest keyframes is fitted as a turn about it and a shift across
+--     it, the turn free (the essential matrix of such a motion has four
+--     entries, linear in the sightings); the direction they fit best is the
+--     axis, the turns over the reading changes its scale, and its side is
+--     solved in closed form; then axis, side and scale are refined by robust
+--     least squares on every keyframe of the joint alone, whose median
+--     Sampson residual scores the focal length shared by the joints;
+--  2. the joints together with the focal length, the scales among them, by
+--     robust least squares;
 --  3. how far every axis lies from the eye, relative to the others: a point
 --     the reference keyframe tracks into the keyframes of two joints has one
 --     depth, while each joint's keyframes alone give it a depth that scales
 --     with that joint's distance; each distance's sign puts the points in
 --     front;
---  4. everything at once (focal lengths, principal point, two radial
---     distortion terms, axes, distances, reading scales) by robust least
---     squares on the Sampson residuals, the matches that fit re-chosen until
---     the choice no longer changes; the sign of all translations by which
---     side of both eyes the matched points lie on;
+--  4. the keyframes of one joint each in one refinement of the tracks, as
+--     stage 5 has it, which any order of the joints explains alike: an
+--     epipolar residual cannot tell a turn that shifts the view the way the
+--     joint's shift moves it (a pitch joint whose axis lies behind the eye),
+--     for a point's depth along its line of sight takes it up; the one depth
+--     a point has for every joint tells it. Then the order of the joints
+--     along the arm, from the keyframes that moved several at once: a
+--     joint's own keyframes tell its axis wherever it is along the arm, but a
+--     turn of a joint nearer the base carries the axes of the joints after
+--     it, so the eye's pose depends on the order its joints compose in, and
+--     it moves the eye mostly in how far it goes, which no epipolar residual
+--     sees: the points, at their depths, reprojected into those keyframes
+--     tell it. From the joints ordered by their axes' distance from the eye,
+--     the farthest first, a joint is moved to another place in the order
+--     while that lowers the median reprojection residual by more than its
+--     standard error. Then everything at once (focal
+--     lengths, principal point, two radial distortion terms, axes, distances,
+--     reading scales) by robust least squares on the Sampson residuals, the
+--     matches that fit re-chosen until the choice no longer changes; the sign
+--     of all translations by which side of both eyes the matched points lie
+--     on;
 --  5. the points the keyframes follow, each with a depth of its own along its
 --     reference line of sight, and every sighting's reprojection residual
 --     (the depths solved by their Schur complement), until a step cannot move
@@ -75,10 +105,16 @@ package Driver.Robot.Kinematics.Fit is
    end record;
 
    type Joint_Array is array (Positive range <>) of Joint;
+   --  An arm's joints in the order of their readings.
 
-   function Eye_At (J : Joint_Array; Change : Real_Array) return Rigid
-     with Pre => Change'Length = J'Length;
-   --  The eye at readings Q0 + Change, in the reference eye's frame.
+   type Chain_Order is array (Positive range <>) of Positive;
+   --  An arm's joints along it, from its base to the eye: each by its place
+   --  among the readings, 1 for the first.
+
+   function Eye_At (J : Joint_Array; Chain : Chain_Order; Change : Real_Array) return Rigid
+     with Pre => Change'Length = J'Length and then Chain'Length = J'Length;
+   --  The eye at readings Q0 + Change, in the reference eye's frame: the
+   --  joints composed in Chain's order, each by its own reading's change.
 
    procedure Across (W : Vec3; E1, E2 : out Vec3);
    --  Two unit directions across W that make a right-handed frame with it.
@@ -108,9 +144,10 @@ package Driver.Robot.Kinematics.Fit is
 
    function Unit_Sigma
      (Joints     : Joint_Array;
+      Chain      : Chain_Order;
       Changes    : Driver.Numerics.Arrays.Real_Matrix;
       Covariance : Real_Lists.Vector) return Real
-     with Pre => Changes'Length (2) = Joints'Length;
+     with Pre => Changes'Length (2) = Joints'Length and then Chain'Length = Joints'Length;
    --  How uncertain the fit's unit is against its own depths, relative: the
    --  unit is the root mean square of the eye positions over the unit's
    --  keyframes (Changes, one keyframe a row), and the fit's covariance holds
@@ -120,10 +157,11 @@ package Driver.Robot.Kinematics.Fit is
 
    procedure Pose_Covariance
      (Joints      : Joint_Array;
+      Chain       : Chain_Order;
       Change      : Real_Array;
       Covariance  : Real_Lists.Vector;
       Turn, Place : out Mat3)
-     with Pre => Change'Length = Joints'Length;
+     with Pre => Change'Length = Joints'Length and then Chain'Length = Joints'Length;
    --  What the fit's uncertainty leaves the eye at readings Q0 + Change
    --  (Eye_At) uncertain by: the covariance of its turn (the rotation vector
    --  that takes it to the truth, in the reference frame, as
@@ -193,10 +231,11 @@ package Driver.Robot.Kinematics.Fit is
       Width, Height : Positive;
       Unit_Frames : Natural;           --  how many of the first keyframes define the unit of length (0: all of them)
       Joints     : out Joint_Array;
+      Chain      : out Chain_Order;
       L          : out Lens;
       Report     : out Fit_Report)
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length
-                 and then Unit_Frames <= Changes'Length (1);
+                 and then Chain'Length = Visible'Length and then Unit_Frames <= Changes'Length (1);
    --  The covariance is the inverse normal equations around the spread of the
    --  gradient (Conley's sandwich), made positive semi-definite (Sandwich). The
    --  spread weights every pair of residual rows by the covariance of their

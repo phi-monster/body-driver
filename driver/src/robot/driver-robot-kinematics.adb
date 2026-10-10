@@ -1,4 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings;
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with Driver.Clock;
@@ -147,6 +149,15 @@ package body Driver.Robot.Kinematics is
       Collect_Into (R, R.World_Pending, R.World_Matches);
       Collect_Into (R, R.Eye_Pending, R.Eye_Matches);
    end Collect;
+
+   --  The arm's joints along it, from its base, as its fit found them.
+   function Chain_Of (R : Arm_Fit) return Fit.Chain_Order is
+     ([for K in 1 .. Natural (R.Chain.Length) => Positive (R.Chain (R.Chain.First_Index + K - 1))]);
+
+   function Chain_Image (C : Fit.Chain_Order) return String is
+     (if C'Length = 0 then ""
+      elsif C'Length = 1 then Ada.Strings.Fixed.Trim (C (C'First)'Image, Ada.Strings.Left)
+      else Ada.Strings.Fixed.Trim (C (C'First)'Image, Ada.Strings.Left) & ", " & Chain_Image (C (C'First + 1 .. C'Last)));
 
    --  The evidence is an arm's now: the graph still lists its group as an
    --  arm, under that number, carrying that eye. Evidence is kept by group,
@@ -682,6 +693,7 @@ package body Driver.Robot.Kinematics is
                      Seen   : Sighting_Access := new Fit.Sighting_Array (1 .. Kept);
                      K      : Natural := 0;
                      Joints : Fit.Joint_Array (1 .. N);
+                     Chain  : Fit.Chain_Order (1 .. N);
                      Lens   : Fit.Lens;
                      Report : Fit.Fit_Report;
                      Result : Arm_Fit;
@@ -700,7 +712,7 @@ package body Driver.Robot.Kinematics is
                      --  keyframe taken after it refines every term, and moves none of
                      --  the lengths the world was measured in.
                      Fit.Fit (Changes.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width, M.Eyes (R.Eye).Grid.Height,
-                              R.Result.Unit_Frames, Joints, Lens, Report);
+                              R.Result.Unit_Frames, Joints, Chain, Lens, Report);
                      --  The table its eye sees, away from it towards the eye,
                      --  and its tracks' points: Up is the first arm's (the world
                      --  is that eye's reference frame), and the points place the
@@ -781,6 +793,9 @@ package body Driver.Robot.Kinematics is
                      for J of Joints loop
                         Result.Joints.Append (Joint_Fit'(W => J.W, P => J.P, C => J.C, Slide => J.Slide));
                      end loop;
+                     for P of Chain loop
+                        Result.Chain.Append (P);
+                     end loop;
                      Result.Lens := (Fx => Lens.Fx, Fy => Lens.Fy, Cx => Lens.Cx, Cy => Lens.Cy, K1 => Lens.K1, K2 => Lens.K2);
                      for X of Report.Covariance loop
                         Result.Covariance.Append (X);
@@ -799,6 +814,7 @@ package body Driver.Robot.Kinematics is
                                 & Report.Used'Image & " fit, median " & Driver.Log.Image (Report.Median_Px, 3)
                                 & " px, noise " & Driver.Log.Image (Report.Sigma_Px, 3) & " px; focal "
                                 & Driver.Log.Image (Lens.Fx, 2) & " x " & Driver.Log.Image (Lens.Fy, 2) & " px"
+                                & "; its joints from the base, by their readings: " & Chain_Image (Chain)
                                 & (if Report.Errors.Measured
                                    then "; errors, px: a sighting's own "
                                         & Driver.Log.Image (Report.Errors.Alone, 3) & ", a point's in every keyframe "
@@ -840,7 +856,9 @@ package body Driver.Robot.Kinematics is
          N      : constant Natural := Natural (R.Result.Joints.Length);
          Frames : constant Natural := R.Result.Unit_Frames;
       begin
-         if N = 0 or else Frames = 0 or else Natural (R.Result.Reference.Length) /= N then
+         if N = 0 or else Frames = 0 or else Natural (R.Result.Reference.Length) /= N
+           or else Natural (R.Result.Chain.Length) /= N
+         then
             return Real'Last;
          end if;
          declare
@@ -863,7 +881,7 @@ package body Driver.Robot.Kinematics is
             for X of R.Result.Covariance loop
                Cov.Append (X);
             end loop;
-            return Result : constant Real := Fit.Unit_Sigma (Joints, Changes.all, Cov) do
+            return Result : constant Real := Fit.Unit_Sigma (Joints, Chain_Of (R.Result), Changes.all, Cov) do
                Free (Changes);
             end return;
          end;
@@ -1634,6 +1652,7 @@ package body Driver.Robot.Kinematics is
       for R of M.Kinematics loop
          if R.Arm = A and then Current (M, R) and then R.Result.Fitted
            and then Natural (R.Result.Joints.Length) = Readings'Length
+           and then Natural (R.Result.Chain.Length) = Readings'Length
            and then Natural (R.Result.Reference.Length) = Readings'Length
          then
             declare
@@ -1648,7 +1667,7 @@ package body Driver.Robot.Kinematics is
                      Change (J) := Readings (Readings'First + J - 1) - R.Result.Reference (J - 1);
                   end;
                end loop;
-               return Fit.Eye_At (Joints, Change);
+               return Fit.Eye_At (Joints, Chain_Of (R.Result), Change);
             end;
          end if;
       end loop;
@@ -1661,7 +1680,7 @@ package body Driver.Robot.Kinematics is
       Turn := [[Real'Last, 0.0, 0.0], [0.0, Real'Last, 0.0], [0.0, 0.0, Real'Last]];
       Place := Turn;
       if R.Fitted and then Natural (R.Joints.Length) = Readings'Length
-        and then Natural (R.Reference.Length) = Readings'Length
+        and then Natural (R.Chain.Length) = Readings'Length and then Natural (R.Reference.Length) = Readings'Length
       then
          declare
             Joints : Fit.Joint_Array (1 .. Readings'Length);
@@ -1679,7 +1698,7 @@ package body Driver.Robot.Kinematics is
             for X of R.Covariance loop
                Cov.Append (X);
             end loop;
-            Fit.Pose_Covariance (Joints, Change, Cov, Turn, Place);
+            Fit.Pose_Covariance (Joints, Chain_Of (R), Change, Cov, Turn, Place);
          end;
       end if;
    end Pose_Covariance;

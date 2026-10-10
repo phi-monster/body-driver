@@ -55,13 +55,13 @@ package body Driver.Robot.Kinematics.Fit is
 
    function Dot (A, B : Vec3) return Real is (A * B);
 
-   function Eye_At (J : Joint_Array; Change : Real_Array) return Rigid is
+   function Eye_At (J : Joint_Array; Chain : Chain_Order; Change : Real_Array) return Rigid is
       T : Rigid := Identity;
    begin
-      for K in J'Range loop
+      for Place of Chain loop
          declare
-            A     : Joint renames J (K);
-            Theta : constant Real := A.C * Change (Change'First + (K - J'First));
+            A     : Joint renames J (J'First + Place - 1);
+            Theta : constant Real := A.C * Change (Change'First + Place - 1);
             Step  : Rigid;
          begin
             if A.Slide then
@@ -426,6 +426,7 @@ package body Driver.Robot.Kinematics.Fit is
      (Changes : Driver.Numerics.Arrays.Real_Matrix;
       Sight   : Sighting_Array;
       Joints  : in out Joint_Array;
+      Chain   : Chain_Order;
       L       : in out Lens;
       Report  : in out Fit_Report)
    is
@@ -541,7 +542,7 @@ package body Driver.Robot.Kinematics.Fit is
             Views : Rigid_Access := new Rigid_Array (1 .. Frames);
          begin
             for F in 1 .. Frames loop
-               Views (F) := Inverse (Eye_At (Jx, Changes_Of (F)));
+               Views (F) := Inverse (Eye_At (Jx, Chain, Changes_Of (F)));
             end loop;
             for K in 1 .. Index'Length loop
                declare
@@ -566,7 +567,7 @@ package body Driver.Robot.Kinematics.Fit is
          begin
             for Sg of Sight loop
                declare
-                  T  : constant Rigid := Eye_At (Joints, Changes_Of (Sg.Frame));
+                  T  : constant Rigid := Eye_At (Joints, Chain, Changes_Of (Sg.Frame));
                   H0 : constant Vec3 := Ray (L, Sg.U0, Sg.V0);
                   Bv : constant Vec3 := T.Rotation * Ray (L, Sg.U, Sg.V);
                   function Across (V : Vec3) return Vec3 is (V - (Dot (V, Bv) / Dot (Bv, Bv)) * Bv);
@@ -1127,6 +1128,7 @@ package body Driver.Robot.Kinematics.Fit is
       Width, Height : Positive;
       Unit_Frames : Natural;
       Joints     : out Joint_Array;
+      Chain      : out Chain_Order;
       L          : out Lens;
       Report     : out Fit_Report)
    is
@@ -1169,8 +1171,16 @@ package body Driver.Robot.Kinematics.Fit is
          return 0;
       end Single;
 
+      --  The keyframe moved two joints or more, as far as their eyes can tell: what tells the joints' order.
+      function Several (Frame : Positive) return Boolean is
+        (for some J in 1 .. N => Moved (Frame, J) and then (for some K in J + 1 .. N => Moved (Frame, K)));
+
       Lens0  : Lens := (Fx | Fy => 1.0, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, others => 0.0);
       Counts : array (1 .. N) of Natural := [others => 0];
+      --  The joints along the arm, from the base (stage 4 finds it; the joints alone are fitted before it).
+      Order  : Chain_Order (1 .. N) := [for K in 1 .. N => K];
+      --  Every track's depth from the keyframes of one joint each (stage 4).
+      Track_Depths : Real_Lists.Vector;
       Usable : Flags (1 .. N) := [others => False];
 
       procedure Fail (Why : String) is
@@ -1184,7 +1194,7 @@ package body Driver.Robot.Kinematics.Fit is
       procedure Poses_Of (Jx : Joint_Array; P : out Pose_Array) is
       begin
          for Frame in 1 .. Frames loop
-            P (Frame) := Eye_At (Jx, Changes_Of (Frame));
+            P (Frame) := Eye_At (Jx, Order, Changes_Of (Frame));
          end loop;
       end Poses_Of;
 
@@ -1195,7 +1205,7 @@ package body Driver.Robot.Kinematics.Fit is
       begin
          for Frame in 1 .. Unit_Count loop
             declare
-               T : constant Vec3 := Eye_At (Jx, Changes_Of (Frame)).Translation;
+               T : constant Vec3 := Eye_At (Jx, Order, Changes_Of (Frame)).Translation;
             begin
                Sum := Sum + T * T;
             end;
@@ -1218,6 +1228,7 @@ package body Driver.Robot.Kinematics.Fit is
    begin
       Report := (others => <>);
       Joints := [others => <>];
+      Chain := Order;
       L := Lens0;
       if N = 0 or else S = 0 or else Frames < 2 then
          Fail ("no keyframes or no matches");
@@ -1240,30 +1251,36 @@ package body Driver.Robot.Kinematics.Fit is
       --  Stage 1: every joint alone.
       Report.Stage := 1;
       declare
-         F_Low  : Real := Real'Last;
-         F_High : Real := 0.0;
+         Moving : Boolean := False;
 
          --  The directions searched: a Fibonacci lattice on the sphere, as
          --  dense as an icosahedron split four times (2562 points, about
-         --  four degrees apart); a direction and its opposite are both kept,
-         --  since the turn's sign is the reading's.
+         --  four degrees apart), of which the half on one side: a direction
+         --  and its opposite are one axis, and the sign of the turn is
+         --  measured with its size (Planar_About).
          Directions : constant Natural := 2562;
          Sphere     : array (1 .. Directions) of Vec3;
 
          --  A joint's sightings as lines of sight at one focal length, with
-         --  the turn of their keyframe, grouped by keyframe.
+         --  the joint's reading change at their keyframe, grouped by keyframe.
          type Sight_Line is record
-            Frame : Positive := 1;
-            Theta : Real := 0.0;
-            H0, H : Vec3 := [0.0, 0.0, 1.0];
+            Frame   : Positive := 1;
+            Reading : Real := 0.0;
+            H0, H   : Vec3 := [0.0, 0.0, 1.0];
          end record;
          type Sight_Line_Array is array (Positive range <>) of Sight_Line;
          type Sight_Line_Access is access Sight_Line_Array;
          procedure Free is new Ada.Unchecked_Deallocation (Sight_Line_Array, Sight_Line_Access);
          Lines : array (1 .. N) of Sight_Line_Access;
+         --  Every keyframe of the joint alone, at one focal length.
+         Every : array (1 .. N) of Sight_Line_Access;
 
-         --  The search scores a joint on its widest turn each way: the keyframes
-         --  that tell its axis best; the later stages use every keyframe.
+         --  The grid scores a joint on its widest turn each way: the keyframes
+         --  that tell its axis best. Its refinement, and the score it gives the
+         --  focal length, take every keyframe of the joint alone: turns of
+         --  many sizes, whose sizes trade with the focal length in the small
+         --  ones and not in the large (the image moves by the focal length
+         --  times a turn's tangent, not its angle).
          Up_Frame, Down_Frame : array (1 .. N) of Natural := [others => 0];
          Grid_Counts : array (1 .. N) of Natural := [others => 0];
 
@@ -1281,15 +1298,21 @@ package body Driver.Robot.Kinematics.Fit is
          begin
             for J in 1 .. N loop
                Free (Lines (J));
+               Free (Every (J));
                Lines (J) := new Sight_Line_Array (1 .. Grid_Counts (J));
+               Every (J) := new Sight_Line_Array (1 .. Counts (J));
                declare
-                  K : Natural := 0;
+                  K, E : Natural := 0;
                begin
                   for X of Sight loop
-                     if Single (X.Frame) = J and then Widest (X.Frame) then
-                        K := K + 1;
-                        Lines (J) (K) := (Frame => X.Frame, Theta => Change (X.Frame, J),
+                     if Single (X.Frame) = J then
+                        E := E + 1;
+                        Every (J) (E) := (Frame => X.Frame, Reading => Change (X.Frame, J),
                                           H0 => Ray (Lx, X.U0, X.V0), H => Ray (Lx, X.U, X.V));
+                        if Widest (X.Frame) then
+                           K := K + 1;
+                           Lines (J) (K) := Every (J) (E);
+                        end if;
                      end if;
                   end loop;
                end;
@@ -1300,15 +1323,18 @@ package body Driver.Robot.Kinematics.Fit is
             Score : Real := Real'Last;
             W     : Vec3 := [0.0, 0.0, 1.0];
             Phi   : Real := 0.0;
+            Scale : Real := 0.0;   --  the turn per reading unit
          end record;
          type Best_Array is array (1 .. N) of Best_Record;
 
-         --  The side of the eye the axis W lies on, solved in closed form (the
-         --  epipolar constraint is linear in the axis point), the constraints
-         --  weighted to Sampson residuals and by Huber at the noise of a first
-         --  solution; the median residual left.
+         --  The side of the eye the axis W lies on, the joint turning by Scale
+         --  per reading unit, solved in closed form (the epipolar constraint is
+         --  linear in the axis point), the constraints weighted to Sampson
+         --  residuals and by Huber at the noise of a first solution; the median
+         --  residual left.
          procedure Best_Phi
-           (J : Positive; F : Real; W : Vec3; Phi : out Real; Median_Px : out Real; Ga, Gb, Wt, Rs : out Real_Array)
+           (J : Positive; F : Real; W : Vec3; Scale : Real; Phi : out Real; Median_Px : out Real;
+            Ga, Gb, Wt, Rs : out Real_Array)
          is
             L      : Sight_Line_Array renames Lines (J).all;
             K      : constant Natural := L'Length;
@@ -1322,7 +1348,7 @@ package body Driver.Robot.Kinematics.Fit is
             for I in 1 .. K loop
                if L (I).Frame /= Last then
                   Last := L (I).Frame;
-                  R := Rot (W, L (I).Theta);
+                  R := Rot (W, Scale * L (I).Reading);
                end if;
                declare
                   Y  : constant Vec3 := Transpose (R) * L (I).H0;
@@ -1369,7 +1395,7 @@ package body Driver.Robot.Kinematics.Fit is
                   for I in 1 .. K loop
                      if L (I).Frame /= Last then
                         Last := L (I).Frame;
-                        R := Rot (W, L (I).Theta);
+                        R := Rot (W, Scale * L (I).Reading);
                      end if;
                      declare
                         Rr : Mat3;
@@ -1406,6 +1432,157 @@ package body Driver.Robot.Kinematics.Fit is
             Median_Px := Driver.Stats.Median (Rs);
          end Best_Phi;
 
+         --  How well joint J's widest keyframes are each a turn about the
+         --  direction W and a shift across it, at focal length F, and how far
+         --  the joint turns per reading unit about W: no reading is taken to be
+         --  in any unit, and the direction is judged before any turn is tied to
+         --  the readings. About W, in a frame whose third axis is W, the
+         --  essential matrix of such a motion has four entries, (A, B) down its
+         --  last column and (E, F) along its last row, (E, F) being (A, B)
+         --  turned by the keyframe's turn and reversed, and the epipolar
+         --  constraint is linear in the four. They are the least squares of the
+         --  keyframe's sightings, weighted to Sampson residuals and by Huber at
+         --  the noise of a first solution, as Best_Phi weights its own; the
+         --  turn is the angle from (A, B) to -(E, F). Score is the median
+         --  Sampson residual of the sightings under their keyframe's motion
+         --  (Real'Last when no keyframe's is told), Scale the least squares of
+         --  the turns over the reading changes: 0 when no keyframe's turn is
+         --  told (fewer sightings than the three a motion about W has, or none
+         --  of the four entries' pairs is nonzero).
+         procedure Planar_About
+           (J : Positive; F : Real; W : Vec3; Wt, Rs, Fits : in out Real_Array; Scale, Score : out Real)
+         is
+            L      : Sight_Line_Array renames Lines (J).all;
+            K      : constant Natural := L'Length;
+            E1, E2 : Vec3;
+            Num, Den : Real := 0.0;
+            Filled   : Natural := 0;   --  residuals in Fits
+
+            --  The sighting's row of the constraint: its lines of sight in the frame of W.
+            function Row (I : Positive) return Real_Vector is
+               H0 : constant Vec3 := [Dot (E1, L (I).H0), Dot (E2, L (I).H0), Dot (W, L (I).H0)];
+               H  : constant Vec3 := [Dot (E1, L (I).H), Dot (E2, L (I).H), Dot (W, L (I).H)];
+            begin
+               return [1 => H (1) * H0 (3), 2 => H (2) * H0 (3), 3 => H (3) * H0 (1), 4 => H (3) * H0 (2)];
+            end Row;
+
+            function Turn_Of (V : Real_Vector) return Real is
+              (Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));
+         begin
+            Perp (W, E1, E2);
+            for Way in 1 .. 2 loop
+               if (if Way = 1 then Up_Frame (J) else Down_Frame (J)) > 0 then
+                  declare
+                     Frame : constant Positive := (if Way = 1 then Up_Frame (J) else Down_Frame (J));
+                     V     : Real_Vector (1 .. 4) := [others => 0.0];
+                     Count : Natural := 0;
+                     Told  : Boolean := False;
+                     Change_Here : Real := 0.0;
+                  begin
+                     for I in 1 .. K loop
+                        if L (I).Frame = Frame then
+                           Wt (I) := 1.0;
+                           Count := Count + 1;
+                           Change_Here := L (I).Reading;
+                        end if;
+                     end loop;
+                     if Count >= 3 then
+                        for Pass in 1 .. 2 loop
+                           declare
+                              A       : Real_Matrix (1 .. 4, 1 .. 4) := [others => [others => 0.0]];
+                              Values  : Real_Vector (1 .. 4);
+                              Vectors : Real_Matrix (1 .. 4, 1 .. 4);
+                              Least   : Positive := 1;
+                           begin
+                              for I in 1 .. K loop
+                                 if L (I).Frame = Frame then
+                                    declare
+                                       G : constant Real_Vector := Row (I);
+                                    begin
+                                       for P in 1 .. 4 loop
+                                          for Q in P .. 4 loop
+                                             A (P, Q) := A (P, Q) + Wt (I) * G (P) * G (Q);
+                                          end loop;
+                                       end loop;
+                                    end;
+                                 end if;
+                              end loop;
+                              --  Symmetric to the last bit, as Eigensystem asks: its lower half the upper's.
+                              for P in 2 .. 4 loop
+                                 for Q in 1 .. P - 1 loop
+                                    A (P, Q) := A (Q, P);
+                                 end loop;
+                              end loop;
+                              Eigensystem (A, Values, Vectors);
+                              for P in 2 .. 4 loop
+                                 if Values (P) < Values (Least) then
+                                    Least := P;
+                                 end if;
+                              end loop;
+                              V := [for P in 1 .. 4 => Vectors (P, Least)];
+                              Told := V (1) ** 2 + V (2) ** 2 > 0.0 and then V (3) ** 2 + V (4) ** 2 > 0.0;
+                              exit when not Told or else Pass = 2;
+                              --  The weights for the second solution, from the motion of the first.
+                              declare
+                                 Turn : constant Real := Turn_Of (V);
+                                 Rr   : constant Mat3 := Rot (W, -Turn);
+                                 Tt   : constant Vec3 := (-V (2)) * E1 + V (1) * E2;
+                                 M    : Natural := 0;
+                              begin
+                                 for I in 1 .. K loop
+                                    if L (I).Frame = Frame then
+                                       M := M + 1;
+                                       Rs (M) := Sampson (Rr, Tt, L (I).H0, L (I).H, F);
+                                    end if;
+                                 end loop;
+                                 declare
+                                    Sigma : constant Real := Noise_Of (Rs (1 .. M));
+                                 begin
+                                    M := 0;
+                                    for I in 1 .. K loop
+                                       if L (I).Frame = Frame then
+                                          M := M + 1;
+                                          declare
+                                             G         : constant Real_Vector := Row (I);
+                                             Algebraic : constant Real := G (1) * V (1) + G (2) * V (2) + G (3) * V (3)
+                                                                          + G (4) * V (4);
+                                          begin
+                                             if Algebraic /= 0.0 and then Rs (M) /= 0.0 then
+                                                Wt (I) := (Rs (M) / Algebraic) ** 2;
+                                             end if;
+                                             if Sigma > 0.0 then
+                                                Wt (I) := Wt (I) * Huber (Rs (M) / Sigma);
+                                             end if;
+                                          end;
+                                       end if;
+                                    end loop;
+                                 end;
+                              end;
+                           end;
+                        end loop;
+                     end if;
+                     if Told then
+                        Num := Num + Turn_Of (V) * Change_Here;
+                        Den := Den + Change_Here ** 2;
+                        declare
+                           Rr : constant Mat3 := Rot (W, -Turn_Of (V));
+                           Tt : constant Vec3 := (-V (2)) * E1 + V (1) * E2;
+                        begin
+                           for I in 1 .. K loop
+                              if L (I).Frame = Frame then
+                                 Filled := Filled + 1;
+                                 Fits (Filled) := abs Sampson (Rr, Tt, L (I).H0, L (I).H, F);
+                              end if;
+                           end loop;
+                        end;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            Scale := (if Den > 0.0 then Num / Den else 0.0);
+            Score := (if Filled > 0 then Driver.Stats.Median (Fits (1 .. Filled)) else Real'Last);
+         end Planar_About;
+
          --  Every joint's best direction at focal length F, the joints scanned
          --  at once, one task each: their sightings are their own.
          procedure Search (F : Real; Best : out Best_Array) is
@@ -1429,21 +1606,89 @@ package body Driver.Robot.Kinematics.Fit is
                      Gb : Real_Access := new Real_Array (1 .. K);
                      Wt : Real_Access := new Real_Array (1 .. K);
                      Rs : Real_Access := new Real_Array (1 .. K);
+                     Fs : Real_Access := new Real_Array (1 .. K);
                   begin
-                     for D of Sphere loop
+                     --  The axis: the direction about which the widest keyframes are each most nearly a turn and a
+                     --  shift across it, their turns free; then its scale, and its side at that scale.
+                     for D of Sphere (1 .. Directions / 2) loop
                         declare
-                           Ph, Md : Real;
+                           Sc, Sd : Real;
                         begin
-                           Best_Phi (J, F, D, Ph, Md, Ga.all, Gb.all, Wt.all, Rs.all);
-                           if Md < Result.Score then
-                              Result := (Score => Md, W => D, Phi => Ph);
+                           Planar_About (J, F, D, Wt.all, Rs.all, Fs.all, Sc, Sd);
+                           if Sc /= 0.0 and then Sd < Result.Score then
+                              Result := (Score => Sd, W => D, Phi => 0.0, Scale => Sc);
                            end if;
                         end;
                      end loop;
+                     if Result.Scale /= 0.0 then
+                        declare
+                           Ph, Md : Real;
+                        begin
+                           Best_Phi (J, F, Result.W, Result.Scale, Ph, Md, Ga.all, Gb.all, Wt.all, Rs.all);
+                           Result.Phi := Ph;
+                           Result.Score := Md;
+                        end;
+                     end if;
+                     --  The best direction of the grid refined, its tilt, its side and the size of its turn per
+                     --  reading unit, by robust least squares on every sighting of the joint alone at this focal
+                     --  length, whose median residual scores it: the
+                     --  grid is four degrees apart, and with the turn measured about each direction its best score
+                     --  jumps from one focal length to the next as much as it changes with them, which a search of
+                     --  the focal length cannot follow (A93's left arm, its readings drawn: the search ended at a
+                     --  focal length of 118 pixels of 400).
+                     if Result.Scale /= 0.0 and then Every (J)'Length > 4 then
+                        declare
+                           L      : Sight_Line_Array renames Every (J).all;
+                           M      : constant Positive := L'Length;
+                           Rm     : Real_Access := new Real_Array (1 .. M);
+                           W0     : constant Vec3 := Result.W;
+                           Sign   : constant Real := (if Result.Scale < 0.0 then -1.0 else 1.0);
+                           E1, E2 : Vec3;
+
+                           function W_Of (X : Real_Array) return Vec3 is (Unit (W0 + X (1) * E1 + X (2) * E2));
+
+                           procedure Evaluate (X : Real_Array; R : out Real_Array) is
+                              W      : constant Vec3 := W_Of (X);
+                              C      : constant Real := Sign * Exp (X (4));
+                              F1, F2 : Vec3;
+                              P      : Vec3;
+                              Rj     : Mat3 := Identity3;
+                              Last   : Natural := 0;
+                              Rr     : Mat3;
+                              Tt     : Vec3;
+                           begin
+                              Perp (W, F1, F2);
+                              P := Cos (X (3)) * F1 + Sin (X (3)) * F2;
+                              for I in 1 .. M loop
+                                 if L (I).Frame /= Last then
+                                    Last := L (I).Frame;
+                                    Rj := Rot (W, C * L (I).Reading);
+                                 end if;
+                                 Relative (Identity, (Rotation => Rj, Translation => P - Rj * P), Rr, Tt);
+                                 R (R'First + I - 1) := Sampson (Rr, Tt, L (I).H0, L (I).H, F);
+                              end loop;
+                           end Evaluate;
+
+                           procedure Solve is new Robust_Fit (4, M, Driver.Conventions.Initial_Damping, Evaluate);
+                           X : Real_Array (1 .. 4) := [0.0, 0.0, Result.Phi, Ln (abs Result.Scale)];
+                        begin
+                           Perp (W0, E1, E2);
+                           Evaluate (X, Rm.all);
+                           Solve (X, Noise_Of (Rm.all));
+                           Evaluate (X, Rm.all);
+                           for I in 1 .. M loop
+                              Rm (I) := abs Rm (I);
+                           end loop;
+                           Result := (Score => Driver.Stats.Median (Rm.all), W => W_Of (X), Phi => X (3),
+                                      Scale => Sign * Exp (X (4)));
+                           Free (Rm);
+                        end;
+                     end if;
                      Free (Ga);
                      Free (Gb);
                      Free (Wt);
                      Free (Rs);
+                     Free (Fs);
                   end;
                   Best (J) := Result;
                end Scanner;
@@ -1470,7 +1715,7 @@ package body Driver.Robot.Kinematics.Fit is
             Sum : Real := 0.0;
          begin
             for J in 1 .. N loop
-               Sum := Sum + Median_Error (B (J).Score, Grid_Counts (J)) ** 2;
+               Sum := Sum + Median_Error (B (J).Score, Counts (J)) ** 2;
             end loop;
             return Sqrt (Sum);
          end Total_Error;
@@ -1513,9 +1758,7 @@ package body Driver.Robot.Kinematics.Fit is
                Sphere (I) := [Rr * Cos (Golden * Real (I)), Rr * Sin (Golden * Real (I)), Z];
             end;
          end loop;
-         --  Where to look for the focal length: a turn moves the image by
-         --  about the focal length times its angle, so the keyframes' ratios
-         --  of the two bracket it.
+         --  Some keyframe of a joint alone moved its matches, or there is nothing to fit.
          for Frame in 2 .. Frames loop
             if Single (Frame) > 0 then
                declare
@@ -1528,32 +1771,28 @@ package body Driver.Robot.Kinematics.Fit is
                         D (K) := Sqrt ((X.U - X.U0) ** 2 + (X.V - X.V0) ** 2);
                      end if;
                   end loop;
-                  if K > 0 and then Driver.Stats.Median (D (1 .. K)) > 0.0 then
-                     declare
-                        Ratio : constant Real := Driver.Stats.Median (D (1 .. K)) / abs Change (Frame, Single (Frame));
-                     begin
-                        F_Low := Real'Min (F_Low, Ratio);
-                        F_High := Real'Max (F_High, Ratio);
-                     end;
-                  end if;
+                  Moving := Moving or else (K > 0 and then Driver.Stats.Median (D (1 .. K)) > 0.0);
                   Free (D);
                end;
             end if;
          end loop;
-         if F_High <= 0.0 then
+         if not Moving then
             Fail ("the matches do not move");
             return;
          end if;
+         --  Where to look for the focal length. The image moves by about the
+         --  focal length times the eye's turn, but how far the eye turned is
+         --  not the reading's change in any known unit (the turns are
+         --  measured, Planar_About), so the motion says nothing of it: the
+         --  search starts where the image's half width is seen at a right
+         --  angle's half, and widens (below).
          --  Golden-section search in the logarithm of the focal length. The
-         --  bracket first widens by its own width on the side whose end scores
-         --  best, until an inner point scores better than both ends; the
-         --  search ends when its two inner points cannot be told apart.
-         A := Ln (F_Low);
-         B := Ln (F_High);
-         if B <= A then
-            A := A - Ln (2.0) / 2.0;
-            B := B + Ln (2.0) / 2.0;
-         end if;
+         --  bracket, an octave about the start, first widens by its own width
+         --  on the side whose end scores best, until an inner point scores
+         --  better than both ends; the search ends when its two inner points
+         --  cannot be told apart.
+         A := Ln (Lens0.Cx) - Ln (2.0) / 2.0;
+         B := Ln (Lens0.Cx) + Ln (2.0) / 2.0;
          Search (Exp (A), BA);
          Search (Exp (B), BB);
          loop
@@ -1597,6 +1836,16 @@ package body Driver.Robot.Kinematics.Fit is
             Best  : constant Best_Array := (if Total (B1) < Total (B2) then B1 else B2);
             Focal : constant Real := Exp (if Total (B1) < Total (B2) then X1 else X2);
          begin
+            for J in 1 .. N loop
+               if Best (J).Scale = 0.0 then
+                  for K in 1 .. N loop
+                     Free (Lines (K));
+                     Free (Every (K));
+                  end loop;
+                  Fail ("joint" & J'Image & "'s widest keyframes tell its turn about no direction");
+                  return;
+               end if;
+            end loop;
             Lens0.Fx := Focal;
             Lens0.Fy := Focal;
             for J in 1 .. N loop
@@ -1605,9 +1854,11 @@ package body Driver.Robot.Kinematics.Fit is
                begin
                   Perp (Best (J).W, E1, E2);
                   Joints (Joints'First + J - 1) :=
-                    (W => Best (J).W, P => Cos (Best (J).Phi) * E1 + Sin (Best (J).Phi) * E2, C => 1.0, Slide => False);
+                    (W => Best (J).W, P => Cos (Best (J).Phi) * E1 + Sin (Best (J).Phi) * E2, C => Best (J).Scale,
+                     Slide => False);
                end;
                Free (Lines (J));
+               Free (Every (J));
             end loop;
          end;
       end;
@@ -1615,10 +1866,12 @@ package body Driver.Robot.Kinematics.Fit is
       ---------------------------------------------------------------------------
       --  Stage 2: the joints together with the focal length, on the keyframes
       --  that moved one joint each. Per joint: the axis's tilt in its tangent
-      --  plane (2) and the side of the eye (1); then the log focal length.
+      --  plane (2), the side of the eye (1) and the logarithm of the size of
+      --  its turn per reading unit (1; its sign is stage 1's); then the log
+      --  focal length.
       Report.Stage := 2;
       declare
-         Count : constant Positive := 3 * N + 1;
+         Count : constant Positive := 4 * N + 1;
          Base  : constant Joint_Array := Joints;
          Used  : Natural := 0;
       begin
@@ -1636,7 +1889,7 @@ package body Driver.Robot.Kinematics.Fit is
             begin
                for J in 1 .. N loop
                   declare
-                     O : constant Natural := X'First + 3 * (J - 1);
+                     O : constant Natural := X'First + 4 * (J - 1);
                      E1, E2, F1, F2 : Vec3;
                      W : Vec3;
                   begin
@@ -1645,6 +1898,8 @@ package body Driver.Robot.Kinematics.Fit is
                      Perp (W, F1, F2);
                      Out_J (Out_J'First + J - 1).W := W;
                      Out_J (Out_J'First + J - 1).P := Cos (X (O + 2)) * F1 + Sin (X (O + 2)) * F2;
+                     Out_J (Out_J'First + J - 1).C :=
+                       (if Base (Base'First + J - 1).C < 0.0 then -Exp (X (O + 3)) else Exp (X (O + 3)));
                   end;
                end loop;
                return Out_J;
@@ -1659,7 +1914,7 @@ package body Driver.Robot.Kinematics.Fit is
                   declare
                      J  : constant Positive := Single (Kept (I).Frame);
                      A  : Joint renames Jx (Jx'First + J - 1);
-                     Rj : constant Mat3 := Rot (A.W, Change (Kept (I).Frame, J));
+                     Rj : constant Mat3 := Rot (A.W, A.C * Change (Kept (I).Frame, J));
                      Rr : Mat3;
                      Tt : Vec3;
                   begin
@@ -1686,7 +1941,8 @@ package body Driver.Robot.Kinematics.Fit is
                begin
                   --  The side as an angle in the tangent frame of the axis.
                   Perp (Base (Base'First + J - 1).W, E1, E2);
-                  X (3 * (J - 1) + 3) := Arctan (Base (Base'First + J - 1).P * E2, Base (Base'First + J - 1).P * E1);
+                  X (4 * (J - 1) + 3) := Arctan (Base (Base'First + J - 1).P * E2, Base (Base'First + J - 1).P * E1);
+                  X (4 * (J - 1) + 4) := Ln (abs Base (Base'First + J - 1).C);
                end;
             end loop;
             X (Count) := Ln (Lens0.Fx);
@@ -1745,7 +2001,7 @@ package body Driver.Robot.Kinematics.Fit is
                   if J > 0 then
                      declare
                         A  : Joint renames Joints (Joints'First + J - 1);
-                        R  : constant Mat3 := Rot (A.W, Change (X.Frame, J));
+                        R  : constant Mat3 := Rot (A.W, A.C * Change (X.Frame, J));
                         T  : constant Vec3 := A.P - R * A.P;
                         H0 : constant Vec3 := Ray (Lens0, X.U0, X.V0);
                         Bv : constant Vec3 := R * Ray (Lens0, X.U, X.V);
@@ -1874,13 +2130,196 @@ package body Driver.Robot.Kinematics.Fit is
             Free_All;
          end;
       end;
-      Normalize (Joints);
 
       ---------------------------------------------------------------------------
-      --  Stage 4: everything at once, on the sightings that fit. Parameters:
+      --  Stage 4 begins with every keyframe of one joint in one refinement of
+      --  the tracks (Refine_Tracks), which any order of the joints explains
+      --  alike. A joint whose turn shifts the view the way its shift moves it
+      --  (a pitch joint whose axis lies behind the eye) has its turn told by
+      --  no epipolar residual: a point's depth along its line of sight takes it
+      --  up. The depth every point has for all the joints pins it (the
+      --  synthetic arm, its readings scaled: two joints at 0.60 and 0.82 of
+      --  their turns after stage 2). The lens, the joints and every point's
+      --  depth come out of it, for the order.
+      Report.Stage := 4;
+      declare
+         Alone_Count : Natural := 0;
+      begin
+         for X of Sight loop
+            if Single (X.Frame) > 0 then
+               Alone_Count := Alone_Count + 1;
+            end if;
+         end loop;
+         declare
+            Alone : Sighting_Access := new Sighting_Array (1 .. Alone_Count);
+            K     : Natural := 0;
+            Lx    : Lens := Lens0;
+            Rep   : Fit_Report;
+         begin
+            for X of Sight loop
+               if Single (X.Frame) > 0 then
+                  K := K + 1;
+                  Alone (K) := X;
+               end if;
+            end loop;
+            Refine_Tracks (Changes, Alone.all, Joints, Order, Lx, Rep);
+            Lens0 := Lx;
+            Track_Depths := Rep.Depths;
+            Free (Alone);
+         end;
+      end;
+
+      ---------------------------------------------------------------------------
+      --  Stage 4: first the order of the joints along the arm. The evidence is
+      --  the sightings of the keyframes that moved several joints at once;
+      --  without one the order is not told. Their epipolar residual cannot
+      --  tell it: the order moves the eye mostly in how far it went, which
+      --  the epipolar constraint does not see (A17's presses, the readings
+      --  drawn: a wrong order left its median at 0.058 px). Where the points
+      --  land does: every point the reference eye saw, at the depth the
+      --  keyframes of one joint each gave it, reprojected into those keyframes,
+      --  scores the order. Lengths in any unit: the depths are in the joints'.
+      if N > 1 then
+         declare
+            Multi, Tracks : Natural := 0;
+         begin
+            for X of Sight loop
+               Tracks := Natural'Max (Tracks, X.Track);
+               if Several (X.Frame) then
+                  Multi := Multi + 1;
+               end if;
+            end loop;
+            if Multi = 0 then
+               Fail ("no keyframe moved two joints at once: the order of the joints along the arm is not told");
+               return;
+            end if;
+            declare
+               Depth  : Real_Access := new Real_Array'(1 .. Tracks => 0.0);   --  0: not placed
+               R      : Real_Access := new Real_Array (1 .. 2 * Multi);
+               Poses  : Rigid_Access := new Pose_Array;
+               Placed : Natural := 0;   --  sightings of placed points in those keyframes
+
+               --  The median across and down of the reprojections of those sightings with the joints in order C,
+               --  in pixels, and its standard error. A point the order puts behind the eye lands nowhere.
+               procedure Score (C : Chain_Order; Median, Error : out Real) is
+                  K : Natural := 0;
+               begin
+                  for Frame in 1 .. Frames loop
+                     Poses (Frame) := Eye_At (Joints, C, Changes_Of (Frame));
+                  end loop;
+                  for X of Sight loop
+                     if Several (X.Frame) and then Depth (X.Track) > 0.0 then
+                        declare
+                           T     : Rigid renames Poses (X.Frame);
+                           Point : constant Vec3 := Depth (X.Track) * Ray (Lens0, X.U0, X.V0);
+                           U, V  : Real;
+                           Ahead : Boolean;
+                        begin
+                           Project (Lens0, Transpose (T.Rotation) * (Point - T.Translation), U, V, Ahead);
+                           R (K + 1) := (if Ahead then U - X.U else Real'Last);
+                           R (K + 2) := (if Ahead then V - X.V else Real'Last);
+                           K := K + 2;
+                        end;
+                     end if;
+                  end loop;
+                  Median := Median_Abs (R (1 .. K));
+                  Error := Median_Error (Median, K);
+               end Score;
+
+               --  C with the joint at place From moved to place To, the joints between shifted over.
+               function Moved (C : Chain_Order; From, To : Positive) return Chain_Order is
+                  Result : Chain_Order := C;
+               begin
+                  if From < To then
+                     Result (From .. To - 1) := C (From + 1 .. To);
+                  else
+                     Result (To + 1 .. From) := C (To .. From - 1);
+                  end if;
+                  Result (To) := C (From);
+                  return Result;
+               end Moved;
+
+               procedure Free_All is
+               begin
+                  Free (Depth);
+                  Free (R);
+                  Free (Poses);
+               end Free_All;
+
+               Here, Here_Error : Real;
+            begin
+               for I in 1 .. Natural'Min (Tracks, Natural (Track_Depths.Length)) loop
+                  Depth (I) := Real'Max (0.0, Track_Depths (Track_Depths.First_Index + I - 1));
+               end loop;
+               for X of Sight loop
+                  if Several (X.Frame) and then Depth (X.Track) > 0.0 then
+                     Placed := Placed + 1;
+                  end if;
+               end loop;
+               if Placed = 0 then
+                  Free_All;
+                  Fail ("no point the keyframes of one joint placed is seen in a keyframe that moved several: the "
+                        & "order of the joints along the arm is not told");
+                  return;
+               end if;
+               --  The start: the axes farthest from the eye first, as they most
+               --  often are on an arm that carries its eye at the end; the
+               --  search does not rest on it.
+               for K in 2 .. N loop
+                  declare
+                     Item : constant Positive := Order (K);
+                     I    : Natural := K - 1;
+                  begin
+                     while I >= 1
+                       and then abs Joints (Joints'First + Order (I) - 1).P < abs Joints (Joints'First + Item - 1).P
+                     loop
+                        Order (I + 1) := Order (I);
+                        I := I - 1;
+                     end loop;
+                     Order (I + 1) := Item;
+                  end;
+               end loop;
+               Score (Order, Here, Here_Error);
+               --  A joint moved to the place that lowers the residual most, while
+               --  that lowers it by more than its standard error.
+               loop
+                  declare
+                     Best_Order : Chain_Order (1 .. N) := Order;
+                     Best       : Real := Here;
+                     Best_Error : Real := Here_Error;
+                  begin
+                     for From in 1 .. N loop
+                        for To in 1 .. N loop
+                           if To /= From then
+                              declare
+                                 C    : constant Chain_Order := Moved (Order, From, To);
+                                 M, E : Real;
+                              begin
+                                 Score (C, M, E);
+                                 if M < Best then
+                                    Best := M;
+                                    Best_Error := E;
+                                    Best_Order := C;
+                                 end if;
+                              end;
+                           end if;
+                        end loop;
+                     end loop;
+                     exit when Here - Best <= Here_Error;
+                     Order := Best_Order;
+                     Here := Best;
+                     Here_Error := Best_Error;
+                  end;
+               end loop;
+               Free_All;
+            end;
+         end;
+      end if;
+      Normalize (Joints);
+
+      --  Then everything at once, on the sightings that fit. Parameters:
       --  log Fx, log Fy, Cx, Cy, K1, K2, then per joint the axis's tilt in its
       --  tangent plane (2), its point (3) and its reading scale (1).
-      Report.Stage := 4;
       declare
          Per_Joint : constant := 6;
          Count     : constant Positive := 6 + Per_Joint * N;
@@ -2057,7 +2496,7 @@ package body Driver.Robot.Kinematics.Fit is
       begin
          for X of Sight loop
             declare
-               T   : constant Rigid := Eye_At (Joints, Changes_Of (X.Frame));
+               T   : constant Rigid := Eye_At (Joints, Order, Changes_Of (X.Frame));
                A   : constant Vec3 := Ray (L, X.U0, X.V0);
                Bv  : constant Vec3 := T.Rotation * Ray (L, X.U, X.V);
                --  Lambda1 A = T.Translation + Lambda2 Bv, least squares.
@@ -2096,13 +2535,13 @@ package body Driver.Robot.Kinematics.Fit is
 
       --  Stage 5: the tracks.
       Report.Stage := 5;
-      Refine_Tracks (Changes, Sight, Joints, L, Report);
+      Refine_Tracks (Changes, Sight, Joints, Order, L, Report);
       declare
          Sum : Real := 0.0;
       begin
          for Frame in 1 .. Unit_Count loop
             declare
-               T : constant Vec3 := Eye_At (Joints, Changes_Of (Frame)).Translation;
+               T : constant Vec3 := Eye_At (Joints, Order, Changes_Of (Frame)).Translation;
             begin
                Sum := Sum + T * T;
             end;
@@ -2146,6 +2585,7 @@ package body Driver.Robot.Kinematics.Fit is
             end;
          end if;
       end;
+      Chain := Order;
       Report.Fitted := Report.Determined;
    end Fit;
 
@@ -2154,6 +2594,7 @@ package body Driver.Robot.Kinematics.Fit is
 
    function Unit_Sigma
      (Joints     : Joint_Array;
+      Chain      : Chain_Order;
       Changes    : Driver.Numerics.Arrays.Real_Matrix;
       Covariance : Real_Lists.Vector) return Real
    is
@@ -2172,7 +2613,7 @@ package body Driver.Robot.Kinematics.Fit is
                   D (J) := Changes (F, Changes'First (2) + J - 1);
                end loop;
                declare
-                  T : constant Vec3 := Eye_At (Jx, D).Translation;
+                  T : constant Vec3 := Eye_At (Jx, Chain, D).Translation;
                begin
                   Sum := Sum + Dot (T, T);
                end;
@@ -2231,6 +2672,7 @@ package body Driver.Robot.Kinematics.Fit is
 
    procedure Pose_Covariance
      (Joints      : Joint_Array;
+      Chain       : Chain_Order;
       Change      : Real_Array;
       Covariance  : Real_Lists.Vector;
       Turn, Place : out Mat3)
@@ -2271,7 +2713,7 @@ package body Driver.Robot.Kinematics.Fit is
                            when Point_2 => A.P := A.P + H * E2;
                            when Scale   => A.C := A.C + H;
                         end case;
-                        return Eye_At (Jx, Change);
+                        return Eye_At (Jx, Chain, Change);
                      end Moved;
                      Up    : constant Rigid := Moved (Sigma);
                      Down  : constant Rigid := Moved (-Sigma);
