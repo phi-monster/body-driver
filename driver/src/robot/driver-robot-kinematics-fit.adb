@@ -195,6 +195,14 @@ package body Driver.Robot.Kinematics.Fit is
    --  of any sighting (Floor) and what the matcher states of this one, as variances.
    function Scale_Of (Floor, Own : Real) return Real is (Real'Max (Sqrt (Floor ** 2 + Own ** 2), Real'Model_Small));
 
+   --  How many degrees of freedom the scale a residual is judged at rests on, as Scale_Of makes it: the sighting's own
+   --  standard deviation rests on Own_Freedom of them and the floor on none to speak of (it is read from thousands of
+   --  residuals), so the scale's variance has as many as the Welch-Satterthwaite formula gives; none (the scale is
+   --  known) when the sighting's own is.
+   function Scale_Freedom (Floor, Own : Real; Own_Freedom : Natural) return Natural is
+     (if Own_Freedom = 0 or else Own <= 0.0 then 0
+      else Driver.Uncertain.Satterthwaite_Count (Real (Own_Freedom) * ((Floor ** 2 + Own ** 2) / Own ** 2) ** 2));
+
    --  The floor of the scales the residuals R are judged at, beside the standard deviations Own their sightings
    --  state (one per residual): the one at which the median of a residual over its scale is the Gaussian's, so a
    --  residual of the size typical of its sighting is typical. With none stated it is Noise_Of; a floor of zero
@@ -561,7 +569,11 @@ package body Driver.Robot.Kinematics.Fit is
          Has    : Flags_Access := new Flags'(1 .. Tracks => False);
          Inlier : Flags_Access := new Flags'(1 .. S => False);
          X      : Real_Array (1 .. Count);
-         Changed : Natural := Natural'Last;
+         --  The sightings each pass began with: the passes end where the choice settles or returns to one it began
+         --  from (a choice that cycles has no fixed point to wait for), and at most as many as the float has bits.
+         type Choice_List is array (1 .. Real'Machine_Mantissa) of Flags_Access;
+         Began  : Choice_List := [others => null];
+         Passes : Natural := 0;
          --  Each parameter's variance at the solution, in the reduced set: the
          --  lens (6), then per joint its tilt (2), its point across the axis
          --  (2) and its reading scale (1).
@@ -787,7 +799,8 @@ package body Driver.Robot.Kinematics.Fit is
                         declare
                            Scale : constant Real := Scale_Of (Floor, Own (I));
                            Seen  : constant Boolean := Rho (I) < Real'Last and then Scale > Real'Model_Small;
-                           Fits  : constant Boolean := Seen and then not Driver.Uncertain.Significant (Rho (I), Scale);
+                           Fits  : constant Boolean := Seen and then not Driver.Uncertain.Significant (Rho (I), Scale,
+                                    Scale_Freedom (Floor, Own (I), Sight (Sight'First + I - 1).Own_Freedom));
                         begin
                            Weight (I) := (if Seen then Huber (Rho (I) / Scale) else 0.0);
                            if Fits /= Fit_Now (I) then
@@ -874,7 +887,9 @@ package body Driver.Robot.Kinematics.Fit is
                      declare
                         Scale : constant Real := Scale_Of (Floor, Own (I));
                      begin
-                        if not Driver.Uncertain.Significant (Rs (I), Scale) then
+                        if not Driver.Uncertain.Significant (Rs (I), Scale,
+                                                          Scale_Freedom (Floor, Own (I), Sight (Sight'First + I - 1).Own_Freedom))
+                        then
                            Weight (I) := 1.0;
                         end if;
                      end;
@@ -947,6 +962,8 @@ package body Driver.Robot.Kinematics.Fit is
                   end if;
                end loop;
                exit when 2 * Used <= Count + Tracks;
+               Passes := Passes + 1;
+               Began (Passes) := new Flags'(Inlier.all);
                declare
                   Index : Real_Access := new Real_Array (1 .. Used);
                   R0    : Real_Access := new Real_Array (1 .. 2 * Used);
@@ -1386,9 +1403,11 @@ package body Driver.Robot.Kinematics.Fit is
                for I in 1 .. S loop
                   declare
                      Scale : constant Real := Scale_Of (Sigma, All_Own (2 * I));
+                     Freedom : constant Natural :=
+                       Scale_Freedom (Sigma, All_Own (2 * I), Sight (Sight'First + I - 1).Own_Freedom);
                      Fits  : constant Boolean := Has (Sight (Sight'First + I - 1).Track) and then Scale > Real'Model_Small
-                       and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Scale)
-                       and then not Driver.Uncertain.Significant (All_R (2 * I), Scale);
+                       and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Scale, Freedom)
+                       and then not Driver.Uncertain.Significant (All_R (2 * I), Scale, Freedom);
                   begin
                      if Fits /= Inlier (I) then
                         Now_Changed := Now_Changed + 1;
@@ -1416,8 +1435,8 @@ package body Driver.Robot.Kinematics.Fit is
                Free (All_Index);
                Free (All_R);
                Free (All_Own);
-               exit when Now_Changed = 0 or else Now_Changed >= Changed;
-               Changed := Now_Changed;
+               exit when Now_Changed = 0 or else Passes = Began'Last
+                 or else (for some Earlier of Began (1 .. Passes) => Earlier.all = Inlier.all);
             end;
          end loop;
          --  The covariance of the last pass's estimate, from what the pass
@@ -1510,6 +1529,9 @@ package body Driver.Robot.Kinematics.Fit is
          Free (Depth);
          Free (Depth_Sigma);
          Free (Has);
+         for Choice of Began loop
+            Free (Choice);
+         end loop;
          Free (Inlier);
       end;
    end Refine_Tracks;

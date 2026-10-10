@@ -600,12 +600,17 @@ package body Driver.Robot.Kinematics is
       end return;
    end Stated_By;
 
-   --  What a keyframe's answers say of where the reference's query points went: the answers found that agree with
-   --  the keyframe's field of displacements (a wrong answer is as sure of itself as a right one, and is told from it
-   --  by the others), but those whose uncertainty is more than Z times the keyframe's typical one (the median of
-   --  those: a point that tells its place no better than that is not a sighting the fit can take as one among the
-   --  rest). The points refused for the prediction's uncertainty, and those found that do not agree, are Wide: the
-   --  prediction may have been what failed them.
+   --  What a keyframe's answers say of where the reference's query points went: the answers found that agree with the
+   --  keyframe's field of displacements (a wrong answer is as sure of itself as a right one, and is told from it by
+   --  the others), but those whose uncertainty is more than Z times the keyframe's typical one (the median of those:
+   --  a point that tells its place no better than that is not a sighting the fit can take as one among the rest).
+   --  The keyframe is one to rest a fit on only when the typical answer of it came from a window no wider than a
+   --  patch (Narrow): a wider one is searched where several places a patch cannot tell apart may lie in it, the
+   --  answer rests on the prediction as much as on the pixels, and a keyframe whose answers do is a move the
+   --  prediction had not followed. Its few answers from narrower windows are no sightings either: the fit takes the
+   --  widest keyframe of a joint for the one that tells its axis best, and a keyframe of a handful of points is no
+   --  such. The points refused for the prediction's uncertainty, those found that do not agree and those a wide
+   --  window found are Wide: the prediction may have been what failed them, and a better one may find them.
    procedure Set_Of
      (F : Positive; R : Arm_Evidence; Given : Keyframes.Prediction_Array; Answers : Keyframes.Answer_Array;
       Agree : Keyframes.Flag_Array; Set : out Match_Set)
@@ -615,9 +620,25 @@ package body Driver.Robot.Kinematics is
       function Sigma_Of (A : Driver.Alignment.Answer) return Real is
         (Ada.Numerics.Long_Elementary_Functions.Sqrt (Real'Max (A.Cov.UU, A.Cov.VV)));
       function Agrees (I : Natural) return Boolean is (Agree (Agree'First + I - Answers'First));
+      function Answered (I : Natural) return Boolean is (Answers (I).Verdict = Driver.Alignment.Found and then Agrees (I));
+      Followed : Boolean := False;
+      function Sighted (I : Natural) return Boolean is (Followed and then Answered (I) and then Answers (I).Narrow);
    begin
+      declare
+         Found, From_Narrow : Natural := 0;
+      begin
+         for I in Answers'Range loop
+            if Answered (I) then
+               Found := Found + 1;
+               if Answers (I).Narrow then
+                  From_Narrow := From_Narrow + 1;
+               end if;
+            end if;
+         end loop;
+         Followed := From_Narrow > Found - From_Narrow;   --  more of the answers came from narrow windows than from wider
+      end;
       for I in Answers'Range loop
-         if Answers (I).Verdict = Driver.Alignment.Found and then Agrees (I) then
+         if Sighted (I) then
             Counted := Counted + 1;
          end if;
       end loop;
@@ -627,7 +648,7 @@ package body Driver.Robot.Kinematics is
             K      : Natural := 0;
          begin
             for I in Answers'Range loop
-               if Answers (I).Verdict = Driver.Alignment.Found and then Agrees (I) then
+               if Sighted (I) then
                   K := K + 1;
                   Sigmas (K) := Sigma_Of (Answers (I));
                end if;
@@ -636,18 +657,18 @@ package body Driver.Robot.Kinematics is
             Free (Sigmas);
          end;
       end if;
-      Set := (Frame => F, Eye => 0, Stated => Stated_By (Given), others => <>);
+      Set := (Frame => F, Eye => 0, Stated => Stated_By (Given), Followed => Followed, others => <>);
       for I in Answers'Range loop
          Set.To_U.Append (Answers (I).To.U);
          Set.To_V.Append (Answers (I).To.V);
          Set.Sigma.Append (if Answers (I).Verdict = Driver.Alignment.Found then Sigma_Of (Answers (I)) else 0.0);
+         Set.Freedom.Append (if Answers (I).Verdict = Driver.Alignment.Found then Answers (I).Degrees_Of_Freedom else 0);
          --  There is no way back: an answer is judged by its own uncertainty, not by another answer.
          Set.Back_U.Append (R.Query_U (I - 1));
          Set.Back_V.Append (R.Query_V (I - 1));
-         Set.Found.Append (Answers (I).Verdict = Driver.Alignment.Found and then Agrees (I)
-                           and then Sigma_Of (Answers (I)) <= Driver.Conventions.Z * Typical);
+         Set.Found.Append (Sighted (I) and then Sigma_Of (Answers (I)) <= Driver.Conventions.Z * Typical);
          if Keyframes.Prediction_Caused (Answers (I))
-           or else (Answers (I).Verdict = Driver.Alignment.Found and then not Agrees (I))
+           or else (Answers (I).Verdict = Driver.Alignment.Found and then not Sighted (I))
          then
             Set.Wide := Set.Wide + 1;
          end if;
@@ -754,6 +775,16 @@ package body Driver.Robot.Kinematics is
       end loop;
    end Align_New;
 
+   --  Whether a prediction that states Sigma has a window narrower than the one a keyframe was aligned from, by enough to
+   --  be worth aligning it again.
+   function Narrowed (Was : Match_Set; Sigma : Real) return Boolean is
+      Then_Radius : constant Real := Driver.Alignment.Window_Radius (Was.Stated);
+      Now_Radius  : constant Real := Driver.Alignment.Window_Radius (Sigma);
+   begin
+      return (if Was.Followed then Now_Radius * Real (Driver.Alignment.Halving) <= Then_Radius
+              else Then_Radius - Now_Radius >= 1.0);
+   end Narrowed;
+
    function Realign (M : in out Model) return Boolean is
       Changed : Boolean := False;
    begin
@@ -775,7 +806,12 @@ package body Driver.Robot.Kinematics is
                         Known   : Boolean;
                      begin
                         Offer_Of (M, R, Readings_Array (R.Frames (F)), Offered.all, Known);
-                        if Known and then Stated_By (Offered.all) < R.Matches (S).Stated then
+                        --  A keyframe is aligned again when the fitted arm gives it a window narrower by a pixel (the grid the
+                        --  aligner's candidates lie on) than the one it was aligned from, and one a size of the pictures narrower if
+                        --  what it answered was what a fit may rest on already (a keyframe the fit takes in, or not, by whether most
+                        --  of its answers came from a window no wider than a patch: a better fit may narrow the window of the
+                        --  next one to that). The windows narrow by a pixel at the least each time, so the repeating ends.
+                        if Known and then Narrowed (R.Matches (S), Stated_By (Offered.all)) then
                            Keyframes.Realign (R.Chain, R.Frames (F).Image, Offered.all, Answers.all, Agree.all);
                            declare
                               Set : Match_Set;
@@ -1048,7 +1084,8 @@ package body Driver.Robot.Kinematics is
                               Seen (K) := (Frame => S.Frame, Track => I + 1,
                                            U0 => R.Query_U (I), V0 => R.Query_V (I),
                                            U => S.To_U (I), V => S.To_V (I),
-                                           Own => (if I < Natural (S.Sigma.Length) then S.Sigma (I) else 0.0));
+                                           Own => (if I < Natural (S.Sigma.Length) then S.Sigma (I) else 0.0),
+                                           Own_Freedom => (if I < Natural (S.Freedom.Length) then S.Freedom (I) else 0));
                            end if;
                         end loop;
                      end loop;

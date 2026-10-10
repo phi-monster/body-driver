@@ -154,6 +154,10 @@ package Driver.Robot.Kinematics.Fit is
       --  The standard deviation the matcher states of where it saw the point again, in pixels, per axis; zero when
       --  it states none. A matcher is the less sure of a point the farther it moved (its patch is warped more), and a
       --  residual of such a sighting is typical at a larger size than one of a sighting that moved little.
+      Own_Freedom : Natural := 0;
+      --  How many degrees of freedom that standard deviation rests on (the matcher estimated it from so many other
+      --  fits of the point): a residual over it follows Student's t with that many, not the Gaussian; zero when it is
+      --  known.
    end record;
 
    type Sighting_Array is array (Positive range <>) of Sighting;

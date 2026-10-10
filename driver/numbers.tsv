@@ -224,7 +224,6 @@ driver-alignment.adb	Freedom : constant Positive := Positive'Max (1, Natural (Re
 driver-alignment.adb	Gain : constant Real := 6.0;	6.0	math	the cubic B-spline weighs a sample and its neighbours one, four and one sixths: the prefilter's gain undoes the sum of six
 driver-alignment.adb	Grow : Positive := 1)	1	structure	a patch is the usual width unless asked to grow
 driver-alignment.adb	Half : constant Natural := (Side - 1) / 2;	2	math	half a patch's side less the middle pixel
-driver-alignment.adb	Halving : constant := 2;	2	math	a size of the pyramid is half the one before: the pictures are halved
 driver-alignment.adb	High_X : constant Integer := Integer (Real'Ceiling (Centre_U + Extent_U - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
 driver-alignment.adb	High_Y : constant Integer := Integer (Real'Ceiling (Centre_V + Extent_V - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
 driver-alignment.adb	Integer'Min (Down - 1, Integer'Max (0, Integer (Real'Rounding (Centre_V - (Real (Low_Y) + 0.5))))) * Across	0.5	math	a pixel's centre lies half a pixel in from its corner
@@ -330,6 +329,7 @@ driver-alignment.adb	return Natural (Real'Rounding (Side / 2.0));	2.0	math	half 
 driver-alignment.adb	return Real'Min (Real (Count), Real'Max (1.0, Real (Count) / Squares));	1.0	statistics	at least one independent sample
 driver-alignment.adb	return Sqrt (Real'Max (0.0, (Q_VV * Du ** 2 - 2.0 * Q_UV * Du * Dv + Q_UU * Dv ** 2) / Q_Det));	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
 driver-alignment.adb	while J >= 1 and then Rho (Peaks (J)) < Rho (Held) loop	1	structure	the insertion stops at the first peak
+driver-alignment.ads	Halving : constant := 2;	2	math	a size of the pyramid is half the one before: the pictures are halved
 driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);	1.0	math	the identity map: the first diagonal entry is one
 driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);	1.0	math	the identity map: the second diagonal entry is one
 driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end
@@ -1692,6 +1692,7 @@ driver-robot-kinematics-fit.adb	S2 := (if Second_Eye then 1.0 else Noise (C2, F2
 driver-robot-kinematics-fit.adb	S_First : constant := 9;	9	structure	the similarity's terms follow the homography's eight
 driver-robot-kinematics-fit.adb	Scale : constant Real := Scale_Of (Sigma, All_Own (2 * I));	2	structure	a sighting's second residual
 driver-robot-kinematics-fit.adb	Scale := 1.0;	1.0	structure	the identity's scale until the link is found
+driver-robot-kinematics-fit.adb	Scale_Freedom (Sigma, All_Own (2 * I), Sight (Sight'First + I - 1).Own_Freedom);	2	structure	a sighting's two residuals, the horizontal and the vertical
 driver-robot-kinematics-fit.adb	Scales : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals to a sighting
 driver-robot-kinematics-fit.adb	Scatter => Squares / Real (Count - 3));	3	statistics	a plane's three terms: its residuals' degrees of freedom
 driver-robot-kinematics-fit.adb	Side_First : constant array (1 .. 2) of Positive := [S_First + Similarity_Terms,	2	structure	two sides
@@ -1773,8 +1774,8 @@ driver-robot-kinematics-fit.adb	[X (X'First + 6), X (X'First + 7), 1.0]]);	1.0	m
 driver-robot-kinematics-fit.adb	[X (X'First + 6), X (X'First + 7), 1.0]]);	6	structure	the positions of a homography's eight free entries in the vector
 driver-robot-kinematics-fit.adb	[X (X'First + 6), X (X'First + 7), 1.0]]);	7	structure	the positions of a homography's eight free entries in the vector
 driver-robot-kinematics-fit.adb	and then (Driver.Conventions.Z * Tilt >= Ada.Numerics.Pi / 2.0	2.0	math	a quarter turn
-driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Scale)	2	structure	a sighting's two residuals, the horizontal and the vertical
-driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I), Scale);	2	structure	a sighting's two residuals, the horizontal and the vertical
+driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Scale, Freedom)	2	structure	a sighting's two residuals, the horizontal and the vertical
+driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I), Scale, Freedom);	2	structure	a sighting's two residuals, the horizontal and the vertical
 driver-robot-kinematics-fit.adb	else Driver.Conventions.Z * (abs Z_Value - 0.5 * Driver.Conventions.Z));	0.5	math	the Huber function
 driver-robot-kinematics-fit.adb	elsif N > 1 then	1	structure	cells move several joints
 driver-robot-kinematics-fit.adb	exit when 2 * Used <= Count + Tracks;	2	structure	two residuals per sighting, across and down
@@ -2034,9 +2035,9 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Lens.Fx, 2) & "" & Driver.Log.Im
 driver-robot-kinematics.adb	& Driver.Log.Image (Link.Sigma, 3) & "" & Driver.Log.Image (Link.F, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Link.Sigma, 3) & "" & Driver.Log.Image (Link.F, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (R2.Result.Scale_Sigma, 4) & ""	4	format	digits printed in a log line or a message
-driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
-driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Placed), 1) & "");	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Real (Fitted - Start), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Real (Placed - Fitted), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Alone, 3) & ""	3	format	digits printed in a log line or a message
@@ -2157,6 +2158,7 @@ driver-robot-kinematics.adb	and then (Fresh or else (Natural (R.Frames.Length) =
 driver-robot-kinematics.adb	and then Natural (R.Result.Tracks.Length) >= 3 * Queries;	3	structure	a track's point is three numbers
 driver-robot-kinematics.adb	and then Place (1, 1) < Real'Last	1	structure	an uncertainty that is not known has its first diagonal entry unbounded
 driver-robot-kinematics.adb	and then Place (1, 1) < Real'Last	1	structure	an uncertainty that is not known has its first diagonal entry unbounded
+driver-robot-kinematics.adb	else Then_Radius - Now_Radius >= 1.0);	1.0	structure	a pixel, the grid the aligner's candidate places lie on: a window narrower by less than one holds the same candidates
 driver-robot-kinematics.adb	else [0.0, 0.0, 1.0 / X (3)]);	1.0	math	the plane across the line of sight at depth z has slope one over z along it
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	the axes of space: three
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	three coordinates

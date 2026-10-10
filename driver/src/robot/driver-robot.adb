@@ -223,9 +223,12 @@ package body Driver.Robot is
       if not M.From_File (Stored_Kinematics) then
          Kinematics.Align_New (M);
          Kinematics.Refit (M);
-         if Kinematics.Realign (M) then
+         --  The keyframes the first fit could not rest on are aligned again from it, as long as it narrows a window
+         --  to what the aligner can rest a fit on or by a size of the pictures (so a keyframe is aligned again only
+         --  so many times): a better fit may narrow the next.
+         while Kinematics.Realign (M) loop
             Kinematics.Refit (M);
-         end if;
+         end loop;
       end if;
       Took ("kinematics");
       M.Graph_Evidence := M.Beats;

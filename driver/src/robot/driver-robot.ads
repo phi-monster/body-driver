@@ -533,8 +533,10 @@ private
       To_U, To_V     : Real_Vectors.Vector;   --  per query point, where it went
       Back_U, Back_V : Real_Vectors.Vector;   --  and where that matched back to in the reference
       Sigma    : Real_Vectors.Vector;    --  and the standard deviation the aligner stated of the answer (none from the instrument)
+      Freedom  : Count_Vectors.Vector;   --  and how many degrees of freedom that standard deviation rests on (0: it is known)
       Found    : Flag_Vectors.Vector;    --  the aligner or the instrument gave an answer
       Stated   : Real := Real'Last;      --  an own keyframe: the median standard deviation its prediction stated
+      Followed : Boolean := False;       --  and whether most of its answers came from a window no wider than a patch
       Wide     : Natural := 0;           --  and how many points it refused for that prediction's uncertainty
    end record;
 

@@ -86,6 +86,10 @@ package Driver.Alignment is
    --  half), in levels of luma per pixel of that level. Not Ok when the sixteen pixels around the place are not all
    --  in the picture.
 
+   Halving : constant := 2;
+   --  Each size of the pyramid is this many times smaller across than the one before: a prediction this many times
+   --  narrower is searched at a size the pictures are this many times finer at.
+
    type Linear_Part is record
       UU, UV, VU, VV : Real := 0.0;
    end record;
@@ -144,6 +148,11 @@ package Driver.Alignment is
       --  How many other fits of the patch (its middle, the coarser levels) the covariance rests on: it is a sample
       --  covariance, so a difference over its sigma follows Student's t with that many degrees of freedom
       --  (Driver.Uncertain), not the Gaussian.
+      Narrow : Boolean := False;
+      --  The prediction's window was no wider than a patch at the full size, so it was searched where the pictures are
+      --  finest. A window wider than that is searched at a coarser size, where several places that a patch cannot tell
+      --  apart may lie within it and a wrong one may be taken for the place; such an answer is not one to rest a fit on
+      --  before something better than the prediction has been found out about the move.
    end record;
    --  To, Cov and Linear are meaningful only when the verdict is Found.
 
@@ -164,6 +173,10 @@ package Driver.Alignment is
    --  The largest standard deviation, along both axes alike, of a prediction whose window Align still searches
    --  (Largest_Window less what a place on a grid of pixels cannot be known to beyond): the width of "anywhere
    --  the aligner can look".
+
+   function Window_Radius (Sigma : Real) return Real;
+   --  The radius, in pixels, of the window of a prediction whose standard deviation is Sigma along both axes: as far
+   --  as a vector of two dimensions is significant, and a place on a grid of pixels cannot be known to beyond.
 
 private
 

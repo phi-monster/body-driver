@@ -58,9 +58,6 @@ package body Driver.Alignment is
 
    Least_Side : constant Positive := Side_Of (Least_Half);
 
-   Halving : constant := 2;
-   --  Each size of the pyramid is this many times smaller across than the one before.
-
    Finest : constant := 0;
    --  The size of the pyramid that is the picture itself.
 
@@ -990,7 +987,8 @@ package body Driver.Alignment is
 
    function Fail (Why : Reason; Verdict : Alignment.Verdict := Not_Found) return Answer is
      ((Verdict => Verdict, Because => Why, To => (U => 0.0, V => 0.0), Cov => (others => 0.0),
-       Linear => Identity_Part, Correlation => 0.0, Fit_Rms => 0.0, Patch_Rms => 0.0, Degrees_Of_Freedom => 0));
+       Linear => Identity_Part, Correlation => 0.0, Fit_Rms => 0.0, Patch_Rms => 0.0, Degrees_Of_Freedom => 0,
+       Narrow => False));
 
    --  The squared length of a displacement in the standard deviations of a covariance (its Mahalanobis length).
    function Squared_Length (Du, Dv : Real; C : Place_Covariance) return Real is
@@ -1529,13 +1527,15 @@ package body Driver.Alignment is
             return (Verdict => Found, Because => Matched, To => (U => Answer_U, V => Answer_V), Cov => Cov,
                     Linear => Fitted.Fitted.Linear, Correlation => Fitted.Correlation,
                     Fit_Rms => Sqrt (Fitted.Rss / Real (Fitted.Count)), Patch_Rms => Fitted.Patch,
-                    Degrees_Of_Freedom => Variants);
+                    Degrees_Of_Freedom => Variants, Narrow => False);
          end;
       end;
    end Align_At;
 
    function Largest_Window (First, Second : Pyramid) return Real is
      (Real'Min (Real (Second.Sizes (0).Width), Real (Second.Sizes (0).Height)) / 2.0);
+
+   function Window_Radius (Sigma : Real) return Real is (Window_Multiple * Sqrt (Sigma * Sigma + Quantization));
 
    function Largest_Sigma (First, Second : Pyramid) return Real is
       Widest : constant Real := Largest_Window (First, Second);
@@ -1610,6 +1610,11 @@ package body Driver.Alignment is
                then Fail (No_Evidence) else Found);
 
             Answered   : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 1));
+
+            --  Whether the window was one a patch carries at the finest size (and was searched there).
+            Fine_Window : constant Boolean := Narrow and then Level_Used = Finest;
+
+            function Marked (Found : Answer) return Answer is (Found with delta Narrow => Fine_Window);
          begin
             --  What a patch of the usual size cannot decide for lack of what lies around the point (it is
             --  ambiguous, tells the place no better than the window does, or is carried off by what the
@@ -1621,11 +1626,11 @@ package body Driver.Alignment is
                   Wider : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2));
                begin
                   if Wider.Verdict = Found then
-                     return Wider;
+                     return Marked (Wider);
                   end if;
                end;
             end if;
-            return Answered;
+            return Marked (Answered);
          end;
       end;
    end Align_Matched;

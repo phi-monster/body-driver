@@ -524,6 +524,31 @@ package body Driver.Alignment.Tests is
       Check (B.Because = Bad_Warp, "a mirrored warp was compared: " & Reason'Image (B.Because));
    end Window;
 
+   procedure Narrow_Window is
+      --  An answer says whether the window it was searched in was one a patch carries at the full size: a prediction
+      --  a pixel uncertain is searched there; one a few pixels uncertain is searched at a coarser size, and its answer,
+      --  though found, is not one to rest a fit on before the move is better known.
+      First : constant Pyramid := Pyramid_Of (Picture (Textured, Identity_Part, 0.0, 0.0, 0.0));
+
+      function Asked (Sigma : Real) return Answer is
+        (Align (First, First,
+                (From => (U => 160.5, V => 120.5), To => (U => 160.5, V => 120.5),
+                 Cov => (UU => Sigma ** 2, UV => 0.0, VV => Sigma ** 2), others => <>)));
+
+      Near : constant Answer := Asked (1.0);
+      Far  : constant Answer := Asked (2.5);
+   begin
+      Check (Near.Verdict = Found and then Near.Narrow,
+             "a prediction a pixel uncertain was not searched at the full size: " & Reason'Image (Near.Because)
+             & (if Near.Narrow then ", narrow" else ", not narrow"));
+      Check (Far.Verdict = Found and then not Far.Narrow,
+             "a prediction two and a half pixels uncertain was "
+             & (if Far.Verdict = Found then "found, narrow" else "not found: " & Reason'Image (Far.Because)));
+      Check (0.0 < Window_Radius (0.0) and then Window_Radius (0.0) < Window_Radius (1.0)
+             and then Window_Radius (1.0) < Window_Radius (2.5),
+             "the window of a prediction does not widen with its uncertainty, nor hold a place on a grid when it is exact");
+   end Narrow_Window;
+
    ---------------------------------------------------------------------------
    --  The keyframes of one reference (Driver.Alignment.Keyframes)
 
@@ -1039,6 +1064,8 @@ package body Driver.Alignment.Tests is
         ("alignment.reach", "the widest window the aligner searches is not the one it says", Reach'Access);
       Driver.Tests.Register
         ("alignment.window", "a window wider than a patch carries, or a mirror, is compared", Window'Access);
+      Driver.Tests.Register
+        ("alignment.narrow", "an answer does not say whether its window was one a patch carries", Narrow_Window'Access);
       Driver.Tests.Register
         ("alignment.sweep", "the keyframes of a sweep are not found where the earlier ones put them", Sweep'Access);
       Driver.Tests.Register
