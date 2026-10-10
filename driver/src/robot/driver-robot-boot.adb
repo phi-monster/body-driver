@@ -369,9 +369,12 @@ package body Driver.Robot.Boot is
                --  columns after its first): a joint's own frames tell its axis
                --  but not how far that axis is from the others', which only
                --  frames that move several joints show. Each joint moves by its
-               --  share: a part of the offset its own keyframes were followed to,
-               --  so that the cell moves the view no farther than the aligner
-               --  followed one joint, or the fitted arm predicts.
+               --  share: its part of the offset its own keyframes were followed
+               --  to, so that the cell moves the view no farther than the aligner
+               --  followed one joint, or the fitted arm predicts; and no less
+               --  than the keyframe step, the smallest turn the fit counts as a
+               --  joint having moved (a sixth of three steps is none, and a cell
+               --  of such parts moves no two joints the fit can see).
                procedure Together (Share : Real_Array) is
                   Rows : Positive := 1;
                begin
@@ -507,7 +510,7 @@ package body Driver.Robot.Boot is
                            Share : Real_Array (1 .. Size) := [others => 0.0];
                         begin
                            for K in 1 .. N loop
-                              Share (Swept (K)) := Reached (Swept (K)) / Real (N);
+                              Share (Swept (K)) := Real'Max (First (Swept (K)), Reached (Swept (K)) / Real (N));
                            end loop;
                            Together (Share);
                         end;
