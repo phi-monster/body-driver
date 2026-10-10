@@ -19,7 +19,10 @@
 --
 --  The run ends after --beats beats, or when --stop FILE exists (the harness
 --  makes it when the driver's log says the body is measured). --dump N
---  writes every camera's picture every N beats to DIR/frames as BMP.
+--  writes every camera's picture every N beats to DIR/frames as BMP. --rate
+--  gives the robot's beats a second (10 unless given; 0 runs as fast as the
+--  driver answers): a robot has its own rate, and the driver's recomputes
+--  cost it beats in proportion.
 --  --quirk turns one of Fake_World's quirks on or off (image_lag, settle,
 --  zero_noise, drift, droop, creep, give, soft_closer, bounce; delay=N beats;
 --  settle_share=X; reading_noise=X).
@@ -73,6 +76,7 @@ procedure Fake_Robot is
    Stop_File  : Unbounded_String;
    Scrambled  : Boolean := True;
    Dump_Every : Natural := 0;
+   Rate       : Real := 10.0;   --  beats a second; 0 runs as fast as the driver answers
 
    W : World;
 
@@ -834,6 +838,7 @@ begin
    Stop_File := To_Unbounded_String (Option ("--stop"));
    Scrambled := Option ("--scramble", "1") /= "0";
    Dump_Every := Natural'Value (Option ("--dump", "0"));
+   Rate := Real'Value (Option ("--rate", "10.0"));
    for I in 1 .. Ada.Command_Line.Argument_Count - 1 loop
       if Ada.Command_Line.Argument (I) = "--quirk" then
          Apply_Quirk (Ada.Command_Line.Argument (I + 1));
@@ -871,10 +876,13 @@ begin
    end if;
    Send_Plain ("hello");
    Send_Plain ("reset");
-   loop
-      declare
-         use Ada.Calendar;
-         T0     : constant Time := Clock;
+   declare
+      use Ada.Calendar;
+      Next : Time := Clock;
+   begin
+      loop
+         declare
+            T0     : constant Time := Clock;
          T1, T2 : Time;
          R      : Driver.Bytes.Buffer;
       begin
@@ -914,8 +922,18 @@ begin
          end if;
          exit when W.Beat >= Beat_Limit;
          exit when Length (Stop_File) > 0 and then Ada.Directories.Exists (To_String (Stop_File));
+         --  A robot has its own rate; the driver is given the beats at it, not as fast as it can answer.
+         if Rate > 0.0 then
+            Next := Next + Duration (1.0 / Rate);
+            if Next > Clock then
+               delay until Next;
+            else
+               Next := Clock;
+            end if;
+         end if;
       end;
    end loop;
+   end;
    Close (Truth);
    Driver.Wire.Disconnect (Link);
    Put_Line ("fake_robot: done after" & W.Beat'Image & " beats");
