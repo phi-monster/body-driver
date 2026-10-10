@@ -155,11 +155,20 @@ private
       Change    : Real_Vectors.Vector;   --  of the readings from the reference's, per channel
       Field     : Field_Fit;
       Moved     : Boolean := True;   --  it was not predicted to be the reference again (the same pose)
-      Curvature : Order_Errors := [others => 0.0];
-      --  Per order, how far a prediction of this keyframe of that order was off beyond what the fields it rested on
-      --  carried, relative to the move, per unit of the distance the extrapolation went (the amount between the
-      --  keyframe and its earlier keyframe, or the product of its two): the Taylor remainder of a smooth move,
-      --  which grows with that distance. Zero where there was none of that order.
+      Squared   : Order_Errors := [others => 0.0];
+      Weight    : Order_Errors := [others => 0.0];
+      --  Per order, what a prediction of this keyframe of that order says of how curved the move is: how far it was
+      --  off beyond what the fields it rested on carried (and the keyframe's own field does not know), squared and
+      --  relative to the squared move, per unit of the squared distance the extrapolation went (the amount between
+      --  the keyframe and its earlier keyframe, or the product of its two): the Taylor remainder of a smooth move,
+      --  which grows with that distance. An estimate with the noise of one measurement, so it may come out below
+      --  zero; Weight is how far it can be believed: the square of how many times the noise it stands above at the
+      --  median point (a move that is hardly more than the noise tells nothing of its curvature). Zero where there
+      --  was no prediction of that order.
+      Squared_Sum : Real := 0.0;
+      Weight_Sum  : Real := 0.0;
+      --  The same of a prediction of this keyframe as the sum of the moves of keyframes that changed one channel
+      --  each (Combination), per unit of the squared sum of the amounts it changed the channels by.
    end record;
 
    --  A prediction from the fields of earlier keyframes.
@@ -176,6 +185,26 @@ private
 
    type Candidate_Array is array (1 .. Orders) of Candidate;
 
+   --  One channel's share of a combination: an earlier keyframe that changed that channel alone, and the multiple of
+   --  its field that the change of the channel makes.
+   type Part is record
+      Frame  : Positive := 1;
+      Weight : Real := 0.0;
+      Off    : Real := 0.0;   --  how far at most the part of the keyframe's change off the channel moved the view
+   end record;
+
+   package Part_Vectors is new Ada.Containers.Vectors (Positive, Part);
+
+   --  A prediction as the sum of the moves of earlier keyframes that changed one channel each, scaled to the amounts
+   --  the new change has of them: a change of several channels at once is, to first order, the moves of each.
+   type Combination is record
+      Valid    : Boolean := False;
+      Parts    : Part_Vectors.Vector;
+      Amount   : Real := 0.0;   --  the sum of the sizes of the channels' changes
+      Relative : Real := 0.0;   --  the relative error of the move it allows for: the curvature times the amount
+      Median   : Real := Real'Last;   --  the median over the points of the standard deviation it states
+   end record;
+
    package Frame_Vectors is new Ada.Containers.Vectors (Positive, Frame);
 
    type Chain is record
@@ -185,6 +214,7 @@ private
       Points   : Pixel_Vectors.Vector;
       Frames   : Frame_Vectors.Vector;
       Latest   : Candidate_Array;   --  per order, the prediction that stated the least for the keyframe being added
+      Combined : Combination;   --  the sum of single-channel moves considered for the keyframe being added
       Last     : Source := Supplied;   --  where the last prediction came from, until the keyframe it was for is added
    end record;
 

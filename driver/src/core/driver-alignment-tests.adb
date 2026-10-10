@@ -557,15 +557,18 @@ package body Driver.Alignment.Tests is
       Stated          : Real := 0.0;   --  the stated standard deviation at the first point
    end record;
 
-   --  One keyframe, at that change of the two joints' readings, predicted from the chain and added to it.
+   --  One keyframe, at that change of the two joints' readings, predicted from the chain and added to it. The picture
+   --  may be taken Jitter pixels along u from where the readings put it (the truth is where they put it): a view that
+   --  does not follow the readings, as the aligner's noise does not.
    function Keyframe_Of
      (C : in out Keyframes.Chain; Points : Keyframes.Point_Array; Change : Real_Array;
-      Shift : Real_Array := Pixels_Per_Reading; Offered : Keyframes.Prediction_Array := Keyframes.No_Offer)
+      Shift : Real_Array := Pixels_Per_Reading; Offered : Keyframes.Prediction_Array := Keyframes.No_Offer;
+      Jitter : Real := 0.0)
       return Sweep_Outcome
    is
       Gate    : constant Real := Driver.Uncertain.Threshold (Driver.Uncertain.Vector_Gate (2));
       Image   : constant Driver.Images.Image :=
-        Picture (Textured, Linear_At (Change), Shift_At (Change, 1), Shift_At (Change, 2), 0.8);
+        Picture (Textured, Linear_At (Change), Shift_At (Change, 1) + Jitter, Shift_At (Change, 2), 0.8);
       Given   : Keyframes.Prediction_Array (Points'Range);
       Answers : Keyframes.Answer_Array (Points'Range);
       Agree   : Keyframes.Flag_Array (Points'Range);
@@ -715,6 +718,75 @@ package body Driver.Alignment.Tests is
              & Natural'Image (Unknown.Found) & " found");
    end Directions;
 
+   procedure Combined is
+      --  The two joints turned one after the other, each by amounts that quadruple, and then both at once: to first order
+      --  the view of the keyframe that turned both is the sum of the views of the ones that turned each alone (scaled
+      --  to the amounts, the sign of the second joint's reversed), so it is predicted so, with a window narrower than
+      --  the one a change that nothing earlier resembles is given (as far as the change can have moved the view), and
+      --  found where it is.
+      Points   : constant Keyframes.Point_Array := Grid_Points;
+      C        : Keyframes.Chain;
+      Alone    : array (1 .. 8) of Sweep_Outcome;
+      Together : Sweep_Outcome;
+      Change   : constant Real_Array := [12.0, -6.0];
+      Reach    : constant Real := abs Change (1) * Pixels_Per_Reading (1) + abs Change (2) * Pixels_Per_Reading (2);
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 27);
+      Keyframes.Begin_Reference (C, Picture (Textured, Identity_Part, 0.0, 0.0, 0.8), Points);
+      for K in 1 .. 4 loop
+         Alone (K) := Keyframe_Of (C, Points, [0.25 * 4.0 ** (K - 1), 0.0]);
+      end loop;
+      for K in 1 .. 4 loop
+         Alone (4 + K) := Keyframe_Of (C, Points, [0.0, 0.25 * 4.0 ** (K - 1)]);
+      end loop;
+      Together := Keyframe_Of (C, Points, Change);
+      Check ((for all A of Alone => A.Found = A.Asked), "a keyframe that turned one joint alone was not found at every point");
+      Check (Together.Source = Keyframes.Extrapolated,
+             "a keyframe that turned both joints at once was predicted as " & Keyframes.Source'Image (Together.Source));
+      Check (Together.Stated < Reach,
+             "a keyframe that turned both joints at once was given a standard deviation of" & Real'Image (Together.Stated)
+             & " px, no less than the" & Real'Image (Reach) & " px the change can have moved the view");
+      Check (Together.Inside * 100 >= Together.Asked * 95,
+             "the truth lay inside the stated window at only" & Natural'Image (Together.Inside) & " of"
+             & Natural'Image (Together.Asked) & " points of a keyframe that turned both joints");
+      Check (Together.Found = Together.Asked and then Together.Worst < 0.2,
+             "the keyframe that turned both joints was found at" & Natural'Image (Together.Found) & " of"
+             & Natural'Image (Together.Asked) & " points," & Real'Image (Together.Worst) & " px off");
+   end Combined;
+
+   procedure Faint_Steps is
+      --  A sweep that begins with keyframes that move the view by less than the aligner's noise, whose pictures are off
+      --  the readings by a few hundredths of a pixel: how curved the move is, read from them, is that noise divided by
+      --  the tiny distances the extrapolation went, a thousand times any curvature of the later keyframes, and is
+      --  none that the keyframes separate from none. The keyframes that move the view by pixels after them are
+      --  predicted as the sweep, found, with the truth inside the stated window.
+      Points   : constant Keyframes.Point_Array := Grid_Points;
+      Jitter   : constant Real := 0.01;
+      C        : Keyframes.Chain;
+      Outcomes : array (1 .. 6) of Sweep_Outcome;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 28);
+      Keyframes.Begin_Reference (C, Picture (Textured, Identity_Part, 0.0, 0.0, 0.8), Points);
+      for K in Outcomes'Range loop
+         Outcomes (K) :=
+           Keyframe_Of (C, Points, [0.0156 * 4.0 ** (K - 1), 0.0],
+                        Jitter => (if K <= 3 then (if K mod 2 = 1 then Jitter else -Jitter) else 0.0));
+      end loop;
+      for K in 5 .. Outcomes'Last loop
+         Check (Outcomes (K).Source = Keyframes.Extrapolated,
+                "keyframe" & Natural'Image (K) & " of a sweep that began under the noise (the view moved up to"
+                & Real'Image (Outcomes (K).Largest_Move) & " px) was predicted as "
+                & Keyframes.Source'Image (Outcomes (K).Source));
+         Check (Outcomes (K).Found = Outcomes (K).Asked,
+                "keyframe" & Natural'Image (K) & " of a sweep that began under the noise was found at"
+                & Natural'Image (Outcomes (K).Found) & " of" & Natural'Image (Outcomes (K).Asked) & " points");
+         Check (Outcomes (K).Inside * 100 >= Outcomes (K).Asked * 95,
+                "the truth lay inside the stated window at only" & Natural'Image (Outcomes (K).Inside) & " of"
+                & Natural'Image (Outcomes (K).Asked) & " points of keyframe" & Natural'Image (K)
+                & " of a sweep that began under the noise");
+      end loop;
+   end Faint_Steps;
+
    --  A model that knows where every point goes in the keyframe at that change, to within the given standard deviation.
    function Model_Of (Points : Keyframes.Point_Array; Change : Real_Array; Sigma : Real)
      return Keyframes.Prediction_Array
@@ -814,7 +886,8 @@ package body Driver.Alignment.Tests is
       Columns : constant := 640;
       Rows    : constant := 480;
       Data    : constant Bytes_Access := new Driver.Bytes.Byte_Array (1 .. 3 * Columns * Rows);
-      Asked   : array (1 .. 4) of Boolean := [others => False];
+      type Asks is array (1 .. 4) of Boolean;
+      Asked   : Asks := [others => False];
    begin
       for Row in 0 .. Rows - 1 loop
          for Column in 0 .. Columns - 1 loop
@@ -848,7 +921,7 @@ package body Driver.Alignment.Tests is
          procedure Run is new Driver.Parallel_For (Piece);
       begin
          Run (1, 4);
-         Check (Asked = [others => True], "a window of a few hundred pixels at the finest size left was not searched by every task");
+         Check (Asked = Asks'[others => True], "a window of a few hundred pixels at the finest size left was not searched by every task");
       end;
    end Wide_Window;
 
@@ -971,6 +1044,12 @@ package body Driver.Alignment.Tests is
       Driver.Tests.Register
         ("alignment.directions", "a keyframe at the reference's readings, or at another joint's, is not found",
          Directions'Access);
+      Driver.Tests.Register
+        ("alignment.combined", "a keyframe that turned two joints at once is not the sum of the views of each alone",
+         Combined'Access);
+      Driver.Tests.Register
+        ("alignment.faintsteps", "a sweep that begins under the noise is not believed less for it",
+         Faint_Steps'Access);
       Driver.Tests.Register
         ("alignment.offered", "a model of the caller's that states less than the chain is not the one used",
          Offered_Model'Access);

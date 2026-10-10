@@ -135,7 +135,9 @@ driver-alignment-keyframes.adb	((C.Points (I).U - Real (C.Width) / 2.0) / (Real 
 driver-alignment-keyframes.adb	((C.Points (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
 driver-alignment-keyframes.adb	((C.Points (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
 driver-alignment-keyframes.adb	(for all K in Change'Range => not Driver.Uncertain.Significant (Change (K), Noise (K) * Sqrt (2.0)));	2.0	statistics	a difference of two readings has the noise of each: the root of two times one reading's
-driver-alignment-keyframes.adb	+ (Evaluate (C, Next.Field.V, P) - Move.Dv) ** 2) / 2.0	2.0	math	the mean over the two axes of a squared error: its sum over two
+driver-alignment-keyframes.adb	(if Total > 0.0 and then Driver.Uncertain.Significant (Sum / Total, 1.0 / Sqrt (Total)) and then Sum > 0.0	1.0	statistics	the standard error of a mean weighted by inverse variances is one over the root of the sum of the weights
+driver-alignment-keyframes.adb	+ (Evaluate (C, Next.Field.V, P) - Move.Dv) ** 2) / 2.0 - Carried - Know) / Size;	2.0	statistics	the mean over the two axes of a squared error: its sum over two
+driver-alignment-keyframes.adb	+ (Evaluate (C, Next.Field.V, P) - Move.Dv) ** 2) / 2.0 - Carried - Know) / Size;	2.0	statistics	the mean over the two axes of a squared error: its sum over two
 driver-alignment-keyframes.adb	Bu, Bv : Real_Vector (1 .. 3);	3	structure	the three terms of an affine field of the place: a constant and the two coordinates
 driver-alignment-keyframes.adb	Half_U : constant Real := Real (C.Width) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	Half_V : constant Real := Real (C.Height) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
@@ -155,6 +157,8 @@ driver-alignment-keyframes.adb	Run (1, Pieces);	1	structure	from the first piece
 driver-alignment-keyframes.adb	Scale : constant Real := Best / Sqrt (2.0 * Log (2.0));	2.0	statistics	the median of the length of a two-dimensional Gaussian's deviation is its scale times the root of twice the logarithm of two
 driver-alignment-keyframes.adb	Scale : constant Real := Best / Sqrt (2.0 * Log (2.0));	2.0	statistics	the median of the length of a two-dimensional Gaussian's deviation is its scale times the root of twice the logarithm of two
 driver-alignment-keyframes.adb	Size : constant Real := (Move.Du ** 2 + Move.Dv ** 2) / 2.0;	2.0	math	the mean over the two axes of a squared move: its sum over two
+driver-alignment-keyframes.adb	Size : constant Real := (Move.Du ** 2 + Move.Dv ** 2) / 2.0;	2.0	statistics	the mean over the two axes of a squared move: its sum over two
+driver-alignment-keyframes.adb	Slope := (UU => Slope.UU + Each.Weight * (G.UU - 1.0), UV => Slope.UV + Each.Weight * G.UV,	1.0	math	a warp that moves nothing has ones on its diagonal: the share of a field is its difference from the identity
 driver-alignment-keyframes.adb	Stay (0.0);	0.0	math	a keyframe at the reference's own readings has moved nothing: no spread
 driver-alignment-keyframes.adb	Sum := Sum + ((Miss_U / (1.0 - Leverage)) ** 2 + (Miss_V / (1.0 - Leverage)) ** 2) / 2.0;	2.0	math	the mean over the two axes of a squared error: its sum over two
 driver-alignment-keyframes.adb	Third : constant Positive := Seen / 3;	3	structure	a third of the points: a sample takes one from each third
@@ -162,6 +166,7 @@ driver-alignment-keyframes.adb	Try (Order (S), Order (S + Third), Order (S + 2 *
 driver-alignment-keyframes.adb	UV => (F.U (3) + F.U (5) * X + 2.0 * F.U (6) * Y) / Half_V,	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
 driver-alignment-keyframes.adb	Unit (J) := 1.0;	1.0	math	the unit vector of a term
 driver-alignment-keyframes.adb	VU => (F.V (2) + 2.0 * F.V (4) * X + F.V (5) * Y) / Half_U,	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
+driver-alignment-keyframes.adb	VU => Slope.VU + Each.Weight * G.VU, VV => Slope.VV + Each.Weight * (G.VV - 1.0));	1.0	math	a warp that moves nothing has ones on its diagonal: the share of a field is its difference from the identity
 driver-alignment-keyframes.adb	VV => 1.0 + (F.V (3) + F.V (5) * X + 2.0 * F.V (6) * Y) / Half_V);	1.0	math	a warp that moves nothing is the identity: its diagonal is one
 driver-alignment-keyframes.adb	VV => 1.0 + (F.V (3) + F.V (5) * X + 2.0 * F.V (6) * Y) / Half_V);	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
 driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess.W2 * (Slope_2.VV - 1.0)),	1.0	math	a warp that moves nothing is the identity: its diagonal is one
@@ -173,21 +178,25 @@ driver-alignment-keyframes.adb	Xu, Xv : Real_Vector (1 .. 3);	3	structure	the th
 driver-alignment-keyframes.adb	Y : constant Real := (P.V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	Y : constant Real := (P.V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	abs (Own - Amounts (First)) * (if Second = 0 then 1.0 else abs (Own - Amounts (Second)));	1.0	math	an order-one extrapolation has one distance: the second factor is the empty product
+driver-alignment-keyframes.adb	and then Channels_Moving (Past, Shifts, Precision) = 1	1	structure	a keyframe that changed one channel alone: one channel moves the view
 driver-alignment-keyframes.adb	for Family in 1 .. 4 loop	4	structure	the picture's two axes and its two diagonals
 driver-alignment-keyframes.adb	for R in 1 .. 3 loop	3	structure	the three points of a sample
 driver-alignment-keyframes.adb	function Order_Of (Second : Natural) return Positive is (if Second = 0 then 1 else Orders);	1	structure	one earlier keyframe gives an extrapolation of order one
 driver-alignment-keyframes.adb	function Terms_Of (Degree : Natural) return Positive is ((Degree + 1) * (Degree + 2) / 2);	2	math	the terms of a polynomial of that degree in two coordinates: (degree + 1) (degree + 2) over two
 driver-alignment-keyframes.adb	function Terms_Of (Degree : Natural) return Positive is ((Degree + 1) * (Degree + 2) / 2);	2	math	the terms of a polynomial of that degree in two coordinates: (degree + 1) (degree + 2) over two
+driver-alignment-keyframes.adb	if Frames > 0 and then Channels_Moving (Changes, Shifts, Precision) >= 2 then	2	structure	a change of several channels at once: two at the least
 driver-alignment-keyframes.adb	if Rows < 2 * P then	2	statistics	as many points as twice the terms: as many degrees of freedom as terms
 driver-alignment-keyframes.adb	if Seen < 2 * Terms then	2	statistics	as many points as twice the terms: as many degrees of freedom as terms
 driver-alignment-keyframes.adb	return (UU => 1.0 + (F.U (2) + 2.0 * F.U (4) * X + F.U (5) * Y) / Half_U,	1.0	math	a warp that moves nothing is the identity: its diagonal is one
 driver-alignment-keyframes.adb	return (UU => 1.0 + (F.U (2) + 2.0 * F.U (4) * X + F.U (5) * Y) / Half_U,	2.0	math	the derivative of a square is twice the coordinate, and the cross term's derivative by either coordinate is the other
+driver-alignment-keyframes.adb	return (if Total > 0.0 then Curvature_Of (Sum, Total) else Pooled_Order (C, 1));	1	structure	the first order: the extrapolation that is linear in the amount of the change
 driver-alignment-keyframes.adb	return F.Sigma ** 2 * (1.0 + Sum);	1.0	math	the variance of a least squares prediction: the residual variance times one plus the place's leverage
 driver-alignment-keyframes.adb	return [1.0, X, Y, X * X, X * Y, Y * Y];	1.0	math	the first term of a quadratic is its constant
 driver-alignment-keyframes.adb	when 1 => X_Of (Index (S)),	1	structure	the family along the picture's first axis
 driver-alignment-keyframes.adb	when 2 => Y_Of (Index (S)),	2	structure	the family along the picture's second axis
 driver-alignment-keyframes.adb	when 3 => X_Of (Index (S)) + Y_Of (Index (S)),	3	structure	the family along the picture's diagonal
 driver-alignment-keyframes.adb	while J >= 1 and then Along (Order (J)) > Along (S) loop	1	structure	the first place of the insertion sort
+driver-alignment-keyframes.ads	Frame : Positive := 1;	1	structure	the first keyframe, until a part names its own
 driver-alignment-keyframes.ads	Orders : constant := 2;	2	structure	an extrapolation is linear (one earlier keyframe) or quadratic (two) in the amount
 driver-alignment-keyframes.ads	Terms : constant := 6;	6	math	a quadratic of two coordinates has six coefficients: one, two, three
 driver-alignment.adb	((C.VV * Du ** 2 - 2.0 * C.UV * Du * Dv + C.UU * Dv ** 2) / (C.UU * C.VV - C.UV ** 2));	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
@@ -1539,6 +1548,7 @@ driver-robot-kinematics-fit.adb	E (P) := 1.0;	1.0	math	a unit vector of the iden
 driver-robot-kinematics-fit.adb	Eigensystem (0.5 * (K + Transpose (K)), Values, Vectors);	0.5	math	the symmetric part of a matrix is half the matrix and its transpose
 driver-robot-kinematics-fit.adb	Eigensystem (0.5 * (Whitened + Transpose (Whitened)), Values, Vectors);	0.5	math	the symmetric part of a matrix
 driver-robot-kinematics-fit.adb	Ends : array (1 .. 2) of Real_Vector (1 .. Outputs);	2	math	a central difference: one standard deviation either way
+driver-robot-kinematics-fit.adb	Equal (P) := (if Ar (P, P) > 0.0 then 1.0 / Sqrt (Ar (P, P)) else 0.0);	1.0	math	a term in units of its own standard error: the inverse root of its diagonal entry
 driver-robot-kinematics-fit.adb	F : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));	1.0	math	lengths scale by the inverse of the root mean square that is the unit
 driver-robot-kinematics-fit.adb	F : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));	1.0	math	lengths scale by the inverse of the root mean square that is the unit
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median

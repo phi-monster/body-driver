@@ -567,6 +567,9 @@ package body Driver.Robot.Kinematics.Fit is
          --  (2) and its reading scale (1).
          Variance   : Real_Array (1 .. 6 + 5 * N) := [others => Real'Last];
          Determined : Boolean := False;
+         --  Why not, when it is not: the last pass that could not be made, and how.
+         Why_Not    : Ada.Strings.Unbounded.Unbounded_String :=
+           Ada.Strings.Unbounded.To_Unbounded_String ("too few sightings fit the tracks to determine the lens and the joints");
 
          --  What the covariance of the last pass is made of: the gradient of
          --  every sighting (its row) and its error, the inverse normal
@@ -1193,6 +1196,11 @@ package body Driver.Robot.Kinematics.Fit is
                                  Br : Grid_Access := new Real_Matrix'[1 .. Reduced => [1 .. Tracks => 0.0]];
                                  Lf : Driver.Numerics.Arrays.Real_Matrix (1 .. Reduced, 1 .. Reduced);
                                  Pd : Boolean;
+                                 --  The reduced terms are in units that differ by as many orders of magnitude as the
+                                 --  fit's parameters do (a log focal length, pixels, radians, lengths): the matrix
+                                 --  is made positive definite or not by its correlations, each term in units of its
+                                 --  own standard error, and not by the sizes of its entries.
+                                 Equal : Real_Array (1 .. Reduced) := [others => 0.0];
                               begin
                                  Free (Seen_Of);
                                  for P in 1 .. Reduced loop
@@ -1215,8 +1223,23 @@ package body Driver.Robot.Kinematics.Fit is
                                        end loop;
                                     end if;
                                  end loop;
-                                 Driver.Numerics.Dense.Cholesky (Ar, Lf, Pd);
+                                 declare
+                                    Scaled : Driver.Numerics.Arrays.Real_Matrix (1 .. Reduced, 1 .. Reduced);
+                                 begin
+                                    for P in 1 .. Reduced loop
+                                       Equal (P) := (if Ar (P, P) > 0.0 then 1.0 / Sqrt (Ar (P, P)) else 0.0);
+                                    end loop;
+                                    for P in 1 .. Reduced loop
+                                       for Q in 1 .. Reduced loop
+                                          Scaled (P, Q) := Equal (P) * Ar (P, Q) * Equal (Q);
+                                       end loop;
+                                    end loop;
+                                    Driver.Numerics.Dense.Cholesky (Scaled, Lf, Pd);
+                                    Pd := Pd and then (for all E of Equal => E > 0.0);
+                                 end;
                                  Determined := Pd;
+                                 Why_Not := Ada.Strings.Unbounded.To_Unbounded_String
+                                   ("the sightings do not determine the lens and the joints (the normal equations are singular)");
                                  Variance := [others => Real'Last];
                                  Report.Covariance.Clear;
                                  --  The covariance of the estimate: the inverse normal
@@ -1263,8 +1286,10 @@ package body Driver.Robot.Kinematics.Fit is
                                              declare
                                                 Column : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, E);
                                              begin
+                                                --  The inverse of the matrix is the inverse of its scaled form,
+                                                --  scaled again.
                                                 for Q in 1 .. Reduced loop
-                                                   Inv (Q, P) := Column (Q);
+                                                   Inv (Q, P) := Equal (Q) * Column (Q) * Equal (P);
                                                 end loop;
                                              end;
                                           end;
@@ -1423,10 +1448,14 @@ package body Driver.Robot.Kinematics.Fit is
                         Report.Errors := Summary_Of (Kinds, Clipped);
                      else
                         Determined := False;
+                        Why_Not := Ada.Strings.Unbounded.To_Unbounded_String
+                          ("the sightings' covariance has no positive semi-definite form");
                      end if;
                   end;
                else
                   Determined := False;
+                  Why_Not := Ada.Strings.Unbounded.To_Unbounded_String
+                    ("the sightings are too few to tell how their errors depend on each other");
                end if;
                Errors.Free (Kinds);
             end;
@@ -1440,8 +1469,7 @@ package body Driver.Robot.Kinematics.Fit is
          --  cone whose Z-sigma edge stays within a quarter turn of it.
          Report.Determined := Determined;
          if not Determined then
-            Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
-              ("the sightings do not determine the lens and the joints (the normal equations are singular)");
+            Report.Why := Why_Not;
          else
             Report.Focal_Sigma := L.Fx * Sqrt (Variance (1));
             if not Driver.Uncertain.Significant (L.Fx, L.Fx * Sqrt (Variance (1)))

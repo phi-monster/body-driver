@@ -547,6 +547,107 @@ package body Driver.Alignment.Keyframes is
    end Extrapolate;
 
    ---------------------------------------------------------------------------
+   --  Predictions as sums of single-channel moves
+
+   --  Whether a change of the channel moves the view by more than the aligner errs by (Precision: the scatter of the
+   --  keyframes' fields, Scatter). Shift is the pixels a unit of the channel moves the view: zero when that is not
+   --  known, and the change then moves it by no amount known.
+   function Moves_View (Change, Shift : Real_Array; K : Positive; Precision : Real) return Boolean is
+     (Driver.Uncertain.Significant (Change (K) * Shift (K), Precision));
+
+   function Channels_Moving (Change, Shift : Real_Array; Precision : Real) return Natural is
+      Count : Natural := 0;
+   begin
+      for K in Change'Range loop
+         if Moves_View (Change, Shift, K, Precision) then
+            Count := Count + 1;
+         end if;
+      end loop;
+      return Count;
+   end Channels_Moving;
+
+   --  The variance of what the fields of a combination carry into a prediction at a place: the scatter of each
+   --  (Variance) and its off-channel part, through its weight.
+   function Carried_By (C : Chain; Combo : Combination; P : Driver.Images.Pixel) return Real is
+      Sum : Real := 0.0;
+   begin
+      for Each of Combo.Parts loop
+         Sum := Sum + Each.Weight ** 2 * (Variance (C, C.Frames (Each.Frame).Field, P) + Each.Off ** 2);
+      end loop;
+      return Sum;
+   end Carried_By;
+
+   function Move_By (C : Chain; Combo : Combination; P : Driver.Images.Pixel) return Displacement is
+      Result : Displacement;
+   begin
+      for Each of Combo.Parts loop
+         Result.Du := Result.Du + Each.Weight * Evaluate (C, C.Frames (Each.Frame).Field.U, P);
+         Result.Dv := Result.Dv + Each.Weight * Evaluate (C, C.Frames (Each.Frame).Field.V, P);
+      end loop;
+      return Result;
+   end Move_By;
+
+   function Stated_Sigma (C : Chain; Combo : Combination; P : Driver.Images.Pixel; Move : Displacement) return Real is
+     (Sqrt (Carried_By (C, Combo, P) + (Combo.Relative ** 2) * (Move.Du ** 2 + Move.Dv ** 2)));
+
+   --  The predictions of every point from the sum of the moves of a combination.
+   procedure Extrapolate (C : Chain; Combo : Combination; Into : out Prediction_Array) is
+   begin
+      for K in Into'Range loop
+         declare
+            P     : constant Driver.Images.Pixel := C.Points (K - Into'First + 1);
+            Move  : constant Displacement := Move_By (C, Combo, P);
+            Sigma : constant Real := Stated_Sigma (C, Combo, P, Move);
+            Slope : Linear_Part := Identity_Part;
+         begin
+            for Each of Combo.Parts loop
+               declare
+                  G : constant Linear_Part := Gradient (C, C.Frames (Each.Frame).Field, P);
+               begin
+                  Slope := (UU => Slope.UU + Each.Weight * (G.UU - 1.0), UV => Slope.UV + Each.Weight * G.UV,
+                            VU => Slope.VU + Each.Weight * G.VU, VV => Slope.VV + Each.Weight * (G.VV - 1.0));
+               end;
+            end loop;
+            Into (K) :=
+              (From => P, To => (U => P.U + Move.Du, V => P.V + Move.Dv), Linear => Slope,
+               Cov => (UU => Sigma ** 2, UV => 0.0, VV => Sigma ** 2), Linear_Sigma => Real'Last);
+         end;
+      end loop;
+   end Extrapolate;
+
+   --  How curved the moves are, from every keyframe that has an estimate of it, each believed as far as its weight
+   --  (Frame): the weighted mean of the estimates. A weight is the inverse variance of its estimate, so the mean
+   --  stands as many standard errors above zero as the keyframes together can tell; curvature that the keyframes do
+   --  not separate from none (the noise of a move hardly bigger than the aligner's, over the tiny distance it
+   --  went, is a thousand times any curvature) is none.
+   function Curvature_Of (Sum, Total : Real) return Real is
+     (if Total > 0.0 and then Driver.Uncertain.Significant (Sum / Total, 1.0 / Sqrt (Total)) and then Sum > 0.0
+      then Sqrt (Sum / Total) else 0.0);
+
+   function Pooled_Order (C : Chain; Order : Positive) return Real is
+      Sum, Total : Real := 0.0;
+   begin
+      for F of C.Frames loop
+         Sum := Sum + F.Weight (Order) * F.Squared (Order);
+         Total := Total + F.Weight (Order);
+      end loop;
+      return Curvature_Of (Sum, Total);
+   end Pooled_Order;
+
+   --  The same of the predictions as sums of single-channel moves; until one has been judged, the curvature of the
+   --  linear extrapolation along a direction (the moves of the channels are curved alike, and a sum of them is as
+   --  much more so as the amounts it adds).
+   function Pooled_Sum (C : Chain) return Real is
+      Sum, Total : Real := 0.0;
+   begin
+      for F of C.Frames loop
+         Sum := Sum + F.Weight_Sum * F.Squared_Sum;
+         Total := Total + F.Weight_Sum;
+      end loop;
+      return (if Total > 0.0 then Curvature_Of (Sum, Total) else Pooled_Order (C, 1));
+   end Pooled_Sum;
+
+   ---------------------------------------------------------------------------
 
    procedure Begin_Reference (C : out Chain; Reference : Driver.Images.Image; Points : Point_Array) is
    begin
@@ -605,6 +706,7 @@ package body Driver.Alignment.Keyframes is
       end Stay;
    begin
       C.Latest := [others => <>];
+      C.Combined := (others => <>);
       From := Same_Pose;
       if Count = 0 or else Is_None (Changes, Noises) then
          Stay (0.0);
@@ -617,6 +719,8 @@ package body Driver.Alignment.Keyframes is
          --  its shift. When no shift is known, as far as the aligner searches.
          Moved   : constant Real := Moved_By (Changes, Shifts);
          Reach   : constant Real := (if Moved > 0.0 then Moved else Largest_Sigma (C.Pictures, C.Pictures));
+         --  How far the aligner errs on these keyframes' views: what a change must move the view by to be told from none.
+         Precision : constant Real := Scatter (C);
          Amounts : Real_Array (1 .. Frames) := [others => 0.0];
          Off     : Real_Array (1 .. Frames) := [others => 0.0];
          Usable  : Flag_Array (1 .. Frames) := [others => False];
@@ -625,6 +729,7 @@ package body Driver.Alignment.Keyframes is
          Best    : Real := Reach;
          Chosen  : Natural := 0;   --  the order of the candidate that states the least, when one states less than Best
          Offer_Wins : Boolean := False;
+         Combined_Wins : Boolean := False;
 
          --  The prediction from the earlier keyframes First and Second (unless zero), kept if it states the least
          --  of its order.
@@ -669,12 +774,9 @@ package body Driver.Alignment.Keyframes is
               and then not Is_None (To_Array (C.Frames (J).Change), Noises)
               and then Own * Off (J) < Reach * abs Amounts (J);
          end loop;
-         for J in 1 .. Frames loop
-            if Usable (J) then
-               for Order in 1 .. Orders loop
-                  Curve (Order) := Real'Max (Curve (Order), C.Frames (J).Curvature (Order));
-               end loop;
-            end if;
+         --  How curved the moves are: what the keyframes showed, each believed as far as it stood above the noise.
+         for Order in 1 .. Orders loop
+            Curve (Order) := Pooled_Order (C, Order);
          end loop;
          for J1 in 1 .. Frames loop
             if Usable (J1) then
@@ -686,6 +788,72 @@ package body Driver.Alignment.Keyframes is
                end loop;
             end if;
          end loop;
+         --  A change of several channels at once is, to first order, the moves of each: the sum of the moves of the
+         --  keyframes that changed one channel each, the nearest in amount to this change's (of the same sign when
+         --  there is one), scaled to it.
+         if Frames > 0 and then Channels_Moving (Changes, Shifts, Precision) >= 2 then
+            declare
+               Combo : Combination;
+               Whole : Boolean := True;
+            begin
+               for K in Changes'Range loop
+                  if Moves_View (Changes, Shifts, K, Precision) then
+                     declare
+                        Nearest_Frame : Natural := 0;
+                        Same_Sign     : Boolean := False;
+                        Gap           : Real := Real'Last;
+                     begin
+                        for J in 1 .. Frames loop
+                           declare
+                              Past : constant Real_Array := To_Array (C.Frames (J).Change);
+                           begin
+                              if C.Frames (J).Field.Valid and then Moves_View (Past, Shifts, K, Precision)
+                                and then Channels_Moving (Past, Shifts, Precision) = 1
+                              then
+                                 declare
+                                    Same  : constant Boolean := Past (K) * Changes (K) > 0.0;
+                                    Apart : constant Real := abs Log (abs Past (K) / abs Changes (K));
+                                 begin
+                                    if (Same and then not Same_Sign) or else (Same = Same_Sign and then Apart < Gap) then
+                                       Nearest_Frame := J;
+                                       Same_Sign := Same;
+                                       Gap := Apart;
+                                    end if;
+                                 end;
+                              end if;
+                           end;
+                        end loop;
+                        if Nearest_Frame = 0 then
+                           Whole := False;
+                        else
+                           declare
+                              Past : constant Real_Array := To_Array (C.Frames (Nearest_Frame).Change);
+                              Away : Real := 0.0;
+                           begin
+                              for I in Past'Range loop
+                                 if I /= K then
+                                    Away := Away + abs Past (I) * Shifts (I);
+                                 end if;
+                              end loop;
+                              Combo.Parts.Append
+                                (Part'(Frame => Nearest_Frame, Weight => Changes (K) / Past (K), Off => Away));
+                              Combo.Amount := Combo.Amount + abs Changes (K);
+                           end;
+                        end if;
+                     end;
+                  end if;
+               end loop;
+               if Whole then
+                  Combo.Valid := True;
+                  Combo.Relative := Pooled_Sum (C) * Combo.Amount;
+                  for K in Sigmas'Range loop
+                     Sigmas (K) := Stated_Sigma (C, Combo, C.Points (K), Move_By (C, Combo, C.Points (K)));
+                  end loop;
+                  Combo.Median := Driver.Stats.Median (Sigmas);
+                  C.Combined := Combo;
+               end if;
+            end;
+         end if;
          for Order in 1 .. Orders loop
             if C.Latest (Order).Valid and then C.Latest (Order).Median < Best then
                Best := C.Latest (Order).Median;
@@ -693,9 +861,18 @@ package body Driver.Alignment.Keyframes is
                Offer_Wins := False;
             end if;
          end loop;
+         if C.Combined.Valid and then C.Combined.Median < Best then
+            Best := C.Combined.Median;
+            Chosen := 0;
+            Offer_Wins := False;
+            Combined_Wins := True;
+         end if;
          if Offer_Wins then
             From := Supplied;
             Into := Offered;
+         elsif Combined_Wins then
+            From := Extrapolated;
+            Extrapolate (C, C.Combined, Into);
          elsif Chosen = 0 then
             From := New_Direction;
             Stay (Reach);
@@ -879,50 +1056,88 @@ package body Driver.Alignment.Keyframes is
       Fit_Field (C, Marks, Next.Field, Mine);
       Settle (C, Second, Answers, Marks, Next.Field, Mine);
       Agree := Mine;
-      --  How far the extrapolation of each order that was tried was off, beyond what it stated: the relative error
-      --  its next use must allow for. It is judged against the keyframe's field at every point that stays in the
-      --  picture, not only at the points that were answered: a prediction off by more than the aligner could follow
-      --  leaves no answer to judge it by. What the field itself does not know there (Variance) is not counted.
+      --  How far the extrapolation of each order that was tried was off, beyond what the fields it rested on carry:
+      --  what the keyframe says of the curvature of the move (Frame). It is judged against the keyframe's field at
+      --  every point that stays in the picture, not only at the points that were answered: a prediction off by more
+      --  than the aligner could follow leaves no answer to judge it by. What the field itself does not know there
+      --  (Variance) is not counted.
       if Next.Field.Valid then
          for Order in 1 .. Orders loop
-            if C.Latest (Order).Valid then
+            if C.Latest (Order).Valid and then C.Latest (Order).Dist > 0.0 then
                declare
                   Guess  : Candidate renames C.Latest (Order);
-                  Ratios : Real_Array (1 .. Count);
+                  Excess : Real_Array (1 .. Count);
+                  Signal : Real_Array (1 .. Count);
                   Judged : Natural := 0;
                begin
-                  --  Per point, how far it was off beyond what was stated and the field knows, over the size of
-                  --  its move (both per axis, as variances); a move the field's own uncertainty there does not
-                  --  separate from none tells nothing. The relative error is the median of them: a few points
-                  --  the aligner could not follow do not set the window of the rest.
+                  --  Per point, how far it was off beyond what the fields carry and this field knows, over the size
+                  --  of its move (both per axis, as variances); a move the field's own uncertainty there does not
+                  --  separate from none tells nothing. The keyframe's estimate is the median of them: a few points
+                  --  the aligner could not follow do not set the window of the rest. How far it can be believed is
+                  --  the signal the median point carries, the curvature's share of the squared error over what else
+                  --  there is in it, squared.
                   for K in 1 .. Count loop
                      declare
-                        P    : constant Driver.Images.Pixel := C.Points (K);
-                        Move : constant Displacement := Move_Of (C, P, Guess);
-                        Size : constant Real := (Move.Du ** 2 + Move.Dv ** 2) / 2.0;
-                        Know : constant Real := Variance (C, Next.Field, P);
+                        P       : constant Driver.Images.Pixel := C.Points (K);
+                        Move    : constant Displacement := Move_Of (C, P, Guess);
+                        Size    : constant Real := (Move.Du ** 2 + Move.Dv ** 2) / 2.0;
+                        Know    : constant Real := Variance (C, Next.Field, P);
+                        Carried : constant Real := Carried_At (C, Guess, P) ** 2;
                      begin
                         if In_View (P) and then Size > Know then
                            Judged := Judged + 1;
-                           Ratios (Judged) :=
+                           Excess (Judged) :=
                              (((Evaluate (C, Next.Field.U, P) - Move.Du) ** 2
-                               + (Evaluate (C, Next.Field.V, P) - Move.Dv) ** 2) / 2.0
-                              - Stated_Sigma (C, Guess, P, Move) ** 2 - Know) / Size;
+                               + (Evaluate (C, Next.Field.V, P) - Move.Dv) ** 2) / 2.0 - Carried - Know) / Size;
+                           Signal (Judged) :=
+                             Guess.Dist ** 2 * Size / Real'Max (Carried + Know + Next.Field.Sigma ** 2, Real'Epsilon * Size);
                         end if;
                      end;
                   end loop;
-                  Next.Curvature (Order) :=
-                    (if Judged > 0 and then Guess.Dist > 0.0
-                     then Sqrt (Guess.Curve ** 2
-                                + Real'Max (0.0, Driver.Stats.Median (Ratios (1 .. Judged))) / Guess.Dist ** 2)
-                     else Guess.Curve);
+                  if Judged > 0 then
+                     Next.Squared (Order) := Driver.Stats.Median (Excess (1 .. Judged)) / Guess.Dist ** 2;
+                     Next.Weight (Order) := Driver.Stats.Median (Signal (1 .. Judged)) ** 2;
+                  end if;
                end;
             end if;
          end loop;
+         --  The same of the sum of single-channel moves, per unit of the squared sum of the amounts.
+         if C.Combined.Valid and then C.Combined.Amount > 0.0 then
+            declare
+               Combo  : Combination renames C.Combined;
+               Excess : Real_Array (1 .. Count);
+               Signal : Real_Array (1 .. Count);
+               Judged : Natural := 0;
+            begin
+               for K in 1 .. Count loop
+                  declare
+                     P       : constant Driver.Images.Pixel := C.Points (K);
+                     Move    : constant Displacement := Move_By (C, Combo, P);
+                     Size    : constant Real := (Move.Du ** 2 + Move.Dv ** 2) / 2.0;
+                     Know    : constant Real := Variance (C, Next.Field, P);
+                     Carried : constant Real := Carried_By (C, Combo, P);
+                  begin
+                     if In_View (P) and then Size > Know then
+                        Judged := Judged + 1;
+                        Excess (Judged) :=
+                          (((Evaluate (C, Next.Field.U, P) - Move.Du) ** 2
+                            + (Evaluate (C, Next.Field.V, P) - Move.Dv) ** 2) / 2.0 - Carried - Know) / Size;
+                        Signal (Judged) :=
+                          Combo.Amount ** 2 * Size / Real'Max (Carried + Know + Next.Field.Sigma ** 2, Real'Epsilon * Size);
+                     end if;
+                  end;
+               end loop;
+               if Judged > 0 then
+                  Next.Squared_Sum := Driver.Stats.Median (Excess (1 .. Judged)) / Combo.Amount ** 2;
+                  Next.Weight_Sum := Driver.Stats.Median (Signal (1 .. Judged)) ** 2;
+               end if;
+            end;
+         end if;
       end if;
       Next.Moved := C.Last /= Same_Pose;
       C.Last := Supplied;
       C.Latest := [others => <>];
+      C.Combined := (others => <>);
       C.Frames.Append (Next);
    end Add;
 
