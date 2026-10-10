@@ -440,6 +440,37 @@ package body Driver.Robot.Lockin is
             function Mark (Marks : Natural_Access; G : Group_Id; B : Natural) return Natural is
               (Marks ((Natural (G) - 1) * M.Beats + B + 1));
 
+            --  Whether the eye's picture moved, at each beat, within what the flow resolves: a cell resolves a
+            --  displacement of less than half its width, and where the cells that could not resolve theirs are a
+            --  significant majority of those with texture, the picture moved beyond the flow's reach, and the
+            --  few cells that did resolve one are not to be believed (a flow that tracks a texture aliases on its
+            --  lookalikes a period away). Such a beat is no evidence for the regression, which measures the
+            --  small-motion Jacobian: on the fake body the sweep's pushes, half a radian in three beats, put most of
+            --  the picture beyond a cell every beat, the gains collapsed under them and the visible steps grew
+            --  three hundredfold (R4, the box). Indexed by the beat plus one.
+            Reached : Flags_Access := new Flags'(1 .. Natural'Max (1, M.Beats) => True);
+
+            procedure Mark_Reach is
+            begin
+               for B in 0 .. M.Beats - 1 loop
+                  if B < Natural (S.Measured.Length) and then S.Measured (B) and then Natural (S.Condition.Length) >= (B + 1) * N then
+                     declare
+                        Textured, Solved : Natural := 0;
+                     begin
+                        for C in 0 .. N - 1 loop
+                           if S.Condition (B * N + C) > 0.0 then
+                              Textured := Textured + 1;
+                              if S.Resolved (B * N + C) then
+                                 Solved := Solved + 1;
+                              end if;
+                           end if;
+                        end loop;
+                        Reached (B + 1) := not Cells_Disagree (Showing => Solved, Silent => Textured - Solved);
+                     end;
+                  end if;
+               end loop;
+            end Mark_Reach;
+
             procedure Mark_Motions is
             begin
                for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -474,7 +505,9 @@ package body Driver.Robot.Lockin is
                Pusher : Group_Id := M.Groups.First_Index;
                Held_Moving : Boolean := False;   --  a group not pushed moved at the beat
             begin
-               if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 or else R >= M.Beats then
+               if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 or else R >= M.Beats
+                 or else not Reached (B + 1)
+               then
                   return False;
                end if;
                for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -536,6 +569,7 @@ package body Driver.Robot.Lockin is
             S.Shifts.Clear;
             if N > 0 then
                Mark_Motions;
+               Mark_Reach;
                for B in 1 .. M.Beats - 1 loop
                   if Usable (B) then
                      Rows := Rows + 1;
@@ -826,6 +860,7 @@ package body Driver.Robot.Lockin is
             Free (Last_Pushed);
             Free (Last_Moved);
             Free (Last_Seen_Moving);
+            Free (Reached);
          end;
       end loop;
       Free (Starts);
