@@ -205,7 +205,9 @@ package body Driver.Robot.Boot is
                end loop;
                Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & C'Image
                                 & (if Amount (C) > 0.0
-                                   then " is seen when moved by " & Scientific (Amount (C)) & " reading units"
+                                   then " is seen when moved by " & Scientific (Amount (C)) & " reading units (after"
+                                        & P.Levels (Driver.Robot.Motion.Increasing)'Image & " levels up,"
+                                        & P.Levels (Driver.Robot.Motion.Decreasing)'Image & " down)"
                                    elsif P.Dead
                                    then " answers neither way up to "
                                         & Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))
