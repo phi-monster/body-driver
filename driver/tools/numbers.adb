@@ -43,6 +43,30 @@ procedure Numbers is
    Undecided_Why : constant String :=
      "undecided: read the context and classify as structure / math / numerics / statistics / format";
 
+   --  A reason that rests on one run or one body (an A-numbered run, x5, G1, a seed, the box, a fake body) is
+   --  a tuning number's: what one body measured is that body's, not the driver's. The ladder that visited every
+   --  other level was registered as math with the reason "one keyframe per two doublings", which A9's arm had
+   --  shown on x5 and a fake body's eye could not follow (10-12).
+   function Cites_One_Run (Why : String) return Boolean is
+      use Ada.Strings.Fixed;
+      Lower : constant String := Ada.Characters.Handling.To_Lower (Why);
+   begin
+      if Index (Lower, "x5") > 0 or else Index (Lower, " g1") > 0 or else Index (Lower, "seed ") > 0
+        or else Index (Lower, "the box") > 0 or else Index (Lower, "fake body") > 0
+      then
+         return True;
+      end if;
+      --  "A" and two or more digits: a run's name.
+      for I in Why'First .. Why'Last - 2 loop
+         if Why (I) = 'A' and then Why (I + 1) in '0' .. '9' and then Why (I + 2) in '0' .. '9'
+           and then (I = Why'First or else not Ada.Characters.Handling.Is_Alphanumeric (Why (I - 1)))
+         then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Cites_One_Run;
+
    function Category_Ok (C : String) return Boolean is
      (C = "structure" or else C = "math" or else C = "numerics" or else C = "statistics" or else C = "format");
 
@@ -1488,6 +1512,9 @@ begin
                   if To_String (R.Category) = "tuning" then
                      Tuning := Tuning + 1;
                      Put_Line ("  tuning: " & K);
+                  elsif Cites_One_Run (To_String (R.Why)) then
+                     Tuning := Tuning + 1;
+                     Put_Line ("  tuning (the reason rests on one run or one body): " & K);
                   elsif not Category_Ok (To_String (R.Category)) then
                      Undecided := Undecided + 1;
                      if Undecided <= 20 then
