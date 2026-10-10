@@ -2201,8 +2201,6 @@ package body Driver.Robot.Kinematics.Fit is
 
          Golden    : constant Real := (3.0 - Sqrt (5.0)) * Ada.Numerics.Pi;
          Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;
-         A, B, X1, X2 : Real;
-         BA, BB, B1, B2 : Best_Array;
       begin
          for X of Sight loop
             Seen_In (X.Frame) := Seen_In (X.Frame) + 1;
@@ -2270,51 +2268,102 @@ package body Driver.Robot.Kinematics.Fit is
          --  on the side whose end scores best, until an inner point scores
          --  better than both ends; the search ends when its two inner points
          --  cannot be told apart.
-         A := Ln (Lens0.Cx) - Ln (2.0) / 2.0;
-         B := Ln (Lens0.Cx) + Ln (2.0) / 2.0;
-         Search (Exp (A), BA);
-         Search (Exp (B), BB);
-         loop
-            X1 := B - Inv_Ratio * (B - A);
-            Search (Exp (X1), B1);
-            exit when Total (B1) <= Total (BA) and then Total (B1) <= Total (BB);
-            exit when B - A >= Ln (Real'Last);
-            if Total (BA) <= Total (BB) then
-               --  Lower: the inner point becomes the upper end.
-               B := X1;
-               BB := B1;
-               A := A - (B - A);
+         declare
+            --  From a start: the bracket, an octave about it, first widens by
+            --  its own width on the side whose end scores best, until an inner
+            --  point scores better than both ends (Low and High are that
+            --  bracket: the basin the start fell in, as the search found it);
+            --  then the golden section narrows it until its two inner points
+            --  cannot be told apart, and At is the better of them.
+            procedure Settle (Start : Real; Low, High, At : out Real; Found : out Best_Array) is
+               A, B, X1, X2   : Real;
+               BA, BB, B1, B2 : Best_Array;
+            begin
+               A := Start - Ln (2.0) / 2.0;
+               B := Start + Ln (2.0) / 2.0;
                Search (Exp (A), BA);
-            else
-               A := X1;
-               BA := B1;
-               B := B + (B - A);
                Search (Exp (B), BB);
-            end if;
-         end loop;
-         X2 := A + Inv_Ratio * (B - A);
-         Search (Exp (X2), B2);
-         loop
-            exit when abs (Total (B1) - Total (B2)) <= Total_Error ((if Total (B1) < Total (B2) then B1 else B2));
-            exit when B - A <= Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs A);
-            if Total (B1) < Total (B2) then
-               B := X2;
-               X2 := X1;
-               B2 := B1;
-               X1 := B - Inv_Ratio * (B - A);
-               Search (Exp (X1), B1);
-            else
-               A := X1;
-               X1 := X2;
-               B1 := B2;
+               loop
+                  X1 := B - Inv_Ratio * (B - A);
+                  Search (Exp (X1), B1);
+                  exit when Total (B1) <= Total (BA) and then Total (B1) <= Total (BB);
+                  exit when B - A >= Ln (Real'Last);
+                  if Total (BA) <= Total (BB) then
+                     --  Lower: the inner point becomes the upper end.
+                     B := X1;
+                     BB := B1;
+                     A := A - (B - A);
+                     Search (Exp (A), BA);
+                  else
+                     A := X1;
+                     BA := B1;
+                     B := B + (B - A);
+                     Search (Exp (B), BB);
+                  end if;
+               end loop;
+               Low := A;
+               High := B;
                X2 := A + Inv_Ratio * (B - A);
                Search (Exp (X2), B2);
-            end if;
-         end loop;
-         declare
-            Best  : constant Best_Array := (if Total (B1) < Total (B2) then B1 else B2);
-            Focal : constant Real := Exp (if Total (B1) < Total (B2) then X1 else X2);
+               loop
+                  exit when abs (Total (B1) - Total (B2)) <= Total_Error ((if Total (B1) < Total (B2) then B1 else B2));
+                  exit when B - A <= Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs A);
+                  if Total (B1) < Total (B2) then
+                     B := X2;
+                     X2 := X1;
+                     B2 := B1;
+                     X1 := B - Inv_Ratio * (B - A);
+                     Search (Exp (X1), B1);
+                  else
+                     A := X1;
+                     X1 := X2;
+                     B1 := B2;
+                     X2 := A + Inv_Ratio * (B - A);
+                     Search (Exp (X2), B2);
+                  end if;
+               end loop;
+               if Total (B1) < Total (B2) then
+                  At := X1;
+                  Found := B1;
+               else
+                  At := X2;
+                  Found := B2;
+               end if;
+            end Settle;
+
+            Low, High, At : Real;
+            Best          : Best_Array;
          begin
+            Settle (Ln (Lens0.Cx), Low, High, At, Best);
+            --  The search finds the minimum of the basin its start falls in,
+            --  and a start in the wrong basin finds the wrong focal length and,
+            --  from it, the wrong order of the joints (A98's arm 1: starts of
+            --  200 to 566 px were right, 100, 141 and 800 wrong). So the
+            --  neighbouring basins are searched too, one basin's width below
+            --  and above (the width the search itself found), as long as each
+            --  scores better than the last: of all the minima found, the
+            --  best is kept.
+            for Side in 1 .. 2 loop
+               loop
+                  declare
+                     Width : constant Real := High - Low;
+                     Start : constant Real := (if Side = 1 then Low - Width else High + Width);
+                     L2, H2, A2 : Real;
+                     F2         : Best_Array;
+                  begin
+                     exit when Width <= 0.0 or else abs Start >= Ln (Real'Last) / 2.0;
+                     Settle (Start, L2, H2, A2, F2);
+                     exit when Total (F2) >= Total (Best);
+                     Low := L2;
+                     High := H2;
+                     At := A2;
+                     Best := F2;
+                  end;
+               end loop;
+            end loop;
+            declare
+               Focal : constant Real := Exp (At);
+            begin
             for J in 1 .. N loop
                if Best (J).Scale = 0.0 then
                   for K in 1 .. N loop
@@ -2339,6 +2388,7 @@ package body Driver.Robot.Kinematics.Fit is
                Free (Lines (J));
                Free (Every (J));
             end loop;
+            end;
          end;
       end;
 

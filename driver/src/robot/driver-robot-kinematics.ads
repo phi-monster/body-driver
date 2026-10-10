@@ -94,14 +94,17 @@ private package Driver.Robot.Kinematics is
 
    function Fitted (M : Model; A : Arm_Id) return Boolean;
 
-   function Followed (M : Model; A : Arm_Id; Readings : Real_Array) return Boolean
-     with Pre => Readings'First = 1;
-   --  The arm's latest keyframe at those readings (every channel within its
-   --  Keyframe_Step of them) is aligned and was followed: most of its points
-   --  were found from windows no wider than a patch, from the keyframes
-   --  before it or from the fitted arm's own prediction (Match_Set.Followed).
-   --  False without such a keyframe, or before it is aligned. The boot climbs
-   --  a joint's ladder of keyframes as far as they are followed.
+   function Followed (M : Model; A : Arm_Id; From, To : Natural) return Boolean;
+   --  The arm's latest keyframe taken at a beat in From .. To is aligned and
+   --  was followed: most of its points were found from windows no wider than
+   --  a patch, from the keyframes before it or from the fitted arm's own
+   --  prediction (Match_Set.Followed). False without such a keyframe, or
+   --  before it is aligned. The boot climbs a joint's ladder of keyframes as
+   --  far as they are followed, and names the beats it held the arm for each:
+   --  the readings it asked for are not what the keyframe reads (the hold an
+   --  arm is moved from and the readings it rests at differ by what the body
+   --  gives under load; fake body Z6, arm 2: every push's keyframe found,
+   --  none at the readings asked).
 
    function Table (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate;
    --  The table the arm's eye saw, in its reference frame, as the fit that

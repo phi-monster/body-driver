@@ -308,16 +308,22 @@ package body Driver.Robot.Boot is
                Driver.Beats.Send (Driver.Commands.Hold);
             end Measure_The_Round;
 
-            --  Whether the keyframe at the readings asked was followed (Kinematics.Followed) and whether the arm
-            --  is fitted now, read in a held beat.
-            Asked        : Real_Array (1 .. Size) := Start;
+            --  Whether the keyframe taken in the beats the arm was held for a push (Ask_From .. Ask_To) was followed
+            --  (Kinematics.Followed) and whether the arm is fitted now, read in a held beat.
+            Ask_From, Ask_To : Natural := 0;
             Followed_Now : Boolean := False;
             Fitted_Now   : Boolean := False;
             procedure Read_Followed is
             begin
-               Followed_Now := Driver.Robot.Kinematics.Followed (M, A, Asked);
+               Followed_Now := Driver.Robot.Kinematics.Followed (M, A, Ask_From, Ask_To);
                Fitted_Now := Driver.Robot.Kinematics.Fitted (M, A);
             end Read_Followed;
+            --  The beats the body has seen, read in a held beat.
+            Beat_Now : Natural := 0;
+            procedure Read_Beat_Now is
+            begin
+               Beat_Now := M.Beats;
+            end Read_Beat_Now;
          begin
             Driver.Beats.Within_A_Beat (Read_Plan'Access);
             if Eye = 0 then
@@ -339,6 +345,11 @@ package body Driver.Robot.Boot is
                type Stop is (Climbing, Not_Followed, Blocked, Widest);
                Offset  : Real_Array (1 .. 2 * Size) := [others => 0.0];
                State   : array (1 .. 2 * Size) of Stop := [others => Blocked];
+               --  Per push: the beats the arm was held for its latest keyframe, the last offset followed, and
+               --  whether the level between that and an unfollowed one was tried.
+               Held_From, Held_To : array (1 .. 2 * Size) of Natural := [others => 0];
+               Held_Offset : Real_Array (1 .. 2 * Size) := [others => 0.0];
+               Retried     : array (1 .. 2 * Size) of Boolean := [others => False];
                --  Per channel: the largest offset a followed keyframe of it was taken at.
                Reached : Real_Array (1 .. Size) := [others => 0.0];
                Swept   : array (1 .. Size) of Positive;
@@ -354,10 +365,14 @@ package body Driver.Robot.Boot is
                   Pose : Real_Array := Start;
                begin
                   Pose (P.Channel) := Start (P.Channel) + P.Sign * Offset (I);
+                  Driver.Beats.Within_A_Beat (Read_Beat_Now'Access);
+                  Held_From (I) := Beat_Now;
                   Go_To (G, Pose, Report);
                   if Report.At_Rest then
                      Driver.Robot.Motion.Hold_For_Keyframe (M, A);
                   end if;
+                  Driver.Beats.Within_A_Beat (Read_Beat_Now'Access);
+                  Held_To (I) := (if Beat_Now > 0 then Beat_Now - 1 else 0);
                   if Report.Outcome /= Driver.Robot.Motion.Reached then
                      State (I) := Blocked;
                   end if;
@@ -383,29 +398,44 @@ package body Driver.Robot.Boot is
                   end loop;
                   for Row in 1 .. Rows - 1 loop
                      declare
-                        Pose : Real_Array := Start;
+                        Scale : Real := 1.0;   --  of the shares: halved where the cell met something
                      begin
-                        for K in 1 .. N loop
+                        loop
                            declare
-                              Bits : Natural := 0;
-                              R    : Natural := Row;
-                              Col  : Natural := K;
+                              Pose : Real_Array := Start;
                            begin
-                              --  H (Row, K) = (-1) ** (the bits Row and K share)
-                              while R > 0 and then Col > 0 loop
-                                 if R mod 2 = 1 and then Col mod 2 = 1 then
-                                    Bits := Bits + 1;
-                                 end if;
-                                 R := R / 2;
-                                 Col := Col / 2;
+                              for K in 1 .. N loop
+                                 declare
+                                    Bits : Natural := 0;
+                                    R    : Natural := Row;
+                                    Col  : Natural := K;
+                                 begin
+                                    --  H (Row, K) = (-1) ** (the bits Row and K share)
+                                    while R > 0 and then Col > 0 loop
+                                       if R mod 2 = 1 and then Col mod 2 = 1 then
+                                          Bits := Bits + 1;
+                                       end if;
+                                       R := R / 2;
+                                       Col := Col / 2;
+                                    end loop;
+                                    Pose (Swept (K)) := Start (Swept (K))
+                                      + (if Bits mod 2 = 0 then 1.0 else -1.0) * Scale * Share (Swept (K));
+                                 end;
                               end loop;
-                              Pose (Swept (K)) := Start (Swept (K)) + (if Bits mod 2 = 0 then 1.0 else -1.0) * Share (Swept (K));
+                              Go_To (G, Pose, Report);
+                              if Report.At_Rest then
+                                 Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                              end if;
                            end;
+                           --  A cell that met something (a keyframe where it stopped, if it
+                           --  rested there) is tried again at half its shares, as long as some
+                           --  share is still a turn the fit counts: a cell need not move every
+                           --  joint, and one that always meets something gives no frame at all
+                           --  (A99's arm 1 had no keyframe of several joints for that).
+                           exit when Report.Outcome = Driver.Robot.Motion.Reached;
+                           Scale := Scale / 2.0;
+                           exit when (for all K in 1 .. N => Scale * Share (Swept (K)) < First (Swept (K)));
                         end loop;
-                        Go_To (G, Pose, Report);
-                        if Report.At_Rest then
-                           Driver.Robot.Motion.Hold_For_Keyframe (M, A);
-                        end if;
                      end;
                   end loop;
                   Go_To (G, Start, Report);
@@ -497,16 +527,24 @@ package body Driver.Robot.Boot is
                               declare
                                  P : Push renames Order (I);
                               begin
-                                 Asked := Start;
-                                 Asked (P.Channel) := Start (P.Channel) + P.Sign * Offset (I);
+                                 Ask_From := Held_From (I);
+                                 Ask_To := Held_To (I);
                                  Driver.Beats.Within_A_Beat (Read_Followed'Access);
                                  if Followed_Now then
                                     Followed_In_Pass := Followed_In_Pass + 1;
                                     Reached (P.Channel) := Real'Max (Reached (P.Channel), Offset (I));
+                                    Held_Offset (I) := Offset (I);
+                                    Retried (I) := False;
                                     Offset (I) := 2.0 * Offset (I);
                                     if Offset (I) * Per_Unit (P.Channel) > Half then
                                        State (I) := Widest;
                                     end if;
+                                 elsif not Retried (I) and then Held_Offset (I) > 0.0 then
+                                    --  Once, half way back towards the last level followed: the
+                                    --  aligner follows an extrapolation to about a patch of
+                                    --  displacement, and the level between may still lie within it.
+                                    Retried (I) := True;
+                                    Offset (I) := (Held_Offset (I) + Offset (I)) / 2.0;
                                  else
                                     State (I) := Not_Followed;
                                  end if;

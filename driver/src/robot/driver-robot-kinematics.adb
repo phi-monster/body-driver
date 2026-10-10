@@ -311,11 +311,22 @@ package body Driver.Robot.Kinematics is
                         begin
                            for C in Now'Range loop
                               declare
-                                 Told : constant Real := Keyframe_Step (M, Arm, C);
-                                 Seen : constant Estimate := Visible_Step (M, G, C);
+                                 Told   : constant Real := Keyframe_Step (M, Arm, C);
+                                 Seen   : constant Estimate := Visible_Step (M, G, C);
+                                 Jitter : constant Real := Channels.Noise (M, G, C);
                               begin
                                  if Told > 0.0 then
-                                    Steps (C) := Told;
+                                    --  And no nearer than the readings tell apart (Z of the noise of
+                                    --  a difference of two readings, as Visible_Step has it): a
+                                    --  matcher that errs by a thousandth of a pixel gives a step
+                                    --  below the readings' own jitter, and an arm at rest gave a
+                                    --  keyframe every thirty-seven beats at one pose (fake body Z9,
+                                    --  arm 1: 295 of them, each aligned for nothing).
+                                    Steps (C) :=
+                                      (if Jitter < Real'Last
+                                       then Real'Max (Told, Driver.Conventions.Z
+                                                            * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Jitter)
+                                       else Told);
                                     Seeable := True;
                                  elsif Known (Seen) then
                                     Steps (C) := Seen.Value;
@@ -2192,7 +2203,7 @@ package body Driver.Robot.Kinematics is
       end if;
    end Pose_Covariance;
 
-   function Followed (M : Model; A : Arm_Id; Readings : Real_Array) return Boolean is
+   function Followed (M : Model; A : Arm_Id; From, To : Natural) return Boolean is
       K : constant Natural := Index_Of (M, A);
    begin
       if K = 0 then
@@ -2202,23 +2213,7 @@ package body Driver.Robot.Kinematics is
          R : Arm_Evidence renames M.Kinematics (K);
       begin
          for F in reverse 2 .. Natural (R.Frames.Length) loop
-            --  At those readings: within the keyframe step, or within what the readings' noise can put between
-            --  a reading and the readings asked for (Z of the noise of a difference of two readings), whichever
-            --  is more. Where the aligner errs by a hundredth of a pixel the step is smaller than the noise, and
-            --  a keyframe taken where it was asked lay more than a step away (fake body Y10, arm 2: eleven of
-            --  twelve pushes ended unfollowed with their keyframes found).
-            if Natural (R.Frames (F).Readings.Length) = Readings'Length
-              and then (for all C in Readings'Range =>
-                          (declare
-                              Step  : constant Real := Keyframe_Step (M, A, C);
-                              Noise : constant Real := Channels.Noise (M, R.Group, C);
-                              Reach : constant Real :=
-                                Real'Max (Step, (if Noise < Real'Last
-                                                 then Driver.Conventions.Z * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Noise
-                                                 else 0.0));
-                              Away  : constant Real := abs (R.Frames (F).Readings (C - 1) - Readings (C));
-                           begin (if Reach > 0.0 then Away < Reach else Away = 0.0)))
-            then
+            if R.Frames (F).Beat in From .. To then
                for S of R.Matches loop
                   if S.Frame = F and then S.Eye = 0 then
                      return S.Followed;
