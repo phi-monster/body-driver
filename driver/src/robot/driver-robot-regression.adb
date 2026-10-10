@@ -1,3 +1,4 @@
+with Ada.Containers.Ordered_Maps;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
@@ -195,7 +196,54 @@ package body Driver.Robot.Regression is
       return Result;
    end Solve;
 
+   --  Each count asked once: the answer is a pure function of the four arguments, and the lock-in asks at every
+   --  beat of every eye whether the cells beyond the flow's reach are a significant majority (Mark_Reach).
+   type Count_Key is record
+      Count, Trials : Natural;
+      Rate          : Real;
+      Tests         : Positive;
+   end record;
+   function "<" (A, B : Count_Key) return Boolean is
+     (A.Count < B.Count
+      or else (A.Count = B.Count
+               and then (A.Trials < B.Trials
+                         or else (A.Trials = B.Trials
+                                  and then (A.Rate < B.Rate or else (A.Rate = B.Rate and then A.Tests < B.Tests))))));
+   package Count_Maps is new Ada.Containers.Ordered_Maps (Count_Key, Boolean);
+   protected Counts_Known is
+      procedure Get (Key : Count_Key; Value : out Boolean; Found : out Boolean);
+      procedure Keep (Key : Count_Key; Value : Boolean);
+   private
+      Map : Count_Maps.Map;
+   end Counts_Known;
+   protected body Counts_Known is
+      procedure Get (Key : Count_Key; Value : out Boolean; Found : out Boolean) is
+         C : constant Count_Maps.Cursor := Map.Find (Key);
+      begin
+         Found := Count_Maps.Has_Element (C);
+         Value := Found and then Count_Maps.Element (C);
+      end Get;
+      procedure Keep (Key : Count_Key; Value : Boolean) is
+      begin
+         Map.Include (Key, Value);
+      end Keep;
+   end Counts_Known;
+
+   function Count_Significant_Computed (Count, Trials : Natural; Rate : Real; Tests : Positive) return Boolean;
+
    function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean is
+      Key   : constant Count_Key := (Count, Trials, Rate, Tests);
+      Value, Found : Boolean;
+   begin
+      Counts_Known.Get (Key, Value, Found);
+      if not Found then
+         Value := Count_Significant_Computed (Count, Trials, Rate, Tests);
+         Counts_Known.Keep (Key, Value);
+      end if;
+      return Value;
+   end Count_Significant;
+
+   function Count_Significant_Computed (Count, Trials : Natural; Rate : Real; Tests : Positive) return Boolean is
    begin
       if Count = 0 then
          return False;
@@ -211,7 +259,7 @@ package body Driver.Robot.Regression is
       begin
          return Tail < Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / Real (Tests);
       end;
-   end Count_Significant;
+   end Count_Significant_Computed;
 
    function Explained_On
      (X : Real_Matrix; Y : Real_Array; Xc : in out Real_Matrix; Yc : in out Real_Vector; Used : out Natural) return Real

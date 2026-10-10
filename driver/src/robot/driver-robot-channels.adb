@@ -1,5 +1,6 @@
 with Driver.Log;
 with Ada.Containers;
+with Ada.Containers.Ordered_Maps;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Distributions;
@@ -279,6 +280,51 @@ package body Driver.Robot.Channels is
    --  (their squared deviations add to a chi-square), so a group of many
    --  channels raises no more false alarms than a single one. A channel
    --  whose noise is not measured yet gives no evidence.
+   --  The gate of a change of so many channels at so many degrees of freedom, searched once: a quantile is a pure
+   --  function of its arguments, and the search is an inversion of a tail that takes thousands of operations. The
+   --  lock-in asks at every beat of every group when it marks the usable beats (12 000 beats, 7 groups, 3 eyes: the
+   --  marks were most of a 14 s recompute on a fake body), the stillness watch at every beat. Kept under a lock:
+   --  the callers run on many tasks.
+   type Gate_Key is record
+      Tested, Freedom : Natural;
+   end record;
+   function "<" (A, B : Gate_Key) return Boolean is
+     (A.Tested < B.Tested or else (A.Tested = B.Tested and then A.Freedom < B.Freedom));
+   package Gate_Maps is new Ada.Containers.Ordered_Maps (Gate_Key, Driver.Uncertain.Gate, "<", Driver.Uncertain."=");
+   protected Gates_Known is
+      procedure Get (Key : Gate_Key; Value : out Driver.Uncertain.Gate; Found : out Boolean);
+      procedure Keep (Key : Gate_Key; Value : Driver.Uncertain.Gate);
+   private
+      Map : Gate_Maps.Map;
+   end Gates_Known;
+   protected body Gates_Known is
+      procedure Get (Key : Gate_Key; Value : out Driver.Uncertain.Gate; Found : out Boolean) is
+         C : constant Gate_Maps.Cursor := Map.Find (Key);
+      begin
+         Found := Gate_Maps.Has_Element (C);
+         if Found then
+            Value := Gate_Maps.Element (C);
+         end if;
+      end Get;
+      procedure Keep (Key : Gate_Key; Value : Driver.Uncertain.Gate) is
+      begin
+         Map.Include (Key, Value);
+      end Keep;
+   end Gates_Known;
+
+   function Change_Gate (Tested : Positive; Freedom : Natural) return Driver.Uncertain.Gate is
+      Key   : constant Gate_Key := (Tested, Freedom);
+      Value : Driver.Uncertain.Gate;
+      Found : Boolean;
+   begin
+      Gates_Known.Get (Key, Value, Found);
+      if not Found then
+         Value := Driver.Uncertain.Vector_Gate (Tested, Freedom);
+         Gates_Known.Keep (Key, Value);
+      end if;
+      return Value;
+   end Change_Gate;
+
    function Significant_Change (M : Model; G : Group_Id; D : Real_Array; Scale : Real) return Boolean is
       Q       : Real := 0.0;
       Tested  : Natural := 0;
@@ -301,7 +347,7 @@ package body Driver.Robot.Channels is
       end loop;
       return Tested > 0
         and then Driver.Uncertain.Significant
-          (Driver.Uncertain.Vector_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);
+          (Change_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);
    end Significant_Change;
 
    function Asked (M : Model; G : Group_Id; Beat : Natural) return Boolean is
