@@ -458,9 +458,10 @@ private
       --  against the beat before and against two beats before, and the watch
       --  over them.
       Change_1, Change_2 : Real := -1.0;     --  at the latest beat; negative when not measured
-      Watch_Last    : Real := 0.0;           --  the last measured Change_1
-      Watch_Peak    : Real := 0.0;           --  the largest Change_1 since the body began to move
-      Watch_Have    : Boolean := False;      --  a last Change_1 was measured since then
+      Rest_Changes  : Real_Vectors.Vector;   --  Change_1 at the beats judged still, since the eye was judged
+      Rest_Change   : Real := Real'Last;     --  their median, from two on (Real'Last before)
+      Rest_Scale    : Real := 0.0;           --  and their robust scale
+      Rest_Counted  : Natural := 0;          --  how many of them those rest on; taken again as they double
       Watch_Done    : Boolean := False;      --  the picture has stopped since then
       Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat
       Condition     : Real_Vectors.Vector;   --  Cells values per beat
