@@ -1,8 +1,10 @@
 with Ada.Containers;
 with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Long_Elementary_Functions;
+with Driver.Clock;
 with Driver.Conventions;
 with Driver.Distributions;
+with Driver.Log;
 with Driver.Shared_For;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
@@ -425,13 +427,54 @@ package body Driver.Robot.Lockin is
                return True;
             end Unseen;
 
+            --  For every commandable group, the last beat up to each at which it was pushed, at which it moved, and
+            --  at which it moved by what this eye can see (not Unseen), each as the beat plus one and zero for none
+            --  yet. What a usable beat's push must be free of, in the window from the settling tail before it
+            --  through the beat, is then asked in one step each, not beat by beat over the window: that scan was
+            --  all of the lock-in's time on the fake body, growing with the square of the beats (17 s at 1056
+            --  beats, the cells' fits 0.1 s of it).
+            Last_Pushed      : Natural_Access := new Natural_Array'(1 .. Groups * M.Beats => 0);
+            Last_Moved       : Natural_Access := new Natural_Array'(1 .. Groups * M.Beats => 0);
+            Last_Seen_Moving : Natural_Access := new Natural_Array'(1 .. Groups * M.Beats => 0);
+
+            function Mark (Marks : Natural_Access; G : Group_Id; B : Natural) return Natural is
+              (Marks ((Natural (G) - 1) * M.Beats + B + 1));
+
+            procedure Mark_Motions is
+            begin
+               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                  if M.Groups (G).Commandable then
+                     declare
+                        Pushed, Moved, Seen : Natural := 0;
+                        Here : Natural := (Natural (G) - 1) * M.Beats;
+                     begin
+                        for B in 0 .. M.Beats - 1 loop
+                           if Channels.Pushed (M, G, B) then
+                              Pushed := B + 1;
+                           end if;
+                           if Channels.Moving (M, G, B) then
+                              Moved := B + 1;
+                              if not Unseen (G, B) then
+                                 Seen := B + 1;
+                              end if;
+                           end if;
+                           Here := Here + 1;
+                           Last_Pushed (Here) := Pushed;
+                           Last_Moved (Here) := Moved;
+                           Last_Seen_Moving (Here) := Seen;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+            end Mark_Motions;
+
             function Usable (B : Natural) return Boolean is
                R      : constant Integer := B - Lag;
                Pushes : Natural := 0;
                Pusher : Group_Id := M.Groups.First_Index;
                Held_Moving : Boolean := False;   --  a group not pushed moved at the beat
             begin
-               if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 then
+               if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 or else R >= M.Beats then
                   return False;
                end if;
                for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -465,17 +508,19 @@ package body Driver.Robot.Lockin is
                      --  whole; with the push's own beats only, A79 to A85 still
                      --  gave arm 2 eye 2 WHOLE after their sweeps, A85's with 240
                      --  of 525 cells, and A85's boot ended in a breach).
-                     for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-                        if G /= Pusher and then M.Groups (G).Commandable then
-                           for B2 in Integer'Max (0, Integer (Began) - Tail) .. Natural (R) loop
-                              if Channels.Pushed (M, G, B2)
-                                or else (Channels.Moving (M, G, B2) and then (B2 < Began or else not Unseen (G, B2)))
-                              then
-                                 return False;
-                              end if;
-                           end loop;
-                        end if;
-                     end loop;
+                     declare
+                        Low : constant Natural := Natural (Integer'Max (0, Integer (Began) - Tail));
+                     begin
+                        for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                           if G /= Pusher and then M.Groups (G).Commandable
+                             and then (Mark (Last_Pushed, G, Natural (R)) > Low
+                                       or else (Began > Low and then Mark (Last_Moved, G, Began - 1) > Low)
+                                       or else Mark (Last_Seen_Moving, G, Natural (R)) > Began)
+                           then
+                              return False;
+                           end if;
+                        end loop;
+                     end;
                      return True;
                   end;
                end if;
@@ -490,6 +535,7 @@ package body Driver.Robot.Lockin is
             S.Gain_Variances.Clear;
             S.Shifts.Clear;
             if N > 0 then
+               Mark_Motions;
                for B in 1 .. M.Beats - 1 loop
                   if Usable (B) then
                      Rows := Rows + 1;
@@ -554,6 +600,10 @@ package body Driver.Robot.Lockin is
                         --  variance and its shift (nothing, where it does not respond). The cells are fitted at once
                         --  and write only their own; the eye's vectors get them in order afterwards.
                         Noise_Of  : Real_Access := new Real_Array'(1 .. N => Real'Last);
+                        --  What each cell's two fits cost, for the log: their reweighting passes, and whether one
+                        --  stopped short of converging.
+                        Passes_Of : Natural_Access := new Natural_Array'(1 .. N => 0);
+                        Stuck_Of  : Flags_Access := new Flags'[1 .. N => False];
                         Gain_Of   : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         Spread_Of : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         Shift_Of  : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
@@ -585,6 +635,8 @@ package body Driver.Robot.Lockin is
                               Fv    : constant Regression.Fit := Regression.Solve (Xc.all, V.all, Floor);
                            begin
                               Noise_Of (Cell) := Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0);
+                              Passes_Of (Cell) := Fu.Passes + Fv.Passes;
+                              Stuck_Of (Cell) := not (Fu.Converged and then Fv.Converged);
                               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
                                  declare
                                     First : Natural := 0;
@@ -677,7 +729,29 @@ package body Driver.Robot.Lockin is
                               X (R, K + 1) := Pushed_Change (Cols (K).Group, Beat_Of (R) - Lag, Cols (K).Channel);
                            end loop;
                         end loop;
-                        Fit_Cells (1, N);
+                        declare
+                           Started : constant Duration := Driver.Clock.Seconds;
+                           Fitted, Passes, Most, Stuck : Natural := 0;
+                        begin
+                           Fit_Cells (1, N);
+                           for Cell in 1 .. N loop
+                              if Textured (Cell) then
+                                 Fitted := Fitted + 1;
+                                 Passes := Passes + Passes_Of (Cell);
+                                 Most := Natural'Max (Most, Passes_Of (Cell));
+                                 Stuck := Stuck + Boolean'Pos (Stuck_Of (Cell));
+                              end if;
+                           end loop;
+                           Driver.Log.Line
+                             (Driver.Log.Robot, "lock-in: eye" & E'Image & ":" & Rows'Image & " rows," & Kept'Image
+                              & " columns, settling tail" & Tail'Image & " beats," & Fitted'Image & " of" & N'Image
+                              & " cells fitted in "
+                              & Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & " s, with" & Passes'Image
+                              & " reweighting passes in all," & Most'Image & " the most in a cell," & Stuck'Image
+                              & " cells with a fit that did not converge");
+                        end;
+                        Free (Passes_Of);
+                        Free (Stuck_Of);
                         for Cell in 1 .. N loop
                            S.Noise.Append (Noise_Of (Cell));
                         end loop;
@@ -749,6 +823,9 @@ package body Driver.Robot.Lockin is
                   Free (Beat_Of);
                end;
             end if;
+            Free (Last_Pushed);
+            Free (Last_Moved);
+            Free (Last_Seen_Moving);
          end;
       end loop;
       Free (Starts);

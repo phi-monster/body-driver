@@ -93,6 +93,7 @@ package body Driver.Robot.Regression is
       A  : Real_Matrix (1 .. P, 1 .. P);
       S  : Real := 0.0;
       Converged : Boolean := False;
+      Passes    : Natural := 0;
 
       --  Weighted normal equations and their solution at the current weights.
       procedure Weighted_Solve is
@@ -170,6 +171,7 @@ package body Driver.Robot.Regression is
                W (I) := Weight (Residual (I));
             end loop;
             Weighted_Solve;
+            Passes := Passes + 1;
             for J in 1 .. P loop
                Size := Real'Max (Size, abs B (J));
                Moved := Real'Max (Moved, abs (B (J) - Before (J)));
@@ -180,7 +182,7 @@ package body Driver.Robot.Regression is
             end if;
          end;
       end loop;
-      return (Columns => P, Beta => B, Scale => S, Normal => A, Converged => Converged);
+      return (Columns => P, Beta => B, Scale => S, Normal => A, Converged => Converged, Passes => Passes);
    end Solve_On;
 
    function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real) return Fit is

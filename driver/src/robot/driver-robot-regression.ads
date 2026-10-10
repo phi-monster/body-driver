@@ -23,6 +23,7 @@ private package Driver.Robot.Regression is
       Scale     : Real;                                   --  robust sigma of one residual
       Normal    : Real_Matrix (1 .. Columns, 1 .. Columns);  --  X' W X at the final weights
       Converged : Boolean;
+      Passes    : Natural := 0;                              --  reweighting rounds the fit took, for the log of its cost
    end record;
 
    function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real) return Fit
