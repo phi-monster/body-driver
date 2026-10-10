@@ -302,8 +302,11 @@ package body Driver.Robot.Hand is
 
    procedure Accumulate (P : in out Pair; M : Model);
    --  Adds the latest beat's picture motion to the pair's tally when one channel of the closer moved, by a step the
-   --  body's one test of motion sees, and no other commandable group moved: each resolved cell's displacement in the
-   --  picture that shows the step (the eye's image lag after it), times the step.
+   --  body's one test of motion sees: each resolved cell's displacement in the picture that shows the step (the eye's
+   --  image lag after it), times the step. What else moved meanwhile is not the closer's steps and goes the way they
+   --  do no more than any other way; a beat was once dropped when another group moved by the one test, and the arm
+   --  holding the closer creeps by a millionth of a radian a beat that the test sees (A88's hand 1 tallied nothing,
+   --  and its ends were not turned).
 
    procedure Accumulate (P : in out Pair; M : Model) is
       S    : Eye_Stream renames M.Eyes (P.Eye);
@@ -320,11 +323,6 @@ package body Driver.Robot.Hand is
       then
          return;
       end if;
-      for G in 1 .. Group_Id'Base (Group_Count (M)) loop
-         if G /= P.Group and then Is_Commandable (M, G) and then Driver.Robot.Channels.Moving (M, G, R) then
-            return;
-         end if;
-      end loop;
       if Natural (P.Motion_U.Length) /= Size * N then
          P.Motion_U.Clear;
          P.Motion_V.Clear;

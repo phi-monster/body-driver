@@ -226,8 +226,10 @@ package body Driver.Robot.Hand.Sweep is
               & Here.Located.There'Image & " to the high end," & Here.Located.Unassigned'Image & " to neither, of doubt "
               & Driver.Log.Image (Here.Located.Doubt, 0) & " pixels, after" & Here.Located.Rounds'Image & " rounds; its parts:"
               & Here.Located.Parts_Here'Image & " at the low end," & Here.Located.Parts_There'Image & " at the high end"
+              & "; the closer's own motion goes with" & Here.Located.With_Motion'Image & " of their pixels and against"
+              & Here.Located.Against_Motion'Image
               & (if Here.Located.Turned
-                 then "; the robot's look gave each end the other's pixels, and the closer's own motion turned them"
+                 then ": the robot's look gave each end the other's pixels, and the closer's own motion turned them"
                  else "")
               & ")";
       end case;

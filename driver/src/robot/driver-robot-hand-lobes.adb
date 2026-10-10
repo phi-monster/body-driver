@@ -1650,6 +1650,8 @@ package body Driver.Robot.Hand.Lobes is
                         end if;
                      end;
                   end loop;
+                  Result.With_Motion := With_It;
+                  Result.Against_Motion := Against_It;
                   if Against_It > With_It then
                      Result.Turned := True;
                      Result.Here := Count (There_Set);
