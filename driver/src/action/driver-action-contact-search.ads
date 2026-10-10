@@ -35,14 +35,17 @@ package Driver.Action.Contact.Search is
    use Driver.Action.Snapshots;
 
    type Pad is record
-      Closer     : Positive;        --  which of the effector's closers moves it
-      Open       : Vec3 := Zero3;   --  face centre with the closer open, tool frame
-      Closed     : Vec3 := Zero3;   --  the same, closed on nothing
-      Facing     : Vec3 := Zero3;   --  unit: the way the face looks
+      Closer : Positive;         --  which of the effector's closers moves it
+      Lobe   : Lobe_State;       --  the path of its face's centre over the closer's settings, tool frame
+      Facing : Vec3 := Zero3;    --  unit: the way the face looks where it does not move (toward the others' meeting)
    end record;
    --  A face is the lobe's end: no width or thickness of it is assumed. It
    --  meets the samples of a thing that lie within the thing's own pitch of
-   --  its path, which the sampling cannot tell from the path.
+   --  its path, which the sampling cannot tell from the path. Its centre at a
+   --  fraction of the closing is where the body measured the lobe's end
+   --  (Snapshots.Tip_At: straight between two measured settings, which may be
+   --  many), and it looks the way it moves there (Facing_At), or Facing where
+   --  it does not move.
 
 
    package Pad_Vectors is new Ada.Containers.Vectors (Positive, Pad);

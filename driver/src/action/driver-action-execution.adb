@@ -206,7 +206,7 @@ package body Driver.Action.Execution is
       for Pd of E.Pads loop
          declare
             F  : constant Real := E.Closers (Pd.Closer).Now;
-            C  : constant Vec3 := Pd.Open + F * (Pd.Closed - Pd.Open) + E.Band * E.Along;   --  the lobe's end
+            C  : constant Vec3 := Tip_At (Pd.Lobe, F) + E.Band * E.Along;   --  the lobe's end
             NL : constant Positive := Positive'Max (1, Natural (Real'Ceiling (E.Depth / Spacing)));
          begin
             for J in 0 .. NL loop
@@ -788,7 +788,7 @@ package body Driver.Action.Execution is
       It  : Goals.Item;
    begin
       for Pd of E.Pads loop
-         Sum := Sum + E.Tool * (Pd.Open + E.Closers (Pd.Closer).Now * (Pd.Closed - Pd.Open));
+         Sum := Sum + E.Tool * Tip_At (Pd.Lobe, E.Closers (Pd.Closer).Now);
          N := N + 1;
       end loop;
       if N = 0 then

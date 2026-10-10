@@ -47,7 +47,75 @@ package body Driver.Action.Contact.Search is
       end;
    end Align;
 
-   function Moves (P : Pad) return Boolean is (abs (P.Closed - P.Open) > 0.0);
+   function Moves (P : Pad) return Boolean is (abs (Closed_Tip (P.Lobe) - Open_Tip (P.Lobe)) > 0.0);
+
+   function At_Fraction (P : Pad; F : Real) return Vec3 is (Tip_At (P.Lobe, F));
+   --  The face's centre at a fraction of the closing, tool frame.
+
+   function Facing_Of (P : Pad; F : Real) return Vec3 is (if Moves (P) then Facing_At (P.Lobe, F) else P.Facing);
+   --  The way the face looks there.
+
+   --  The fractions at which the face's path bends: its lobe's measured settings, within the closing.
+   function Breaks_Of (P : Pad) return Real_Array is
+      Result : Real_Array (1 .. Natural (P.Lobe.Path.Length) + 2);
+      N      : Natural := 0;
+   begin
+      N := N + 1;
+      Result (N) := 0.0;
+      for Node of P.Lobe.Path loop
+         if Node.Fraction > Result (N) and then Node.Fraction < 1.0 then
+            N := N + 1;
+            Result (N) := Node.Fraction;
+         end if;
+      end loop;
+      N := N + 1;
+      Result (N) := 1.0;
+      return Result (1 .. N);
+   end Breaks_Of;
+
+   --  Both pads' bends, in order, each once.
+   function Merged (A, B : Real_Array) return Real_Array is
+      Result : Real_Array (1 .. A'Length + B'Length);
+      N      : Natural := 0;
+      I      : Positive := A'First;
+      J      : Positive := B'First;
+      Next   : Real;
+   begin
+      while I <= A'Last or else J <= B'Last loop
+         if J > B'Last or else (I <= A'Last and then A (I) <= B (J)) then
+            Next := A (I);
+            I := I + 1;
+         else
+            Next := B (J);
+            J := J + 1;
+         end if;
+         if N = 0 then
+            N := 1;
+            Result (1) := Next;
+         elsif Next > Result (N) then
+            N := N + 1;
+            Result (N) := Next;
+         end if;
+      end loop;
+      return Result (1 .. N);
+   end Merged;
+
+   --  The slowest the face's centre moves along its path, per unit of the closing: distance a fraction.
+   function Least_Speed (P : Pad) return Real is
+      Least : Real := Real'Last;
+   begin
+      for K in P.Lobe.Path.First_Index .. P.Lobe.Path.Last_Index - 1 loop
+         declare
+           A : Tip_Node renames P.Lobe.Path (K);
+           B : Tip_Node renames P.Lobe.Path (K + 1);
+         begin
+            if B.Fraction > A.Fraction then
+               Least := Real'Min (Least, abs (B.Tip - A.Tip) / (B.Fraction - A.Fraction));
+            end if;
+         end;
+      end loop;
+      return Least;
+   end Least_Speed;
 
    function Effector_Of (S : Snapshot; A : Arm_Id) return Effector is
       Arm_S   : constant Arm_State := Arm (S, A);
@@ -98,9 +166,7 @@ package body Driver.Action.Contact.Search is
                            Facing : constant Vec3 :=
                              (if Moves (L) then Unit (Closed_Tip (L) - Open_Tip (L)) else Unit (Toward));
                         begin
-                           E.Pads.Append (Pad'(Closer => C, Open => Open_Tip (L),
-                                               Closed => (if Moves (L) then Closed_Tip (L) else Open_Tip (L)),
-                                               Facing => Facing));
+                           E.Pads.Append (Pad'(Closer => C, Lobe => L, Facing => Facing));
                         end;
                      end if;
                   end;
@@ -132,8 +198,9 @@ package body Driver.Action.Contact.Search is
       if E.Sigma < Real'Last and then Known (Arm_S.Step) then
          E.Band := Arm_S.Step.Value + Z * E.Sigma;
          for P of E.Pads loop
-            P.Open := P.Open - E.Band * E.Along;
-            P.Closed := P.Closed - E.Band * E.Along;
+            for Node of P.Lobe.Path loop
+               Node.Tip := Node.Tip - E.Band * E.Along;
+            end loop;
          end loop;
       end if;
       for K in 1 .. Natural (E.Pads.Length) loop
@@ -149,7 +216,7 @@ package body Driver.Action.Contact.Search is
                                 Point_Estimate'(Mean => B, Covariance => (Tip_Sd ** 2) * Identity3)));
          begin
             for P of E.Pads loop
-               Mid := Mid + P.Closed / Real (N);
+               Mid := Mid + Closed_Tip (P.Lobe) / Real (N);
             end loop;
             for Count in reverse 2 .. N loop
                if N mod Count = 0 then
@@ -162,8 +229,8 @@ package body Driver.Action.Contact.Search is
                      for K in 1 .. N loop
                         for J in 1 .. N loop
                            if Image (K) = 0 and then not Taken (J) and then E.Pads (J).Closer = E.Pads (K).Closer
-                             and then Same (S * E.Pads (K).Open, E.Pads (J).Open)
-                             and then Same (S * E.Pads (K).Closed, E.Pads (J).Closed)
+                             and then Same (S * Open_Tip (E.Pads (K).Lobe), Open_Tip (E.Pads (J).Lobe))
+                             and then Same (S * Closed_Tip (E.Pads (K).Lobe), Closed_Tip (E.Pads (J).Lobe))
                            then
                               Image (K) := J;
                               Taken (J) := True;
@@ -467,6 +534,43 @@ package body Driver.Action.Contact.Search is
          end loop;
       end First_Meeting;
 
+      --  Where a face first meets the thing as its closer closes from open: its centre at a fraction is Where (F),
+      --  in the world with the hand placed, and it looks the way Look (F). Between two of its breaks (the measured
+      --  settings of its lobe, and the pinned face's when it is taken relative to one) the centre goes straight, so
+      --  First_Meeting is asked stretch by stretch, from open to closed, and the first stretch that meets gives the
+      --  fraction. S is Real'Last and Hit zero when none does.
+      procedure First_Meeting_Along
+        (Breaks : Real_Array;
+         Where  : not null access function (F : Real) return Vec3;
+         Look   : not null access function (F : Real) return Vec3;
+         Back   : Vec3;
+         Face   : Footprint;
+         S      : out Real;
+         Hit    : out Natural)
+      is
+      begin
+         S := Real'Last;
+         Hit := 0;
+         for K in Breaks'First .. Breaks'Last - 1 loop
+            declare
+               Fa : constant Real := Breaks (K);
+               Fb : constant Real := Breaks (K + 1);
+               A0 : constant Vec3 := Where (Fa);
+               T  : Real;
+               H  : Natural;
+            begin
+               if Fb > Fa then
+                  First_Meeting (A0, Where (Fb) - A0, Look ((Fa + Fb) / 2.0), Back, Face, T, H);
+                  if H /= 0 then
+                     S := Fa + T * (Fb - Fa);
+                     Hit := H;
+                     return;
+                  end if;
+               end if;
+            end;
+         end loop;
+      end First_Meeting_Along;
+
       type Outcome is (Touching, On_Air, Not_First);
 
       --  Pad K's face pinned on sample I, the hand turned R. Along the path
@@ -493,9 +597,13 @@ package body Driver.Action.Contact.Search is
                   PJ  : constant Pad := E.Pads (J);
                   S   : Real;
                   Hit : Natural;
+                  --  Face J relative to the pinned face K, the hand turned R, at a fraction of their closer.
+                  function Relative (F : Real) return Vec3 is
+                    (Pts (I) + R * (At_Fraction (PJ, F) - At_Fraction (PK, F)));
+                  function Look (F : Real) return Vec3 is (R * Facing_Of (PJ, F));
                begin
-                  First_Meeting (Pts (I) + R * (PJ.Open - PK.Open), R * ((PJ.Closed - PJ.Open) - (PK.Closed - PK.Open)),
-                                 R * PJ.Facing, Back, Face, S, Hit);
+                  First_Meeting_Along (Merged (Breaks_Of (PJ), Breaks_Of (PK)), Relative'Access, Look'Access, Back, Face,
+                                       S, Hit);
                   S_Star := Real'Min (S_Star, S);
                end;
             end if;
@@ -504,10 +612,15 @@ package body Driver.Action.Contact.Search is
             Result := On_Air;
             return;
          end if;
-         X := Pts (I) - R * (PK.Open + S_Star * (PK.Closed - PK.Open));
+         X := Pts (I) - R * At_Fraction (PK, S_Star);
          for J in 1 .. N_Pads loop
-            First_Meeting (X + R * E.Pads (J).Open, R * (E.Pads (J).Closed - E.Pads (J).Open), R * E.Pads (J).Facing,
-                           Back, Face, Meet (J), Hits (J));
+            declare
+               PJ : constant Pad := E.Pads (J);
+               function Placed (F : Real) return Vec3 is (X + R * At_Fraction (PJ, F));
+               function Look (F : Real) return Vec3 is (R * Facing_Of (PJ, F));
+            begin
+               First_Meeting_Along (Breaks_Of (PJ), Placed'Access, Look'Access, Back, Face, Meet (J), Hits (J));
+            end;
          end loop;
          --  Each closer stops where its first face meets the thing; one that
          --  meets nothing keeps its present fraction.
@@ -526,7 +639,7 @@ package body Driver.Action.Contact.Search is
          --  The pinned face must be the first to meet its sample, at the
          --  fraction the pin was solved for.
          if Hits (K) = 0 or else abs (Pts (Hits (K)) - Pts (I)) > Res
-           or else abs (Meet (K) - S_Star) * abs (PK.Closed - PK.Open) > Res
+           or else abs (At_Fraction (PK, Meet (K)) - At_Fraction (PK, S_Star)) > Res
          then
             Result := Not_First;
             return;
@@ -537,7 +650,8 @@ package body Driver.Action.Contact.Search is
          begin
             for J in 1 .. N_Pads loop
                if Hits (J) /= 0 and then Moves (E.Pads (J))
-                 and then abs (Meet (J) - Stops (E.Pads (J).Closer)) * abs (E.Pads (J).Closed - E.Pads (J).Open) <= Res
+                 and then abs (At_Fraction (E.Pads (J), Meet (J)) - At_Fraction (E.Pads (J), Stops (E.Pads (J).Closer)))
+                          <= Res
                then
                   Count := Count + 1;
                else
@@ -561,25 +675,28 @@ package body Driver.Action.Contact.Search is
          end loop;
       end Touches_Of;
 
-      function Pin_Rotation (K, I : Positive; Psi : Real) return Mat3 is
-        (Exp (Psi * Nrm (I)) * Align (Now_R * E.Pads (K).Facing, -Nrm (I)) * Now_R);
+      --  The way pad K's face looks as the hand stands now, at its closer's present fraction.
+      function Facing_Now (K : Positive) return Vec3 is
+        (Facing_Of (E.Pads (K), E.Closers (E.Pads (K).Closer).Now));
 
-      --  The farthest any other face's centre, or Extra beyond it, comes from
-      --  the axis along pad K's facing through its face: the lever a turn
-      --  about that axis acts on.
+      function Pin_Rotation (K, I : Positive; Psi : Real) return Mat3 is
+        (Exp (Psi * Nrm (I)) * Align (Now_R * Facing_Now (K), -Nrm (I)) * Now_R);
+
+      --  The farthest any other face's centre, anywhere on its path, or Extra
+      --  beyond it, comes from the axis along pad K's facing through its
+      --  face, anywhere on K's path: the lever a turn about that axis acts on.
       function Lever (K : Positive; Extra : Real) return Real is
-         PK : constant Pad := E.Pads (K);
-         L  : Real := 0.0;
+         PK     : constant Pad := E.Pads (K);
+         Facing : constant Vec3 := Facing_Now (K);
+         L      : Real := 0.0;
       begin
          for J in 1 .. N_Pads loop
             if J /= K then
-               for F in 0 .. 1 loop
-                  for G in 0 .. 1 loop
+               for A of E.Pads (J).Lobe.Path loop
+                  for B of PK.Lobe.Path loop
                      declare
-                        P    : constant Pad := E.Pads (J);
-                        D    : constant Vec3 :=
-                          (P.Open + Real (F) * (P.Closed - P.Open)) - (PK.Open + Real (G) * (PK.Closed - PK.Open));
-                        Perp : constant Vec3 := D - Real'(D * PK.Facing) * PK.Facing;
+                        D    : constant Vec3 := A.Tip - B.Tip;
+                        Perp : constant Vec3 := D - Real'(D * Facing) * Facing;
                      begin
                         L := Real'Max (L, abs Perp + Real'Max (0.0, Extra));
                      end;
@@ -657,10 +774,10 @@ package body Driver.Action.Contact.Search is
       end record;
 
       function Box_Of (P : Pad; R : Mat3; X : Vec3; F, Extra : Real) return Box is
-         Facing : constant Vec3 := R * P.Facing;
+         Facing : constant Vec3 := R * Facing_Of (P, F);
          Back   : constant Vec3 := -(R * E.Along);
       begin
-         return (Face => X + R * (P.Open + F * (P.Closed - P.Open)) - E.Band * Back, Facing => Facing,
+         return (Face => X + R * At_Fraction (P, F) - E.Band * Back, Facing => Facing,
                  Side => Unit (Cross (Back, Facing)), Back => Back,
                  Length => E.Depth + Extra);
       end Box_Of;
@@ -822,7 +939,7 @@ package body Driver.Action.Contact.Search is
                               begin
                                  for P of E.Pads loop
                                     if P.Closer = C and then Moves (P) then
-                                       Slow := Real'Min (Slow, abs (P.Closed - P.Open));
+                                       Slow := Real'Min (Slow, Least_Speed (P));
                                     end if;
                                  end loop;
                                  Before (C) := (if Slow = Real'Last or else Stops (C) = E.Closers (C).Now then Stops (C)

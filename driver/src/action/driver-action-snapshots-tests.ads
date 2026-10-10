@@ -68,6 +68,11 @@ package Driver.Action.Snapshots.Tests is
    --  Five lobes on a circle about the tool's z, their ends at Radius open
    --  and at Closed_Radius closed on nothing.
 
+   function Curling_Gripper (Arm : Arm_Id; Hand : Hand_Id; Opening, Depth, Bow, Sigma : Real) return Hand_State;
+   --  The gripper, but each lobe's end was measured half way as well, Bow
+   --  aside along the tool's y of the straight way between its openings:
+   --  fingers whose ends swing as they close.
+
    function Arm_Of (Id : Arm_Id; Tool : Rigid; Sigma : Real) return Arm_State;
    --  An arm whose tool pose is known to Sigma, stepping by a tenth of it.
 

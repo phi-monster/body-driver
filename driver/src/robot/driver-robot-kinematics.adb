@@ -818,6 +818,22 @@ package body Driver.Robot.Kinematics is
          & R.Aligned'Image & ":" & Found'Image & " of" & Natural'Image ((R.Aligned - First + 1) * Queries)
          & " points found, the aligner errs by " & Driver.Log.Image (Match_Sigma (R), 3) & " px, in "
          & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s" & Reasons_Text);
+      --  The steps a keyframe of each channel needs, for the log: what the matcher tells apart against what the eye sees.
+      declare
+         Text : Ada.Strings.Unbounded.Unbounded_String;
+      begin
+         for C in 1 .. N loop
+            declare
+               Seen : constant Estimate := Visible_Step (M, R.Group, C);
+            begin
+               Ada.Strings.Unbounded.Append
+                 (Text, " c" & C'Image & " " & Driver.Log.Image (Keyframe_Step (M, R.Arm, C), 6) & " (eye "
+                  & (if Known (Seen) then Driver.Log.Image (Seen.Value, 6) else "?") & ")");
+            end;
+         end loop;
+         Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe steps, matcher (eye):"
+                          & Ada.Strings.Unbounded.To_String (Text));
+      end;
    end Align_Arm;
 
    procedure Align_New (M : in out Model) is

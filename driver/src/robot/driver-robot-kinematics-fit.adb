@@ -1713,7 +1713,16 @@ package body Driver.Robot.Kinematics.Fit is
          Usable (J) := Counts (J) > 0;
       end loop;
       if (for some U of Usable => not U) then
-         Fail ("a joint has no keyframe of its own");
+         declare
+            Which : Ada.Strings.Unbounded.Unbounded_String;
+         begin
+            for J in 1 .. N loop
+               if not Usable (J) then
+                  Ada.Strings.Unbounded.Append (Which, J'Image);
+               end if;
+            end loop;
+            Fail ("a joint has no keyframe of its own (channel" & Ada.Strings.Unbounded.To_String (Which) & ")");
+         end;
          return;
       end if;
 
