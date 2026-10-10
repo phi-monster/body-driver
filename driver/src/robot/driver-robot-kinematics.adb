@@ -236,15 +236,38 @@ package body Driver.Robot.Kinematics is
    function Held_Still (M : Model; A : Arm_Id; Beat : Natural) return Boolean is
       E : constant Eye_Id'Base := Eye_Of (M, A);
       G : constant Group_Id := Arm_Group (M, A);
+      --  Over the time the group's response takes to show (its measured push
+      --  delay, and the beat itself): a joint on its way at a steady rate
+      --  below the readings' noise per beat is not still, though no two beats
+      --  tell (a reading creeping towards its command; item 21). Still at
+      --  every beat of the span, and not moved over the span as a whole.
+      Span : constant Positive := 1 + (if M.Groups (G).Delay_Known then M.Groups (G).Delay_Beats else 0);
    begin
-      if E = 0 then
+      if E = 0 or else Beat < Span then
          return False;
       end if;
       --  The eye's picture by the one stop rule (Stillness.Eye_Settled), which
       --  holds for the latest beat.
-      return Beat > 0 and then Stillness.Eye_Settled (M, E)
-        and then Channels.Has_Reading (M, G, Beat) and then Channels.Has_Reading (M, G, Beat - 1)
-        and then not Channels.Moving (M, G, Beat);
+      if not Stillness.Eye_Settled (M, E) then
+         return False;
+      end if;
+      for B in Beat - Span + 1 .. Beat loop
+         if not Channels.Has_Reading (M, G, B) or else not Channels.Has_Reading (M, G, B - 1)
+           or else Channels.Moving (M, G, B)
+         then
+            return False;
+         end if;
+      end loop;
+      declare
+         Now   : constant Real_Array := Readings_Of (M, G, Beat);
+         Since : constant Real_Array := Readings_Of (M, G, Beat - Span);
+         D     : Real_Array (1 .. Now'Length);
+      begin
+         for C in D'Range loop
+            D (C) := Now (Now'First + C - 1) - Since (Since'First + C - 1);
+         end loop;
+         return not Channels.Visible (M, G, D);
+      end;
    end Held_Still;
 
    procedure Observe (M : in out Model; O : Observation) is
