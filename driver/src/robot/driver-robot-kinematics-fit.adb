@@ -1647,7 +1647,8 @@ package body Driver.Robot.Kinematics.Fit is
             Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " enters stage" & Stage'Image & " of its fit"
                              & (if Report.Seconds.Is_Empty then ""
                                 else ", the stage before it having taken "
-                                     & Driver.Log.Image (Report.Seconds.Last_Element, 1) & " s"));
+                                     & Driver.Log.Image (Report.Seconds.Last_Element, 1) & " s")
+                             & ", the focal length " & Driver.Log.Image (Lens0.Fx, 1) & " px");
          end if;
       end Enter;
 

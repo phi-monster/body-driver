@@ -162,7 +162,13 @@ package body Fake_World is
       Unit_Draw : constant Real := Random (W);
       Arm_Unit  : constant Real := (if Unit_Draw < 0.4 then 1.0 elsif Unit_Draw < 0.7 then Pi / 180.0 else 0.001);
       Tau       : constant Real := Random (W, 0.8, 1.5);
-      Tilt      : constant Real := Random (W, 0.75, 0.95);
+      --  The wrist eye sits behind the palm and above it, as a wrist camera does, and looks forward and a little
+      --  down: the fingertips stand in the lower third of its picture and the table fills the rest. It used to sit
+      --  over the finger roots looking steeply down them, and the fingers filled its picture from top to bottom, so
+      --  that the closer's sweep moved most of its cells and the body took the closer for the group carrying the eye.
+      Eye_Back  : constant Real := Random (W, 0.03, 0.05);
+      Eye_Above : constant Real := Random (W, 0.05, 0.07);
+      Tilt      : constant Real := Random (W, 0.2, 0.35);
       Grey  : constant Material :=
         (Kind => Flat, Albedo => [0.26, 0.26, 0.29], Contrast => 0.0, Scale => 1.0, Gloss => 0.2);
       Black : constant Material :=
@@ -275,15 +281,15 @@ package body Fake_World is
          when Drawn =>
             raise Program_Error with "a hand to build must be drawn first";
       end case;
-      --  The wrist eye: above the root of the fingers, looking steeply down
-      --  along them, so that they stand in the lower part of its picture and
-      --  the table beyond them in the upper part; or ahead at the wall.
+      --  The wrist eye: behind the palm and above it, looking forward and a
+      --  little down, so that the fingertips stand in the lower third of its
+      --  picture and the table beyond them fills the rest; or ahead at the wall.
       if With_Eye then
          declare
             Pitch : constant Real := (if Eye_Up then -0.3 else Tilt);
          begin
             Add_Camera (W, "eye_arm" & Trim (A), J6, A,
-                        Look ([0.0, L6 + 0.03, 0.055], [0.0, Cos (Pitch), -Sin (Pitch)], [0.0, 0.0, 1.0]),
+                        Look ([0.0, L6 - Eye_Back, Eye_Above], [0.0, Cos (Pitch), -Sin (Pitch)], [0.0, 0.0, 1.0]),
                         Width, Height, 0.62);
          end;
       end if;

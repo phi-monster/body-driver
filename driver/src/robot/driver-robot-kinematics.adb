@@ -1,3 +1,4 @@
+with Ada.Characters.Handling;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings;
 with Ada.Strings.Fixed;
@@ -716,6 +717,21 @@ package body Driver.Robot.Kinematics is
       Start   : constant Duration := Driver.Clock.Seconds;
       First   : constant Natural := R.Aligned + 1;
       Found   : Natural := 0;
+      Because : array (Driver.Alignment.Reason) of Natural := [others => 0];   --  why each point was or was not found
+
+      --  The tally of the aligner's reasons, for the log: "; because: matched 5358, no_texture 1200, ...".
+      function Reasons_Text return String is
+         Text : Ada.Strings.Unbounded.Unbounded_String;
+      begin
+         for Why in Because'Range loop
+            if Because (Why) > 0 then
+               Ada.Strings.Unbounded.Append
+                 (Text, (if Ada.Strings.Unbounded.Length (Text) = 0 then "; because: " else ", ")
+                  & Ada.Characters.Handling.To_Lower (Why'Image) & Because (Why)'Image);
+            end if;
+         end loop;
+         return Ada.Strings.Unbounded.To_String (Text);
+      end Reasons_Text;
    begin
       for C in 1 .. N loop
          Noise (C) := Channels.Noise (M, R.Group, C);
@@ -758,6 +774,9 @@ package body Driver.Robot.Kinematics is
                Keyframes.Predict (R.Chain, Change, Noise, Shift, Keyframes.No_Offer, Given.all, From);
             end if;
             Keyframes.Add (R.Chain, R.Frames (F).Image, Change, Given.all, Answers.all, Agree.all);
+            for A of Answers.all loop
+               Because (A.Because) := Because (A.Because) + 1;
+            end loop;
             Set_Of (F, R, Given.all, Answers.all, Agree.all, Set);
             for Seen of Set.Found loop
                if Seen then
@@ -780,7 +799,7 @@ package body Driver.Robot.Kinematics is
         (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " aligned keyframes" & First'Image & " to"
          & R.Aligned'Image & ":" & Found'Image & " of" & Natural'Image ((R.Aligned - First + 1) * Queries)
          & " points found, the aligner errs by " & Driver.Log.Image (Match_Sigma (R), 3) & " px, in "
-         & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
+         & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s" & Reasons_Text);
    end Align_Arm;
 
    procedure Align_New (M : in out Model) is

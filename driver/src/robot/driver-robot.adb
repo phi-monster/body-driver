@@ -216,6 +216,7 @@ package body Driver.Robot is
          Lockin.Measure (M);
       end if;
       Took ("lock-in");
+      Store_Visible_Steps (M);
       if not M.From_File (Stored_Graph) then
          Graph.Derive (M);
       end if;
@@ -325,6 +326,9 @@ package body Driver.Robot is
       Why  : out Ada.Strings.Unbounded.Unbounded_String) is
    begin
       Body_File.Read (M, Text, Ok, Why);
+      if Ok then
+         Store_Visible_Steps (M);
+      end if;
    end Load_Body_Text;
 
    function Reloaded (M : Model; Q : Stored) return Boolean is (M.From_File (Q));
@@ -662,7 +666,13 @@ package body Driver.Robot is
       end;
    end End_Of;
 
-   function Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate is
+   function Measured_Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate;
+   --  The visible step as the lock-in's measure has it now: Visible_Step's quantity, summed over every cell of
+   --  every eye at each call. Asked once per channel when the measure is done (Store_Visible_Steps), and read
+   --  from the group's stream after: the one test of motion asks it at every beat of every group (the lock-in's
+   --  own marks, the stillness watch, the views), and asked here each time it was most of the lock-in's time.
+
+   function Measured_Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate is
       Best : Estimate := Unknown;
    begin
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
@@ -719,7 +729,38 @@ package body Driver.Robot is
          end;
       end if;
       return Best;
+   end Measured_Visible_Step;
+
+   function Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate is
+      S : Group_Stream renames M.Groups (G);
+   begin
+      if Channel > Natural (S.Step_Known.Length) or else not S.Step_Known (Channel - 1) then
+         return Unknown;
+      end if;
+      return (Value => S.Step_Values (Channel - 1), Sigma => S.Step_Sigmas (Channel - 1), Degrees_Of_Freedom => 0);
    end Visible_Step;
+
+   procedure Store_Visible_Steps (M : in out Model) is
+   begin
+      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+         declare
+            S : Group_Stream renames M.Groups (G);
+         begin
+            S.Step_Values.Clear;
+            S.Step_Sigmas.Clear;
+            S.Step_Known.Clear;
+            for C in 1 .. S.Size loop
+               declare
+                  Step : constant Estimate := Measured_Visible_Step (M, G, C);
+               begin
+                  S.Step_Known.Append (Known (Step));
+                  S.Step_Values.Append (if Known (Step) then Step.Value else 0.0);
+                  S.Step_Sigmas.Append (if Known (Step) then Step.Sigma else Real'Last);
+               end;
+            end loop;
+         end;
+      end loop;
+   end Store_Visible_Steps;
 
    function Response (M : Model; G : Group_Id; E : Eye_Id) return Eye_Response is
      (Graph.Effect (M, G, E).Verdict);
