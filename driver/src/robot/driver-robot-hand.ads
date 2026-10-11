@@ -296,6 +296,19 @@ private
    --  view taken since it cannot be judged (Driver.Robot.Hand.Views.Gathered),
    --  or whether it shows the eye something its last end did not.
 
+   function Wait_For_A_View (Longest_Formed, Longest_Settling, Began : Natural) return Positive is
+     (Positive'Max (1, (if Longest_Formed > 0 or else Longest_Settling > 0
+                       then Natural'Max (Longest_Formed, Longest_Settling)
+                       else Began)));
+   --  How many beats a push's view is waited for: the longest any view of
+   --  this decider took to form or the longest the eye has ever taken to settle
+   --  after a move, whichever is more; before either is known, the beats the
+   --  stream had when the sweep began (no wait is longer than all the waiting
+   --  so far). The longest view alone was too little: a first view that formed
+   --  in one beat gave every view after it one beat, and B0_2's arm 1 closer
+   --  was left unswept ("the view after its last push did not form within 1
+   --  beats") while the eye's pictures had taken three to settle all along.
+
    procedure Sweep_Way
      (Way          : Real;
       Step         : Real;

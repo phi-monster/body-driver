@@ -3060,6 +3060,27 @@ package body Driver.Robot.Tests is
              "with a lag still unmeasured the hold is the guess");
    end Pause_Follows_The_Measured_Lag;
 
+   --  The longest an eye's picture has taken to settle after a move, from the
+   --  per-beat flags: moves at beats 10 and 30, the eye settled at 14 and 31,
+   --  a move at 50 not settled yet (not counted), and a second move at 70
+   --  before the first settled (the spell counts from the later move).
+   procedure Longest_Settling_Of_An_Eye is
+      M : Model;
+      S : Eye_Stream;
+   begin
+      for B in 0 .. 80 loop
+         M.Began_Moving.Append (B = 10 or else B = 30 or else B = 50 or else B = 70 or else B = 72);
+         S.Settled_At.Append (B in 14 .. 29 or else B in 31 .. 49 or else B in 75 .. 80);
+      end loop;
+      M.Eyes.Append (S);
+      Check (Longest_Settling (M, 1) = 4,
+             "the longest settling is" & Longest_Settling (M, 1)'Image & ", not 4 (beats 10 to 14)");
+      Check (Longest_Settling (M, 2) = 0, "an eye the model does not have settled in" & Longest_Settling (M, 2)'Image);
+      M.Eyes (1).Settled_At.Replace_Element (73, True);
+      Check (Longest_Settling (M, 1) = 4,
+             "a move at 72 settled at 73 counts from the later move: longest" & Longest_Settling (M, 1)'Image);
+   end Longest_Settling_Of_An_Eye;
+
    procedure Boot_With_Short_Deliveries is
       M       : Model;
       Done    : Boolean;
@@ -7572,6 +7593,8 @@ package body Driver.Robot.Tests is
                              Kinematics_Of_A_Synthetic_Arm'Access);
       Driver.Tests.Register ("robot.boot", "the boot does not finish, deadlocks with the main loop, or does not "
                              & "recognize the rig's groups when it pushes them itself", Boot_From_Zero'Access);
+      Driver.Tests.Register ("robot.settling.longest", "the longest an eye took to settle after a move is misread "
+                             & "from the per-beat flags", Longest_Settling_Of_An_Eye'Access);
       Driver.Tests.Register ("robot.boot.pause", "a recognition round's hold after a push keeps doubling with the "
                              & "rounds after every eye's lag is measured: B0_1 held 384 beats a push at 32 times the "
                              & "amounts with the lags measured at 1", Pause_Follows_The_Measured_Lag'Access);

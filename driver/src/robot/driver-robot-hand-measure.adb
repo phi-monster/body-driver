@@ -282,6 +282,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Eye    : Eye_Id := 1;
          Have   : Natural := 0;       --  the poses its eye has seen its readings from
          Began  : Natural := 0;       --  the beats the stream had
+         Settles : Natural := 0;     --  the most beats the own eye has taken to settle after a move
          Plan   : Driver.Robot.Motion.Plan;
          Ready  : Boolean := False;   --  the raise is planned and its readings show
          Why    : Ada.Strings.Unbounded.Unbounded_String;   --  when it is not, why
@@ -295,6 +296,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          begin
             Began := Natural (O.Beat);
             Placed := P > 0;
+            Settles := (if Placed then Longest_Settling (M, H.Data.Pairs (P).Eye) else 0);
             Have := 0;
             if Placed then
                Arm := H.Data.Pairs (P).Arm;
@@ -386,7 +388,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
             return;
          end if;
          Driver.Robot.Hand.Gather_Poses
-           (Wanted, Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began)), Poses_Now'Access,
+           (Wanted, Driver.Robot.Hand.Wait_For_A_View (Longest_Formed, Settles, Began), Poses_Now'Access,
             Raise_Eye'Access, Raises, Reached);
          Hold_Beat (Read_Poses'Access);
          Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & ": after" & Raises'Image & " raises its eye has seen"
@@ -456,11 +458,13 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Pixel : Real := 0.0;   --  the push that moves the own eye's view by a pixel
          Still_A_Closer : Boolean := False;
          Began : Natural := 0;   --  the beats the stream had when the sweep began
+         Settles : Natural := 0; --  the most beats the own eye has taken to settle after a move
          procedure Read_Start (O : Observation) is
             R : constant Real_Array := O.Readings.Element (G);
             P : constant Natural := Own_Pair (G);
          begin
             Began := Natural (O.Beat);
+            Settles := (if P > 0 then Longest_Settling (M, H.Data.Pairs (P).Eye) else 0);
             Start := R (R'First + C - 1);
             Step := Visible_Step (M, G, C);
             Pixel := (if P > 0 then Seen_By (Driver.Robot.Lockin.Shift (M, H.Data.Pairs (P).Eye, G, C)) else 0.0);
@@ -529,7 +533,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   Pushes, Unseen, Longest : Natural;
                   Formed, Answered        : Boolean;
                   Wait_At_Most            : constant Positive :=
-                    Positive'Max (1, (if Longest_Formed > 0 then Longest_Formed else Began));
+                    Driver.Robot.Hand.Wait_For_A_View (Longest_Formed, Settles, Began);
                begin
                   Driver.Robot.Hand.Sweep_Way (Way, Step.Value, Pixel, Wait_At_Most, Push'Access, Shows'Access, Pushes,
                                                Unseen, Longest, Formed, Answered);

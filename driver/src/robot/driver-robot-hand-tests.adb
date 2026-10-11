@@ -85,6 +85,22 @@ package body Driver.Robot.Hand.Tests is
          Check (False, "a closer at its upper end was asked ever further up while its reading stayed there");
    end Upper_End;
 
+   --  How long a push's view is waited for (Wait_For_A_View): the longest view
+   --  or the longest settling, whichever is more; the stream's length before
+   --  either is known.
+   procedure Wait_For_A_View_Is_The_Longest_Known is
+   begin
+      Check (Wait_For_A_View (Longest_Formed => 1, Longest_Settling => 3, Began => 7000) = 3,
+             "a first view of one beat with the eye settling in three: the wait is three, got"
+             & Wait_For_A_View (1, 3, 7000)'Image);
+      Check (Wait_For_A_View (Longest_Formed => 5, Longest_Settling => 3, Began => 7000) = 5,
+             "a view that took five beats with the eye settling in three: five");
+      Check (Wait_For_A_View (Longest_Formed => 0, Longest_Settling => 0, Began => 7000) = 7000,
+             "before any view or settling is known: the beats the stream had");
+      Check (Wait_For_A_View (Longest_Formed => 0, Longest_Settling => 0, Began => 0) = 1,
+             "at the very start: one beat at least");
+   end Wait_For_A_View_Is_The_Longest_Known;
+
    procedure Views_Never_Form is
       --  A12: the push is followed, and its view never forms (the body never
       --  came to rest within its readings' noise), so Shows says Not_Yet at
@@ -784,6 +800,9 @@ package body Driver.Robot.Hand.Tests is
                              & "word of why", Unswept_Closer_Says_Why'Access);
       Driver.Tests.Register ("hand.measure.end", "a closer at an end of its travel is asked ever further past it",
                              Upper_End'Access);
+      Driver.Tests.Register ("hand.measure.wait", "a push's view is waited for only as long as the longest view "
+                             & "before it took, however long the eye has taken to settle: B0_2's arm 1 closer got one "
+                             & "beat and was left unswept", Wait_For_A_View_Is_The_Longest_Known'Access);
       Driver.Tests.Register ("hand.measure.unformed", "a push whose view never forms is waited for without end (A12)",
                              Views_Never_Form'Access);
       Driver.Tests.Register ("hand.measure.press", "a press overshoots the surface by more than the least push, or is "
