@@ -221,7 +221,14 @@ package body Driver.Robot is
       end if;
       Took ("graph");
       if not M.From_File (Stored_Kinematics) then
+         Kinematics.Align_New (M);
          Kinematics.Refit (M);
+         --  The keyframes the first fit could not rest on are aligned again from it, as long as it narrows a window
+         --  to what the aligner can rest a fit on or by a size of the pictures (so a keyframe is aligned again only
+         --  so many times): a better fit may narrow the next.
+         while Kinematics.Realign (M) loop
+            Kinematics.Refit (M);
+         end loop;
       end if;
       Took ("kinematics");
       M.Graph_Evidence := M.Beats;
@@ -547,7 +554,65 @@ package body Driver.Robot is
    end Tool_In_Arm;
 
    function Table_In_Arm (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate is
-     (if Natural (A) <= Arm_Count (M) then Kinematics.Table (M, A) else (others => <>));
+      use Driver.Numerics.Arrays;
+   begin
+      if Natural (A) > Arm_Count (M) then
+         return (others => <>);
+      end if;
+      declare
+         Own : constant Driver.Geometry.Plane_Estimate := Kinematics.Table (M, A);
+      begin
+         if Driver.Geometry.Known (Own) then
+            return Own;
+         end if;
+      end;
+      --  An arm whose own eye saw no table, placed in the world: the table another eye saw is the world's (the first
+      --  arm's, Kinematics.World_Table), turned into this arm's frame by its placement, X_world = Placement * (Scale *
+      --  X); whichever eye saw the plane, its plane is pressed on (item 14). Its offset at the centre is the world's
+      --  over the scale, with the placement's centre along the normal and its turn over the lever to the centre, and
+      --  the centre's distance times the scale's own sigma; its tilt the world's with the placement's turn (the
+      --  trace of the turn's covariance bounds its largest variance).
+      declare
+         World     : constant Driver.Geometry.Plane_Estimate := Kinematics.World_Table (M);
+         Placement : Rigid;
+         Scale     : Real;
+         Placed    : Boolean;
+      begin
+         Kinematics.In_World (M, A, Placement, Scale, Placed);
+         if not Placed or else not Driver.Geometry.Known (World) or else Scale <= 0.0 then
+            return (others => <>);
+         end if;
+         declare
+            Rt          : constant Mat3 := Transpose (Placement.Rotation);
+            Lever       : constant Vec3 := World.Centre - Placement.Translation;
+            Centre      : constant Vec3 := (1.0 / Scale) * (Rt * Lever);
+            Scale_Sigma : constant Estimate := Kinematics.Scale_In_World (M, A);
+            Turn, Place : Mat3;
+         begin
+            Kinematics.Placement_Covariance (M, A, Turn, Place);
+            if Turn (1, 1) >= Real'Last or else Place (1, 1) >= Real'Last then
+               return (others => <>);
+            end if;
+            declare
+               Spin   : constant Real := Turn (1, 1) + Turn (2, 2) + Turn (3, 3);
+               Offset : constant Real :=
+                 (World.Offset_Sigma ** 2 + World.Normal * (Place * World.Normal) + (abs Lever) ** 2 * Spin) / Scale ** 2
+                 + (if Known (Scale_Sigma) then (abs Centre * Scale_Sigma.Sigma / Scale) ** 2 else 0.0);
+            begin
+               return (Centre       => Centre,
+                       Normal       => Rt * World.Normal,
+                       Tangent_1    => Rt * World.Tangent_1,
+                       Tangent_2    => Rt * World.Tangent_2,
+                       Offset_Sigma => Sqrt (Offset),
+                       Tilt_11      => World.Tilt_11 + Spin,
+                       Tilt_12      => World.Tilt_12,
+                       Tilt_22      => World.Tilt_22 + Spin,
+                       Points       => World.Points,
+                       Scatter      => World.Scatter);
+            end;
+         end;
+      end;
+   end Table_In_Arm;
 
    function Up_In_Arm (M : Model; A : Arm_Id) return Direction_Estimate is
       P : constant Driver.Geometry.Plane_Estimate := Table_In_Arm (M, A);
@@ -599,6 +664,50 @@ package body Driver.Robot is
          return False;
       end;
    end Blocked;
+
+   function Stopped_By_An_End (M : Model; A : Arm_Id; O : Observation) return Boolean is
+   begin
+      if Natural (A) > Arm_Count (M) then
+         return False;
+      end if;
+      declare
+         G       : constant Group_Id := Arm_Group (M, A);
+         At_Beat : constant Natural := Natural (O.Beat);
+      begin
+         --  The push in effect at that beat, as Blocked finds it.
+         for K in reverse 1 .. Steps.Episodes (M, G) loop
+            declare
+               E : Episode renames M.Groups (G).Episodes (K);
+            begin
+               if E.Start <= At_Beat then
+                  if E.Start = 0 or else not (E.Ended and then E.End_At <= At_Beat and then E.Blocked and then E.Rested) then
+                     return False;
+                  end if;
+                  declare
+                     L : constant Natural := Steps.Limiter (M, G, E);
+                  begin
+                     if L = 0 then
+                        return False;
+                     end if;
+                     declare
+                        From : constant Real := Channels.Reading (M, G, E.Start - 1, L);
+                        To   : constant Real := Channels.Target (M, G, E.Start, L);
+                        Rest_At : constant Real := Channels.Reading (M, G, E.End_At, L);
+                        Way  : constant Sense := (if To >= From then Increasing else Decreasing);
+                        Stop : constant Estimate := End_Of (M, G, L, Way);
+                        --  How far past the end, the way asked, the channel came to rest.
+                        Past : constant Real := (if Way = Increasing then Rest_At - Stop.Value else Stop.Value - Rest_At);
+                     begin
+                        return Known (Stop)
+                          and then (Past >= 0.0 or else not Driver.Uncertain.Significant (Past, Sqrt (2.0) * Stop.Sigma));
+                     end;
+                  end;
+               end if;
+            end;
+         end loop;
+         return False;
+      end;
+   end Stopped_By_An_End;
 
    function Self_Mask (M : Model; E : Eye_Id; O : Observation) return Driver.Images.Mask is
      (if E <= O.Images.Last_Index then Driver.Images.Create (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)))
@@ -660,28 +769,20 @@ package body Driver.Robot is
    begin
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
-            S    : Eye_Stream renames M.Eyes (E);
-            Kept : constant Natural := Natural (S.Kept_Groups.Length);
-            N    : constant Natural := (if Kept = 0 then 0 else Natural (S.Gains.Length) / Kept);
-            Column : Natural := 0;
+            Gain, Spread : Real;
+            Measured     : Boolean;
          begin
-            for K in 0 .. Kept - 1 loop
-               if S.Kept_Groups (K) = Natural (G) and then S.Kept_Channels (K) = Channel then
-                  Column := K + 1;
-               end if;
-            end loop;
-            if Column > 0 and then Response (M, G, E) in Patch | Undecided | Whole then
+            Lockin.Gain_Of (M, E, G, Channel, Gain, Spread, Measured);
+            if Measured and then Response (M, G, E) in Patch | Undecided | Whole then
                declare
-                  Gain, Spread : Real := 0.0;
                begin
-                  for Cell in 0 .. N - 1 loop
-                     Gain := Gain + S.Gains (Cell * Kept + Column - 1);
-                     Spread := Spread + S.Gain_Variances (Cell * Kept + Column - 1);
-                  end loop;
                   --  A step is seen when the displacement pattern it causes,
                   --  matched against the eye's cells, stands out of their
-                  --  noise: a test of one degree, passed from Z / sqrt (Gain) on.
-                  if Gain > 0.0 then
+                  --  noise: a test of one degree, passed from Z / sqrt (Gain) on;
+                  --  and only by an eye that sees the channel move it at all
+                  --  (Lockin.Seen): a summed gain that is positive by chance
+                  --  gives a step that means nothing.
+                  if Lockin.Seen (Gain, Spread) then
                      declare
                         Step : constant Real := Driver.Conventions.Z / Sqrt (Gain);
                      begin

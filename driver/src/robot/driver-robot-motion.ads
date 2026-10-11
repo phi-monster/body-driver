@@ -29,10 +29,24 @@ package Driver.Robot.Motion is
       Delivered : Estimate;          --  delivered fraction of the commanded step
       Started   : Natural := 0;      --  how many beats the body had seen when the step was sent
       Detail    : Unbounded_String;  --  which channels, and by how much, for the log
+      Stopped   : Boolean := False;  --  the step was stopped where it stood, its caller's condition met
    end record;
 
-   procedure Step (M : in out Model; Targets : Driver.Commands.Command; Report : out Step_Report);
+   procedure Step
+     (M       : in out Model;
+      Targets : Driver.Commands.Command;
+      Report  : out Step_Report;
+      Stop    : access function return Boolean := null);
    --  Sends the targets, waits until the body settles, and judges the step.
+   --  Stop, when given, is asked at every beat of the wait (between Next and
+   --  Send, so it may read the latest observation): once it holds, every
+   --  targeted group is held where it was read at that beat, the push ends as
+   --  it ends against anything, and Stopped says so. A press stops when what
+   --  the hand watches tells it met something, before the arm's own readings
+   --  could (A69's first press at open: the closer, held open, was pushed
+   --  from 1.0 to 0.39 within six beats of the finger meeting the table, the
+   --  push was judged blocked 77 beats later, and the closer never came back
+   --  to its opening).
 
    procedure Note_Stopped (M : in out Model; G : Group_Id; Noted : out Boolean);
    --  The decider's word that the group's latest push, ended Blocked or Short, was stopped by the body itself and
@@ -61,6 +75,10 @@ package Driver.Robot.Motion is
    procedure Hold (M : in out Model; Beats : Positive);
    --  Holds the body for that many beats.
 
+   procedure Hold_And_Estimate (M : in out Model);
+   --  Holds the body for one beat and brings the estimates up to date between the beat and the hold
+   --  (Estimate_Now): a round of the sweep is measured before the next round is moved.
+
    procedure Hold_While_Matching (M : in out Model);
    --  Holds the body until the instrument has answered every match the
    --  estimators asked of it (the kinematics' keyframes).
@@ -76,10 +94,12 @@ package Driver.Robot.Motion is
    --  what both the view and the matcher can tell: Z times the larger of
    --  the cells' displacement noise (Lockin.Cell_Noise) and the matcher's
    --  (Kinematics.Match_Noise, from the still twin), over how far the view
-   --  moves per reading unit of the joint (Lockin.Shift); a keyframe that
-   --  moves less tells the kinematics nothing, and A9's showed it makes the
-   --  fit worse. Zero when the arm carries no eye or the shift or the cells'
-   --  noise is not measured.
+   --  moves per reading unit of the joint (Lockin.Shift), the keyframe step,
+   --  plus what the readings' noise can take off a turn (Z of the noise of a
+   --  difference of two readings), so that the turn lands at the step or
+   --  beyond; a keyframe that moves less tells the kinematics nothing, and
+   --  A9's showed it makes the fit worse. Zero when the arm carries no eye or
+   --  the shift or the cells' noise is not measured.
 
    procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id);
    --  Holds the body until the arm can give its kinematics a keyframe: its
@@ -252,10 +272,16 @@ package Driver.Robot.Motion is
    --  caller makes by asking for a clearance.
 
    function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal;
-                               Clearance : Real := Real'Last; Lever : Real := 0.0) return Plan;
+                               Clearance : Real := Real'Last; Lever : Real := 0.0;
+                               Goal_Turn_Sigma : Real := 0.0) return Plan;
    --  The same, the goal a pose of the tool in the arm's own frame
    --  (Tool_In_Arm): it needs only the arm's kinematics, not its placement in
    --  the world; the Clearance and the Lever are in the arm's own unit.
+   --  Goal_Turn_Sigma is how well the goal's own turn is known, in radians: a
+   --  turn the solver leaves is a miss when it stands out of the fit's turn
+   --  sigma and the goal's together. An aim at "down" as the table shows it is
+   --  known no better than that direction; A87's hand 1 planned no aim of any
+   --  press, every one left 9e-4 rad from a goal judged by the fit alone.
 
    function Status (P : Plan) return Plan_Status;
    function Why (P : Plan) return String;
@@ -295,9 +321,14 @@ package Driver.Robot.Motion is
    --  goal's unit (the arm's own for Plan_Reach_In_Arm). Zero when every
    --  segment keeps within the clearance, or none was asked.
 
-   procedure Follow (M : in out Model; P : Plan; Report : out Step_Report)
+   procedure Follow
+     (M      : in out Model;
+      P      : Plan;
+      Report : out Step_Report;
+      Stop   : access function return Boolean := null)
      with Pre => Status (P) = Planned;
-   --  Moves along a planned path, step by step, judging every step.
+   --  Moves along a planned path, step by step, judging every step; a step
+   --  stopped by Stop (see Step) ends the path there.
 
 private
 

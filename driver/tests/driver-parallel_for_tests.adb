@@ -64,10 +64,44 @@ package body Driver.Parallel_For_Tests is
              "the call returned before the other indices ended");
    end A_Failure_Waits_For_The_Rest;
 
+   --  A work that itself does work at once: every inner index is done, and
+   --  the calls return (the workers are a pool that nothing waits for; an
+   --  index no worker is free for is done by whoever asked).
+   procedure Nested_Calls_End is
+      Outer, Inner : constant := 12;
+      Got : array (1 .. Outer, 1 .. Inner) of Long_Long_Integer := [others => [others => 0]];
+      procedure Row (I : Positive) is
+         procedure Cell (J : Positive) is
+         begin
+            for K in 1 .. 20_000 loop
+               Got (I, J) := Got (I, J) + Long_Long_Integer (K * I * J);
+            end loop;
+         end Cell;
+         procedure Cells is new Driver.Parallel_For (Cell);
+      begin
+         Cells (1, Inner);
+      end Row;
+      procedure Rows is new Driver.Parallel_For (Row);
+      Wanted : Long_Long_Integer;
+   begin
+      Rows (1, Outer);
+      for I in 1 .. Outer loop
+         for J in 1 .. Inner loop
+            Wanted := 0;
+            for K in 1 .. 20_000 loop
+               Wanted := Wanted + Long_Long_Integer (K * I * J);
+            end loop;
+            Check (Got (I, J) = Wanted, "a nested index was not done, or not done alone:" & I'Image & J'Image);
+         end loop;
+      end loop;
+   end Nested_Calls_End;
+
    procedure Register is
    begin
       Driver.Tests.Register ("core.parallel_for", "work done at once for several indices is what it is done alone",
                              Each_Index_Alone'Access);
+      Driver.Tests.Register ("core.parallel_for_nested", "work at once inside work at once deadlocks or skips an index",
+                             Nested_Calls_End'Access);
       Driver.Tests.Register ("core.parallel_for_failure",
                              "the failure of one index is raised once every other one has ended",
                              A_Failure_Waits_For_The_Rest'Access);

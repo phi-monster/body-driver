@@ -5,16 +5,17 @@ with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Log;
 with Driver.Robot.Channels;
+with Driver.Robot.Kinematics;
 with Driver.Robot.Hand.Frames;
 with Driver.Robot.Hand.Lobes;
 with Driver.Robot.Hand.Lowering;
+with Driver.Robot.Hand.Pressing;
 with Driver.Robot.Hand.Presses;
 with Driver.Robot.Hand.Shape;
 with Driver.Robot.Hand.Slide;
 with Driver.Robot.Hand.Sweep;
 with Driver.Robot.Hand.Tips;
 with Driver.Robot.Hand.Views;
-with Driver.Robot.Kinematics;
 with Driver.Robot.Lockin;
 with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
@@ -37,6 +38,10 @@ package body Driver.Robot.Hand is
       Eye      : Eye_Id;
       Arm      : Arm_Id;
       Sweep    : Sweeps.State;
+      --  How the eye's picture moved per unit of each closer channel's reading, cell by cell (channel after
+      --  channel, the eye's cells in order): each cell's displacement at the beats only that channel moved, times
+      --  the channel's step there, summed (Accumulate).
+      Motion_U, Motion_V : Real_Vectors.Vector;
    end record;
 
    package Pair_Vectors is new Ada.Containers.Vectors (Positive, Pair);
@@ -51,9 +56,19 @@ package body Driver.Robot.Hand is
       Reach : Real := 0.0;
    end record;
 
+   --  What the eye saw of a lobe at a stop of the sweep between its openings: its tip's line of sight and its look.
+   type Stop_Sight is record
+      Reading : Real := 0.0;
+      Sight   : Hand.Sight;
+      Patch   : Driver.Robot.Hand.Slide.Patch;
+   end record;
+
+   package Stop_Vectors is new Ada.Containers.Vectors (Positive, Stop_Sight);
+
    type Lobe_Record is record
-      Channel : Positive;
+      Channel : Natural;   --  of the closer; 0 for the lobe of a tool no closer moves
       Sights  : Sight_Array;
+      Stops   : Stop_Vectors.Vector;   --  between the openings, by the channel's reading, ascending
       Patches : Patch_Array;   --  what its tip looked like at each opening, in the views of the sweep
       Way     : Closing_Way;
       Shape   : Driver.Robot.Hand.Shape.Lobe_Shape;   --  its surface as its own eye saw it, up to scale
@@ -65,7 +80,7 @@ package body Driver.Robot.Hand is
    type Reading_Array is array (Opening) of Driver.Robot.Hand.Views.Reading_Holders.Holder;
 
    type Hand_Record is record
-      Group    : Group_Id;
+      Group    : Group_Id'Base;   --  the closer; 0 for the hand an arm's tool is
       Arm      : Arm_Id;
       Eye      : Eye_Id;
       Readings : Reading_Array;
@@ -223,6 +238,9 @@ package body Driver.Robot.Hand is
    function Has_Pair (D : Hand_Data; G : Group_Id; E : Eye_Id) return Boolean is
      (for some P of D.Pairs => P.Group = G and then P.Eye = E);
 
+   procedure Keep (D : in out Hand_Data; Made : in out Hand_Record);
+   --  Keeps the hand made (declared ahead: Find_Pairs makes the hand an arm's tool is).
+
    procedure Find_Pairs (D : in out Hand_Data; M : Model; O : Observation);
    --  Every closer group with the eyes on its own arm, once the body has
    --  measured them; by the body's roles as they are now, which the boot
@@ -235,6 +253,18 @@ package body Driver.Robot.Hand is
    function Still_A_Pair (P : Pair; M : Model) return Boolean is
      (Role (M, P.Group) = Closer and then Closer_Arm (M, P.Group) = P.Arm
       and then Eye_Mount (M, P.Eye).Kind = Arm_Carried and then Eye_Mount (M, P.Eye).Arm = P.Arm);
+
+   function Has_A_Closer (M : Model; A : Arm_Id) return Boolean is
+     (for some G in 1 .. Group_Id'Base (Group_Count (M)) => Role (M, G) = Closer and then Closer_Arm (M, G) = A);
+
+   --  A hand of a closer stands while the body takes its group for a closer of its arm; the hand an arm's tool
+   --  is (no closer) stands while the arm has no closer, its eye still rides on it and the arm is fitted (the
+   --  tool frame its presses are made in).
+   function Still_A_Hand (R : Hand_Record; M : Model) return Boolean is
+     (if R.Group > 0 then Role (M, R.Group) = Closer and then Closer_Arm (M, R.Group) = R.Arm
+      else Natural (R.Arm) <= Arm_Count (M) and then not Has_A_Closer (M, R.Arm)
+           and then Natural (R.Eye) <= Eye_Count (M) and then Eye_Mount (M, R.Eye).Kind = Arm_Carried
+           and then Eye_Mount (M, R.Eye).Arm = R.Arm and then Driver.Robot.Kinematics.Fitted (M, R.Arm));
 
    procedure Find_Pairs (D : in out Hand_Data; M : Model; O : Observation) is
    begin
@@ -256,15 +286,52 @@ package body Driver.Robot.Hand is
          I : Hand_Id := 1;
       begin
          while I <= D.Found.Last_Index loop
-            if Role (M, D.Found (I).Group) = Closer and then Closer_Arm (M, D.Found (I).Group) = D.Found (I).Arm then
+            if Still_A_Hand (D.Found (I), M) then
                I := I + 1;
             else
-               Driver.Log.Line (Driver.Log.Robot, "hand: group" & D.Found (I).Group'Image & " is no longer a closer"
-                                & " of arm" & D.Found (I).Arm'Image & "; the hand found from it is dropped");
+               Driver.Log.Line (Driver.Log.Robot,
+                                (if D.Found (I).Group > 0
+                                 then "hand: group" & D.Found (I).Group'Image & " is no longer a closer of arm"
+                                      & D.Found (I).Arm'Image & "; the hand found from it is dropped"
+                                 else "hand: arm" & D.Found (I).Arm'Image & " has a closer now, or lost its eye or its fit;"
+                                      & " the hand its tool was is dropped"));
                D.Found.Delete (I);
             end if;
          end loop;
       end;
+      --  An arm that carries an eye and is fitted, with no closer group of its own, has the hand its tool is: one
+      --  lobe that no channel moves and no eye has a line of sight to, able to press and push; its tip is where
+      --  its presses stop (Tips, the free model of Touch). Made once the arm is fitted (the tool frame the presses
+      --  are made in), kept while Still_A_Hand.
+      for A in 1 .. Arm_Id'Base (Arm_Count (M)) loop
+         if not Has_A_Closer (M, A) and then Driver.Robot.Kinematics.Fitted (M, A)
+           and then not (for some R of D.Found => R.Group = 0 and then R.Arm = A)
+         then
+            for E in 1 .. Eye_Id'Base (Eye_Count (M)) loop
+               if Eye_Mount (M, E).Kind = Arm_Carried and then Eye_Mount (M, E).Arm = A then
+                  declare
+                     Made : Hand_Record := (Group => 0, Arm => A, Eye => E, others => <>);
+                     None : constant Real_Array (1 .. 0) := [];
+                  begin
+                     Made.Readings := [Open         => Driver.Robot.Hand.Views.Reading_Holders.To_Holder (None),
+                                       Closed_Empty => Driver.Robot.Hand.Views.Reading_Holders.To_Holder (None)];
+                     Made.Lobes.Append
+                       (Lobe_Record'(Channel => 0,
+                                     Sights  => <>,
+                                     Stops   => <>,
+                                     Patches => [others => Driver.Robot.Hand.Slide.Empty],
+                                     Way     => <>,
+                                     Shape   => Driver.Robot.Hand.Shape.Unfitted ("no closer moves it: its tip is where its presses stop"),
+                                     Size    => <>));
+                     Driver.Log.Line (Driver.Log.Robot, "hand: arm" & A'Image & " carries eye" & E'Image
+                                      & " and no closer: its tool is a hand of one lobe, pressed to find its tip");
+                     Keep (D, Made);
+                     exit;
+                  end;
+               end if;
+            end loop;
+         end if;
+      end loop;
       for G in 1 .. Group_Id'Base (Group_Count (M)) loop
          if Role (M, G) = Closer and then Closer_Arm (M, G) > 0 and then Driver.Observations.Has_Reading (O, G) then
             for E in 1 .. Eye_Id'Base (Eye_Count (M)) loop
@@ -283,7 +350,8 @@ package body Driver.Robot.Hand is
                             Eye   => E,
                             Arm   => Arm,
                             Sweep => Sweeps.Start (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)),
-                                                   Channels, Noise)));
+                                                   Channels, Noise),
+                            others => <>));
                         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " on arm" & Arm'Image
                                          & " is watched in eye" & E'Image & ", its own");
                      end;
@@ -294,13 +362,108 @@ package body Driver.Robot.Hand is
       end loop;
    end Find_Pairs;
 
+   procedure Accumulate (P : in out Pair; M : Model);
+   --  Adds the latest beat's picture motion to the pair's tally when one channel of the closer moved, by a step the
+   --  body's one test of motion sees: each resolved cell's displacement in the picture that shows the step (the eye's
+   --  image lag after it), times the step; and when no other commandable group's step at that beat moves this eye's
+   --  picture by what its cells tell (Lockin.Shows_Step): a beat whose picture another group moved shows that motion
+   --  as well, and the world moves past a closer carried with its eye (A88's replay with every such beat tallied:
+   --  28,242 of the lobes' pixels went with the closer's motion and 34,938 against it, and the ends the robot's look
+   --  had given right were turned wrong). Whether another group moved by the body's one test of motion is not the
+   --  question: the arm holding the closer creeps by a millionth of a radian a beat, which that test sees and no cell
+   --  of the eye does (A88's hand 1 tallied nothing so, and its wrong ends were not turned).
+
+   procedure Accumulate (P : in out Pair; M : Model) is
+      S    : Eye_Stream renames M.Eyes (P.Eye);
+      N    : constant Natural := Cells (S.Grid);
+      B    : constant Integer := M.Beats - 1;
+      R    : constant Integer := B - Integer'Max (0, Image_Lag (M, P.Eye));
+      Size : constant Natural := Group_Size (M, P.Group);
+   begin
+      if N = 0 or else Size = 0 or else R < 1 or else Natural (S.Du.Length) < (B + 1) * N
+        or else Natural (S.Resolved.Length) < (B + 1) * N
+        or else not Driver.Robot.Channels.Has_Reading (M, P.Group, R)
+        or else not Driver.Robot.Channels.Has_Reading (M, P.Group, R - 1)
+        or else not Driver.Robot.Channels.Moving (M, P.Group, R)
+      then
+         return;
+      end if;
+      if Natural (P.Motion_U.Length) /= Size * N then
+         P.Motion_U.Clear;
+         P.Motion_V.Clear;
+         P.Motion_U.Append (0.0, Ada.Containers.Count_Type (Size * N));
+         P.Motion_V.Append (0.0, Ada.Containers.Count_Type (Size * N));
+      end if;
+      declare
+         Moved : Natural := 0;
+         Which : Positive := 1;
+      begin
+         for C in 1 .. Size loop
+            declare
+               Alone : Real_Array (1 .. Size) := [others => 0.0];
+            begin
+               Alone (C) := Driver.Robot.Channels.Change (M, P.Group, R, C);
+               if Driver.Robot.Channels.Visible (M, P.Group, Alone) then
+                  Moved := Moved + 1;
+                  Which := C;
+               end if;
+            end;
+         end loop;
+         if Moved /= 1 then
+            return;
+         end if;
+         for G in 1 .. Group_Id'Base (Group_Count (M)) loop
+            if G /= P.Group and then Is_Commandable (M, G) and then Driver.Robot.Channels.Has_Reading (M, G, R)
+              and then Driver.Robot.Channels.Has_Reading (M, G, R - 1)
+              and then Driver.Robot.Lockin.Shows_Step
+                (M, P.Eye, G, [for C in 1 .. Group_Size (M, G) => Driver.Robot.Channels.Change (M, G, R, C)])
+            then
+               return;
+            end if;
+         end loop;
+         declare
+            Step : constant Real := Driver.Robot.Channels.Change (M, P.Group, R, Which);
+            Base : constant Natural := (Which - 1) * N;
+         begin
+            for Cell in 0 .. N - 1 loop
+               if S.Resolved (B * N + Cell) then
+                  P.Motion_U.Replace_Element (Base + Cell, P.Motion_U (Base + Cell) + Step * S.Du (B * N + Cell));
+                  P.Motion_V.Replace_Element (Base + Cell, P.Motion_V (Base + Cell) + Step * S.Dv (B * N + Cell));
+               end if;
+            end loop;
+         end;
+      end;
+   end Accumulate;
+
    procedure Feed (P : in out Pair; M : Model; O : Observation);
 
    procedure Feed (P : in out Pair; M : Model; O : Observation) is
       Complete : constant Boolean := All_Read (O) and then Driver.Observations.Has_Image (O, P.Eye);
       function Moved (Before, After : Real_Array) return Boolean is (Rest_Moved (M, P.Group, Before, After));
       function Carried (Before, After : Real_Array) return Boolean is (Eye_Moved (M, P.Group, P.Eye, Before, After));
+
+      --  The tally at a pixel: its cell's (Accumulate). Cells are numbered row by row from the top-left one, a cell
+      --  covering the columns from its number times the width over the columns on (Flow.Bounds).
+      procedure Motion (Channel : Positive; Column, Row : Natural; U, V : out Real) is
+         G : constant Cell_Grid := M.Eyes (P.Eye).Grid;
+      begin
+         U := 0.0;
+         V := 0.0;
+         if G.Width > 0 and then G.Height > 0 and then Column < G.Width and then Row < G.Height then
+            declare
+               K : constant Natural :=
+                 (Channel - 1) * Cells (G) + ((Row + 1) * G.Rows - 1) / G.Height * G.Columns
+                 + ((Column + 1) * G.Columns - 1) / G.Width;
+            begin
+               if K < Natural (P.Motion_U.Length) then
+                  U := P.Motion_U (K);
+                  V := P.Motion_V (K);
+               end if;
+            end;
+         end if;
+      end Motion;
    begin
+      Accumulate (P, M);
       Sweeps.Set_Closer_Noise (P.Sweep, Closer_Sigma (M, P.Group));
       --  A view of the pair's eye needs that eye's picture to have stopped
       --  changing (the one stop rule, Driver.Robot.Stillness): its validity
@@ -311,7 +474,7 @@ package body Driver.Robot.Hand is
       --  every beat started the view again, and none ever had two frames.
       Sweeps.Observe (P.Sweep, O, Still => Driver.Robot.Stillness.Eye_Settled (M, P.Eye) and then Complete,
                       Closer => O.Readings (P.Group), Rest => Rest_Of (O, P.Group), Image => O.Images (P.Eye),
-                      Rest_Moved => Moved'Access, Eye_Moved => Carried'Access);
+                      Rest_Moved => Moved'Access, Eye_Moved => Carried'Access, Motion => Motion'Access);
    end Feed;
 
    function Sizes_Text (R : Hand_Record) return String;
@@ -375,7 +538,6 @@ package body Driver.Robot.Hand is
       Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & " sizes: " & Sizes_Text (R));
    end Size_Up;
 
-   procedure Keep (D : in out Hand_Data; Made : in out Hand_Record);
    --  The hand found from a closer group, among the hands. A hand measured
    --  again keeps its presses; they are given to the new lobes by number, or
    --  forgotten when the number changed.
@@ -385,15 +547,27 @@ package body Driver.Robot.Hand is
    begin
       for L in Table'Range loop
          for Which in Opening loop
-            Table (L) (Which) := (Known  => Made.Lobes (L).Sights (Which).Known,
-                                  Ray    => Made.Lobes (L).Sights (Which).Ray,
-                                  Spread => Made.Lobes (L).Sights (Which).Spread,
-                                  Travel => Made.Lobes (L).Way.Reach * Made.Lobes (L).Sights (Which).Pitch,
-                                  Pitch  => Made.Lobes (L).Sights (Which).Pitch);
+            --  A lobe no channel moves has no line of sight: its presses go to the book as a tip anywhere, starting
+            --  from the tool frame's origin (Touch, the free model).
+            Table (L) (Which) :=
+              (if Made.Lobes (L).Channel = 0
+               then (Known  => False,
+                     Lined  => False,
+                     Ray    => (Origin    => (Mean => Zero3, Covariance => [others => [others => 0.0]]),
+                                Direction => (Unit_Vector => [0.0, 0.0, 1.0], Sigma => Real'Last)),
+                     Spread => 0.0,
+                     Travel => 0.0,
+                     Pitch  => 0.0)
+               else (Known  => Made.Lobes (L).Sights (Which).Known,
+                     Lined  => True,
+                     Ray    => Made.Lobes (L).Sights (Which).Ray,
+                     Spread => Made.Lobes (L).Sights (Which).Spread,
+                     Travel => Made.Lobes (L).Way.Reach * Made.Lobes (L).Sights (Which).Pitch,
+                     Pitch  => Made.Lobes (L).Sights (Which).Pitch));
          end loop;
       end loop;
       for Id in D.Found.First_Index .. D.Found.Last_Index loop
-         if D.Found (Id).Group = Made.Group then
+         if D.Found (Id).Group = Made.Group and then (Made.Group > 0 or else D.Found (Id).Arm = Made.Arm) then
             Made.Watch := D.Found (Id).Watch;
             Made.Book := D.Found (Id).Book;
             Driver.Robot.Hand.Tips.Set_Sights (Made.Book, Table);
@@ -450,10 +624,15 @@ package body Driver.Robot.Hand is
                then Arctan (abs Cross (Line.Direction.Unit_Vector, Next.Direction.Unit_Vector),
                             Line.Direction.Unit_Vector * Next.Direction.Unit_Vector)
                else 0.0);
+            Ray   : constant Ray_Estimate := Driver.Robot.Hand.Frames.Into (Eye_In_Tool (M, P.Eye, V.Seen), Line);
          begin
-            return (Known  => True,
+            --  A sight is known when its line is: the eye's lens and its place in the tool frame are the arm's
+            --  fit's, and until the arm is fitted a tip seen in the picture has no line of sight to press along
+            --  (the first fake body: its arm's focal length undetermined, its hand swept, and the press's aim
+            --  asked the direction of a zero vector).
+            return (Known  => Ray.Direction.Sigma < Real'Last and then abs Ray.Direction.Unit_Vector > 0.0,
                     Pixel  => Px,
-                    Ray    => Driver.Robot.Hand.Frames.Into (Eye_In_Tool (M, P.Eye, V.Seen), Line),
+                    Ray    => Ray,
                     Spread => Pitch * Driver.Robot.Hand.Lobes.Tip_Spread
                                         (Driver.Robot.Hand.Lobes.Tip_Cap (Region, Centre, Px), Px),
                     Pitch  => Pitch);
@@ -490,8 +669,10 @@ package body Driver.Robot.Hand is
                Low  : constant Driver.Robot.Hand.Views.View := Sweeps.Low_End (P.Sweep, C);
                High : constant Driver.Robot.Hand.Views.View := Sweeps.High_End (P.Sweep, C);
                Closed_High : constant Boolean := Sweeps.Closed_End_Is_High (P.Sweep, C);
+               Lobe_No : Natural := 0;
             begin
                for L of Sweeps.Lobes_Of (P.Sweep, C) loop
+                  Lobe_No := Lobe_No + 1;
                   declare
                      At_Low  : constant Sight := Seen_Tip (Low, L.Tip_Known_Here, L.Tip_Here, L.Here, L.Centre_Here);
                      At_High : constant Sight := Seen_Tip (High, L.Tip_Known_There, L.Tip_There, L.There, L.Centre_There);
@@ -500,11 +681,33 @@ package body Driver.Robot.Hand is
                         then Closing_Way_Of (From => (if Closed_High then L.Tip_Here else L.Tip_There),
                                              To   => (if Closed_High then L.Tip_There else L.Tip_Here))
                         else (others => <>));
+                     Stops   : Stop_Vectors.Vector;
                   begin
+                     --  The stops of the sweep between the ends: the lobe's tip as the eye saw it at each.
+                     for K in 1 .. Sweeps.Stops (P.Sweep, C) loop
+                        declare
+                           V    : constant Driver.Robot.Hand.Views.View := Sweeps.Stop_View (P.Sweep, C, K);
+                           Tips : constant Sweeps.Stop_Tips := Sweeps.Tips_At_Stop (P.Sweep, C, K);
+                        begin
+                           if Lobe_No <= Tips'Last then
+                              declare
+                                 T : Sweeps.Stop_Tip renames Tips (Lobe_No);
+                              begin
+                                 Stops.Append
+                                   (Stop_Sight'(Reading => Sweeps.Stop_Reading (P.Sweep, C, K),
+                                                Sight   => Seen_Tip (V, T.Known, T.Tip, T.Region, T.Centre),
+                                                Patch   => (if Way.Known and then T.Known
+                                                            then Patch_At (V, T.Region, T.Centre, T.Tip, Way)
+                                                            else Driver.Robot.Hand.Slide.Empty)));
+                              end;
+                           end if;
+                        end;
+                     end loop;
                      Made.Lobes.Append
                        (Lobe_Record'(Channel => C,
                                      Sights  => [Open         => (if Closed_High then At_Low else At_High),
                                                  Closed_Empty => (if Closed_High then At_High else At_Low)],
+                                     Stops   => Stops,
                                      Patches =>
                                        [Open         => (if Way.Known
                                                          then Patch_At ((if Closed_High then Low else High),
@@ -577,6 +780,7 @@ package body Driver.Robot.Hand is
          Made.Lobes.Append
            (Lobe_Record'(Channel => 1,
                          Sights  => Row,
+                         Stops   => <>,
                          Patches => [others => Driver.Robot.Hand.Slide.Empty],
                          Way     => <>,
                          Shape   => Driver.Robot.Hand.Shape.Unfitted ("the hand was given, not swept"),
@@ -629,7 +833,7 @@ package body Driver.Robot.Hand is
    --  opening within their noise and not those of the other.
 
    function Opening_Of (R : Hand_Record; M : Model; Readings : Real_Array; Which : out Opening) return Boolean is
-      Sigma : constant Real_Array := Closer_Sigma (M, R.Group);
+      Sigma : constant Real_Array := (if R.Group = 0 then [1 .. 0 => 0.0] else Closer_Sigma (M, R.Group));
       function At_It (O : Opening) return Boolean is
          Measured : constant Real_Array := R.Readings (O).Element;
       begin
@@ -644,6 +848,10 @@ package body Driver.Robot.Hand is
       end At_It;
    begin
       Which := Open;
+      --  A tool no closer moves has one setting: it is always at it.
+      if R.Group = 0 then
+         return True;
+      end if;
       if R.Readings (Open).Is_Empty or else R.Readings (Closed_Empty).Is_Empty then
          return False;
       end if;
@@ -686,14 +894,14 @@ package body Driver.Robot.Hand is
    end Tips_Said;
 
    function Measured_Slides
-     (R : Hand_Record; Id : Hand_Id; O : Observation; Which : Opening) return Driver.Robot.Hand.Tips.Slid_Row;
+     (R : Hand_Record; Id : Hand_Id; M : Model; O : Observation; Which : Opening) return Driver.Robot.Hand.Tips.Slid_Row;
    --  How far each lobe's finger stands from where the closer's reading puts
    --  it, in the picture of the beat of a press made at that opening: the
    --  pixels of its tip as the sweep saw them, found again under the press
    --  (Driver.Robot.Hand.Slide). Said in the log for every lobe, measured or not.
 
    function Measured_Slides
-     (R : Hand_Record; Id : Hand_Id; O : Observation; Which : Opening) return Driver.Robot.Hand.Tips.Slid_Row
+     (R : Hand_Record; Id : Hand_Id; M : Model; O : Observation; Which : Opening) return Driver.Robot.Hand.Tips.Slid_Row
    is
       Result : Driver.Robot.Hand.Tips.Slid_Row (1 .. Natural (R.Lobes.Length)) := [others => <>];
       Text   : Unbounded_String;
@@ -716,11 +924,27 @@ package body Driver.Robot.Hand is
                else
                   Driver.Robot.Hand.Slide.Measure (Lobe.Patches (Which), Under, Shift);
                   if Shift.Known then
-                     Result (L) := (Known          => True,
-                                    Pixels         => Shift.By,
-                                    Pixels_Sigma   => Shift.Sigma,
-                                    Fraction       => Shift.By / Lobe.Way.Reach,
-                                    Fraction_Sigma => Shift.Sigma / Lobe.Way.Reach);
+                     declare
+                        --  The tip's line of sight under the press: the sweep's tip pixel moved by the slide along the way
+                        --  the finger closes, in the tool frame (the eye is the tool frame of the arm that carries it); the
+                        --  slide's sigma at the pitch of a pixel there is how far the finger may still be off it (item 8).
+                        Px    : constant Driver.Images.Pixel := Lobe.Sights (Which).Pixel;
+                        Slid  : constant Ray_Estimate :=
+                          Driver.Robot.Hand.Frames.Into
+                            (Eye_In_Tool (M, R.Eye, O),
+                             Eye_Ray (M, R.Eye, (U => Px.U + Shift.By * Lobe.Way.U, V => Px.V + Shift.By * Lobe.Way.V)));
+                        Lined : constant Boolean :=
+                          Slid.Direction.Sigma < Real'Last and then abs Slid.Direction.Unit_Vector > 0.0;
+                     begin
+                        Result (L) := (Known          => True,
+                                       Pixels         => Shift.By,
+                                       Pixels_Sigma   => Shift.Sigma,
+                                       Fraction       => Shift.By / Lobe.Way.Reach,
+                                       Fraction_Sigma => Shift.Sigma / Lobe.Way.Reach,
+                                       Lined          => Lined,
+                                       Line           => (if Lined then Slid.Direction.Unit_Vector else [0.0, 0.0, 0.0]),
+                                       Line_Sigma     => (if Lined then Lobe.Sights (Which).Pitch * Shift.Sigma else Real'Last));
+                     end;
                      Append (Text, "slid" & Driver.Log.Image (Shift.By, 2) & " +- " & Driver.Log.Image (Shift.Sigma, 2)
                              & " pixels, " & Driver.Log.Image (100.0 * Shift.By / Lobe.Way.Reach, 2) & " % of the"
                              & Driver.Log.Image (Lobe.Way.Reach, 1) & " it closes");
@@ -812,8 +1036,18 @@ package body Driver.Robot.Hand is
             then
                return;
             end if;
+            --  A push whose target stands the tool where it stood, as far as its place tells from its noise
+            --  (Pressing.Least_Push), asked the hand nothing, and a share of nothing is no number: A79's aim of a
+            --  press, whose push began at a target 3e-8 from where the tool stood while the arm went on 2.6 of
+            --  its units the way a joint's end let it, was judged a stall of 95,629,588 per cent, and the rest
+            --  after it was kept as a press of lobe 2 at closed, a tip 45 +- 89 units along its sight (760 mm).
+            if abs (Target.Pose.Translation - From.Pose.Translation)
+                 < Driver.Robot.Hand.Pressing.Least_Push (M, R.Arm, Seen_At (Before))
+            then
+               return;
+            end if;
             declare
-               Closer : constant Natural := Group_Size (M, R.Group);
+               Closer : constant Natural := (if R.Group = 0 then 0 else Group_Size (M, R.Group));
                Lobes  : constant Natural := Natural (R.Lobes.Length);
                Where  : Driver.Robot.Hand.Lowering.Points (1 .. 1 + Lobes) := [others => Zero3];
                Whose  : array (1 .. 1 + Lobes) of Natural := [others => 0];   --  the lobe a point is the tip of
@@ -821,7 +1055,7 @@ package body Driver.Robot.Hand is
                Which  : Opening;
                Said   : Driver.Robot.Hand.Lowering.Judgment;
             begin
-               if Driver.Robot.Channels.Has_Reading (M, R.Group, E.End_At)
+               if (R.Group = 0 or else Driver.Robot.Channels.Has_Reading (M, R.Group, E.End_At))
                  and then Opening_Of (R, M, [for C in 1 .. Closer => Driver.Robot.Channels.Reading (M, R.Group, E.End_At, C)],
                                       Which)
                then
@@ -921,28 +1155,49 @@ package body Driver.Robot.Hand is
          Size_Up (R, Id);
       end if;
       Judge_Push (R, Id, M, O);
-      if not Driver.Observations.Has_Reading (O, R.Group) then
+      if R.Group > 0 and then not Driver.Observations.Has_Reading (O, R.Group) then
          return;
       end if;
       --  A push that stalled is a block as far as the press is concerned: the verdict stands until the next push begins.
-      Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked or else Stalled_Now, Is_Pushing, Is_Still,
-                                         Tool_In_Arm (M, R.Arm, O),
-                                         O.Readings.Element (Arm_Group (M, R.Arm)), O.Readings.Element (R.Group),
-                                         Found, Press,
-                                         Retargeted => Driver.Robot.Channels.Target_Changed (M, Arm_Group (M, R.Arm), Natural (O.Beat)));
+      --  A new command's readings, as a tool pose, tell a let-go from a retreat (Presses).
+      declare
+         G          : constant Group_Id := Arm_Group (M, R.Arm);
+         Retargeted : constant Boolean := Driver.Robot.Channels.Target_Changed (M, G, Natural (O.Beat));
+         Asked      : Pose_Estimate;
+      begin
+         if Retargeted and then Driver.Robot.Channels.Has_Target (M, G, Natural (O.Beat)) then
+            declare
+               Wanted : Real_Array (1 .. Group_Size (M, G));
+            begin
+               for C in Wanted'Range loop
+                  Wanted (C) := Driver.Robot.Channels.Target (M, G, Natural (O.Beat), C);
+               end loop;
+               Asked := Pose_Of (Wanted);
+            end;
+         end if;
+         --  A block at a joint's end the body has shown is the body's own, no contact: no press is made of it (item 7).
+         Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat,
+                                            (Is_Blocked and then not Stopped_By_An_End (M, R.Arm, O)) or else Stalled_Now,
+                                            Is_Pushing, Is_Still,
+                                            Tool_In_Arm (M, R.Arm, O),
+                                            O.Readings.Element (G),
+                                            (if R.Group > 0 then O.Readings.Element (R.Group) else [1 .. 0 => 0.0]),
+                                            Found, Press, Retargeted => Retargeted, Asked => Asked);
+      end;
       if not Found then
          return;
       end if;
       R.Rests := R.Rests + 1;
       if Opening_Of (R, M, Press.Closer.Element, Which) then
-         Driver.Robot.Hand.Tips.Add (R.Book, Press, Which, Measured_Slides (R, Id, O, Which));
+         Driver.Robot.Hand.Tips.Add (R.Book, Press, Which, Measured_Slides (R, Id, M, O, Which));
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": a press at the " & Opening'Image (Which)
                           & " opening, at beat" & Press.Beat'Image & "," & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image
                           & " kept; "
                           & (if Driver.Robot.Hand.Tips.Latest_Agrees (R.Book)
                              then "a tip rests on it"
                              else "no tip rests on it (it stopped short of the table, or no tip is fixed)")
-                          & "; the tips at this opening: " & Tips_Said (R, Which));
+                          & "; the tips at this opening: " & Tips_Said (R, Which)
+                          & "; the fit of the presses: " & Driver.Robot.Hand.Tips.Fit_Account (R.Book));
          Size_Up (R, Id);
       else
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image
@@ -966,11 +1221,40 @@ package body Driver.Robot.Hand is
    end Press_Beat;
 
    function Arm_At_Rest (M : Model; A : Arm_Id; O : Observation) return Boolean is
-     (Natural (A) <= Arm_Count (M)
-      and then Driver.Robot.Stillness.Group_Still (M, Arm_Group (M, A), Natural (O.Beat)));
-   --  The arm's own readings are at rest at the beat. The body's eyes are not
-   --  asked: the pose of a press is a function of the readings alone, and the
-   --  pictures settle after the arm does.
+      G : Group_Id;
+   begin
+      if Natural (A) > Arm_Count (M) or else Natural (O.Beat) = 0 then
+         return False;
+      end if;
+      G := Arm_Group (M, A);
+      if not Driver.Robot.Channels.Has_Reading (M, G, Natural (O.Beat))
+        or else not Driver.Robot.Channels.Has_Reading (M, G, Natural (O.Beat) - 1)
+      then
+         return False;
+      end if;
+      declare
+         Before : Observation;
+         Now_At, Then_At : Pose_Estimate;
+         Least : constant Real := Driver.Robot.Hand.Pressing.Least_Push (M, A, O);
+      begin
+         Before.Readings := O.Readings;
+         Before.Readings.Replace_Element
+           (G, [for C in 1 .. Group_Size (M, G) => Driver.Robot.Channels.Reading (M, G, Natural (O.Beat) - 1, C)]);
+         Now_At := Tool_In_Arm (M, A, O);
+         Then_At := Tool_In_Arm (M, A, Before);
+         return Least < Real'Last
+           and then abs (Now_At.Pose.Translation - Then_At.Pose.Translation) < Least
+           and then Driver.Numerics.Angle (Transpose (Then_At.Pose.Rotation) * Now_At.Pose.Rotation)
+                      < Driver.Conventions.Z * Driver.Robot.Kinematics.Angle_Sigma (M, A);
+      end;
+   end Arm_At_Rest;
+   --  The tool stood still at the beat as far as its pose is known: it moved since the beat before by less than
+   --  the least move that tells from the noise of its place (Pressing.Least_Push) and turned by less than Z sigmas
+   --  of its turn. The body's eyes are not asked: the pose of a press is a function of the readings alone, and the
+   --  pictures settle after the arm does. The arm's readings were asked once, by the body's one test of motion, and
+   --  that test sees what the eyes can tell over every cell of them: a hand resting on the table crept by a
+   --  millionth of a radian a beat, more than eye 3 tells, and A78's hand 2 waited 2,900 beats after its let-go
+   --  for a rest its pose had reached at the first of them. Unknown where the tool's place is not measured.
 
    function Asks_A_Translation (M : Model; A : Arm_Id; From, Target : Real_Array) return Boolean is
       Arm_Is : constant Group_Id := Arm_Group (M, A);
@@ -1170,121 +1454,211 @@ package body Driver.Robot.Hand is
    procedure Descend
      (Above : not null access function return Heights;
       Least : Real;
-      Lower : not null access procedure (By : Real; Reached : out Boolean);
+      Lower : not null access procedure (By : Real; Outcome : out Lowered);
+      Back  : not null access procedure (To_Start : Boolean; Reached : out Boolean);
       Steps : out Descent_Steps)
    is
       Fast    : Real := Least;   --  the next step of the fast part, doubling
       Past    : Real := 0.0;     --  the last step past the band, doubling
-      Reached : Boolean;
+      Outcome : Lowered;
       Allowed : Natural := Natural'Last;   --  the steps the schedule takes to cover the eye's room: no more are made
-      First   : Boolean := True;
+      Seen    : Heights;
+
+      --  Seeking, the contact is looked for as the presses so far predict it, or by doubling; Halving, a step met
+      --  something and the span the contact lies in is halved from its near end; Pressing, the span is no longer
+      --  than Least and the tool stands where the descent began, for the press.
+      type Phase is (Seeking, Halving, Pressing);
+      State  : Phase := Seeking;
+      --  Along the way down from where the descent began: the deepest the tool went and met nothing, where it stands
+      --  while seeking and halving; and, once a step met something, the farthest the contact can be.
+      Top    : Real := 0.0;
+      Bottom : Real := 0.0;
+      Moved  : Boolean := False;   --  a step was reached: the tool no longer stands where the descent began
+      At_Stop : Boolean := False;  --  the span's far end is where the step that met something stopped the tool
+      Done   : Boolean := False;
 
       --  How many steps doubling from Step takes to cover Over.
       function Doublings (Over, Step : Real) return Natural is
         (Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (Over / Step + 1.0, 2.0))));
+
+      --  Back, to where the descent began for the press when the span is no longer than Least, else to the near end
+      --  of the span, where the step that met something began. Done when the arm does not get there.
+      procedure Go_Back is
+         Got_There : Boolean;
+         To_Start  : constant Boolean := Bottom - Top <= Least;
+      begin
+         Back (To_Start, Got_There);
+         Steps.Backs := Steps.Backs + 1;
+         if not Got_There then
+            Steps.Unbacked := True;
+            Done := True;
+         elsif To_Start then
+            State := Pressing;
+            Moved := False;
+         else
+            State := Halving;
+         end if;
+      end Go_Back;
    begin
       Steps := (others => <>);
-      loop
+      Seen := Above.all;
+      --  The arm followed the aim and the hand did not go down with it: the hand lies on what it met, and the descent
+      --  is the press, a bound or a contact, not spent.
+      if Seen.Stalled then
+         Steps.Stalled := True;
+         return;
+      end if;
+      if Known (Seen.Eye) then
          declare
-            type Kind is (Doubling, Banded, Blind);
-            Seen : constant Heights := Above.all;
-            G    : Estimate renames Seen.Tip;
-            By   : Real := Least;
-            How  : Kind := Blind;
+            Room : constant Real :=
+              Seen.Eye.Value - Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
          begin
-            --  The arm followed the step before and the hand did not go down with it: the hand lies on what it met,
-            --  and the descent is the press, a bound or a contact, not spent.
-            if Seen.Stalled then
-               Steps.Stalled := True;
-               exit;
-            end if;
-            if First then
-               First := False;
-               if Known (Seen.Eye) then
-                  declare
-                     Room : constant Real :=
-                       Seen.Eye.Value - Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
-                  begin
-                     if Room >= Least then
-                        --  Doubling from Least covers the room, the last step cut to it and the one
-                        --  that finds none left; a prediction adds its band and the doubling past it.
-                        Allowed := Doublings (Room, Least) + 2;
-                        if Known (G) then
-                           Allowed := Allowed + 2 * Natural (Real'Ceiling (Threshold (Scalar_Gate (G.Degrees_Of_Freedom)))) + 1
-                             + Doublings (Room, Real'Max (G.Sigma, Least));
-                        end if;
-                     end if;
-                  end;
+            if Room >= Least then
+               --  Doubling from Least covers the room, the last step cut to it and the one
+               --  that finds none left; a prediction adds its band and the doubling past it.
+               Allowed := Doublings (Room, Least) + 2;
+               if Known (Seen.Tip) then
+                  Allowed := Allowed + 2 * Natural (Real'Ceiling (Threshold (Scalar_Gate (Seen.Tip.Degrees_Of_Freedom)))) + 1
+                    + Doublings (Room, Real'Max (Seen.Tip.Sigma, Least));
                end if;
             end if;
-            --  Steps that were reached and went on without the tool meeting anything are not lowering it:
-            --  they end, on the schedule, not on the clock (A17: 6000 beats of steps the hand slid under).
-            if Total (Steps) >= Allowed then
-               Steps.Spent := True;
-               exit;
-            end if;
-            if Known (G) then
-               declare
-                  Spread : constant Real := Threshold (Scalar_Gate (G.Degrees_Of_Freedom)) * G.Sigma;
-                  --  How far the tip may go before it is within Z sigma of the
-                  --  predicted contact.
-                  Room : constant Real := G.Value - Spread;
-               begin
-                  if Room >= Least then
-                     --  The prediction says where the contact is: the first push goes to Z sigma above it, in
-                     --  one (the steps used to double from Least over it, thirteen pushes of ten beats to cover
-                     --  A22's 4.5 units, and a stop of the arm's own in the air showed at the sixth of them).
-                     By := Room;
-                     How := Doubling;
-                  elsif G.Value + Spread > 0.0 then
-                     By := Real'Max (G.Sigma, Least);
-                     How := Banded;
+         end;
+      end if;
+      loop
+         declare
+            type Kind is (Doubling, Banded, Blind, Probe, Press);
+            G   : constant Estimate := Seen.Tip;
+            By  : Real := Least;
+            How : Kind := Blind;
+         begin
+            case State is
+               when Halving =>
+                  --  A surface that does not give stops the tool where the contact is, as the table did every
+                  --  press of A79 and A90 that reached it: the first step goes to Least short of that, and when it
+                  --  meets nothing the span is no longer than Least. When it meets something, the surface gave, and
+                  --  the span is halved.
+                  if At_Stop then
+                     By := Bottom - Least - Top;
                   else
-                     --  The band is behind and nothing was met: the contact is not
-                     --  where it was predicted, as when the press that fixed the tip
-                     --  was stopped above the surface by something under it, and the
-                     --  prediction is only a bound. Steps of the band's size would
-                     --  creep to the table (A17: 6000 beats, then the hand slid
-                     --  along it, each small push reached): they double again.
-                     if Past = 0.0 then
-                        Driver.Log.Line
-                          (Driver.Log.Robot,
-                           "hand: the tip has gone past the contact its presses predict and the band of its sigma"
-                           & " about it, and met nothing (it is predicted" & Driver.Log.Image (G.Value, 4)
-                           & " above it now): the steps double again");
-                     end if;
-                     Past := Real'Max (2.0 * Past, Real'Max (G.Sigma, Least));
-                     By := Past;
+                     By := (Bottom - Top) / 2.0;
                   end if;
-               end;
-            else
-               --  Nothing predicts the contact: doubling until a step is
-               --  not reached, the overshoot as it comes.
-               By := Fast;
-               Fast := 2.0 * Fast;
-            end if;
-            --  The eye stays above the surface, whatever the tip does.
-            if Known (Seen.Eye) then
-               declare
-                  Room : constant Real :=
-                    Seen.Eye.Value - Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
-               begin
-                  if Room < Least then
+                  At_Stop := False;
+                  How := Probe;
+               when Pressing =>
+                  --  To Least past the near end of the span: past its far end, which a push to it exactly would only
+                  --  reach when the contact is there, and no more than Least past the contact.
+                  By := Top + Least;
+                  How := Press;
+               when Seeking =>
+                  --  Steps that were reached and went on without the tool meeting anything are not lowering it:
+                  --  they end, on the schedule, not on the clock (A17: 6000 beats of steps the hand slid under).
+                  if Steps.Fast + Steps.Band + Steps.Blind >= Allowed then
                      Steps.Spent := True;
                      exit;
-                  elsif By > Room then
-                     By := Room;
-                     Steps.Capped := Steps.Capped + 1;
                   end if;
-               end;
-            end if;
+                  if Known (G) then
+                     declare
+                        Spread : constant Real := Threshold (Scalar_Gate (G.Degrees_Of_Freedom)) * G.Sigma;
+                        --  How far the tip may go before it is within Z sigma of the
+                        --  predicted contact.
+                        Room : constant Real := G.Value - Spread;
+                     begin
+                        if Room >= Least then
+                           --  The prediction says where the contact is: the first push goes to Z sigma above it, in
+                           --  one (the steps used to double from Least over it, thirteen pushes of ten beats to cover
+                           --  A22's 4.5 units, and a stop of the arm's own in the air showed at the sixth of them).
+                           By := Room;
+                           How := Doubling;
+                        elsif G.Value + Spread > 0.0 then
+                           By := Real'Max (G.Sigma, Least);
+                           How := Banded;
+                        else
+                           --  The band is behind and nothing was met: the contact is not
+                           --  where it was predicted, as when the press that fixed the tip
+                           --  was stopped above the surface by something under it, and the
+                           --  prediction is only a bound. Steps of the band's size would
+                           --  creep to the table (A17: 6000 beats, then the hand slid
+                           --  along it, each small push reached): they double again.
+                           if Past = 0.0 then
+                              Driver.Log.Line
+                                (Driver.Log.Robot,
+                                 "hand: the tip has gone past the contact its presses predict and the band of its sigma"
+                                 & " about it, and met nothing (it is predicted" & Driver.Log.Image (G.Value, 4)
+                                 & " above it now): the steps double again");
+                           end if;
+                           Past := Real'Max (2.0 * Past, Real'Max (G.Sigma, Least));
+                           By := Past;
+                        end if;
+                     end;
+                  else
+                     --  Nothing predicts the contact: doubling until a step meets something.
+                     By := Fast;
+                     Fast := 2.0 * Fast;
+                  end if;
+                  --  The eye stays above the surface, whatever the tip does.
+                  if Known (Seen.Eye) then
+                     declare
+                        Room : constant Real :=
+                          Seen.Eye.Value - Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
+                     begin
+                        if Room < Least then
+                           Steps.Spent := True;
+                           exit;
+                        elsif By > Room then
+                           By := Room;
+                           Steps.Capped := Steps.Capped + 1;
+                        end if;
+                     end;
+                  end if;
+            end case;
             case How is
                when Doubling => Steps.Fast := Steps.Fast + 1;
                when Banded   => Steps.Band := Steps.Band + 1;
                when Blind    => Steps.Blind := Steps.Blind + 1;
+               when Probe    => Steps.Probes := Steps.Probes + 1;
+               when Press    => Steps.Pressed := Steps.Pressed + 1;
             end case;
-            Lower (By, Reached);
-            exit when not Reached;
+            Lower (By, Outcome);
+            exit when Outcome = Ended;
+            Seen := Above.all;
+            --  A step the arm followed and the hand did not go down with met something all the same: the hand lies on
+            --  what it met (A17's third press).
+            if Outcome = Reached and then Seen.Stalled then
+               Outcome := Met;
+               Steps.Stalled := True;
+            else
+               Steps.Stalled := False;
+            end if;
+            if Outcome = Reached then
+               if State = Pressing then
+                  --  Nothing where the span said: what stopped the step that bounded it is not there now, and the
+                  --  contact is looked for again from here.
+                  Top := Bottom;
+                  State := Seeking;
+               else
+                  Top := Top + By;
+               end if;
+               Moved := True;
+               if State = Halving and then Bottom - Top <= Least then
+                  Go_Back;
+               end if;
+            elsif State = Pressing
+              or else (not Moved and then By <= Least)
+            then
+               --  The press: a push from where the descent began, ending no more than Least past where nothing was met.
+               exit;
+            else
+               --  Something met further than Least past where nothing was: the span the contact lies in, its far end
+               --  where the tool stopped when that is nearer (it went past the contact, not short of it), and back.
+               Bottom := Top + By;
+               At_Stop := not Steps.Stalled and then Seen.Down > Top and then Seen.Down < Bottom;
+               if At_Stop then
+                  Bottom := Seen.Down;
+               end if;
+               Steps.Stalled := False;
+               Go_Back;
+            end if;
+            exit when Done;
          end;
       end loop;
    end Descend;
@@ -1301,7 +1675,7 @@ package body Driver.Robot.Hand is
    function Hand_Count (H : Hands) return Natural is (if H.Data = null then 0 else Natural (H.Data.Found.Length));
 
    function Exists (H : Hands; Id : Hand_Id) return Boolean is (H.Data /= null and then Id <= H.Data.Found.Last_Index);
-   function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id is (Found (H, Id).Group);
+   function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id'Base is (Found (H, Id).Group);
    function Arm_Of (H : Hands; Id : Hand_Id) return Arm_Id is (Found (H, Id).Arm);
    function Lobe_Count (H : Hands; Id : Hand_Id) return Positive is (Natural (Found (H, Id).Lobes.Length));
    function Presses_Kept (H : Hands; Id : Hand_Id) return Natural is (Driver.Robot.Hand.Tips.Pressed (Found (H, Id).Book));
@@ -1336,8 +1710,10 @@ package body Driver.Robot.Hand is
      (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded)
      return Point_Estimate
    is
+      R : constant Hand_Record := Found (H, Id);
    begin
-      return Driver.Robot.Hand.Tips.Tip (Found (H, Id).Book, Lobe, At_Opening, Kind);
+      --  A lobe no channel moves has one tip, pressed at the open setting, whichever is asked.
+      return Driver.Robot.Hand.Tips.Tip (R.Book, Lobe, (if R.Lobes (Lobe).Channel = 0 then Open else At_Opening), Kind);
    end Tip_In_Tool;
 
    function Tip_Beat
@@ -1383,32 +1759,140 @@ package body Driver.Robot.Hand is
      return Point_Estimate is
      (In_World (H, M, Id, O, Tip_In_Tool (H, Id, Lobe, At_Opening)));
 
-   function Tip_Now_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate;
-   --  The tip at the closer reading of O, on the straight path between the
-   --  two measured ends in the proportion the lobe's channel is closed.
+   function Opening_Reading (R : Hand_Record; Lobe : Positive; Which : Opening) return Real is
+     (if R.Lobes (Lobe).Channel = 0 then 0.0
+      else R.Readings (Which).Element (R.Readings (Which).Element'First + R.Lobes (Lobe).Channel - 1));
+   --  The lobe's channel's reading at the opening.
 
-   function Tip_Now_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate is
+   function Settings (H : Hands; Id : Hand_Id; Lobe : Positive) return Positive is
+     (2 + Natural (Found (H, Id).Lobes (Lobe).Stops.Length));
+
+   function Setting_Sight_At (H : Hands; Id : Hand_Id; Lobe : Positive; S : Positive) return Setting_Sight is
+      R    : constant Hand_Record := Found (H, Id);
+      L    : Lobe_Record renames R.Lobes (Lobe);
+      Last : constant Positive := 2 + Natural (L.Stops.Length);
+   begin
+      if S = 1 or else S = Last then
+         declare
+            Which : constant Opening := (if S = 1 then Open else Closed_Empty);
+         begin
+            return (Reading => Opening_Reading (R, Lobe, Which), Known => L.Sights (Which).Known, Ray => L.Sights (Which).Ray);
+         end;
+      end if;
+      declare
+         --  The stops are kept by the reading, ascending; the settings run from the open opening to the closed one.
+         Ascending : constant Boolean := Opening_Reading (R, Lobe, Closed_Empty) > Opening_Reading (R, Lobe, Open);
+         K         : constant Positive := (if Ascending then S - 1 else Last - S);
+         Stop      : Stop_Sight renames L.Stops (K);
+      begin
+         return (Reading => Stop.Reading, Known => Stop.Sight.Known, Ray => Stop.Sight.Ray);
+      end;
+   end Setting_Sight_At;
+
+   function Tip_Between
+     (Opened, Shut : Point_Estimate; Open_At, Closed_At, Reading : Real; Seen : Setting_Sights) return Point_Estimate
+   is
+      Unknown_Tip : Point_Estimate;
+      Span : constant Real := Closed_At - Open_At;
+      function Fraction_Of (R : Real) return Real is ((R - Open_At) / Span);
+      --  The straight path between the openings' tips, at a share of the way.
+      function Straight (G : Real) return Point_Estimate is
+        (Mean       => Opened.Mean + G * (Shut.Mean - Opened.Mean),
+         Covariance => ((1.0 - G) ** 2) * Opened.Covariance + (G ** 2) * Shut.Covariance);
+      --  The tip at a seen setting: the point of its line of sight nearest the straight path's, the pull as error.
+      function Pulled (S : Setting_Sight) return Point_Estimate;
+      function Pulled (S : Setting_Sight) return Point_Estimate is
+         X     : constant Point_Estimate := Straight (Fraction_Of (S.Reading));
+         E     : constant Vec3 := S.Ray.Origin.Mean;
+         D     : constant Vec3 := S.Ray.Direction.Unit_Vector;
+         On    : constant Vec3 := E + Real'((X.Mean - E) * D) * D;
+         Pull  : constant Vec3 := X.Mean - On;
+      begin
+         return (Mean => On, Covariance => X.Covariance + Real'(Pull * Pull) * Identity3);
+      end Pulled;
+      F : Real;
+      --  The settings on either side of the reading, the openings among them, as shares of the way and tips.
+      Lower_F : Real := 0.0;
+      Upper_F : Real := 1.0;
+      Lower, Upper : Point_Estimate;
+   begin
+      if not Known (Opened) or else not Known (Shut) or else Span = 0.0 then
+         return Unknown_Tip;
+      end if;
+      F := Fraction_Of (Reading);
+      if F <= 0.0 or else F >= 1.0 then
+         return Straight (F);
+      end if;
+      Lower := Opened;
+      Upper := Shut;
+      for S of Seen loop
+         if S.Known and then S.Ray.Direction.Sigma < Real'Last then
+            declare
+               G : constant Real := Fraction_Of (S.Reading);
+            begin
+               if G > 0.0 and then G < 1.0 then
+                  if G <= F and then G >= Lower_F then
+                     Lower_F := G;
+                     Lower := Pulled (S);
+                  end if;
+                  if G >= F and then G <= Upper_F then
+                     Upper_F := G;
+                     Upper := Pulled (S);
+                  end if;
+               end if;
+            end;
+         end if;
+      end loop;
+      if Upper_F = Lower_F then
+         return Lower;
+      end if;
+      declare
+         T : constant Real := (F - Lower_F) / (Upper_F - Lower_F);
+      begin
+         return (Mean       => Lower.Mean + T * (Upper.Mean - Lower.Mean),
+                 Covariance => ((1.0 - T) ** 2) * Lower.Covariance + (T ** 2) * Upper.Covariance);
+      end;
+   end Tip_Between;
+
+   function Tip_Now_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate;
+   --  The tip at the closer reading of O, between the two measured openings
+   --  along the settings the eye saw the lobe at (Tip_Between).
+
+   function Tip_Along (H : Hands; Id : Hand_Id; Lobe : Positive; Reading : Real) return Point_Estimate is
       R       : constant Hand_Record := Found (H, Id);
-      C       : constant Positive := R.Lobes (Lobe).Channel;
       Opened  : constant Point_Estimate := Tip_In_Tool (H, Id, Lobe, Open);
       Shut    : constant Point_Estimate := Tip_In_Tool (H, Id, Lobe, Closed_Empty);
       Unknown_Tip : Point_Estimate;
    begin
-      if not Driver.Observations.Has_Reading (O, R.Group) or else not Known (Opened) or else not Known (Shut) then
+      if not Known (Opened) or else not Known (Shut) then
          return Unknown_Tip;
       end if;
       declare
-         Now     : constant Real_Array := O.Readings.Element (R.Group);
-         From    : constant Real_Array := R.Readings (Open).Element;
-         To      : constant Real_Array := R.Readings (Closed_Empty).Element;
-         Reading : constant Real := Now (Now'First + C - 1);
-         Start   : constant Real := From (From'First + C - 1);
-         --  The ends were measured at significantly different readings.
-         F       : constant Real := (Reading - Start) / (To (To'First + C - 1) - Start);
+         Seen : Setting_Sights (1 .. Natural (R.Lobes (Lobe).Stops.Length));
       begin
-         return (Mean       => Opened.Mean + F * (Shut.Mean - Opened.Mean),
-                 Covariance => ((1.0 - F) ** 2) * Opened.Covariance + (F ** 2) * Shut.Covariance);
+         for K in Seen'Range loop
+            Seen (K) := (Reading => R.Lobes (Lobe).Stops (K).Reading,
+                         Known   => R.Lobes (Lobe).Stops (K).Sight.Known,
+                         Ray     => R.Lobes (Lobe).Stops (K).Sight.Ray);
+         end loop;
+         return Tip_Between (Opened, Shut, Opening_Reading (R, Lobe, Open), Opening_Reading (R, Lobe, Closed_Empty),
+                             Reading, Seen);
       end;
+   end Tip_Along;
+
+   function Tip_Now_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate is
+      R : constant Hand_Record := Found (H, Id);
+      C : constant Natural := R.Lobes (Lobe).Channel;
+      Unknown_Tip : Point_Estimate;
+   begin
+      --  A lobe no channel moves is where it is at any reading.
+      if C = 0 then
+         return Tip_Along (H, Id, Lobe, 0.0);
+      end if;
+      if not Driver.Observations.Has_Reading (O, R.Group) then
+         return Unknown_Tip;
+      end if;
+      return Tip_Along (H, Id, Lobe, O.Readings.Element (R.Group) (O.Readings.Element (R.Group)'First + C - 1));
    end Tip_Now_In_Tool;
 
    function Tip_Now (H : Hands; M : Model; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate is
@@ -1457,8 +1941,9 @@ package body Driver.Robot.Hand is
             R      : constant Hand_Record := Found (H, Id);
             Known_Tips, Checked_Tips, Sought : Natural := 0;
          begin
-            Append (Text, "hand" & Id'Image & ": closer group" & R.Group'Image & " on arm" & R.Arm'Image & ", eye"
-                    & R.Eye'Image & "," & R.Lobes.Length'Image & " lobes;");
+            Append (Text, "hand" & Id'Image
+                    & (if R.Group > 0 then ": closer group" & R.Group'Image else ": the tool, no closer,") & " on arm"
+                    & R.Arm'Image & ", eye" & R.Eye'Image & "," & R.Lobes.Length'Image & " lobes;");
             for L in R.Lobes.First_Index .. R.Lobes.Last_Index loop
                Append (Text, " channel" & R.Lobes (L).Channel'Image & " tip open " & Image (R.Lobes (L).Sights (Open).Pixel)
                        & " closed " & Image (R.Lobes (L).Sights (Closed_Empty).Pixel) & ";");

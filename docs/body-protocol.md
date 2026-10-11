@@ -73,6 +73,13 @@ reports back the command it received under the same last key as the reading
 its echo), that key is the group's command key. When the robot echoes
 nothing anywhere, every group is tried as commandable under its last key.
 
+Which of the two is the reading is told by how they change, never by their
+names or their order: the echo is the command, so it changes at the beats the
+command it echoes changed and at no other; the reading moves with the body.
+Until the two have been told apart the first in the observation stands for
+the reading. The echo of a beat is the command the robot received before
+building that observation.
+
 ### What each group is
 
 The driver does not guess a group's meaning from its size or its values.

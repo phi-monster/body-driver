@@ -49,7 +49,9 @@ with Ada.Streams.Stream_IO;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
+with Interfaces;
 with Driver.Alignment;
+with Driver.Alignment.Keyframes;
 with Driver.Bytes;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -661,7 +663,7 @@ procedure Align_Study is
    --  correlation, the instrument's error (u, v), the instrument's round trip (or -1) and whether it answered,
    --  the point's place in the first picture, what the fit left unexplained, the patch's own spread, and the
    --  answer's degrees of freedom.
-   procedure Print_Row (Q : Question; K : Positive; A : Driver.Alignment.Answer; Error : Real) is
+   procedure Print_Row (Q : Question; K : Positive; A : Driver.Alignment.Answer; Error : Real; Agrees : Integer := -1) is
       P        : constant Point := Q.Points (K);
       Found    : constant Boolean := A.Verdict = Driver.Alignment.Found;
       Has_Roma : constant Boolean := P.Roma_U >= 0.0;
@@ -684,7 +686,8 @@ procedure Align_Study is
          & " " & Fixed_If (Has_Roma, P.Roma_U - P.True_U, 4) & " " & Fixed_If (Has_Roma, P.Roma_V - P.True_V, 4)
          & " " & Fixed (Trip, 3) & " " & (if Has_Roma then "1" else "0")
          & " " & Fixed (P.U, 2) & " " & Fixed (P.V, 2)
-         & " " & Fixed (A.Fit_Rms, 3) & " " & Fixed (A.Patch_Rms, 3) & " " & Img (A.Degrees_Of_Freedom));
+         & " " & Fixed (A.Fit_Rms, 3) & " " & Fixed (A.Patch_Rms, 3) & " " & Img (A.Degrees_Of_Freedom)
+         & (if Agrees >= 0 then " " & Img (Agrees) else ""));
    end Print_Row;
 
    procedure Ask_Point
@@ -1276,364 +1279,142 @@ procedure Align_Study is
       return Sum;
    end Dot;
 
-   --  Where a reference point went in a keyframe, as the aligner gave it.
-   type Kept_Match is record
-      Found : Boolean := False;
-      U, V  : Real := 0.0;
-      Sigma : Real := 0.0;   --  the larger of the answer's standard deviations
-   end record;
+   Quantization : constant Real := 1.0 / 12.0;
 
-   package Kept_Vectors is new Ada.Containers.Vectors (Positive, Kept_Match);
-
-   --  The displacements of a keyframe's points as a smooth field: a quadratic of the place, per axis.
-   type Smooth is record
-      U, V  : Real_Array (1 .. 6) := [others => 0.0];
-      Valid : Boolean := False;
-      Sigma : Real := 0.0;   --  the robust scale of what the field leaves
-      Typical : Real := 0.0;   --  the median displacement of the points it was fitted to
-   end record;
-
-   function Gradient (F : Smooth; U, V : Real) return Driver.Alignment.Linear_Part is
-      X : constant Real := (U - 320.0) / 320.0;
-      Y : constant Real := (V - 240.0) / 240.0;
-      Du_U : constant Real := (F.U (2) + 2.0 * F.U (4) * X + F.U (5) * Y) / 320.0;
-      Du_V : constant Real := (F.U (3) + F.U (5) * X + 2.0 * F.U (6) * Y) / 240.0;
-      Dv_U : constant Real := (F.V (2) + 2.0 * F.V (4) * X + F.V (5) * Y) / 320.0;
-      Dv_V : constant Real := (F.V (3) + F.V (5) * X + 2.0 * F.V (6) * Y) / 240.0;
+   --  The noise of one reading of each channel: the robust scale of the readings' beat-to-beat differences over the
+   --  whole stream (the arm is still at most beats, so that scale is its readings' jitter), over the root of two.
+   function Reading_Noises (Camera : Natural) return Real_Array is
+      Channels : constant Natural := Readings_At (Camera, 0)'Length;
+      Result   : Real_Array (1 .. Channels) := [others => 0.0];
    begin
-      return (UU => 1.0 + Du_U, UV => Du_V, VU => Dv_U, VV => 1.0 + Dv_V);
-   end Gradient;
-
-   function Fit_Smooth (Q : Question; Matches : Kept_Vectors.Vector) return Smooth is
-      Result : Smooth;
-      Chosen : Index_Vectors.Vector;
-      Keep   : array (1 .. Natural (Matches.Length)) of Boolean := [others => False];
-   begin
-      for I in 1 .. Natural (Matches.Length) loop
-         if Matches (I).Found then
-            Chosen.Append (I);
-            Keep (I) := True;
-         end if;
-      end loop;
-      if Natural (Chosen.Length) < 40 then
-         return Result;
-      end if;
-      for Pass in 1 .. 3 loop
+      for C in Result'Range loop
          declare
-            Count : Natural := 0;
+            Steps : Real_Vectors.Vector;
          begin
-            for Item of Chosen loop
-               if Keep (Item) then
-                  Count := Count + 1;
-               end if;
+            for Beat in 1 .. Natural (Left_Arm.Length) - 1 loop
+               Steps.Append (Readings_At (Camera, Beat) (C) - Readings_At (Camera, Beat - 1) (C));
             end loop;
-            exit when Count < 40;
-            declare
-               A  : Real_Matrix (1 .. Count, 1 .. 6);
-               Bu, Bv : Real_Vector (1 .. Count);
-               Xu, Xv : Real_Vector (1 .. 6);
-               Full_U, Full_V : Boolean;
-               K  : Natural := 0;
-            begin
-               for Item of Chosen loop
-                  if Keep (Item) then
-                     K := K + 1;
-                     declare
-                        P : Point renames Q.Points (Item);
-                        Row_Basis : constant Real_Array := Basis (P.U, P.V);
-                     begin
-                        for J in 1 .. 6 loop
-                           A (K, J) := Row_Basis (J);
-                        end loop;
-                        Bu (K) := Matches (Item).U - P.U;
-                        Bv (K) := Matches (Item).V - P.V;
-                     end;
-                  end if;
-               end loop;
-               Driver.Numerics.Dense.Least_Squares (A, Bu, Xu, Full_U);
-               Driver.Numerics.Dense.Least_Squares (A, Bv, Xv, Full_V);
-               exit when not (Full_U and then Full_V);
-               for J in 1 .. 6 loop
-                  Result.U (J) := Xu (J);
-                  Result.V (J) := Xv (J);
-               end loop;
-               Result.Valid := True;
-            end;
-            declare
-               Ru, Rv : Real_Vectors.Vector;
-            begin
-               for Item of Chosen loop
-                  declare
-                     P : Point renames Q.Points (Item);
-                  begin
-                     Ru.Append (Matches (Item).U - P.U - Evaluate (Result.U, P.U, P.V));
-                     Rv.Append (Matches (Item).V - P.V - Evaluate (Result.V, P.U, P.V));
-                  end;
-               end loop;
-               declare
-                  Su : constant Real := Driver.Stats.Robust_Sigma (To_Array (Ru));
-                  Sv : constant Real := Driver.Stats.Robust_Sigma (To_Array (Rv));
-                  Index : Natural := 0;
-               begin
-                  Result.Sigma := Sqrt ((Su ** 2 + Sv ** 2) / 2.0);
-                  for Item of Chosen loop
-                     Index := Index + 1;
-                     Keep (Item) := abs Ru (Index) <= Driver.Conventions.Z * Su
-                       and then abs Rv (Index) <= Driver.Conventions.Z * Sv;
-                  end loop;
-               end;
-            end;
+            Result (C) := Driver.Stats.Robust_Sigma (To_Array (Steps)) / Sqrt (2.0);
          end;
       end loop;
       return Result;
-   end Fit_Smooth;
+   end Reading_Noises;
 
-   --  A keyframe already aligned: the readings' change from the reference, where the points went, the smooth
-   --  field of that, and how far the prediction that found them was off, relatively.
-   type Done_Keyframe is record
-      Change    : Real_Vectors.Vector;
-      Amount    : Real := 0.0;   --  the length of the change
-      Matches   : Kept_Vectors.Vector;
-      Field     : Smooth;
-      Rel_Error : Real := 0.0;   --  the relative error its own prediction showed, beyond its stated sigma
-   end record;
-
-   package Done_Vectors is new Ada.Containers.Vectors (Positive, Done_Keyframe);
-
-   Quantization : constant Real := 1.0 / 12.0;
-
-   Collinear : constant Real := 0.05;
-   --  A keyframe is a multiple of an earlier one when its change of readings lies within this fraction of its own
-   --  length of a multiple of that one's (a study value, not the driver's).
-
-   --  How far along the direction of Change the earlier keyframe lies (signed), and whether it lies along it at all.
-   procedure Along (Before : Done_Keyframe; Change : Real_Array; Amount : out Real; Is_Along : out Boolean) is
-      Own  : constant Real := Dot (Change, Change);
-      Past : constant Real_Array := To_Array (Before.Change);
-      Left : Real_Array (Change'Range);
-      Unit : constant Real := Dot (Past, Change) / Own;
+   --  The pixels a unit of each channel moved the view: the median, over the keyframes that turned that channel
+   --  most, of how far their points moved (the truth's, over the points on a smooth surface) over the change, those
+   --  that moved by more than a pixel grid rounds to. What the lock-in measures before the arm is swept.
+   function Shifts_Of (Group : Keyframe_Vectors.Vector) return Real_Array is
+      Channels    : constant Natural := Change_Of (Group.First_Element)'Length;
+      Per_Channel : array (1 .. Channels) of Real_Vectors.Vector;
+      Result      : Real_Array (1 .. Channels) := [others => 0.0];
    begin
-      Amount := Dot (Past, Change) / Sqrt (Own);
-      for C in Left'Range loop
-         Left (C) := Past (C) - Unit * Change (C);
-      end loop;
-      Is_Along :=
-        Before.Field.Valid and then abs Amount > 1.0E-6 and then Dot (Left, Left) <= Collinear ** 2 * Dot (Past, Past);
-   end Along;
-
-   type Predicted_Point is record
-      Du, Dv, Sigma : Real := 0.0;
-      Warp          : Driver.Alignment.Linear_Part := Driver.Alignment.Identity_Part;
-   end record;
-
-   package Predicted_Vectors is new Ada.Containers.Vectors (Positive, Predicted_Point);
-
-   --  What the fields of one or two earlier keyframes, at the amounts A1 and A2 along the direction, say of a
-   --  keyframe at the amount Target: a field that is linear in the amount (one earlier keyframe) or quadratic in
-   --  it (two), its uncertainty the earlier fields' scatter carried by the same weights, and the relative error
-   --  the earlier predictions showed.
-   procedure Extrapolate
-     (Q : Question; First, Second : Done_Keyframe; A1, A2, Target : Real; Two : Boolean; Relative : Real;
-      Into : out Predicted_Vectors.Vector)
-   is
-      W1 : constant Real := (if Two then Target * (A2 - Target) / (A1 * (A2 - A1)) else Target / A1);
-      W2 : constant Real := (if Two then Target * (Target - A1) / (A2 * (A2 - A1)) else 0.0);
-      Noise : constant Real := Sqrt ((W1 * First.Field.Sigma) ** 2 + (W2 * Second.Field.Sigma) ** 2);
-   begin
-      Into.Clear;
-      for P of Q.Points loop
+      for Now of Group loop
          declare
-            Item : Predicted_Point;
+            Change : constant Real_Array := Change_Of (Now);
+            Big    : Positive := Change'First;
+            Moves  : Real_Vectors.Vector;
          begin
-            if P.Status /= 'U' and then P.Status /= 'E' then
-               declare
-                  G1 : constant Driver.Alignment.Linear_Part := Gradient (First.Field, P.U, P.V);
-                  G2 : constant Driver.Alignment.Linear_Part := Gradient (Second.Field, P.U, P.V);
-               begin
-                  Item.Du := W1 * Evaluate (First.Field.U, P.U, P.V) + W2 * Evaluate (Second.Field.U, P.U, P.V);
-                  Item.Dv := W1 * Evaluate (First.Field.V, P.U, P.V) + W2 * Evaluate (Second.Field.V, P.U, P.V);
-                  Item.Warp :=
-                    (UU => 1.0 + W1 * (G1.UU - 1.0) + W2 * (G2.UU - 1.0), UV => W1 * G1.UV + W2 * G2.UV,
-                     VU => W1 * G1.VU + W2 * G2.VU, VV => 1.0 + W1 * (G1.VV - 1.0) + W2 * (G2.VV - 1.0));
-                  Item.Sigma := Sqrt (Noise ** 2 + (Relative * Sqrt (Item.Du ** 2 + Item.Dv ** 2)) ** 2);
-               end;
+            for K in Change'Range loop
+               if abs Change (K) > abs Change (Big) then
+                  Big := K;
+               end if;
+            end loop;
+            for P of Now.Q.Points loop
+               if P.Status = 'V' then
+                  Moves.Append (Sqrt ((P.True_U - P.U) ** 2 + (P.True_V - P.V) ** 2));
+               end if;
+            end loop;
+            --  A keyframe whose points moved by less than a pixel grid's own rounding says nothing of the shift.
+            if not Moves.Is_Empty and then Driver.Stats.Median (To_Array (Moves)) >= Sqrt (Quantization) then
+               Per_Channel (Big).Append (Driver.Stats.Median (To_Array (Moves)) / abs Change (Big));
             end if;
-            Into.Append (Item);
          end;
       end loop;
-   end Extrapolate;
-
-   function Median_Sigma (V : Predicted_Vectors.Vector) return Real is
-      S : Real_Vectors.Vector;
-   begin
-      for Item of V loop
-         S.Append (Item.Sigma);
+      for K in Result'Range loop
+         if not Per_Channel (K).Is_Empty then
+            Result (K) := Driver.Stats.Median (To_Array (Per_Channel (K)));
+         end if;
       end loop;
-      return (if S.Is_Empty then 0.0 else Driver.Stats.Median (To_Array (S)));
-   end Median_Sigma;
+      return Result;
+   end Shifts_Of;
 
    procedure Chain_Group (Dir : String; Group : Keyframe_Vectors.Vector) is
-      Done : Done_Vectors.Vector;
       Window : constant Real := Driver.Uncertain.Threshold (Driver.Uncertain.Vector_Gate (2));
+      First  : Question renames Group.First_Element.Q.all;
+      Noises : constant Real_Array := Reading_Noises (Group.First_Element.Camera);
+      Shifts : constant Real_Array := Shifts_Of (Group);
+      Points : Driver.Alignment.Keyframes.Point_Array (1 .. Natural (First.Points.Length));
+      Chain  : Driver.Alignment.Keyframes.Chain;
    begin
-      for K in 1 .. Natural (Group.Length) loop
+      for K in Noises'Range loop
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error, "camera" & Natural'Image (Group.First_Element.Camera) & " channel" & Natural'Image (K)
+            & ": reading noise " & Fixed (Noises (K), 9) & ", shift " & Fixed (Shifts (K), 3) & " px per unit");
+      end loop;
+      for I in Points'Range loop
+         Points (I) := (U => First.Points (I).U, V => First.Points (I).V);
+      end loop;
+      Driver.Alignment.Keyframes.Begin_Reference
+        (Chain, Read_Ppm (Dir & "/req_" & Padded (Group.First_Element.Number) & "_a.ppm"), Points);
+      for Now of Group loop
          declare
-            Now    : Keyframe_Question renames Group (K);
-            Q      : Question renames Now.Q.all;
-            Seen   : constant Pictures :=
-              (First => Driver.Alignment.Pyramid_Of (Read_Ppm (Dir & "/req_" & Padded (Q.Number) & "_a.ppm")),
-               Second => Driver.Alignment.Pyramid_Of (Read_Ppm (Dir & "/req_" & Padded (Q.Number) & "_b.ppm")));
-            Change : constant Real_Array := Change_Of (Now);
-            Own    : constant Real := Sqrt (Dot (Change, Change));
-            Guess  : Predicted_Vectors.Vector;
-            How    : Unbounded_String := To_Unbounded_String ("a new direction");
-            Used_Relative : Real := 0.0;
-            Predicted_Here : Boolean := False;
-            Kept   : Kept_Vectors.Vector;
-            Sensitivity : Real := 0.0;   --  how far a unit of change of readings moved the points, at most so far
-            Points, Reached, Covered, Found : Natural := 0;
+            Q       : Question renames Now.Q.all;
+            Change  : constant Real_Array := Change_Of (Now);
+            Own     : constant Real := Sqrt (Dot (Change, Change));
+            Given   : Driver.Alignment.Keyframes.Prediction_Array (Points'Range);
+            Answers : Driver.Alignment.Keyframes.Answer_Array (Points'Range);
+            Agree   : Driver.Alignment.Keyframes.Flag_Array (Points'Range);
+            From    : Driver.Alignment.Keyframes.Source;
+            Points_Here, Reached, Covered, Found : Natural := 0;
             Sum_Identity, Sum_Predicted : Real := 0.0;
-            Sum_Excess, Sum_Shown : Real := 0.0;
             Sigmas, Errors : Real_Vectors.Vector;
          begin
-            if Own >= 1.0E-6 then
-               --  The earlier keyframes along this direction and where they lie on it; the best way to predict from
-               --  them is the one with the least uncertainty.
-               declare
-                  Count   : constant Natural := Natural (Done.Length);
-                  Amounts : Real_Array (1 .. Count) := [others => 0.0];
-                  Usable  : array (1 .. Count) of Boolean := [others => False];
-                  Best    : Real := Real'Last;
-
-                  procedure Consider (J1, J2 : Natural; Two : Boolean) is
-                     Try : Predicted_Vectors.Vector;
-                     Relative : constant Real :=
-                       Real'Max (Done (J1).Rel_Error, (if Two then Done (J2).Rel_Error else 0.0));
-                  begin
-                     Extrapolate (Q, Done (J1), Done (J2), Amounts (J1), Amounts (J2), Own, Two, Relative, Try);
-                     if Median_Sigma (Try) < Best then
-                        Best := Median_Sigma (Try);
-                        Guess := Try;
-                        Used_Relative := Relative;
-                        Predicted_Here := True;
-                        How := To_Unbounded_String
-                          ((if Two then "order 2 from requests" & Natural'Image (Group (J1).Number) & " and"
-                                          & Natural'Image (Group (J2).Number)
-                            else "order 1 from request" & Natural'Image (Group (J1).Number)));
-                     end if;
-                  end Consider;
-               begin
-                  for J in 1 .. Count loop
-                     Along (Done (J), Change, Amounts (J), Usable (J));
-                     if Done (J).Field.Valid and then Done (J).Amount > 1.0E-6 then
-                        Sensitivity := Real'Max (Sensitivity, Done (J).Field.Typical / Done (J).Amount);
-                     end if;
-                  end loop;
-                  for J1 in 1 .. Count loop
-                     if Usable (J1) then
-                        Consider (J1, J1, False);
-                        for J2 in 1 .. Count loop
-                           if J2 /= J1 and then Usable (J2) and then abs (Amounts (J1) - Amounts (J2)) > 1.0E-6 then
-                              Consider (J1, J2, True);
-                           end if;
-                        end loop;
-                     end if;
-                  end loop;
-               end;
-            else
-               How := To_Unbounded_String ("same pose");
-            end if;
-            for I in 1 .. Natural (Q.Points.Length) loop
+            Driver.Alignment.Keyframes.Predict
+              (Chain, Change, Noises, Shifts, Driver.Alignment.Keyframes.No_Offer, Given, From);
+            Driver.Alignment.Keyframes.Add
+              (Chain, Read_Ppm (Dir & "/req_" & Padded (Q.Number) & "_b.ppm"), Change, Given, Answers, Agree);
+            for I in Points'Range loop
                declare
                   P : Point renames Q.Points (I);
-                  Match : Kept_Match;
                begin
-                  if P.Status /= 'U' and then P.Status /= 'E' then
+                  Print_Row (Q, I, Answers (I), 1.0, (if Agree (I) then 1 else 0));
+                  if Answers (I).Verdict = Driver.Alignment.Found then
+                     Found := Found + 1;
+                  end if;
+                  if P.Status = 'V' then
                      declare
-                        Item : Predicted_Point;
+                        Variance : constant Real := Given (I).Cov.UU;
+                        Off      : constant Real :=
+                          Sqrt ((P.True_U - Given (I).To.U) ** 2 + (P.True_V - Given (I).To.V) ** 2);
                      begin
-                        if Predicted_Here then
-                           Item := Guess (I);
-                        elsif Own >= 1.0E-6 then
-                           --  A change of readings no earlier keyframe holds a multiple of: the points may have
-                           --  moved as far as a unit of change moved them at most, so far.
-                           Item.Sigma := (if Sensitivity > 0.0 then Own * Sensitivity else 1.0);
+                        Points_Here := Points_Here + 1;
+                        Sum_Identity := Sum_Identity + (P.True_U - P.U) ** 2 + (P.True_V - P.V) ** 2;
+                        Sum_Predicted := Sum_Predicted + Off ** 2;
+                        Sigmas.Append (Sqrt (Variance));
+                        Errors.Append (Off);
+                        if Off <= Window * Sqrt (Variance + Quantization) then
+                           Covered := Covered + 1;
                         end if;
-                        declare
-                           Variance : constant Real := Item.Sigma ** 2;
-                           Query : constant Driver.Alignment.Prediction :=
-                             (From => (U => P.U, V => P.V), To => (U => P.U + Item.Du, V => P.V + Item.Dv),
-                              Linear => Item.Warp, Cov => (UU => Variance, UV => 0.0, VV => Variance), others => <>);
-                           A : constant Driver.Alignment.Answer :=
-                             Driver.Alignment.Align (Seen.First, Seen.Second, Query);
-                        begin
-                           Print_Row (Q, I, A, 1.0);
-                           if A.Verdict = Driver.Alignment.Found then
-                              Match := (Found => True, U => A.To.U, V => A.To.V,
-                                        Sigma => Sqrt (Real'Max (A.Cov.UU, A.Cov.VV)));
-                              Found := Found + 1;
-                              Sum_Excess := Sum_Excess
-                                + ((A.To.U - P.U - Item.Du) ** 2 + (A.To.V - P.V - Item.Dv) ** 2) / 2.0
-                                - Variance - Match.Sigma ** 2;
-                              Sum_Shown := Sum_Shown + (Item.Du ** 2 + Item.Dv ** 2) / 2.0;
-                           end if;
-                           if P.Status = 'V' then
-                              declare
-                                 Off : constant Real :=
-                                   Sqrt ((P.True_U - P.U - Item.Du) ** 2 + (P.True_V - P.V - Item.Dv) ** 2);
-                              begin
-                                 Points := Points + 1;
-                                 Sum_Identity := Sum_Identity + (P.True_U - P.U) ** 2 + (P.True_V - P.V) ** 2;
-                                 Sum_Predicted := Sum_Predicted + Off ** 2;
-                                 Sigmas.Append (Item.Sigma);
-                                 Errors.Append (Off);
-                                 if Off <= Window * Sqrt (Variance + Quantization) then
-                                    Covered := Covered + 1;
-                                 end if;
-                                 if Off <= 1.0 then
-                                    Reached := Reached + 1;
-                                 end if;
-                              end;
-                           end if;
-                        end;
+                        if Off <= 1.0 then
+                           Reached := Reached + 1;
+                        end if;
                      end;
                   end if;
-                  Kept.Append (Match);
                end;
             end loop;
-            if Points > 0 then
+            if Points_Here > 0 then
                Ada.Text_IO.Put_Line
                  ("pred request" & Natural'Image (Q.Number) & " camera" & Natural'Image (Now.Camera)
-                  & " readings change " & Fixed (Own, 5) & ": " & To_String (How)
-                  & "; points" & Natural'Image (Points) & ", identity error "
-                  & Fixed (Sqrt (Sum_Identity / Real (Points)), 3) & " px, prediction error rms "
-                  & Fixed (Sqrt (Sum_Predicted / Real (Points)), 3) & " median "
+                  & " readings change " & Fixed (Own, 5) & ": "
+                  & Driver.Alignment.Keyframes.Source'Image (From)
+                  & "; points" & Natural'Image (Points_Here) & ", identity error "
+                  & Fixed (Sqrt (Sum_Identity / Real (Points_Here)), 3) & " px, prediction error rms "
+                  & Fixed (Sqrt (Sum_Predicted / Real (Points_Here)), 3) & " median "
                   & Fixed (Driver.Stats.Median (To_Array (Errors)), 3) & " px, within 1 px "
-                  & Percent (Reached, Points) & " %, median stated sigma "
+                  & Percent (Reached, Points_Here) & " %, median stated sigma "
                   & Fixed (Driver.Stats.Median (To_Array (Sigmas)), 3) & " px, truth inside the window "
-                  & Percent (Covered, Points) & " %, found" & Natural'Image (Found));
+                  & Percent (Covered, Points_Here) & " %, found" & Natural'Image (Found));
             end if;
-            declare
-               Next   : Done_Keyframe;
-               Shifts : Real_Vectors.Vector;
-            begin
-               for X of Change loop
-                  Next.Change.Append (X);
-               end loop;
-               Next.Amount := Own;
-               Next.Matches := Kept;
-               for I in 1 .. Natural (Kept.Length) loop
-                  if Kept (I).Found then
-                     Shifts.Append (Sqrt ((Kept (I).U - Q.Points (I).U) ** 2 + (Kept (I).V - Q.Points (I).V) ** 2));
-                  end if;
-               end loop;
-               Next.Field := Fit_Smooth (Q, Kept);
-               Next.Field.Typical := (if Shifts.Is_Empty then 0.0 else Driver.Stats.Median (To_Array (Shifts)));
-               Next.Rel_Error :=
-                 (if Predicted_Here and then Sum_Shown > 0.0
-                  then Sqrt (Used_Relative ** 2 + Real'Max (0.0, Sum_Excess) / Sum_Shown) else 0.0);
-               Done.Append (Next);
-            end;
          end;
       end loop;
    end Chain_Group;
@@ -1768,6 +1549,881 @@ procedure Align_Study is
       Refusals (Same_Eye => False);
    end Report_Mode;
 
+   ---------------------------------------------------------------------------
+   --  distinct: how distinctive a point's patch is in the whole of the other picture, when its warp is known.
+
+   type Real_Access is access Real_Array;
+
+   --  The luma of a picture at a level (halved that many times by averaging two by two).
+   procedure Level_Luma
+     (I : Driver.Images.Image; Level : Natural; Pixels : out Real_Access; Width, Height : out Natural)
+   is
+      W    : Natural := Driver.Images.Width (I);
+      H    : Natural := Driver.Images.Height (I);
+      Cur  : Real_Access := new Real_Array (1 .. W * H);
+   begin
+      Driver.Images.Luma (I, Cur.all);
+      for Step in 1 .. Level loop
+         declare
+            NW : constant Natural := W / 2;
+            NH : constant Natural := H / 2;
+            Next : constant Real_Access := new Real_Array (1 .. NW * NH);
+         begin
+            for Y in 0 .. NH - 1 loop
+               for X in 0 .. NW - 1 loop
+                  Next (1 + Y * NW + X) :=
+                    (Cur (1 + (2 * Y) * W + 2 * X) + Cur (1 + (2 * Y) * W + 2 * X + 1)
+                     + Cur (1 + (2 * Y + 1) * W + 2 * X) + Cur (1 + (2 * Y + 1) * W + 2 * X + 1)) / 4.0;
+               end loop;
+            end loop;
+            Cur := Next;
+            W := NW;
+            H := NH;
+         end;
+      end loop;
+      Pixels := Cur;
+      Width := W;
+      Height := H;
+   end Level_Luma;
+
+   function Bilinear (P : Real_Array; W, H : Natural; X, Y : Real) return Real is
+      --  X and Y in pixel units where the centre of the first pixel is (0.5, 0.5).
+      Fx : constant Real := X - 0.5;
+      Fy : constant Real := Y - 0.5;
+      X0 : constant Integer := Integer (Real'Floor (Fx));
+      Y0 : constant Integer := Integer (Real'Floor (Fy));
+      Ax : constant Real := Fx - Real (X0);
+      Ay : constant Real := Fy - Real (Y0);
+      function At_Pixel (Cx, Cy : Integer) return Real is
+        (P (1 + Integer'Max (0, Integer'Min (H - 1, Cy)) * W + Integer'Max (0, Integer'Min (W - 1, Cx))));
+   begin
+      return (1.0 - Ay) * ((1.0 - Ax) * At_Pixel (X0, Y0) + Ax * At_Pixel (X0 + 1, Y0))
+        + Ay * ((1.0 - Ax) * At_Pixel (X0, Y0 + 1) + Ax * At_Pixel (X0 + 1, Y0 + 1));
+   end Bilinear;
+
+   procedure Distinct_Mode is
+      Dir    : constant String := Ada.Command_Line.Argument (2);
+      Lag    : constant String := Ada.Command_Line.Argument (3);
+      Number : constant Natural := Natural'Value (Ada.Command_Line.Argument (4));
+      Q      : constant Question_Access := Read_Question (Dir, Number, Lag);
+      Image_A : constant Driver.Images.Image := Read_Ppm (Dir & "/req_" & Padded (Number) & "_a.ppm");
+      Image_B : constant Driver.Images.Image := Read_Ppm (Dir & "/req_" & Padded (Number) & "_b.ppm");
+      Half   : constant Natural := 8;   --  a patch of seventeen pixels a side, as a level of the aligner's carries
+      Tried, Top1, Top5, Seen : Natural := 0;
+      Ratios : Real_Vectors.Vector;
+   begin
+      for I in 1 .. Natural (Q.Points.Length) loop
+         declare
+            P : Point renames Q.Points (I);
+            Det : constant Real := P.Jxx * P.Jyy - P.Jxy * P.Jyx;
+         begin
+            if P.Status = 'V' and then Det > 1.0E-6 then
+               Seen := Seen + 1;
+               declare
+                  Scale : constant Real := Sqrt (Det);
+                  --  The level of the first picture whose pixels are the second's, or the second's that are the first's.
+                  A_Level : constant Natural :=
+                    (if Scale < 1.0 then Natural (Real'Max (0.0, Real'Rounding (Log (1.0 / Scale, 2.0)))) else 0);
+                  B_Level : constant Natural :=
+                    (if Scale > 1.0 then Natural (Real'Max (0.0, Real'Rounding (Log (Scale, 2.0)))) else 0);
+                  A_Px, B_Px : Real_Access;
+                  Aw, Ah, Bw, Bh : Natural;
+                  Ratio : constant Real := Real (2 ** A_Level) / Real (2 ** B_Level);
+                  --  The second picture's pixel offset (at its level) to the first's offset (at its level):
+                  --  d_A = Ratio * Inverse (J) * d_B / ...
+                  Ia : constant Real := P.Jyy / Det;
+                  Ib : constant Real := -P.Jxy / Det;
+                  Ic : constant Real := -P.Jyx / Det;
+                  Id : constant Real := P.Jxx / Det;
+                  Side : constant Positive := 2 * Half + 1;
+                  Template : Real_Array (1 .. Side * Side);
+                  Mean_T, Var_T : Real := 0.0;
+                  Best, Truth_Rho : Real := -2.0;
+                  Best_X, Best_Y : Integer := 0;
+                  Truth_X : constant Integer := Integer (Real'Floor (P.True_U / Real (2 ** B_Level)));
+                  Truth_Y : constant Integer := Integer (Real'Floor (P.True_V / Real (2 ** B_Level)));
+                  type Peak is record
+                     X, Y : Integer;
+                     Rho  : Real;
+                  end record;
+                  Peaks : array (1 .. 5) of Peak := [others => (0, 0, -2.0)];
+               begin
+                  Level_Luma (Image_A, A_Level, A_Px, Aw, Ah);
+                  Level_Luma (Image_B, B_Level, B_Px, Bw, Bh);
+                  --  The first picture's patch resampled through the known warp, at the second's level.
+                  for Dy in -Half .. Half loop
+                     for Dx in -Half .. Half loop
+                        declare
+                           Bx : constant Real := Real (Dx);
+                           By : constant Real := Real (Dy);
+                           --  offset in the first picture's full-size pixels: Inverse (J) * (offset in the second's full-size pixels)
+                           Fu : constant Real := Real (2 ** B_Level) * (Ia * Bx + Ib * By);
+                           Fv : constant Real := Real (2 ** B_Level) * (Ic * Bx + Id * By);
+                           Sx : constant Real := (P.U + Fu) / Real (2 ** A_Level);
+                           Sy : constant Real := (P.V + Fv) / Real (2 ** A_Level);
+                           T  : constant Real := Bilinear (A_Px.all, Aw, Ah, Sx, Sy);
+                        begin
+                           Template ((Dy + Half) * Side + Dx + Half + 1) := T;
+                           Mean_T := Mean_T + T;
+                        end;
+                     end loop;
+                  end loop;
+                  Mean_T := Mean_T / Real (Side * Side);
+                  for K in Template'Range loop
+                     Template (K) := Template (K) - Mean_T;
+                     Var_T := Var_T + Template (K) ** 2;
+                  end loop;
+                  if Var_T > 1.0E-9 then
+                     Tried := Tried + 1;
+                     for Cy in Half .. Bh - 1 - Half loop
+                        for Cx in Half .. Bw - 1 - Half loop
+                           declare
+                              Sum_S, Sum_SS, Sum_ST : Real := 0.0;
+                              K : Natural := 0;
+                           begin
+                              for Dy in -Half .. Half loop
+                                 for Dx in -Half .. Half loop
+                                    K := K + 1;
+                                    declare
+                                       S : constant Real := B_Px (1 + (Cy + Dy) * Bw + Cx + Dx);
+                                    begin
+                                       Sum_S := Sum_S + S;
+                                       Sum_SS := Sum_SS + S * S;
+                                       Sum_ST := Sum_ST + S * Template (K);
+                                    end;
+                                 end loop;
+                              end loop;
+                              declare
+                                 N   : constant Real := Real (Side * Side);
+                                 Vss : constant Real := Sum_SS - Sum_S ** 2 / N;
+                                 Rho : constant Real := (if Vss > 1.0E-9 then Sum_ST / Sqrt (Vss * Var_T) else -2.0);
+                              begin
+                                 if abs (Cx - Truth_X) <= 1 and then abs (Cy - Truth_Y) <= 1 then
+                                    Truth_Rho := Real'Max (Truth_Rho, Rho);
+                                 end if;
+                                 if Rho > Best then
+                                    Best := Rho;
+                                    Best_X := Cx;
+                                    Best_Y := Cy;
+                                 end if;
+                                 --  the five best places at least four pixels apart
+                                 declare
+                                    Slot : Natural := 0;
+                                 begin
+                                    for S_K in Peaks'Range loop
+                                       if abs (Peaks (S_K).X - Cx) <= 3 and then abs (Peaks (S_K).Y - Cy) <= 3 then
+                                          Slot := S_K;
+                                       end if;
+                                    end loop;
+                                    if Slot > 0 then
+                                       if Rho > Peaks (Slot).Rho then
+                                          Peaks (Slot) := (Cx, Cy, Rho);
+                                       end if;
+                                    else
+                                       declare
+                                          Lowest : Positive := 1;
+                                       begin
+                                          for S_K in Peaks'Range loop
+                                             if Peaks (S_K).Rho < Peaks (Lowest).Rho then
+                                                Lowest := S_K;
+                                             end if;
+                                          end loop;
+                                          if Rho > Peaks (Lowest).Rho then
+                                             Peaks (Lowest) := (Cx, Cy, Rho);
+                                          end if;
+                                       end;
+                                    end if;
+                                 end;
+                              end;
+                           end;
+                        end loop;
+                     end loop;
+                     if abs (Best_X - Truth_X) <= 1 and then abs (Best_Y - Truth_Y) <= 1 then
+                        Top1 := Top1 + 1;
+                     end if;
+                     if (for some Item of Peaks => abs (Item.X - Truth_X) <= 1 and then abs (Item.Y - Truth_Y) <= 1) then
+                        Top5 := Top5 + 1;
+                     end if;
+                     Ratios.Append (Truth_Rho - Best);
+                     Ada.Text_IO.Put_Line
+                       ("point" & Natural'Image (I) & " scale " & Fixed (Scale, 3) & " levels" & Natural'Image (A_Level)
+                        & Natural'Image (B_Level) & " truth rho " & Fixed (Truth_Rho, 3) & " best " & Fixed (Best, 3)
+                        & (if abs (Best_X - Truth_X) <= 1 and then abs (Best_Y - Truth_Y) <= 1 then " TOP1" else ""));
+                  end if;
+                  pragma Unreferenced (Ratio);
+               end;
+            end if;
+         end;
+      end loop;
+      Ada.Text_IO.Put_Line
+        ("request" & Natural'Image (Number) & ": points the truth sees" & Natural'Image (Seen) & ", textured"
+         & Natural'Image (Tried) & ", the whole picture's best place is the truth's" & Natural'Image (Top1) & " ("
+         & Percent (Top1, Natural'Max (1, Tried)) & " %), among its five best" & Natural'Image (Top5) & " ("
+         & Percent (Top5, Natural'Max (1, Tried)) & " %)");
+   end Distinct_Mode;
+
+   --  A fit a replay dumped (BD_FITDUMP): the joints of an arm and the keyframes' readings, the last block of the arm.
+   type Joint_Fit is record
+      W, P  : Vec3;
+      C     : Real;
+      Slide : Boolean;
+   end record;
+   package Joint_Vectors is new Ada.Containers.Vectors (Positive, Joint_Fit);
+   type Fit_Row is record
+      Beat : Natural;
+      Q    : Real_Vectors.Vector;
+   end record;
+   package Fit_Row_Vectors is new Ada.Containers.Vectors (Positive, Fit_Row);
+
+   type Rigid_Map is record
+      R : Mat3;
+      T : Vec3;
+   end record;
+
+   function Compose (A, B : Rigid_Map) return Rigid_Map is
+     ((R => A.R * B.R, T => A.R * B.T + A.T));
+
+   --  The eye of the fit at readings Q in the frame of the eye at readings Q0: the product of the joints' motions.
+   function Eye_At (Joints : Joint_Vectors.Vector; Q, Q0 : Real_Vectors.Vector) return Rigid_Map is
+      Result : Rigid_Map := (R => Identity3, T => Zero3);
+   begin
+      for J in 1 .. Natural (Joints.Length) loop
+         declare
+            Joint : Joint_Fit renames Joints (J);
+            D     : constant Real := Joint.C * (Q (J) - Q0 (J));
+            Step  : Rigid_Map;
+         begin
+            if Joint.Slide then
+               Step := (R => Identity3, T => D * Joint.W);
+            else
+               declare
+                  Turn : constant Mat3 := Driver.Numerics.Exp (D * Joint.W);
+               begin
+                  Step := (R => Turn, T => Joint.P - Turn * Joint.P);
+               end;
+            end if;
+            Result := Compose (Result, Step);
+         end;
+      end loop;
+      return Result;
+   end Eye_At;
+
+   --  A dumped line with the space a negative number leaves out after the axis's mark restored.
+   function Apart (Line : String) return String is
+      Result : String (1 .. 2 * Line'Length);
+      Count  : Natural := 0;
+   begin
+      for I in Line'Range loop
+         Count := Count + 1;
+         Result (Count) := Line (I);
+         if Line (I) = 'W' and then I < Line'Last and then Line (I + 1) = '-' then
+            Count := Count + 1;
+            Result (Count) := ' ';
+         end if;
+      end loop;
+      return Result (1 .. Count);
+   end Apart;
+
+   procedure Read_Fit
+     (Path : String; Arm : Natural; Joints : out Joint_Vectors.Vector; Rows : out Fit_Row_Vectors.Vector; Found : out Boolean)
+   is
+      F            : Ada.Text_IO.File_Type;
+      In_Block     : Boolean := False;
+      Fresh_Joints : Joint_Vectors.Vector;
+      Fresh_Rows   : Fit_Row_Vectors.Vector;
+   begin
+      Found := False;
+      Joints.Clear;
+      Rows.Clear;
+      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+      while not Ada.Text_IO.End_Of_File (F) loop
+         declare
+            Line : constant String := Apart (Ada.Text_IO.Get_Line (F));
+            W    : constant Word_Array := Words (Line);
+         begin
+            if W'Length > 3 and then To_String (W (W'First)) = "FIT" then
+               if In_Block then
+                  Joints := Fresh_Joints;
+                  Rows := Fresh_Rows;
+                  Found := True;
+               end if;
+               Fresh_Joints.Clear;
+               Fresh_Rows.Clear;
+               In_Block := Natural'Value (To_String (W (W'First + 2))) = Arm;
+            elsif In_Block and then W'Length > 13 and then To_String (W (W'First)) = "JOINT" then
+               Fresh_Joints.Append
+                 (Joint_Fit'(W => [Value (W (W'First + 3)), Value (W (W'First + 4)), Value (W (W'First + 5))],
+                             P => [Value (W (W'First + 7)), Value (W (W'First + 8)), Value (W (W'First + 9))],
+                             C => Value (W (W'First + 11)), Slide => To_String (W (W'First + 13)) = "TRUE"));
+            elsif In_Block and then W'Length > 4 and then To_String (W (W'First)) = "KEYFRAME" then
+               declare
+                  Row : Fit_Row;
+               begin
+                  Row.Beat := Natural'Value (To_String (W (W'First + 3)));
+                  for K in W'First + 5 .. W'Last loop
+                     Row.Q.Append (Value (W (K)));
+                  end loop;
+                  Fresh_Rows.Append (Row);
+               end;
+            end if;
+         end;
+      end loop;
+      if In_Block then
+         Joints := Fresh_Joints;
+         Rows := Fresh_Rows;
+         Found := True;
+      end if;
+      Ada.Text_IO.Close (F);
+      Found := Found and then not Rows.Is_Empty;
+   end Read_Fit;
+
+   --  The value below which nine tenths of the numbers lie.
+   function Upper (X : Real_Array) return Real is
+      Sorted : Real_Array := X;
+   begin
+      for I in Sorted'First + 1 .. Sorted'Last loop
+         declare
+            Held : constant Real := Sorted (I);
+            J    : Integer := I - 1;
+         begin
+            while J >= Sorted'First and then Sorted (J) > Held loop
+               Sorted (J + 1) := Sorted (J);
+               J := J - 1;
+            end loop;
+            Sorted (J + 1) := Held;
+         end;
+      end loop;
+      return Sorted (Sorted'First + Integer (0.9 * Real (Sorted'Length - 1)));
+   end Upper;
+
+   --  align_study sweep RUN_DIR LAG CAMERA [KEYFRAMES]: the depth of every query point of an arm's reference found from its keyframes
+   --  alone, by the plane sweep of multi-view stereo, with the truth's camera motions: for each candidate depth along the point's
+   --  line of sight the reference patch is carried into every keyframe by the fronto-parallel plane there, and its zero-mean
+   --  normalized correlation with the keyframe's pixels, averaged over the keyframes that hold it, scores the depth; the best
+   --  candidate is the point's depth. Against the truth's depth: how many points are found within 3 and 10 percent, by the truth's
+   --  depth (the near, the middle, the far). This asks only whether the pixels hold the depth, with the motions exact.
+   procedure Sweep_Mode is
+      Dir      : constant String := Ada.Command_Line.Argument (2);
+      Lag      : constant String := Ada.Command_Line.Argument (3);
+      Camera   : constant Natural := Natural'Value (Ada.Command_Line.Argument (4));
+      Wanted   : constant Natural := (if Ada.Command_Line.Argument_Count >= 5 then Natural'Value (Ada.Command_Line.Argument (5)) else 24);
+      --  The motions the sweep is given are the truth's with an error: a turn about a random axis of this many degrees (rms) and a
+      --  translation scaled by one plus a random number of this standard deviation, for each keyframe alone.
+      Turn_Error  : constant Real := (if Ada.Command_Line.Argument_Count >= 6 then Real'Value (Ada.Command_Line.Argument (6)) else 0.0) * Ada.Numerics.Pi / 180.0;
+      Shift_Error : constant Real := (if Ada.Command_Line.Argument_Count >= 7 then Real'Value (Ada.Command_Line.Argument (7)) else 0.0);
+      Seed     : Interfaces.Unsigned_64 := 12345;
+      --  With a dump and an arm (arguments 8 and 9) the keyframes' poses are the fit's, in the unit its shifts have against the truth's.
+      Use_Fit  : constant Boolean := Ada.Command_Line.Argument_Count >= 9;
+      Fit_Path : constant String := (if Use_Fit then Ada.Command_Line.Argument (8) else "");
+      Fit_Arm  : constant Natural := (if Use_Fit then Natural'Value (Ada.Command_Line.Argument (9)) else 0);
+      Fit_Joints : Joint_Vectors.Vector;
+      Fit_Rows   : Fit_Row_Vectors.Vector;
+      Fit_Found  : Boolean := False;
+      Unit       : Real := 1.0;
+
+      function Gaussian return Real is
+         function Uniform return Real is
+            use type Interfaces.Unsigned_64;
+         begin
+            Seed := Seed * 6364136223846793005 + 1442695040888963407;
+            return (Real (Seed / 2048) + 0.5) / 9007199254740992.0;
+         end Uniform;
+         U1 : constant Real := Uniform;
+         U2 : constant Real := Uniform;
+      begin
+         return Sqrt (-2.0 * Log (U1)) * Cos (2.0 * Ada.Numerics.Pi * U2);
+      end Gaussian;
+      Half     : constant Integer := 7;
+      Steps    : constant := 160;
+      Nearest  : constant Real := 0.12;    --  m, the sweep's range
+      Farthest : constant Real := 2.5;
+
+      type Keyframe is record
+         Pictures : Driver.Alignment.Pyramid;
+         R        : Mat3;
+         T        : Vec3;   --  m
+      end record;
+      package Keyframe_Vectors is new Ada.Containers.Vectors (Positive, Keyframe);
+      Keys           : Keyframe_Vectors.Vector;
+      Reference      : Driver.Alignment.Pyramid;
+      Points         : Point_Vectors.Vector;
+      Pinhole        : Lens;
+      Have_Reference : Boolean := False;
+      Candidates     : Natural := 0;
+      Listed         : array (1 .. 600) of Natural;
+      Count          : Natural := 0;
+   function Row_Of (Beat : Natural) return Natural is
+      begin
+         for K in 1 .. Natural (Fit_Rows.Length) loop
+            if Fit_Rows (K).Beat = Beat then
+               return K;
+            end if;
+         end loop;
+         return 0;
+      end Row_Of;
+
+      function Fit_Pose (Beat : Natural) return Rigid_Map is
+         Eye : constant Rigid_Map := Eye_At (Fit_Joints, Fit_Rows (Row_Of (Beat)).Q, Fit_Rows (1).Q);
+      begin
+         return (R => Transpose (Eye.R), T => -(Transpose (Eye.R) * Eye.T));
+      end Fit_Pose;
+   begin
+      if Use_Fit then
+         Read_Fit (Fit_Path, Fit_Arm, Fit_Joints, Fit_Rows, Fit_Found);
+         if not Fit_Found then
+            Ada.Text_IO.Put_Line ("sweep: no fit of arm" & Natural'Image (Fit_Arm) & " in " & Fit_Path);
+            return;
+         end if;
+      end if;
+      declare
+         Dots, Squares : Real := 0.0;
+      begin
+         for Number in 1 .. 600 loop
+            exit when not Ada.Directories.Exists (Dir & "/req_" & Padded (Number) & ".txt");
+            declare
+               Q : constant Question_Access := Read_Question (Dir, Number, Lag);
+            begin
+               if Q.A_Camera = Camera and then Q.B_Camera = Camera and then Q.Motions (0).Present
+                 and then (not Use_Fit or else (Row_Of (Q.B_Beat) > 0 and then Q.A_Beat = Fit_Rows (1).Beat))
+               then
+                  Count := Count + 1;
+                  Listed (Count) := Number;
+                  if Use_Fit then
+                     declare
+                        T : constant Vec3 := Fit_Pose (Q.B_Beat).T;
+                     begin
+                        Dots := Dots + T * Q.Motions (0).Shift;
+                        Squares := Squares + T * T;
+                     end;
+                  end if;
+               end if;
+            end;
+         end loop;
+         if Use_Fit and then Squares > 0.0 then
+            Unit := Dots / Squares;
+            Ada.Text_IO.Put_Line ("sweep: the fit's unit is" & Fixed (Unit, 5) & " m");
+         end if;
+      end;
+      Ada.Text_IO.Put_Line ("sweep:" & Natural'Image (Count) & " same-eye questions of camera" & Natural'Image (Camera) & " with the table's motion");
+      declare
+         Taken : Natural := 0;
+         Step  : constant Natural := Natural'Max (1, Count / Wanted);
+      begin
+         for I in 1 .. Count loop
+            if I mod Step = 0 and then Taken < Wanted then
+               declare
+                  Number : constant Natural := Listed (I);
+                  Q      : constant Question_Access := Read_Question (Dir, Number, Lag);
+               begin
+                  Taken := Taken + 1;
+                  if Use_Fit then
+                     declare
+                        Pose : constant Rigid_Map := Fit_Pose (Q.B_Beat);
+                     begin
+                        Keys.Append
+                          (Keyframe'(Pictures => Driver.Alignment.Pyramid_Of (Read_Ppm (Dir & "/req_" & Padded (Number) & "_b.ppm")),
+                                     R => Pose.R, T => Unit * Pose.T));
+                     end;
+                  else
+                     Keys.Append
+                       (Keyframe'(Pictures => Driver.Alignment.Pyramid_Of (Read_Ppm (Dir & "/req_" & Padded (Number) & "_b.ppm")),
+                         R => Driver.Numerics.Exp ([Turn_Error * Gaussian, Turn_Error * Gaussian, Turn_Error * Gaussian]) * Q.Motions (0).Rotation,
+                         T => (1.0 + Shift_Error * Gaussian) * Q.Motions (0).Shift));
+                  end if;
+                  if not Have_Reference then
+                     Reference := Driver.Alignment.Pyramid_Of (Read_Ppm (Dir & "/req_" & Padded (Number) & "_a.ppm"));
+                     Have_Reference := True;
+                     Points := Q.Points;
+                     Pinhole := Q.Lens_A;
+                     declare
+                        Seen : Natural := 0;
+                        Lo, Hi : Real;
+                     begin
+                        Lo := Real'Last;
+                        Hi := -Real'Last;
+                        for Each of Points loop
+                           if Each.Status = 'V' then
+                              Seen := Seen + 1;
+                              Lo := Real'Min (Lo, Each.Surface (3));
+                              Hi := Real'Max (Hi, Each.Surface (3));
+                           end if;
+                        end loop;
+                        Ada.Text_IO.Put_Line ("sweep: the reference from question" & Natural'Image (Number) & ":" & Natural'Image (Natural (Points.Length)) & " points," & Natural'Image (Seen) & " seen in both (depths " & Fixed (Lo, 1) & " to " & Fixed (Hi, 1) & "), lens " & Fixed (Pinhole.Fx, 2) & Fixed (Pinhole.Cx, 1) & Fixed (Pinhole.Cy, 1));
+                     end;
+                  end if;
+               end;
+            end if;
+         end loop;
+      end;
+      Ada.Text_IO.Put_Line ("sweep:" & Natural'Image (Natural (Keys.Length)) & " keyframes");
+      declare
+         Right, Close, Total : array (1 .. 3) of Natural := [others => 0];
+         Errors : Real_Vectors.Vector;
+      begin
+         for I in 1 .. Natural (Points.Length) loop
+            declare
+               P : Point renames Points (I);
+            begin
+               if P.Status = 'V' and then P.Surface (3) > Nearest and then P.Surface (3) < Farthest then
+                  Candidates := Candidates + 1;
+                  declare
+                     Truth_Depth : constant Real := P.Surface (3);
+                     Best_Score  : Real := -2.0;
+                     Best_Depth  : Real := 0.0;
+                     Template    : Real_Array (1 .. (2 * Half + 1) ** 2);
+                     Template_Ok : Boolean := True;
+                     Mean_T, Var_T : Real := 0.0;
+                     Index       : Natural := 0;
+                  begin
+                     for J in -Half .. Half loop
+                        for K in -Half .. Half loop
+                           declare
+                              Value, Du, Dv : Real;
+                              Ok : Boolean;
+                           begin
+                              Index := Index + 1;
+                              Driver.Alignment.Sample_Level (Reference, 0, P.U + Real (K), P.V + Real (J), Value, Du, Dv, Ok);
+                              Template (Index) := Value;
+                              Template_Ok := Template_Ok and then Ok;
+                              Mean_T := Mean_T + Value;
+                           end;
+                        end loop;
+                     end loop;
+                     Mean_T := Mean_T / Real (Template'Length);
+                     for V of Template loop
+                        Var_T := Var_T + (V - Mean_T) ** 2;
+                     end loop;
+                     if Template_Ok and then Var_T > 0.0 then
+                        for S in 0 .. Steps loop
+                           declare
+                              --  Uniform in the inverse of the depth.
+                              Inverse   : constant Real := 1.0 / Farthest + (1.0 / Nearest - 1.0 / Farthest) * Real (S) / Real (Steps);
+                              Depth     : constant Real := 1.0 / Inverse;
+                              Total_Rho : Real := 0.0;
+                              Used      : Natural := 0;
+                           begin
+                              for Key of Keys loop
+                                 declare
+                                    Samples : Real_Array (1 .. Template'Length);
+                                    Mean_S, Var_S, Cov : Real := 0.0;
+                                    Inside  : Boolean := True;
+                                    N       : Natural := 0;
+                                 begin
+                                    for J in -Half .. Half loop
+                                       for K in -Half .. Half loop
+                                          declare
+                                             Ray : constant Vec3 :=
+                                               [(P.U + Real (K) - Pinhole.Cx) / Pinhole.Fx, (P.V + Real (J) - Pinhole.Cy) / Pinhole.Fx, 1.0];
+                                             X1  : constant Vec3 := Depth * Ray;
+                                             X2  : constant Vec3 := Key.R * X1 + Key.T;
+                                             Value, Du, Dv : Real;
+                                             Ok  : Boolean := False;
+                                          begin
+                                             N := N + 1;
+                                             if X2 (3) > 0.001 then
+                                                Driver.Alignment.Sample_Level
+                                                  (Key.Pictures, 0, Pinhole.Cx + Pinhole.Fx * X2 (1) / X2 (3),
+                                                   Pinhole.Cy + Pinhole.Fx * X2 (2) / X2 (3), Value, Du, Dv, Ok);
+                                             end if;
+                                             if Ok then
+                                                Samples (N) := Value;
+                                                Mean_S := Mean_S + Value;
+                                             else
+                                                Inside := False;
+                                             end if;
+                                          end;
+                                       end loop;
+                                    end loop;
+                                    if Inside then
+                                       Mean_S := Mean_S / Real (N);
+                                       for L in Samples'Range loop
+                                          Var_S := Var_S + (Samples (L) - Mean_S) ** 2;
+                                          Cov := Cov + (Samples (L) - Mean_S) * (Template (L) - Mean_T);
+                                       end loop;
+                                       if Var_S > 0.0 then
+                                          Total_Rho := Total_Rho + Cov / Sqrt (Var_S * Var_T);
+                                          Used := Used + 1;
+                                       end if;
+                                    end if;
+                                 end;
+                              end loop;
+                              if Used >= 4 and then Total_Rho / Real (Used) > Best_Score then
+                                 Best_Score := Total_Rho / Real (Used);
+                                 Best_Depth := Depth;
+                              end if;
+                           end;
+                        end loop;
+                     end if;
+                     declare
+                        Band : constant Positive := (if Truth_Depth < 0.33 then 1 elsif Truth_Depth < 0.6 then 2 else 3);
+                        Miss : constant Real := (if Best_Depth > 0.0 then abs (Best_Depth / Truth_Depth - 1.0) else 9.0);
+                     begin
+                        Total (Band) := Total (Band) + 1;
+                        if Miss <= 0.03 then
+                           Right (Band) := Right (Band) + 1;
+                        end if;
+                        if Miss <= 0.10 then
+                           Close (Band) := Close (Band) + 1;
+                        end if;
+                        Errors.Append (Miss);
+                     end;
+                  end;
+               end if;
+            end;
+         end loop;
+         for Band in 1 .. 3 loop
+            Ada.Text_IO.Put_Line
+              ("   truth depth " & (case Band is when 1 => "under 0.33 m", when 2 => "0.33 to 0.6 m", when others => "over 0.6 m")
+               & ":" & Natural'Image (Total (Band)) & " points, depth within 3 percent" & Natural'Image (Right (Band))
+               & ", within 10 percent" & Natural'Image (Close (Band)));
+         end loop;
+         Ada.Text_IO.Put_Line ("sweep: of" & Natural'Image (Candidates) & " points the depth's median miss is "
+                               & Fixed (100.0 * Driver.Stats.Median (To_Array (Errors)), 2) & " percent");
+      end;
+   end Sweep_Mode;
+
+   --  align_study poses RUN_DIR LAG CAMERA DUMP ARM: how far the poses of a fit (the joints a replay dumped, FIT blocks of
+   --  BD_FITDUMP) put each keyframe's eye from where the truth has it, against the reference (the first keyframe): the turn between
+   --  the two poses in degrees and the shift's miss as a part of the true shift, once the fit's unit of length is taken from the keyframes
+   --  (the scale that fits its shifts to the truth's). The last block of the arm is read.
+   procedure Poses_Mode is
+      Dir    : constant String := Ada.Command_Line.Argument (2);
+      Lag    : constant String := Ada.Command_Line.Argument (3);
+      Camera : constant Natural := Natural'Value (Ada.Command_Line.Argument (4));
+      Path   : constant String := Ada.Command_Line.Argument (5);
+      Arm    : constant Natural := Natural'Value (Ada.Command_Line.Argument (6));
+      Joints : Joint_Vectors.Vector;
+      Rows   : Fit_Row_Vectors.Vector;
+      Found  : Boolean;
+   begin
+      Read_Fit (Path, Arm, Joints, Rows, Found);
+      if not Found then
+         Ada.Text_IO.Put_Line ("poses: no fit of arm" & Natural'Image (Arm) & " in the dump");
+         return;
+      end if;
+      Ada.Text_IO.Put_Line ("poses: the last fit of arm" & Natural'Image (Arm) & ":" & Natural'Image (Natural (Joints.Length))
+                            & " joints," & Natural'Image (Natural (Rows.Length)) & " keyframes, reference beat" & Natural'Image (Rows (1).Beat));
+      declare
+         Used : Natural := 0;
+         Dots, Squares : Real := 0.0;
+         type Pair is record
+            Turn   : Real;
+            Fit_T  : Vec3;
+            True_T : Vec3;
+         end record;
+         package Pair_Vectors is new Ada.Containers.Vectors (Positive, Pair);
+         Pairs : Pair_Vectors.Vector;
+      begin
+         for Number in 1 .. 600 loop
+            exit when not Ada.Directories.Exists (Dir & "/req_" & Padded (Number) & ".txt");
+            declare
+               Q : constant Question_Access := Read_Question (Dir, Number, Lag);
+            begin
+               if Q.A_Camera = Camera and then Q.B_Camera = Camera and then Q.A_Beat = Rows (1).Beat and then Q.Motions (0).Present then
+                  for Row of Rows loop
+                     if Row.Beat = Q.B_Beat then
+                        declare
+                           Eye     : constant Rigid_Map := Eye_At (Joints, Row.Q, Rows (1).Q);
+                           R_Fit   : constant Mat3 := Transpose (Eye.R);
+                           T_Fit   : constant Vec3 := -(R_Fit * Eye.T);
+                           Delta_R : constant Mat3 := R_Fit * Transpose (Q.Motions (0).Rotation);
+                        begin
+                           Pairs.Append
+                             (Pair'(Turn => Driver.Numerics.Angle (Delta_R) * 180.0 / Ada.Numerics.Pi, Fit_T => T_Fit,
+                                    True_T => Q.Motions (0).Shift));
+                           Dots := Dots + T_Fit * Q.Motions (0).Shift;
+                           Squares := Squares + T_Fit * T_Fit;
+                           Used := Used + 1;
+                        end;
+                     end if;
+                  end loop;
+               end if;
+            end;
+         end loop;
+         if Used = 0 or else Squares = 0.0 then
+            Ada.Text_IO.Put_Line ("poses: no keyframe of the dump has a question of camera" & Natural'Image (Camera));
+            return;
+         end if;
+         declare
+            Unit : constant Real := Dots / Squares;
+            Turns, Misses, Absolute : Real_Vectors.Vector;
+         begin
+            Ada.Text_IO.Put_Line ("poses:" & Natural'Image (Used) & " keyframes matched to a question, the fit's unit is " & Fixed (Unit, 5) & " m");
+            for P of Pairs loop
+               declare
+                  True_Length : constant Real := Sqrt (P.True_T * P.True_T);
+                  Miss        : constant Vec3 := Unit * P.Fit_T - P.True_T;
+               begin
+                  if True_Length > 0.005 then
+                     Turns.Append (P.Turn);
+                     Misses.Append (Sqrt (Miss * Miss) / True_Length);
+                     Absolute.Append (1000.0 * Sqrt (Miss * Miss));
+                  end if;
+               end;
+            end loop;
+            if not Turns.Is_Empty then
+               Ada.Text_IO.Put_Line
+                 ("poses: over" & Natural'Image (Natural (Turns.Length)) & " keyframes that moved the eye by more than 5 mm: the turn's miss median "
+                  & Fixed (Driver.Stats.Median (To_Array (Turns)), 3) & " degrees, 90% " & Fixed (Upper (To_Array (Turns)), 3)
+                  & "; the shift's miss median " & Fixed (100.0 * Driver.Stats.Median (To_Array (Misses)), 1) & " percent of the shift, 90% "
+                  & Fixed (100.0 * Upper (To_Array (Misses)), 1) & "; in millimetres median "
+                  & Fixed (Driver.Stats.Median (To_Array (Absolute)), 2) & ", 90% " & Fixed (Upper (To_Array (Absolute)), 2));
+            end if;
+         end;
+      end;
+   end Poses_Mode;
+
+
+   --  align_study superpose RUN_DIR LAG CAMERA: how far the move of a keyframe that changes several channels at once is the
+   --  sum of the moves of keyframes that changed one channel each, scaled to the amounts. For every keyframe of the camera
+   --  with two or more channels changed (by more than the noise of a difference of two readings), the truth's move of each
+   --  point is compared with the sum, over the keyframe's channels, of the truth's move of that point in the earlier
+   --  keyframe of the same reference that changed that channel alone and by the amount nearest in size (of the same sign
+   --  when there is one), times the ratio of the amounts: the points the truth sees in all of them.
+   procedure Superpose_Mode is
+      Dir    : constant String := Ada.Command_Line.Argument (2);
+      Lag    : constant String := Ada.Command_Line.Argument (3);
+      Camera : constant Natural := Natural'Value (Ada.Command_Line.Argument (4));
+      All_Questions : Keyframe_Vectors.Vector;
+   begin
+      Read_Readings (Dir & "/beats.txt");
+      declare
+         Number : Natural := 1;
+      begin
+         while Ada.Directories.Exists (Dir & "/req_" & Padded (Number) & ".txt") loop
+            declare
+               Q : constant Question_Access := Read_Question (Dir, Number, Lag);
+            begin
+               if Q.Paired and then Q.A_Camera = Q.B_Camera and then Q.A_Camera = Camera then
+                  All_Questions.Append
+                    (Keyframe_Question'(Number => Number, Camera => Q.A_Camera, From_Beat => Q.A_Beat,
+                                        To_Beat => Q.B_Beat, Q => Q));
+               end if;
+            end;
+            Number := Number + 1;
+         end loop;
+      end;
+      declare
+         Shifts : constant Real_Array := Shifts_Of (All_Questions);
+
+         --  A channel changed moves the view by a pixel at least.
+         function Significant_In (D : Real_Array; K : Positive) return Boolean is
+           (abs D (K) * Shifts (K) >= 1.0);
+
+         function Count_Of (D : Real_Array) return Natural is
+            Count : Natural := 0;
+         begin
+            for K in D'Range loop
+               if Significant_In (D, K) then
+                  Count := Count + 1;
+               end if;
+            end loop;
+            return Count;
+         end Count_Of;
+      begin
+      for T in 1 .. Natural (All_Questions.Length) loop
+         declare
+            Target : Keyframe_Question renames All_Questions (T);
+            Change : constant Real_Array := Change_Of (Target);
+            Used   : array (Change'Range) of Natural := [others => 0];
+            Whole  : Boolean := True;
+            Errors, Moves, Relative : Real_Vectors.Vector;
+            Line   : Ada.Strings.Unbounded.Unbounded_String;
+         begin
+            if Count_Of (Change) >= 2 then
+               --  For each channel the earlier keyframe of the same reference that changed it alone and is nearest in size.
+               for K in Change'Range loop
+                  if Significant_In (Change, K) then
+                     declare
+                        Best_Score : Real := Real'Last;
+                     begin
+                        for S in 1 .. T - 1 loop
+                           declare
+                              Other : Keyframe_Question renames All_Questions (S);
+                              D     : constant Real_Array := Change_Of (Other);
+                           begin
+                              if Other.From_Beat = Target.From_Beat and then Count_Of (D) = 1 and then Significant_In (D, K) then
+                                 declare
+                                    Score : constant Real :=
+                                      abs (Log (abs D (K) / abs Change (K))) + (if D (K) * Change (K) > 0.0 then 0.0 else 10.0);
+                                 begin
+                                    if Score < Best_Score then
+                                       Best_Score := Score;
+                                       Used (K) := S;
+                                    end if;
+                                 end;
+                              end if;
+                           end;
+                        end loop;
+                        if Used (K) = 0 then
+                           Whole := False;
+                        end if;
+                     end;
+                  end if;
+               end loop;
+               if Whole then
+                  for I in 1 .. Natural (Target.Q.Points.Length) loop
+                     declare
+                        P      : Point renames Target.Q.Points (I);
+                        Seen   : Boolean := P.Status = 'V';
+                        Pred_U, Pred_V : Real := 0.0;
+                     begin
+                        for K in Change'Range loop
+                           if Used (K) > 0 then
+                              declare
+                                 Other : Keyframe_Question renames All_Questions (Used (K));
+                                 D     : constant Real_Array := Change_Of (Other);
+                                 R     : constant Real := Change (K) / D (K);
+                                 O     : Point renames Other.Q.Points (I);
+                              begin
+                                 Seen := Seen and then O.Status = 'V';
+                                 Pred_U := Pred_U + R * (O.True_U - O.U);
+                                 Pred_V := Pred_V + R * (O.True_V - O.V);
+                              end;
+                           end if;
+                        end loop;
+                        if Seen then
+                           declare
+                              Move_U : constant Real := P.True_U - P.U;
+                              Move_V : constant Real := P.True_V - P.V;
+                              Miss   : constant Real := Sqrt ((Move_U - Pred_U) ** 2 + (Move_V - Pred_V) ** 2);
+                              Size   : constant Real := Sqrt (Move_U ** 2 + Move_V ** 2);
+                           begin
+                              Errors.Append (Miss);
+                              Moves.Append (Size);
+                              if Size > 1.0 then
+                                 Relative.Append (Miss / Size);
+                              end if;
+                           end;
+                        end if;
+                     end;
+                  end loop;
+                  for K in Change'Range loop
+                     if Used (K) > 0 then
+                        Ada.Strings.Unbounded.Append
+                          (Line, " j" & Img (K) & ":" & Fixed (Change (K), 3) & " (from " & Img (All_Questions (Used (K)).Number) & ")");
+                     end if;
+                  end loop;
+                  if Natural (Errors.Length) > 0 then
+                     Ada.Text_IO.Put_Line
+                       ("super request" & Natural'Image (Target.Number) & ":" & Ada.Strings.Unbounded.To_String (Line)
+                        & "; points" & Natural'Image (Natural (Errors.Length)) & ", true move median "
+                        & Fixed (Driver.Stats.Median (To_Array (Moves)), 2) & " px, superposition misses by median "
+                        & Fixed (Driver.Stats.Median (To_Array (Errors)), 2) & " px, rms "
+                        & Fixed (Sqrt (Dot (To_Array (Errors), To_Array (Errors)) / Real (Errors.Length)), 2)
+                        & ", relative median " & Fixed (100.0 * Driver.Stats.Median (To_Array (Relative)), 1) & " %");
+                  end if;
+               else
+                  Ada.Text_IO.Put_Line
+                    ("super request" & Natural'Image (Target.Number) & ": a channel changed has no earlier keyframe that changed it alone");
+               end if;
+            end if;
+         end;
+      end loop;
+      end;
+   end Superpose_Mode;
+
+
 begin
    if Ada.Command_Line.Argument_Count < 2 then
       Ada.Text_IO.Put_Line ("usage: align_study roma|run|report ...");
@@ -1781,6 +2437,14 @@ begin
       Run_Mode (Probe => True);
    elsif Ada.Command_Line.Argument (1) = "chain" then
       Chain_Mode;
+   elsif Ada.Command_Line.Argument (1) = "distinct" then
+      Distinct_Mode;
+   elsif Ada.Command_Line.Argument (1) = "sweep" then
+      Sweep_Mode;
+   elsif Ada.Command_Line.Argument (1) = "poses" then
+      Poses_Mode;
+   elsif Ada.Command_Line.Argument (1) = "superpose" then
+      Superpose_Mode;
    else
       Report_Mode;
    end if;

@@ -29,9 +29,10 @@ package body Driver.Action.Plants.Live is
    function Fraction_Of (M : Driver.Robot.Model; H : Robot_Hand.Hands; Id : Robot_Hand.Hand_Id;
                          O : Driver.Observations.Observation) return Estimate
    is
-      G : constant Driver.Robot.Group_Id := Robot_Hand.Closer_Group (H, Id);
+      G : constant Driver.Robot.Group_Id'Base := Robot_Hand.Closer_Group (H, Id);
    begin
-      if Natural (G) > Natural (O.Readings.Length) or else not Driver.Observations.Has_Reading (O, G) then
+      --  The hand an arm's tool is has no closer: nothing of it closes.
+      if G = 0 or else Natural (G) > Natural (O.Readings.Length) or else not Driver.Observations.Has_Reading (O, G) then
          return Unknown;
       end if;
       declare
@@ -185,13 +186,26 @@ package body Driver.Action.Plants.Live is
             X.Arm := Robot_Hand.Arm_Of (Hands, Id);
             for L in 1 .. Robot_Hand.Lobe_Count (Hands, Id) loop
                declare
-                  Open   : constant Point_Estimate := Robot_Hand.Tip_In_Tool (Hands, Id, L, Robot_Hand.Open);
-                  Closed : constant Point_Estimate := Robot_Hand.Tip_In_Tool (Hands, Id, L, Robot_Hand.Closed_Empty);
+                  --  The lobe's end at every setting its eye saw it at, from the open opening to the closed one,
+                  --  as a share of the way between the openings' readings of its channel.
+                  Lobe    : Lobe_State;
+                  Count   : constant Positive := Robot_Hand.Settings (Hands, Id, L);
+                  Open_At : constant Real := Robot_Hand.Setting_Sight_At (Hands, Id, L, 1).Reading;
+                  Shut_At : constant Real := Robot_Hand.Setting_Sight_At (Hands, Id, L, Count).Reading;
                begin
-                  X.Lobes.Append (Lobe_State'(Open_Tip   => Open.Mean,
-                                              Closed_Tip => Closed.Mean,
-                                              Tip_Sigma  => Real'Max (Largest_Sigma (Open.Covariance),
-                                                                      Largest_Sigma (Closed.Covariance))));
+                  for S in 1 .. Count loop
+                     declare
+                        Reading : constant Real := Robot_Hand.Setting_Sight_At (Hands, Id, L, S).Reading;
+                        Tip     : constant Point_Estimate := Robot_Hand.Tip_Along (Hands, Id, L, Reading);
+                     begin
+                        Lobe.Path.Append
+                          (Tip_Node'(Fraction => (if Shut_At = Open_At then Real (S - 1) / Real (Count - 1)
+                                                  else (Reading - Open_At) / (Shut_At - Open_At)),
+                                     Tip      => Tip.Mean,
+                                     Sigma    => Largest_Sigma (Tip.Covariance)));
+                     end;
+                  end loop;
+                  X.Lobes.Append (Lobe);
                end;
             end loop;
             X.Fraction := Fraction_Of (Robot, Hands, Id, O);
@@ -392,7 +406,10 @@ package body Driver.Action.Plants.Live is
                for K in Open'Range loop
                   Values (K) := Open (K) + C.Fraction * (Closed (K) - Open (K));
                end loop;
-               Driver.Commands.Set_Target (Targets, Robot_Hand.Closer_Group (P.Hands.all, C.Hand), Values);
+               --  The hand an arm's tool is has no closer: nothing of it is commanded.
+               if Robot_Hand.Closer_Group (P.Hands.all, C.Hand) > 0 then
+                  Driver.Commands.Set_Target (Targets, Robot_Hand.Closer_Group (P.Hands.all, C.Hand), Values);
+               end if;
             end Aiming;
          begin
             Driver.Beats.Within_A_Beat (Aiming'Access);

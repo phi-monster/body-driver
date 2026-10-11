@@ -1,5 +1,6 @@
 with Driver.Log;
 with Ada.Containers;
+with Ada.Containers.Ordered_Maps;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Distributions;
@@ -32,6 +33,7 @@ package body Driver.Robot.Channels is
             if S.Size = 0 and then G <= O.Readings.Last_Index and then O.Readings.Element (G)'Length > 0 then
                S.Size := O.Readings.Element (G)'Length;
                S.Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));
+               S.Twin_Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));
                S.Targets.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));
             end if;
          end;
@@ -42,6 +44,46 @@ package body Driver.Robot.Channels is
             Aimed : constant Boolean := S.Size > 0 and then Driver.Commands.Has_Target (Sent, G)
                                         and then Driver.Commands.Target (Sent, G)'Length = S.Size;
          begin
+            --  The pair of this group's command key was found the other way round at this beat (Driver.Twins): what
+            --  was kept for its readings was its echo, and the echo kept was its readings. Both turn round, and the
+            --  range seen with them; the estimates are redone at once.
+            if G <= O.Turned.Last_Index and then O.Turned (G)
+              and then Natural (S.Twin_Values.Length) = Natural (S.Values.Length)
+            then
+               declare
+                  Kept : constant Real_Vectors.Vector := S.Values;
+               begin
+                  S.Values := S.Twin_Values;
+                  S.Twin_Values := Kept;
+               end;
+               S.Low_Seen.Clear;
+               S.High_Seen.Clear;
+               for B in 0 .. Natural (S.Present.Length) - 1 loop
+                  if S.Present (B) then
+                     for C in 0 .. S.Size - 1 loop
+                        declare
+                           V : constant Real := S.Values (B * S.Size + C);
+                        begin
+                           if Natural (S.Low_Seen.Length) < S.Size then
+                              S.Low_Seen.Append (V);
+                              S.High_Seen.Append (V);
+                           else
+                              S.Low_Seen.Replace_Element (C, Real'Min (S.Low_Seen (C), V));
+                              S.High_Seen.Replace_Element (C, Real'Max (S.High_Seen (C), V));
+                           end if;
+                        end;
+                     end loop;
+                  end if;
+               end loop;
+               M.Due := True;
+            end if;
+            if G <= O.Echoes.Last_Index and then O.Echoes.Element (G)'Length = S.Size then
+               for V of O.Echoes.Element (G) loop
+                  S.Twin_Values.Append (V);
+               end loop;
+            else
+               S.Twin_Values.Append (0.0, Ada.Containers.Count_Type (S.Size));
+            end if;
             S.Present.Append (Have);
             if Have then
                for V of O.Readings.Element (G) loop
@@ -238,6 +280,51 @@ package body Driver.Robot.Channels is
    --  (their squared deviations add to a chi-square), so a group of many
    --  channels raises no more false alarms than a single one. A channel
    --  whose noise is not measured yet gives no evidence.
+   --  The gate of a change of so many channels at so many degrees of freedom, searched once: a quantile is a pure
+   --  function of its arguments, and the search is an inversion of a tail that takes thousands of operations. The
+   --  lock-in asks at every beat of every group when it marks the usable beats (12 000 beats, 7 groups, 3 eyes: the
+   --  marks were most of a 14 s recompute on a fake body), the stillness watch at every beat. Kept under a lock:
+   --  the callers run on many tasks.
+   type Gate_Key is record
+      Tested, Freedom : Natural;
+   end record;
+   function "<" (A, B : Gate_Key) return Boolean is
+     (A.Tested < B.Tested or else (A.Tested = B.Tested and then A.Freedom < B.Freedom));
+   package Gate_Maps is new Ada.Containers.Ordered_Maps (Gate_Key, Driver.Uncertain.Gate, "<", Driver.Uncertain."=");
+   protected Gates_Known is
+      procedure Get (Key : Gate_Key; Value : out Driver.Uncertain.Gate; Found : out Boolean);
+      procedure Keep (Key : Gate_Key; Value : Driver.Uncertain.Gate);
+   private
+      Map : Gate_Maps.Map;
+   end Gates_Known;
+   protected body Gates_Known is
+      procedure Get (Key : Gate_Key; Value : out Driver.Uncertain.Gate; Found : out Boolean) is
+         C : constant Gate_Maps.Cursor := Map.Find (Key);
+      begin
+         Found := Gate_Maps.Has_Element (C);
+         if Found then
+            Value := Gate_Maps.Element (C);
+         end if;
+      end Get;
+      procedure Keep (Key : Gate_Key; Value : Driver.Uncertain.Gate) is
+      begin
+         Map.Include (Key, Value);
+      end Keep;
+   end Gates_Known;
+
+   function Change_Gate (Tested : Positive; Freedom : Natural) return Driver.Uncertain.Gate is
+      Key   : constant Gate_Key := (Tested, Freedom);
+      Value : Driver.Uncertain.Gate;
+      Found : Boolean;
+   begin
+      Gates_Known.Get (Key, Value, Found);
+      if not Found then
+         Value := Driver.Uncertain.Vector_Gate (Tested, Freedom);
+         Gates_Known.Keep (Key, Value);
+      end if;
+      return Value;
+   end Change_Gate;
+
    function Significant_Change (M : Model; G : Group_Id; D : Real_Array; Scale : Real) return Boolean is
       Q       : Real := 0.0;
       Tested  : Natural := 0;
@@ -260,7 +347,7 @@ package body Driver.Robot.Channels is
       end loop;
       return Tested > 0
         and then Driver.Uncertain.Significant
-          (Driver.Uncertain.Vector_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);
+          (Change_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);
    end Significant_Change;
 
    function Asked (M : Model; G : Group_Id; Beat : Natural) return Boolean is
@@ -431,20 +518,17 @@ package body Driver.Robot.Channels is
       end;
    end Measure;
 
-   function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean is
+   function Visible (M : Model; G : Group_Id; D : Real_Array; Steps : Real_Array) return Boolean is
       Seen : Real_Array := D;   --  the changes an eye could tell
    begin
       for C in Seen'Range loop
-         declare
-            V : constant Estimate := Visible_Step (M, G, C);
-         begin
-            --  A channel an eye watches changed by less than that eye can see
-            --  is no change: below that no eye can tell, however the held
-            --  reading jitters.
-            if Known (V) and then abs Seen (C) < V.Value then
-               Seen (C) := 0.0;
-            end if;
-         end;
+         --  A channel an eye watches changed by less than that eye can see
+         --  is no change: below that no eye can tell, however the held
+         --  reading jitters.
+         if Steps (Steps'First + C - Seen'First) < Real'Last and then abs Seen (C) < Steps (Steps'First + C - Seen'First)
+         then
+            Seen (C) := 0.0;
+         end if;
       end loop;
       --  What an eye could tell is motion when it is also significant against
       --  the noise: the change of two readings has twice the variance of one.
@@ -454,7 +538,25 @@ package body Driver.Robot.Channels is
       return Significant_Change (M, G, Seen, Sqrt (2.0));
    end Visible;
 
-   function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean is
+   function Steps_Of (M : Model; G : Group_Id) return Real_Array is
+      Steps : Real_Array (1 .. M.Groups (G).Size) := [others => Real'Last];
+   begin
+      for C in Steps'Range loop
+         declare
+            V : constant Estimate := Visible_Step (M, G, C);
+         begin
+            if Known (V) then
+               Steps (C) := V.Value;
+            end if;
+         end;
+      end loop;
+      return Steps;
+   end Steps_Of;
+
+   function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean is
+     (Visible (M, G, D, Steps_Of (M, G)));
+
+   function Moving (M : Model; G : Group_Id; Beat : Natural; Steps : Real_Array) return Boolean is
    begin
       if Beat = 0 or else not Has_Reading (M, G, Beat) or else not Has_Reading (M, G, Beat - 1) then
          return False;
@@ -465,8 +567,11 @@ package body Driver.Robot.Channels is
          for C in D'Range loop
             D (C) := Change (M, G, Beat, C);
          end loop;
-         return Visible (M, G, D);
+         return Visible (M, G, D, Steps);
       end;
    end Moving;
+
+   function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean is
+     (Moving (M, G, Beat, Steps_Of (M, G)));
 
 end Driver.Robot.Channels;

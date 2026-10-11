@@ -1,5 +1,7 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
+with Driver.Log;
 
 package body Driver.Robot.Hand.Tips is
 
@@ -22,12 +24,18 @@ package body Driver.Robot.Hand.Tips is
 
    --  The known lines of sight in order, lobe by lobe, open before closed;
    --  the fit numbers them so.
+   --  An entry goes to the fit when the eye saw the tip there, or when the lobe has no line of sight at all.
+   function In_Fit (S : Sight_Of) return Boolean is (S.Known or else not S.Lined);
+
+   function Any_Unlined (T : Sight_Table) return Boolean is
+     (for some Row of T => (for some S of Row => not S.Lined));
+
    function Index_Of (T : Sight_Table; Lobe : Positive; At_Opening : Opening) return Natural is
       N : Natural := 0;
    begin
       for L in T'Range loop
          for O in Opening loop
-            if T (L) (O).Known then
+            if In_Fit (T (L) (O)) then
                N := N + 1;
                if L = Lobe and then O = At_Opening then
                   return N;
@@ -43,7 +51,7 @@ package body Driver.Robot.Hand.Tips is
    begin
       for Row of T loop
          for S of Row loop
-            Count := Count + Boolean'Pos (S.Known);
+            Count := Count + Boolean'Pos (In_Fit (S));
          end loop;
       end loop;
       declare
@@ -52,11 +60,14 @@ package body Driver.Robot.Hand.Tips is
       begin
          for Row of T loop
             for S of Row loop
-               if S.Known then
+               if In_Fit (S) then
                   N := N + 1;
-                  --  The prior of the angles across the line: the eye's and the lobe's tip region's, together.
+                  --  The prior of the angles across the line: the eye's and the lobe's tip region's, together;
+                  --  an entry without a line keeps its mark (a sigma past any).
                   Result (N) := S.Ray;
-                  Result (N).Direction.Sigma := Sqrt (S.Ray.Direction.Sigma ** 2 + S.Spread ** 2);
+                  if S.Lined then
+                     Result (N).Direction.Sigma := Sqrt (S.Ray.Direction.Sigma ** 2 + S.Spread ** 2);
+                  end if;
                end if;
             end loop;
          end loop;
@@ -300,7 +311,8 @@ package body Driver.Robot.Hand.Tips is
                            Slide            => Slipped.Fraction * Travel.Mean,
                            Slide_Covariance => Slipped.Fraction_Sigma ** 2 * Outer (Travel.Mean, Travel.Mean)
                                                + Slipped.Fraction ** 2 * Travel.Covariance,
-                           Slide_Angle      => 0.0);   --  a vector tells it
+                           Slide_Angle      => 0.0,   --  a vector tells it, and the tip is a point: no line of its own
+                           others           => <>);
                         Of_Kept (N) := I;
                      end;
                   end if;
@@ -308,7 +320,9 @@ package body Driver.Robot.Hand.Tips is
             end loop;
             declare
                F : constant Driver.Robot.Hand.Touch.Fit_Result :=
-                 Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);
+                 Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)],
+                                              As => (if Any_Unlined (T) then Driver.Robot.Hand.Touch.Free
+                                                     else Driver.Robot.Hand.Touch.On_Sight));
             begin
                B.Free := Fit_Holders.To_Holder (F);
                if F.Ok then
@@ -340,10 +354,16 @@ package body Driver.Robot.Hand.Tips is
       end if;
    end Refit_Free;
 
-   --  How far the lobe's finger stood from where its free pixel puts it under a press, as an angle seen from the
-   --  eye: what was measured, with its sigma, and no more than the finger's whole travel; the whole travel when the
-   --  press could not say (the finger was not found where it was looked for, or has no edge to look for). A press
-   --  with no slides at all is one made where nothing was measured: nothing is taken to have slid.
+   --  The press's slide of its own lobe; none when it has no slides (nothing was measured at it).
+   function Own_Slide (K : Kept) return Slid is
+     (if K.Lobe <= Natural (K.Slides.Length) then K.Slides (K.Lobe) else Slid'(others => <>));
+
+   --  How far the lobe's finger may stand off the line the fit puts its tip on under a press, as an angle seen from
+   --  the eye: the slide's own sigma when the press carries the finger's own line (the slide is in the line, item 8);
+   --  the slide and its sigma when it was measured but no line could be made of it; and no more than the finger's
+   --  whole travel, which is all of it when the press could not say (the finger was not found where it was looked
+   --  for, or has no edge to look for). A press with no slides at all is one made where nothing was measured:
+   --  nothing is taken to have slid.
    function Slid_Angle (K : Kept; Sight : Sight_Of) return Real is
    begin
       if K.Lobe > Natural (K.Slides.Length) then
@@ -355,9 +375,42 @@ package body Driver.Robot.Hand.Tips is
          if not S.Known or else S.Pixels_Sigma >= Real'Last then
             return Sight.Travel;
          end if;
+         if S.Lined and then S.Line_Sigma < Real'Last then
+            return Real'Min (Sight.Travel, S.Line_Sigma);
+         end if;
          return Real'Min (Sight.Travel, Sight.Pitch * Sqrt (S.Pixels ** 2 + S.Pixels_Sigma ** 2));
       end;
    end Slid_Angle;
+
+   function Fit_Account (B : Book) return String is
+      use Ada.Strings.Unbounded;
+      Text : Unbounded_String :=
+        To_Unbounded_String (if B.Fitted.Is_Empty then "not fitted" elsif Fit_Ok (B) then "solved" else "not solved");
+   begin
+      if B.Sights.Is_Empty then
+         return To_String (Text);
+      end if;
+      declare
+         T : constant Sight_Table := Sights_Of (B);
+      begin
+         Append (Text, "; lines of sight known:");
+         for L in T'Range loop
+            Append (Text, " lobe" & L'Image & (if T (L) (Open).Known then " open" else "") & (if T (L) (Closed_Empty).Known then " closed" else ""));
+         end loop;
+         for K of B.Kept loop
+            if K.Lobe in T'Range then
+               Append (Text, "; lobe" & K.Lobe'Image & " " & (if K.Opening = Open then "open" else "closed")
+                       & ", slid up to " & Driver.Log.Image (Slid_Angle (K, T (K.Lobe) (K.Opening)), 4) & " of "
+                       & Driver.Log.Image (T (K.Lobe) (K.Opening).Travel, 4) & " rad, hit " & Driver.Log.Image (K.Hit, 4)
+                       & (if K.Agrees then ", rests" else ", left out"));
+            else
+               Append (Text, "; at " & (if K.Opening = Open then "open" else "closed") & " given to no lobe, "
+                       & (if K.Event.Approach.Sigma < Real'Last then "pressing along a way known" else "the way it pressed unknown"));
+            end if;
+         end loop;
+      end;
+      return To_String (Text);
+   end Fit_Account;
 
    procedure Refit (B : in out Book) is
       T     : constant Sight_Table := Sights_Of (B);
@@ -380,14 +433,17 @@ package body Driver.Robot.Hand.Tips is
                if K.Lobe > 0 and then Index_Of (T, K.Lobe, K.Opening) > 0 then
                   N := N + 1;
                   Presses (N) := (Tool => K.Event.Tool, Sight => Index_Of (T, K.Lobe, K.Opening), Surface => 1,
-                                  Slide_Angle => Slid_Angle (K, T (K.Lobe) (K.Opening)), others => <>);
+                                  Slide_Angle => Slid_Angle (K, T (K.Lobe) (K.Opening)),
+                                  Lined => Own_Slide (K).Lined, Line => Own_Slide (K).Line, others => <>);
                   Of_Kept (N) := I;
                end if;
             end;
          end loop;
          declare
             F : constant Driver.Robot.Hand.Touch.Fit_Result :=
-              Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);
+              Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)],
+                                           As => (if Any_Unlined (T) then Driver.Robot.Hand.Touch.Free
+                                                  else Driver.Robot.Hand.Touch.On_Sight));
          begin
             B.Fitted := Fit_Holders.To_Holder (F);
             for I in B.Kept.First_Index .. B.Kept.Last_Index loop

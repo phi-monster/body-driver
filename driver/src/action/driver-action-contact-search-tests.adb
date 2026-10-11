@@ -118,6 +118,49 @@ package body Driver.Action.Contact.Search.Tests is
       end loop;
    end Bar_Closes_Across_Its_Width;
 
+   --  Lobes whose ends dip as they close, measured half way: the touches are
+   --  where the measured path puts the ends at the fractions the search
+   --  reports, not where the straight way between the openings would.
+   procedure Curling_Lobes_Touch_Where_They_Are is
+      Bow : constant Real := 0.03;
+   begin
+      for Place of Both_Frames loop
+         declare
+            X : Scene := Make (Bar (0.2, 0.02, 0.02), Place, 0.4, 2);
+            Best : Candidate;
+            Found : Boolean;
+            Tried : Account;
+         begin
+            X.S.Hands.Replace_Element (1, Curling_Gripper (1, 1, 0.08, 0.04, Bow, Sigma));
+            Search (X, Slide (Up_Of (X)), Best, Found, Tried);
+            Check (Found, "no contact set raises a bar between curling lobes: " & Say (Tried));
+            if Found then
+               Check (Natural (Best.Touches.Length) = 2, "a two-lobe set has" & Best.Touches.Length'Image & " touches");
+               for T of Best.Touches loop
+                  declare
+                     Nearest, Straightest : Real := Real'Last;
+                  begin
+                     for L of X.S.Hands (1).Lobes loop
+                        declare
+                           F    : constant Real := Best.At_Touch (1);
+                           Path : constant Vec3 := Best.Tool * Tip_At (L, F);
+                           Line : constant Vec3 := Best.Tool * (Open_Tip (L) + F * (Closed_Tip (L) - Open_Tip (L)));
+                        begin
+                           Nearest := Real'Min (Nearest, abs (Path - T.Point));
+                           Straightest := Real'Min (Straightest, abs (Line - T.Point));
+                        end;
+                     end loop;
+                     Check (Nearest < 0.007, "a touch lies" & Driver.Log.Image (Nearest, 4)
+                            & " from where the measured path puts a lobe's end at the fraction reported");
+                     Check (Straightest > 0.010, "the straight way between the openings puts a lobe's end"
+                            & Driver.Log.Image (Straightest, 4) & " from the touch: the dip of the path was not used");
+                  end;
+               end loop;
+            end if;
+         end;
+      end loop;
+   end Curling_Lobes_Touch_Where_They_Are;
+
    --  A lobe is known only by where its end is: two ends touch a thing at two
    --  points, which hold no turn about the line between them, and no contact
    --  patch of a lobe is assumed. Flat scissors taken at their edges are
@@ -221,11 +264,13 @@ package body Driver.Action.Contact.Search.Tests is
             H : Hand_State := X.S.Hands (1);
             L : Lobe_State := H.Lobes (3);
          begin
-            if Change = 1 then
-               L.Closed_Tip := L.Closed_Tip + [0.0, 0.0, 20.0 * Sigma];
-            else
-               L.Open_Tip := L.Open_Tip + [0.0, 0.0, 20.0 * Sigma];
-            end if;
+            declare
+               Which : constant Positive := (if Change = 1 then L.Path.Last_Index else L.Path.First_Index);
+               N     : Tip_Node := L.Path (Which);
+            begin
+               N.Tip := N.Tip + [0.0, 0.0, 20.0 * Sigma];
+               L.Path.Replace_Element (Which, N);
+            end;
             H.Lobes.Replace_Element (3, L);
             X.S.Hands.Replace_Element (1, H);
             Check (Effector_Of (X.S, 1).Repeats = 1, "a hand with one lobe unlike the others is taken to repeat"
@@ -377,6 +422,8 @@ package body Driver.Action.Contact.Search.Tests is
       Driver.Tests.Register ("action.search.bar", "a gripper closes along a bar instead of across it, or is chosen "
                              & "at the very friction it needs and squeezes without bound",
                              Bar_Closes_Across_Its_Width'Access);
+      Driver.Tests.Register ("action.search.curling", "lobes whose ends dip as they close are taken to go straight "
+                             & "between their openings", Curling_Lobes_Touch_Where_They_Are'Access);
       Driver.Tests.Register ("action.search.scissors",
                              "two lobe ends are taken to hold flat scissors on a pinch line that misses their centre of mass",
                              Point_Ends_Do_Not_Hold_Flat_Scissors'Access);

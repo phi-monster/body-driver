@@ -101,8 +101,9 @@ package body Driver.Robot.Hand.Pressing.Tests is
       Terms : constant Natural := Fit.Terms (Joint_Count);
    begin
       R.Fitted := True;
-      for J of Truth loop
-         R.Joints.Append (Joint_Fit'(W => J.W, P => J.P, C => J.C, Slide => J.Slide));
+      for K in Truth'Range loop
+         R.Joints.Append (Joint_Fit'(W => Truth (K).W, P => Truth (K).P, C => Truth (K).C, Slide => Truth (K).Slide));
+         R.Chain.Append (K - Truth'First + 1);   --  built in the order of its readings
          R.Reference.Append (0.0);
       end loop;
       R.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
@@ -444,8 +445,9 @@ package body Driver.Robot.Hand.Pressing.Tests is
             end if;
          end;
       end loop;
-      --  An arm whose eye found no table has no way down, and an arm not
-      --  fitted no tool: nothing is aimed.
+      --  An arm whose eye found no table presses on the world's table turned into its frame when it is placed in the
+      --  world, and by touch along its line of sight, turning nothing, when it is not (item 14); only an arm not
+      --  fitted has no tool, and nothing is aimed.
       declare
          M     : Model;
          O     : constant Observation := Observed (1, Idle, Here, 0.0);
@@ -454,11 +456,24 @@ package body Driver.Robot.Hand.Pressing.Tests is
          Build (M, Placed);
          M.Kinematics (2).Result.Table := (others => <>);
          Aim (M, 2, 2, O, Along, Got);
-         Check (not Got.Ok, "a press is aimed down with no table found");
-         M.Kinematics (2).Result.Table := Table_Of (2);
-         M.Kinematics (2).Result.Fitted := False;
-         Aim (M, 2, 2, O, Along, Got);
-         Check (not Got.Ok, "a press is aimed by an arm that is not fitted");
+         Check (Got.Ok, "a placed arm whose eye found no table aims no press on the world's table");
+         Check (Got.Ok and then abs (Got.Into + Transpose (Placement_2.Rotation) * Table_Normal (1)) < 1.0e-6,
+                "the way down of a placed arm whose eye found no table is not the world's table turned into its frame");
+         declare
+            M2 : Model;   --  a body of its own: Build appends arms
+         begin
+            Build (M2, Unplaced);
+            M2.Kinematics (2).Result.Table := (others => <>);
+            Aim (M2, 2, 2, O, Along, Got);
+            Check (Got.Ok and then Got.Turn < 1.0e-9
+                   and then abs (Got.Into - Unit (Tool_In_Arm (M2, 2, O).Pose.Rotation * Along)) < 1.0e-9,
+                   "an arm not placed, whose eye found no table, does not press by touch along its line of sight (ok "
+                   & Got.Ok'Image & ", turn" & Got.Turn'Image & ")");
+            M2.Kinematics (2).Result.Table := Table_Of (2);
+            M2.Kinematics (2).Result.Fitted := False;
+            Aim (M2, 2, 2, O, Along, Got);
+            Check (not Got.Ok, "a press is aimed by an arm that is not fitted");
+         end;
       end;
    end Press_Planned_In_The_Arms_Frame;
 

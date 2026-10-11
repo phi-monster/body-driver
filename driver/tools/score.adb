@@ -34,6 +34,9 @@
 --  finger's farthest vertex along the tool's approach (from the tool link
 --  towards the fingers) is reported beside it.
 --
+--  score --scramble FILE ... scores a scrambled run (harness/robodojo_scramble): FILE is the draw the scrambler
+--  wrote beside it, and the recorded beats are paired with the truth through it.
+--
 --  score --check RECORDING TRUTH CLOSER LINK... checks the scorer itself: it
 --  makes estimates from the truth (tools at the given links, eyes at the
 --  cameras, rays from the lenses, one hand on the first link, read by the
@@ -273,8 +276,13 @@ procedure Score is
          end if;
          if Known then
             Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Recorded.Length), O);
+            --  Both groups of a command key's pair, each under its own path: which is the reading the driver tells by how
+            --  they change (Driver.Twins), and the truth pairs by the path of the reading.
             for G in Layout.Groups.First_Index .. Layout.Groups.Last_Index loop
                B.Readings.Include (To_String (Layout.Groups (G).Path), O.Readings.Element (G));
+               if Length (Layout.Groups (G).Echo_Path) > 0 and then O.Echoes.Element (G)'Length > 0 then
+                  B.Readings.Include (To_String (Layout.Groups (G).Echo_Path), O.Echoes.Element (G));
+               end if;
             end loop;
             Recorded.Append (B);
          end if;
@@ -290,15 +298,93 @@ procedure Score is
       Driver.Recording.Close (R);
    end Read_Recording;
 
+   ---------------------------------------------------------------------------
+   --  A scrambled run (harness/robodojo_scramble): the draw the simulator's side gave the driver, read from the
+   --  file the scrambler wrote beside the run (score --scramble FILE ...). The driver was given every key under a
+   --  drawn name and every group's channels in a drawn order, each with its own sign, scale and zero.
+
+   Scrambled : Boolean := False;
+   package Text_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, String);
+   Drawn_Names : Text_Maps.Map;   --  real key -> the name the driver was given
+   Draw_Order, Draw_Sign, Draw_Scale, Draw_Zero : Value_Maps.Map;   --  per real last key of a group
+
+   procedure Read_Scramble (Path : String) is
+      use Driver.Json;
+      F       : Ada.Text_IO.File_Type;
+      Content : Unbounded_String;
+      Doc     : Document;
+      Ok      : Boolean;
+      Why     : Unbounded_String;
+   begin
+      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+      while not Ada.Text_IO.End_Of_File (F) loop
+         Append (Content, Ada.Text_IO.Get_Line (F));
+      end loop;
+      Ada.Text_IO.Close (F);
+      Parse (To_String (Content), Doc, Ok, Why);
+      if not Ok then
+         raise Program_Error with "the scramble file " & Path & " does not parse: " & To_String (Why);
+      end if;
+      declare
+         Names  : constant Node := Lookup (Doc, Root (Doc), "names");
+         Groups : constant Node := Lookup (Doc, Root (Doc), "groups");
+      begin
+         for I in 1 .. Count (Doc, Names) loop
+            Drawn_Names.Include (Member_Name (Doc, Names, I), Text (Doc, Member_Value (Doc, Names, I)));
+         end loop;
+         for I in 1 .. Count (Doc, Groups) loop
+            declare
+               Key : constant String := Member_Name (Doc, Groups, I);
+               G   : constant Node := Member_Value (Doc, Groups, I);
+            begin
+               Draw_Order.Include (Key, Numbers_Of (Doc, Lookup (Doc, G, "order")));
+               Draw_Sign.Include (Key, Numbers_Of (Doc, Lookup (Doc, G, "sign")));
+               Draw_Scale.Include (Key, Numbers_Of (Doc, Lookup (Doc, G, "scale")));
+               Draw_Zero.Include (Key, Numbers_Of (Doc, Lookup (Doc, G, "zero")));
+            end;
+         end loop;
+      end;
+      Scrambled := True;
+   end Read_Scramble;
+
+   function Drawn (Key : String) return String is
+     (if Scrambled and then Drawn_Names.Contains (Key) then Drawn_Names (Key) else Key);
+
+   --  A truth state's values as the driver was given them: channel I is sign times scale times channel Order (I)
+   --  of the real group, plus zero, in the scrambler's order of operations. The scales are powers of two and the
+   --  signs one either way, so the product is exact and the sum rounds once, here as there: the values agree to
+   --  the bit, and the pairing stays exact.
+   function Through_Draw (Key : String; T : Real_Array) return Real_Array is
+   begin
+      if not Scrambled or else not Draw_Order.Contains (Key)
+        or else Value_Maps.Element (Draw_Order, Key)'Length /= T'Length
+      then
+         return T;
+      end if;
+      declare
+         O : constant Real_Array := Draw_Order (Key);
+         S : constant Real_Array := Draw_Sign (Key);
+         K : constant Real_Array := Draw_Scale (Key);
+         Z : constant Real_Array := Draw_Zero (Key);
+         Y : Real_Array (1 .. T'Length);
+      begin
+         for I in Y'Range loop
+            Y (I) := S (S'First + I - 1) * K (K'First + I - 1) * T (T'First + Natural (O (O'First + I - 1)))
+                     + Z (Z'First + I - 1);
+         end loop;
+         return Y;
+      end;
+   end Through_Draw;
+
    function Same_State (B : Recorded_Beat; L : Truth_Line) return Boolean is
       Common : Natural := 0;
    begin
       for C in L.State.Iterate loop
          declare
-            Key : constant String := "state/" & Value_Maps.Key (C);
+            Key : constant String := Drawn ("state") & "/" & Drawn (Value_Maps.Key (C));
          begin
             if B.Readings.Contains (Key) then
-               if B.Readings (Key) /= Value_Maps.Element (C) then
+               if B.Readings (Key) /= Through_Draw (Value_Maps.Key (C), Value_Maps.Element (C)) then
                   return False;
                end if;
                Common := Common + 1;
@@ -330,12 +416,23 @@ procedure Score is
    ---------------------------------------------------------------------------
    --  Estimates
 
+   package Flag_Vectors is new Ada.Containers.Vectors (Positive, Boolean);
+
    type Estimated_Beat is record
       Tools, Eyes : Pose_Vectors.Vector;   --  driver units
+      Own         : Flag_Vectors.Vector;   --  per tool: in its arm's own frame, not the driver's world ("frames")
    end record;
 
    package Estimate_Maps is new Ada.Containers.Indefinite_Ordered_Maps (Natural, Estimated_Beat);
    Estimated : Estimate_Maps.Map;   --  by beat
+
+   --  The tool's estimate at that beat is in its arm's own frame (the driver had not placed the arm in its world).
+   function Own_Frame (E : Estimated_Beat; Tool : Positive) return Boolean is
+     (Tool <= Natural (E.Own.Length) and then E.Own (Tool));
+
+   --  Some beat has the tool's estimate in that frame.
+   function Any_Beats (Tool : Positive; Own : Boolean) return Boolean is
+     (for some E of Estimated => Natural (E.Tools.Length) >= Tool and then Own_Frame (E, Tool) = Own);
 
    type Ray_Sample is record
       U, V : Real;
@@ -434,6 +531,15 @@ procedure Score is
                for I in 1 .. Count (Doc, Eyes) loop
                   B.Eyes.Append (From_Matrix (Doc, Element (Doc, Eyes, I)));
                end loop;
+               declare
+                  Frames : constant Node := Lookup (Doc, Root (Doc), "frames");
+               begin
+                  if Frames /= No_Node then
+                     for I in 1 .. Count (Doc, Frames) loop
+                        B.Own.Append (Text (Doc, Element (Doc, Frames, I)) = "own");
+                     end loop;
+                  end if;
+               end;
                Estimated.Include (Natural (Number (Doc, Lookup (Doc, Root (Doc), "beat"))), B);
             end;
          elsif Ok and then Lookup (Doc, Root (Doc), "rays") /= No_Node then
@@ -697,6 +803,7 @@ procedure Score is
 
    type Arm_Fit is record
       Found : Boolean := False;
+      Own   : Boolean := False;   --  fitted in the arm's own frame, with a similarity of its own ("frames": own)
       Link  : Unbounded_String;
       X     : Parameters := [others => 0.0];
       --  The links are ranked by the root mean square of the test positions'
@@ -759,7 +866,7 @@ procedure Score is
       return Have;
    end Rigid_With;
 
-   procedure Split_Pairs (Tool : Positive; Link : String; Train, Test : out Pair_Vectors.Vector) is
+   procedure Split_Pairs (Tool : Positive; Link : String; Own : Boolean; Train, Test : out Pair_Vectors.Vector) is
       --  Beats at which the estimate did not move are one pose; distinct
       --  poses alternate between fitting and testing. The poses are the
       --  estimate's, as in the ranking: on the truth's own, a link that moved
@@ -772,7 +879,7 @@ procedure Score is
       Test.Clear;
       for B in Recorded.First_Index .. Recorded.Last_Index loop
          if Recorded (B).Line > 0 and then Estimated.Contains (B)
-           and then Natural (Estimated (B).Tools.Length) >= Tool
+           and then Natural (Estimated (B).Tools.Length) >= Tool and then Own_Frame (Estimated (B), Tool) = Own
            and then Truth (Recorded (B).Line).Links.Contains (Link)
          then
             declare
@@ -797,7 +904,7 @@ procedure Score is
       Median, Spread : Real := Real'Last;
    end record;
 
-   function Rotation_Mismatch (Tool : Positive; Link : String) return Turn_Mismatch is
+   function Rotation_Mismatch (Tool : Positive; Link : String; Own : Boolean) return Turn_Mismatch is
       --  How much the tool turns between the estimate's successive distinct
       --  poses is the same angle whatever the world frame and the offset on
       --  the link (S and X cancel in R_i^T R_j), so the tool's true link turns
@@ -814,7 +921,7 @@ procedure Score is
    begin
       for B in Recorded.First_Index .. Recorded.Last_Index loop
          if Recorded (B).Line > 0 and then Estimated.Contains (B)
-           and then Natural (Estimated (B).Tools.Length) >= Tool
+           and then Natural (Estimated (B).Tools.Length) >= Tool and then Own_Frame (Estimated (B), Tool) = Own
            and then Truth (Recorded (B).Line).Links.Contains (Link)
          then
             declare
@@ -864,107 +971,131 @@ procedure Score is
       end loop;
       for Tool in 1 .. Tools loop
          declare
-            Best : Arm_Fit;
-            Best_Test : Pair_Vectors.Vector;
-            Best_Length : Real := 0.0;
-            Least : Turn_Mismatch;
-            Turns : array (1 .. Natural (Links.Length)) of Turn_Mismatch;
+            --  A tool's estimates are in the driver's one world or, while the driver had not placed its arm there, in
+            --  the arm's own frame (the estimates say which, "frames"): those are fitted with a similarity of their
+            --  own, so the hand of an arm not placed is scored still (item 11). The world's fit is the tool's when it
+            --  has one.
+            Fits : array (Boolean) of Arm_Fit;
          begin
-            --  Only links that turn like the tool, within Z of the best one's
-            --  own scatter, are worth a fit.
-            for I in Turns'Range loop
-               Turns (I) := Rotation_Mismatch (Tool, Links (I));
-               if Turns (I).Median < Least.Median then
-                  Least := Turns (I);
+            for Own in Boolean loop
+               if Any_Beats (Tool, Own) then
+                  declare
+                     Best : Arm_Fit;
+                     Best_Test : Pair_Vectors.Vector;
+                     Best_Length : Real := 0.0;
+                     Least : Turn_Mismatch;
+                     Turns : array (1 .. Natural (Links.Length)) of Turn_Mismatch;
+                  begin
+                     --  Only links that turn like the tool, within Z of the best one's
+                     --  own scatter, are worth a fit.
+                     for I in Turns'Range loop
+                        Turns (I) := Rotation_Mismatch (Tool, Links (I), Own);
+                        if Turns (I).Median < Least.Median then
+                           Least := Turns (I);
+                        end if;
+                     end loop;
+                     for I in Turns'Range loop
+                        declare
+                           Link        : constant String := Links (I);
+                           Train, Test : Pair_Vectors.Vector;
+                        begin
+                           --  No link to rank when the estimate never moved (A16's arm 2 stood after its boot).
+                           if Least.Median < Real'Last
+                             and then Turns (I).Median <= Least.Median + Driver.Conventions.Z * Least.Spread
+                           then
+                              Split_Pairs (Tool, Link, Own, Train, Test);
+                           end if;
+                           --  A world of its own needs both the estimate and the link to
+                           --  have moved: the scale is the ratio of their spreads.
+                           if Natural (Train.Length) >= 5 and then not Test.Is_Empty
+                             and then ((Has_World and then not Own)
+                                      or else (Spread (Train, True) > 0.0 and then Spread (Train, False) > 0.0))
+                           then
+                              declare
+                                 X : constant Parameters :=
+                                   Best_Fit (Train, Has_World and then not Own, World_X,
+                                             (if Has_World and then not Own then World_Length
+                                              else Spread (Train, True)));
+                                 Squares : Real := 0.0;
+                              begin
+                                 for P of Test loop
+                                    declare
+                                       D : constant Vec3 := Similarity (X, P.Est).Translation - P.Truth.Translation;
+                                    begin
+                                       Squares := Squares + D * D;
+                                    end;
+                                 end loop;
+                                 if Sqrt (Squares / Real (Test.Length)) < Best.Rank then
+                                    Best := (Found => True, Link => To_Unbounded_String (Link), X => X,
+                                             Rank => Sqrt (Squares / Real (Test.Length)), others => <>);
+                                    Best_Test := Test;
+                                    Best_Length := Spread (Train, True);
+                                 end if;
+                              end;
+                           end if;
+                        end;
+                     end loop;
+                     if not Best.Found then
+                        Ada.Text_IO.Put_Line
+                          ("tool" & Tool'Image & ": too few distinct poses to fit (the estimate moves too little)");
+                     else
+                        declare
+                           Position, Rotation : Real_Array (1 .. Natural (Best_Test.Length));
+                           Travel : constant Real := Millimetres_Per_Metre * Spread (Best_Test, True);
+                        begin
+                           for I in Position'Range loop
+                              declare
+                                 M : constant Rigid := Similarity (Best.X, Best_Test (I).Est);
+                              begin
+                                 Position (I) :=
+                                   Millimetres_Per_Metre * abs (M.Translation - Best_Test (I).Truth.Translation);
+                                 Rotation (I) :=
+                                   Degrees_Per_Radian * Angle (Transpose (Best_Test (I).Truth.Rotation) * M.Rotation);
+                              end;
+                           end loop;
+                           --  How far the test poses lie apart is said with their errors:
+                           --  an error is only as telling as the motion it was found over.
+                           --  A link that moves no more than the largest error has not
+                           --  shown which link carries the tool (A16's arm 2 stood: every
+                           --  standing link of it fitted alike), so it carries neither
+                           --  the world nor a hand.
+                           if Travel <= Largest (Position) then
+                              Best.Found := False;
+                              Ada.Text_IO.Put_Line
+                                ("tool" & Tool'Image & ": its true link moves no more over the" & Best_Test.Length'Image
+                                 & " test poses (" & Image (Travel, 3) & " mm) than its largest error ("
+                                 & Image (Largest (Position), 3)
+                                    & " mm), so which link carries it is not known; its pose"
+                                 & " is scored as its eye's");
+                           else
+                              Best.Largest_Position := Largest (Position) / Millimetres_Per_Metre;
+                              Best.Largest_Turn := Largest (Rotation) / Degrees_Per_Radian;
+                              if not Has_World and then not Own then
+                                 Has_World := True;
+                                 World_X := Best.X;
+                                 World_Length := Best_Length;
+                                 World_Tool := Tool;
+                              end if;
+                              Ada.Text_IO.Put_Line
+                                ("tool" & Tool'Image & " (true link " & To_String (Best.Link) & "):"
+                                   & Best_Test.Length'Image
+                                 & " test poses spread over " & Image (Travel, 1)
+                                 & " mm, position median " & Image (Driver.Stats.Median (Position), 2) & " mm, largest "
+                                 & Image (Largest (Position), 2) & " mm; rotation median "
+                                 & Image (Driver.Stats.Median (Rotation), 3) & " deg, largest "
+                                    & Image (Largest (Rotation), 3)
+                                 & " deg; scale " & Image (Scale_Of (Best.X), 6) & " m per unit"
+                                 & (if Own then ", in a world of its own: the driver had not placed its arm"
+                                     elsif World_Tool = Tool then "" else ", in the world of tool" & World_Tool'Image));
+                           end if;
+                        end;
+                     end if;
+                     Best.Own := Own;
+                     Fits (Own) := Best;
+                  end;
                end if;
             end loop;
-            for I in Turns'Range loop
-               declare
-                  Link        : constant String := Links (I);
-                  Train, Test : Pair_Vectors.Vector;
-               begin
-                  --  No link to rank when the estimate never moved (A16's arm 2 stood after its boot).
-                  if Least.Median < Real'Last
-                    and then Turns (I).Median <= Least.Median + Driver.Conventions.Z * Least.Spread
-                  then
-                     Split_Pairs (Tool, Link, Train, Test);
-                  end if;
-                  --  A world of its own needs both the estimate and the link to
-                  --  have moved: the scale is the ratio of their spreads.
-                  if Natural (Train.Length) >= 5 and then not Test.Is_Empty
-                    and then (Has_World or else (Spread (Train, True) > 0.0 and then Spread (Train, False) > 0.0))
-                  then
-                     declare
-                        X : constant Parameters :=
-                          Best_Fit (Train, Has_World, World_X, (if Has_World then World_Length else Spread (Train, True)));
-                        Squares : Real := 0.0;
-                     begin
-                        for P of Test loop
-                           declare
-                              D : constant Vec3 := Similarity (X, P.Est).Translation - P.Truth.Translation;
-                           begin
-                              Squares := Squares + D * D;
-                           end;
-                        end loop;
-                        if Sqrt (Squares / Real (Test.Length)) < Best.Rank then
-                           Best := (Found => True, Link => To_Unbounded_String (Link), X => X,
-                                    Rank => Sqrt (Squares / Real (Test.Length)), others => <>);
-                           Best_Test := Test;
-                           Best_Length := Spread (Train, True);
-                        end if;
-                     end;
-                  end if;
-               end;
-            end loop;
-            if not Best.Found then
-               Ada.Text_IO.Put_Line ("tool" & Tool'Image & ": too few distinct poses to fit (the estimate moves too little)");
-            else
-               declare
-                  Position, Rotation : Real_Array (1 .. Natural (Best_Test.Length));
-                  Travel : constant Real := Millimetres_Per_Metre * Spread (Best_Test, True);
-               begin
-                  for I in Position'Range loop
-                     declare
-                        M : constant Rigid := Similarity (Best.X, Best_Test (I).Est);
-                     begin
-                        Position (I) := Millimetres_Per_Metre * abs (M.Translation - Best_Test (I).Truth.Translation);
-                        Rotation (I) := Degrees_Per_Radian * Angle (Transpose (Best_Test (I).Truth.Rotation) * M.Rotation);
-                     end;
-                  end loop;
-                  --  How far the test poses lie apart is said with their errors:
-                  --  an error is only as telling as the motion it was found over.
-                  --  A link that moves no more than the largest error has not
-                  --  shown which link carries the tool (A16's arm 2 stood: every
-                  --  standing link of it fitted alike), so it carries neither
-                  --  the world nor a hand.
-                  if Travel <= Largest (Position) then
-                     Best.Found := False;
-                     Ada.Text_IO.Put_Line
-                       ("tool" & Tool'Image & ": its true link moves no more over the" & Best_Test.Length'Image
-                        & " test poses (" & Image (Travel, 3) & " mm) than its largest error ("
-                        & Image (Largest (Position), 3) & " mm), so which link carries it is not known; its pose"
-                        & " is scored as its eye's");
-                  else
-                     Best.Largest_Position := Largest (Position) / Millimetres_Per_Metre;
-                     Best.Largest_Turn := Largest (Rotation) / Degrees_Per_Radian;
-                     if not Has_World then
-                        Has_World := True;
-                        World_X := Best.X;
-                        World_Length := Best_Length;
-                        World_Tool := Tool;
-                     end if;
-                     Ada.Text_IO.Put_Line
-                       ("tool" & Tool'Image & " (true link " & To_String (Best.Link) & "):" & Best_Test.Length'Image
-                        & " test poses spread over " & Image (Travel, 1)
-                        & " mm, position median " & Image (Driver.Stats.Median (Position), 2) & " mm, largest "
-                        & Image (Largest (Position), 2) & " mm; rotation median "
-                        & Image (Driver.Stats.Median (Rotation), 3) & " deg, largest " & Image (Largest (Rotation), 3)
-                        & " deg; scale " & Image (Scale_Of (Best.X), 6) & " m per unit"
-                        & (if World_Tool = Tool then "" else ", in the world of tool" & World_Tool'Image));
-                  end if;
-               end;
-            end if;
-            Arm_Fits.Append (Best);
+            Arm_Fits.Append (if Fits (False).Found then Fits (False) else Fits (True));
          end;
       end loop;
    end Score_Arms;
@@ -1282,9 +1413,9 @@ procedure Score is
             declare
                Train, Test : Pair_Vectors.Vector;
             begin
-               Split_Pairs (Arm, To_String (Link), Train, Test);
+               Split_Pairs (Arm, To_String (Link), Fit.Own, Train, Test);
                if Natural (Train.Length) >= 5 then
-                  Fit.X := Best_Fit (Train, True, World_X, World_Length);
+                  Fit.X := Best_Fit (Train, not Fit.Own, World_X, (if Fit.Own then Spread (Train, True) else World_Length));
                   Fit.Link := Link;
                end if;
             end;
@@ -1651,33 +1782,42 @@ procedure Score is
 
    use Ada.Command_Line;
 
+   --  "--scramble FILE" first, when the run was scrambled; the arguments after it are as without it.
+   Skip : constant Natural := (if Argument_Count >= 2 and then Argument (1) = "--scramble" then 2 else 0);
+   function Count return Natural is (Argument_Count - Skip);
+   function Arg (N : Positive) return String is (Argument (Skip + N));
+
 begin
-   if Argument_Count = 5 and then Argument (1) = "--project" then
-      Read_Truth (Argument (3));
-      Read_Recording (Argument (2));
+   if Skip > 0 then
+      Read_Scramble (Argument (2));
+   end if;
+   if Count = 5 and then Arg (1) = "--project" then
+      Read_Truth (Arg (3));
+      Read_Recording (Arg (2));
       Pair_Beats;
-      Project (Natural'Value (Argument (4)), Positive'Value (Argument (5)));
+      Project (Natural'Value (Arg (4)), Positive'Value (Arg (5)));
       return;
    end if;
-   if Argument_Count >= 5 and then Argument (1) = "--check" then
-      Read_Truth (Argument (3));
-      Read_Recording (Argument (2));
+   if Count >= 5 and then Arg (1) = "--check" then
+      Read_Truth (Arg (3));
+      Read_Recording (Arg (2));
       Pair_Beats;
       declare
          Links : Name_Vectors.Vector;
       begin
-         for I in 5 .. Argument_Count loop
-            Links.Append (Argument (I));
+         for I in 5 .. Count loop
+            Links.Append (Arg (I));
          end loop;
-         Synthesize (Argument (4), Links);
+         Synthesize (Arg (4), Links);
       end;
-   elsif Argument_Count = 3 then
-      Read_Truth (Argument (3));
-      Read_Recording (Argument (2));
+   elsif Count = 3 then
+      Read_Truth (Arg (3));
+      Read_Recording (Arg (2));
       Pair_Beats;
-      Read_Estimates (Argument (1));
+      Read_Estimates (Arg (1));
    else
-      Line (Core, "usage: score ESTIMATES RECORDING TRUTH, or score --check RECORDING TRUTH CLOSER LINK...");
+      Line (Core, "usage: score [--scramble FILE] ESTIMATES RECORDING TRUTH, or score [--scramble FILE] --check RECORDING "
+            & "TRUTH CLOSER LINK...");
       Set_Exit_Status (Failure);
       return;
    end if;

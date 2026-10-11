@@ -280,13 +280,29 @@ package body Driver.Action.Snapshots.Tests is
    begin
       for Sign in -1 .. 1 loop
          if Sign /= 0 then
-            H.Lobes.Append (Lobe_State'(Open_Tip   => [Real (Sign) * Opening / 2.0, 0.0, Depth],
-                             Closed_Tip => [0.0, 0.0, Depth],
-                             Tip_Sigma  => Sigma));
+            H.Lobes.Append (Straight ([Real (Sign) * Opening / 2.0, 0.0, Depth], [0.0, 0.0, Depth], Sigma));
          end if;
       end loop;
       return H;
    end Gripper;
+
+   function Curling_Gripper (Arm : Arm_Id; Hand : Hand_Id; Opening, Depth, Bow, Sigma : Real) return Hand_State is
+      H : Hand_State := Hand_Of (Arm, Hand, Depth, Sigma);
+   begin
+      for Sign in -1 .. 1 loop
+         if Sign /= 0 then
+            declare
+               L : Lobe_State;
+            begin
+               L.Path.Append (Tip_Node'(Fraction => 0.0, Tip => [Real (Sign) * Opening / 2.0, 0.0, Depth], Sigma => Sigma));
+               L.Path.Append (Tip_Node'(Fraction => 0.5, Tip => [Real (Sign) * Opening / 4.0, Bow, Depth], Sigma => Sigma));
+               L.Path.Append (Tip_Node'(Fraction => 1.0, Tip => [0.0, 0.0, Depth], Sigma => Sigma));
+               H.Lobes.Append (L);
+            end;
+         end if;
+      end loop;
+      return H;
+   end Curling_Gripper;
 
    function Five_Lobes (Arm : Arm_Id; Hand : Hand_Id; Radius, Closed_Radius, Depth, Sigma : Real) return Hand_State is
       H : Hand_State := Hand_Of (Arm, Hand, Depth, Sigma);
@@ -296,9 +312,7 @@ package body Driver.Action.Snapshots.Tests is
             A : constant Real := 2.0 * Pi * Real (K) / 5.0;
             D : constant Vec3 := [Cos (A), Sin (A), 0.0];
          begin
-            H.Lobes.Append (Lobe_State'(Open_Tip   => Radius * D + [0.0, 0.0, Depth],
-                             Closed_Tip => Closed_Radius * D + [0.0, 0.0, Depth],
-                             Tip_Sigma  => Sigma));
+            H.Lobes.Append (Straight (Radius * D + [0.0, 0.0, Depth], Closed_Radius * D + [0.0, 0.0, Depth], Sigma));
          end;
       end loop;
       return H;

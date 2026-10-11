@@ -41,6 +41,7 @@ with Driver.Observations;
 with Driver.Protocol;
 with Driver.Recording;
 with Driver.Replies;
+with Driver.Twins;
 with Driver.Robot;
 with Driver.Robot.Boot;
 with Driver.Robot.Hand;
@@ -172,6 +173,7 @@ procedure Body_Driver is
    Pending  : Driver.Commands.Command := Driver.Commands.Hold;   --  the decider's command for this beat
    Sent     : Driver.Commands.Command := Driver.Commands.Hold;   --  the last command sent
    Holds    : Driver.Replies.State;
+   Twins    : Driver.Twins.Watch;   --  which group of each command key's pair is its reading
 
    --  What a robot message gives the models: a new episode, and an
    --  observation with the command in effect while it was captured (the last
@@ -254,6 +256,7 @@ procedure Body_Driver is
          M.Sent := Sent;
          if Observed then
             Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), M.O);
+            Driver.Twins.Order (Twins, Layout, M.O, Sent);
             Current := M.O;
             Have_Obs := True;
          end if;

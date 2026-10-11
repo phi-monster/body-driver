@@ -77,6 +77,35 @@ package body Driver.Robot.Hand.Views is
    --  not. A command past the channel's travel moves its reading on (a
    --  reading that echoes the command does) but nothing the eye sees.
 
+   procedure Keep_Between (P : in out End_Pair; V : View; Channel : Positive; Noise : Real);
+   --  The view among the pair's stops, when it has the two frames a view is
+   --  judged by: in the place its reading gives it, or in place of the stop
+   --  at its reading when it has more frames than that one.
+
+   procedure Keep_Between (P : in out End_Pair; V : View; Channel : Positive; Noise : Real) is
+      Here : constant Real := Reading (V, Channel);
+   begin
+      if Driver.Pixels.Frames (V.Frames) < 2 then
+         return;
+      end if;
+      for I in P.Between.First_Index .. P.Between.Last_Index loop
+         declare
+            There : constant Real := Reading (P.Between (I), Channel);
+         begin
+            if not Significant (Here - There, Noise) then
+               if Driver.Pixels.Frames (V.Frames) > Driver.Pixels.Frames (P.Between (I).Frames) then
+                  P.Between.Replace_Element (I, V);
+               end if;
+               return;
+            elsif Here < There then
+               P.Between.Insert (I, V);
+               return;
+            end if;
+         end;
+      end loop;
+      P.Between.Append (V);
+   end Keep_Between;
+
    procedure Consider
      (T          : in out Tracker;
       V          : View;
@@ -124,12 +153,16 @@ package body Driver.Robot.Hand.Views is
                      High : constant Real := Reading (P.High.Element, C);
                      Here : constant Real := Reading (V, C);
                      Frames_Here : constant Natural := Driver.Pixels.Frames (V.Frames);
+                     Was_Low  : constant View := P.Low.Element;
+                     Was_High : constant View := P.High.Element;
                   begin
                      --  Beyond an end and showing more, or at it with more frames
                      --  to say how still it was.
                      if Significant (Low - Here, Noise) and then Here < Low then
                         if Shows_More (P.Low.Element, V) then
                            P.Low := View_Holders.To_Holder (V);
+                           --  The end this view replaced is a reading the channel stood still at, between the ends now.
+                           Keep_Between (P, Was_Low, C, Noise);
                         end if;
                      elsif not Significant (Low - Here, Noise)
                        and then Frames_Here > Driver.Pixels.Frames (P.Low.Element.Frames)
@@ -139,11 +172,18 @@ package body Driver.Robot.Hand.Views is
                      if Significant (Here - High, Noise) and then Here > High then
                         if Shows_More (P.High.Element, V) then
                            P.High := View_Holders.To_Holder (V);
+                           Keep_Between (P, Was_High, C, Noise);
                         end if;
                      elsif not Significant (Here - High, Noise)
                        and then Frames_Here > Driver.Pixels.Frames (P.High.Element.Frames)
                      then
                         P.High := View_Holders.To_Holder (V);
+                     end if;
+                     --  A view between the ends, significantly apart from both: a stop of the travel.
+                     if Significant (Here - Low, Noise) and then Here > Low
+                       and then Significant (High - Here, Noise) and then Here < High
+                     then
+                        Keep_Between (P, V, C, Noise);
                      end if;
                   end;
                end if;
@@ -305,5 +345,11 @@ package body Driver.Robot.Hand.Views is
 
    function High_Closer (T : Tracker; Channel : Positive) return Real_Array is
      (T.Ends.Constant_Reference.Element (Channel).High.Constant_Reference.Element.Closer.Element);
+
+   function Stops (T : Tracker; Channel : Positive) return Natural is
+     (if Has_Ends (T, Channel) then Natural (T.Ends.Constant_Reference.Element (Channel).Between.Length) else 0);
+
+   function Stop (T : Tracker; Channel : Positive; K : Positive) return View is
+     (T.Ends.Constant_Reference.Element (Channel).Between (K));
 
 end Driver.Robot.Hand.Views;

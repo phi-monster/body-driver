@@ -1,5 +1,5 @@
 --  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT] [--watch EYE]
---         [--readings GROUP]
+--         [--readings GROUP] [--dump DIR EYE EVERY] [--dump-only]
 --
 --  Feeds a recording (Driver.Recording format, uncompressed; it is read once,
 --  forward, so "zstd -dc run.rec.zst | replay /dev/stdin ..." needs no copy on
@@ -37,6 +37,8 @@
 --  still and settled, and how far its cells moved; with --readings GROUP, one
 --  on that group (Driver.Robot.Group_Watch): its readings, their change in
 --  units of their noise, whether it moved and was pushed, and its target.
+--  With --dump DIR EYE EVERY, the eye's picture at every EVERY-th beat is written
+--  to DIR/eyeEYE_BEAT.ppm (a study's way of seeing what the estimators saw).
 --
 --  The estimators' service calls are answered as Driver.Services describes
 --  for a replay: by the live service when --inst or --eye names one (a
@@ -49,6 +51,7 @@ with Ada.Command_Line;
 with Ada.Exceptions;
 with Ada.Containers.Indefinite_Ordered_Maps;
 with Ada.Strings.Fixed;
+with Ada.Streams.Stream_IO;
 with Ada.Text_IO;
 with Ada.Strings.Unbounded;
 with Driver.Apart;
@@ -68,6 +71,7 @@ with Driver.Robot;
 with Driver.Robot.Boot;
 with Driver.Robot.Hand;
 with Driver.Services;
+with Driver.Twins;
 with Driver.Uncertain;
 with Driver.World;
 
@@ -94,6 +98,12 @@ procedure Replay is
    More     : Boolean := True;
 
    Layout   : Driver.Observations.Layout;
+   Twins    : Driver.Twins.Watch;   --  which group of each command key's pair is its reading, as the driver finds it
+
+   --  Where a group's readings are in the observation: its layout path, or its echo path when the driver found its
+   --  pair the other way round (Driver.Twins).
+   function Reading_Path (G : Driver.Observations.Group_Id) return Ada.Strings.Unbounded.Unbounded_String is
+     (if Driver.Twins.Reading_Is_Echo_Path (Twins, G) then Layout.Groups (G).Echo_Path else Layout.Groups (G).Path);
    Known    : Boolean := False;
    Beat     : Natural := 0;
    Episodes : Natural := 0;
@@ -120,9 +130,24 @@ procedure Replay is
    procedure Write_Beat (O : Driver.Observations.Observation) is
       Line_Text : Unbounded_String := To_Unbounded_String ("{""beat"":" & Natural'Image (Natural (O.Beat)) & ",""tools"":[");
    begin
+      --  A tool in the driver's world or, while the driver has not placed its arm there, in the arm's own frame
+      --  (Tool_In_Arm), which "frames" says per tool: the scorer fits such a tool with a similarity of its own, so the
+      --  hand of an arm not placed is scored still (item 11).
+      for A in 1 .. Driver.Robot.Arm_Count (Robot) loop
+         declare
+            Arm    : constant Driver.Robot.Arm_Id := Driver.Robot.Arm_Id (A);
+            Placed : constant Boolean := Driver.Uncertain.Known (Driver.Robot.Arm_Unit (Robot, Arm));
+         begin
+            Append (Line_Text, (if A > 1 then "," else "")
+                    & Pose_Json ((if Placed then Driver.Robot.Tool_Pose (Robot, Arm, O).Pose
+                                  else Driver.Robot.Tool_In_Arm (Robot, Arm, O).Pose)));
+         end;
+      end loop;
+      Append (Line_Text, "],""frames"":[");
       for A in 1 .. Driver.Robot.Arm_Count (Robot) loop
          Append (Line_Text, (if A > 1 then "," else "")
-                 & Pose_Json (Driver.Robot.Tool_Pose (Robot, Driver.Robot.Arm_Id (A), O).Pose));
+                 & (if Driver.Uncertain.Known (Driver.Robot.Arm_Unit (Robot, Driver.Robot.Arm_Id (A)))
+                    then """world""" else """own"""));
       end loop;
       Append (Line_Text, "],""eyes"":[");
       for E in 1 .. Driver.Robot.Eye_Count (Robot) loop
@@ -183,7 +208,7 @@ procedure Replay is
             H : constant Hand_Id := Hand_Id (Id);
          begin
             Append (Line_Text, (if Id > 1 then "," else "") & "{""arm"":" & Natural'Image (Natural (Arm_Of (Hands, H)))
-                    & ",""closer"":""" & To_String (Layout.Groups (Closer_Group (Hands, H)).Path) & """,""lobes"":[");
+                    & ",""closer"":""" & To_String (Reading_Path (Closer_Group (Hands, H))) & """,""lobes"":[");
             for Lobe in 1 .. Lobe_Count (Hands, H) loop
                Append (Line_Text, (if Lobe > 1 then ",{" else "{"));
                for At_Opening in Opening loop
@@ -272,6 +297,33 @@ procedure Replay is
    Watched : Natural := 0;
    Followed : Natural := 0;
 
+   --  With --dump, the eye's picture every so many beats, written as a PPM.
+   Dump_Dir   : Unbounded_String;
+   Dump_Eye   : Natural := 0;
+   Dump_Every : Natural := 0;
+   Dump_Only  : Boolean := False;   --  with --dump-only, nothing else is estimated
+
+   procedure Write_Ppm (File : String; I : Driver.Images.Image) is
+      F    : Ada.Streams.Stream_IO.File_Type;
+      Head : constant String :=
+        "P6" & ASCII.LF & Ada.Strings.Fixed.Trim (Natural'Image (Driver.Images.Width (I)), Ada.Strings.Left) & " "
+        & Ada.Strings.Fixed.Trim (Natural'Image (Driver.Images.Height (I)), Ada.Strings.Left) & ASCII.LF & "255" & ASCII.LF;
+      Bytes : Driver.Bytes.Byte_Array (1 .. Ada.Streams.Stream_Element_Offset (Head'Length));
+
+      procedure Put (RGB : Driver.Bytes.Byte_Array) is
+      begin
+         Ada.Streams.Stream_IO.Write (F, RGB);
+      end Put;
+   begin
+      for K in Head'Range loop
+         Bytes (Ada.Streams.Stream_Element_Offset (K - Head'First + 1)) := Driver.Bytes.Byte (Character'Pos (Head (K)));
+      end loop;
+      Ada.Streams.Stream_IO.Create (F, Ada.Streams.Stream_IO.Out_File, File);
+      Ada.Streams.Stream_IO.Write (F, Bytes);
+      Driver.Images.Query (I, Put'Access);
+      Ada.Streams.Stream_IO.Close (F);
+   end Write_Ppm;
+
    procedure Robot_Part (M : Input) is
       Start : Duration;
    begin
@@ -291,13 +343,18 @@ procedure Replay is
             Line (Core, "group" & Followed'Image & ": "
                   & Driver.Robot.Group_Watch (Robot, Driver.Observations.Group_Id (Followed)));
          end if;
+         if Dump_Every > 0 and then Natural (M.O.Beat) mod Dump_Every = 0 and then Driver.Observations.Has_Image (M.O, Driver.Observations.Camera_Id (Dump_Eye)) then
+            Write_Ppm (To_String (Dump_Dir) & "/eye" & Ada.Strings.Fixed.Trim (Natural'Image (Dump_Eye), Ada.Strings.Left)
+                       & "_" & Ada.Strings.Fixed.Trim (Natural'Image (Natural (M.O.Beat)), Ada.Strings.Left) & ".ppm",
+                       M.O.Images (Driver.Observations.Camera_Id (Dump_Eye)));
+         end if;
       end if;
    end Robot_Part;
 
    procedure Rest (M : Input) is
       Start : Duration;
    begin
-      if M.Observed then
+      if M.Observed and then not Dump_Only then
          Start := Driver.Clock.Seconds;
          Driver.Robot.Hand.Observe (Hands, Robot, M.O, M.Sent);
          Spent (Hand_Layer) := Spent (Hand_Layer) + (Driver.Clock.Seconds - Start);
@@ -316,6 +373,9 @@ procedure Replay is
    procedure Compute is
       Start : constant Duration := Driver.Clock.Seconds;
    begin
+      if Dump_Only then
+         return;
+      end if;
       Driver.Robot.Compute_Estimates (Robot);
       Spent (Estimates_Apart) := Spent (Estimates_Apart) + (Driver.Clock.Seconds - Start);
    end Compute;
@@ -352,6 +412,7 @@ procedure Replay is
                Start : constant Duration := Driver.Clock.Seconds;
             begin
                Driver.Observations.Parse (Req.Doc, Req.Observation, Layout, Driver.Clock.Beat (Beat), M.O);
+               Driver.Twins.Order (Twins, Layout, M.O, Sent);
                Spent (Parsing) := Spent (Parsing) + (Driver.Clock.Seconds - Start);
             end;
             Current := M.O;
@@ -528,6 +589,12 @@ begin
          Configure_Service (Driver.Services.Brain, Argument (I + 1));
       elsif Argument (I) = "--watch" then
          Watched := Natural'Value (Argument (I + 1));
+      elsif Argument (I) = "--dump-only" then
+         Dump_Only := True;
+      elsif Argument (I) = "--dump" and then I + 3 <= Argument_Count then
+         Dump_Dir := To_Unbounded_String (Argument (I + 1));
+         Dump_Eye := Natural'Value (Argument (I + 2));
+         Dump_Every := Natural'Value (Argument (I + 3));
       elsif Argument (I) = "--readings" then
          Followed := Natural'Value (Argument (I + 1));
       end if;

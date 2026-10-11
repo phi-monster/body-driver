@@ -187,6 +187,35 @@ package body Driver.Robot.Hand.Sweep.Tests is
                 & Natural'Image (Located_Of (S, 1).Changed));
          Check (Located_Of (S, 1).Unassigned = 0, "a pixel that changed was given to neither end:"
                 & Natural'Image (Located_Of (S, 1).Unassigned));
+         --  The sweep stood still half way, at 0.5: a stop, with each finger's tip where it stood then (its top
+         --  row, within its columns at that reading).
+         Check (Stops (S, 1) = 1, "the sweep's one stop between its ends gave" & Stops (S, 1)'Image & " stops");
+         if Stops (S, 1) = 1 then
+            Check (Stop_Reading (S, 1, 1) = 0.5, "the stop is not at the reading the sweep stood still at");
+            declare
+               Tips : constant Stop_Tips := Tips_At_Stop (S, 1, 1);
+               Lobe : Natural := 0;
+            begin
+               Check (Tips'Length = 2, "the stop has tips for" & Tips'Length'Image & " lobes, not 2");
+               for L of Lobes_Of (S, 1) loop
+                  Lobe := Lobe + 1;
+                  declare
+                     --  Which finger the lobe is, by its tip at the low end (closed, 0.0): finger 1 lies left.
+                     Finger : constant Positive := (if L.Tip_Here.U < Real (W) / 2.0 then 1 else 2);
+                     Left   : constant Integer := Left_Edge (Finger, 0.5);
+                  begin
+                     Check (Tips (Lobe).Known, "lobe" & Lobe'Image & " has no tip at the stop");
+                     if Tips (Lobe).Known then
+                        Check (abs (Tips (Lobe).Tip.V - 40.5) < 1.0e-9
+                               and then Tips (Lobe).Tip.U >= Real (Left) - 0.5 and then Tips (Lobe).Tip.U <= Real (Left + 20) - 0.5,
+                               "lobe" & Lobe'Image & "'s tip at the stop is at (" & Tips (Lobe).Tip.U'Image & ","
+                               & Tips (Lobe).Tip.V'Image & "), not on its finger's top between columns" & Left'Image
+                               & " and" & Integer'Image (Left + 19));
+                     end if;
+                  end;
+               end loop;
+            end;
+         end if;
       end if;
    end Two_Fingers_Swept;
 

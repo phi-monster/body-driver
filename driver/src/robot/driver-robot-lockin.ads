@@ -100,10 +100,34 @@ private package Driver.Robot.Lockin is
    --  textured cells of the noise of their displacements about the
    --  regression on the pushes, in pixels; Real'Last before it is measured.
 
+   procedure Gain_Of
+     (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive; Gain, Spread : out Real; Measured : out Boolean);
+   --  The channel's gain in the eye summed over its cells (Measure: each
+   --  cell's displacement per reading unit in units of the cell's noise,
+   --  squared, less the variance of estimating it), and the variance of that
+   --  sum. Measured is False, and both zero, when the eye keeps no column for
+   --  the channel.
+
+   function Seen (Gain, Spread : Real) return Boolean;
+   function Seen (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Boolean;
+   --  The eye sees the channel move it at all: the summed gain stands Z of
+   --  its spread above zero. A channel that moves nothing the eye sees still
+   --  gets a coefficient in every cell that responds to its group, noise
+   --  about zero with a magnitude, and from that a shift (the median
+   --  magnitude) and a visible step (Z over the root of the summed gain,
+   --  positive by chance) that mean nothing: fake body seed 5, arm 1's third
+   --  channel, which the probe drove to its end unseen, had a keyframe step
+   --  of 1.2 units from a shift of 0.05 px, while the step the eye could see
+   --  was 137; its return at 16 units a beat gave a keyframe every beat, 262
+   --  of them 96 px from the reference, which aligned nothing. False before
+   --  the eye is measured.
+
    function Shift (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Real;
    --  How many pixels the eye's image moves per reading unit of the channel:
    --  the median over the cells that respond to its group; zero when none
    --  does or it was not measured.
+   --  Zero too for a channel the eye does not see (Seen): its coefficients
+   --  are noise.
 
    function Shows_Step (M : Model; E : Eye_Id; G : Group_Id; Step : Real_Array) return Boolean;
    --  A step of the group's readings moves the eye's image by what its cells

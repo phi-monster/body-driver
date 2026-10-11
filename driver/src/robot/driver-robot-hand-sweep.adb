@@ -54,11 +54,23 @@ package body Driver.Robot.Hand.Sweep is
                            and then Poses_Doubled (S, Channel)));
    end Ends_Moved;
 
-   procedure Renew (S : in out State; Channel : Positive);
+   procedure Renew
+     (S       : in out State;
+      Channel : Positive;
+      Motion  : access procedure (Channel : Positive; Column, Row : Natural; U, V : out Real));
    --  New ends: what changed between them decides whether anything is to be
    --  placed; a measurement of older ends no longer stands.
 
-   procedure Renew (S : in out State; Channel : Positive) is
+   procedure Renew
+     (S       : in out State;
+      Channel : Positive;
+      Motion  : access procedure (Channel : Positive; Column, Row : Natural; U, V : out Real))
+   is
+      --  How the picture moves per unit of this channel's reading, from the low end's reading towards the high one's.
+      procedure Channel_Motion (Column, Row : Natural; U, V : out Real) is
+      begin
+         Motion (Channel, Column, Row, U, V);
+      end Channel_Motion;
       Low      : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.Low_End (S.Views, Channel);
       High     : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.High_End (S.Views, Channel);
       Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Low.Frames, High.Frames);
@@ -88,7 +100,8 @@ package body Driver.Robot.Hand.Sweep is
               Driver.Robot.Hand.Selfsight.Anchor_For (S.Memory, (if At_Low then Low.Closer.Element else High.Closer.Element));
          begin
             Now.Located := Driver.Robot.Hand.Lobes.From_Change
-              (Compared.Changed, Low.Frames, High.Frames, Anchor, At_Low, Compared.Spread, Nothing);
+              (Compared.Changed, Low.Frames, High.Frames, Anchor, At_Low, Compared.Spread, Nothing,
+               Motion => (if Motion = null then null else Channel_Motion'Access));
             Now.Closing := Driver.Robot.Hand.Lobes.Direction (Now.Located.Lobes, Nothing);
             Now.Change := Driver.Robot.Hand.Lobes.Closing_Change (Now.Located.Lobes, Nothing);
             Now.Status := (if Now.Located.How = Driver.Robot.Hand.Lobes.Placed then Measured else Unplaced);
@@ -97,6 +110,110 @@ package body Driver.Robot.Hand.Sweep is
       Per_Channel (Channel) := Now;
       S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
    end Renew;
+
+   function Overlap (A, B : Mask) return Natural;
+   --  How many pixels are in both.
+
+   function Overlap (A, B : Mask) return Natural is
+      N : Natural := 0;
+   begin
+      if Width (A) /= Width (B) or else Height (A) /= Height (B) then
+         return 0;
+      end if;
+      for Row in 0 .. Height (A) - 1 loop
+         for Column in 0 .. Width (A) - 1 loop
+            if Contains (A, Column, Row) and then Contains (B, Column, Row) then
+               N := N + 1;
+            end if;
+         end loop;
+      end loop;
+      return N;
+   end Overlap;
+
+   procedure Renew_Stops
+     (S       : in out State;
+      Channel : Positive;
+      Motion  : access procedure (Channel : Positive; Column, Row : Natural; U, V : out Real));
+   --  The lobes at every stop of the channel's travel, placed as the ends' were (between the anchored end and
+   --  the stop's view), each given to the lobe of the ends' placing whose pixels at the anchored end it most
+   --  shares. Asked once the ends' lobes are placed, and again whenever the views have more stops.
+
+   procedure Renew_Stops
+     (S       : in out State;
+      Channel : Positive;
+      Motion  : access procedure (Channel : Positive; Column, Row : Natural; U, V : out Real))
+   is
+      Per_Channel : Channel_Array := S.Per_Channel.Element;
+      Now         : Channel_State renames Per_Channel (Channel);
+      Low         : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.Low_End (S.Views, Channel);
+      High        : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.High_End (S.Views, Channel);
+      At_Low      : constant Boolean := Now.Poses_Low >= Now.Poses_High;   --  the anchored end, as the ends' placing had it
+      Anchored    : constant Driver.Robot.Hand.Views.View := (if At_Low then Low else High);
+      Anchor      : constant Driver.Pixels.View :=
+        Driver.Robot.Hand.Selfsight.Anchor_For (S.Memory, Anchored.Closer.Element);
+      N           : constant Natural := Natural (Now.Located.Lobes.Length);
+      Count       : constant Natural := Driver.Robot.Hand.Views.Stops (S.Views, Channel);
+      Nothing     : constant Mask := Create (0, 0);
+      --  How the picture moves per unit of the channel's reading, from the anchored end towards a stop.
+      procedure Stop_Motion (Column, Row : Natural; U, V : out Real) is
+      begin
+         Motion (Channel, Column, Row, U, V);
+         if not At_Low then
+            U := -U;
+            V := -V;
+         end if;
+      end Stop_Motion;
+   begin
+      Now.Stops.Clear;
+      Now.Stops_Seen := Count;
+      for K in 1 .. Count loop
+         declare
+            V        : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.Stop (S.Views, Channel, K);
+            Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Anchored.Frames, V.Frames);
+            Tips     : Stop_Tips (1 .. N);
+         begin
+            if Compared.Trusted and then Driver.Images.Count (Compared.Changed) > 0 then
+               declare
+                  Placed : constant Driver.Robot.Hand.Lobes.Located := Driver.Robot.Hand.Lobes.From_Change
+                    (Compared.Changed, Anchored.Frames, V.Frames, Anchor, True, Compared.Spread, Nothing,
+                     Motion => (if Motion = null then null else Stop_Motion'Access));
+               begin
+                  if Placed.How = Driver.Robot.Hand.Lobes.Placed then
+                     for L in 1 .. N loop
+                        declare
+                           Mine : constant Mask :=
+                             (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
+                           Best : Natural := 0;
+                           Most : Natural := 0;
+                        begin
+                           for J in Placed.Lobes.First_Index .. Placed.Lobes.Last_Index loop
+                              declare
+                                 Shared : constant Natural := Overlap (Mine, Placed.Lobes (J).Here);
+                              begin
+                                 if Shared > Most then
+                                    Best := J;
+                                    Most := Shared;
+                                 end if;
+                              end;
+                           end loop;
+                           if Best > 0 and then Placed.Lobes (Best).Tip_Known_There then
+                              Tips (L) := (Known  => True,
+                                           Tip    => Placed.Lobes (Best).Tip_There,
+                                           Centre => Placed.Lobes (Best).Centre_There,
+                                           Region => Placed.Lobes (Best).There);
+                           end if;
+                        end;
+                     end loop;
+                  end if;
+               end;
+            end if;
+            Now.Stops.Append
+              (Stop_State'(Reading => Driver.Robot.Hand.Views.Reading (V, Channel), From => V.From,
+                           Tips    => Tip_Holders.To_Holder (Tips)));
+         end;
+      end loop;
+      S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
+   end Renew_Stops;
 
    procedure Set_Status (S : in out State; Channel : Positive; To : Progress);
 
@@ -115,14 +232,22 @@ package body Driver.Robot.Hand.Sweep is
       Rest       : Real_Array;
       Image      : Driver.Images.Image;
       Rest_Moved : not null access function (Before, After : Real_Array) return Boolean;
-      Eye_Moved  : not null access function (Before, After : Real_Array) return Boolean)
+      Eye_Moved  : not null access function (Before, After : Real_Array) return Boolean;
+      Motion     : access procedure (Channel : Positive; Column, Row : Natural; U, V : out Real) := null)
    is
    begin
       Driver.Robot.Hand.Views.Observe (S.Views, Seen, Still, Closer, Rest, Image, Rest_Moved);
       Driver.Robot.Hand.Selfsight.Observe (S.Memory, Closer, Rest, Still, Image, Eye_Moved);
       for C in 1 .. Channels (S) loop
          if Ends_Moved (S, C) then
-            Renew (S, C);
+            Renew (S, C, Motion);
+            if Status (S, C) = Measured then
+               Renew_Stops (S, C, Motion);
+            end if;
+         elsif Status (S, C) = Measured
+           and then Driver.Robot.Hand.Views.Stops (S.Views, C) /= S.Per_Channel.Constant_Reference.Element (C).Stops_Seen
+         then
+            Renew_Stops (S, C, Motion);
          elsif Status (S, C) = Waiting and then Driver.Robot.Hand.Views.Unseen_Travel (S.Views, C) then
             Set_Status (S, C, Nothing_Moves);
          end if;
@@ -150,6 +275,27 @@ package body Driver.Robot.Hand.Sweep is
 
    function Located_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Located is
      (S.Per_Channel.Constant_Reference.Element (Channel).Located);
+
+   function Stops (S : State; Channel : Positive) return Natural is
+     (Natural (S.Per_Channel.Constant_Reference.Element (Channel).Stops.Length));
+
+   function Stop_Reading (S : State; Channel : Positive; K : Positive) return Real is
+     (S.Per_Channel.Constant_Reference.Element (Channel).Stops (K).Reading);
+
+   function Stop_View (S : State; Channel : Positive; K : Positive) return Views.View is
+      From : constant Driver.Clock.Beat := S.Per_Channel.Constant_Reference.Element (Channel).Stops (K).From;
+   begin
+      --  The views' stops may have grown since the placing: the view is the one that began at that beat.
+      for J in 1 .. Driver.Robot.Hand.Views.Stops (S.Views, Channel) loop
+         if Driver.Robot.Hand.Views.Stop (S.Views, Channel, J).From = From then
+            return Driver.Robot.Hand.Views.Stop (S.Views, Channel, J);
+         end if;
+      end loop;
+      raise Program_Error with "a stop's view is gone";
+   end Stop_View;
+
+   function Tips_At_Stop (S : State; Channel : Positive; K : Positive) return Stop_Tips is
+     (S.Per_Channel.Constant_Reference.Element (Channel).Stops (K).Tips.Element);
 
    function Closed_End_Is_High (S : State; Channel : Positive) return Boolean is
      (S.Per_Channel.Constant_Reference.Element (Channel).Closing = Driver.Robot.Hand.Lobes.Towards_There);
@@ -211,7 +357,13 @@ package body Driver.Robot.Hand.Sweep is
               & " (" & Pixels_Text & ";" & Here.Located.Here'Image & " given to the low end,"
               & Here.Located.There'Image & " to the high end," & Here.Located.Unassigned'Image & " to neither, of doubt "
               & Driver.Log.Image (Here.Located.Doubt, 0) & " pixels, after" & Here.Located.Rounds'Image & " rounds; its parts:"
-              & Here.Located.Parts_Here'Image & " at the low end," & Here.Located.Parts_There'Image & " at the high end)";
+              & Here.Located.Parts_Here'Image & " at the low end," & Here.Located.Parts_There'Image & " at the high end"
+              & "; the closer's own motion goes with" & Here.Located.With_Motion'Image & " of their pixels and against"
+              & Here.Located.Against_Motion'Image
+              & (if Here.Located.Turned
+                 then ": the robot's look gave each end the other's pixels, and the closer's own motion turned them"
+                 else "")
+              & ")";
       end case;
    end Account;
 

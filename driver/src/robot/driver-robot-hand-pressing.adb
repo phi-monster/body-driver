@@ -1,5 +1,8 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Driver.Conventions;
+with Driver.Log;
 with Driver.Robot.Hand.Aims;
+with Driver.Robot.Kinematics;
 
 package body Driver.Robot.Hand.Pressing is
 
@@ -7,16 +10,22 @@ package body Driver.Robot.Hand.Pressing is
    use Driver.Numerics.Arrays;
    use type Driver.Robot.Motion.Plan_Status;
 
-   function Least_Push (M : Model; Arm : Arm_Id; O : Observation) return Real is
-      Tool    : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
+   --  The largest variance of a covariance along any axis.
+   function Widest (C : Mat3) return Real is
       Values  : Vec3;
       Vectors : Mat3;
+   begin
+      Symmetric_Eigensystem (C, Values, Vectors);
+      return Real'Max (Values (1), Real'Max (Values (2), Values (3)));
+   end Widest;
+
+   function Least_Push (M : Model; Arm : Arm_Id; O : Observation) return Real is
+      Tool : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
    begin
       if Tool.Position_Covariance (1, 1) = Real'Last then
          return Real'Last;   --  the tool's place is not measured
       end if;
-      Symmetric_Eigensystem (Tool.Position_Covariance, Values, Vectors);
-      return Threshold (Vector_Gate (Vec3'Length)) * Sqrt (Real'Max (Values (1), Real'Max (Values (2), Values (3))));
+      return Threshold (Vector_Gate (Vec3'Length)) * Sqrt (Widest (Tool.Position_Covariance));
    end Least_Push;
 
    procedure Aim
@@ -24,16 +33,26 @@ package body Driver.Robot.Hand.Pressing is
    is
       Tool    : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
       Down    : constant Direction_Estimate := Up_In_Arm (M, Arm);
+      --  No eye saw a surface below the hand (no table in the arm's frame, its own eye's or the world's): the press
+      --  goes by touch, along the lobe's line of sight as the hand stands. The first contact is where the surface is,
+      --  and presses tilted about that line solve the surface and the tip together (Touch, an unmeasured surface);
+      --  the aim turns nothing, and the yaw turns the hand about that line through the eye (item 14).
+      Blind   : constant Boolean := Down.Sigma >= Real'Last;
    begin
       Result := (others => <>);
-      Result.Ok := Down.Sigma < Real'Last and then Tool.Position_Covariance (1, 1) < Real'Last
-        and then Eye_Mount (M, Eye).Kind = Arm_Carried;
+      Result.Ok := Tool.Position_Covariance (1, 1) < Real'Last and then Eye_Mount (M, Eye).Kind = Arm_Carried
+        and then (Blind or else abs Down.Unit_Vector > 0.0) and then abs Along > 0.0;
       if not Result.Ok then
          return;
       end if;
-      Result.Into := -Down.Unit_Vector;
-      Result.Above := Driver.Robot.Hand.Aims.Turned_About
-        (Tool.Pose, Eye_In_Tool (M, Eye, O).Pose.Translation, Along, Result.Into);
+      if Blind then
+         Result.Into := Unit (Tool.Pose.Rotation * Along);
+         Result.Above := Tool.Pose;
+      else
+         Result.Into := -Down.Unit_Vector;
+         Result.Above := Driver.Robot.Hand.Aims.Turned_About
+           (Tool.Pose, Eye_In_Tool (M, Eye, O).Pose.Translation, Along, Result.Into);
+      end if;
       if Yaw /= 0.0 then
          declare
             Eye_Here : constant Vec3 := Eye_In_Tool (M, Eye, O).Pose.Translation;
@@ -44,7 +63,10 @@ package body Driver.Robot.Hand.Pressing is
          end;
       end if;
       Result.Turn := Angle (Transpose (Tool.Pose.Rotation) * Result.Above.Rotation);
-      Result.Plan := Driver.Robot.Motion.Plan_Reach_In_Arm (M, Arm, O, (Pose => Result.Above, Position_Only => False));
+      --  The aim points the line of sight at "down" as the arm's eye saw the table: known to that direction's sigma; a
+      --  blind aim is the tool's own turn, known as the fit knows it.
+      Result.Plan := Driver.Robot.Motion.Plan_Reach_In_Arm
+        (M, Arm, O, (Pose => Result.Above, Position_Only => False), Goal_Turn_Sigma => (if Blind then 0.0 else Down.Sigma));
       if Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Planned then
          declare
             There : Observation := O;
@@ -54,6 +76,30 @@ package body Driver.Robot.Hand.Pressing is
          end;
       end if;
    end Aim;
+
+   function Off_Aim (M : Model; Arm : Arm_Id; O : Observation; A : Aimed) return Aim_Offset is
+      Sigma : constant Real := Driver.Robot.Kinematics.Angle_Sigma (M, Arm);
+      Down  : constant Direction_Estimate := Up_In_Arm (M, Arm);
+      Tool  : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
+   begin
+      if not A.Ok or else Tool.Position_Covariance (1, 1) = Real'Last then
+         return (others => <>);
+      end if;
+      if Sigma = Real'Last then
+         return (others => <>);
+      end if;
+      declare
+         Values  : Vec3;
+         Vectors : Mat3;
+      begin
+         Symmetric_Eigensystem (Tool.Position_Covariance, Values, Vectors);
+         return (Place       => abs (Tool.Pose.Translation - A.Above.Translation),
+                 Place_Sigma => Sqrt (Sigma ** 2 + Real'Max (Values (1), Real'Max (Values (2), Values (3)))),
+                 Turn        => Angle (Transpose (Tool.Pose.Rotation) * A.Above.Rotation),
+                 --  A blind aim's turn (no table: the tool's own) is told against the fit's sigma alone.
+                 Turn_Sigma  => (if Down.Sigma < Real'Last then Sqrt (Sigma ** 2 + Down.Sigma ** 2) else Sigma));
+      end;
+   end Off_Aim;
 
    procedure Aim_Reaching
      (M       : Model;
@@ -67,7 +113,8 @@ package body Driver.Robot.Hand.Pressing is
       Yaw     : out Real;
       Reaches : out Boolean;
       Unmeasured : out Boolean;
-      Why     : out Ada.Strings.Unbounded.Unbounded_String)
+      Why     : out Ada.Strings.Unbounded.Unbounded_String;
+      Footprint : Real := 0.0)
    is
       Group : constant Group_Id := Arm_Group (M, Arm);
    begin
@@ -103,6 +150,33 @@ package body Driver.Robot.Hand.Pressing is
                           ("the descent from it to the contact the presses predict: " & Driver.Robot.Motion.Why (Deep));
                      end if;
                   end;
+                  --  Where the tip lands, the tip at the aim lowered by the gap: something standing above the table there
+                  --  (the arm's eye's tracks), within what the landing is uncertain by and the tip's region, is what the
+                  --  press would meet, not the table. This aim is not taken; the next turn of the circle lands elsewhere.
+                  if Reaches then
+                     declare
+                        Tool_There : constant Pose_Estimate := Tool_In_Arm (M, Arm, There);
+                        Landing    : constant Vec3 := Tool_There.Pose * Tip.Mean + Down.Value * Result.Into;
+                        Measured   : constant Boolean :=
+                          Tool_There.Position_Covariance (1, 1) < Real'Last and then Tip.Covariance (1, 1) < Real'Last;
+                        Within     : constant Real :=
+                          (if Measured
+                           then Driver.Conventions.Z * Sqrt (Widest (Tool_There.Position_Covariance) + Widest (Tip.Covariance))
+                                + Footprint
+                           else 0.0);
+                        Standing   : constant Natural :=
+                          (if Measured then Driver.Robot.Kinematics.Standing_Near (M, Arm, Landing, Within) else 0);
+                     begin
+                        if Standing > 0 then
+                           Reaches := False;
+                           if K = 0 then
+                              Why := Ada.Strings.Unbounded.To_Unbounded_String
+                                ("something stands above the table where the tip would land:" & Standing'Image
+                                 & " of the eye's tracks within " & Driver.Log.Image (Within, 4) & " of it");
+                           end if;
+                        end if;
+                     end;
+                  end if;
                end if;
             end;
          end if;

@@ -39,6 +39,7 @@ with Driver.Geometry;
 with Driver.Images;
 with Driver.Numerics;
 with Driver.Observations;
+private with Driver.Alignment.Keyframes;
 private with Driver.Pixels;
 private with Driver.Services;
 with Driver.Uncertain;
@@ -228,6 +229,14 @@ package Driver.Robot is
    --  Driver.Robot.Motion.Step reports, so a replay sees the blocked beats of
    --  the run it replays.
 
+   function Stopped_By_An_End (M : Model; A : Arm_Id; O : Observation) return Boolean;
+   --  At the beat of O the arm's push in effect, ended blocked at rest, was stopped by a joint's end the body has
+   --  shown: the channel that stopped it (Steps.Limiter) stands, where the push ended, at or past the end it was
+   --  asked towards (End_Of), or short of it by no more than the noise of two readings. Such a stop is the body's
+   --  own and no contact: the hand makes no press of it and waits for none (A79's hand 1: five presses of eleven
+   --  never met the table, item 7). False while that end is not known: the first stop at an end is told from a
+   --  contact only by the pose it is found again from (Note_Stopped).
+
    function Self_Mask (M : Model; E : Eye_Id; O : Observation) return Driver.Images.Mask;
    --  The pixels of the eye that show the robot itself at the beat of O.
 
@@ -352,6 +361,15 @@ private
    --  every beat, never on a stack.
    package Count_Vectors is new Ada.Containers.Vectors (Natural, Natural);
 
+   --  The extreme a quantity of a push has reached (Driver.Robot.Steps.Follow), and the quantity at the beats since,
+   --  that one included: their count, mean and the sum of the squares of their deviations from it (Welford's).
+   type Extreme is record
+      Value    : Real := 0.0;
+      Followed : Natural := 0;
+      Mean     : Real := 0.0;
+      Spread   : Real := 0.0;
+   end record;
+
    --  One push of a group and how it went (Driver.Robot.Steps).
    type Episode is record
       Start     : Natural := 0;       --  the beat its target changed
@@ -361,12 +379,11 @@ private
       End_At    : Natural := 0;       --  the first still beat, or where it was given up or cut short
       Settled   : Boolean := False;   --  judged: not cut short by the next push
       Rested    : Boolean := False;   --  ended with its readings still (not given up while they kept moving)
-      Closest_At : Natural := 0;      --  the beat it came closest to its target, by a step it could be seen to make and its
-                                      --  own chatter could not
-      Closest   : Real := 0.0;        --  how far along its ask it had come then, in reading units
-      Followed  : Natural := 0;       --  the beats followed since then (that one included), and their progress along
-      Mean_Along : Real := 0.0;       --  the ask: its mean,
-      Spread_Along : Real := 0.0;     --  and the sum of the squares of its deviations from it
+      Progress_At : Natural := 0;     --  the latest beat its group came nearer its target or farther from where it began
+                                      --  than it had been, in the channels it asked a step of, by a step the one test
+                                      --  of motion sees and the group's own chatter does not make
+      Nearest   : Extreme;            --  how near its target the group has come, in reading units
+      Farthest  : Extreme;            --  how far from where it began the group has gone, in reading units
       Length    : Real := 0.0;        --  how far it asked, in reading units
       Shortfall : Estimate;           --  how far short of the target it stopped, along the ask
       Delivered : Estimate;           --  the fraction of the ask it delivered, along the ask
@@ -401,6 +418,8 @@ private
       Size        : Natural := 0;
       Commandable : Boolean := False;
       Values      : Real_Vectors.Vector;   --  Size readings per beat
+      Twin_Values : Real_Vectors.Vector;   --  Size values per beat of the other group of its command key's pair (the robot's
+                                           --  echo of its command, Driver.Twins), kept to turn Values round with
       Present     : Flag_Vectors.Vector;   --  a reading arrived that beat
       Targets     : Real_Vectors.Vector;   --  Size targets per beat
       Targeted    : Flag_Vectors.Vector;   --  the command in effect carried a target
@@ -409,6 +428,7 @@ private
       Delay_Known : Boolean := False;      --  some push was answered
       Episodes    : Episode_Vectors.Vector;   --  every push and how it went (Driver.Robot.Steps)
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
+      Asks        : Flag_Vectors.Vector;   --  of the push under way: the channels it asked a step the one test of motion sees
       Free_Shortfalls : Real_Vectors.Vector;   --  of every answered push that was not blocked, along its ask, in order
       Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
       Stopped_Low, Stopped_High : Real_Vectors.Vector;   --  per channel, the ends: where the body stopped a push of the
@@ -446,9 +466,16 @@ private
       --  against the beat before and against two beats before, and the watch
       --  over them.
       Change_1, Change_2 : Real := -1.0;     --  at the latest beat; negative when not measured
-      Watch_Last    : Real := 0.0;           --  the last measured Change_1
-      Watch_Peak    : Real := 0.0;           --  the largest Change_1 since the body began to move
-      Watch_Have    : Boolean := False;      --  a last Change_1 was measured since then
+      Watch_Last    : Real := 0.0;          --  the change of the beat before (Stillness.Watch)
+      Watch_Have    : Boolean := False;     --  a beat before has a change to compare with
+      Watch_Diffs   : Real_Vectors.Vector;  --  the beat-to-beat differences of the change at the stationary beats
+      Watch_Scatter : Real := 0.0;          --  their median: what the change wanders by at a lasting level
+      Watch_Scatter_Counted : Natural := 0; --  how many of them that rests on; taken again as they double
+      Watch_Levels  : Real_Vectors.Vector;  --  the change at the stationary beats: what rest makes
+      Watch_Rest    : Real := Real'Last;    --  their median (Real'Last before two), and
+      Watch_Rest_Scale : Real := 0.0;       --  their robust scale
+      Watch_Rest_Counted : Natural := 0;    --  how many those rest on; taken again as they double
+      Watch_Run     : Natural := 0;         --  stationary beats in a row, now
       Watch_Done    : Boolean := False;      --  the picture has stopped since then
       Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat
       Condition     : Real_Vectors.Vector;   --  Cells values per beat
@@ -531,7 +558,12 @@ private
       Eye      : Natural := 0;           --  the other eye whose view it is; 0 for the arm's own keyframes
       To_U, To_V     : Real_Vectors.Vector;   --  per query point, where it went
       Back_U, Back_V : Real_Vectors.Vector;   --  and where that matched back to in the reference
-      Found    : Flag_Vectors.Vector;    --  the instrument gave an answer
+      Sigma    : Real_Vectors.Vector;    --  and the standard deviation the aligner stated of the answer (none from the instrument)
+      Freedom  : Count_Vectors.Vector;   --  and how many degrees of freedom that standard deviation rests on (0: it is known)
+      Found    : Flag_Vectors.Vector;    --  the aligner or the instrument gave an answer
+      Stated   : Real := Real'Last;      --  an own keyframe: the median standard deviation its prediction stated
+      Followed : Boolean := False;       --  and whether most of its answers came from a window no wider than a patch
+      Wide     : Natural := 0;           --  and how many points it refused for that prediction's uncertainty
    end record;
 
    package Match_Set_Vectors is new Ada.Containers.Vectors (Positive, Match_Set);
@@ -563,6 +595,7 @@ private
       Fitted    : Boolean := False;
       Reference : Real_Vectors.Vector;    --  the readings of the reference keyframe
       Joints    : Joint_Fit_Vectors.Vector;
+      Chain     : Count_Vectors.Vector;   --  the joints along the arm from its base, by their readings' places (Kinematics.Fit)
       Lens      : Lens_Fit;
       Used      : Natural := 0;           --  sightings in the last fit
       Median_Px, Sigma_Px : Real := 0.0;
@@ -642,8 +675,11 @@ private
       Eye      : Eye_Id'Base := 0;
       Frames   : Keyframe_Vectors.Vector;   --  the first is the reference
       Query_U, Query_V : Real_Vectors.Vector;   --  the reference's query points
-      Pending  : Pending_Vectors.Vector;
-      Matches  : Match_Set_Vectors.Vector;
+      Chain    : Driver.Alignment.Keyframes.Chain;   --  the reference's pyramid and what its keyframes showed
+      Aligned  : Natural := 0;   --  how many of Frames are aligned into Matches (Kinematics.Align_New)
+      Twin_Taken : Boolean := False;   --  a keyframe at the reference's readings was taken after it: its still twin
+      Revision : Natural := 0;   --  how many keyframes were aligned again from the fitted arm (Kinematics.Realign)
+      Matches  : Match_Set_Vectors.Vector;   --  one per aligned keyframe after the reference, in order
       Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
       --  The first arm's reference view matched into this arm's, its query
       --  points into this arm's reference image (Kinematics.Observe), and of

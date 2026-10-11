@@ -284,6 +284,7 @@ package body Driver.Observations is
       for G of L.Groups loop
          O.Readings.Append (Values (G.Keys, G.Size));
          O.Echoes.Append (Values (G.Echo_Keys, G.Size));
+         O.Turned.Append (False);
       end loop;
       if L.Has_Instruction then
          O.Instruction := To_Unbounded_String (Text (Doc, Lookup (Doc, Root, "instruction")));

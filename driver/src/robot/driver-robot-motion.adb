@@ -4,6 +4,7 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Clock;
 with Driver.Log;
+with Driver.Observations;
 with Driver.Robot.Channels;
 with Driver.Robot.Steps;
 with Driver.Robot.Lockin;
@@ -79,7 +80,12 @@ package body Driver.Robot.Motion is
       Report.Outcome := (if not Blocked_Any then Reached elsif Moved_Some then Short else Blocked);
    end Judge;
 
-   procedure Step (M : in out Model; Targets : Driver.Commands.Command; Report : out Step_Report) is
+   procedure Step
+     (M       : in out Model;
+      Targets : Driver.Commands.Command;
+      Report  : out Step_Report;
+      Stop    : access function return Boolean := null)
+   is
       B : Driver.Clock.Beat;
    begin
       Report := (others => <>);
@@ -95,6 +101,21 @@ package body Driver.Robot.Motion is
 
          function Targeted (G : Group_Id) return Boolean is
            (Is_Commandable (M, G) and then Driver.Commands.Has_Target (Targets, G));
+
+         Stopped : Boolean := False;   --  Stop held, and every targeted group was held where it was read
+
+         --  Every targeted group held at what it reads at this beat.
+         function Held_Here return Driver.Commands.Command is
+            C : Driver.Commands.Command := Driver.Commands.Hold;
+            O : constant Driver.Beats.Observation_View := Driver.Beats.Latest;
+         begin
+            for G in 1 .. Groups loop
+               if Targeted (Group_Id (G)) and then Driver.Observations.Has_Reading (O.all, Group_Id (G)) then
+                  Driver.Commands.Set_Target (C, Group_Id (G), O.Readings.Element (Group_Id (G)));
+               end if;
+            end loop;
+            return C;
+         end Held_Here;
 
          --  Every push this step started is over.
          function Done return Boolean is
@@ -120,12 +141,19 @@ package body Driver.Robot.Motion is
             Waited := Waited + 1;
             declare
                Finished : constant Boolean := Done;
+               Halt     : constant Boolean := not Finished and then not Stopped and then Stop /= null and then Stop.all;
             begin
                if Finished then
                   Judge (M, Targets, Before, Waited, Report);
                   Report.Started := Started;
+                  Report.Stopped := Stopped;
                end if;
-               Driver.Beats.Send (Driver.Commands.Hold);
+               if Halt then
+                  Stopped := True;
+                  Driver.Beats.Send (Held_Here);
+               else
+                  Driver.Beats.Send (Driver.Commands.Hold);
+               end if;
                exit when Finished;
             end;
          end loop;
@@ -274,7 +302,17 @@ package body Driver.Robot.Motion is
    end Note_Stopped;
 
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
-     (Kinematics.Keyframe_Step (M, A, Channel));
+      Step  : constant Real := Kinematics.Keyframe_Step (M, A, Channel);
+      Noise : constant Real := Channels.Noise (M, Arm_Group (M, A), Channel);
+   begin
+      --  The step, and what the readings' noise can take off a turn asked of
+      --  exactly it: a keyframe counts as a joint's own, and is kept at all,
+      --  from the step on, and a turn of the step itself lands below it half
+      --  the time (fake body V6, arm 1: the first joint's turns of its step,
+      --  38 units, left no keyframe through eleven rounds, and the fit said
+      --  the joint had none of its own).
+      return (if Step > 0.0 and then Noise < Real'Last then Step + Driver.Conventions.Z * Sqrt (2.0) * Noise else Step);
+   end Sweep_Start;
 
    procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id) is
       B    : Driver.Clock.Beat;
@@ -330,6 +368,14 @@ package body Driver.Robot.Motion is
       end loop;
    end Hold;
 
+   procedure Hold_And_Estimate (M : in out Model) is
+      B : Driver.Clock.Beat;
+   begin
+      Driver.Beats.Next (B);
+      Estimate_Now (M);
+      Driver.Beats.Send (Driver.Commands.Hold);
+   end Hold_And_Estimate;
+
    function Hold_Of (M : Model; G : Group_Id; Channel : Positive) return Real is
       Last : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
    begin
@@ -338,6 +384,10 @@ package body Driver.Robot.Motion is
    end Hold_Of;
 
    function Ln (X : Real) return Real renames Ada.Numerics.Long_Elementary_Functions.Log;
+
+   --  Readings for a log line, each to the six places the group lines give them (Driver.Robot.Group_Watch).
+   function Readings_Image (Q : Real_Array) return String is
+     (if Q'Length = 0 then "" else Readings_Image (Q (Q'First .. Q'Last - 1)) & " " & Driver.Log.Image (Q (Q'Last), 6));
 
    --  The probes may try as many levels as a float has bits of precision.
    Levels : constant Positive := Real'Machine_Mantissa;
@@ -945,7 +995,8 @@ package body Driver.Robot.Motion is
    end Plan_Reach;
 
    function Plan_Reach_In_Arm (M : Model; A : Arm_Id; O : Observation; Goal : Pose_Goal;
-                               Clearance : Real := Real'Last; Lever : Real := 0.0) return Plan is
+                               Clearance : Real := Real'Last; Lever : Real := 0.0;
+                               Goal_Turn_Sigma : Real := 0.0) return Plan is
       use Driver.Numerics.Arrays;
    begin
       if Natural (A) > Arm_Count (M) or else not Kinematics.Fitted (M, A) then
@@ -968,6 +1019,8 @@ package body Driver.Robot.Motion is
             Result : Plan := (State => Planned, Reason => Null_Unbounded_String, Group => G, others => <>);
             Failed : Boolean := False;
             Worst_Position, Worst_Turn : Real := 0.0;
+            Failed_From : Real_Array (1 .. Size) := Start;   --  the readings the segment that failed was solved from
+            Failed_At   : Real := 0.0;                       --  and how far along the path it began
 
             --  The pose a fraction of the way from the start to the goal:
             --  straight in position, about one axis in turn.
@@ -1000,7 +1053,7 @@ package body Driver.Robot.Motion is
                Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only and then B_Of = 1.0,
                                       Next, Position_Off, Turn_Off);
                if not Driver.Uncertain.Significant (Position_Off, Sigma)
-                 and then not Driver.Uncertain.Significant (Turn_Off, Sigma)
+                 and then not Driver.Uncertain.Significant (Turn_Off, Sqrt (Sigma ** 2 + Goal_Turn_Sigma ** 2))
                then
                   declare
                      Bow : constant Real :=
@@ -1046,6 +1099,8 @@ package body Driver.Robot.Motion is
                   Failed := True;
                   Worst_Position := Position_Off;
                   Worst_Turn := Turn_Off;
+                  Failed_From := Q;
+                  Failed_At := A_Of;
                end if;
             end Reach;
 
@@ -1059,7 +1114,10 @@ package body Driver.Robot.Motion is
                return (State => Unreachable,
                        Reason => To_Unbounded_String ("the arm's fitted model leaves the goal"
                                                       & Real'Image (Worst_Position) & " model units and"
-                                                      & Real'Image (Worst_Turn) & " rad away"),
+                                                      & Real'Image (Worst_Turn) & " rad away, from "
+                                                      & Driver.Log.Image (Failed_At, 4) & " of the way, at readings"
+                                                      & Readings_Image (Failed_From) & " where the arm's conditioning is "
+                                                      & Driver.Log.Image (Kinematics.Conditioning (M, A, Failed_From), 6)),
                        Solves => Result.Solves, others => <>);
             end if;
             declare
@@ -1082,7 +1140,12 @@ package body Driver.Robot.Motion is
    function Solve_Count (P : Plan) return Natural is (P.Solves);
    function Worst_Bow (P : Plan) return Real is (P.Bow);
 
-   procedure Follow (M : in out Model; P : Plan; Report : out Step_Report) is
+   procedure Follow
+     (M      : in out Model;
+      P      : Plan;
+      Report : out Step_Report;
+      Stop   : access function return Boolean := null)
+   is
    begin
       Report := (Outcome => Reached, others => <>);
       for W of P.Waypoints loop
@@ -1090,9 +1153,9 @@ package body Driver.Robot.Motion is
             C : Driver.Commands.Command;
          begin
             Driver.Commands.Set_Target (C, P.Group, W);
-            Step (M, C, Report);
+            Step (M, C, Report, Stop);
          end;
-         exit when Report.Outcome /= Reached;
+         exit when Report.Outcome /= Reached or else Report.Stopped;
       end loop;
    end Follow;
 

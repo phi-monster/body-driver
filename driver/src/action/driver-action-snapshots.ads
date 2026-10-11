@@ -52,14 +52,40 @@ package Driver.Action.Snapshots is
 
    package Arm_Vectors is new Ada.Containers.Vectors (Positive, Arm_State);
 
-   type Lobe_State is record
-      Open_Tip   : Vec3 := Zero3;   --  the end of the lobe, opened fully, tool frame
-      Closed_Tip : Vec3 := Zero3;   --  the same, closed on nothing
-      Tip_Sigma  : Real := Real'Last;
+   type Tip_Node is record
+      Fraction : Real := 0.0;        --  how far its closer is closed at the setting: 0 open, 1 closed on nothing
+      Tip      : Vec3 := Zero3;      --  the end of the lobe there, tool frame
+      Sigma    : Real := Real'Last;  --  of the tip, the largest along any axis
    end record;
-   --  A lobe is known by where its end is, open and closed on nothing, and
-   --  nothing of its shape is assumed: what of it meets a thing is its end.
-   --  A lobe that does not move faces the meeting point of the others.
+
+   package Node_Vectors is new Ada.Containers.Vectors (Positive, Tip_Node);
+
+   type Lobe_State is record
+      Path : Node_Vectors.Vector;
+      --  Where the lobe's end is at every setting of its closer the body measured, from opened fully (fraction 0)
+      --  to closed on nothing (fraction 1), by fraction; between two settings the end goes straight, as nothing
+      --  of the way was measured, and the body carries what that interpolation can be wrong by in the sigma.
+      --  Two nodes for a lobe whose eye saw it at its openings only. Nothing of its shape is assumed: what of it
+      --  meets a thing is its end. A lobe that does not move faces the meeting point of the others.
+   end record;
+
+   function Open_Tip (L : Lobe_State) return Vec3;
+   function Closed_Tip (L : Lobe_State) return Vec3;
+   --  The ends of the path; Zero3 for an empty one.
+
+   function Tip_Sigma (L : Lobe_State) return Real;
+   --  The largest sigma along the path; Real'Last for an empty one.
+
+   function Tip_At (L : Lobe_State; Fraction : Real) return Vec3;
+   --  The lobe's end at that fraction: on the path between its two nodes around it; beyond an end, the end
+   --  segment goes on.
+
+   function Facing_At (L : Lobe_State; Fraction : Real) return Vec3;
+   --  The unit direction the end moves in as the closer closes, at that fraction (the segment's); Zero3 where
+   --  the lobe does not move.
+
+   function Straight (Open_Tip, Closed_Tip : Vec3; Sigma : Real) return Lobe_State;
+   --  A lobe measured at its openings only.
 
    package Lobe_Vectors is new Ada.Containers.Vectors (Positive, Lobe_State);
 

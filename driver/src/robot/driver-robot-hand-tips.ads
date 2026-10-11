@@ -30,6 +30,9 @@ package Driver.Robot.Hand.Tips is
 
    type Sight_Of is record
       Known  : Boolean := False;
+      Lined  : Boolean := True;    --  the lobe has a line of sight at all; False for a tool no closer moves, whose
+                                   --  presses find its tip anywhere (Touch, the free model), from the tool frame's
+                                   --  origin; such an entry is in the fit whether or not it is Known
       Ray    : Ray_Estimate;    --  tool frame
       Spread : Real := 0.0;
       --  How far from that line the lobe's tip lies, per axis across it, as
@@ -75,6 +78,12 @@ package Driver.Robot.Hand.Tips is
       Pixels_Sigma   : Real := Real'Last;   --  in; positive is inward
       Fraction       : Real := 0.0;         --  and as a share of the travel between its openings in that picture
       Fraction_Sigma : Real := Real'Last;
+      Lined          : Boolean := False;    --  the finger's own line of sight under the press is known: the sweep's tip
+                                            --  pixel moved by the measured slide along the way the finger closes
+                                            --  (Hand.Measured_Slides)
+      Line           : Vec3 := [0.0, 0.0, 0.0];   --  its unit direction, tool frame
+      Line_Sigma     : Real := Real'Last;   --  how far the finger may still be off it, as an angle: the slide's sigma
+                                            --  at the pitch of a pixel there
    end record;
    --  How far a lobe's finger stood from where the closer's reading puts it
    --  at a press (Driver.Robot.Hand.Slide).
@@ -161,6 +170,12 @@ package Driver.Robot.Hand.Tips is
    function Surface (B : Book) return Driver.Geometry.Plane_Estimate;
    --  The surface as the presses and the prior make it, in the frame of the
    --  presses' poses; unknown until the presses fit it.
+
+   function Fit_Account (B : Book) return String;
+   --  What the last fit of the finger as it stood under each press made of the presses kept: whether it was solved,
+   --  and for every press given to a lobe, the lobe and opening, the angle its finger can have slid by as the fit took
+   --  it (Touch.Press.Slide_Angle: the whole travel where the slide was not measured), its hit, and whether the tip
+   --  rests on it.
 
 private
 

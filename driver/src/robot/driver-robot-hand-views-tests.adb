@@ -112,6 +112,59 @@ package body Driver.Robot.Hand.Views.Tests is
       Check (not Has_Ends (T, 1), "ends were kept across a move of the arm and of the closer");
    end Ends_Of_A_Sweep;
 
+   procedure Stops_Of_A_Sweep is
+      T : Tracker := Start (Side, Side, Closer_Noise => [1 => 0.0]);
+      B : Driver.Clock.Beat := 0;
+      procedure Beat (Still : Boolean; Closer : Real; Level : Natural; Arm : Real := 0.0) is
+      begin
+         Observe (T, At_Beat (B), Still, [1 => Closer], [Arm, 0.0], Grey (Level), Exact'Access);
+         B := B + 1;
+      end Beat;
+   begin
+      --  A sweep that doubles outwards from the middle, as the hand's does: still at 0.5, 0.6, 0.8, 1.0, then
+      --  back and still at 0.4, 0.2, 0.0, each setting looking different.
+      Beat (True, 0.5, 10); Beat (True, 0.5, 10); Beat (True, 0.5, 10);
+      Beat (False, 0.55, 15);
+      Beat (True, 0.6, 20); Beat (True, 0.6, 20);
+      Beat (False, 0.7, 25);
+      Beat (True, 0.8, 30); Beat (True, 0.8, 30);
+      Beat (False, 0.9, 35);
+      Beat (True, 1.0, 40); Beat (True, 1.0, 40); Beat (True, 1.0, 40);
+      Beat (False, 0.7, 25);
+      Beat (True, 0.4, 50); Beat (True, 0.4, 50);
+      Beat (False, 0.3, 55);
+      Beat (True, 0.2, 60); Beat (True, 0.2, 60);
+      Beat (False, 0.1, 65);
+      Beat (True, 0.0, 70); Beat (True, 0.0, 70);
+      Beat (False, 0.1, 65);
+      Check (Has_Ends (T, 1) and then Reading (Low_End (T, 1), 1) = 0.0 and then Reading (High_End (T, 1), 1) = 1.0,
+             "the sweep did not give its two ends");
+      Check (Stops (T, 1) = 5, "the settings between the ends the channel stood still at are" & Stops (T, 1)'Image
+             & ", not the 5 of the sweep (0.2, 0.4, 0.5, 0.6, 0.8)");
+      if Stops (T, 1) = 5 then
+         Check ((for all K in 1 .. 4 => Reading (Stop (T, 1, K), 1) < Reading (Stop (T, 1, K + 1), 1)),
+                "the stops are not in the order of their readings");
+         Check (Reading (Stop (T, 1, 3), 1) = 0.5 and then Driver.Pixels.Frames (Stop (T, 1, 3).Frames) = 3,
+                "the stop at the start of the sweep is not the view it began with");
+      end if;
+      --  Still at 0.6 again, in more frames: the stop there is the longer view; in fewer: it stays.
+      Beat (True, 0.6, 20); Beat (True, 0.6, 20); Beat (True, 0.6, 20); Beat (True, 0.6, 20);
+      Beat (False, 0.5, 15);
+      Beat (True, 0.6, 20); Beat (True, 0.6, 20);
+      Beat (False, 0.5, 15);
+      Check (Stops (T, 1) = 5 and then Driver.Pixels.Frames (Stop (T, 1, 4).Frames) = 4,
+             "a second view at a stop's reading did not leave the one with the most frames:" & Stops (T, 1)'Image
+             & " stops, the one at 0.6 of" & Driver.Pixels.Frames (Stop (T, 1, 4).Frames)'Image & " frames");
+      --  A view of one frame at a new reading is no stop.
+      Beat (True, 0.7, 25);
+      Beat (False, 0.5, 15);
+      Check (Stops (T, 1) = 5, "a view of one frame was kept as a stop");
+      --  The arm moves and the closer with it: the ends start again, and the stops with them.
+      Beat (True, 0.5, 80, Arm => 0.3); Beat (True, 0.5, 80, Arm => 0.3);
+      Beat (False, 0.5, 80, Arm => 0.3);
+      Check (not Has_Ends (T, 1) and then Stops (T, 1) = 0, "stops were kept across a move of the arm and the closer");
+   end Stops_Of_A_Sweep;
+
    --  The block at a level the closer's reading does not touch, on a background lit
    --  (1 - Reading) times one to three levels more, a level either way at each pixel.
    function Lit (Reading : Real) return Driver.Images.Image is
@@ -228,6 +281,8 @@ package body Driver.Robot.Hand.Views.Tests is
                              Ends_Of_A_Sweep'Access);
       Driver.Tests.Register ("hand.views.beyond", "a command past the travel, which the eye shows changing nothing, moves the end",
                              Past_The_Travel'Access);
+      Driver.Tests.Register ("hand.views.stops", "the readings a channel stood still at between its ends are kept, one view each",
+                             Stops_Of_A_Sweep'Access);
       Driver.Tests.Register ("hand.views.light", "a closer whose push the eye sees only as lighting is given a travel",
                              Light_Is_Not_Travel'Access);
       Driver.Tests.Register ("hand.views.frames", "views too short to measure their own noise are taken as ends",

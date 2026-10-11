@@ -1,8 +1,10 @@
 with Ada.Containers;
 with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Long_Elementary_Functions;
+with Driver.Clock;
 with Driver.Conventions;
 with Driver.Distributions;
+with Driver.Log;
 with Driver.Shared_For;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
@@ -87,8 +89,11 @@ package body Driver.Robot.Lockin is
       Far, Rest : Natural := 0;
       Far_Energy, Energy : Real := 0.0;
       Weights, Weighted  : Real := 0.0;
+      Sum_Energy, Sum_Variance : Real := 0.0;   --  for the log line
    begin
       for C of Pool loop
+         Sum_Energy := Sum_Energy + C.Energy;
+         Sum_Variance := Sum_Variance + C.Variance;
          Energy := Energy + Real'Max (0.0, C.Energy);
          if Far_Above (C) then
             Far := Far + 1;
@@ -115,6 +120,10 @@ package body Driver.Robot.Lockin is
             Low   : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));
             High  : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean + Z * Sigma) / Typical));
          begin
+            Driver.Log.Line (Driver.Log.Robot, "lock-in: the" & Pool'Length'Image & " cells too noisy to tell show together "
+                             & Driver.Log.Image (Mean, 4) & " +- " & Driver.Log.Image (Sigma, 4) & " of the typical energy "
+                             & Driver.Log.Image (Typical, 4) & " (their energies sum to " & Driver.Log.Image (Sum_Energy, 4)
+                             & ", their variances to " & Driver.Log.Image (Sum_Variance, 4) & ";" & Far'Image & " far above)");
             return (Least => Counted + Natural (Real'Floor (Low * Real (Rest))),
                     Most  => Counted + Natural (Real'Ceiling (High * Real (Rest))));
          end;
@@ -291,7 +300,49 @@ package body Driver.Robot.Lockin is
 
       function Push_Start (G : Group_Id; Beat : Natural) return Natural is
         (Starts ((Natural (G) - 1) * M.Beats + Beat + 1));
+
+      --  What the measure before this one knew of every group in every eye, for telling a held group's motion that
+      --  no cell of an eye can see (Usable): its verdict, every channel's pixels per reading unit, the eye's cell noise.
+      Total_Channels : Natural := 0;
+      Channel_Of     : array (1 .. Groups) of Natural := [others => 0];   --  the channels of the groups before it
+      Was_Verdict    : array (1 .. Groups * Eyes) of Eye_Response := [others => Unmeasured];
+      Was_Noise      : array (1 .. Eyes) of Real := [others => Real'Last];
+      Was_Shift      : Real_Access;
+      Step_Table     : Real_Access;
+      function Steps_Of (G : Group_Id) return Real_Array is
+        (Step_Table (Channel_Of (Natural (G)) + 1 .. Channel_Of (Natural (G)) + M.Groups (G).Size));
    begin
+      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+         Channel_Of (Natural (G)) := Total_Channels;
+         Total_Channels := Total_Channels + M.Groups (G).Size;
+      end loop;
+      Was_Shift := new Real_Array'(1 .. Eyes * Total_Channels => 0.0);
+      --  Every channel's visible step as the body has it when the measure begins, before any eye's gains, which
+      --  it rests on, are cleared and made again: the one test of motion is asked at every beat of every group
+      --  below, and the step summed every cell of every eye at each asking.
+      Step_Table := new Real_Array'(1 .. Total_Channels => Real'Last);
+      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+         declare
+            Steps : constant Real_Array := Channels.Steps_Of (M, G);
+         begin
+            for C in Steps'Range loop
+               Step_Table (Channel_Of (Natural (G)) + C) := Steps (C);
+            end loop;
+         end;
+      end loop;
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         Was_Noise (Natural (E)) := Cell_Noise (M, E);
+         for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+            declare
+               K : constant Natural := (Natural (G) - 1) * Eyes + Natural (E);   --  as Graph.Effect has it
+            begin
+               Was_Verdict (K) := (if K <= Natural (M.Graph.Effects.Length) then M.Graph.Effects (K).Verdict else Unmeasured);
+            end;
+            for C in 1 .. M.Groups (G).Size loop
+               Was_Shift ((Natural (E) - 1) * Total_Channels + Channel_Of (Natural (G)) + C) := Shift (M, E, G, C);
+            end loop;
+         end loop;
+      end loop;
       M.Graph.Effects.Clear;
       M.Graph.Effects.Append (Eye_Effect'(others => <>), Ada.Containers.Count_Type (Groups * Eyes));
       for S of M.Groups loop
@@ -301,6 +352,8 @@ package body Driver.Robot.Lockin is
       end loop;
       if All_Columns = 0 or else M.Beats < 2 then
          Free (Starts);
+         Free (Was_Shift);
+         Free (Step_Table);
          return;
       end if;
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -324,27 +377,186 @@ package body Driver.Robot.Lockin is
             S     : Eye_Stream renames M.Eyes (E);
             N     : constant Natural := Cells (S.Grid);
             Lag   : constant Integer := (if E <= M.Lags.Last_Index then M.Lags (E) else 0);
+            --  Where the eye's time goes, for the log: the marks of the usable beats, the rows assembled, the
+            --  cells fitted (timed below), and what follows the fit.
+            Eye_Began   : constant Duration := Driver.Clock.Seconds;
+            Marks_Took, Rows_Took : Duration := 0.0;
             Rows  : Natural := 0;
+
+            --  How long the eye's picture goes on settling after the body stops moving: from the last beat any
+            --  commandable group moved or was pushed to the first beat after it at which the picture had settled
+            --  (the stillness watch), the longest such stretch in the stream. The picture of a renderer that
+            --  accumulates its frames drifts for beats after the readings stop, and carries the tail of a motion
+            --  into the beats after it.
+            function Settling_Tail return Natural is
+               Longest : Natural := 0;
+               Last    : Natural := 0;   --  the last beat a group moved or was pushed
+               Waiting : Boolean := False;
+            begin
+               for B in 0 .. Natural'Min (M.Beats, Natural (S.Settled_At.Length)) - 1 loop
+                  if (for some G in M.Groups.First_Index .. M.Groups.Last_Index =>
+                        M.Groups (G).Commandable and then (Channels.Pushed (M, G, B) or else Channels.Moving (M, G, B, Steps_Of (G))))
+                  then
+                     Last := B;
+                     Waiting := True;
+                  elsif Waiting and then S.Settled_At (B) then
+                     Longest := Natural'Max (Longest, B - Last);
+                     Waiting := False;
+                  end if;
+               end loop;
+               return Longest;
+            end Settling_Tail;
+            Tail : constant Natural := Settling_Tail;
 
             --  A beat of the eye can be explained when its displacement was
             --  measured, every commandable group's readings exist for the
             --  beat it shows and the one before, at most one group was being
-            --  pushed then, no other group's reading moved (a push that
-            --  coincides with another group's motion is no reference for
-            --  either: their effects cannot be told apart, and a group that
-            --  moves with no push under way, one that ended or was given up
-            --  while it kept moving, moves its picture all the same), and the
-            --  push, if there is one, began from a picture that had settled,
+            --  pushed then, no other group's reading moved but as the push's
+            --  own reaction (a push that coincides with another group's motion
+            --  is no reference for either: their effects cannot be told apart,
+            --  and a group that moves with no push under way, one that ended or
+            --  was given up while it kept moving, moves its picture all the
+            --  same; a held group that stood until the push began and, once it is
+            --  under way, moves by less than any cell of this eye can see
+            --  (Unseen) moves nothing of its picture, and the regression gives
+            --  a held group's motion no weight: A94's left closer shook its arm
+            --  at every beat of its pushes, none was kept, and no eye ever
+            --  measured it; an arm that moves with the gripper by as much as its
+            --  own pushes still leaves the beat out, A29's), and the push, if
+            --  there is one, began from a picture that had settled,
             --  at the beat before it began: the tail of an earlier motion is
             --  not the push's effect. (That beat, not the one that shows the
             --  push's first reading: the watch restarts at the lag the eye
             --  had when the beat was taken, which is not yet measured early.)
+            --  A held group's step at a reading beat moves this eye's picture by less than one cell tells: the eye
+            --  showed nothing of the group, or no channel's step times its pixels per reading unit is significant
+            --  against the cells' noise (Shows_Step, as the measure before this one had them). Not known of a group
+            --  this eye has not measured.
+            function Unseen (G : Group_Id; Beat : Natural) return Boolean is
+               V : constant Eye_Response := Was_Verdict ((Natural (G) - 1) * Eyes + Natural (E));
+            begin
+               if V = Nothing then
+                  return True;
+               elsif V = Unmeasured or else Was_Noise (Natural (E)) = Real'Last then
+                  return False;
+               end if;
+               for C in 1 .. M.Groups (G).Size loop
+                  declare
+                     Per_Unit : constant Real :=
+                       Was_Shift ((Natural (E) - 1) * Total_Channels + Channel_Of (Natural (G)) + C);
+                  begin
+                     if Per_Unit > 0.0
+                       and then Driver.Uncertain.Significant (Channels.Change (M, G, Beat, C) * Per_Unit, Was_Noise (Natural (E)))
+                     then
+                        return False;
+                     end if;
+                  end;
+               end loop;
+               return True;
+            end Unseen;
+
+            --  For every commandable group, the last beat up to each at which it was pushed, at which it moved, and
+            --  at which it moved by what this eye can see (not Unseen), each as the beat plus one and zero for none
+            --  yet. What a usable beat's push must be free of, in the window from the settling tail before it
+            --  through the beat, is then asked in one step each, not beat by beat over the window: that scan was
+            --  all of the lock-in's time on the fake body, growing with the square of the beats (17 s at 1056
+            --  beats, the cells' fits 0.1 s of it).
+            Last_Pushed      : Natural_Access := new Natural_Array'(1 .. Groups * M.Beats => 0);
+            Last_Moved       : Natural_Access := new Natural_Array'(1 .. Groups * M.Beats => 0);
+            Last_Seen_Moving : Natural_Access := new Natural_Array'(1 .. Groups * M.Beats => 0);
+
+            function Mark (Marks : Natural_Access; G : Group_Id; B : Natural) return Natural is
+              (Marks ((Natural (G) - 1) * M.Beats + B + 1));
+
+            --  Whether the eye's picture moved, at each beat, within what the flow resolves: a cell resolves a
+            --  displacement of less than half its width, and where the cells that could not resolve theirs are a
+            --  significant majority of those with texture, the picture moved beyond the flow's reach, and the
+            --  few cells that did resolve one are not to be believed (a flow that tracks a texture aliases on its
+            --  lookalikes a period away). Such a beat is no evidence for the regression, which measures the
+            --  small-motion Jacobian: on the fake body the sweep's pushes, half a radian in three beats, put most of
+            --  the picture beyond a cell every beat, the gains collapsed under them and the visible steps grew
+            --  three hundredfold (R4, the box). Indexed by the beat plus one.
+            Reached : Flags_Access := new Flags'(1 .. Natural'Max (1, M.Beats) => True);
+
+            procedure Mark_Reach is
+               --  The cells that resolve their displacement at most measured beats: a cell too faint to resolve
+               --  any says nothing of how far the picture moved at one (an eye whose faint cells are a majority
+               --  would have every push beyond reach, and show nothing of a motion it sees whole).
+               Usual    : Flags_Access := new Flags'(1 .. N => False);
+               Resolved : Natural_Access := new Natural_Array'(1 .. N => 0);
+               Measured : Natural := 0;
+            begin
+               for B in 0 .. M.Beats - 1 loop
+                  if B < Natural (S.Measured.Length) and then S.Measured (B) and then Natural (S.Condition.Length) >= (B + 1) * N then
+                     Measured := Measured + 1;
+                     for C in 0 .. N - 1 loop
+                        if S.Condition (B * N + C) > 0.0 and then S.Resolved (B * N + C) then
+                           Resolved (C + 1) := Resolved (C + 1) + 1;
+                        end if;
+                     end loop;
+                  end if;
+               end loop;
+               for C in 1 .. N loop
+                  Usual (C) := 2 * Resolved (C) > Measured;
+               end loop;
+               for B in 0 .. M.Beats - 1 loop
+                  if B < Natural (S.Measured.Length) and then S.Measured (B) and then Natural (S.Condition.Length) >= (B + 1) * N then
+                     declare
+                        Textured, Solved : Natural := 0;
+                     begin
+                        for C in 0 .. N - 1 loop
+                           if Usual (C + 1) and then S.Condition (B * N + C) > 0.0 then
+                              Textured := Textured + 1;
+                              if S.Resolved (B * N + C) then
+                                 Solved := Solved + 1;
+                              end if;
+                           end if;
+                        end loop;
+                        Reached (B + 1) := not Cells_Disagree (Showing => Solved, Silent => Textured - Solved);
+                     end;
+                  end if;
+               end loop;
+               Free (Usual);
+               Free (Resolved);
+            end Mark_Reach;
+
+            procedure Mark_Motions is
+            begin
+               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                  if M.Groups (G).Commandable then
+                     declare
+                        Pushed, Moved, Seen : Natural := 0;
+                        Here : Natural := (Natural (G) - 1) * M.Beats;
+                     begin
+                        for B in 0 .. M.Beats - 1 loop
+                           if Channels.Pushed (M, G, B) then
+                              Pushed := B + 1;
+                           end if;
+                           if Channels.Moving (M, G, B, Steps_Of (G)) then
+                              Moved := B + 1;
+                              if not Unseen (G, B) then
+                                 Seen := B + 1;
+                              end if;
+                           end if;
+                           Here := Here + 1;
+                           Last_Pushed (Here) := Pushed;
+                           Last_Moved (Here) := Moved;
+                           Last_Seen_Moving (Here) := Seen;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+            end Mark_Motions;
+
             function Usable (B : Natural) return Boolean is
                R      : constant Integer := B - Lag;
                Pushes : Natural := 0;
                Pusher : Group_Id := M.Groups.First_Index;
+               Held_Moving : Boolean := False;   --  a group not pushed moved at the beat
             begin
-               if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 then
+               if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 or else R >= M.Beats
+                 or else not Reached (B + 1)
+               then
                   return False;
                end if;
                for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -354,12 +566,12 @@ package body Driver.Robot.Lockin is
                      elsif Channels.Pushed (M, G, R) then
                         Pushes := Pushes + 1;
                         Pusher := G;
-                     elsif Channels.Moving (M, G, R) then
-                        return False;
+                     elsif Channels.Moving (M, G, R, Steps_Of (G)) then
+                        Held_Moving := True;
                      end if;
                   end if;
                end loop;
-               if Pushes > 1 then
+               if Pushes > 1 or else (Pushes = 0 and then Held_Moving) then
                   return False;
                elsif Pushes = 1 then
                   declare
@@ -369,21 +581,28 @@ package body Driver.Robot.Lockin is
                      if Before < 0 or else Before >= Natural (S.Settled_At.Length) or else not S.Settled_At (Before) then
                         return False;
                      end if;
-                     --  Nor did another group move at any beat of the push: its
-                     --  picture goes on changing for beats after its readings
-                     --  stop, and the lock-in would credit that to this push
-                     --  (A62 and A63, the arms swept at once: arm 2 took eye 2,
-                     --  arm 1's, as a whole, and no hand was made of either
-                     --  closer).
-                     for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-                        if G /= Pusher and then M.Groups (G).Commandable then
-                           for B2 in Began .. Natural (R) loop
-                              if Channels.Pushed (M, G, B2) or else Channels.Moving (M, G, B2) then
-                                 return False;
-                              end if;
-                           end loop;
-                        end if;
-                     end loop;
+                     --  Nor was another group pushed at any beat of the push or
+                     --  within the eye's settling tail before it, nor did it move
+                     --  in that tail: its picture goes on changing for beats after
+                     --  its readings stop, and the lock-in would credit that to
+                     --  this push (A62 and A63,
+                     --  the arms swept at once: arm 2 took eye 2, arm 1's, as a
+                     --  whole; with the push's own beats only, A79 to A85 still
+                     --  gave arm 2 eye 2 WHOLE after their sweeps, A85's with 240
+                     --  of 525 cells, and A85's boot ended in a breach).
+                     declare
+                        Low : constant Natural := Natural (Integer'Max (0, Integer (Began) - Tail));
+                     begin
+                        for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                           if G /= Pusher and then M.Groups (G).Commandable
+                             and then (Mark (Last_Pushed, G, Natural (R)) > Low
+                                       or else (Began > Low and then Mark (Last_Moved, G, Began - 1) > Low)
+                                       or else Mark (Last_Seen_Moving, G, Natural (R)) > Began)
+                           then
+                              return False;
+                           end if;
+                        end loop;
+                     end;
                      return True;
                   end;
                end if;
@@ -398,11 +617,14 @@ package body Driver.Robot.Lockin is
             S.Gain_Variances.Clear;
             S.Shifts.Clear;
             if N > 0 then
+               Mark_Motions;
+               Mark_Reach;
                for B in 1 .. M.Beats - 1 loop
                   if Usable (B) then
                      Rows := Rows + 1;
                   end if;
                end loop;
+               Marks_Took := Driver.Clock.Seconds - Eye_Began;
             end if;
             --  A regression needs more observations than coefficients.
             if Rows > All_Columns + 1 then
@@ -462,6 +684,10 @@ package body Driver.Robot.Lockin is
                         --  variance and its shift (nothing, where it does not respond). The cells are fitted at once
                         --  and write only their own; the eye's vectors get them in order afterwards.
                         Noise_Of  : Real_Access := new Real_Array'(1 .. N => Real'Last);
+                        --  What each cell's two fits cost, for the log: their reweighting passes, and whether one
+                        --  stopped short of converging.
+                        Passes_Of : Natural_Access := new Natural_Array'(1 .. N => 0);
+                        Stuck_Of  : Flags_Access := new Flags'[1 .. N => False];
                         Gain_Of   : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         Spread_Of : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         Shift_Of  : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
@@ -487,12 +713,19 @@ package body Driver.Robot.Lockin is
                                                                  S.Luma_Variance (Cell - 1));
                               end if;
                            end loop;
+                           if Cell = 1 or else Cell = N or else Cell = N / 2 then
+                              Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & " cell" & Cell'Image & " regresses"
+                                               & K'Image & " of" & Rows'Image & " rows (resolved there), floor "
+                                               & Driver.Log.Image (Driver.Stats.Median (Floors.all), 5));
+                           end if;
                            declare
                               Floor : constant Real := Driver.Stats.Median (Floors.all);
                               Fu    : constant Regression.Fit := Regression.Solve (Xc.all, U.all, Floor);
                               Fv    : constant Regression.Fit := Regression.Solve (Xc.all, V.all, Floor);
                            begin
                               Noise_Of (Cell) := Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0);
+                              Passes_Of (Cell) := Fu.Passes + Fv.Passes;
+                              Stuck_Of (Cell) := not (Fu.Converged and then Fv.Converged);
                               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
                                  declare
                                     First : Natural := 0;
@@ -585,7 +818,44 @@ package body Driver.Robot.Lockin is
                               X (R, K + 1) := Pushed_Change (Cols (K).Group, Beat_Of (R) - Lag, Cols (K).Channel);
                            end loop;
                         end loop;
-                        Fit_Cells (1, N);
+                        declare
+                           Motion_Rows : Natural := 0;
+                        begin
+                           for R in 1 .. Rows loop
+                              if (for some K in 1 .. Kept => X (R, K + 1) /= 0.0) then
+                                 Motion_Rows := Motion_Rows + 1;
+                              end if;
+                           end loop;
+                           Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ":" & Motion_Rows'Image & " of" & Rows'Image
+                                            & " rows carry a push; the rows' beats run" & (if Rows > 0 then Beat_Of (1)'Image else "")
+                                            & " to" & (if Rows > 0 then Beat_Of (Rows)'Image else "") & ", lag" & Lag'Image);
+                        end;
+                        declare
+                           Started : constant Duration := Driver.Clock.Seconds;
+                           Fitted, Passes, Most, Stuck : Natural := 0;
+                        begin
+                           Rows_Took := Started - Eye_Began - Marks_Took;
+                           Fit_Cells (1, N);
+                           for Cell in 1 .. N loop
+                              if Textured (Cell) then
+                                 Fitted := Fitted + 1;
+                                 Passes := Passes + Passes_Of (Cell);
+                                 Most := Natural'Max (Most, Passes_Of (Cell));
+                                 Stuck := Stuck + Boolean'Pos (Stuck_Of (Cell));
+                              end if;
+                           end loop;
+                           Driver.Log.Line
+                             (Driver.Log.Robot, "lock-in: eye" & E'Image & ":" & Rows'Image & " rows," & Kept'Image
+                              & " columns, settling tail" & Tail'Image & " beats," & Fitted'Image & " of" & N'Image
+                              & " cells fitted in "
+                              & Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & " s (the marks took "
+                              & Driver.Log.Image (Real (Marks_Took), 1) & " s, the rows "
+                              & Driver.Log.Image (Real (Rows_Took), 1) & " s before them), with" & Passes'Image
+                              & " reweighting passes in all," & Most'Image & " the most in a cell," & Stuck'Image
+                              & " cells with a fit that did not converge");
+                        end;
+                        Free (Passes_Of);
+                        Free (Stuck_Of);
                         for Cell in 1 .. N loop
                            S.Noise.Append (Noise_Of (Cell));
                         end loop;
@@ -641,6 +911,11 @@ package body Driver.Robot.Lockin is
                                        Effect.Fraction :=
                                          (Value => F, Sigma => Sqrt (F * (1.0 - F) / Real (T)), Degrees_Of_Freedom => 0);
                                        Effect.Verdict := Judge (Count, T, Least, Most, Disagree);
+                                       Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & " group" & G'Image & ":"
+                                                        & Count'Image & " of" & T'Image & " textured cells respond, "
+                                                        & Least'Image & " to" & Most'Image & " show the motion"
+                                                        & (if Disagree then " and the cells that can tell disagree" else "")
+                                                        & ": " & Effect.Verdict'Image);
                                     end;
                                  end if;
                                  M.Graph.Effects.Replace_Element ((Natural (G) - 1) * Eyes + Natural (E), Effect);
@@ -657,9 +932,15 @@ package body Driver.Robot.Lockin is
                   Free (Beat_Of);
                end;
             end if;
+            Free (Last_Pushed);
+            Free (Last_Moved);
+            Free (Last_Seen_Moving);
+            Free (Reached);
          end;
       end loop;
       Free (Starts);
+      Free (Was_Shift);
+      Free (Step_Table);
    end Measure;
 
    procedure Measure_Rest_Noise (M : in out Model) is
@@ -856,6 +1137,46 @@ package body Driver.Robot.Lockin is
       return False;
    end Shows_Step;
 
+   function Column_Of (S : Eye_Stream; G : Group_Id; Channel : Positive) return Natural is
+      Kept : constant Natural := Natural (S.Kept_Groups.Length);
+   begin
+      for K in 0 .. Kept - 1 loop
+         if S.Kept_Groups (K) = Natural (G) and then S.Kept_Channels (K) = Channel then
+            return K + 1;
+         end if;
+      end loop;
+      return 0;
+   end Column_Of;
+
+   procedure Gain_Of
+     (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive; Gain, Spread : out Real; Measured : out Boolean)
+   is
+      S      : Eye_Stream renames M.Eyes (E);
+      Kept   : constant Natural := Natural (S.Kept_Groups.Length);
+      Column : constant Natural := Column_Of (S, G, Channel);
+   begin
+      Gain := 0.0;
+      Spread := 0.0;
+      Measured := Column > 0;
+      if Measured then
+         for Cell in 0 .. Natural (S.Gains.Length) / Kept - 1 loop
+            Gain := Gain + S.Gains (Cell * Kept + Column - 1);
+            Spread := Spread + S.Gain_Variances (Cell * Kept + Column - 1);
+         end loop;
+      end if;
+   end Gain_Of;
+
+   function Seen (Gain, Spread : Real) return Boolean is
+     (Gain > Driver.Conventions.Z * Sqrt (Real'Max (0.0, Spread)));
+
+   function Seen (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Boolean is
+      Gain, Spread : Real;
+      Measured     : Boolean;
+   begin
+      Gain_Of (M, E, G, Channel, Gain, Spread, Measured);
+      return Measured and then Seen (Gain, Spread);
+   end Seen;
+
    function Shift (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive) return Real is
       S      : Eye_Stream renames M.Eyes (E);
       Kept   : constant Natural := Natural (S.Kept_Groups.Length);
@@ -868,6 +1189,9 @@ package body Driver.Robot.Lockin is
          end if;
       end loop;
       if Column = 0 then
+         return 0.0;
+      end if;
+      if not Seen (M, E, G, Channel) then
          return 0.0;
       end if;
       for Cell in 0 .. Natural (S.Shifts.Length) / Kept - 1 loop

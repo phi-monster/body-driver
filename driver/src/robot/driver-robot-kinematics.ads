@@ -3,20 +3,35 @@
 --  For every arm whose eye rides on it (Driver.Robot.Graph), a keyframe is
 --  kept whenever the arm and its eye are both at rest and the arm's readings
 --  differ from every keyframe kept so far: the readings, and what the eye
---  saw. The first keyframe is the reference. The instrument is asked where
---  the reference's query points went in every later keyframe, both ways
---  round, and the answers are kept with the keyframe they belong to. The
---  query points are the centres of the reference eye's cells that respond
---  to the arm's own push (the lock-in): those show the world, not the hand
---  that rides with the eye.
+--  saw. The first keyframe is the reference. Driver.Alignment finds where
+--  the reference's query points went in every later keyframe (Align_New), each
+--  keyframe predicted from the ones before it (Driver.Alignment.Keyframes), and
+--  the answers are kept with the keyframe they belong to. The query points are
+--  the centres of the reference eye's cells that respond to the arm's own push
+--  (the lock-in): those show the world, not the hand that rides with the eye.
 --
---  Every request is submitted and its reply read on a later beat
---  (Driver.Services), so the same evidence follows from a recording.
+--  What other eyes show of the reference is asked of the instrument: a request
+--  is submitted and its reply read on a later beat (Driver.Services), so the
+--  same evidence follows from a recording.
 
 private package Driver.Robot.Kinematics is
 
    procedure Observe (M : in out Model; O : Observation);
    --  One beat, after the readings and the eyes were taken in.
+
+   procedure Align_New (M : in out Model);
+
+   function Realign (M : in out Model) return Boolean;
+   --  Aligns again the keyframes whose first alignment refused points for the uncertainty of the prediction it was
+   --  given (a keyframe the arm's earlier keyframes could not carry the prediction to), now that the fitted arm
+   --  predicts them: those it predicts with less uncertainty than they were aligned from. True when it changed any.
+   --  Aligns every keyframe of every arm that was taken and not aligned yet,
+   --  in the order they were taken: where the reference's query points are in
+   --  it, with the answer's own uncertainty. Called with the estimates, after
+   --  the noise of the readings and the lock-in's shifts are measured and
+   --  before Refit; a replay therefore aligns the same keyframes at the same
+   --  places of the stream. Nothing is aligned while a channel's noise is not
+   --  measured.
 
    function Held_Still (M : Model; A : Arm_Id; Beat : Natural) return Boolean;
    --  A keyframe can be taken of the arm at the latest beat: its readings do
@@ -26,15 +41,16 @@ private package Driver.Robot.Kinematics is
    --  and a real camera's exposure does too).
 
    function Matched (M : Model; A : Arm_Id) return Natural;
-   --  How many keyframes of the arm have their matches back.
+   --  How many keyframes of the arm have their answers.
 
    function Match_Noise (M : Model; A : Arm_Id) return Real;
-   --  How far the matcher errs on the arm's eye: the noise of a round trip,
-   --  the robust scale about zero of every answer's return to its query,
-   --  both coordinates, in pixels (Refit judges by it which keyframes moved
-   --  enough to tell the fit anything); 0 before any answer. The arm's
-   --  second keyframe is a still twin of its reference, taken at the same
-   --  pose, so the matcher's own error is known before any move.
+   --  How far the aligner errs on the arm's eye: the scatter of what a smooth
+   --  field of displacements leaves of the points it found in the keyframes
+   --  the arm moved to (Driver.Alignment.Keyframes.Scatter), in pixels (Refit
+   --  judges by it which keyframes moved enough to tell the fit anything); 0
+   --  before any such keyframe is aligned. A still twin of the reference
+   --  cannot say: the aligner's own error on two identical pictures is far
+   --  under its error on pictures that moved.
 
    function Keyframe_Step (M : Model; A : Arm_Id; Channel : Positive) return Real;
    --  The smallest change of the arm's channel that moves the view of the eye
@@ -48,18 +64,29 @@ private package Driver.Robot.Kinematics is
    --  the sweep's base, ten times the lock-in's step, a twentieth of this).
 
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean;
-   --  The arm's still twin was taken and its match answered or refused, or
-   --  the instrument can never answer: Match_Noise will not change before
-   --  the arm moves.
+   --  The arm's still twin of its reference was taken.
+
+   procedure Begin_Anew (M : in out Model; A : Arm_Id);
+   --  Drops what the arm's kinematics gathered so far: the next still frame
+   --  of its eye is its reference, the one after its twin. The boot calls it
+   --  in a held beat where the arm's sweep begins, so that the reference is
+   --  the pose the arm is swept from: the fit tells which joints a keyframe
+   --  moved by its change from the reference, and the recognition rounds
+   --  leave an arm where they found it, not where its first frame was taken
+   --  (fake body T6, arm 1: 173 units of channel 2 off, one and a half
+   --  steps, so every keyframe of its sweep moved two joints and no joint
+   --  but that one had a keyframe of its own; A10's arm 2 lay a twentieth
+   --  of a step off and fitted). An arm that carries no eye has nothing to
+   --  drop.
 
    function Pending (M : Model) return Natural;
    --  Match requests of every arm not answered yet.
 
    procedure Refit (M : in out Model);
-   --  Fits every arm whose matches changed since its last fit
-   --  (Driver.Robot.Kinematics.Fit). Its sightings are the matches whose
-   --  round trip comes back to where it started, within the noise of all the
-   --  round trips.
+   --  Fits every arm whose answers changed since its last fit
+   --  (Driver.Robot.Kinematics.Fit). Its sightings are the answers of
+   --  keyframes the points moved in by more than the aligner errs, whose
+   --  uncertainty is not more than Z times the keyframe's typical one.
 
    function Eye_In_Reference (M : Model; A : Arm_Id; Readings : Real_Array) return Rigid;
    --  The arm's eye at those readings, in the frame of its eye at the
@@ -67,9 +94,28 @@ private package Driver.Robot.Kinematics is
 
    function Fitted (M : Model; A : Arm_Id) return Boolean;
 
+   function Followed (M : Model; A : Arm_Id; From, To : Natural) return Boolean;
+   --  The arm's latest keyframe taken at a beat in From .. To is aligned and
+   --  was followed: most of its points were found from windows no wider than
+   --  a patch, from the keyframes before it or from the fitted arm's own
+   --  prediction (Match_Set.Followed). False without such a keyframe, or
+   --  before it is aligned. The boot climbs a joint's ladder of keyframes as
+   --  far as they are followed, and names the beats it held the arm for each:
+   --  the readings it asked for are not what the keyframe reads (the hold an
+   --  arm is moved from and the readings it rests at differ by what the body
+   --  gives under load; fake body Z6, arm 2: every push's keyframe found,
+   --  none at the readings asked).
+
    function Table (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate;
    --  The table the arm's eye saw, in its reference frame, as the fit that
    --  holds found it (Refit); unknown until then.
+
+   function Standing_Near (M : Model; A : Arm_Id; Point : Vec3; Within : Real) return Natural;
+   --  How many of the arm's tracks stand above its table within Within of Point across the table's normal, in
+   --  the arm's frame: tracks with a depth (Track_Known) that do not lie on the table and whose height above it
+   --  is significant against the height's own sigma (the track's depth and the plane's there). A press lands on
+   --  what stands there, not on the table (A79's hand 1: five presses of eleven never met the table, item 7). 0
+   --  without a fit or a table.
 
    procedure In_World (M : Model; A : Arm_Id; Placement : out Rigid; Scale : out Real; Known : out Boolean);
    --  The arm's reference frame in the world: X_world = Placement * (Scale *
@@ -81,6 +127,15 @@ private package Driver.Robot.Kinematics is
 
    function Scale_In_World (M : Model; A : Arm_Id) return Estimate;
    --  In_World's Scale with its sigma; Unknown until the arm is placed.
+
+   procedure Placement_Covariance (M : Model; A : Arm_Id; Turn, Centre : out Mat3);
+   --  The covariance of the arm's placement in the world: of its turn (a rotation vector, world frame) and of its
+   --  centre, in world units; Real'Last on the diagonals until it is placed.
+
+   function World_Table (M : Model) return Driver.Geometry.Plane_Estimate;
+   --  The table in the world: the first arm's (the world is its reference frame, In_World), as its eye saw it;
+   --  unknown until that arm is fitted with a table. An arm whose own eye saw none presses on this one, turned
+   --  into its frame by its placement (Driver.Robot.Table_In_Arm, item 14).
 
    procedure World_Pose_Covariance (M : Model; A : Arm_Id; Readings : Real_Array; Turn, Place : out Mat3);
    --  Pose_Covariance carried into the world: the arm's own, turned and
@@ -110,6 +165,11 @@ private package Driver.Robot.Kinematics is
    --  by less than the unchanged fraction of it; how far the eye remains
    --  from Goal. Q gives every joint that turns as the reading nearest Start
    --  (Nearest_Readings): the same pose, the way the arm is nearest to go.
+
+   function Conditioning (M : Model; A : Arm_Id; Q : Real_Array) return Real;
+   --  How near the arm stands at readings Q to a pose where its eye cannot move every way: the least singular value
+   --  of the fitted model's Jacobian of the eye's place (model units) and turn (radians) by the readings, over the
+   --  greatest; 0 where some way of the eye is lost, 1 where every way is as easy. Zero for a model not fitted.
 
    function Nearest_Readings (M : Model; A : Arm_Id; Near, Readings : Real_Array) return Real_Array
      with Pre => Near'Length = Readings'Length,
