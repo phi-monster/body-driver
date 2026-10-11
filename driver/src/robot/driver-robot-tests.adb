@@ -1018,8 +1018,11 @@ package body Driver.Robot.Tests is
          begin
             Check (Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last, "arm 1's sweep plan is not measured");
             if Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last then
-               Check_Close (Start * Shift, Driver.Conventions.Z * Noise, 1.0e-9 * Noise,
-                            "the first level moves the view of joint" & C'Image);
+               --  The step the matcher tells apart, and what the readings' noise can take off a turn asked of exactly it
+               --  (Motion.Sweep_Start: a turn of the step itself lands below it half the time).
+               Check_Close (Start, Driver.Conventions.Z * Noise / Shift
+                                   + Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C),
+                            1.0e-9 * Noise / Shift, "the first level moves the view of joint" & C'Image);
                Check (Known (Visible_Step (M, 1, C)) and then Start > Visible_Step (M, 1, C).Value,
                       "joint" & C'Image & "'s sweep starts at its visible step or below");
             end if;
@@ -1402,6 +1405,7 @@ package body Driver.Robot.Tests is
          Level_Now : Real := Bump;
       begin
          S.Watch_Done := False;
+         S.Watch_Have := False;
          while Taken < Within loop
             Next (Kind, Beat + Taken, Level_Now);
             Taken := Taken + 1;
@@ -1421,10 +1425,7 @@ package body Driver.Robot.Tests is
             Taken : Natural;
          begin
             --  Each picture is an eye of its own: what rest changes by is measured on it alone.
-            S.Rest_Changes.Clear;
-            S.Rest_Change := Real'Last;
-            S.Rest_Scale := 0.0;
-            S.Rest_Counted := 0;
+            S.Watch_Have := False;
             Next (Kind, 0, 0.0);
             Next (Kind, 1, 0.0);
             Next (Kind, 2, 0.0);

@@ -331,6 +331,7 @@ package body Driver.Robot.Kinematics is
                         declare
                            Steps   : Real_Array (Now'Range) := [others => 0.0];
                            Seeable : Boolean := False;
+                           At_Reference : Boolean := False;   --  at the reference's readings, to within the steps
                         begin
                            for C in Now'Range loop
                               declare
@@ -357,32 +358,47 @@ package body Driver.Robot.Kinematics is
                                  end if;
                               end;
                            end loop;
-                           for F of R.Frames loop
+                           for F in R.Frames.First_Index .. R.Frames.Last_Index loop
                               declare
                                  Apart : Boolean := False;
                               begin
                                  for C in Now'Range loop
-                                    if Steps (C) > 0.0 and then abs (Now (C) - F.Readings (C - 1)) >= Steps (C) then
+                                    if Steps (C) > 0.0 and then abs (Now (C) - R.Frames (F).Readings (C - 1)) >= Steps (C) then
                                        Apart := True;
                                     end if;
                                  end loop;
                                  Fresh := Fresh and then Apart;
+                                 if F = R.Frames.First_Index then
+                                    At_Reference := not Apart;
+                                 end if;
                               end;
                            end loop;
+                           --  The reference's still twin: the first keyframe after it at its readings, whenever the
+                           --  arm stands there again (two pictures of one pose: the matcher's own error, Match_Noise).
+                           --  A frame at other readings is no twin, held still or not: the reference's next still beat
+                           --  can come after a push (robot.sweep.twin: that frame was aligned as the same pose, and 0
+                           --  of 40 points were found).
                            Fresh := Seeable
-                             and then (Fresh or else (Natural (R.Frames.Length) = 1 and then Beat > R.Frames (1).Beat));
+                             and then (Fresh
+                                       or else (not R.Twin_Taken and then not R.Frames.Is_Empty
+                                                and then Beat > R.Frames (1).Beat and then At_Reference));
+                           if Fresh then
+                              declare
+                                 K : Keyframe;
+                              begin
+                                 K.Beat := Beat;
+                                 for X of Now loop
+                                    K.Readings.Append (X);
+                                 end loop;
+                                 K.Image := O.Images (E);
+                                 R.Frames.Append (K);
+                              end;
+                              if At_Reference and then Natural (R.Frames.Length) > 1 then
+                                 R.Twin_Taken := True;
+                              end if;
+                           end if;
                         end;
                         if Fresh then
-                           declare
-                              K : Keyframe;
-                           begin
-                              K.Beat := Beat;
-                              for X of Now loop
-                                 K.Readings.Append (X);
-                              end loop;
-                              K.Image := O.Images (E);
-                              R.Frames.Append (K);
-                           end;
                            if Natural (R.Frames.Length) = 1 then
                               Query_Points (M, E, G, R.Query_U, R.Query_V);
                               --  The reference's points into every other eye's view at
@@ -493,7 +509,7 @@ package body Driver.Robot.Kinematics is
       declare
          R : Arm_Evidence renames M.Kinematics (Index_Of (M, A));
       begin
-         return Natural (R.Frames.Length) >= 2;
+         return R.Twin_Taken;
       end;
    end Twin_Answered;
 

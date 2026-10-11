@@ -263,9 +263,11 @@ package body Driver.Robot.Kinematics.Fit is
    --  Robust least squares: Levenberg-Marquardt on a numerical Jacobian, Huber
    --  weights at Z on residuals in units of Sigma. It stops when a step lowers
    --  the cost by less than the unchanged fraction of it, or when no damping
-   --  gives a step that lowers it at all; To_The_End, only then (the last
-   --  stage of an arm's fit: stopped at the fraction, inputs apart by 1e-9 px
-   --  gave fits apart by far more, A23's arm 2, item 3).
+   --  gives a step that lowers it at all; To_The_End, when a step no longer
+   --  moves any combination of the parameters by more than the unchanged
+   --  fraction of its standard error (the last stage of an arm's fit: stopped
+   --  at the fraction of the cost, inputs apart by 1e-9 px gave fits apart by
+   --  far more, A23's arm 2, item 3).
 
    generic
       Parameters : Positive;
@@ -276,7 +278,7 @@ package body Driver.Robot.Kinematics.Fit is
       --  Evaluate writes nothing but R, so the Jacobian's columns may be taken
       --  at once (Driver.Parallel_For), each with its own residual array.
       To_The_End : Boolean := False;
-      --  Go on while any damping lowers the cost at all.
+      --  Go on while a step moves the estimate by more than the unchanged fraction of its standard error.
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real);
 
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real) is
@@ -378,7 +380,15 @@ package body Driver.Robot.Kinematics.Fit is
                               C : constant Real := Cost (Rn.all);
                            begin
                               if C < Cost0 then
-                                 Improved := To_The_End or else Cost0 - C > Driver.Conventions.Unchanged_Fraction * Cost0;
+                                 --  To the end: a step that moves some combination of the parameters by more than
+                                 --  the unchanged fraction of its standard error (the step's squared length in the
+                                 --  metric of the normal equations, the inverse covariance), whatever the cost: a
+                                 --  decrease of the cost is no measure of how far the estimate still moves on the
+                                 --  axes the data barely determine, and any decrease at all never ends on a flat
+                                 --  valley (robot.boot ground sixteen minutes in its last stage).
+                                 Improved := (if To_The_End
+                                              then Delta_X * (A * Delta_X) > Driver.Conventions.Unchanged_Fraction ** 2
+                                              else Cost0 - C > Driver.Conventions.Unchanged_Fraction * Cost0);
                                  X := Xn;
                                  R0.all := Rn.all;
                                  Cost0 := C;
@@ -3716,12 +3726,12 @@ package body Driver.Robot.Kinematics.Fit is
       --  The table, among the planes found one after another (each the consensus of the points the earlier ones left,
       --  until one holds significantly fewer points than the most found, to within what chance explains: it would be
       --  the dominant plane of the rest), is not the plane most points lie on: a textured thing on a plain table holds
-      --  more (A84 and A77 took a keyboard for the table). It is the one nothing seen stands below (no more points beyond
-      --  it, away from the eye, than chance leaves at Z: things stand on the table and nothing hangs under it, and the
-      --  top of a thing on it has the table's points below) that spans the most of the picture (the angular extent of
-      --  its points across and down, as the eye sees them); a nearer surface that is not parallel to that choice
-      --  replaces it still (the room's far wall spans a picture that looks along it, and is no surface an arm works
-      --  on). When every plane has something below it, the one with the least does (item 9).
+      --  more (A84 and A77 took a keyboard for the table). The choice begins at the plane that spans the most of the
+      --  picture (the angular box of its points across and down, as the eye sees them: the table is the largest
+      --  surface in a picture that looks at it); every other plane found then replaces it when it is nearer and not
+      --  parallel to it (the room's far wall spans a picture that looks along it, and is no surface an arm works on),
+      --  or when it is parallel, farther, and most of the choice's points lie within its box in the picture: the
+      --  choice stands on it, a thing on the table (item 9).
       declare
          type Flag_Array_Access is access Flag_Array;
          procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flag_Array_Access);
@@ -3729,23 +3739,33 @@ package body Driver.Robot.Kinematics.Fit is
             P      : Sight_Plane;
             On     : Flag_Array_Access;
             Count  : Natural := 0;
-            Below  : Natural := 0;   --  points beyond it, away from the eye, by more than their own sigma tells
-            Extent : Real := 0.0;    --  the angular box its points span, across times down
+            X_Low, Y_Low   : Real := Real'Last;    --  the box its points span in the picture, as angles
+            X_High, Y_High : Real := Real'First;
+            Extent : Real := 0.0;    --  that box's area, across times down
          end record;
          package Candidate_Vectors is new Ada.Containers.Vectors (Positive, Candidate);
          Found  : Candidate_Vectors.Vector;
-         Usable_Count : Natural := 0;
-         --  The chance a point on a plane shows beyond it by more than Z of its sigma.
-         Rate   : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / 2.0;
-         function Clear (C : Candidate) return Boolean is
-           (Usable_Count = 0 or else not Driver.Robot.Regression.Count_Significant (C.Below, Usable_Count, Rate));
+         --  Most of Q's points lie within C's box in the picture.
+         function Stands_On (Q, C : Candidate) return Boolean is
+            Inside, Total : Natural := 0;
+         begin
+            for I in Points'Range loop
+               if Q.On (I) and then Points (I).H (3) > 0.0 then
+                  Total := Total + 1;
+                  declare
+                     X : constant Real := Points (I).H (1) / Points (I).H (3);
+                     Y : constant Real := Points (I).H (2) / Points (I).H (3);
+                  begin
+                     if X >= C.X_Low and then X <= C.X_High and then Y >= C.Y_Low and then Y <= C.Y_High then
+                        Inside := Inside + 1;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            return 2 * Inside > Total;
+         end Stands_On;
          Choice : Natural := 0;
       begin
-         for I in Points'Range loop
-            if Usable (Points (I)) then
-               Usable_Count := Usable_Count + 1;
-            end if;
-         end loop;
          loop
             Consensus;
             exit when not This.Found;
@@ -3753,32 +3773,17 @@ package body Driver.Robot.Kinematics.Fit is
               and then Driver.Robot.Regression.Count_Significant (Reference, Reference + This_Count, Half);
             declare
                C : Candidate := (P => This, On => new Flag_Array'(This_On), Count => This_Count, others => <>);
-               X_Low, Y_Low : Real := Real'Last;
-               X_High, Y_High : Real := Real'First;
             begin
                for I in Points'Range loop
-                  if Usable (Points (I)) then
-                     if This_On (I) then
-                        if Points (I).H (3) > 0.0 then
-                           X_Low := Real'Min (X_Low, Points (I).H (1) / Points (I).H (3));
-                           X_High := Real'Max (X_High, Points (I).H (1) / Points (I).H (3));
-                           Y_Low := Real'Min (Y_Low, Points (I).H (2) / Points (I).H (3));
-                           Y_High := Real'Max (Y_High, Points (I).H (2) / Points (I).H (3));
-                        end if;
-                     else
-                        declare
-                           R : constant Real := Standard_Residual (This.A, Points (I));
-                        begin
-                           --  Beyond the plane: a smaller inverse depth than the plane's along the line of sight.
-                           if R < 0.0 and then Driver.Uncertain.Significant (R, 1.0) then
-                              C.Below := C.Below + 1;
-                           end if;
-                        end;
-                     end if;
+                  if This_On (I) and then Points (I).H (3) > 0.0 then
+                     C.X_Low := Real'Min (C.X_Low, Points (I).H (1) / Points (I).H (3));
+                     C.X_High := Real'Max (C.X_High, Points (I).H (1) / Points (I).H (3));
+                     C.Y_Low := Real'Min (C.Y_Low, Points (I).H (2) / Points (I).H (3));
+                     C.Y_High := Real'Max (C.Y_High, Points (I).H (2) / Points (I).H (3));
                   end if;
                end loop;
-               if X_High > X_Low and then Y_High > Y_Low then
-                  C.Extent := (X_High - X_Low) * (Y_High - Y_Low);
+               if C.X_High > C.X_Low and then C.Y_High > C.Y_Low then
+                  C.Extent := (C.X_High - C.X_Low) * (C.Y_High - C.Y_Low);
                end if;
                Found.Append (C);
             end;
@@ -3788,24 +3793,24 @@ package body Driver.Robot.Kinematics.Fit is
                Taken (I) := Taken (I) or else This_On (I);
             end loop;
          end loop;
-         --  The choice: the clear plane that spans the most; with none clear, the one with the least below it.
+         --  The choice begins at the plane that spans the most of the picture.
          for K in Found.First_Index .. Found.Last_Index loop
-            if Choice = 0
-              or else (Clear (Found (K)) and then not Clear (Found (Choice)))
-              or else (Clear (Found (K)) = Clear (Found (Choice))
-                       and then (if Clear (Found (K)) then Found (K).Extent > Found (Choice).Extent
-                                 else Found (K).Below < Found (Choice).Below))
-            then
+            if Choice = 0 or else Found (K).Extent > Found (Choice).Extent then
                Choice := K;
             end if;
          end loop;
-         --  A nearer clear surface not parallel to the choice replaces it.
+         --  A nearer plane not parallel to the choice replaces it (the far wall); so does a farther parallel one
+         --  that most of the choice's points lie within in the picture (the choice stands on it).
          if Choice > 0 then
             for K in Found.First_Index .. Found.Last_Index loop
-               if K /= Choice and then Clear (Found (K)) and then not Parallel (Found (K).P, Found (Choice).P)
-                 and then Distance (Found (K).P) < Distance (Found (Choice).P)
-               then
-                  Choice := K;
+               if K /= Choice then
+                  if Parallel (Found (K).P, Found (Choice).P) then
+                     if Distance (Found (K).P) > Distance (Found (Choice).P) and then Stands_On (Found (Choice), Found (K)) then
+                        Choice := K;
+                     end if;
+                  elsif Distance (Found (K).P) < Distance (Found (Choice).P) then
+                     Choice := K;
+                  end if;
                end if;
             end loop;
             Plane := Found (Choice).P;

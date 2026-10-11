@@ -472,14 +472,33 @@ package body Driver.Robot.Lockin is
             Reached : Flags_Access := new Flags'(1 .. Natural'Max (1, M.Beats) => True);
 
             procedure Mark_Reach is
+               --  The cells that resolve their displacement at most measured beats: a cell too faint to resolve
+               --  any says nothing of how far the picture moved at one (an eye whose faint cells are a majority
+               --  would have every push beyond reach, and show nothing of a motion it sees whole).
+               Usual    : Flags_Access := new Flags'(1 .. N => False);
+               Resolved : Natural_Access := new Natural_Array'(1 .. N => 0);
+               Measured : Natural := 0;
             begin
+               for B in 0 .. M.Beats - 1 loop
+                  if B < Natural (S.Measured.Length) and then S.Measured (B) and then Natural (S.Condition.Length) >= (B + 1) * N then
+                     Measured := Measured + 1;
+                     for C in 0 .. N - 1 loop
+                        if S.Condition (B * N + C) > 0.0 and then S.Resolved (B * N + C) then
+                           Resolved (C + 1) := Resolved (C + 1) + 1;
+                        end if;
+                     end loop;
+                  end if;
+               end loop;
+               for C in 1 .. N loop
+                  Usual (C) := 2 * Resolved (C) > Measured;
+               end loop;
                for B in 0 .. M.Beats - 1 loop
                   if B < Natural (S.Measured.Length) and then S.Measured (B) and then Natural (S.Condition.Length) >= (B + 1) * N then
                      declare
                         Textured, Solved : Natural := 0;
                      begin
                         for C in 0 .. N - 1 loop
-                           if S.Condition (B * N + C) > 0.0 then
+                           if Usual (C + 1) and then S.Condition (B * N + C) > 0.0 then
                               Textured := Textured + 1;
                               if S.Resolved (B * N + C) then
                                  Solved := Solved + 1;
@@ -490,6 +509,8 @@ package body Driver.Robot.Lockin is
                      end;
                   end if;
                end loop;
+               Free (Usual);
+               Free (Resolved);
             end Mark_Reach;
 
             procedure Mark_Motions is

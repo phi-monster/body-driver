@@ -466,10 +466,8 @@ private
       --  against the beat before and against two beats before, and the watch
       --  over them.
       Change_1, Change_2 : Real := -1.0;     --  at the latest beat; negative when not measured
-      Rest_Changes  : Real_Vectors.Vector;   --  Change_1 at the beats judged still, since the eye was judged
-      Rest_Change   : Real := Real'Last;     --  their median, from two on (Real'Last before)
-      Rest_Scale    : Real := 0.0;           --  and their robust scale
-      Rest_Counted  : Natural := 0;          --  how many of them those rest on; taken again as they double
+      Watch_Last    : Real := 0.0;          --  the change of the beat before (Stillness.Watch)
+      Watch_Have    : Boolean := False;     --  a beat before has a change to compare with
       Watch_Done    : Boolean := False;      --  the picture has stopped since then
       Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat
       Condition     : Real_Vectors.Vector;   --  Cells values per beat
@@ -671,6 +669,7 @@ private
       Query_U, Query_V : Real_Vectors.Vector;   --  the reference's query points
       Chain    : Driver.Alignment.Keyframes.Chain;   --  the reference's pyramid and what its keyframes showed
       Aligned  : Natural := 0;   --  how many of Frames are aligned into Matches (Kinematics.Align_New)
+      Twin_Taken : Boolean := False;   --  a keyframe at the reference's readings was taken after it: its still twin
       Revision : Natural := 0;   --  how many keyframes were aligned again from the fitted arm (Kinematics.Realign)
       Matches  : Match_Set_Vectors.Vector;   --  one per aligned keyframe after the reference, in order
       Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more

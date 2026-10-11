@@ -185,6 +185,7 @@ package body Driver.Robot.Stillness is
          end if;
       end if;
       if Began_Moving then
+         S.Watch_Have := False;
          S.Watch_Done := False;
       end if;
       --  A beat without two frames to compare counts neither way.
@@ -193,38 +194,22 @@ package body Driver.Robot.Stillness is
             C1 : constant Real := S.Change_1;
             C2 : constant Real := S.Change_2;
          begin
-            --  A beat judged still (Judge_Eye: this frame against the eye's rest, pixel by pixel) shows what
-            --  rest changes by: the median of those changes and their robust scale, taken again whenever
-            --  their number doubles.
-            if S.Is_Still then
-               S.Rest_Changes.Append (C1);
-               if Natural (S.Rest_Changes.Length) >= 2
-                 and then Natural (S.Rest_Changes.Length) >= 2 * S.Rest_Counted
-               then
-                  declare
-                     V : Real_Array (1 .. Natural (S.Rest_Changes.Length));
-                  begin
-                     for I in V'Range loop
-                        V (I) := S.Rest_Changes (I);
-                     end loop;
-                     S.Rest_Change := Driver.Stats.Median (V);
-                     S.Rest_Scale := Driver.Stats.Robust_Sigma (V);
-                     S.Rest_Counted := V'Length;
-                  end;
-               end if;
-            end if;
-            --  The picture has stopped when this beat's change is what rest makes, Z of rest's scatter allowed,
-            --  and the change over two beats adds up as rest's does. It used to be stopped when the change had
-            --  fallen to a hundredth of the largest since the move (Unchanged_Fraction, the convention for an
-            --  iterative estimate against its own size): a hundredth of a jump is still many times the noise, and
-            --  a fake body's eye was taken stopped one beat after a move while its picture still changed by two
-            --  levels, 24 keyframes on changing pictures (item 22). Before rest is measured nothing is stopped.
-            if S.Rest_Change < Real'Last
-              and then C1 <= S.Rest_Change + Driver.Conventions.Z * S.Rest_Scale
-              and then (C2 < 0.0 or else C2 - Adds_Up * C1 <= Driver.Conventions.Z * Adds_Up * S.Rest_Scale)
+            --  The picture has stopped when the change from beat to beat has converged, a step of less than the
+            --  unchanged fraction of itself (the convention for an iterative estimate against its own size: the
+            --  change settles towards what rest makes, whatever that is, a lasting flicker included), and the change
+            --  over two beats adds up as rest's does (within Z of the beat-to-beat scatter), not as a drift's. It
+            --  used to be stopped as well when the change had fallen to a hundredth of the largest since the move: a
+            --  hundredth of a jump is still many times the noise, and a fake body's eye was taken stopped one beat
+            --  after a move while its picture still changed by two levels, 24 keyframes on changing pictures
+            --  (item 22).
+            if S.Watch_Have
+              and then S.Watch_Last - C1 <= Driver.Conventions.Unchanged_Fraction * S.Watch_Last
+              and then (C2 < 0.0 or else C2 - Adds_Up * C1 <= Driver.Conventions.Z * abs (C1 - S.Watch_Last))
             then
                S.Watch_Done := True;
             end if;
+            S.Watch_Last := C1;
+            S.Watch_Have := True;
          end;
       end if;
    end Watch;
