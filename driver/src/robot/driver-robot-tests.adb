@@ -11,6 +11,7 @@ with Driver.Instrument;
 with Driver.Observations;
 with Driver.Stats;
 with Driver.Beats;
+with Driver.Alignment;
 with Driver.Log;
 with Driver.Numerics.Dense;
 with Ada.Strings.Fixed;
@@ -925,10 +926,17 @@ package body Driver.Robot.Tests is
             begin
                Check (Shift > 0.0, "arm 1's shift is not measured");
                if Shift > 0.0 then
-                  Check_Close (Start, Driver.Conventions.Z * Noise / Shift
-                                      + Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C),
-                               1.0e-9 * Noise / Shift,
-                               "the first level of joint" & C'Image & " moves the view by what the matcher can tell");
+                  --  The larger of half the aligner's patch of view and the least turn a keyframe counts
+                  --  (Motion.Sweep_Start).
+                  declare
+                     Least  : constant Real := Driver.Conventions.Z * Noise / Shift
+                       + Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C);
+                     Follow : constant Real := Real (Driver.Alignment.Half_Patch (Rig_Width, Rig_Height)) / Shift;
+                  begin
+                     Check_Close (Start, Real'Max (Least, Follow), 1.0e-9 * Real'Max (Least, Follow),
+                                  "the first level of joint" & C'Image
+                                  & " is not half a patch of view, nor the least turn a keyframe counts");
+                  end;
                end if;
             end;
          end loop;
@@ -1052,11 +1060,19 @@ package body Driver.Robot.Tests is
          begin
             Check (Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last, "arm 1's sweep plan is not measured");
             if Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last then
-               --  The step the matcher tells apart, and what the readings' noise can take off a turn asked of exactly it
+               --  The larger of: half the aligner's patch of view (the largest turn it follows by itself), and the
+               --  step the matcher tells apart plus what the readings' noise can take off a turn asked of exactly it
                --  (Motion.Sweep_Start: a turn of the step itself lands below it half the time).
-               Check_Close (Start, Driver.Conventions.Z * Noise / Shift
-                                   + Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C),
-                            1.0e-9 * Noise / Shift, "the first level moves the view of joint" & C'Image);
+               declare
+                  Least  : constant Real := Driver.Conventions.Z * Noise / Shift
+                    + Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C);
+                  Follow : constant Real := Real (Driver.Alignment.Half_Patch (Rig_Width, Rig_Height)) / Shift;
+               begin
+                  Check_Close (Start, Real'Max (Least, Follow), 1.0e-9 * Real'Max (Least, Follow),
+                               "the first level of joint" & C'Image & " is not half a patch of view (or the least turn)");
+                  Check (Follow > Least, "the rig's half patch" & Driver.Log.Image (Follow, 6)
+                         & " is not above the least turn" & Driver.Log.Image (Least, 6) & ": the rule is not exercised");
+               end;
                Check (Known (Visible_Step (M, 1, C)) and then Start > Visible_Step (M, 1, C).Value,
                       "joint" & C'Image & "'s sweep starts at its visible step or below");
             end if;
@@ -7662,8 +7678,9 @@ package body Driver.Robot.Tests is
                              & "reload it from", Boot_Keeps_What_It_Measured'Access);
       Driver.Tests.Register ("robot.sweep.twin", "an arm at rest takes no still twin of its reference, or its sweep "
                              & "starts where the view moves less than the matcher errs", Twin_Before_The_Sweep'Access);
-      Driver.Tests.Register ("robot.sweep.start", "a joint's sweep starts below where one cell of its eye tells the "
-                             & "view moved", Sweep_Starts_Where_A_Cell_Tells'Access);
+      Driver.Tests.Register ("robot.sweep.start", "a joint's sweep starts at the turn that moves its eye's view by half "
+                             & "the aligner's patch, never below the least turn a keyframe counts, and above the step one "
+                             & "cell of its eye tells", Sweep_Starts_Where_A_Cell_Tells'Access);
       Driver.Tests.Register ("robot.answers.unlisted", "the answers to an arm the graph no longer lists are never read, "
                              & "so the wait for every answer never ends", Answers_Read_For_An_Unlisted_Arm'Access);
       Driver.Tests.Register ("robot.steps.jitter", "a push never ends when the held reading jitters more than it did at "

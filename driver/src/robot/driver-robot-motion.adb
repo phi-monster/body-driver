@@ -304,14 +304,25 @@ package body Driver.Robot.Motion is
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
       Step  : constant Real := Kinematics.Keyframe_Step (M, A, Channel);
       Noise : constant Real := Channels.Noise (M, Arm_Group (M, A), Channel);
+      --  The least turn a keyframe counts: the step, and what the readings'
+      --  noise can take off a turn asked of exactly it (a keyframe counts as
+      --  a joint's own, and is kept at all, from the step on, and a turn of
+      --  the step itself lands below it half the time: fake body V6, arm 1,
+      --  the first joint's turns of its step, 38 units, left no keyframe
+      --  through eleven rounds, and the fit said the joint had none of its
+      --  own).
+      Least : constant Real :=
+        (if Step > 0.0 and then Noise < Real'Last then Step + Driver.Conventions.Z * Sqrt (2.0) * Noise else Step);
    begin
-      --  The step, and what the readings' noise can take off a turn asked of
-      --  exactly it: a keyframe counts as a joint's own, and is kept at all,
-      --  from the step on, and a turn of the step itself lands below it half
-      --  the time (fake body V6, arm 1: the first joint's turns of its step,
-      --  38 units, left no keyframe through eleven rounds, and the fit said
-      --  the joint had none of its own).
-      return (if Step > 0.0 and then Noise < Real'Last then Step + Driver.Conventions.Z * Sqrt (2.0) * Noise else Step);
+      --  The first level is the largest turn the aligner follows by itself,
+      --  half a patch of view (Kinematics.Follow_Step), and never less than
+      --  the least turn a keyframe counts. The ladder doubles from there: its
+      --  next level is about a patch, the one after it is followed only by a
+      --  fitted arm's prediction. From the least turn, a doubling a round and
+      --  a fit a round, the x5's eye (no pixel noise, a step of 1e-4 reading
+      --  units) climbed four levels in 1100 beats to turns of 0.0013 units,
+      --  and every fit of them was undetermined (B0a_1, 10-13).
+      return (if Step > 0.0 then Real'Max (Least, Kinematics.Follow_Step (M, A, Channel)) else Step);
    end Sweep_Start;
 
    procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id) is

@@ -90,9 +90,11 @@ package Driver.Robot.Motion is
    --  no eye is not held.
 
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real;
-   --  The smallest turn of a joint of the arm that moves its eye's view by
-   --  what both the view and the matcher can tell: Z times the larger of
-   --  the cells' displacement noise (Lockin.Cell_Noise) and the matcher's
+   --  The first level of the sweep's ladder for a joint of the arm: the
+   --  largest turn whose keyframe the aligner follows from the reference by
+   --  itself, half a patch of its eye's view (Kinematics.Follow_Step), and
+   --  never less than the least turn a keyframe counts: Z times the larger
+   --  of the cells' displacement noise (Lockin.Cell_Noise) and the matcher's
    --  (Kinematics.Match_Noise, from the still twin), over how far the view
    --  moves per reading unit of the joint (Lockin.Shift), the keyframe step,
    --  plus what the readings' noise can take off a turn (Z of the noise of a

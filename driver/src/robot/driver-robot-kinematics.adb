@@ -501,6 +501,21 @@ package body Driver.Robot.Kinematics is
       end;
    end Keyframe_Step;
 
+   function Follow_Step (M : Model; A : Arm_Id; Channel : Positive) return Real is
+      E : constant Eye_Id'Base := Eye_Of (M, A);
+   begin
+      if E = 0 then
+         return 0.0;
+      end if;
+      declare
+         Per_Unit : constant Real := Lockin.Shift (M, E, Arm_Group (M, A), Channel);
+         Half     : constant Natural :=
+           Driver.Alignment.Half_Patch (M.Eyes (E).Grid.Width, M.Eyes (E).Grid.Height);
+      begin
+         return (if Per_Unit > 0.0 then Real (Half) / Per_Unit else 0.0);
+      end;
+   end Follow_Step;
+
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean is
    begin
       if Index_Of (M, A) = 0 then

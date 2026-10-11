@@ -63,6 +63,18 @@ private package Driver.Robot.Kinematics is
    --  keyframe, taken in a push of the recognition rounds, lay 3e-5 rad off
    --  the sweep's base, ten times the lock-in's step, a twentieth of this).
 
+   function Follow_Step (M : Model; A : Arm_Id; Channel : Positive) return Real;
+   --  The change of the arm's channel that moves the view of the eye it
+   --  carries by half the aligner's patch at the full size: the largest turn
+   --  whose keyframe the aligner follows from the reference by itself
+   --  (Followed), over the pixels the view moves per reading unit
+   --  (Lockin.Shift); 0 while the shift is unmeasured. The sweep's ladder
+   --  starts here (Motion.Sweep_Start). From the keyframe step it took a
+   --  doubling a round, a fit a round, to reach a turn the fit could use
+   --  (B0a_1, x5, 10-13: the step 1e-4 reading units, the eye seeing 5.7e-6,
+   --  four rounds and 1100 beats to turns of 0.0013 units, every fit of them
+   --  undetermined: "at most 2.7e-4 rad by that scale").
+
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean;
    --  The arm's still twin of its reference was taken.
 

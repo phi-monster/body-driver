@@ -178,6 +178,12 @@ package Driver.Alignment is
    --  The radius, in pixels, of the window of a prediction whose standard deviation is Sigma along both axes: as far
    --  as a vector of two dimensions is significant, and a place on a grid of pixels cannot be known to beyond.
 
+   function Half_Patch (Width, Height : Natural) return Natural;
+   --  Half the width of the patch Align matches a point by, in pictures of this size: the patch is as many pixels
+   --  wide as the geometric middle between a pixel and the picture's size (Driver.Robot.Flow's cells), half of it
+   --  either side of the point. A prediction's window no wider than a patch at the full size is searched where the
+   --  pictures are, and such a point is followed (Driver.Robot.Kinematics.Followed).
+
 private
 
    --  An array of reals made once and read after by any number of alignments at once (Driver.Parallel_For). The
