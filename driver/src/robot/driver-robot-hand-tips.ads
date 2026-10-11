@@ -78,6 +78,12 @@ package Driver.Robot.Hand.Tips is
       Pixels_Sigma   : Real := Real'Last;   --  in; positive is inward
       Fraction       : Real := 0.0;         --  and as a share of the travel between its openings in that picture
       Fraction_Sigma : Real := Real'Last;
+      Lined          : Boolean := False;    --  the finger's own line of sight under the press is known: the sweep's tip
+                                            --  pixel moved by the measured slide along the way the finger closes
+                                            --  (Hand.Measured_Slides)
+      Line           : Vec3 := [0.0, 0.0, 0.0];   --  its unit direction, tool frame
+      Line_Sigma     : Real := Real'Last;   --  how far the finger may still be off it, as an angle: the slide's sigma
+                                            --  at the pitch of a pixel there
    end record;
    --  How far a lobe's finger stood from where the closer's reading puts it
    --  at a press (Driver.Robot.Hand.Slide).

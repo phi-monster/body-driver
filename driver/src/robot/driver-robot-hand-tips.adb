@@ -353,10 +353,16 @@ package body Driver.Robot.Hand.Tips is
       end if;
    end Refit_Free;
 
-   --  How far the lobe's finger stood from where its free pixel puts it under a press, as an angle seen from the
-   --  eye: what was measured, with its sigma, and no more than the finger's whole travel; the whole travel when the
-   --  press could not say (the finger was not found where it was looked for, or has no edge to look for). A press
-   --  with no slides at all is one made where nothing was measured: nothing is taken to have slid.
+   --  The press's slide of its own lobe; none when it has no slides (nothing was measured at it).
+   function Own_Slide (K : Kept) return Slid is
+     (if K.Lobe <= Natural (K.Slides.Length) then K.Slides (K.Lobe) else Slid'(others => <>));
+
+   --  How far the lobe's finger may stand off the line the fit puts its tip on under a press, as an angle seen from
+   --  the eye: the slide's own sigma when the press carries the finger's own line (the slide is in the line, item 8);
+   --  the slide and its sigma when it was measured but no line could be made of it; and no more than the finger's
+   --  whole travel, which is all of it when the press could not say (the finger was not found where it was looked
+   --  for, or has no edge to look for). A press with no slides at all is one made where nothing was measured:
+   --  nothing is taken to have slid.
    function Slid_Angle (K : Kept; Sight : Sight_Of) return Real is
    begin
       if K.Lobe > Natural (K.Slides.Length) then
@@ -367,6 +373,9 @@ package body Driver.Robot.Hand.Tips is
       begin
          if not S.Known or else S.Pixels_Sigma >= Real'Last then
             return Sight.Travel;
+         end if;
+         if S.Lined and then S.Line_Sigma < Real'Last then
+            return Real'Min (Sight.Travel, S.Line_Sigma);
          end if;
          return Real'Min (Sight.Travel, Sight.Pitch * Sqrt (S.Pixels ** 2 + S.Pixels_Sigma ** 2));
       end;
@@ -423,7 +432,8 @@ package body Driver.Robot.Hand.Tips is
                if K.Lobe > 0 and then Index_Of (T, K.Lobe, K.Opening) > 0 then
                   N := N + 1;
                   Presses (N) := (Tool => K.Event.Tool, Sight => Index_Of (T, K.Lobe, K.Opening), Surface => 1,
-                                  Slide_Angle => Slid_Angle (K, T (K.Lobe) (K.Opening)), others => <>);
+                                  Slide_Angle => Slid_Angle (K, T (K.Lobe) (K.Opening)),
+                                  Lined => Own_Slide (K).Lined, Line => Own_Slide (K).Line, others => <>);
                   Of_Kept (N) := I;
                end if;
             end;

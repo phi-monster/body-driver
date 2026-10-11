@@ -90,6 +90,12 @@ package Driver.Robot.Hand.Touch is
       --  when no vector tells which way (the loaded fit has the travel of no lobe): at the tip's distance it is the
       --  length of noise added to the press in every direction. The most a finger can be off is the whole of its
       --  travel, so a press that cannot say how far it slid has that.
+      Lined : Boolean := False;
+      Line  : Vec3 := [0.0, 0.0, 0.0];
+      --  The tip's own line of sight under this press, a unit direction of the tool frame: the sight's line moved by
+      --  the finger's measured slide. The fit on sight puts the tip under this press at the sight's distance along it,
+      --  turned by the sight's angles, and Slide_Angle is then the slide's own sigma, not the slide (item 8: a slide
+      --  taken as noise left tips 40 to 50 mm uncertain). Without it, the sight's line.
    end record;
 
    type Press_Array is array (Positive range <>) of Press;

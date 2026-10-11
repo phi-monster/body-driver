@@ -124,14 +124,30 @@ package body Driver.Robot.Hand.Touch is
       --  The prior of a tip's angles across its line: the eye's and the lobe's tip region's together.
       function Across_Sigma (S : Positive) return Real is (Real'Max (Line (S).Direction.Sigma, Least_Angle));
 
-      --  The line's direction turned by the tip's two angles.
+      --  The line a press's tip lies along: the press's own (the sight's moved by the finger's measured slide) or
+      --  the sight's.
+      function Line_Of (P : Press) return Vec3 is
+        (if P.Lined then P.Line else Line (Sight_Of (P)).Direction.Unit_Vector);
+
+      --  The line's direction turned by the tip's two angles: the sight's, where the finger stands free, and a
+      --  press's own.
       function Aim_At (S : Positive) return Vec3 is
         (Line (S).Direction.Unit_Vector + Tip_Q (W * (S - 1) + 2) * Across_Of (S, 1)
          + Tip_Q (W * (S - 1) + 3) * Across_Of (S, 2));
 
+      function Aim_Of (P : Press) return Vec3 is
+        (Line_Of (P) + Tip_Q (W * (Sight_Of (P) - 1) + 2) * Across_Of (Sight_Of (P), 1)
+         + Tip_Q (W * (Sight_Of (P) - 1) + 3) * Across_Of (Sight_Of (P), 2));
+
+      --  The tip where the finger stands free, and under a press (slid along its own line).
       function Tip_At (S : Positive) return Vec3 is
         (if As = On_Sight then Line (S).Origin.Mean + Tip_Q (W * (S - 1) + 1) * Aim_At (S)
          else Vec3 (Tip_Q (W * (S - 1) + 1 .. W * S)));
+
+      function Tip_Under (P : Press) return Vec3 is
+        (if As = On_Sight
+         then Line (Sight_Of (P)).Origin.Mean + Tip_Q (W * (Sight_Of (P) - 1) + 1) * Aim_Of (P)
+         else Tip_At (Sight_Of (P)));
 
       --  How far a finger that slid under the press by an angle is off, at the tip's distance: along an axis nothing
       --  tells here.
@@ -142,7 +158,7 @@ package body Driver.Robot.Hand.Touch is
       --  slide taken as noise.
       function Noise_Of (P : Press) return Real is
          F    : constant Positive := Surface_Of (P);
-         X    : constant Vec3 := Tip_At (Sight_Of (P)) + P.Slide;
+         X    : constant Vec3 := Tip_Under (P) + P.Slide;
          N    : constant Vec3 := Nominal (F).Normal;
          Lift : constant Vec3 := Transpose (P.Tool.Pose.Rotation) * N;
       begin
@@ -238,7 +254,7 @@ package body Driver.Robot.Hand.Touch is
                         P    : Press renames Presses (I);
                         S    : constant Positive := Sight_Of (P);
                         F    : constant Positive := Surface_Of (P);
-                        X    : constant Vec3 := Tip_At (S) + P.Slide;   --  the finger as it stood under the press
+                        X    : constant Vec3 := Tip_Under (P) + P.Slide;   --  the finger as it stood under the press
                         Y    : constant Vec3 := P.Tool.Pose * X;
                         N    : constant Vec3 := Nominal (F).Normal;
                         Lift : constant Vec3 := Transpose (P.Tool.Pose.Rotation) * N;
@@ -253,7 +269,7 @@ package body Driver.Robot.Hand.Touch is
                            declare
                               Dist : constant Real := Tip_Q (W * (S - 1) + 1);
                            begin
-                              Base (Row, C0) := Lift * Aim_At (S);
+                              Base (Row, C0) := Lift * Aim_Of (P);
                               Base (Row, C0 + 1) := Dist * (Lift * Across_Of (S, 1));
                               Base (Row, C0 + 2) := Dist * (Lift * Across_Of (S, 2));
                               Rhs (Row) := -(H - (Base (Row, C0) * Dist + Base (Row, C0 + 1) * Tip_Q (W * (S - 1) + 2)
@@ -424,7 +440,7 @@ package body Driver.Robot.Hand.Touch is
          for P of Presses loop
             --  A press of a tip without a line says nothing of the surface's normal.
             if Line (Sight_Of (P)).Direction.Sigma < Real'Last then
-               Into (Surface_Of (P)) := Into (Surface_Of (P)) - P.Tool.Pose.Rotation * Line (Sight_Of (P)).Direction.Unit_Vector;
+               Into (Surface_Of (P)) := Into (Surface_Of (P)) - P.Tool.Pose.Rotation * Line_Of (P);
             end if;
          end loop;
          --  A tip or a surface no press bears on is pinned below, so the rest
@@ -450,7 +466,7 @@ package body Driver.Robot.Hand.Touch is
                   O : constant Vec3 := P.Tool.Pose * (Line (S).Origin.Mean + P.Slide);
                begin
                   R := R + 1;
-                  A (R, S) := N * (P.Tool.Pose.Rotation * Line (S).Direction.Unit_Vector);
+                  A (R, S) := N * (P.Tool.Pose.Rotation * Line_Of (P));
                   Used (S) := True;
                   if Prior (F).Measured then
                      B (R) := N * (Nominal (F).Centre - O);
@@ -499,7 +515,7 @@ package body Driver.Robot.Hand.Touch is
                      for P of Presses loop
                         if Surface_Of (P) = F then
                            Sum := Sum + P.Tool.Pose * (Line (Sight_Of (P)).Origin.Mean + P.Slide
-                                                       + Q (Sight_Of (P)) * Line (Sight_Of (P)).Direction.Unit_Vector);
+                                                       + Q (Sight_Of (P)) * Line_Of (P));
                            Count := Count + 1;
                         end if;
                      end loop;
@@ -517,7 +533,7 @@ package body Driver.Robot.Hand.Touch is
       --  Whether a press's finger stood where its free pixel puts it, within its pose's own noise: the slide it
       --  took as noise, at the tip's distance, is no more than the noise of the pose it was made at.
       function Firm (P : Press) return Boolean is
-        (Slid_Length (P) ** 2 <= Pose_Sigma (P.Tool, Tip_At (Sight_Of (P)) + P.Slide, Nominal (Surface_Of (P)).Normal) ** 2);
+        (Slid_Length (P) ** 2 <= Pose_Sigma (P.Tool, Tip_Under (P) + P.Slide, Nominal (Surface_Of (P)).Normal) ** 2);
 
       --  How far the presses of a tip took its finger off the free pixel's line, together: by the weights they have in
       --  the fit. Every press pushes the finger the same way, so averaging them does not average it out, and a tip

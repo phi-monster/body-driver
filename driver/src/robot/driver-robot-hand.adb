@@ -893,14 +893,14 @@ package body Driver.Robot.Hand is
    end Tips_Said;
 
    function Measured_Slides
-     (R : Hand_Record; Id : Hand_Id; O : Observation; Which : Opening) return Driver.Robot.Hand.Tips.Slid_Row;
+     (R : Hand_Record; Id : Hand_Id; M : Model; O : Observation; Which : Opening) return Driver.Robot.Hand.Tips.Slid_Row;
    --  How far each lobe's finger stands from where the closer's reading puts
    --  it, in the picture of the beat of a press made at that opening: the
    --  pixels of its tip as the sweep saw them, found again under the press
    --  (Driver.Robot.Hand.Slide). Said in the log for every lobe, measured or not.
 
    function Measured_Slides
-     (R : Hand_Record; Id : Hand_Id; O : Observation; Which : Opening) return Driver.Robot.Hand.Tips.Slid_Row
+     (R : Hand_Record; Id : Hand_Id; M : Model; O : Observation; Which : Opening) return Driver.Robot.Hand.Tips.Slid_Row
    is
       Result : Driver.Robot.Hand.Tips.Slid_Row (1 .. Natural (R.Lobes.Length)) := [others => <>];
       Text   : Unbounded_String;
@@ -923,11 +923,27 @@ package body Driver.Robot.Hand is
                else
                   Driver.Robot.Hand.Slide.Measure (Lobe.Patches (Which), Under, Shift);
                   if Shift.Known then
-                     Result (L) := (Known          => True,
-                                    Pixels         => Shift.By,
-                                    Pixels_Sigma   => Shift.Sigma,
-                                    Fraction       => Shift.By / Lobe.Way.Reach,
-                                    Fraction_Sigma => Shift.Sigma / Lobe.Way.Reach);
+                     declare
+                        --  The tip's line of sight under the press: the sweep's tip pixel moved by the slide along the way
+                        --  the finger closes, in the tool frame (the eye is the tool frame of the arm that carries it); the
+                        --  slide's sigma at the pitch of a pixel there is how far the finger may still be off it (item 8).
+                        Px    : constant Driver.Images.Pixel := Lobe.Sights (Which).Pixel;
+                        Slid  : constant Ray_Estimate :=
+                          Driver.Robot.Hand.Frames.Into
+                            (Eye_In_Tool (M, R.Eye, O),
+                             Eye_Ray (M, R.Eye, (U => Px.U + Shift.By * Lobe.Way.U, V => Px.V + Shift.By * Lobe.Way.V)));
+                        Lined : constant Boolean :=
+                          Slid.Direction.Sigma < Real'Last and then abs Slid.Direction.Unit_Vector > 0.0;
+                     begin
+                        Result (L) := (Known          => True,
+                                       Pixels         => Shift.By,
+                                       Pixels_Sigma   => Shift.Sigma,
+                                       Fraction       => Shift.By / Lobe.Way.Reach,
+                                       Fraction_Sigma => Shift.Sigma / Lobe.Way.Reach,
+                                       Lined          => Lined,
+                                       Line           => (if Lined then Slid.Direction.Unit_Vector else [0.0, 0.0, 0.0]),
+                                       Line_Sigma     => (if Lined then Lobe.Sights (Which).Pitch * Shift.Sigma else Real'Last));
+                     end;
                      Append (Text, "slid" & Driver.Log.Image (Shift.By, 2) & " +- " & Driver.Log.Image (Shift.Sigma, 2)
                              & " pixels, " & Driver.Log.Image (100.0 * Shift.By / Lobe.Way.Reach, 2) & " % of the"
                              & Driver.Log.Image (Lobe.Way.Reach, 1) & " it closes");
@@ -1172,7 +1188,7 @@ package body Driver.Robot.Hand is
       end if;
       R.Rests := R.Rests + 1;
       if Opening_Of (R, M, Press.Closer.Element, Which) then
-         Driver.Robot.Hand.Tips.Add (R.Book, Press, Which, Measured_Slides (R, Id, O, Which));
+         Driver.Robot.Hand.Tips.Add (R.Book, Press, Which, Measured_Slides (R, Id, M, O, Which));
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": a press at the " & Opening'Image (Which)
                           & " opening, at beat" & Press.Beat'Image & "," & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image
                           & " kept; "
