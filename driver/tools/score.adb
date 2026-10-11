@@ -980,108 +980,111 @@ procedure Score is
                if Any_Beats (Tool, Own) then
                   declare
                      Best : Arm_Fit;
-                  Best_Test : Pair_Vectors.Vector;
-                  Best_Length : Real := 0.0;
-                  Least : Turn_Mismatch;
-                  Turns : array (1 .. Natural (Links.Length)) of Turn_Mismatch;
-               begin
-                  --  Only links that turn like the tool, within Z of the best one's
-                  --  own scatter, are worth a fit.
-                  for I in Turns'Range loop
-                     Turns (I) := Rotation_Mismatch (Tool, Links (I), Own);
-                     if Turns (I).Median < Least.Median then
-                        Least := Turns (I);
-                     end if;
-                  end loop;
-                  for I in Turns'Range loop
-                     declare
-                        Link        : constant String := Links (I);
-                        Train, Test : Pair_Vectors.Vector;
-                     begin
-                        --  No link to rank when the estimate never moved (A16's arm 2 stood after its boot).
-                        if Least.Median < Real'Last
-                          and then Turns (I).Median <= Least.Median + Driver.Conventions.Z * Least.Spread
-                        then
-                           Split_Pairs (Tool, Link, Own, Train, Test);
+                     Best_Test : Pair_Vectors.Vector;
+                     Best_Length : Real := 0.0;
+                     Least : Turn_Mismatch;
+                     Turns : array (1 .. Natural (Links.Length)) of Turn_Mismatch;
+                  begin
+                     --  Only links that turn like the tool, within Z of the best one's
+                     --  own scatter, are worth a fit.
+                     for I in Turns'Range loop
+                        Turns (I) := Rotation_Mismatch (Tool, Links (I), Own);
+                        if Turns (I).Median < Least.Median then
+                           Least := Turns (I);
                         end if;
-                        --  A world of its own needs both the estimate and the link to
-                        --  have moved: the scale is the ratio of their spreads.
-                        if Natural (Train.Length) >= 5 and then not Test.Is_Empty
-                          and then ((Has_World and then not Own)
-                                   or else (Spread (Train, True) > 0.0 and then Spread (Train, False) > 0.0))
-                        then
-                           declare
-                              X : constant Parameters :=
-                                Best_Fit (Train, Has_World and then not Own, World_X,
-                                          (if Has_World and then not Own then World_Length else Spread (Train, True)));
-                              Squares : Real := 0.0;
-                           begin
-                              for P of Test loop
-                                 declare
-                                    D : constant Vec3 := Similarity (X, P.Est).Translation - P.Truth.Translation;
-                                 begin
-                                    Squares := Squares + D * D;
-                                 end;
-                              end loop;
-                              if Sqrt (Squares / Real (Test.Length)) < Best.Rank then
-                                 Best := (Found => True, Link => To_Unbounded_String (Link), X => X,
-                                          Rank => Sqrt (Squares / Real (Test.Length)), others => <>);
-                                 Best_Test := Test;
-                                 Best_Length := Spread (Train, True);
-                              end if;
-                           end;
-                        end if;
-                     end;
-                  end loop;
-                  if not Best.Found then
-                     Ada.Text_IO.Put_Line ("tool" & Tool'Image & ": too few distinct poses to fit (the estimate moves too little)");
-                  else
-                     declare
-                        Position, Rotation : Real_Array (1 .. Natural (Best_Test.Length));
-                        Travel : constant Real := Millimetres_Per_Metre * Spread (Best_Test, True);
-                     begin
-                        for I in Position'Range loop
-                           declare
-                              M : constant Rigid := Similarity (Best.X, Best_Test (I).Est);
-                           begin
-                              Position (I) := Millimetres_Per_Metre * abs (M.Translation - Best_Test (I).Truth.Translation);
-                              Rotation (I) := Degrees_Per_Radian * Angle (Transpose (Best_Test (I).Truth.Rotation) * M.Rotation);
-                           end;
-                        end loop;
-                        --  How far the test poses lie apart is said with their errors:
-                        --  an error is only as telling as the motion it was found over.
-                        --  A link that moves no more than the largest error has not
-                        --  shown which link carries the tool (A16's arm 2 stood: every
-                        --  standing link of it fitted alike), so it carries neither
-                        --  the world nor a hand.
-                        if Travel <= Largest (Position) then
-                           Best.Found := False;
-                           Ada.Text_IO.Put_Line
-                             ("tool" & Tool'Image & ": its true link moves no more over the" & Best_Test.Length'Image
-                              & " test poses (" & Image (Travel, 3) & " mm) than its largest error ("
-                              & Image (Largest (Position), 3) & " mm), so which link carries it is not known; its pose"
-                              & " is scored as its eye's");
-                        else
-                           Best.Largest_Position := Largest (Position) / Millimetres_Per_Metre;
-                           Best.Largest_Turn := Largest (Rotation) / Degrees_Per_Radian;
-                           if not Has_World and then not Own then
-                              Has_World := True;
-                              World_X := Best.X;
-                              World_Length := Best_Length;
-                              World_Tool := Tool;
+                     end loop;
+                     for I in Turns'Range loop
+                        declare
+                           Link        : constant String := Links (I);
+                           Train, Test : Pair_Vectors.Vector;
+                        begin
+                           --  No link to rank when the estimate never moved (A16's arm 2 stood after its boot).
+                           if Least.Median < Real'Last
+                             and then Turns (I).Median <= Least.Median + Driver.Conventions.Z * Least.Spread
+                           then
+                              Split_Pairs (Tool, Link, Own, Train, Test);
                            end if;
-                           Ada.Text_IO.Put_Line
-                             ("tool" & Tool'Image & " (true link " & To_String (Best.Link) & "):" & Best_Test.Length'Image
-                              & " test poses spread over " & Image (Travel, 1)
-                              & " mm, position median " & Image (Driver.Stats.Median (Position), 2) & " mm, largest "
-                              & Image (Largest (Position), 2) & " mm; rotation median "
-                              & Image (Driver.Stats.Median (Rotation), 3) & " deg, largest " & Image (Largest (Rotation), 3)
-                              & " deg; scale " & Image (Scale_Of (Best.X), 6) & " m per unit"
-                              & (if Own then ", in a world of its own: the driver had not placed its arm"
-                                  elsif World_Tool = Tool then "" else ", in the world of tool" & World_Tool'Image));
-                        end if;
-                     end;
-                  end if;
+                           --  A world of its own needs both the estimate and the link to
+                           --  have moved: the scale is the ratio of their spreads.
+                           if Natural (Train.Length) >= 5 and then not Test.Is_Empty
+                             and then ((Has_World and then not Own)
+                                      or else (Spread (Train, True) > 0.0 and then Spread (Train, False) > 0.0))
+                           then
+                              declare
+                                 X : constant Parameters :=
+                                   Best_Fit (Train, Has_World and then not Own, World_X,
+                                             (if Has_World and then not Own then World_Length
+                                              else Spread (Train, True)));
+                                 Squares : Real := 0.0;
+                              begin
+                                 for P of Test loop
+                                    declare
+                                       D : constant Vec3 := Similarity (X, P.Est).Translation - P.Truth.Translation;
+                                    begin
+                                       Squares := Squares + D * D;
+                                    end;
+                                 end loop;
+                                 if Sqrt (Squares / Real (Test.Length)) < Best.Rank then
+                                    Best := (Found => True, Link => To_Unbounded_String (Link), X => X,
+                                             Rank => Sqrt (Squares / Real (Test.Length)), others => <>);
+                                    Best_Test := Test;
+                                    Best_Length := Spread (Train, True);
+                                 end if;
+                              end;
+                           end if;
+                        end;
+                     end loop;
+                     if not Best.Found then
+                        Ada.Text_IO.Put_Line
+                          ("tool" & Tool'Image & ": too few distinct poses to fit (the estimate moves too little)");
+                     else
+                        declare
+                           Position, Rotation : Real_Array (1 .. Natural (Best_Test.Length));
+                           Travel : constant Real := Millimetres_Per_Metre * Spread (Best_Test, True);
+                        begin
+                           for I in Position'Range loop
+                              declare
+                                 M : constant Rigid := Similarity (Best.X, Best_Test (I).Est);
+                              begin
+                                 Position (I) :=
+                                   Millimetres_Per_Metre * abs (M.Translation - Best_Test (I).Truth.Translation);
+                                 Rotation (I) := Degrees_Per_Radian * Angle (Transpose (Best_Test (I).Truth.Rotation) * M.Rotation);
+                              end;
+                           end loop;
+                           --  How far the test poses lie apart is said with their errors:
+                           --  an error is only as telling as the motion it was found over.
+                           --  A link that moves no more than the largest error has not
+                           --  shown which link carries the tool (A16's arm 2 stood: every
+                           --  standing link of it fitted alike), so it carries neither
+                           --  the world nor a hand.
+                           if Travel <= Largest (Position) then
+                              Best.Found := False;
+                              Ada.Text_IO.Put_Line
+                                ("tool" & Tool'Image & ": its true link moves no more over the" & Best_Test.Length'Image
+                                 & " test poses (" & Image (Travel, 3) & " mm) than its largest error ("
+                                 & Image (Largest (Position), 3) & " mm), so which link carries it is not known; its pose"
+                                 & " is scored as its eye's");
+                           else
+                              Best.Largest_Position := Largest (Position) / Millimetres_Per_Metre;
+                              Best.Largest_Turn := Largest (Rotation) / Degrees_Per_Radian;
+                              if not Has_World and then not Own then
+                                 Has_World := True;
+                                 World_X := Best.X;
+                                 World_Length := Best_Length;
+                                 World_Tool := Tool;
+                              end if;
+                              Ada.Text_IO.Put_Line
+                                ("tool" & Tool'Image & " (true link " & To_String (Best.Link) & "):" & Best_Test.Length'Image
+                                 & " test poses spread over " & Image (Travel, 1)
+                                 & " mm, position median " & Image (Driver.Stats.Median (Position), 2) & " mm, largest "
+                                 & Image (Largest (Position), 2) & " mm; rotation median "
+                                 & Image (Driver.Stats.Median (Rotation), 3) & " deg, largest " & Image (Largest (Rotation), 3)
+                                 & " deg; scale " & Image (Scale_Of (Best.X), 6) & " m per unit"
+                                 & (if Own then ", in a world of its own: the driver had not placed its arm"
+                                     elsif World_Tool = Tool then "" else ", in the world of tool" & World_Tool'Image));
+                           end if;
+                        end;
+                     end if;
                      Fits (Own) := Best;
                   end;
                end if;
