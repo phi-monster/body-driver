@@ -263,7 +263,9 @@ package body Driver.Robot.Kinematics.Fit is
    --  Robust least squares: Levenberg-Marquardt on a numerical Jacobian, Huber
    --  weights at Z on residuals in units of Sigma. It stops when a step lowers
    --  the cost by less than the unchanged fraction of it, or when no damping
-   --  gives a step that lowers it at all.
+   --  gives a step that lowers it at all; To_The_End, only then (the last
+   --  stage of an arm's fit: stopped at the fraction, inputs apart by 1e-9 px
+   --  gave fits apart by far more, A23's arm 2, item 3).
 
    generic
       Parameters : Positive;
@@ -273,6 +275,8 @@ package body Driver.Robot.Kinematics.Fit is
       At_Once    : Boolean := False;
       --  Evaluate writes nothing but R, so the Jacobian's columns may be taken
       --  at once (Driver.Parallel_For), each with its own residual array.
+      To_The_End : Boolean := False;
+      --  Go on while any damping lowers the cost at all.
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real);
 
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real) is
@@ -374,7 +378,7 @@ package body Driver.Robot.Kinematics.Fit is
                               C : constant Real := Cost (Rn.all);
                            begin
                               if C < Cost0 then
-                                 Improved := Cost0 - C > Driver.Conventions.Unchanged_Fraction * Cost0;
+                                 Improved := To_The_End or else Cost0 - C > Driver.Conventions.Unchanged_Fraction * Cost0;
                                  X := Xn;
                                  R0.all := Rn.all;
                                  Cost0 := C;
@@ -2861,7 +2865,10 @@ package body Driver.Robot.Kinematics.Fit is
          Count     : constant Positive := 6 + Per_Joint * N;
          Inlier    : Flags_Access := new Flags'(1 .. S => False);
          Base      : Joint_Array := Joints;
-         Changed   : Natural := Natural'Last;
+         --  The choices of sightings made so far: a round that comes back to one of them is a cycle.
+         package Selection_Lists is new Ada.Containers.Vectors (Positive, Flags_Access);
+         procedure Free_Flags is new Ada.Unchecked_Deallocation (Flags, Flags_Access);
+         Seen      : Selection_Lists.Vector;
 
          function Lens_Of (X : Real_Array) return Lens is
            ((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),
@@ -2948,10 +2955,12 @@ package body Driver.Robot.Kinematics.Fit is
                Free (All_R);
                Report.Sigma_Px := Sigma;
                Report.Used := Used;
-               --  Re-chosen until the choice no longer changes, or changes no
-               --  less than it did the round before.
-               exit when Now_Changed = 0 or else Now_Changed >= Changed or else Used <= Count;
-               Changed := Now_Changed;
+               --  Re-chosen until the choice no longer changes, or comes back to one made before (a cycle between
+               --  choices, each giving the same fit again: no round after it tells more; item 3), or too few are
+               --  left to fit.
+               exit when Now_Changed = 0 or else Used <= Count
+                 or else (for some Earlier of Seen => Earlier.all = Inlier.all);
+               Seen.Append (new Flags'(Inlier.all));
                declare
                   Kept : Sighting_Access := new Sighting_Array (1 .. Used);
                   K    : Natural := 0;
@@ -2975,7 +2984,7 @@ package body Driver.Robot.Kinematics.Fit is
                   end Evaluate;
 
                   procedure Solve is new Robust_Fit
-                    (Count, Used, Driver.Conventions.Initial_Damping, Evaluate, At_Once => True);
+                    (Count, Used, Driver.Conventions.Initial_Damping, Evaluate, At_Once => True, To_The_End => True);
                begin
                   for I in 1 .. S loop
                      if Inlier (I) then
@@ -2993,6 +3002,13 @@ package body Driver.Robot.Kinematics.Fit is
                   end loop;
                   To_X (Lens_Of (X), Base, X);
                end;
+            end;
+         end loop;
+         for Earlier of Seen loop
+            declare
+               F : Flags_Access := Earlier;
+            begin
+               Free_Flags (F);
             end;
          end loop;
          L := Lens_Of (X);
