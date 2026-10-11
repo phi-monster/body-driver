@@ -1048,7 +1048,8 @@ procedure Score is
                               begin
                                  Position (I) :=
                                    Millimetres_Per_Metre * abs (M.Translation - Best_Test (I).Truth.Translation);
-                                 Rotation (I) := Degrees_Per_Radian * Angle (Transpose (Best_Test (I).Truth.Rotation) * M.Rotation);
+                                 Rotation (I) :=
+                                   Degrees_Per_Radian * Angle (Transpose (Best_Test (I).Truth.Rotation) * M.Rotation);
                               end;
                            end loop;
                            --  How far the test poses lie apart is said with their errors:
@@ -1062,7 +1063,8 @@ procedure Score is
                               Ada.Text_IO.Put_Line
                                 ("tool" & Tool'Image & ": its true link moves no more over the" & Best_Test.Length'Image
                                  & " test poses (" & Image (Travel, 3) & " mm) than its largest error ("
-                                 & Image (Largest (Position), 3) & " mm), so which link carries it is not known; its pose"
+                                 & Image (Largest (Position), 3)
+                                    & " mm), so which link carries it is not known; its pose"
                                  & " is scored as its eye's");
                            else
                               Best.Largest_Position := Largest (Position) / Millimetres_Per_Metre;
@@ -1074,11 +1076,13 @@ procedure Score is
                                  World_Tool := Tool;
                               end if;
                               Ada.Text_IO.Put_Line
-                                ("tool" & Tool'Image & " (true link " & To_String (Best.Link) & "):" & Best_Test.Length'Image
+                                ("tool" & Tool'Image & " (true link " & To_String (Best.Link) & "):"
+                                   & Best_Test.Length'Image
                                  & " test poses spread over " & Image (Travel, 1)
                                  & " mm, position median " & Image (Driver.Stats.Median (Position), 2) & " mm, largest "
                                  & Image (Largest (Position), 2) & " mm; rotation median "
-                                 & Image (Driver.Stats.Median (Rotation), 3) & " deg, largest " & Image (Largest (Rotation), 3)
+                                 & Image (Driver.Stats.Median (Rotation), 3) & " deg, largest "
+                                    & Image (Largest (Rotation), 3)
                                  & " deg; scale " & Image (Scale_Of (Best.X), 6) & " m per unit"
                                  & (if Own then ", in a world of its own: the driver had not placed its arm"
                                      elsif World_Tool = Tool then "" else ", in the world of tool" & World_Tool'Image));
