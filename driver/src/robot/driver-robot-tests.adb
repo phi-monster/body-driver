@@ -6807,7 +6807,7 @@ package body Driver.Robot.Tests is
       end loop;
       Driver.Robot.Kinematics.Refit (M);
       Check (Driver.Robot.Kinematics.Fitted (M, 1), "the arm is not fitted with the keyframes taken after its fit");
-      Check (M.Kinematics (1).Result.Matches = Natural (M.Kinematics (1).Matches.Length)
+      Check (M.Kinematics (1).Result.Matches = Natural (Ada.Containers.Count_Type'(M.Kinematics (1).Matches.Length))
              and then M.Kinematics (1).Result.Used > First_Used,
              "the refit did not use the keyframes taken after the fit:" & M.Kinematics (1).Result.Used'Image
              & " sightings against" & First_Used'Image);
