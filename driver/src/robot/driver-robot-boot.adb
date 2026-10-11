@@ -5,7 +5,6 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Driver.Beats;
-with Driver.Clock;
 with Driver.Commands;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -315,11 +314,8 @@ package body Driver.Robot.Boot is
             --  them, before the next round is moved (Estimate_Now): what the next
             --  round asks rests on what this one showed.
             procedure Measure_The_Round is
-               B : Driver.Clock.Beat;
             begin
-               Driver.Beats.Next (B);
-               Estimate_Now (M);
-               Driver.Beats.Send (Driver.Commands.Hold);
+               Driver.Robot.Motion.Hold_And_Estimate (M);
             end Measure_The_Round;
 
             --  Whether the keyframe taken in the beats the arm was held for a push (Ask_From .. Ask_To) was followed

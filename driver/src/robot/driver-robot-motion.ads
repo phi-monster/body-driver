@@ -75,6 +75,10 @@ package Driver.Robot.Motion is
    procedure Hold (M : in out Model; Beats : Positive);
    --  Holds the body for that many beats.
 
+   procedure Hold_And_Estimate (M : in out Model);
+   --  Holds the body for one beat and brings the estimates up to date between the beat and the hold
+   --  (Estimate_Now): a round of the sweep is measured before the next round is moved.
+
    procedure Hold_While_Matching (M : in out Model);
    --  Holds the body until the instrument has answered every match the
    --  estimators asked of it (the kinematics' keyframes).

@@ -368,6 +368,14 @@ package body Driver.Robot.Motion is
       end loop;
    end Hold;
 
+   procedure Hold_And_Estimate (M : in out Model) is
+      B : Driver.Clock.Beat;
+   begin
+      Driver.Beats.Next (B);
+      Estimate_Now (M);
+      Driver.Beats.Send (Driver.Commands.Hold);
+   end Hold_And_Estimate;
+
    function Hold_Of (M : Model; G : Group_Id; Channel : Positive) return Real is
       Last : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
    begin
