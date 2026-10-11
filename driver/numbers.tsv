@@ -1537,9 +1537,16 @@ driver-robot-kinematics-errors.ads	with Pre => Frame'First = 1 and then Track'Fi
 driver-robot-kinematics-errors.ads	with Pre => Frame'First = 1 and then Track'First = 1 and then Track'Length = Frame'Length	1	structure	indexes start at one
 driver-robot-kinematics-errors.ads	with Pre => Frame'First = 1 and then Track'First = 1 and then Track'Length = Frame'Length	1	structure	indexes start at one
 driver-robot-kinematics-errors.ads	with Pre => Frame'First = 1 and then Track'First = 1 and then Track'Length = Frame'Length	1	structure	indexes start at one
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Exp (Low), 1) & "" & Driver.Log.Image (Exp (High), 1));	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Exp (Low), 1) & "" & Driver.Log.Image (Exp (High), 1));	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (F_Least, 3) & "" & Driver.Log.Image (F_Most, 1)	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (F_Least, 3) & "" & Driver.Log.Image (F_Most, 1)	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Focal, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Lens0.Fx, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Real'Image (C) & "" & Real'Image (Sqrt (Variance (O + 5)))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element, 1) & "")	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	((Fx => Exp (T (T'First)), Fy => Exp (T (T'First + 1)), Cx => T (T'First + 2), Cy => T (T'First + 3),	2	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
 driver-robot-kinematics-fit.adb	((Fx => Exp (T (T'First)), Fy => Exp (T (T'First + 1)), Cx => T (T'First + 2), Cy => T (T'First + 3),	3	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
 driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),	2	structure	the positions of the parameters in the vector
@@ -1640,11 +1647,13 @@ driver-robot-kinematics-fit.adb	F : constant Real := 1.0 / Sqrt (Sum / Real (Uni
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
+driver-robot-kinematics-fit.adb	F_Least := (if Searches = 1 then F else Real'Min (F_Least, F));	1	structure	the first focal length tried starts the least
 driver-robot-kinematics-fit.adb	Fit_Abs (Kf) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Fit_Abs (Kf) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Focal : constant Real := (L.Fx + L.Fy) / 2.0;	2.0	math	the focal length: the mean of the two
 driver-robot-kinematics-fit.adb	Foot : constant Vec3 := (1.0 / Length ** 2) * P.A;	1.0	math	the plane A * X = 1: its point nearest the eye is A over its length squared
 driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	indexes start at one
+driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	default: the reference frame, the first
 driver-robot-kinematics-fit.adb	Frame : constant Positive := (if Way = 1 then Up_Frame (J) else Down_Frame (J));	1	structure	the two widest keyframes of a joint, one each way
 driver-robot-kinematics-fit.adb	Free_First : constant Positive := (if Second_Eye then S_First else 1);	1	structure	the homography's entries come first, and are terms only when the eye's lens is unknown
 driver-robot-kinematics-fit.adb	Fx, Fy, Tx, Ty : Real_Array (1 .. Natural'Max (1, Pairs)) := [others => 0.0];	1	structure	at least one element, so that an empty set is no empty array
@@ -1653,6 +1662,8 @@ driver-robot-kinematics-fit.adb	Golden : constant Real := (3.0 - Sqrt (5.0)) * A
 driver-robot-kinematics-fit.adb	H : constant Mat3 := Homography_Of (Xv (Xv'First .. Xv'First + 7));	7	structure	a homography's eight free entries come first
 driver-robot-kinematics-fit.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));	1.0	numerics	forward differences at the square root of the float's resolution relative to each parameter's size
 driver-robot-kinematics-fit.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (X'First + K - 1));	1.0	numerics	the scale floor of a finite difference and of a bracket width
+driver-robot-kinematics-fit.adb	H0 => [C.X0 / F, C.Y0 / F, 1.0], H => [C.X1 / F, C.Y1 / F, 1.0]);	1.0	math	a ray through the pixel at unit depth (Ray without distortion)
+driver-robot-kinematics-fit.adb	H0 => [C.X0 / F, C.Y0 / F, 1.0], H => [C.X1 / F, C.Y1 / F, 1.0]);	1.0	math	a ray through the pixel at unit depth (Ray without distortion)
 driver-robot-kinematics-fit.adb	Half : constant := 0.5;	0.5	statistics	an even split: the null of two planes that hold as many points
 driver-robot-kinematics-fit.adb	Hd : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Xf (P));	1.0	numerics	the scale floor of a finite difference
 driver-robot-kinematics-fit.adb	Hn (R, C) := Vectors (3 * (R - 1) + C, Least);	3	structure	a homography's entries row by row, three to a row
@@ -1929,6 +1940,7 @@ driver-robot-kinematics-fit.adb	if Median_Ratio (0.0) <= Typical then	0.0	math	n
 driver-robot-kinematics-fit.adb	if N < 2 then	2	math	two points fix a similarity of the plane
 driver-robot-kinematics-fit.adb	if N = 0 or else S = 0 or else Frames < 2 then	2	structure	the keyframes and joints after the first
 driver-robot-kinematics-fit.adb	if N > 1 and then (for all X of Sight => not Several (X.Frame)) then	1	structure	an arm of one joint has no order to find
+driver-robot-kinematics-fit.adb	if N > 1 and then P_Count > 0 and then P_Count + 1 < N then	1	structure	the anchor adds one row to the pairs; joints beyond one need it
 driver-robot-kinematics-fit.adb	if N > 1 and then P_Count > 0 then	1	structure	cells move several joints
 driver-robot-kinematics-fit.adb	if N > 1 then	1	structure	an arm of one joint has no order to find
 driver-robot-kinematics-fit.adb	if Pass = 1 then	1	structure	the side solved once unweighted, once weighted to Sampson residuals

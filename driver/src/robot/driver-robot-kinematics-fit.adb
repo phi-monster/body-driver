@@ -1767,6 +1767,23 @@ package body Driver.Robot.Kinematics.Fit is
          Lines : array (1 .. N) of Sight_Line_Access;
          --  Every keyframe of the joint alone, at one focal length.
          Every : array (1 .. N) of Sight_Line_Access;
+         --  Per joint, its sightings' pixel offsets from the lens centre, gathered once: a focal length only
+         --  scales them (Ray without distortion is (U - Cx) / F, (V - Cy) / F, 1). Prepare used to scan every
+         --  sighting once per joint, allocate and fill the lines anew and call Ray for each, at every focal
+         --  length the search tried: B0a_2 (x5, 10-13) tried about 190 in one fit and spent 224 s of the
+         --  fit's 194 s stage in Ray and that scan (15.5 million calls, the profile of its replay).
+         type Centred_Sighting is record
+            Frame   : Positive := 1;
+            Reading : Real := 0.0;
+            X0, Y0  : Real := 0.0;   --  the reference pixel less the centre
+            X1, Y1  : Real := 0.0;   --  the keyframe pixel less the centre
+            Wide    : Boolean := False;
+         end record;
+         type Centred_Array is array (Positive range <>) of Centred_Sighting;
+         type Centred_Access is access Centred_Array;
+         procedure Free is new Ada.Unchecked_Deallocation (Centred_Array, Centred_Access);
+         Centred   : array (1 .. N) of Centred_Access := [others => null];
+         Gathered  : Boolean := False;
 
          --  The grid scores a joint on its widest turn each way: the keyframes
          --  that tell its axis best. Its refinement, and the score it gives the
@@ -1787,26 +1804,49 @@ package body Driver.Robot.Kinematics.Fit is
             and then (Frame = Up_Frame (Single (Frame)) or else Frame = Down_Frame (Single (Frame))));
 
          procedure Prepare (F : Real) is
-            Lx : constant Lens := (Fx | Fy => F, Cx => Lens0.Cx, Cy => Lens0.Cy, others => 0.0);
          begin
-            for J in 1 .. N loop
-               Free (Lines (J));
-               Free (Every (J));
-               Lines (J) := new Sight_Line_Array (1 .. Grid_Counts (J));
-               Every (J) := new Sight_Line_Array (1 .. Counts (J));
+            if not Gathered then
+               for J in 1 .. N loop
+                  Free (Lines (J));
+                  Free (Every (J));
+                  Lines (J) := new Sight_Line_Array (1 .. Grid_Counts (J));
+                  Every (J) := new Sight_Line_Array (1 .. Counts (J));
+                  Centred (J) := new Centred_Array (1 .. Counts (J));
+               end loop;
                declare
-                  K, E : Natural := 0;
+                  E : array (1 .. N) of Natural := [others => 0];
                begin
                   for X of Sight loop
-                     if Single (X.Frame) = J then
-                        E := E + 1;
-                        Every (J) (E) := (Frame => X.Frame, Reading => Change (X.Frame, J),
-                                          H0 => Ray (Lx, X.U0, X.V0), H => Ray (Lx, X.U, X.V));
-                        if Widest (X.Frame) then
+                     if Single (X.Frame) in 1 .. N then
+                        declare
+                           J : constant Positive := Single (X.Frame);
+                        begin
+                           E (J) := E (J) + 1;
+                           Centred (J) (E (J)) :=
+                             (Frame => X.Frame, Reading => Change (X.Frame, J),
+                              X0 => X.U0 - Lens0.Cx, Y0 => X.V0 - Lens0.Cy,
+                              X1 => X.U - Lens0.Cx, Y1 => X.V - Lens0.Cy, Wide => Widest (X.Frame));
+                        end;
+                     end if;
+                  end loop;
+               end;
+               Gathered := True;
+            end if;
+            for J in 1 .. N loop
+               declare
+                  K : Natural := 0;
+               begin
+                  for E in Centred (J)'Range loop
+                     declare
+                        C : Centred_Sighting renames Centred (J) (E);
+                     begin
+                        Every (J) (E) := (Frame => C.Frame, Reading => C.Reading,
+                                          H0 => [C.X0 / F, C.Y0 / F, 1.0], H => [C.X1 / F, C.Y1 / F, 1.0]);
+                        if C.Wide then
                            K := K + 1;
                            Lines (J) (K) := Every (J) (E);
                         end if;
-                     end if;
+                     end;
                   end loop;
                end;
             end loop;
@@ -2137,8 +2177,14 @@ package body Driver.Robot.Kinematics.Fit is
 
          --  Every joint's best direction at focal length F, the joints scanned
          --  at once, one task each: their sightings are their own.
+         Searches        : Natural := 0;          --  focal lengths tried, for the log
+         F_Least, F_Most : Real := 0.0;           --  the least and the most of them, px
+
          procedure Search (F : Real; Best : out Best_Array) is
          begin
+            Searches := Searches + 1;
+            F_Least := (if Searches = 1 then F else Real'Min (F_Least, F));
+            F_Most := Real'Max (F_Most, F);
             Prepare (F);
             declare
                task type Scanner is
@@ -2386,11 +2432,19 @@ package body Driver.Robot.Kinematics.Fit is
             declare
                Focal : constant Real := Exp (Best_At);
             begin
+            --  What the search did, for the log: how many focal lengths it tried and how far they ranged
+            --  (B0a_1's arms ended at 0.002 px: the search had run to the bracket's end).
+            Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " focal search tried" & Searches'Image
+                             & " lengths from " & Driver.Log.Image (F_Least, 3) & " to " & Driver.Log.Image (F_Most, 1)
+                             & " px, best " & Driver.Log.Image (Focal, 1) & " px, score "
+                             & Driver.Log.Image (Total (Best), 4) & " +- " & Driver.Log.Image (Total_Error (Best), 4)
+                             & " px; the basin " & Driver.Log.Image (Exp (Low), 1) & " to " & Driver.Log.Image (Exp (High), 1));
             for J in 1 .. N loop
                if Best (J).Scale = 0.0 then
                   for K in 1 .. N loop
                      Free (Lines (K));
                      Free (Every (K));
+                     Free (Centred (K));
                   end loop;
                   Fail ("joint" & J'Image & "'s widest keyframes tell its turn about no direction");
                   return;
@@ -2409,6 +2463,7 @@ package body Driver.Robot.Kinematics.Fit is
                end;
                Free (Lines (J));
                Free (Every (J));
+               Free (Centred (J));
             end loop;
             end;
          end;
