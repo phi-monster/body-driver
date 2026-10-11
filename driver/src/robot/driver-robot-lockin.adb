@@ -89,8 +89,11 @@ package body Driver.Robot.Lockin is
       Far, Rest : Natural := 0;
       Far_Energy, Energy : Real := 0.0;
       Weights, Weighted  : Real := 0.0;
+      Sum_Energy, Sum_Variance : Real := 0.0;   --  for the log line
    begin
       for C of Pool loop
+         Sum_Energy := Sum_Energy + C.Energy;
+         Sum_Variance := Sum_Variance + C.Variance;
          Energy := Energy + Real'Max (0.0, C.Energy);
          if Far_Above (C) then
             Far := Far + 1;
@@ -117,6 +120,10 @@ package body Driver.Robot.Lockin is
             Low   : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));
             High  : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean + Z * Sigma) / Typical));
          begin
+            Driver.Log.Line (Driver.Log.Robot, "lock-in: the" & Pool'Length'Image & " cells too noisy to tell show together "
+                             & Driver.Log.Image (Mean, 4) & " +- " & Driver.Log.Image (Sigma, 4) & " of the typical energy "
+                             & Driver.Log.Image (Typical, 4) & " (their energies sum to " & Driver.Log.Image (Sum_Energy, 4)
+                             & ", their variances to " & Driver.Log.Image (Sum_Variance, 4) & ";" & Far'Image & " far above)");
             return (Least => Counted + Natural (Real'Floor (Low * Real (Rest))),
                     Most  => Counted + Natural (Real'Ceiling (High * Real (Rest))));
          end;
@@ -706,6 +713,11 @@ package body Driver.Robot.Lockin is
                                                                  S.Luma_Variance (Cell - 1));
                               end if;
                            end loop;
+                           if Cell = 1 or else Cell = N or else Cell = N / 2 then
+                              Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & " cell" & Cell'Image & " regresses"
+                                               & K'Image & " of" & Rows'Image & " rows (resolved there), floor "
+                                               & Driver.Log.Image (Driver.Stats.Median (Floors.all), 5));
+                           end if;
                            declare
                               Floor : constant Real := Driver.Stats.Median (Floors.all);
                               Fu    : constant Regression.Fit := Regression.Solve (Xc.all, U.all, Floor);
@@ -807,6 +819,18 @@ package body Driver.Robot.Lockin is
                            end loop;
                         end loop;
                         declare
+                           Motion_Rows : Natural := 0;
+                        begin
+                           for R in 1 .. Rows loop
+                              if (for some K in 1 .. Kept => X (R, K + 1) /= 0.0) then
+                                 Motion_Rows := Motion_Rows + 1;
+                              end if;
+                           end loop;
+                           Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ":" & Motion_Rows'Image & " of" & Rows'Image
+                                            & " rows carry a push; the rows' beats run" & (if Rows > 0 then Beat_Of (1)'Image else "")
+                                            & " to" & (if Rows > 0 then Beat_Of (Rows)'Image else "") & ", lag" & Lag'Image);
+                        end;
+                        declare
                            Started : constant Duration := Driver.Clock.Seconds;
                            Fitted, Passes, Most, Stuck : Natural := 0;
                         begin
@@ -887,6 +911,11 @@ package body Driver.Robot.Lockin is
                                        Effect.Fraction :=
                                          (Value => F, Sigma => Sqrt (F * (1.0 - F) / Real (T)), Degrees_Of_Freedom => 0);
                                        Effect.Verdict := Judge (Count, T, Least, Most, Disagree);
+                                       Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & " group" & G'Image & ":"
+                                                        & Count'Image & " of" & T'Image & " textured cells respond, "
+                                                        & Least'Image & " to" & Most'Image & " show the motion"
+                                                        & (if Disagree then " and the cells that can tell disagree" else "")
+                                                        & ": " & Effect.Verdict'Image);
                                     end;
                                  end if;
                                  M.Graph.Effects.Replace_Element ((Natural (G) - 1) * Eyes + Natural (E), Effect);

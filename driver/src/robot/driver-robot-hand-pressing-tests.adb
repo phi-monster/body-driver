@@ -459,18 +459,21 @@ package body Driver.Robot.Hand.Pressing.Tests is
          Check (Got.Ok, "a placed arm whose eye found no table aims no press on the world's table");
          Check (Got.Ok and then abs (Got.Into + Transpose (Placement_2.Rotation) * Table_Normal (1)) < 1.0e-6,
                 "the way down of a placed arm whose eye found no table is not the world's table turned into its frame");
-         Build (M, Unplaced);
-         M.Kinematics (2).Result.Table := (others => <>);
-         Aim (M, 2, 2, O, Along, Got);
-         Check (Got.Ok and then Got.Turn < 1.0e-9
-                and then abs (Got.Into - Unit (Tool_In_Arm (M, 2, O).Pose.Rotation * Along)) < 1.0e-9,
-                "an arm not placed, whose eye found no table, does not press by touch along its line of sight (ok "
-                & Got.Ok'Image & ", turn" & Got.Turn'Image & ", off the line by"
-                & Real'Image (abs (Got.Into - Unit (Tool_In_Arm (M, 2, O).Pose.Rotation * Along))) & ")");
-         M.Kinematics (2).Result.Table := Table_Of (2);
-         M.Kinematics (2).Result.Fitted := False;
-         Aim (M, 2, 2, O, Along, Got);
-         Check (not Got.Ok, "a press is aimed by an arm that is not fitted");
+         declare
+            M2 : Model;   --  a body of its own: Build appends arms
+         begin
+            Build (M2, Unplaced);
+            M2.Kinematics (2).Result.Table := (others => <>);
+            Aim (M2, 2, 2, O, Along, Got);
+            Check (Got.Ok and then Got.Turn < 1.0e-9
+                   and then abs (Got.Into - Unit (Tool_In_Arm (M2, 2, O).Pose.Rotation * Along)) < 1.0e-9,
+                   "an arm not placed, whose eye found no table, does not press by touch along its line of sight (ok "
+                   & Got.Ok'Image & ", turn" & Got.Turn'Image & ")");
+            M2.Kinematics (2).Result.Table := Table_Of (2);
+            M2.Kinematics (2).Result.Fitted := False;
+            Aim (M2, 2, 2, O, Along, Got);
+            Check (not Got.Ok, "a press is aimed by an arm that is not fitted");
+         end;
       end;
    end Press_Planned_In_The_Arms_Frame;
 

@@ -187,26 +187,70 @@ package body Driver.Robot.Stillness is
       if Began_Moving then
          S.Watch_Have := False;
          S.Watch_Done := False;
+         S.Watch_Run := 0;
       end if;
       --  A beat without two frames to compare counts neither way.
       if S.Change_1 >= 0.0 then
          declare
             C1 : constant Real := S.Change_1;
             C2 : constant Real := S.Change_2;
+            --  The step of the change from the beat before, positive while it shrinks; a stationary beat is one
+            --  whose step is under the unchanged fraction of the change (converged) and not a shrinking one against
+            --  what the change wanders by at a lasting level (the median of its steps at the stationary beats so far;
+            --  a tail that decays under a large steady flicker shrinks by less than a hundredth of the whole and by
+            --  many times that wander: robot.boot.settling held 18 keyframes on such tails).
+            Step       : constant Real := (if S.Watch_Have then S.Watch_Last - C1 else 0.0);
+            Converged  : constant Boolean :=
+              S.Watch_Have and then abs Step <= Driver.Conventions.Unchanged_Fraction * S.Watch_Last;
+            Shrinking  : constant Boolean :=
+              S.Watch_Have and then S.Watch_Scatter_Counted > 0 and then Step > Driver.Conventions.Z * S.Watch_Scatter;
+            --  The two-beat change adds up as rest's does, not as a drift's: within Z of the step and the wander,
+            --  whichever is larger (a step that happens to be tiny on a noisy picture is no measure of what the two-beat
+            --  change wanders by; the beat after a jump has a large step, and its two-beat change spans the jump).
+            Adds_As_Rest : constant Boolean :=
+              C2 < 0.0 or else C2 - Adds_Up * C1 <= Driver.Conventions.Z * Real'Max (abs Step, S.Watch_Scatter);
+            --  A drift is converged and not shrinking, and is no rest: what rest makes is measured on beats that add
+            --  up as rest does.
+            Stationary : constant Boolean := Converged and then not Shrinking and then Adds_As_Rest;
          begin
-            --  The picture has stopped when the change from beat to beat has converged, a step of less than the
-            --  unchanged fraction of itself (the convention for an iterative estimate against its own size: the
-            --  change settles towards what rest makes, whatever that is, a lasting flicker included), and the change
-            --  over two beats adds up as rest's does (within Z of the beat-to-beat scatter), not as a drift's. It
-            --  used to be stopped as well when the change had fallen to a hundredth of the largest since the move: a
-            --  hundredth of a jump is still many times the noise, and a fake body's eye was taken stopped one beat
-            --  after a move while its picture still changed by two levels, 24 keyframes on changing pictures
-            --  (item 22).
-            if S.Watch_Have
-              and then S.Watch_Last - C1 <= Driver.Conventions.Unchanged_Fraction * S.Watch_Last
-              and then (C2 < 0.0 or else C2 - Adds_Up * C1 <= Driver.Conventions.Z * abs (C1 - S.Watch_Last))
+            S.Watch_Run := (if Stationary then S.Watch_Run + 1 else 0);
+            --  The picture has stopped when its change is what rest makes (the median of the change at the stationary
+            --  beats so far, Z of their scale allowed: a residual of a move that is many times the noise is not rest,
+            --  item 22), or when it has been stationary for two beats running at a level rest never showed (a lasting
+            --  flicker that came with the move: waiting for it to end is waiting forever); and in either case the
+            --  change over two beats adds up as rest's does. It used to be stopped as well when the change had fallen
+            --  to a hundredth of the largest since the move: a hundredth of a jump is still many times the noise, and
+            --  a fake body's eye was taken stopped one beat after a move while its picture still changed by two
+            --  levels, 24 keyframes on changing pictures.
+            if S.Watch_Have and then Adds_As_Rest
+              and then ((S.Watch_Rest < Real'Last and then C1 <= S.Watch_Rest + Driver.Conventions.Z * S.Watch_Rest_Scale)
+                        or else S.Watch_Run >= 2)
             then
                S.Watch_Done := True;
+            end if;
+            if Stationary then
+               S.Watch_Diffs.Append (abs Step);
+               S.Watch_Levels.Append (C1);
+               if Natural (S.Watch_Diffs.Length) >= 2 * Natural'Max (1, S.Watch_Scatter_Counted) then
+                  declare
+                     V : Real_Array (1 .. Natural (S.Watch_Diffs.Length));
+                     L : Real_Array (1 .. Natural (S.Watch_Levels.Length));
+                  begin
+                     for I in V'Range loop
+                        V (I) := S.Watch_Diffs (S.Watch_Diffs.First_Index + I - 1);
+                     end loop;
+                     for I in L'Range loop
+                        L (I) := S.Watch_Levels (S.Watch_Levels.First_Index + I - 1);
+                     end loop;
+                     S.Watch_Scatter := Driver.Stats.Median (V);
+                     S.Watch_Scatter_Counted := V'Length;
+                     if L'Length >= 2 then
+                        S.Watch_Rest := Driver.Stats.Median (L);
+                        S.Watch_Rest_Scale := Driver.Stats.Robust_Sigma (L);
+                        S.Watch_Rest_Counted := L'Length;
+                     end if;
+                  end;
+               end if;
             end if;
             S.Watch_Last := C1;
             S.Watch_Have := True;

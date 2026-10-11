@@ -468,6 +468,14 @@ private
       Change_1, Change_2 : Real := -1.0;     --  at the latest beat; negative when not measured
       Watch_Last    : Real := 0.0;          --  the change of the beat before (Stillness.Watch)
       Watch_Have    : Boolean := False;     --  a beat before has a change to compare with
+      Watch_Diffs   : Real_Vectors.Vector;  --  the beat-to-beat differences of the change at the stationary beats
+      Watch_Scatter : Real := 0.0;          --  their median: what the change wanders by at a lasting level
+      Watch_Scatter_Counted : Natural := 0; --  how many of them that rests on; taken again as they double
+      Watch_Levels  : Real_Vectors.Vector;  --  the change at the stationary beats: what rest makes
+      Watch_Rest    : Real := Real'Last;    --  their median (Real'Last before two), and
+      Watch_Rest_Scale : Real := 0.0;       --  their robust scale
+      Watch_Rest_Counted : Natural := 0;    --  how many those rest on; taken again as they double
+      Watch_Run     : Natural := 0;         --  stationary beats in a row, now
       Watch_Done    : Boolean := False;      --  the picture has stopped since then
       Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat
       Condition     : Real_Vectors.Vector;   --  Cells values per beat
