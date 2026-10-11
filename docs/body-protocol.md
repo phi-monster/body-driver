@@ -145,9 +145,12 @@ A map from command key to a list of numbers, as many as the group's reading:
 
 - A group the driver moves this beat gets its target.
 - A group it does not move holds: it gets the last target the driver sent it
-  this episode; if it was never commanded this episode, its reading of this
-  beat; if this beat has no reading for it, what was last sent for it; and if
-  nothing was ever sent, the key is left out. No number is ever made up.
+  this episode; if it was never commanded this episode, the reading of the
+  beat it was first held at, kept until a target comes (not the reading of
+  every beat: a body that gives under its load would be told each beat to
+  stand where it had sagged to, and creep without end); if that beat has no
+  reading for it, what was last sent for it; and if nothing was ever sent, the
+  key is left out. No number is ever made up.
 - What closes a hand gets the last target given to it this episode, not its
   reading, since an outside push changes the reading and holding the reading
   would lock the push in.

@@ -897,6 +897,24 @@ package body Driver.Robot is
    function Lag_Known (M : Model; E : Eye_Id) return Boolean is
      (E <= M.Lag_Known.Last_Index and then M.Lag_Known (E));
 
+   function Longest_Settling (M : Model; E : Eye_Id) return Natural is
+      Longest      : Natural := 0;
+      Moving_Since : Integer := -1;   --  the beat the latest move began, its picture not settled since
+   begin
+      if E > M.Eyes.Last_Index then
+         return 0;
+      end if;
+      for B in M.Began_Moving.First_Index .. M.Began_Moving.Last_Index loop
+         if M.Began_Moving (B) then
+            Moving_Since := B;
+         elsif Moving_Since >= 0 and then B <= M.Eyes (E).Settled_At.Last_Index and then M.Eyes (E).Settled_At (B) then
+            Longest := Natural'Max (Longest, B - Moving_Since);
+            Moving_Since := -1;
+         end if;
+      end loop;
+      return Longest;
+   end Longest_Settling;
+
    function Closer_Arm (M : Model; G : Group_Id) return Arm_Id'Base is
      (if Role (M, G) = Closer then M.Graph.Arm_Of (G) else 0);
 

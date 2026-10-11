@@ -8,6 +8,7 @@ package body Driver.Replies is
    procedure New_Episode (S : in out State) is
    begin
       S.Targets.Clear;
+      S.Held.Clear;
    end New_Episode;
 
    procedure Write_Action
@@ -20,13 +21,20 @@ package body Driver.Replies is
    is
       Count : Natural := 0;
 
-      --  What group G carries this beat; empty when nothing is known for it.
+      --  What group G carries this beat; empty when nothing is known for it. A group never commanded this
+      --  episode holds at the reading of the beat it was first held at, kept (Held) until a target comes: sent
+      --  its reading of every beat, as it was, a body that gives under its load was told each beat to stand
+      --  where it had sagged to, sagged from there again, and crept without end (fake body B0F1, 10-13: no
+      --  command but holds, arm 2's fingers rose 72 cm over 8000 beats; the readings' creep locked in the
+      --  same way the protocol already refused for what closes a hand).
       function Value_Of (G : Group_Id) return Real_Array is
       begin
          if Driver.Commands.Has_Target (C, G) then
             return Driver.Commands.Target (C, G);
          elsif S.Targets.Contains (G) then
             return S.Targets.Element (G);
+         elsif S.Held.Contains (G) then
+            return S.Held.Element (G);
          elsif Has_Reading (O, G) then
             return O.Readings.Element (G);
          elsif S.Last_Sent.Contains (G) then
@@ -57,6 +65,8 @@ package body Driver.Replies is
                   S.Last_Sent.Include (G, V);
                   if Driver.Commands.Has_Target (C, G) then
                      S.Targets.Include (G, V);
+                  elsif not S.Targets.Contains (G) and then not S.Held.Contains (G) then
+                     S.Held.Include (G, V);
                   end if;
                end if;
             end;

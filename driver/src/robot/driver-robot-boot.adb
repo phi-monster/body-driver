@@ -349,10 +349,12 @@ package body Driver.Robot.Boot is
             --  (Kinematics.Followed) and whether the arm is fitted now, read in a held beat.
             Ask_From, Ask_To : Natural := 0;
             Followed_Now : Boolean := False;
+            Framed_Now   : Boolean := False;   --  a keyframe was taken in the span at all
             Fitted_Now   : Boolean := False;
             procedure Read_Followed is
             begin
                Followed_Now := Driver.Robot.Kinematics.Followed (M, A, Ask_From, Ask_To);
+               Framed_Now := Driver.Robot.Kinematics.Framed (M, A, Ask_From, Ask_To);
                Fitted_Now := Driver.Robot.Kinematics.Fitted (M, A);
             end Read_Followed;
             --  The beats the body has seen, read in a held beat.
@@ -567,6 +569,16 @@ package body Driver.Robot.Boot is
                                  if Followed_Now then
                                     Followed_In_Pass := Followed_In_Pass + 1;
                                     Reached (P.Channel) := Real'Max (Reached (P.Channel), Offset (I));
+                                 end if;
+                                 if Followed_Now or else not Framed_Now then
+                                    --  Followed, or too small to count: no keyframe came of the push
+                                    --  (the held pose was not apart from the keyframes before it by
+                                    --  the step the fit counts, which is re-estimated after the push
+                                    --  was sized by it; B0_2, arm 1: channels 1, 2 and 5 pushed by
+                                    --  exactly their step, judged against a step grown since, and
+                                    --  left unswept, so the arm never fitted). Either way the ladder
+                                    --  climbs; only a keyframe the aligner could not follow, too
+                                    --  large, stops it.
                                     Offset (I) := 2.0 * Offset (I);
                                     if Offset (I) * Per_Unit (P.Channel) > Half then
                                        State (I) := Widest;
@@ -858,9 +870,12 @@ package body Driver.Robot.Boot is
                            Shows  : array (1 .. Count, 1 .. Eyes) of Eye_Response;
                            Rests  : array (1 .. Count, 1 .. Eyes) of Real;   --  the rest's motion together, in sigmas
                            Factor : array (1 .. Count) of Real := [others => 1.0];
-                           --  The hold after each push, doubling with the rounds from the longest lag the stream could tell
-                           --  when the rounds began (Push_Both_Ways).
+                           --  The hold after each push (Pause_After_A_Push): the longest measured lag once every eye's
+                           --  is measured, until then the longest lag the stream could tell when the rounds began,
+                           --  doubled with the rounds (Push_Both_Ways).
                            Pause  : array (1 .. Count) of Natural := [others => Natural'Max (1, Driver.Robot.Lag.Longest (M))];
+                           Lags_Known  : Boolean := False;   --  every eye's lag is measured (Read_Open)
+                           Longest_Lag : Natural := 0;       --  the longest measured, in beats
                            Again  : array (1 .. Count) of Boolean;
                            Spent  : array (1 .. Count) of Boolean := [others => False];   --  pushed as far as it goes
                            function Most_Channels return Natural is
@@ -884,6 +899,15 @@ package body Driver.Robot.Boot is
                            procedure Read_Open is
                            begin
                               Needed := [others => [others => False]];
+                              Lags_Known := Eyes > 0;
+                              Longest_Lag := 0;
+                              for E in 1 .. Eyes loop
+                                 if Lag_Known (M, Eye_Id (E)) then
+                                    Longest_Lag := Natural'Max (Longest_Lag, Natural'Max (0, Image_Lag (M, Eye_Id (E))));
+                                 else
+                                    Lags_Known := False;
+                                 end if;
+                              end loop;
                               for G in 1 .. Count loop
                                  Again (G) := False;
                                  for E in 1 .. Eyes loop
@@ -930,7 +954,7 @@ package body Driver.Robot.Boot is
                               for G in Again'Range loop
                                  if Again (G) then
                                     Factor (G) := 2.0 * Factor (G);
-                                    Pause (G) := 2 * Pause (G);
+                                    Pause (G) := Pause_After_A_Push (Lags_Known, Longest_Lag, 2 * Pause (G));
                                     Driver.Log.Line
                                       (Driver.Log.Robot, "boot: group" & G'Image
                                        & " leaves an eye undecided or showing a patch that may grow;"

@@ -323,6 +323,15 @@ package Driver.Robot is
    --  the image of beat B shows the body as read at beat B - Image_Lag; 0
    --  until measured.
 
+   function Longest_Settling (M : Model; E : Eye_Id) return Natural;
+   --  The most beats the eye's picture has taken to settle after the body
+   --  began to move, over the whole stream (Began_Moving to the eye's next
+   --  Settled_At); 0 before any move has settled. What a wait for the eye's
+   --  picture may be measured against: the hand's sweep waited for a push's
+   --  view only as long as the longest view before it had taken, and B0_2's
+   --  arm 1 closer, whose first view formed in one beat, was given one beat
+   --  for the next and left unswept.
+
    function Lag_Known (M : Model; E : Eye_Id) return Boolean;
    --  The lag stood out of every shift tried: the eye's motion follows some
    --  push at that delay.
