@@ -24,6 +24,19 @@ package Driver.Robot.Boot is
    --  tail). The boot pushes a group again, at twice the amounts, while an
    --  eye that is undecided about it or shows a patch of it grew by this.
 
+   function Pause_After_A_Push (Every_Lag_Known : Boolean; Longest_Lag : Natural; Guess : Natural) return Natural is
+     (if Every_Lag_Known then Longest_Lag else Guess);
+   --  How many beats a recognition round holds after each push before the
+   --  pictures are asked to settle. The hold is for an eye whose picture
+   --  trails the readings: settled the beat after they stop, before it has
+   --  moved. Once every eye's lag is measured, the hold is the longest of
+   --  them, and nothing more; until then it is Guess, the longest lag the
+   --  stream could tell when the rounds began, doubled with the rounds (the
+   --  doubling convention, as the amounts are). B0_1 (x5, 10-12) doubled it
+   --  with the lags measured at 1 beat from beat 405 on: 12, 24, 48 ... 384
+   --  beats a hold, 3456 of a round's 3516 beats spent holding at 32 times
+   --  the amounts, and the groups were never recognized in 180 minutes.
+
    procedure Save (M : Model; H : Driver.Robot.Hand.Hands; Body_File : String);
    --  Writes everything measured so far, with uncertainties and method
    --  versions, to the body file. Boot calls it as it measures; the replay

@@ -94,6 +94,16 @@ private package Driver.Robot.Kinematics is
 
    function Fitted (M : Model; A : Arm_Id) return Boolean;
 
+   function Framed (M : Model; A : Arm_Id; From, To : Natural) return Boolean;
+   --  A keyframe of the arm was taken at a beat in From .. To at all. A pose
+   --  held after a push gives none when it is not fresh: not apart from every
+   --  keyframe before it by the step the fit counts as a joint having moved
+   --  (Keyframe_Step, re-estimated at every estimate). The boot tells such a
+   --  push, too small, from one whose keyframe the aligner could not follow,
+   --  too large (B0_2, arm 1: channels 1, 2 and 5 were pushed by the step
+   --  known when the sweep began, the step rose before the poses were judged,
+   --  no keyframe came of them, and the ladder stopped as if unfollowed).
+
    function Followed (M : Model; A : Arm_Id; From, To : Natural) return Boolean;
    --  The arm's latest keyframe taken at a beat in From .. To is aligned and
    --  was followed: most of its points were found from windows no wider than

@@ -932,7 +932,7 @@ driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	1.0	mat
 driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
-driver-robot-boot.adb	Pause (G) := 2 * Pause (G);	2	math	doubling: the hold after a push climbs with the rounds
+driver-robot-boot.adb	Pause (G) := Pause_After_A_Push (Lags_Known, Longest_Lag, 2 * Pause (G));	2	math	doubling: the guessed hold climbs with the rounds until every lag is measured
 driver-robot-boot.adb	Pause : array (1 .. Count) of Natural := [others => Natural'Max (1, Driver.Robot.Lag.Longest (M))];	1	structure	the hold after a push begins at one beat, the unit, while the stream can tell no lag; the doubling goes on from it
 driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved, Pause => Natural'Max (1, Driver.Robot.Lag.Longest (M)));	1	structure	the hold after a push begins at one beat, the unit, while the stream can tell no lag
 driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved, Pause => Natural'Max (1, Driver.Robot.Lag.Longest (M)));	1.0	structure	the first round pushes by the amounts as recognized, once

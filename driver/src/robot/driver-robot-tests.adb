@@ -2786,11 +2786,13 @@ package body Driver.Robot.Tests is
      (M : in out Model; Settling : Boolean; Done, Ok : out Boolean; Beats : out Natural; Still_Poses : out Natural;
       Arm_2_Poses : out Natural; Eye_2_Noise : Real := 0.0; Eye_2_Lag : Positive := 1;
       Eye_2_Near : Real := 1.0; Eye_2_Mid : Real := 1.0; Eye_2_Far : Real := 1.0;
-      File : String := ""; Stop_Once_Kept : Boolean := False)
+      File : String := ""; Stop_Once_Kept : Boolean := False; Delivers : Real := 1.0)
    is
       --  File is the body file the boot is given. With Stop_Once_Kept, the main
       --  loop stops answering a few beats after the file first exists, as if
-      --  the boot had died there, and the decider is aborted.
+      --  the boot had died there, and the decider is aborted. The arms' joints
+      --  read Delivers of what they are sent (1: exactly it; a body under load,
+      --  or whose command and reading scales differ, reads less).
       Since_Kept : Natural := 0;
       --  What each beat showed, for an eye that lags more than one beat.
       History   : array (0 .. Eye_2_Lag - 1) of Rig_State;
@@ -2986,8 +2988,8 @@ package body Driver.Robot.Tests is
             end if;
             History (B mod Eye_2_Lag) := Now;
             Shown := Now;
-            Now.Arm_1 := Driver.Commands.Target (Sent, 1);
-            Now.Arm_2 := Driver.Commands.Target (Sent, 2);
+            Now.Arm_1 := [for X of Driver.Commands.Target (Sent, 1) => Delivers * X];
+            Now.Arm_2 := [for X of Driver.Commands.Target (Sent, 2) => Delivers * X];
             Now.Closer := Driver.Commands.Target (Sent, 3) (1);
             Now.Part := Driver.Commands.Target (Sent, 4) (1);
             Now.Idle := Driver.Commands.Target (Sent, 5) (1);
@@ -3031,6 +3033,69 @@ package body Driver.Robot.Tests is
       Check (Known (Visible_Step (M, 1, 1)), "the boot measured how far arm 1 must move to be seen");
       Driver.Log.Line (Driver.Log.Robot, "boot from zero took" & Beats'Image & " beats");
    end Boot_From_Zero;
+
+   --  The rig's boot with the arms' joints reading nine tenths of what they
+   --  are sent. The sweep sizes a joint's first push by its keyframe step (the
+   --  readings' noise is nil here, as a simulator's are), so the pose it rests
+   --  at is short of the step, not apart from the reference by it, and no
+   --  keyframe comes of it. The ladder must climb there, not stop: B0_2 (x5,
+   --  10-12) pushed arm 1's channels 1, 2 and 5 by exactly their step, the
+   --  step was re-estimated higher before the poses were judged, no keyframe
+   --  came of them, the ladder took them for unfollowed, and the arm never
+   --  fitted. Every joint of both arms must have a keyframe at least its step
+   --  from the reference.
+   --  The hold after a recognition push: the longest measured lag once every
+   --  eye's lag is measured, whatever the doubled guess has grown to; the
+   --  guess until then.
+   procedure Pause_Follows_The_Measured_Lag is
+      use Driver.Robot.Boot;
+   begin
+      Check (Pause_After_A_Push (Every_Lag_Known => True, Longest_Lag => 1, Guess => 384) = 1,
+             "with every lag measured at 1 beat the hold is 1 beat, not the doubled guess of 384");
+      Check (Pause_After_A_Push (Every_Lag_Known => True, Longest_Lag => 10, Guess => 12) = 10,
+             "with an eye measured 10 beats behind the hold is 10 beats");
+      Check (Pause_After_A_Push (Every_Lag_Known => True, Longest_Lag => 0, Guess => 7) = 0,
+             "with every lag measured at 0 the hold is 0: the settle alone decides");
+      Check (Pause_After_A_Push (Every_Lag_Known => False, Longest_Lag => 1, Guess => 24) = 24,
+             "with a lag still unmeasured the hold is the guess");
+   end Pause_Follows_The_Measured_Lag;
+
+   procedure Boot_With_Short_Deliveries is
+      M       : Model;
+      Done    : Boolean;
+      Ok      : Boolean;
+      Beats   : Natural;
+      Poses   : Natural;
+      Poses_2 : Natural;
+   begin
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, Delivers => 0.9);
+      Check (Done, "the boot did not finish");
+      Check (Role (M, 1) = Arm and then Role (M, 2) = Arm, "the boot recognized both arms, got "
+             & Role (M, 1)'Image & " and " & Role (M, 2)'Image);
+      for E of M.Kinematics loop
+         if E.Arm in 1 .. 2 then
+            Check (not E.Frames.Is_Empty, "arm" & E.Arm'Image & " has no keyframe at all");
+            if not E.Frames.Is_Empty then
+               for C in 1 .. 2 loop
+                  declare
+                     Step     : constant Real := Driver.Robot.Kinematics.Keyframe_Step (M, E.Arm, C);
+                     Farthest : Real := 0.0;
+                  begin
+                     for F of E.Frames loop
+                        Farthest := Real'Max (Farthest, abs (F.Readings (C - 1) - E.Frames.First_Element.Readings (C - 1)));
+                     end loop;
+                     Check (Step > 0.0 and then Farthest >= Step,
+                            "arm" & E.Arm'Image & " channel" & C'Image & " has no keyframe as far as its step from the"
+                            & " reference: farthest " & Driver.Log.Image (Farthest, 6) & ", step "
+                            & Driver.Log.Image (Step, 6) & " (the first push, nine tenths of the step, left no"
+                            & " keyframe and the ladder stopped there)");
+                  end;
+               end loop;
+            end if;
+         end if;
+      end loop;
+      Driver.Log.Line (Driver.Log.Robot, "boot with short deliveries took" & Beats'Image & " beats");
+   end Boot_With_Short_Deliveries;
 
    --  The rig's boot with arm 2's eye noisy (luma noise of 2 in its every
    --  pixel): pushed by the amount another eye first sees it at, arm 2 leaves
@@ -7507,6 +7572,13 @@ package body Driver.Robot.Tests is
                              Kinematics_Of_A_Synthetic_Arm'Access);
       Driver.Tests.Register ("robot.boot", "the boot does not finish, deadlocks with the main loop, or does not "
                              & "recognize the rig's groups when it pushes them itself", Boot_From_Zero'Access);
+      Driver.Tests.Register ("robot.boot.pause", "a recognition round's hold after a push keeps doubling with the "
+                             & "rounds after every eye's lag is measured: B0_1 held 384 beats a push at 32 times the "
+                             & "amounts with the lags measured at 1", Pause_Follows_The_Measured_Lag'Access);
+      Driver.Tests.Register ("robot.boot.short", "an arm whose joints read less than they are sent is left unswept: "
+                             & "its first pushes, sized by the keyframe step, rest short of it, leave no keyframe, "
+                             & "and the sweep's ladder stops there as if the aligner had lost them",
+                             Boot_With_Short_Deliveries'Access);
       Driver.Tests.Register ("robot.boot.undecided", "an arm whose eye is undecided after the first pushes is left "
                              & "unswept: the boot reads the body before the eye decides", Boot_With_An_Undecided_Eye'Access);
       Driver.Tests.Register ("robot.boot.patch", "an arm whose eye shows only a patch of its view after the first "

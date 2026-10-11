@@ -2281,6 +2281,12 @@ package body Driver.Robot.Kinematics is
       end if;
    end Pose_Covariance;
 
+   function Framed (M : Model; A : Arm_Id; From, To : Natural) return Boolean is
+      K : constant Natural := Index_Of (M, A);
+   begin
+      return K > 0 and then (for some F of M.Kinematics (K).Frames => F.Beat in From .. To);
+   end Framed;
+
    function Followed (M : Model; A : Arm_Id; From, To : Natural) return Boolean is
       K : constant Natural := Index_Of (M, A);
    begin
