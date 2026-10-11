@@ -416,14 +416,32 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   Helps := Status = Sweeps.Unlocated
                     or else (Status = Sweeps.Unplaced
                              and then Sweeps.Located_Of (S, C).How = Driver.Robot.Hand.Lobes.Unseparated);
+                  Share := Sweeps.Located_Of (S, C).Share;
+                  Doubt := Sweeps.Located_Of (S, C).Doubt;
                end;
             end if;
          end Read_Status;
          Reached : Boolean;
+         --  What the last placing told the lobes apart by: the share of the changed pixels' variance its cut
+         --  explains, and the mixture's own doubt. A doubling of the poses that raises the one and lowers the
+         --  other not at all shows the poses are not what is missing, and the hand is not raised again for more
+         --  (A91's hand 1 doubled its raises with the lobes no further apart, up to the arm's end; item 5).
+         Last_Share : Real := -1.0;
+         Last_Doubt : Real := Real'Last;
+         Share, Doubt : Real := 0.0;
       begin
          loop
             Hold_Beat (Read_Status'Access);
             exit when not Helps;
+            if Status = Sweeps.Unplaced and then Last_Share >= 0.0 and then Share <= Last_Share and then Doubt >= Last_Doubt then
+               Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image & ": doubling the"
+                                & " poses to" & Have'Image & " told the lobes no further apart (the cut explains "
+                                & Driver.Log.Image (Share, 3) & " of their variance as before, doubt " & Driver.Log.Image (Doubt, 2)
+                                & "); the hand is not raised again for more");
+               exit;
+            end if;
+            Last_Share := Share;
+            Last_Doubt := Doubt;
             Gather_Own_Poses (G, Positive'Max (Driver.Robot.Hand.Selfsight.Needed, 2 * Have), Reached);
             exit when not Reached;
             --  The estimators place again at the next beat that sees the poses doubled; one more beat to read it.
