@@ -3081,6 +3081,40 @@ package body Driver.Robot.Tests is
              "a move at 72 settled at 73 counts from the later move: longest" & Longest_Settling (M, 1)'Image);
    end Longest_Settling_Of_An_Eye;
 
+   --  The hold after a push for one group: only the eyes that see the group
+   --  move count. Two eyes, group 1 seen whole by eye 1 (lag measured at 1)
+   --  and not at all by eye 2 (lag unmeasured): the hold is 1, not the
+   --  doubled guess; eye 2 seeing a patch of it while unmeasured: the guess;
+   --  eye 2 measured at 10 beats: 10.
+   procedure Hold_Counts_The_Seeing_Eyes is
+      use Driver.Robot.Boot;
+      M : Model;
+      S : Eye_Stream;
+      function Seen (V : Eye_Response) return Eye_Effect is
+        ((Verdict => V, Responding => 1, Textured => 1,
+          Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+   begin
+      M.Eyes.Append (S);
+      M.Eyes.Append (S);
+      M.Lags.Append (1);
+      M.Lag_Known.Append (True);
+      M.Lags.Append (0);
+      M.Lag_Known.Append (False);
+      M.Graph.Effects.Append (Seen (Whole));
+      M.Graph.Effects.Append (Seen (Nothing));
+      Check (Hold_After_A_Push (M, 1, 24) = 1,
+             "an eye that sees nothing of the group, unmeasured, kept the hold at the guess:"
+             & Hold_After_A_Push (M, 1, 24)'Image);
+      M.Graph.Effects.Replace_Element (2, Seen (Patch));
+      Check (Hold_After_A_Push (M, 1, 24) = 24,
+             "an eye that sees a patch of the group, unmeasured, did not keep the hold at the guess:"
+             & Hold_After_A_Push (M, 1, 24)'Image);
+      M.Lags.Replace_Element (2, 10);
+      M.Lag_Known.Replace_Element (2, True);
+      Check (Hold_After_A_Push (M, 1, 24) = 10,
+             "two seeing eyes measured at 1 and 10 beats: the hold is 10, got" & Hold_After_A_Push (M, 1, 24)'Image);
+   end Hold_Counts_The_Seeing_Eyes;
+
    procedure Boot_With_Short_Deliveries is
       M       : Model;
       Done    : Boolean;
@@ -7598,6 +7632,9 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.boot.pause", "a recognition round's hold after a push keeps doubling with the "
                              & "rounds after every eye's lag is measured: B0_1 held 384 beats a push at 32 times the "
                              & "amounts with the lags measured at 1", Pause_Follows_The_Measured_Lag'Access);
+      Driver.Tests.Register ("robot.boot.hold", "an eye that sees nothing of a group keeps its recognition hold at "
+                             & "the doubled guess because its own lag is never measured (B0a: the head eye)",
+                             Hold_Counts_The_Seeing_Eyes'Access);
       Driver.Tests.Register ("robot.boot.short", "an arm whose joints read less than they are sent is left unswept: "
                              & "its first pushes, sized by the keyframe step, rest short of it, leave no keyframe, "
                              & "and the sweep's ladder stops there as if the aligner had lost them",

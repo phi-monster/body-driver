@@ -31,6 +31,22 @@ package body Driver.Robot.Boot is
       return Ada.Strings.Fixed.Trim (S, Ada.Strings.Both);
    end Scientific;
 
+   function Hold_After_A_Push (M : Model; G : Group_Id; Guess : Natural) return Natural is
+      Every_Known : Boolean := Eye_Count (M) > 0;
+      Longest     : Natural := 0;
+   begin
+      for E in 1 .. Eye_Count (M) loop
+         if Response (M, G, Eye_Id (E)) /= Nothing then
+            if Lag_Known (M, Eye_Id (E)) then
+               Longest := Natural'Max (Longest, Natural'Max (0, Image_Lag (M, Eye_Id (E))));
+            else
+               Every_Known := False;
+            end if;
+         end if;
+      end loop;
+      return Pause_After_A_Push (Every_Known, Longest, Guess);
+   end Hold_After_A_Push;
+
    function Grew (Before, After, Cells : Integer) return Boolean is
      (After > Before and then Cells >= After
       and then Driver.Robot.Regression.Count_Significant
@@ -874,8 +890,12 @@ package body Driver.Robot.Boot is
                            --  is measured, until then the longest lag the stream could tell when the rounds began,
                            --  doubled with the rounds (Push_Both_Ways).
                            Pause  : array (1 .. Count) of Natural := [others => Natural'Max (1, Driver.Robot.Lag.Longest (M))];
-                           Lags_Known  : Boolean := False;   --  every eye's lag is measured (Read_Open)
-                           Longest_Lag : Natural := 0;       --  the longest measured, in beats
+                           --  Per group: every eye that sees it move at all has its lag measured, and the longest of
+                           --  those lags (Read_Open). An eye that sees nothing of the group never gets a lag from its
+                           --  pushes and must not keep the hold at the doubled guess: B0a (10-13), the head eye saw
+                           --  nothing of either arm, its lag stayed unmeasured, and every round held 16 to 26 beats a
+                           --  push with the arms' own eyes measured at 1 beat (B0a_2: 533 of a 766-beat round).
+                           Next_Pause : array (1 .. Count) of Natural := [others => 0];   --  Hold_After_A_Push, read with the round
                            Again  : array (1 .. Count) of Boolean;
                            Spent  : array (1 .. Count) of Boolean := [others => False];   --  pushed as far as it goes
                            function Most_Channels return Natural is
@@ -899,17 +919,9 @@ package body Driver.Robot.Boot is
                            procedure Read_Open is
                            begin
                               Needed := [others => [others => False]];
-                              Lags_Known := Eyes > 0;
-                              Longest_Lag := 0;
-                              for E in 1 .. Eyes loop
-                                 if Lag_Known (M, Eye_Id (E)) then
-                                    Longest_Lag := Natural'Max (Longest_Lag, Natural'Max (0, Image_Lag (M, Eye_Id (E))));
-                                 else
-                                    Lags_Known := False;
-                                 end if;
-                              end loop;
                               for G in 1 .. Count loop
                                  Again (G) := False;
+                                 Next_Pause (G) := Hold_After_A_Push (M, Group_Id (G), 2 * Pause (G));
                                  for E in 1 .. Eyes loop
                                     Now (G, E) := -1;
                                     if Commandable (G)
@@ -954,7 +966,7 @@ package body Driver.Robot.Boot is
                               for G in Again'Range loop
                                  if Again (G) then
                                     Factor (G) := 2.0 * Factor (G);
-                                    Pause (G) := Pause_After_A_Push (Lags_Known, Longest_Lag, 2 * Pause (G));
+                                    Pause (G) := Next_Pause (G);
                                     Driver.Log.Line
                                       (Driver.Log.Robot, "boot: group" & G'Image
                                        & " leaves an eye undecided or showing a patch that may grow;"
