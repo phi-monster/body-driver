@@ -1,4 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Numerics.Dense;
 with Driver.Parallel_For;
@@ -752,6 +753,17 @@ package body Driver.Alignment.Keyframes is
          Offer_Wins : Boolean := False;
          Combined_Wins : Boolean := False;
 
+         --  What every usable keyframe's field says at every point, taken once: its scatter there and its
+         --  displacement. The candidates below ask them Frames squared times (118 keyframes: 7,000 pairs over 230
+         --  points, four field evaluations each, which grew with the square of the keyframes; item 2). A candidate's
+         --  arithmetic is the same as Carried_At, Move_Of and Stated_Sigma, on these.
+         type Real_Grid is array (Positive range <>, Positive range <>) of Real;
+         type Grid_Access is access Real_Grid;
+         procedure Free is new Ada.Unchecked_Deallocation (Real_Grid, Grid_Access);
+         Field_Var : Grid_Access := new Real_Grid'(1 .. Frames => [1 .. Count => 0.0]);
+         Field_U   : Grid_Access := new Real_Grid'(1 .. Frames => [1 .. Count => 0.0]);
+         Field_V   : Grid_Access := new Real_Grid'(1 .. Frames => [1 .. Count => 0.0]);
+
          --  The prediction from the earlier keyframes First and Second (unless zero), kept if it states the least
          --  of its order.
          procedure Consider (First, Second : Natural) is
@@ -765,7 +777,20 @@ package body Driver.Alignment.Keyframes is
          begin
             Weights (Amounts, First, Second, Own, Guess.W1, Guess.W2);
             for K in Sigmas'Range loop
-               Sigmas (K) := Stated_Sigma (C, Guess, C.Points (K), Move_Of (C, C.Points (K), Guess));
+               declare
+                  One     : constant Real := Guess.W1 ** 2 * (Field_Var (First, K) + Guess.Off1 ** 2);
+                  Other   : constant Real :=
+                    (if Second = 0 then 0.0 else Guess.W2 ** 2 * (Field_Var (Second, K) + Guess.Off2 ** 2));
+                  Carried : constant Real := Sqrt (One + Other);
+                  Du      : Real := Guess.W1 * Field_U (First, K);
+                  Dv      : Real := Guess.W1 * Field_V (First, K);
+               begin
+                  if Second > 0 then
+                     Du := Du + Guess.W2 * Field_U (Second, K);
+                     Dv := Dv + Guess.W2 * Field_V (Second, K);
+                  end if;
+                  Sigmas (K) := Sqrt (Carried ** 2 + (Guess.Relative ** 2) * (Du ** 2 + Dv ** 2));
+               end;
             end loop;
             Guess.Median := Driver.Stats.Median (Sigmas);
             if Guess.Median < C.Latest (Order).Median then
@@ -794,6 +819,15 @@ package body Driver.Alignment.Keyframes is
             Usable (J) := C.Frames (J).Field.Valid and then Amounts (J) /= 0.0
               and then not Is_None (To_Array (C.Frames (J).Change), Noises)
               and then Own * Off (J) < Reach * abs Amounts (J);
+         end loop;
+         for J in 1 .. Frames loop
+            if Usable (J) then
+               for K in 1 .. Count loop
+                  Field_Var (J, K) := Variance (C, C.Frames (J).Field, C.Points (K));
+                  Field_U (J, K) := Evaluate (C, C.Frames (J).Field.U, C.Points (K));
+                  Field_V (J, K) := Evaluate (C, C.Frames (J).Field.V, C.Points (K));
+               end loop;
+            end if;
          end loop;
          --  How curved the moves are: what the keyframes showed, each believed as far as it stood above the noise.
          for Order in 1 .. Orders loop
@@ -902,6 +936,9 @@ package body Driver.Alignment.Keyframes is
             Extrapolate (C, C.Latest (Chosen), Into);
          end if;
          C.Last := From;
+         Free (Field_Var);
+         Free (Field_U);
+         Free (Field_V);
       end;
    end Predict;
 
