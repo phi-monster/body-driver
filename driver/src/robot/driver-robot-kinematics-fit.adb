@@ -2206,6 +2206,11 @@ package body Driver.Robot.Kinematics.Fit is
          --  at once, one task each: their sightings are their own.
          Searches        : Natural := 0;          --  focal lengths tried, for the log
          F_Least, F_Most : Real := 0.0;           --  the least and the most of them, px
+         Warm            : Best_Array;            --  per joint: its axis at the focal length tried before
+         Warm_Angle      : array (1 .. N) of Real := [others => -1.0];   --  per joint, this search: see Scanner
+         Warm_Better     : array (1 .. N) of Boolean := [others => False];
+         Warm_Tries, Warm_Wins : Natural := 0;    --  over the searches, for the log
+         Warm_Far        : Real := 0.0;           --  the farthest a warm start lay from the scan, radians
 
          procedure Search (F : Real; Best : out Best_Array) is
          begin
@@ -2258,6 +2263,23 @@ package body Driver.Robot.Kinematics.Fit is
                      if Result.Scale /= 0.0 and then Every (J)'Length > 4 then
                         Refine (J, F, Result);
                      end if;
+                     --  Measured and not yet used: the joint's axis at the focal length tried before, refined at
+                     --  this one, and how far it lies from the scan's (whether the scan could be skipped between the
+                     --  focal lengths of one search). A lattice ladder in place of the scan was tried on 10-13 and
+                     --  put 7 of 16 fit tests red: a refined axis is as stable in a wrong basin as in the right one.
+                     if Result.Scale /= 0.0 and then Warm (J).Scale /= 0.0 and then Every (J)'Length > 4 then
+                        declare
+                           Again : Best_Record := Warm (J);
+                        begin
+                           Refine (J, F, Again);
+                           Warm_Angle (J) := Arccos (Real'Min (1.0, abs Dot (Again.W, Result.W)));
+                           Warm_Better (J) := Again.Score < Result.Score;
+                        end;
+                     else
+                        Warm_Angle (J) := -1.0;
+                        Warm_Better (J) := False;
+                     end if;
+                     Warm (J) := Result;
                      Free (Ga);
                      Free (Gb);
                      Free (Wt);
@@ -2273,6 +2295,15 @@ package body Driver.Robot.Kinematics.Fit is
                   Scanners (J).Start (J);
                end loop;
             end;
+            for J in 1 .. N loop
+               if Warm_Angle (J) >= 0.0 then
+                  Warm_Tries := Warm_Tries + 1;
+                  Warm_Far := Real'Max (Warm_Far, Warm_Angle (J));
+                  if Warm_Better (J) then
+                     Warm_Wins := Warm_Wins + 1;
+                  end if;
+               end if;
+            end loop;
          end Search;
 
          function Total (B : Best_Array) return Real is
@@ -2473,7 +2504,9 @@ package body Driver.Robot.Kinematics.Fit is
                              & Driver.Log.Image (Total (Best), 4) & " +- " & Driver.Log.Image (Total_Error (Best), 4)
                              & " px; the basin " & Driver.Log.Image (Exp (Low), 1) & " to " & Driver.Log.Image (Exp (High), 1)
                              & ", told within " & Driver.Log.Image (Exp (Best_At - Told_Within), 1) & " to "
-                             & Driver.Log.Image (Exp (Best_At + Told_Within), 1));
+                             & Driver.Log.Image (Exp (Best_At + Told_Within), 1) & "; warm starts" & Warm_Tries'Image
+                             & ", farthest " & Driver.Log.Image (Warm_Far * 180.0 / Ada.Numerics.Pi, 2)
+                             & " deg from the scan, better" & Warm_Wins'Image & " times");
             for J in 1 .. N loop
                if Best (J).Scale = 0.0 then
                   for K in 1 .. N loop
