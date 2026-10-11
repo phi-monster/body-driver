@@ -2076,6 +2076,65 @@ package body Driver.Robot.Kinematics.Fit is
             Score := (if Filled > 0 then Driver.Stats.Median (Fits (1 .. Filled)) else Real'Last);
          end Planar_About;
 
+         --  The best direction of the grid refined, its tilt, its side and the size of its turn per
+         --  reading unit, by robust least squares on every sighting of joint J alone at focal length F,
+         --  whose median residual scores it: the grid is four degrees apart, and with the turn measured
+         --  about each direction its best score jumps from one focal length to the next as much as it
+         --  changes with them, which a search of the focal length cannot follow (A93's left arm, its
+         --  readings drawn: the search ended at a focal length of 118 pixels of 400).
+         --
+         --  A procedure of its own, not a block of the scanner task: the fit's Evaluate reads the
+         --  sightings' count and the start of the search from the frame around it, and built with
+         --  AddressSanitizer a task body's frame had that count poisoned by the time Evaluate read it
+         --  (robot.body.plan, .file, .method: "unknown-crash" at the count's four bytes), which the
+         --  same construct in a plain procedure never showed (the three other instances of Robust_Fit).
+         procedure Refine (J : Positive; F : Real; Result : in out Best_Record) is
+            L      : Sight_Line_Array renames Every (J).all;
+            M      : constant Positive := L'Length;
+            Rm     : Real_Access := new Real_Array (1 .. M);
+            W0     : constant Vec3 := Result.W;
+            Sign   : constant Real := (if Result.Scale < 0.0 then -1.0 else 1.0);
+            E1, E2 : Vec3;
+
+            function W_Of (X : Real_Array) return Vec3 is (Unit (W0 + X (1) * E1 + X (2) * E2));
+
+            procedure Evaluate (X : Real_Array; R : out Real_Array) is
+               W      : constant Vec3 := W_Of (X);
+               C      : constant Real := Sign * Exp (X (4));
+               F1, F2 : Vec3;
+               P      : Vec3;
+               Rj     : Mat3 := Identity3;
+               Last   : Natural := 0;
+               Rr     : Mat3;
+               Tt     : Vec3;
+            begin
+               Perp (W, F1, F2);
+               P := Cos (X (3)) * F1 + Sin (X (3)) * F2;
+               for I in L'Range loop
+                  if L (I).Frame /= Last then
+                     Last := L (I).Frame;
+                     Rj := Rot (W, C * L (I).Reading);
+                  end if;
+                  Relative (Identity, (Rotation => Rj, Translation => P - Rj * P), Rr, Tt);
+                  R (R'First + I - L'First) := Sampson (Rr, Tt, L (I).H0, L (I).H, F);
+               end loop;
+            end Evaluate;
+
+            procedure Solve is new Robust_Fit (4, M, Driver.Conventions.Initial_Damping, Evaluate);
+            X : Real_Array (1 .. 4) := [0.0, 0.0, Result.Phi, Ln (abs Result.Scale)];
+         begin
+            Perp (W0, E1, E2);
+            Evaluate (X, Rm.all);
+            Solve (X, Noise_Of (Rm.all));
+            Evaluate (X, Rm.all);
+            for I in Rm'Range loop
+               Rm (I) := abs Rm (I);
+            end loop;
+            Result := (Score => Driver.Stats.Median (Rm.all), W => W_Of (X), Phi => X (3),
+                       Scale => Sign * Exp (X (4)));
+            Free (Rm);
+         end Refine;
+
          --  Every joint's best direction at focal length F, the joints scanned
          --  at once, one task each: their sightings are their own.
          procedure Search (F : Real; Best : out Best_Array) is
@@ -2122,60 +2181,9 @@ package body Driver.Robot.Kinematics.Fit is
                            Result.Score := Md;
                         end;
                      end if;
-                     --  The best direction of the grid refined, its tilt, its side and the size of its turn per
-                     --  reading unit, by robust least squares on every sighting of the joint alone at this focal
-                     --  length, whose median residual scores it: the
-                     --  grid is four degrees apart, and with the turn measured about each direction its best score
-                     --  jumps from one focal length to the next as much as it changes with them, which a search of
-                     --  the focal length cannot follow (A93's left arm, its readings drawn: the search ended at a
-                     --  focal length of 118 pixels of 400).
+                     --  The grid's best direction refined by least squares on every sighting (Refine).
                      if Result.Scale /= 0.0 and then Every (J)'Length > 4 then
-                        declare
-                           L      : Sight_Line_Array renames Every (J).all;
-                           M      : constant Positive := L'Length;
-                           Rm     : Real_Access := new Real_Array (1 .. M);
-                           W0     : constant Vec3 := Result.W;
-                           Sign   : constant Real := (if Result.Scale < 0.0 then -1.0 else 1.0);
-                           E1, E2 : Vec3;
-
-                           function W_Of (X : Real_Array) return Vec3 is (Unit (W0 + X (1) * E1 + X (2) * E2));
-
-                           procedure Evaluate (X : Real_Array; R : out Real_Array) is
-                              W      : constant Vec3 := W_Of (X);
-                              C      : constant Real := Sign * Exp (X (4));
-                              F1, F2 : Vec3;
-                              P      : Vec3;
-                              Rj     : Mat3 := Identity3;
-                              Last   : Natural := 0;
-                              Rr     : Mat3;
-                              Tt     : Vec3;
-                           begin
-                              Perp (W, F1, F2);
-                              P := Cos (X (3)) * F1 + Sin (X (3)) * F2;
-                              for I in 1 .. M loop
-                                 if L (I).Frame /= Last then
-                                    Last := L (I).Frame;
-                                    Rj := Rot (W, C * L (I).Reading);
-                                 end if;
-                                 Relative (Identity, (Rotation => Rj, Translation => P - Rj * P), Rr, Tt);
-                                 R (R'First + I - 1) := Sampson (Rr, Tt, L (I).H0, L (I).H, F);
-                              end loop;
-                           end Evaluate;
-
-                           procedure Solve is new Robust_Fit (4, M, Driver.Conventions.Initial_Damping, Evaluate);
-                           X : Real_Array (1 .. 4) := [0.0, 0.0, Result.Phi, Ln (abs Result.Scale)];
-                        begin
-                           Perp (W0, E1, E2);
-                           Evaluate (X, Rm.all);
-                           Solve (X, Noise_Of (Rm.all));
-                           Evaluate (X, Rm.all);
-                           for I in 1 .. M loop
-                              Rm (I) := abs Rm (I);
-                           end loop;
-                           Result := (Score => Driver.Stats.Median (Rm.all), W => W_Of (X), Phi => X (3),
-                                      Scale => Sign * Exp (X (4)));
-                           Free (Rm);
-                        end;
+                        Refine (J, F, Result);
                      end if;
                      Free (Ga);
                      Free (Gb);
