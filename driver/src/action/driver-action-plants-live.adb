@@ -29,9 +29,10 @@ package body Driver.Action.Plants.Live is
    function Fraction_Of (M : Driver.Robot.Model; H : Robot_Hand.Hands; Id : Robot_Hand.Hand_Id;
                          O : Driver.Observations.Observation) return Estimate
    is
-      G : constant Driver.Robot.Group_Id := Robot_Hand.Closer_Group (H, Id);
+      G : constant Driver.Robot.Group_Id'Base := Robot_Hand.Closer_Group (H, Id);
    begin
-      if Natural (G) > Natural (O.Readings.Length) or else not Driver.Observations.Has_Reading (O, G) then
+      --  The hand an arm's tool is has no closer: nothing of it closes.
+      if G = 0 or else Natural (G) > Natural (O.Readings.Length) or else not Driver.Observations.Has_Reading (O, G) then
          return Unknown;
       end if;
       declare
@@ -405,7 +406,10 @@ package body Driver.Action.Plants.Live is
                for K in Open'Range loop
                   Values (K) := Open (K) + C.Fraction * (Closed (K) - Open (K));
                end loop;
-               Driver.Commands.Set_Target (Targets, Robot_Hand.Closer_Group (P.Hands.all, C.Hand), Values);
+               --  The hand an arm's tool is has no closer: nothing of it is commanded.
+               if Robot_Hand.Closer_Group (P.Hands.all, C.Hand) > 0 then
+                  Driver.Commands.Set_Target (Targets, Robot_Hand.Closer_Group (P.Hands.all, C.Hand), Values);
+               end if;
             end Aiming;
          begin
             Driver.Beats.Within_A_Beat (Aiming'Access);

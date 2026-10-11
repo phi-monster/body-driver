@@ -24,12 +24,18 @@ package body Driver.Robot.Hand.Tips is
 
    --  The known lines of sight in order, lobe by lobe, open before closed;
    --  the fit numbers them so.
+   --  An entry goes to the fit when the eye saw the tip there, or when the lobe has no line of sight at all.
+   function In_Fit (S : Sight_Of) return Boolean is (S.Known or else not S.Lined);
+
+   function Any_Unlined (T : Sight_Table) return Boolean is
+     (for some Row of T => (for some S of Row => not S.Lined));
+
    function Index_Of (T : Sight_Table; Lobe : Positive; At_Opening : Opening) return Natural is
       N : Natural := 0;
    begin
       for L in T'Range loop
          for O in Opening loop
-            if T (L) (O).Known then
+            if In_Fit (T (L) (O)) then
                N := N + 1;
                if L = Lobe and then O = At_Opening then
                   return N;
@@ -45,7 +51,7 @@ package body Driver.Robot.Hand.Tips is
    begin
       for Row of T loop
          for S of Row loop
-            Count := Count + Boolean'Pos (S.Known);
+            Count := Count + Boolean'Pos (In_Fit (S));
          end loop;
       end loop;
       declare
@@ -54,11 +60,14 @@ package body Driver.Robot.Hand.Tips is
       begin
          for Row of T loop
             for S of Row loop
-               if S.Known then
+               if In_Fit (S) then
                   N := N + 1;
-                  --  The prior of the angles across the line: the eye's and the lobe's tip region's, together.
+                  --  The prior of the angles across the line: the eye's and the lobe's tip region's, together;
+                  --  an entry without a line keeps its mark (a sigma past any).
                   Result (N) := S.Ray;
-                  Result (N).Direction.Sigma := Sqrt (S.Ray.Direction.Sigma ** 2 + S.Spread ** 2);
+                  if S.Lined then
+                     Result (N).Direction.Sigma := Sqrt (S.Ray.Direction.Sigma ** 2 + S.Spread ** 2);
+                  end if;
                end if;
             end loop;
          end loop;
@@ -310,7 +319,9 @@ package body Driver.Robot.Hand.Tips is
             end loop;
             declare
                F : constant Driver.Robot.Hand.Touch.Fit_Result :=
-                 Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);
+                 Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)],
+                                              As => (if Any_Unlined (T) then Driver.Robot.Hand.Touch.Free
+                                                     else Driver.Robot.Hand.Touch.On_Sight));
             begin
                B.Free := Fit_Holders.To_Holder (F);
                if F.Ok then
@@ -419,7 +430,9 @@ package body Driver.Robot.Hand.Tips is
          end loop;
          declare
             F : constant Driver.Robot.Hand.Touch.Fit_Result :=
-              Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)]);
+              Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)],
+                                           As => (if Any_Unlined (T) then Driver.Robot.Hand.Touch.Free
+                                                  else Driver.Robot.Hand.Touch.On_Sight));
          begin
             B.Fitted := Fit_Holders.To_Holder (F);
             for I in B.Kept.First_Index .. B.Kept.Last_Index loop

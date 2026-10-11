@@ -30,6 +30,9 @@ package Driver.Robot.Hand.Tips is
 
    type Sight_Of is record
       Known  : Boolean := False;
+      Lined  : Boolean := True;    --  the lobe has a line of sight at all; False for a tool no closer moves, whose
+                                   --  presses find its tip anywhere (Touch, the free model), from the tool frame's
+                                   --  origin; such an entry is in the fit whether or not it is Known
       Ray    : Ray_Estimate;    --  tool frame
       Spread : Real := 0.0;
       --  How far from that line the lobe's tip lies, per axis across it, as

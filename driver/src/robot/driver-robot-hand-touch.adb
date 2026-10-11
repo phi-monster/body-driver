@@ -422,7 +422,10 @@ package body Driver.Robot.Hand.Touch is
             end if;
          end loop;
          for P of Presses loop
-            Into (Surface_Of (P)) := Into (Surface_Of (P)) - P.Tool.Pose.Rotation * Line (Sight_Of (P)).Direction.Unit_Vector;
+            --  A press of a tip without a line says nothing of the surface's normal.
+            if Line (Sight_Of (P)).Direction.Sigma < Real'Last then
+               Into (Surface_Of (P)) := Into (Surface_Of (P)) - P.Tool.Pose.Rotation * Line (Sight_Of (P)).Direction.Unit_Vector;
+            end if;
          end loop;
          --  A tip or a surface no press bears on is pinned below, so the rest
          --  can be solved however many of them there are (a hand's four tips
@@ -553,8 +556,11 @@ package body Driver.Robot.Hand.Touch is
             return Done;
          end if;
       end loop;
+      --  A line whose direction has no sigma is no line: a tip that may lie anywhere (a tool no closer
+      --  moves, which no eye has a line of sight to), fitted free from its origin, the tool frame's. On its line
+      --  such a tip cannot be fitted.
       for S in 1 .. J loop
-         if not Known (Line (S).Origin) or else Line (S).Direction.Sigma >= Real'Last then
+         if not Known (Line (S).Origin) or else (Line (S).Direction.Sigma >= Real'Last and then As = On_Sight) then
             return Done;
          end if;
       end loop;
@@ -567,26 +573,35 @@ package body Driver.Robot.Hand.Touch is
          end if;
       end;
       if As = Free then
-         --  From the tips on their lines and the surfaces they gave.
-         declare
-            Along : constant Fit_Result := Fit (Presses, Sights, Surfaces, On_Sight);
-         begin
-            if not Along.Ok then
-               return Done;
-            end if;
+         if (for some S in 1 .. J => Line (S).Direction.Sigma >= Real'Last) then
+            --  A tip without a line starts at its origin, the tool frame's, and the others at theirs: with a
+            --  measured surface the press equations are linear in a tip's point, and the solve below finds it
+            --  from any start.
             for S in 1 .. J loop
-               declare
-                  X : constant Vec3 := (if Along.Tips (S).Ok then Along.Tips (S).Tip.Mean else Line (S).Origin.Mean);
-               begin
-                  Tip_Q (W * (S - 1) + 1 .. W * S) := X;
-               end;
+               Tip_Q (W * (S - 1) + 1 .. W * S) := Line (S).Origin.Mean;
             end loop;
-            for F in 1 .. K loop
-               if not Prior (F).Measured and then Geometry.Known (Along.Planes (F)) then
-                  Nominal (F) := With_Tangents (Along.Planes (F).Centre, Along.Planes (F).Normal);
+         else
+            --  From the tips on their lines and the surfaces they gave.
+            declare
+               Along : constant Fit_Result := Fit (Presses, Sights, Surfaces, On_Sight);
+            begin
+               if not Along.Ok then
+                  return Done;
                end if;
-            end loop;
-         end;
+               for S in 1 .. J loop
+                  declare
+                     X : constant Vec3 := (if Along.Tips (S).Ok then Along.Tips (S).Tip.Mean else Line (S).Origin.Mean);
+                  begin
+                     Tip_Q (W * (S - 1) + 1 .. W * S) := X;
+                  end;
+               end loop;
+               for F in 1 .. K loop
+                  if not Prior (F).Measured and then Geometry.Known (Along.Planes (F)) then
+                     Nominal (F) := With_Tangents (Along.Planes (F).Centre, Along.Planes (F).Normal);
+                  end if;
+               end loop;
+            end;
+         end if;
       end if;
       --  Solve, reweighting at the estimate until it moves by a negligible
       --  part of its own uncertainty or stops shrinking the move; then leave

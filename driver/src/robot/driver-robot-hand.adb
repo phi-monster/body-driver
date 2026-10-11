@@ -5,6 +5,7 @@ with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Log;
 with Driver.Robot.Channels;
+with Driver.Robot.Kinematics;
 with Driver.Robot.Hand.Frames;
 with Driver.Robot.Hand.Lobes;
 with Driver.Robot.Hand.Lowering;
@@ -66,7 +67,7 @@ package body Driver.Robot.Hand is
    package Stop_Vectors is new Ada.Containers.Vectors (Positive, Stop_Sight);
 
    type Lobe_Record is record
-      Channel : Positive;
+      Channel : Natural;   --  of the closer; 0 for the lobe of a tool no closer moves
       Sights  : Sight_Array;
       Stops   : Stop_Vectors.Vector;   --  between the openings, by the channel's reading, ascending
       Patches : Patch_Array;   --  what its tip looked like at each opening, in the views of the sweep
@@ -80,7 +81,7 @@ package body Driver.Robot.Hand is
    type Reading_Array is array (Opening) of Driver.Robot.Hand.Views.Reading_Holders.Holder;
 
    type Hand_Record is record
-      Group    : Group_Id;
+      Group    : Group_Id'Base;   --  the closer; 0 for the hand an arm's tool is
       Arm      : Arm_Id;
       Eye      : Eye_Id;
       Readings : Reading_Array;
@@ -251,6 +252,18 @@ package body Driver.Robot.Hand is
      (Role (M, P.Group) = Closer and then Closer_Arm (M, P.Group) = P.Arm
       and then Eye_Mount (M, P.Eye).Kind = Arm_Carried and then Eye_Mount (M, P.Eye).Arm = P.Arm);
 
+   function Has_A_Closer (M : Model; A : Arm_Id) return Boolean is
+     (for some G in 1 .. Group_Id'Base (Group_Count (M)) => Role (M, G) = Closer and then Closer_Arm (M, G) = A);
+
+   --  A hand of a closer stands while the body takes its group for a closer of its arm; the hand an arm's tool
+   --  is (no closer) stands while the arm has no closer, its eye still rides on it and the arm is fitted (the
+   --  tool frame its presses are made in).
+   function Still_A_Hand (R : Hand_Record; M : Model) return Boolean is
+     (if R.Group > 0 then Role (M, R.Group) = Closer and then Closer_Arm (M, R.Group) = R.Arm
+      else Natural (R.Arm) <= Arm_Count (M) and then not Has_A_Closer (M, R.Arm)
+           and then Natural (R.Eye) <= Eye_Count (M) and then Eye_Mount (M, R.Eye).Kind = Arm_Carried
+           and then Eye_Mount (M, R.Eye).Arm = R.Arm and then Driver.Robot.Kinematics.Fitted (M, R.Arm));
+
    procedure Find_Pairs (D : in out Hand_Data; M : Model; O : Observation) is
    begin
       declare
@@ -271,15 +284,52 @@ package body Driver.Robot.Hand is
          I : Hand_Id := 1;
       begin
          while I <= D.Found.Last_Index loop
-            if Role (M, D.Found (I).Group) = Closer and then Closer_Arm (M, D.Found (I).Group) = D.Found (I).Arm then
+            if Still_A_Hand (D.Found (I), M) then
                I := I + 1;
             else
-               Driver.Log.Line (Driver.Log.Robot, "hand: group" & D.Found (I).Group'Image & " is no longer a closer"
-                                & " of arm" & D.Found (I).Arm'Image & "; the hand found from it is dropped");
+               Driver.Log.Line (Driver.Log.Robot,
+                                (if D.Found (I).Group > 0
+                                 then "hand: group" & D.Found (I).Group'Image & " is no longer a closer of arm"
+                                      & D.Found (I).Arm'Image & "; the hand found from it is dropped"
+                                 else "hand: arm" & D.Found (I).Arm'Image & " has a closer now, or lost its eye or its fit;"
+                                      & " the hand its tool was is dropped"));
                D.Found.Delete (I);
             end if;
          end loop;
       end;
+      --  An arm that carries an eye and is fitted, with no closer group of its own, has the hand its tool is: one
+      --  lobe that no channel moves and no eye has a line of sight to, able to press and push; its tip is where
+      --  its presses stop (Tips, the free model of Touch). Made once the arm is fitted (the tool frame the presses
+      --  are made in), kept while Still_A_Hand.
+      for A in 1 .. Arm_Id'Base (Arm_Count (M)) loop
+         if not Has_A_Closer (M, A) and then Driver.Robot.Kinematics.Fitted (M, A)
+           and then not (for some R of D.Found => R.Group = 0 and then R.Arm = A)
+         then
+            for E in 1 .. Eye_Id'Base (Eye_Count (M)) loop
+               if Eye_Mount (M, E).Kind = Arm_Carried and then Eye_Mount (M, E).Arm = A then
+                  declare
+                     Made : Hand_Record := (Group => 0, Arm => A, Eye => E, others => <>);
+                     None : constant Real_Array (1 .. 0) := [];
+                  begin
+                     Made.Readings := [Open         => Driver.Robot.Hand.Views.Reading_Holders.To_Holder (None),
+                                       Closed_Empty => Driver.Robot.Hand.Views.Reading_Holders.To_Holder (None)];
+                     Made.Lobes.Append
+                       (Lobe_Record'(Channel => 0,
+                                     Sights  => <>,
+                                     Stops   => <>,
+                                     Patches => [others => Driver.Robot.Hand.Slide.Empty],
+                                     Way     => <>,
+                                     Shape   => Driver.Robot.Hand.Shape.Unfitted ("no closer moves it: its tip is where its presses stop"),
+                                     Size    => <>));
+                     Driver.Log.Line (Driver.Log.Robot, "hand: arm" & A'Image & " carries eye" & E'Image
+                                      & " and no closer: its tool is a hand of one lobe, pressed to find its tip");
+                     Keep (D, Made);
+                     exit;
+                  end;
+               end if;
+            end loop;
+         end if;
+      end loop;
       for G in 1 .. Group_Id'Base (Group_Count (M)) loop
          if Role (M, G) = Closer and then Closer_Arm (M, G) > 0 and then Driver.Observations.Has_Reading (O, G) then
             for E in 1 .. Eye_Id'Base (Eye_Count (M)) loop
@@ -496,15 +546,27 @@ package body Driver.Robot.Hand is
    begin
       for L in Table'Range loop
          for Which in Opening loop
-            Table (L) (Which) := (Known  => Made.Lobes (L).Sights (Which).Known,
-                                  Ray    => Made.Lobes (L).Sights (Which).Ray,
-                                  Spread => Made.Lobes (L).Sights (Which).Spread,
-                                  Travel => Made.Lobes (L).Way.Reach * Made.Lobes (L).Sights (Which).Pitch,
-                                  Pitch  => Made.Lobes (L).Sights (Which).Pitch);
+            --  A lobe no channel moves has no line of sight: its presses go to the book as a tip anywhere, starting
+            --  from the tool frame's origin (Touch, the free model).
+            Table (L) (Which) :=
+              (if Made.Lobes (L).Channel = 0
+               then (Known  => False,
+                     Lined  => False,
+                     Ray    => (Origin    => (Mean => Zero3, Covariance => [others => [others => 0.0]]),
+                                Direction => (Unit_Vector => [0.0, 0.0, 1.0], Sigma => Real'Last)),
+                     Spread => 0.0,
+                     Travel => 0.0,
+                     Pitch  => 0.0)
+               else (Known  => Made.Lobes (L).Sights (Which).Known,
+                     Lined  => True,
+                     Ray    => Made.Lobes (L).Sights (Which).Ray,
+                     Spread => Made.Lobes (L).Sights (Which).Spread,
+                     Travel => Made.Lobes (L).Way.Reach * Made.Lobes (L).Sights (Which).Pitch,
+                     Pitch  => Made.Lobes (L).Sights (Which).Pitch));
          end loop;
       end loop;
       for Id in D.Found.First_Index .. D.Found.Last_Index loop
-         if D.Found (Id).Group = Made.Group then
+         if D.Found (Id).Group = Made.Group and then (Made.Group > 0 or else D.Found (Id).Arm = Made.Arm) then
             Made.Watch := D.Found (Id).Watch;
             Made.Book := D.Found (Id).Book;
             Driver.Robot.Hand.Tips.Set_Sights (Made.Book, Table);
@@ -770,7 +832,7 @@ package body Driver.Robot.Hand is
    --  opening within their noise and not those of the other.
 
    function Opening_Of (R : Hand_Record; M : Model; Readings : Real_Array; Which : out Opening) return Boolean is
-      Sigma : constant Real_Array := Closer_Sigma (M, R.Group);
+      Sigma : constant Real_Array := (if R.Group = 0 then [1 .. 0 => 0.0] else Closer_Sigma (M, R.Group));
       function At_It (O : Opening) return Boolean is
          Measured : constant Real_Array := R.Readings (O).Element;
       begin
@@ -785,6 +847,10 @@ package body Driver.Robot.Hand is
       end At_It;
    begin
       Which := Open;
+      --  A tool no closer moves has one setting: it is always at it.
+      if R.Group = 0 then
+         return True;
+      end if;
       if R.Readings (Open).Is_Empty or else R.Readings (Closed_Empty).Is_Empty then
          return False;
       end if;
@@ -964,7 +1030,7 @@ package body Driver.Robot.Hand is
                return;
             end if;
             declare
-               Closer : constant Natural := Group_Size (M, R.Group);
+               Closer : constant Natural := (if R.Group = 0 then 0 else Group_Size (M, R.Group));
                Lobes  : constant Natural := Natural (R.Lobes.Length);
                Where  : Driver.Robot.Hand.Lowering.Points (1 .. 1 + Lobes) := [others => Zero3];
                Whose  : array (1 .. 1 + Lobes) of Natural := [others => 0];   --  the lobe a point is the tip of
@@ -972,7 +1038,7 @@ package body Driver.Robot.Hand is
                Which  : Opening;
                Said   : Driver.Robot.Hand.Lowering.Judgment;
             begin
-               if Driver.Robot.Channels.Has_Reading (M, R.Group, E.End_At)
+               if (R.Group = 0 or else Driver.Robot.Channels.Has_Reading (M, R.Group, E.End_At))
                  and then Opening_Of (R, M, [for C in 1 .. Closer => Driver.Robot.Channels.Reading (M, R.Group, E.End_At, C)],
                                       Which)
                then
@@ -1072,7 +1138,7 @@ package body Driver.Robot.Hand is
          Size_Up (R, Id);
       end if;
       Judge_Push (R, Id, M, O);
-      if not Driver.Observations.Has_Reading (O, R.Group) then
+      if R.Group > 0 and then not Driver.Observations.Has_Reading (O, R.Group) then
          return;
       end if;
       --  A push that stalled is a block as far as the press is concerned: the verdict stands until the next push begins.
@@ -1094,7 +1160,8 @@ package body Driver.Robot.Hand is
          end if;
          Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked or else Stalled_Now, Is_Pushing, Is_Still,
                                             Tool_In_Arm (M, R.Arm, O),
-                                            O.Readings.Element (G), O.Readings.Element (R.Group),
+                                            O.Readings.Element (G),
+                                            (if R.Group > 0 then O.Readings.Element (R.Group) else [1 .. 0 => 0.0]),
                                             Found, Press, Retargeted => Retargeted, Asked => Asked);
       end;
       if not Found then
@@ -1588,7 +1655,7 @@ package body Driver.Robot.Hand is
    function Hand_Count (H : Hands) return Natural is (if H.Data = null then 0 else Natural (H.Data.Found.Length));
 
    function Exists (H : Hands; Id : Hand_Id) return Boolean is (H.Data /= null and then Id <= H.Data.Found.Last_Index);
-   function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id is (Found (H, Id).Group);
+   function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id'Base is (Found (H, Id).Group);
    function Arm_Of (H : Hands; Id : Hand_Id) return Arm_Id is (Found (H, Id).Arm);
    function Lobe_Count (H : Hands; Id : Hand_Id) return Positive is (Natural (Found (H, Id).Lobes.Length));
    function Presses_Kept (H : Hands; Id : Hand_Id) return Natural is (Driver.Robot.Hand.Tips.Pressed (Found (H, Id).Book));
@@ -1623,8 +1690,10 @@ package body Driver.Robot.Hand is
      (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded)
      return Point_Estimate
    is
+      R : constant Hand_Record := Found (H, Id);
    begin
-      return Driver.Robot.Hand.Tips.Tip (Found (H, Id).Book, Lobe, At_Opening, Kind);
+      --  A lobe no channel moves has one tip, pressed at the open setting, whichever is asked.
+      return Driver.Robot.Hand.Tips.Tip (R.Book, Lobe, (if R.Lobes (Lobe).Channel = 0 then Open else At_Opening), Kind);
    end Tip_In_Tool;
 
    function Tip_Beat
@@ -1671,7 +1740,8 @@ package body Driver.Robot.Hand is
      (In_World (H, M, Id, O, Tip_In_Tool (H, Id, Lobe, At_Opening)));
 
    function Opening_Reading (R : Hand_Record; Lobe : Positive; Which : Opening) return Real is
-     (R.Readings (Which).Element (R.Readings (Which).Element'First + R.Lobes (Lobe).Channel - 1));
+     (if R.Lobes (Lobe).Channel = 0 then 0.0
+      else R.Readings (Which).Element (R.Readings (Which).Element'First + R.Lobes (Lobe).Channel - 1));
    --  The lobe's channel's reading at the opening.
 
    function Settings (H : Hands; Id : Hand_Id; Lobe : Positive) return Positive is
@@ -1792,9 +1862,13 @@ package body Driver.Robot.Hand is
 
    function Tip_Now_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate is
       R : constant Hand_Record := Found (H, Id);
-      C : constant Positive := R.Lobes (Lobe).Channel;
+      C : constant Natural := R.Lobes (Lobe).Channel;
       Unknown_Tip : Point_Estimate;
    begin
+      --  A lobe no channel moves is where it is at any reading.
+      if C = 0 then
+         return Tip_Along (H, Id, Lobe, 0.0);
+      end if;
       if not Driver.Observations.Has_Reading (O, R.Group) then
          return Unknown_Tip;
       end if;
@@ -1847,8 +1921,9 @@ package body Driver.Robot.Hand is
             R      : constant Hand_Record := Found (H, Id);
             Known_Tips, Checked_Tips, Sought : Natural := 0;
          begin
-            Append (Text, "hand" & Id'Image & ": closer group" & R.Group'Image & " on arm" & R.Arm'Image & ", eye"
-                    & R.Eye'Image & "," & R.Lobes.Length'Image & " lobes;");
+            Append (Text, "hand" & Id'Image
+                    & (if R.Group > 0 then ": closer group" & R.Group'Image else ": the tool, no closer,") & " on arm"
+                    & R.Arm'Image & ", eye" & R.Eye'Image & "," & R.Lobes.Length'Image & " lobes;");
             for L in R.Lobes.First_Index .. R.Lobes.Last_Index loop
                Append (Text, " channel" & R.Lobes (L).Channel'Image & " tip open " & Image (R.Lobes (L).Sights (Open).Pixel)
                        & " closed " & Image (R.Lobes (L).Sights (Closed_Empty).Pixel) & ";");

@@ -49,7 +49,10 @@ package Driver.Robot.Hand is
    --  at Target is that at From, to what the arm's fit can tell (Kinematics.Angle_Sigma, Z times it), as the steps of a
    --  descent are (Pressing.Lowered) and the turn of an aim about the eye is not. True when the poses are not known.
    --  A block counts toward a press only when the push that was blocked asked a translation (Observe).
-   function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id;
+   function Closer_Group (H : Hands; Id : Hand_Id) return Group_Id'Base;
+   --  The closer the hand is made of; 0 for the hand an arm's tool is when the arm has no closer: one lobe no
+   --  channel moves and no eye has a line of sight to, pressed to find where its tip is (item 12: an end that
+   --  does not open and close is still a part that touches, with a tip, able to press and push).
    function Arm_Of (H : Hands; Id : Hand_Id) return Arm_Id;
    function Lobe_Count (H : Hands; Id : Hand_Id) return Positive;
    function Presses_Kept (H : Hands; Id : Hand_Id) return Natural;

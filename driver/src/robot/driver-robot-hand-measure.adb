@@ -73,7 +73,23 @@ procedure Measure (H : in out Hands; M : in out Model) is
      (Id <= H.Data.Found.Last_Index and then H.Data.Found (Id).Group = R.Group and then H.Data.Found (Id).Arm = R.Arm);
    --  The hand at Id is the hand R was read from. Read inside a held beat, as every index into the hands is.
 
-   package Group_Lists is new Ada.Containers.Vectors (Positive, Group_Id);
+   --  A hand to measure is named by its closer group, or by its arm alone for the hand an arm's tool is when the
+   --  arm has no closer (Group 0).
+   type Hand_Key is record
+      Group : Group_Id'Base := 0;
+      Arm   : Arm_Id'Base := 0;
+   end record;
+   package Key_Lists is new Ada.Containers.Vectors (Positive, Hand_Key);
+   --  The hand the arm's tool is, now; 0 if none. Read inside a held beat.
+   function Index_Of_Tool (Arm : Arm_Id) return Natural is
+   begin
+      for I in H.Data.Found.First_Index .. H.Data.Found.Last_Index loop
+         if H.Data.Found (I).Group = 0 and then H.Data.Found (I).Arm = Arm then
+            return Natural (I);
+         end if;
+      end loop;
+      return 0;
+   end Index_Of_Tool;
 
    --  One part of one hand, from its closer group: its closer swept, or its lobes pressed, by the body's roles as
    --  they are when each begins. The closers are swept one after another: a sweep reads the views its own eye has
@@ -83,7 +99,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  closer, reads and changes the models only in its held beats, and keeps what follows here, its own, from one
    --  beat to the next.
    type Hand_Part is (Sweep_Part, Press_Part);
-   procedure One_Hand (Closer : Group_Id; Part : Hand_Part) is
+   procedure One_Hand (Key : Hand_Key; Part : Hand_Part) is
+      Closer : constant Group_Id'Base := Key.Group;
 
       Lost : Boolean := False;
       --  Set by a read that found the hand under measure gone: the press in progress ends, the arm let go and taken
@@ -582,7 +599,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Seen : Opening;
          procedure Read_Closer (O : Observation) is
          begin
-            Now := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (O.Readings.Element (R.Group));
+            Now := Driver.Robot.Hand.Views.Reading_Holders.To_Holder
+              (if R.Group > 0 then O.Readings.Element (R.Group) else Real_Array'(1 .. 0 => 0.0));
          end Read_Closer;
       begin
          Hold_Beat (Read_Closer'Access);
@@ -670,7 +688,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
             O    : constant Driver.Beats.Observation_View := Driver.Beats.Latest;
             Seen : Opening;
          begin
-            return Present (Id, R) and then Driver.Observations.Has_Reading (O.all, R.Group)
+            return Present (Id, R) and then R.Group > 0 and then Driver.Observations.Has_Reading (O.all, R.Group)
               and then not (Opening_Of (R, M, O.Readings.Element (R.Group), Seen) and then Seen = Which);
          end Closer_Left;
 
@@ -1010,10 +1028,31 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end Press_Past_Its_Ends;
 
       procedure Press_Lobe (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening) is
-         Sight  : constant Vec3 := R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector;
+         --  The lobe of a tool no closer moves has no line of sight: it is pressed along the way down, the
+         --  surface's normal turned into the tool frame where the tool stands, read in a held beat; without a
+         --  surface known there is no way down and no press.
+         Lined      : constant Boolean := R.Lobes (Lobe).Channel > 0;
+         Sight      : Vec3 := (if Lined then R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector else Zero3);
+         Down_Known : Boolean := Lined;
+         procedure Read_Down (O : Observation) is
+            Surface : constant Driver.Geometry.Plane_Estimate := Driver.Robot.Hand.Tips.Surface (H.Data.Found (Id).Book);
+         begin
+            Down_Known := Present (Id, R) and then Driver.Geometry.Known (Surface) and then abs Surface.Normal > 0.0;
+            if Down_Known then
+               Sight := Transpose (Tool_In_Arm (M, R.Arm, O).Rotation) * (-Unit (Surface.Normal));
+            end if;
+         end Read_Down;
          Lines  : Driver.Robot.Hand.Aims.Direction_Array (1 .. Natural (R.Lobes.Length));
          K      : Natural := 0;
       begin
+         if not Lined then
+            Hold_Beat (Read_Down'Access);
+            if not Down_Known then
+               Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the tool of arm" & R.Arm'Image
+                                & " is not pressed: no surface is known to press it on");
+               return;
+            end if;
+         end if;
          for L in 1 .. Natural (R.Lobes.Length) loop
             if L /= Lobe and then R.Lobes (L).Sights (Which).Known then
                K := K + 1;
@@ -1031,6 +1070,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
               (if K > 0 then Driver.Robot.Hand.Aims.Spread (Sight, Rest)
                elsif R.Lobes (Lobe).Sights (Other_End).Known
                then Driver.Robot.Hand.Aims.Spread (Sight, [1 => R.Lobes (Lobe).Sights (Other_End).Ray.Direction.Unit_Vector])
+               --  A lobe with no line of its own is tilted through the whole quarter turn: nothing of its tip's
+               --  direction is known, and a tip anywhere needs presses from three directions (Touch).
+               elsif not Lined then Ada.Numerics.Pi / 2.0
                else 0.0);
             Agreed  : Boolean := True;    --  the latest press is one its tip rests on
             Checked : Boolean := False;   --  the lobe's tip is confirmed by a second press from another pose
@@ -1153,6 +1195,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
       end Read_Group;
    begin
       if Part = Sweep_Part then
+         --  The hand an arm's tool is has no channel to sweep.
+         if Closer = 0 then
+            return;
+         end if;
          --  Sweep every channel of the closer when an eye on its arm watches it.
          Hold_Beat (Read_Group'Access);
          if Now then
@@ -1185,11 +1231,12 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Here : Boolean := False;
             procedure Read_Hand (O : Observation) is
                pragma Unreferenced (O);
-               There : constant Natural := Index_Of (Closer);
+               There : constant Natural := (if Closer > 0 then Index_Of (Closer) else Index_Of_Tool (Key.Arm));
             begin
                Here := There > 0
-                 and then Role (M, Closer) = Driver.Robot.Closer
-                 and then Closer_Arm (M, Closer) = H.Data.Found (Hand_Id (There)).Arm;
+                 and then (Closer = 0
+                           or else (Role (M, Closer) = Driver.Robot.Closer
+                                    and then Closer_Arm (M, Closer) = H.Data.Found (Hand_Id (There)).Arm));
                if Here then
                   Id := Hand_Id (There);
                   R := H.Data.Found (Id);
@@ -1197,11 +1244,15 @@ procedure Measure (H : in out Hands; M : in out Model) is
             end Read_Hand;
          begin
             Lost := False;
+            --  The hand an arm's tool is has one setting: it is pressed at the first.
+            exit when Closer = 0 and then Which = Closed_Empty;
             Hold_Beat (Read_Hand'Access);
             if Here then
-               Move_Group (R.Group, R.Readings (Which).Element);
+               if R.Group > 0 then
+                  Move_Group (R.Group, R.Readings (Which).Element);
+               end if;
                for L in 1 .. Natural (R.Lobes.Length) loop
-                  if R.Lobes (L).Sights (Which).Known then
+                  if R.Lobes (L).Sights (Which).Known or else R.Lobes (L).Channel = 0 then
                      Press_Lobe (Id, R, L, Which);
                      exit when Lost;
                   else
@@ -1212,8 +1263,12 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   end if;
                end loop;
             elsif Which = Open then
-               Driver.Log.Line (Driver.Log.Robot, "hand: the hand of closer group" & Closer'Image & " is not pressed:"
-                                & " no hand is made of it, or its group is no longer a closer of its arm");
+               Driver.Log.Line (Driver.Log.Robot,
+                                (if Closer > 0
+                                 then "hand: the hand of closer group" & Closer'Image & " is not pressed:"
+                                      & " no hand is made of it, or its group is no longer a closer of its arm"
+                                 else "hand: the tool of arm" & Key.Arm'Image & " is not pressed: no hand is made of it"
+                                      & " (the arm has a closer, or is not fitted)"));
             end if;
          end;
       end loop;
@@ -1226,28 +1281,33 @@ procedure Measure (H : in out Hands; M : in out Model) is
       Text := Ada.Strings.Unbounded.To_Unbounded_String (Describe (H));
    end Read_Description;
 
-   --  The closers to measure: every group the body takes for a closer, or whose closer an eye on its arm watches,
-   --  or of which a hand is already made, when the hands begin.
-   Closers : Group_Lists.Vector;
+   --  The hands to measure: every group the body takes for a closer, or whose closer an eye on its arm watches,
+   --  and every hand already made (of a closer, or of an arm's tool, which has none), when the hands begin.
+   Keys : Key_Lists.Vector;
+   function Has_Key (G : Group_Id'Base; A : Arm_Id'Base) return Boolean is
+     (for some K of Keys => K.Group = G and then (G > 0 or else K.Arm = A));
    procedure Read_Closers (O : Observation) is
       pragma Unreferenced (O);
    begin
-      Closers.Clear;
+      Keys.Clear;
       for G in 1 .. Group_Id'Base (Group_Count (M)) loop
          if Sweepable (H, M, G) or else Role (M, G) = Closer then
-            Closers.Append (G);
+            Keys.Append (Hand_Key'(Group => G, Arm => Closer_Arm (M, G)));
          end if;
       end loop;
       for I in H.Data.Found.First_Index .. H.Data.Found.Last_Index loop
-         if not Closers.Contains (H.Data.Found (I).Group) then
-            Closers.Append (H.Data.Found (I).Group);
+         if not Has_Key (H.Data.Found (I).Group, H.Data.Found (I).Arm) then
+            Keys.Append (Hand_Key'(Group => H.Data.Found (I).Group, Arm => H.Data.Found (I).Arm));
          end if;
       end loop;
    end Read_Closers;
 
+   function Image (K : Hand_Key) return String is
+     (if K.Group > 0 then "the hand of closer group" & K.Group'Image else "the tool of arm" & K.Arm'Image);
+
    procedure Hand_Lane (Lane : Positive) is
    begin
-      One_Hand (Closers (Lane), Press_Part);
+      One_Hand (Keys (Lane), Press_Part);
    end Hand_Lane;
 
    procedure Hands_At_Once is new Driver.Beats.At_Once (Hand_Lane);
@@ -1257,20 +1317,20 @@ begin
       H.Data := new Hand_Data;
    end if;
    Hold_Beat (Read_Closers'Access);
-   if Closers.Is_Empty then
-      Driver.Log.Line (Driver.Log.Robot, "hand: no closer was found, so nothing is swept or pressed");
+   if Keys.Is_Empty then
+      Driver.Log.Line (Driver.Log.Robot, "hand: no closer and no tool hand was found, so nothing is swept or pressed");
    else
-      for G of Closers loop
-         One_Hand (G, Sweep_Part);
+      for K of Keys loop
+         One_Hand (K, Sweep_Part);
       end loop;
-      if Natural (Closers.Length) = 1 then
-         One_Hand (Closers.First_Element, Press_Part);
+      if Natural (Keys.Length) = 1 then
+         One_Hand (Keys.First_Element, Press_Part);
       else
-         for G of Closers loop
-            Driver.Log.Line (Driver.Log.Robot, "hand: the hand of closer group" & G'Image & " is pressed with the"
-                             & Natural'Image (Natural (Closers.Length)) & " hands at once");
+         for K of Keys loop
+            Driver.Log.Line (Driver.Log.Robot, "hand: " & Image (K) & " is pressed with the"
+                             & Natural'Image (Natural (Keys.Length)) & " hands at once");
          end loop;
-         Hands_At_Once (Positive (Closers.Length));
+         Hands_At_Once (Positive (Keys.Length));
       end if;
    end if;
    Hold_Beat (Read_Description'Access);

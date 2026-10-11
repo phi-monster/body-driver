@@ -592,15 +592,21 @@ package body Driver.Action.Contact.Search is
          Stops := [others => 0.0];
          X := Zero3;
          for J in 1 .. N_Pads loop
-            if J /= K and then E.Pads (J).Closer = PK.Closer then
+            if J /= K then
                declare
                   PJ  : constant Pad := E.Pads (J);
                   S   : Real;
                   Hit : Natural;
-                  --  Face J relative to the pinned face K, the hand turned R, at a fraction of their closer.
+                  --  Face J's setting as the pinned face's closer closes to F: F itself when it is that closer's
+                  --  face, else where its own closer stands now. A finger of another closer does not move with
+                  --  this one, but it is there to be met: a hand of several closers, each a finger, meets the
+                  --  thing with any of them (item 12: the search once met only the pinned closer's own faces).
+                  function Setting (F : Real) return Real is
+                    (if PJ.Closer = PK.Closer then F else E.Closers (PJ.Closer).Now);
+                  --  Face J relative to the pinned face K, the hand turned R.
                   function Relative (F : Real) return Vec3 is
-                    (Pts (I) + R * (At_Fraction (PJ, F) - At_Fraction (PK, F)));
-                  function Look (F : Real) return Vec3 is (R * Facing_Of (PJ, F));
+                    (Pts (I) + R * (At_Fraction (PJ, Setting (F)) - At_Fraction (PK, F)));
+                  function Look (F : Real) return Vec3 is (R * Facing_Of (PJ, Setting (F)));
                begin
                   First_Meeting_Along (Merged (Breaks_Of (PJ), Breaks_Of (PK)), Relative'Access, Look'Access, Back, Face,
                                        S, Hit);
