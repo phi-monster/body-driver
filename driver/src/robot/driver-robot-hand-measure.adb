@@ -1084,7 +1084,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          begin
             Down_Known := Present (Id, R) and then Driver.Geometry.Known (Surface) and then abs Surface.Normal > 0.0;
             if Down_Known then
-               Sight := Transpose (Tool_In_Arm (M, R.Arm, O).Rotation) * (-Unit (Surface.Normal));
+               Sight := Transpose (Tool_In_Arm (M, R.Arm, O).Pose.Rotation) * (-Unit (Surface.Normal));
             end if;
          end Read_Down;
          Lines  : Driver.Robot.Hand.Aims.Direction_Array (1 .. Natural (R.Lobes.Length));

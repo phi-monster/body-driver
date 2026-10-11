@@ -139,8 +139,8 @@ procedure Replay is
             Placed : constant Boolean := Driver.Uncertain.Known (Driver.Robot.Arm_Unit (Robot, Arm));
          begin
             Append (Line_Text, (if A > 1 then "," else "")
-                    & Pose_Json ((if Placed then Driver.Robot.Tool_Pose (Robot, Arm, O)
-                                  else Driver.Robot.Tool_In_Arm (Robot, Arm, O)).Pose));
+                    & Pose_Json ((if Placed then Driver.Robot.Tool_Pose (Robot, Arm, O).Pose
+                                  else Driver.Robot.Tool_In_Arm (Robot, Arm, O).Pose)));
          end;
       end loop;
       Append (Line_Text, "],""frames"":[");
