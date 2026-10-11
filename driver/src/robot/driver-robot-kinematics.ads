@@ -110,6 +110,13 @@ private package Driver.Robot.Kinematics is
    --  The table the arm's eye saw, in its reference frame, as the fit that
    --  holds found it (Refit); unknown until then.
 
+   function Standing_Near (M : Model; A : Arm_Id; Point : Vec3; Within : Real) return Natural;
+   --  How many of the arm's tracks stand above its table within Within of Point across the table's normal, in
+   --  the arm's frame: tracks with a depth (Track_Known) that do not lie on the table and whose height above it
+   --  is significant against the height's own sigma (the track's depth and the plane's there). A press lands on
+   --  what stands there, not on the table (A79's hand 1: five presses of eleven never met the table, item 7). 0
+   --  without a fit or a table.
+
    procedure In_World (M : Model; A : Arm_Id; Placement : out Rigid; Scale : out Real; Known : out Boolean);
    --  The arm's reference frame in the world: X_world = Placement * (Scale *
    --  X). The world is the first arm's reference frame (identity, scale

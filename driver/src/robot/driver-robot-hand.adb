@@ -1158,7 +1158,10 @@ package body Driver.Robot.Hand is
                Asked := Pose_Of (Wanted);
             end;
          end if;
-         Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Is_Blocked or else Stalled_Now, Is_Pushing, Is_Still,
+         --  A block at a joint's end the body has shown is the body's own, no contact: no press is made of it (item 7).
+         Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat,
+                                            (Is_Blocked and then not Stopped_By_An_End (M, R.Arm, O)) or else Stalled_Now,
+                                            Is_Pushing, Is_Still,
                                             Tool_In_Arm (M, R.Arm, O),
                                             O.Readings.Element (G),
                                             (if R.Group > 0 then O.Readings.Element (R.Group) else [1 .. 0 => 0.0]),

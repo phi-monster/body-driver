@@ -229,6 +229,14 @@ package Driver.Robot is
    --  Driver.Robot.Motion.Step reports, so a replay sees the blocked beats of
    --  the run it replays.
 
+   function Stopped_By_An_End (M : Model; A : Arm_Id; O : Observation) return Boolean;
+   --  At the beat of O the arm's push in effect, ended blocked at rest, was stopped by a joint's end the body has
+   --  shown: the channel that stopped it (Steps.Limiter) stands, where the push ended, at or past the end it was
+   --  asked towards (End_Of), or short of it by no more than the noise of two readings. Such a stop is the body's
+   --  own and no contact: the hand makes no press of it and waits for none (A79's hand 1: five presses of eleven
+   --  never met the table, item 7). False while that end is not known: the first stop at an end is told from a
+   --  contact only by the pose it is found again from (Note_Stopped).
+
    function Self_Mask (M : Model; E : Eye_Id; O : Observation) return Driver.Images.Mask;
    --  The pixels of the eye that show the robot itself at the beat of O.
 

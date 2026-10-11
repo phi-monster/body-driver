@@ -1,4 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Driver.Conventions;
+with Driver.Log;
 with Driver.Robot.Hand.Aims;
 with Driver.Robot.Kinematics;
 
@@ -8,16 +10,22 @@ package body Driver.Robot.Hand.Pressing is
    use Driver.Numerics.Arrays;
    use type Driver.Robot.Motion.Plan_Status;
 
-   function Least_Push (M : Model; Arm : Arm_Id; O : Observation) return Real is
-      Tool    : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
+   --  The largest variance of a covariance along any axis.
+   function Widest (C : Mat3) return Real is
       Values  : Vec3;
       Vectors : Mat3;
+   begin
+      Symmetric_Eigensystem (C, Values, Vectors);
+      return Real'Max (Values (1), Real'Max (Values (2), Values (3)));
+   end Widest;
+
+   function Least_Push (M : Model; Arm : Arm_Id; O : Observation) return Real is
+      Tool : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
    begin
       if Tool.Position_Covariance (1, 1) = Real'Last then
          return Real'Last;   --  the tool's place is not measured
       end if;
-      Symmetric_Eigensystem (Tool.Position_Covariance, Values, Vectors);
-      return Threshold (Vector_Gate (Vec3'Length)) * Sqrt (Real'Max (Values (1), Real'Max (Values (2), Values (3))));
+      return Threshold (Vector_Gate (Vec3'Length)) * Sqrt (Widest (Tool.Position_Covariance));
    end Least_Push;
 
    procedure Aim
@@ -93,7 +101,8 @@ package body Driver.Robot.Hand.Pressing is
       Yaw     : out Real;
       Reaches : out Boolean;
       Unmeasured : out Boolean;
-      Why     : out Ada.Strings.Unbounded.Unbounded_String)
+      Why     : out Ada.Strings.Unbounded.Unbounded_String;
+      Footprint : Real := 0.0)
    is
       Group : constant Group_Id := Arm_Group (M, Arm);
    begin
@@ -129,6 +138,33 @@ package body Driver.Robot.Hand.Pressing is
                           ("the descent from it to the contact the presses predict: " & Driver.Robot.Motion.Why (Deep));
                      end if;
                   end;
+                  --  Where the tip lands, the tip at the aim lowered by the gap: something standing above the table there
+                  --  (the arm's eye's tracks), within what the landing is uncertain by and the tip's region, is what the
+                  --  press would meet, not the table. This aim is not taken; the next turn of the circle lands elsewhere.
+                  if Reaches then
+                     declare
+                        Tool_There : constant Pose_Estimate := Tool_In_Arm (M, Arm, There);
+                        Landing    : constant Vec3 := Tool_There.Pose * Tip.Mean + Down.Value * Result.Into;
+                        Measured   : constant Boolean :=
+                          Tool_There.Position_Covariance (1, 1) < Real'Last and then Tip.Covariance (1, 1) < Real'Last;
+                        Within     : constant Real :=
+                          (if Measured
+                           then Driver.Conventions.Z * Sqrt (Widest (Tool_There.Position_Covariance) + Widest (Tip.Covariance))
+                                + Footprint
+                           else 0.0);
+                        Standing   : constant Natural :=
+                          (if Measured then Driver.Robot.Kinematics.Standing_Near (M, Arm, Landing, Within) else 0);
+                     begin
+                        if Standing > 0 then
+                           Reaches := False;
+                           if K = 0 then
+                              Why := Ada.Strings.Unbounded.To_Unbounded_String
+                                ("something stands above the table where the tip would land:" & Standing'Image
+                                 & " of the eye's tracks within " & Driver.Log.Image (Within, 4) & " of it");
+                           end if;
+                        end if;
+                     end;
+                  end if;
                end if;
             end;
          end if;

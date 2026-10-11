@@ -2255,6 +2255,48 @@ package body Driver.Robot.Kinematics is
    function Table (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate is
      (if Fitted (M, A) then M.Kinematics (Index_Of (M, A)).Result.Table else (others => <>));
 
+   function Standing_Near (M : Model; A : Arm_Id; Point : Vec3; Within : Real) return Natural is
+      K     : constant Natural := Index_Of (M, A);
+      Count : Natural := 0;
+   begin
+      if not Fitted (M, A) or else not Driver.Geometry.Known (M.Kinematics (K).Result.Table) then
+         return 0;
+      end if;
+      declare
+         F : Arm_Fit renames M.Kinematics (K).Result;
+         P : Driver.Geometry.Plane_Estimate renames F.Table;
+      begin
+         for T in 0 .. Natural (F.Track_Known.Length) - 1 loop
+            if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)
+              and then not (T < Natural (F.Table_On.Length) and then F.Table_On (T))
+              and then T < Natural (F.Track_Sigmas.Length) and then F.Track_Sigmas (T) < Real'Last
+            then
+               declare
+                  X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];
+                  H : constant Real := Driver.Geometry.Height (P, X);
+                  --  The track's depth is uncertain by its logarithm's sigma: along its line of sight (the
+                  --  reference eye is the origin), its length times that, of which the part along the normal
+                  --  is the height's; with the plane's own there.
+                  Along   : constant Real := abs X * F.Track_Sigmas (T);
+                  Sigma   : constant Real :=
+                    (if abs X > 0.0
+                     then Sqrt ((Along * abs (Unit (X) * P.Normal)) ** 2 + Driver.Geometry.Height_Sigma (P, X) ** 2)
+                     else Real'Last);
+                  Off     : constant Vec3 := X - Point;
+                  Lateral : constant Real := abs (Off - (Off * P.Normal) * P.Normal);
+               begin
+                  if Sigma < Real'Last and then H > 0.0 and then Driver.Uncertain.Significant (H, Sigma)
+                    and then Lateral <= Within
+                  then
+                     Count := Count + 1;
+                  end if;
+               end;
+            end if;
+         end loop;
+      end;
+      return Count;
+   end Standing_Near;
+
    procedure Solve_Pose
      (M             : Model;
       A             : Arm_Id;

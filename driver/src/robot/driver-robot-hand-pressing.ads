@@ -83,14 +83,19 @@ package Driver.Robot.Hand.Pressing is
       Yaw     : out Real;
       Reaches : out Boolean;
       Unmeasured : out Boolean;
-      Why     : out Ada.Strings.Unbounded.Unbounded_String);
+      Why     : out Ada.Strings.Unbounded.Unbounded_String;
+      Footprint : Real := 0.0);
    --  The first aim of Along that the arm can be taken to, and from which it can be taken down to the contact the
    --  presses so far predict (Tip in the tool frame, Surface in the arm's: nothing is asked of the descent when they
    --  do not predict it): the least rotation first, then the hand turned about the way down by a quarter either way,
    --  by half a turn, by three quarters, and by the whole of one (eight poses of the circle). A path past an end a
    --  channel showed is not planned (Driver.Robot.Motion.Plan_Reach); Yaw is the turn that was taken. Reaches is
    --  False when none is planned, Result then the last tried, and Why says why the least rotation was not, with the
-   --  descent when it is that; Unmeasured is True when that was for want of a measured arm.
+   --  descent when it is that; Unmeasured is True when that was for want of a measured arm. An aim whose tip would
+   --  land where something stands above the table (the arm's eye's tracks, Kinematics.Standing_Near, within what the
+   --  landing is uncertain by and Footprint, the radius of the tip's region there in the arm's unit) is not taken
+   --  either: the press would meet that, not the table (A79's hand 1, item 7); a tip nothing predicts yet lands
+   --  where nothing can be looked at.
 
    function Least_Push (M : Model; Arm : Arm_Id; O : Observation) return Real;
    --  The smallest move of the tool that tells from its noise, where the tool

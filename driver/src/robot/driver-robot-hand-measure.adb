@@ -656,10 +656,15 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Stalls := H.Data.Found (Id).Stalls;
             declare
                B : Driver.Robot.Hand.Tips.Book renames H.Data.Found (Id).Book;
+               --  The radius of the tip's region at the contact: the lobe's angular spread about its tip, at the tip's
+               --  distance from the eye; nothing while the distance is not fitted.
+               Distance  : constant Estimate := Driver.Robot.Hand.Tips.Distance (B, Lobe, Which);
+               Footprint : constant Real :=
+                 (if Known (Distance) then abs Distance.Value * R.Lobes (Lobe).Sights (Which).Spread else 0.0);
             begin
                Driver.Robot.Hand.Pressing.Aim_Reaching
                  (M, R.Arm, R.Eye, O, Along, Driver.Robot.Hand.Tips.Tip (B, Lobe, Which), Driver.Robot.Hand.Tips.Surface (B),
-                  Aimed, Yaw, Reaches, Unmeasured_Aim, Why_Not);
+                  Aimed, Yaw, Reaches, Unmeasured_Aim, Why_Not, Footprint => Footprint);
             end;
          end Read_Aim;
 
@@ -825,6 +830,14 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Arm_Now := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (O.Readings.Element (Arm_Is));
          end Read_Arm;
 
+         --  The last push, judged blocked, was stopped by a joint's end the arm has shown (Driver.Robot.Stopped_By_An_End),
+         --  read in a held beat: the body's own stop, no contact.
+         Ended_On_Joint : Boolean := False;
+         procedure Read_End (O : Observation) is
+         begin
+            Ended_On_Joint := Driver.Robot.Stopped_By_An_End (M, R.Arm, O);
+         end Read_End;
+
          --  The hand this press measures is gone: it ends where it stands, with the arm let go and taken back to where
          --  the descent began (or to where it stands, when it never moved), and nothing of it is kept.
          procedure End_Lost (Moved : Boolean) is
@@ -950,6 +963,20 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   Hold_Beat (Note_The_Stop'Access);
                end if;
             end;
+            --  A push stopped at a joint's end the arm has shown is the body's own stop, wherever the tip stands: no press is
+            --  made of it and none is waited for; the tilt is one that cannot be lowered, and half of it is tried.
+            Hold_Beat (Read_End'Access);
+            if Ended_On_Joint then
+               Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the descent of a press of lobe" & Lobe'Image & " at "
+                                & (if Which = Open then "open" else "closed") & " stopped on an end the arm has shown (the"
+                                & " channel that stopped it stands at its end): no press is made of it, the stop is the"
+                                & " body's, and the arm is taken back to where the descent began");
+               Hold_Beat (Note_The_Stop'Access);
+               Aim_Short := True;
+               Hold_Beat (Read_Arm'Access);
+               Move_Group (Arm_Is, Aim_At.Element);
+               return False;
+            end if;
          end if;
          --  One line a press, for the boot's account of where its time went:
          --  how many pushes, and why each was as long as it was.

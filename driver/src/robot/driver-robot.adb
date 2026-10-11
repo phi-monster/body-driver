@@ -607,6 +607,50 @@ package body Driver.Robot is
       end;
    end Blocked;
 
+   function Stopped_By_An_End (M : Model; A : Arm_Id; O : Observation) return Boolean is
+   begin
+      if Natural (A) > Arm_Count (M) then
+         return False;
+      end if;
+      declare
+         G       : constant Group_Id := Arm_Group (M, A);
+         At_Beat : constant Natural := Natural (O.Beat);
+      begin
+         --  The push in effect at that beat, as Blocked finds it.
+         for K in reverse 1 .. Steps.Episodes (M, G) loop
+            declare
+               E : Episode renames M.Groups (G).Episodes (K);
+            begin
+               if E.Start <= At_Beat then
+                  if E.Start = 0 or else not (E.Ended and then E.End_At <= At_Beat and then E.Blocked and then E.Rested) then
+                     return False;
+                  end if;
+                  declare
+                     L : constant Natural := Steps.Limiter (M, G, E);
+                  begin
+                     if L = 0 then
+                        return False;
+                     end if;
+                     declare
+                        From : constant Real := Channels.Reading (M, G, E.Start - 1, L);
+                        To   : constant Real := Channels.Target (M, G, E.Start, L);
+                        At   : constant Real := Channels.Reading (M, G, E.End_At, L);
+                        Way  : constant Sense := (if To >= From then Increasing else Decreasing);
+                        Stop : constant Estimate := End_Of (M, G, L, Way);
+                        --  How far past the end, the way asked, the channel came to rest.
+                        Past : constant Real := (if Way = Increasing then At - Stop.Value else Stop.Value - At);
+                     begin
+                        return Known (Stop)
+                          and then (Past >= 0.0 or else not Driver.Uncertain.Significant (Past, Sqrt (2.0) * Stop.Sigma));
+                     end;
+                  end;
+               end if;
+            end;
+         end loop;
+         return False;
+      end;
+   end Stopped_By_An_End;
+
    function Self_Mask (M : Model; E : Eye_Id; O : Observation) return Driver.Images.Mask is
      (if E <= O.Images.Last_Index then Driver.Images.Create (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)))
       else Driver.Images.Create (0, 0));
