@@ -3697,29 +3697,112 @@ package body Driver.Robot.Kinematics.Fit is
    begin
       Plane := (others => <>);
       On := [others => False];
-      --  The table is the plane most of the points lie on, or a nearer surface that holds about as many and is not
-      --  parallel to it: the room's far wall has as many tracks as the table in a picture that looks along it, and is
-      --  no surface an arm works on. A plane parallel to the table, at another height (the top of a thing standing on
-      --  it), is no other table, and never replaces it. Planes are found one after another, each among the points the
-      --  earlier ones left, until one holds significantly fewer points than the most found, to within what chance
-      --  explains: it would be the dominant plane of the rest. The first is taken whatever it is, as the plane most of
-      --  the points lie on has always been; a plane that is not parallel to the choice replaces it only when it is
-      --  nearer the eye.
-      loop
-         Consensus;
-         exit when not This.Found;
-         exit when not First
-           and then Driver.Robot.Regression.Count_Significant (Reference, Reference + This_Count, Half);
-         if First or else (not Parallel (This, Plane) and then Distance (This) < Distance (Plane)) then
-            Plane := This;
-            On := This_On;
-         end if;
-         Reference := Natural'Max (Reference, This_Count);
-         First := False;
+      --  The table, among the planes found one after another (each the consensus of the points the earlier ones left,
+      --  until one holds significantly fewer points than the most found, to within what chance explains: it would be
+      --  the dominant plane of the rest), is not the plane most points lie on: a textured thing on a plain table holds
+      --  more (A84 and A77 took a keyboard for the table). It is the one nothing seen stands below (no more points beyond
+      --  it, away from the eye, than chance leaves at Z: things stand on the table and nothing hangs under it, and the
+      --  top of a thing on it has the table's points below) that spans the most of the picture (the angular extent of
+      --  its points across and down, as the eye sees them); a nearer surface that is not parallel to that choice
+      --  replaces it still (the room's far wall spans a picture that looks along it, and is no surface an arm works
+      --  on). When every plane has something below it, the one with the least does (item 9).
+      declare
+         type Flag_Array_Access is access Flag_Array;
+         procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flag_Array_Access);
+         type Candidate is record
+            P      : Sight_Plane;
+            On     : Flag_Array_Access;
+            Count  : Natural := 0;
+            Below  : Natural := 0;   --  points beyond it, away from the eye, by more than their own sigma tells
+            Extent : Real := 0.0;    --  the angular box its points span, across times down
+         end record;
+         package Candidate_Vectors is new Ada.Containers.Vectors (Positive, Candidate);
+         Found  : Candidate_Vectors.Vector;
+         Usable_Count : Natural := 0;
+         --  The chance a point on a plane shows beyond it by more than Z of its sigma.
+         Rate   : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / 2.0;
+         function Clear (C : Candidate) return Boolean is
+           (Usable_Count = 0 or else not Driver.Robot.Regression.Count_Significant (C.Below, Usable_Count, Rate));
+         Choice : Natural := 0;
+      begin
          for I in Points'Range loop
-            Taken (I) := Taken (I) or else This_On (I);
+            if Usable (Points (I)) then
+               Usable_Count := Usable_Count + 1;
+            end if;
          end loop;
-      end loop;
+         loop
+            Consensus;
+            exit when not This.Found;
+            exit when not First
+              and then Driver.Robot.Regression.Count_Significant (Reference, Reference + This_Count, Half);
+            declare
+               C : Candidate := (P => This, On => new Flag_Array'(This_On), Count => This_Count, others => <>);
+               X_Low, Y_Low : Real := Real'Last;
+               X_High, Y_High : Real := Real'First;
+            begin
+               for I in Points'Range loop
+                  if Usable (Points (I)) then
+                     if This_On (I) then
+                        if Points (I).H (3) > 0.0 then
+                           X_Low := Real'Min (X_Low, Points (I).H (1) / Points (I).H (3));
+                           X_High := Real'Max (X_High, Points (I).H (1) / Points (I).H (3));
+                           Y_Low := Real'Min (Y_Low, Points (I).H (2) / Points (I).H (3));
+                           Y_High := Real'Max (Y_High, Points (I).H (2) / Points (I).H (3));
+                        end if;
+                     else
+                        declare
+                           R : constant Real := Standard_Residual (This.A, Points (I));
+                        begin
+                           --  Beyond the plane: a smaller inverse depth than the plane's along the line of sight.
+                           if R < 0.0 and then Driver.Uncertain.Significant (R, 1.0) then
+                              C.Below := C.Below + 1;
+                           end if;
+                        end;
+                     end if;
+                  end if;
+               end loop;
+               if X_High > X_Low and then Y_High > Y_Low then
+                  C.Extent := (X_High - X_Low) * (Y_High - Y_Low);
+               end if;
+               Found.Append (C);
+            end;
+            Reference := Natural'Max (Reference, This_Count);
+            First := False;
+            for I in Points'Range loop
+               Taken (I) := Taken (I) or else This_On (I);
+            end loop;
+         end loop;
+         --  The choice: the clear plane that spans the most; with none clear, the one with the least below it.
+         for K in Found.First_Index .. Found.Last_Index loop
+            if Choice = 0
+              or else (Clear (Found (K)) and then not Clear (Found (Choice)))
+              or else (Clear (Found (K)) = Clear (Found (Choice))
+                       and then (if Clear (Found (K)) then Found (K).Extent > Found (Choice).Extent
+                                 else Found (K).Below < Found (Choice).Below))
+            then
+               Choice := K;
+            end if;
+         end loop;
+         --  A nearer clear surface not parallel to the choice replaces it.
+         if Choice > 0 then
+            for K in Found.First_Index .. Found.Last_Index loop
+               if K /= Choice and then Clear (Found (K)) and then not Parallel (Found (K).P, Found (Choice).P)
+                 and then Distance (Found (K).P) < Distance (Found (Choice).P)
+               then
+                  Choice := K;
+               end if;
+            end loop;
+            Plane := Found (Choice).P;
+            On := Found (Choice).On.all;
+         end if;
+         for K in Found.First_Index .. Found.Last_Index loop
+            declare
+               C : Candidate := Found (K);
+            begin
+               Free (C.On);
+            end;
+         end loop;
+      end;
    end Dominant_Plane;
 
    ---------------------------------------------------------------------------
