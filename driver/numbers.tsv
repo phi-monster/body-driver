@@ -932,7 +932,10 @@ driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	1.0	mat
 driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
-driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved);	1.0	structure	the first round pushes by the amounts the probes found, once
+driver-robot-boot.adb	Pause (G) := 2 * Pause (G);	2	math	doubling: the hold after a push climbs with the rounds
+driver-robot-boot.adb	Pause : array (1 .. Count) of Natural := [others => Natural'Max (1, Driver.Robot.Lag.Longest (M))];	1	structure	the hold after a push begins at one beat, the unit, while the stream can tell no lag; the doubling goes on from it
+driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved, Pause => Natural'Max (1, Driver.Robot.Lag.Longest (M)));	1	structure	the hold after a push begins at one beat, the unit, while the stream can tell no lag
+driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved, Pause => Natural'Max (1, Driver.Robot.Lag.Longest (M)));	1.0	structure	the first round pushes by the amounts as recognized, once
 driver-robot-boot.adb	R := R / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	2	format	two digits after the point in the log
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	3	format	three exponent digits in the log
@@ -1741,7 +1744,6 @@ driver-robot-kinematics-fit.adb	R1 : constant Real_Vector (1 .. 9) := [X, Y, 1.0
 driver-robot-kinematics-fit.adb	R1 : constant Real_Vector (1 .. 9) := [X, Y, 1.0, 0.0, 0.0, 0.0, -U * X, -U * Y, -U];	9	structure	a homography's nine entries: the direct linear transform's unknowns
 driver-robot-kinematics-fit.adb	R2 : constant Real_Vector (1 .. 9) := [0.0, 0.0, 0.0, X, Y, 1.0, -V * X, -V * Y, -V];	1.0	math	homogeneous coordinates in the direct linear transform's rows
 driver-robot-kinematics-fit.adb	R2 : constant Real_Vector (1 .. 9) := [0.0, 0.0, 0.0, X, Y, 1.0, -V * X, -V * Y, -V];	9	structure	a homography's nine entries: the direct linear transform's unknowns
-driver-robot-kinematics-fit.adb	Rate : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / 2.0;	2.0	statistics	one side of the two-sided tail: a point beyond the plane, not either way
 driver-robot-kinematics-fit.adb	Ray (Lx, Kept (I).U, Kept (I).V), (Lx.Fx + Lx.Fy) / 2.0);	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	Ray (Lx, Sight (I).U, Sight (I).V), (Lx.Fx + Lx.Fy) / 2.0);	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 2 * N;	2	structure	two numbers across each joint's axis
@@ -1931,7 +1933,6 @@ driver-robot-kinematics-fit.adb	if N > 1 and then (for all X of Sight => not Sev
 driver-robot-kinematics-fit.adb	if N > 1 and then P_Count > 0 then	1	structure	cells move several joints
 driver-robot-kinematics-fit.adb	if N > 1 then	1	structure	an arm of one joint has no order to find
 driver-robot-kinematics-fit.adb	if Pass = 1 then	1	structure	the side solved once unweighted, once weighted to Sampson residuals
-driver-robot-kinematics-fit.adb	if R < 0.0 and then Driver.Uncertain.Significant (R, 1.0) then	1.0	statistics	a standardized residual is tested against unit sigma
 driver-robot-kinematics-fit.adb	if Result.Scale /= 0.0 and then Every (J)'Length > 4 then	4	structure	the refinement's four terms; more sightings than terms
 driver-robot-kinematics-fit.adb	or else Driver.Distributions.F_Upper_Tail (Link.F, 4, 2 * Link.Used - Apart_Terms)	2	structure	two residuals per answer, across and down
 driver-robot-kinematics-fit.adb	or else Driver.Distributions.F_Upper_Tail (Link.F, 4, 2 * Link.Used - Apart_Terms)	4	statistics	the four constraints one homography for both sides adds: the F statistic's numerator degrees of freedom
@@ -1947,6 +1948,7 @@ driver-robot-kinematics-fit.adb	return (if H (3, 3) /= 0.0 then (1.0 / H (3, 3))
 driver-robot-kinematics-fit.adb	return (if N >= Real (Positive'Last) then Positive'Last else Positive (Real'Max (1.0, N)));	1.0	numerics	at least one sample
 driver-robot-kinematics-fit.adb	return (if Q > 0.0 then (1.0 / Q) * H else [0.0, 0.0, 0.0]);	1.0	math	depth is the inverse of inverse depth
 driver-robot-kinematics-fit.adb	return 1;	1	math	one sample when every point agrees
+driver-robot-kinematics-fit.adb	return 2 * Inside > Total;	2	math	a majority: more than half of the plane's points lie inside the other's box
 driver-robot-kinematics-fit.adb	return Real_Matrix'(1 .. 3 => [1 .. Terms => 0.0]);	3	math	three coordinates of the plane's A
 driver-robot-kinematics-fit.adb	return Sigma / (2.0 * Sqrt (Real (Count)) * F);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	return Sqrt (Sum / Real (Natural'Max (1, Changes'Length (1))));	1	numerics	a count that divides is at least one
@@ -2286,7 +2288,6 @@ driver-robot-kinematics.adb	[R.Result.Tracks (3 * Q), R.Result.Tracks (3 * Q + 1
 driver-robot-kinematics.adb	[R.Result.Tracks (3 * Q), R.Result.Tracks (3 * Q + 1), R.Result.Tracks (3 * Q + 2)];	3	structure	a track's point is three numbers, one track after another
 driver-robot-kinematics.adb	[R.Result.Tracks (3 * Q), R.Result.Tracks (3 * Q + 1), R.Result.Tracks (3 * Q + 2)];	3	structure	a track's point is three numbers, one track after another
 driver-robot-kinematics.adb	[R.Result.Tracks (3 * Q), R.Result.Tracks (3 * Q + 1), R.Result.Tracks (3 * Q + 2)];	3	structure	a track's point is three numbers, one track after another
-driver-robot-kinematics.adb	and then (Fresh or else (Natural (R.Frames.Length) = 1 and then Beat > R.Frames (1).Beat));	1	structure	the reference alone so far: the next keyframe at its pose is its still twin
 driver-robot-kinematics.adb	and then Natural (R.Result.Tracks.Length) >= 3 * Queries;	3	structure	a track's point is three numbers
 driver-robot-kinematics.adb	and then Place (1, 1) < Real'Last	1	structure	an uncertainty that is not known has its first diagonal entry unbounded
 driver-robot-kinematics.adb	and then Place (1, 1) < Real'Last	1	structure	an uncertainty that is not known has its first diagonal entry unbounded
@@ -2323,6 +2324,7 @@ driver-robot-kinematics.adb	for Q in 1 .. 3 loop	3	structure	the three component
 driver-robot-kinematics.adb	for Q in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for Q in 1 .. 6 loop	6	structure	the six terms of a pose: its turn (three) and its centre (three)
 driver-robot-kinematics.adb	function C (P, Q : Positive) return Real is (R.Placement_Covariance ((P - 1) * 6 + Q - 1));	6	structure	the six terms of a pose: its turn (three) and its centre (three)
+driver-robot-kinematics.adb	if At_Reference and then Natural (R.Frames.Length) > 1 then	1	structure	the twin is a frame after the first: there must be more than one
 driver-robot-kinematics.adb	if Current (M, R) and then R.Result.Fitted and then R.Aligned >= 2 and then Queries > 0 then	2	structure	a keyframe after the reference is the second or later
 driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	2	structure	the last of a track's three numbers
 driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	3	structure	three numbers a track
@@ -2331,7 +2333,6 @@ driver-robot-kinematics.adb	or else Natural (F.Depth_Gains.Length) /= Q * T or e
 driver-robot-kinematics.adb	or else Natural (F.Table_Response.Length) /= 3 * T	3	structure	three coordinates per point; three terms for the plane's own error
 driver-robot-kinematics.adb	or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) /= 36	36	structure	a pose's covariance, six terms by six, row by row
 driver-robot-kinematics.adb	or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) < 36	36	structure	a six by six covariance, row by row
-driver-robot-kinematics.adb	return Natural (R.Frames.Length) >= 2;	2	structure	the still twin of the reference is the second keyframe
 driver-robot-kinematics.adb	return Square_Root (Fixed_Angle_Sigma (M, E) ** 2 + Var / 2.0);	2.0	math	half the trace: the variance per axis across a line
 driver-robot-kinematics.adb	then "" & Driver.Log.Image (Report.Linear_To, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	then "" & Pm (Report.L.K1, Sd (5), 4) & "" & Pm (Report.L.K2, Sd (6), 4)	4	structure	the index of a term of the covariance
@@ -2364,9 +2365,15 @@ driver-robot-lag.adb	if Last < 1 then	1	structure	a differenced series needs two
 driver-robot-lag.adb	if Used = 0 or else R2 >= 1.0 then	1.0	math	a fraction of variance explained is at most one
 driver-robot-lag.adb	return (if Used = 0 then 1.0 else 0.0);	1.0	math	probabilities: no positive coefficient explains nothing, a perfect fit cannot be noise
 driver-robot-lag.adb	return 1.0;	1.0	math	a probability: too few rows to fit, so noise explains everything
+driver-robot-lockin.adb	& "" & Driver.Log.Image (Sum_Variance, 4) & "" & Far'Image & "");	4	format	digits printed in a log line or a message
+driver-robot-lockin.adb	& Driver.Log.Image (Driver.Stats.Median (Floors.all), 5));	5	format	digits printed in a log line or a message
+driver-robot-lockin.adb	& Driver.Log.Image (Mean, 4) & "" & Driver.Log.Image (Sigma, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-lockin.adb	& Driver.Log.Image (Mean, 4) & "" & Driver.Log.Image (Sigma, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Real (Marks_Took), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Real (Rows_Took), 1) & "" & Passes'Image	1	format	digits printed in a log line or a message
+driver-robot-lockin.adb	& Driver.Log.Image (Typical, 4) & "" & Driver.Log.Image (Sum_Energy, 4)	4	format	digits printed in a log line or a message
+driver-robot-lockin.adb	& Driver.Log.Image (Typical, 4) & "" & Driver.Log.Image (Sum_Energy, 4)	4	format	digits printed in a log line or a message
 driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));	0.5	math	the chi-square median with two degrees of freedom
 driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));	1.0	math	the chi-square median with two degrees of freedom
 driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));	2	math	the chi-square median with two degrees of freedom
@@ -2382,6 +2389,7 @@ driver-robot-lockin.adb	Reached : Flags_Access := new Flags'(1 .. Natural'Max (1
 driver-robot-lockin.adb	S.Rest_Counts_Known := Rest > 1;	1	statistics	a spread takes two samples
 driver-robot-lockin.adb	Sigma : constant Real := 1.0 / Sqrt (Weights);	1.0	math	the standard error of a mean weighted by inverse variances is one over the root of the weights' sum
 driver-robot-lockin.adb	Spread_Of ((Cell - 1) * Kept + K) := 4.0 * (Gu * Bu ** 2 + Gv * Bv ** 2);	4.0	math	the variance of a squared estimate b^2 with variance g is 4 g b^2 to first order
+driver-robot-lockin.adb	Usual (C) := 2 * Resolved (C) > Measured;	2	math	a majority: a cell resolved in more than half the measured beats usually resolves
 driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Dof (Cell, G)) * Noise (Cell - 1) ** 4);	1.0	math	the weight of an estimate is the inverse of its variance
 driver-robot-lockin.adb	Weight : constant Real := 1.0 / (2.0 * Real (Dof (Cell, G)) * Noise (Cell - 1) ** 4);	2.0	math	a chi-square has a variance of twice its degrees of freedom
 driver-robot-lockin.adb	Weights := Weights + 1.0 / Variance_Of (C);	1.0	math	the weight of an estimate is the inverse of its variance
@@ -2389,6 +2397,8 @@ driver-robot-lockin.adb	X (R, 1) := 1.0;	1.0	math	the intercept column of a regr
 driver-robot-lockin.adb	elsif Pushes = 1 then	1	structure	one group is pushed: its push is a reference only if the picture had settled when it began
 driver-robot-lockin.adb	if All_Columns = 0 or else M.Beats < 2 then	2	structure	a displacement needs two frames
 driver-robot-lockin.adb	if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 or else R >= M.Beats	1	structure	the first beat has none before it
+driver-robot-lockin.adb	if Cell = 1 or else Cell = N or else Cell = N / 2 then	1	format	the log shows the first cell's rows
+driver-robot-lockin.adb	if Cell = 1 or else Cell = N or else Cell = N / 2 then	2	format	the log shows the middle cell's rows
 driver-robot-lockin.adb	if Pushes > 1 or else (Pushes = 0 and then Held_Moving) then	1	structure	at most one group pushed at a beat the regression explains
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: its linear term, twice Z squared
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, twice Z squared times (2 Q - K)
@@ -2477,9 +2487,11 @@ driver-robot-stillness.adb	S.Change_1 := -1.0;	1.0	format	a negative change mark
 driver-robot-stillness.adb	S.Change_2 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K
-driver-robot-stillness.adb	and then Natural (S.Rest_Changes.Length) >= 2 * S.Rest_Counted	2	statistics	recomputed at doubling counts: the robust scale settles as the sample doubles
-driver-robot-stillness.adb	if Natural (S.Rest_Changes.Length) >= 2	2	statistics	a scale needs two values
+driver-robot-stillness.adb	if L'Length >= 2 then	2	statistics	a scale is measured from two levels at least
+driver-robot-stillness.adb	if Natural (S.Watch_Diffs.Length) >= 2 * Natural'Max (1, S.Watch_Scatter_Counted) then	1	structure	the doubling of the stationary sample begins at one beat
+driver-robot-stillness.adb	if Natural (S.Watch_Diffs.Length) >= 2 * Natural'Max (1, S.Watch_Scatter_Counted) then	2	math	doubling: the medians are recomputed when the stationary beats have doubled
 driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then	2	statistics	a variance needs two frames
+driver-robot-stillness.adb	or else S.Watch_Run >= 2)	2	statistics	a level holds when two stationary steps in a row agree on it (the agreed settling rule)
 driver-robot.adb	& "" & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	1	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	3	format	digits printed in a log line or a message

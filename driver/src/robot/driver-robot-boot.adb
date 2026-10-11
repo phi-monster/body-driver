@@ -11,6 +11,7 @@ with Driver.Distributions;
 with Driver.Log;
 with Driver.Robot.Body_File;
 with Driver.Robot.Kinematics;
+with Driver.Robot.Lag;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Regression;
@@ -142,10 +143,11 @@ package body Driver.Robot.Boot is
       --  the way out: a round of a six-joint group took a thousand beats, four rounds ten thousand, item 17).
       type Channel_Flags is array (Positive range <>) of Boolean;
       procedure Push_Both_Ways
-        (G : Group_Id; Size : Positive; Factor : Real; Moved : out Boolean; Only : Channel_Flags := [1 .. 0 => False])
+        (G : Group_Id; Size : Positive; Factor : Real; Moved : out Boolean; Only : Channel_Flags := [1 .. 0 => False];
+         Pause : Natural := 0)
       is
          Start  : constant Real_Array := Holds_Of (G, Size);
-         Here   : Real_Array := Start;
+         Here   : constant Real_Array := Start;   --  every push goes out from the hold and back to it
          Amount : Real_Array (1 .. Size) := [others => 0.0];
          Report : Driver.Robot.Motion.Step_Report;
          Order  : Push_Array (1 .. 2 * Size);
@@ -193,12 +195,37 @@ package body Driver.Robot.Boot is
                Driver.Robot.Motion.Settle (M, Waited);
                Go_To (G, Away, Report);
                Moved := Moved or else Report.Outcome = Driver.Robot.Motion.Reached;
+               --  Held after the push for Pause beats before the pictures are asked to settle: a picture that trails
+               --  the readings (an eye of the rig ten beats behind them) is settled the beat after they stop, before it
+               --  has moved, and pushes a few beats apart make one burst that no lag longer than their spacing can be
+               --  told across (Lag: the shifts tried reach the stretch between bursts); the pause doubles with the
+               --  rounds (Factor), from the longest lag the stream could tell at the first (robot.boot.reread).
+               if Pause > 0 then
+                  Driver.Robot.Motion.Hold (M, Pause);
+                  Settled := Settled + Pause;
+               end if;
                Driver.Robot.Motion.Settle (M, Waited);
                Settled := Settled + Waited;
-               Here := Holds_Of (G, Size);
+               --  And back to where it was pushed from, a second push the same size the other way: a round of pushes
+               --  that only go on from where the last one left (item 17's chain) gives the lock-in half the evidence a
+               --  round of pushes out and back does, and an eye whose middle distance showed itself at twice the
+               --  amounts with the old round showed nothing with the chain, so the patch did not grow and the boot
+               --  left the arm a part (robot.boot.patch, robot.boot.step: 13 of 48 cells at twice the amounts against
+               --  17 before). The chain's other saving stands: only the channels an undecided eye does not see.
+               Go_To (G, Here, Report);
+               if Pause > 0 then
+                  Driver.Robot.Motion.Hold (M, Pause);
+                  Settled := Settled + Pause;
+               end if;
+               Driver.Robot.Motion.Settle (M, Waited);
+               Settled := Settled + Waited;
             end;
          end loop;
          Go_To (G, Start, Report);
+         if Pause > 0 then
+            Driver.Robot.Motion.Hold (M, Pause);
+            Settled := Settled + Pause;
+         end if;
          Driver.Robot.Motion.Settle (M, Waited);
          Settled := Settled + Waited;
          Driver.Beats.Within_A_Beat (Read_End'Access);
@@ -257,7 +284,7 @@ package body Driver.Robot.Boot is
          declare
             Moved : Boolean;
          begin
-            Push_Both_Ways (G, Size, 1.0, Moved);
+            Push_Both_Ways (G, Size, 1.0, Moved, Pause => Natural'Max (1, Driver.Robot.Lag.Longest (M)));
          end;
       end Recognize;
 
@@ -831,6 +858,9 @@ package body Driver.Robot.Boot is
                            Shows  : array (1 .. Count, 1 .. Eyes) of Eye_Response;
                            Rests  : array (1 .. Count, 1 .. Eyes) of Real;   --  the rest's motion together, in sigmas
                            Factor : array (1 .. Count) of Real := [others => 1.0];
+                           --  The hold after each push, doubling with the rounds from the longest lag the stream could tell
+                           --  when the rounds began (Push_Both_Ways).
+                           Pause  : array (1 .. Count) of Natural := [others => Natural'Max (1, Driver.Robot.Lag.Longest (M))];
                            Again  : array (1 .. Count) of Boolean;
                            Spent  : array (1 .. Count) of Boolean := [others => False];   --  pushed as far as it goes
                            function Most_Channels return Natural is
@@ -900,6 +930,7 @@ package body Driver.Robot.Boot is
                               for G in Again'Range loop
                                  if Again (G) then
                                     Factor (G) := 2.0 * Factor (G);
+                                    Pause (G) := 2 * Pause (G);
                                     Driver.Log.Line
                                       (Driver.Log.Robot, "boot: group" & G'Image
                                        & " leaves an eye undecided or showing a patch that may grow;"
@@ -912,7 +943,7 @@ package body Driver.Robot.Boot is
                                        for C in Only'Range loop
                                           Only (C) := Needed (G, C);
                                        end loop;
-                                       Push_Both_Ways (Group_Id (G), Sizes (G), Factor (G), Moved, Only);
+                                       Push_Both_Ways (Group_Id (G), Sizes (G), Factor (G), Moved, Only, Pause (G));
                                        if not Moved then
                                           Spent (G) := True;
                                           Driver.Log.Line
