@@ -554,7 +554,64 @@ package body Driver.Robot is
    end Tool_In_Arm;
 
    function Table_In_Arm (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate is
-     (if Natural (A) <= Arm_Count (M) then Kinematics.Table (M, A) else (others => <>));
+   begin
+      if Natural (A) > Arm_Count (M) then
+         return (others => <>);
+      end if;
+      declare
+         Own : constant Driver.Geometry.Plane_Estimate := Kinematics.Table (M, A);
+      begin
+         if Driver.Geometry.Known (Own) then
+            return Own;
+         end if;
+      end;
+      --  An arm whose own eye saw no table, placed in the world: the table another eye saw is the world's (the first
+      --  arm's, Kinematics.World_Table), turned into this arm's frame by its placement, X_world = Placement * (Scale *
+      --  X); whichever eye saw the plane, its plane is pressed on (item 14). Its offset at the centre is the world's
+      --  over the scale, with the placement's centre along the normal and its turn over the lever to the centre, and
+      --  the centre's distance times the scale's own sigma; its tilt the world's with the placement's turn (the
+      --  trace of the turn's covariance bounds its largest variance).
+      declare
+         World     : constant Driver.Geometry.Plane_Estimate := Kinematics.World_Table (M);
+         Placement : Rigid;
+         Scale     : Real;
+         Placed    : Boolean;
+      begin
+         Kinematics.In_World (M, A, Placement, Scale, Placed);
+         if not Placed or else not Driver.Geometry.Known (World) or else Scale <= 0.0 then
+            return (others => <>);
+         end if;
+         declare
+            Rt          : constant Mat3 := Transpose (Placement.Rotation);
+            Lever       : constant Vec3 := World.Centre - Placement.Translation;
+            Centre      : constant Vec3 := (1.0 / Scale) * (Rt * Lever);
+            Scale_Sigma : constant Estimate := Kinematics.Scale_In_World (M, A);
+            Turn, Place : Mat3;
+         begin
+            Kinematics.Placement_Covariance (M, A, Turn, Place);
+            if Turn (1, 1) >= Real'Last or else Place (1, 1) >= Real'Last then
+               return (others => <>);
+            end if;
+            declare
+               Spin   : constant Real := Turn (1, 1) + Turn (2, 2) + Turn (3, 3);
+               Offset : constant Real :=
+                 (World.Offset_Sigma ** 2 + World.Normal * (Place * World.Normal) + (abs Lever) ** 2 * Spin) / Scale ** 2
+                 + (if Known (Scale_Sigma) then (abs Centre * Scale_Sigma.Sigma / Scale) ** 2 else 0.0);
+            begin
+               return (Centre       => Centre,
+                       Normal       => Rt * World.Normal,
+                       Tangent_1    => Rt * World.Tangent_1,
+                       Tangent_2    => Rt * World.Tangent_2,
+                       Offset_Sigma => Sqrt (Offset),
+                       Tilt_11      => World.Tilt_11 + Spin,
+                       Tilt_12      => World.Tilt_12,
+                       Tilt_22      => World.Tilt_22 + Spin,
+                       Points       => World.Points,
+                       Scatter      => World.Scatter);
+            end;
+         end;
+      end;
+   end Table_In_Arm;
 
    function Up_In_Arm (M : Model; A : Arm_Id) return Direction_Estimate is
       P : constant Driver.Geometry.Plane_Estimate := Table_In_Arm (M, A);

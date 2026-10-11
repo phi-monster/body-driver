@@ -128,6 +128,15 @@ private package Driver.Robot.Kinematics is
    function Scale_In_World (M : Model; A : Arm_Id) return Estimate;
    --  In_World's Scale with its sigma; Unknown until the arm is placed.
 
+   procedure Placement_Covariance (M : Model; A : Arm_Id; Turn, Centre : out Mat3);
+   --  The covariance of the arm's placement in the world: of its turn (a rotation vector, world frame) and of its
+   --  centre, in world units; Real'Last on the diagonals until it is placed.
+
+   function World_Table (M : Model) return Driver.Geometry.Plane_Estimate;
+   --  The table in the world: the first arm's (the world is its reference frame, In_World), as its eye saw it;
+   --  unknown until that arm is fitted with a table. An arm whose own eye saw none presses on this one, turned
+   --  into its frame by its placement (Driver.Robot.Table_In_Arm, item 14).
+
    procedure World_Pose_Covariance (M : Model; A : Arm_Id; Readings : Real_Array; Turn, Place : out Mat3);
    --  Pose_Covariance carried into the world: the arm's own, turned and
    --  scaled by its placement, with the placement's own (its turn, its

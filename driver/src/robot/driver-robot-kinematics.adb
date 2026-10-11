@@ -2127,6 +2127,45 @@ package body Driver.Robot.Kinematics is
               Degrees_Of_Freedom => 0);
    end Scale_In_World;
 
+   procedure Placement_Covariance (M : Model; A : Arm_Id; Turn, Centre : out Mat3) is
+      K : constant Natural := Index_Of (M, A);
+   begin
+      Turn := [others => [others => 0.0]];
+      Centre := [others => [others => 0.0]];
+      for I in 1 .. 3 loop
+         Turn (I, I) := Real'Last;
+         Centre (I, I) := Real'Last;
+      end loop;
+      if K = 0 or else not M.Kinematics (K).Result.Fitted or else not M.Kinematics (K).Result.Placed
+        or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) < 36
+      then
+         return;
+      end if;
+      declare
+         C : Real_Vectors.Vector renames M.Kinematics (K).Result.Placement_Covariance;
+      begin
+         --  6 x 6, row by row: the turn first, then the centre.
+         for I in 1 .. 3 loop
+            for J in 1 .. 3 loop
+               Turn (I, J) := C (C.First_Index + 6 * (I - 1) + (J - 1));
+               Centre (I, J) := C (C.First_Index + 6 * (I + 2) + (J + 2));
+            end loop;
+         end loop;
+      end;
+   end Placement_Covariance;
+
+   function World_Table (M : Model) return Driver.Geometry.Plane_Estimate is
+   begin
+      for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+         if M.Kinematics (K).Result.Fitted and then M.Kinematics (K).Result.Placed
+           and then M.Kinematics (K).Result.Placed_Through = 0
+         then
+            return M.Kinematics (K).Result.Table;
+         end if;
+      end loop;
+      return (others => <>);
+   end World_Table;
+
    procedure World_Pose_Covariance (M : Model; A : Arm_Id; Readings : Real_Array; Turn, Place : out Mat3) is
       use Driver.Numerics.Arrays;
       K : constant Natural := Index_Of (M, A);

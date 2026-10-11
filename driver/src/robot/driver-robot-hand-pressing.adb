@@ -33,16 +33,26 @@ package body Driver.Robot.Hand.Pressing is
    is
       Tool    : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
       Down    : constant Direction_Estimate := Up_In_Arm (M, Arm);
+      --  No eye saw a surface below the hand (no table in the arm's frame, its own eye's or the world's): the press
+      --  goes by touch, along the lobe's line of sight as the hand stands. The first contact is where the surface is,
+      --  and presses tilted about that line solve the surface and the tip together (Touch, an unmeasured surface);
+      --  the aim turns nothing, and the yaw turns the hand about that line through the eye (item 14).
+      Blind   : constant Boolean := Down.Sigma >= Real'Last;
    begin
       Result := (others => <>);
-      Result.Ok := Down.Sigma < Real'Last and then Tool.Position_Covariance (1, 1) < Real'Last
-        and then Eye_Mount (M, Eye).Kind = Arm_Carried;
+      Result.Ok := Tool.Position_Covariance (1, 1) < Real'Last and then Eye_Mount (M, Eye).Kind = Arm_Carried
+        and then (Blind or else abs Down.Unit_Vector > 0.0) and then abs Along > 0.0;
       if not Result.Ok then
          return;
       end if;
-      Result.Into := -Down.Unit_Vector;
-      Result.Above := Driver.Robot.Hand.Aims.Turned_About
-        (Tool.Pose, Eye_In_Tool (M, Eye, O).Pose.Translation, Along, Result.Into);
+      if Blind then
+         Result.Into := Unit (Tool.Pose.Rotation * Along);
+         Result.Above := Tool.Pose;
+      else
+         Result.Into := -Down.Unit_Vector;
+         Result.Above := Driver.Robot.Hand.Aims.Turned_About
+           (Tool.Pose, Eye_In_Tool (M, Eye, O).Pose.Translation, Along, Result.Into);
+      end if;
       if Yaw /= 0.0 then
          declare
             Eye_Here : constant Vec3 := Eye_In_Tool (M, Eye, O).Pose.Translation;
@@ -53,9 +63,10 @@ package body Driver.Robot.Hand.Pressing is
          end;
       end if;
       Result.Turn := Angle (Transpose (Tool.Pose.Rotation) * Result.Above.Rotation);
-      --  The aim points the line of sight at "down" as the arm's eye saw the table: known to that direction's sigma.
+      --  The aim points the line of sight at "down" as the arm's eye saw the table: known to that direction's sigma; a
+      --  blind aim is the tool's own turn, known as the fit knows it.
       Result.Plan := Driver.Robot.Motion.Plan_Reach_In_Arm
-        (M, Arm, O, (Pose => Result.Above, Position_Only => False), Goal_Turn_Sigma => Down.Sigma);
+        (M, Arm, O, (Pose => Result.Above, Position_Only => False), Goal_Turn_Sigma => (if Blind then 0.0 else Down.Sigma));
       if Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Planned then
          declare
             There : Observation := O;
@@ -85,7 +96,8 @@ package body Driver.Robot.Hand.Pressing is
          return (Place       => abs (Tool.Pose.Translation - A.Above.Translation),
                  Place_Sigma => Sqrt (Sigma ** 2 + Real'Max (Values (1), Real'Max (Values (2), Values (3)))),
                  Turn        => Angle (Transpose (Tool.Pose.Rotation) * A.Above.Rotation),
-                 Turn_Sigma  => (if Down.Sigma < Real'Last then Sqrt (Sigma ** 2 + Down.Sigma ** 2) else Real'Last));
+                 --  A blind aim's turn (no table: the tool's own) is told against the fit's sigma alone.
+                 Turn_Sigma  => (if Down.Sigma < Real'Last then Sqrt (Sigma ** 2 + Down.Sigma ** 2) else Sigma));
       end;
    end Off_Aim;
 
