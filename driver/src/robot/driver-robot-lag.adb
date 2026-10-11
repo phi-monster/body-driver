@@ -135,10 +135,23 @@ package body Driver.Robot.Lag is
       end if;
    end Difference;
 
-   --  The series takes more than one value.
+   --  The series takes more than one value: some available value differs from the first available one
+   --  (one pass; the pass over every pair it used to be took the square of the stream's length when
+   --  nothing varied, see Measure).
    function Varies (S : Series) return Boolean is
-     (for some I in S.Value'Range => S.Have (I)
-        and then (for some J in S.Value'Range => S.Have (J) and then S.Value (J) /= S.Value (I)));
+      First : Natural := 0;
+   begin
+      for I in S.Value'Range loop
+         if S.Have (I) then
+            if First = 0 then
+               First := I;
+            elsif S.Value (I) /= S.Value (First) then
+               return True;
+            end if;
+         end if;
+      end loop;
+      return False;
+   end Varies;
 
    --  How far a lag can be told at all: a push's response is told from the
    --  next push's only when it shows before that one starts, so the lag is
@@ -239,21 +252,21 @@ package body Driver.Robot.Lag is
             end if;
          end loop;
          declare
+         --  The groups whose speed ranks vary, found once: they are the same at every shift and for
+         --  every eye. Found inside Fit_Tail, as they were, a stream of a few thousand beats held at
+         --  rest, with no push yet so that every shift the stream allows was tried, spent the whole
+         --  estimate here (B0F1, a random body sagging under its hold: the lag measurement took 1.8 s
+         --  at 384 beats, 13 at 768, 140 at 1536 and 731 at 2651, and the boot waited on it for
+         --  good; the profile of its replay put the time in this scan).
+         Varying : array (1 .. Natural (M.Groups.Length)) of Group_Id;
+         K       : Natural := 0;
          --  The chance that noise fits the eye's motion at this shift as well as
          --  the pushes do: the eye's differenced motion ranks regressed on every
          --  varying group's differenced speed ranks at once, each of which can
          --  only add motion, against the F distribution of that fit.
          function Fit_Tail (Motion : Series; Shift : Integer) return Real is
-            Varying : array (1 .. Natural (M.Groups.Length)) of Group_Id;
-            K       : Natural := 0;
             Rows    : Natural := 0;
          begin
-            for G in Speeds'Range loop
-               if M.Groups (G).Commandable and then Varies (Speeds (G).all) then
-                  K := K + 1;
-                  Varying (K) := G;
-               end if;
-            end loop;
             for I in Motion.Value'Range loop
                if Motion.Have (I) and then I - Shift in Motion.Value'Range
                  and then (for all J in 1 .. K => Speeds (Varying (J)).Have (I - Shift))
@@ -295,6 +308,12 @@ package body Driver.Robot.Lag is
             end;
          end Fit_Tail;
       begin
+         for G in Speeds'Range loop
+            if M.Groups (G).Commandable and then Varies (Speeds (G).all) then
+               K := K + 1;
+               Varying (K) := G;
+            end if;
+         end loop;
          for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
             declare
                S      : Eye_Stream renames M.Eyes (E);
@@ -332,17 +351,21 @@ package body Driver.Robot.Lag is
                   end loop;
                   Difference (Motion.all);
                   Rank (Motion.all);
-                  for Shift in -Bound .. Bound loop
-                     declare
-                        Tail : constant Real := Fit_Tail (Motion.all, Shift);
-                     begin
-                        Tests := Tests + 1;
-                        if Tail < Best then
-                           Best := Tail;
-                           Lag := Shift;
-                        end if;
-                     end;
-                  end loop;
+                  --  No group's speed varied: no shift can be told from another (Fit_Tail gave every
+                  --  shift the same chance), so none is tried and the lag stays unmeasured, as before.
+                  if K > 0 then
+                     for Shift in -Bound .. Bound loop
+                        declare
+                           Tail : constant Real := Fit_Tail (Motion.all, Shift);
+                        begin
+                           Tests := Tests + 1;
+                           if Tail < Best then
+                              Best := Tail;
+                              Lag := Shift;
+                           end if;
+                        end;
+                     end loop;
+                  end if;
                   --  The best of many shifts is one of a family: the lag is
                   --  measured only when it stands out of all of them.
                   if Tests > 0
