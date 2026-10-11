@@ -507,14 +507,23 @@ package body Driver.Robot.Kinematics.Fit is
    procedure Free is new Ada.Unchecked_Deallocation (Rigid_Array, Rigid_Access);
 
    procedure Refine_Tracks
-     (Changes : Driver.Numerics.Arrays.Real_Matrix;
-      Sight   : Sighting_Array;
-      Joints  : in out Joint_Array;
-      Chain   : Chain_Order;
-      L       : in out Lens;
-      Report  : in out Fit_Report)
+     (Changes      : Driver.Numerics.Arrays.Real_Matrix;
+      Sight        : Sighting_Array;
+      Joints       : in out Joint_Array;
+      Chain        : Chain_Order;
+      L            : in out Lens;
+      Report       : in out Fit_Report;
+      Focal_Within : Real := 0.0)
    is
       N         : constant Natural := Joints'Length;
+      --  The focal lengths the fit is given are the focal search's (stage 1), told within Focal_Within in the
+      --  logarithm: they enter the fit as a measurement of that width, two residuals of unit scale (no measurement
+      --  when the width is 0). Without it the fit walked the focal length along a direction the sightings do not
+      --  determine: B0a_1 (x5, 10-13), the search at 490 px and the fit ending at "focal lengths undetermined:
+      --  1.84 +- 259 and 1.53 +- 215 px"; B0a_2 at 0.0004 px after 4042 s.
+      Ln_Fx0    : constant Real := Ln (L.Fx);
+      Ln_Fy0    : constant Real := Ln (L.Fy);
+      Prior_W   : constant Real := (if Focal_Within > 0.0 then 1.0 / Focal_Within ** 2 else 0.0);
       Frames    : constant Natural := Changes'Length (1);
       S         : constant Natural := Sight'Length;
       Per_Joint : constant := 6;
@@ -996,13 +1005,14 @@ package body Driver.Robot.Kinematics.Fit is
                   Sigma : Real;
                   Lambda : Real := Real'Model_Epsilon;
                   Cost0 : Real;
-                  function Cost (R : Real_Array) return Real is
+                  --  The sightings' cost at the parameters Xv, and the focal search's measurement's (Prior_W).
+                  function Cost (R : Real_Array; Xv : Real_Array) return Real is
                      C : Real := 0.0;
                   begin
                      for I in R'Range loop
                         C := C + Huber_Cost (R (I) / Scales (I));
                      end loop;
-                     return C;
+                     return C + 0.5 * Prior_W * ((Xv (Xv'First) - Ln_Fx0) ** 2 + (Xv (Xv'First + 1) - Ln_Fy0) ** 2);
                   end Cost;
                begin
                   for I in 1 .. S loop
@@ -1028,7 +1038,7 @@ package body Driver.Robot.Kinematics.Fit is
                      Free (Scales);
                      exit;
                   end if;
-                  Cost0 := Cost (R0.all);
+                  Cost0 := Cost (R0.all, X);
                   --  A step that still lowers the cost is taken again, as many times as the float has bits: each
                   --  step of a convergent descent gains digits, and one that crawls down a valley the sightings
                   --  leave flat has not found the fit they determine (the covariance then says what is left
@@ -1100,6 +1110,13 @@ package body Driver.Robot.Kinematics.Fit is
                               Gd (T) := Gd (T) - W * Jd (I) * R0 (I);
                            end;
                         end loop;
+                        --  The focal search's measurement of the two focal lengths (Prior_W, the header).
+                        if Prior_W > 0.0 then
+                           A (1, 1) := A (1, 1) + Prior_W;
+                           Gp (1) := Gp (1) - Prior_W * (X (1) - Ln_Fx0);
+                           A (2, 2) := A (2, 2) + Prior_W;
+                           Gp (2) := Gp (2) - Prior_W * (X (2) - Ln_Fy0);
+                        end if;
                         for P in 1 .. Count loop
                            for Q in 1 .. P - 1 loop
                               A (P, Q) := A (Q, P);
@@ -1157,7 +1174,7 @@ package body Driver.Robot.Kinematics.Fit is
                                     if Moves then
                                        Residuals (Xn, Dn.all, Index, Rn.all);
                                        declare
-                                          Cn : constant Real := Cost (Rn.all);
+                                          Cn : constant Real := Cost (Rn.all, Xn);
                                        begin
                                           if Cn < Cost0 then
                                              Improved := Moves_The_Fit (Cost0 - Cn);
@@ -1634,6 +1651,10 @@ package body Driver.Robot.Kinematics.Fit is
         (for some J in 1 .. N => Moved (Frame, J) and then (for some K in J + 1 .. N => Moved (Frame, K)));
 
       Lens0  : Lens := (Fx | Fy => 1.0, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, others => 0.0);
+      --  Half the width, in the logarithm, the focal search of stage 1 could tell the focal length within
+      --  (its ended bracket); 0 before the search. The last stage takes the search's focal length as a
+      --  measurement of this width (Refine_Tracks).
+      Focal_Within : Real := 0.0;
       Counts : array (1 .. N) of Natural := [others => 0];
       --  The joints along the arm, from the base (stage 4 finds it; the joints alone are fitted before it).
       Order  : Chain_Order (1 .. N) := [for K in 1 .. N => K];
@@ -2343,7 +2364,7 @@ package body Driver.Robot.Kinematics.Fit is
             --  bracket: the basin the start fell in, as the search found it);
             --  then the golden section narrows it until its two inner points
             --  cannot be told apart, and Best_At is the better of them.
-            procedure Settle (Start : Real; Low, High, Best_At : out Real; Found : out Best_Array) is
+            procedure Settle (Start : Real; Low, High, Best_At, Within : out Real; Found : out Best_Array) is
                A, B, X1, X2   : Real;
                BA, BB, B1, B2 : Best_Array;
             begin
@@ -2390,6 +2411,9 @@ package body Driver.Robot.Kinematics.Fit is
                      Search (Exp (X2), B2);
                   end if;
                end loop;
+               --  Half the bracket the search ended in, in the logarithm: the two inner points could not be told
+               --  apart by the score's error, so the focal length is told to about this.
+               Within := (B - A) / 2.0;
                if Total (B1) < Total (B2) then
                   Best_At := X1;
                   Found := B1;
@@ -2400,9 +2424,10 @@ package body Driver.Robot.Kinematics.Fit is
             end Settle;
 
             Low, High, Best_At : Real;
+            Told_Within        : Real;
             Best          : Best_Array;
          begin
-            Settle (Ln (Lens0.Cx), Low, High, Best_At, Best);
+            Settle (Ln (Lens0.Cx), Low, High, Best_At, Told_Within, Best);
             --  The search finds the minimum of the basin its start falls in,
             --  and a start in the wrong basin finds the wrong focal length and,
             --  from it, the wrong order of the joints (A98's arm 1: starts of
@@ -2416,19 +2441,21 @@ package body Driver.Robot.Kinematics.Fit is
                   declare
                      Width : constant Real := High - Low;
                      Start : constant Real := (if Side = 1 then Low - Width else High + Width);
-                     L2, H2, A2 : Real;
-                     F2         : Best_Array;
+                     L2, H2, A2, W2 : Real;
+                     F2             : Best_Array;
                   begin
                      exit when Width <= 0.0 or else abs Start >= Ln (Real'Last) / 2.0;
-                     Settle (Start, L2, H2, A2, F2);
+                     Settle (Start, L2, H2, A2, W2, F2);
                      exit when Total (F2) >= Total (Best);
                      Low := L2;
                      High := H2;
                      Best_At := A2;
+                     Told_Within := W2;
                      Best := F2;
                   end;
                end loop;
             end loop;
+            Focal_Within := Told_Within;
             declare
                Focal : constant Real := Exp (Best_At);
             begin
@@ -2438,7 +2465,9 @@ package body Driver.Robot.Kinematics.Fit is
                              & " lengths from " & Driver.Log.Image (F_Least, 3) & " to " & Driver.Log.Image (F_Most, 1)
                              & " px, best " & Driver.Log.Image (Focal, 1) & " px, score "
                              & Driver.Log.Image (Total (Best), 4) & " +- " & Driver.Log.Image (Total_Error (Best), 4)
-                             & " px; the basin " & Driver.Log.Image (Exp (Low), 1) & " to " & Driver.Log.Image (Exp (High), 1));
+                             & " px; the basin " & Driver.Log.Image (Exp (Low), 1) & " to " & Driver.Log.Image (Exp (High), 1)
+                             & ", told within " & Driver.Log.Image (Exp (Best_At - Told_Within), 1) & " to "
+                             & Driver.Log.Image (Exp (Best_At + Told_Within), 1));
             for J in 1 .. N loop
                if Best (J).Scale = 0.0 then
                   for K in 1 .. N loop
@@ -2784,7 +2813,7 @@ package body Driver.Robot.Kinematics.Fit is
                   Alone (K) := X;
                end if;
             end loop;
-            Refine_Tracks (Changes, Alone.all, Joints, Order, Lx, Rep);
+            Refine_Tracks (Changes, Alone.all, Joints, Order, Lx, Rep, Focal_Within);
             Lens0 := Lx;
             Track_Depths := Rep.Depths;
             Free (Alone);
@@ -3169,7 +3198,7 @@ package body Driver.Robot.Kinematics.Fit is
 
       --  Stage 5: the tracks.
       Enter (5);
-      Refine_Tracks (Changes, Sight, Joints, Order, L, Report);
+      Refine_Tracks (Changes, Sight, Joints, Order, L, Report, Focal_Within);
       declare
          Sum : Real := 0.0;
       begin
