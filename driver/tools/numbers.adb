@@ -43,7 +43,8 @@ procedure Numbers is
    Undecided_Why : constant String :=
      "undecided: read the context and classify as structure / math / numerics / statistics / format";
 
-   --  A reason that rests on one run or one body (an A-numbered run, x5, G1, a seed, the box, a fake body) is
+   --  A reason that rests on one run or one body (an A-numbered run, x5, G1, a numbered seed, the box the runs
+   --  are made on, a fake body) is
    --  a tuning number's: what one body measured is that body's, not the driver's. The ladder that visited every
    --  other level was registered as math with the reason "one keyframe per two doublings", which A9's arm had
    --  shown on x5 and a fake body's eye could not follow (10-12).
@@ -51,11 +52,22 @@ procedure Numbers is
       use Ada.Strings.Fixed;
       Lower : constant String := Ada.Characters.Handling.To_Lower (Why);
    begin
-      if Index (Lower, "x5") > 0 or else Index (Lower, " g1") > 0 or else Index (Lower, "seed ") > 0
-        or else Index (Lower, "the box") > 0 or else Index (Lower, "fake body") > 0
+      if Index (Lower, "x5") > 0 or else Index (Lower, " g1") > 0
+        or else Index (Lower, "on the box") > 0 or else Index (Lower, "fake body") > 0
       then
          return True;
       end if;
+      --  "seed" and a number: one draw of a body or a scene (a statistical seed, or the seed of a mixture, is not).
+      declare
+         Here : Natural := Index (Lower, "seed ");
+      begin
+         while Here > 0 loop
+            if Here + 5 <= Lower'Last and then Lower (Here + 5) in '0' .. '9' then
+               return True;
+            end if;
+            Here := Index (Lower, "seed ", Here + 1);
+         end loop;
+      end;
       --  "A" and two or more digits: a run's name.
       for I in Why'First .. Why'Last - 2 loop
          if Why (I) = 'A' and then Why (I + 1) in '0' .. '9' and then Why (I + 2) in '0' .. '9'
