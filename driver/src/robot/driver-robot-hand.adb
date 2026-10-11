@@ -16,7 +16,6 @@ with Driver.Robot.Hand.Slide;
 with Driver.Robot.Hand.Sweep;
 with Driver.Robot.Hand.Tips;
 with Driver.Robot.Hand.Views;
-with Driver.Robot.Kinematics;
 with Driver.Robot.Lockin;
 with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
@@ -238,6 +237,9 @@ package body Driver.Robot.Hand is
 
    function Has_Pair (D : Hand_Data; G : Group_Id; E : Eye_Id) return Boolean is
      (for some P of D.Pairs => P.Group = G and then P.Eye = E);
+
+   procedure Keep (D : in out Hand_Data; Made : in out Hand_Record);
+   --  Keeps the hand made (declared ahead: Find_Pairs makes the hand an arm's tool is).
 
    procedure Find_Pairs (D : in out Hand_Data; M : Model; O : Observation);
    --  Every closer group with the eyes on its own arm, once the body has
@@ -536,7 +538,6 @@ package body Driver.Robot.Hand is
       Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & " sizes: " & Sizes_Text (R));
    end Size_Up;
 
-   procedure Keep (D : in out Hand_Data; Made : in out Hand_Record);
    --  The hand found from a closer group, among the hands. A hand measured
    --  again keeps its presses; they are given to the new lobes by number, or
    --  forgotten when the number changed.

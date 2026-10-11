@@ -2278,8 +2278,8 @@ package body Driver.Robot.Kinematics.Fit is
             --  point scores better than both ends (Low and High are that
             --  bracket: the basin the start fell in, as the search found it);
             --  then the golden section narrows it until its two inner points
-            --  cannot be told apart, and At is the better of them.
-            procedure Settle (Start : Real; Low, High, At : out Real; Found : out Best_Array) is
+            --  cannot be told apart, and Best_At is the better of them.
+            procedure Settle (Start : Real; Low, High, Best_At : out Real; Found : out Best_Array) is
                A, B, X1, X2   : Real;
                BA, BB, B1, B2 : Best_Array;
             begin
@@ -2327,18 +2327,18 @@ package body Driver.Robot.Kinematics.Fit is
                   end if;
                end loop;
                if Total (B1) < Total (B2) then
-                  At := X1;
+                  Best_At := X1;
                   Found := B1;
                else
-                  At := X2;
+                  Best_At := X2;
                   Found := B2;
                end if;
             end Settle;
 
-            Low, High, At : Real;
+            Low, High, Best_At : Real;
             Best          : Best_Array;
          begin
-            Settle (Ln (Lens0.Cx), Low, High, At, Best);
+            Settle (Ln (Lens0.Cx), Low, High, Best_At, Best);
             --  The search finds the minimum of the basin its start falls in,
             --  and a start in the wrong basin finds the wrong focal length and,
             --  from it, the wrong order of the joints (A98's arm 1: starts of
@@ -2360,13 +2360,13 @@ package body Driver.Robot.Kinematics.Fit is
                      exit when Total (F2) >= Total (Best);
                      Low := L2;
                      High := H2;
-                     At := A2;
+                     Best_At := A2;
                      Best := F2;
                   end;
                end loop;
             end loop;
             declare
-               Focal : constant Real := Exp (At);
+               Focal : constant Real := Exp (Best_At);
             begin
             for J in 1 .. N loop
                if Best (J).Scale = 0.0 then

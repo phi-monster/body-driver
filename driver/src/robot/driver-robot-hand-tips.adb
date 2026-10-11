@@ -311,7 +311,8 @@ package body Driver.Robot.Hand.Tips is
                            Slide            => Slipped.Fraction * Travel.Mean,
                            Slide_Covariance => Slipped.Fraction_Sigma ** 2 * Outer (Travel.Mean, Travel.Mean)
                                                + Slipped.Fraction ** 2 * Travel.Covariance,
-                           Slide_Angle      => 0.0);   --  a vector tells it
+                           Slide_Angle      => 0.0,   --  a vector tells it, and the tip is a point: no line of its own
+                           others           => <>);
                         Of_Kept (N) := I;
                      end;
                   end if;

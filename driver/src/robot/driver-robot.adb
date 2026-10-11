@@ -554,6 +554,7 @@ package body Driver.Robot is
    end Tool_In_Arm;
 
    function Table_In_Arm (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate is
+      use Driver.Numerics.Arrays;
    begin
       if Natural (A) > Arm_Count (M) then
          return (others => <>);
@@ -691,11 +692,11 @@ package body Driver.Robot is
                      declare
                         From : constant Real := Channels.Reading (M, G, E.Start - 1, L);
                         To   : constant Real := Channels.Target (M, G, E.Start, L);
-                        At   : constant Real := Channels.Reading (M, G, E.End_At, L);
+                        Rest_At : constant Real := Channels.Reading (M, G, E.End_At, L);
                         Way  : constant Sense := (if To >= From then Increasing else Decreasing);
                         Stop : constant Estimate := End_Of (M, G, L, Way);
                         --  How far past the end, the way asked, the channel came to rest.
-                        Past : constant Real := (if Way = Increasing then At - Stop.Value else Stop.Value - At);
+                        Past : constant Real := (if Way = Increasing then Rest_At - Stop.Value else Stop.Value - Rest_At);
                      begin
                         return Known (Stop)
                           and then (Past >= 0.0 or else not Driver.Uncertain.Significant (Past, Sqrt (2.0) * Stop.Sigma));

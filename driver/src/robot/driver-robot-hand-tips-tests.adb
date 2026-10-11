@@ -54,7 +54,7 @@ package body Driver.Robot.Hand.Tips.Tests is
    --  The lobes' lines of sight, each with the spread of its tip region across it (an angle).
    function Sights (Spread : Real := 0.0; Pitch : Real := 0.0; Travel : Real := 0.0) return Sight_Table is
      ([for L in 1 .. 2 =>
-         [for O in Opening => (Known  => True,
+         [for O in Opening => (Known  => True, Lined => True,
                                Ray    => (Origin    => (Mean => Eye, Covariance => 1.0e-10 * Identity3),
                                           Direction => (Unit_Vector => Line (L, O), Sigma => 1.0e-5)),
                                Spread => Spread,
@@ -351,9 +351,9 @@ package body Driver.Robot.Hand.Tips.Tests is
       Made  : Boolean;
       Press : Driver.Robot.Hand.Presses.Event;
       Slid_20 : constant Slid := (Known => True, Pixels => 20.0, Pixels_Sigma => 0.5, Fraction => 0.1,
-                                  Fraction_Sigma => 0.0025);
+                                  Fraction_Sigma => 0.0025, others => <>);
       Slid_Nil : constant Slid := (Known => True, Pixels => 0.2, Pixels_Sigma => 0.4, Fraction => 0.001,
-                                   Fraction_Sigma => 0.002);
+                                   Fraction_Sigma => 0.002, others => <>);
    begin
       Ada.Numerics.Float_Random.Reset (Gen, 57);
       Set_Sights (B, Sights);
@@ -392,7 +392,7 @@ package body Driver.Robot.Hand.Tips.Tests is
    function Measured_Slide (L : Positive; Known_Slide : Boolean := True) return Slid_Row is
      ([for Which in 1 .. 2 => (if Which = L and then Known_Slide
                                then Slid'(Known => True, Pixels => 0.0, Pixels_Sigma => 1.0, Fraction => Slid_By (L),
-                                         Fraction_Sigma => 0.01)
+                                         Fraction_Sigma => 0.01, others => <>)
                                else Slid'(others => <>))]);
 
    --  Presses at both openings, or at the open one only, the fingers sliding by their shares under each, the
@@ -444,7 +444,7 @@ package body Driver.Robot.Hand.Tips.Tests is
          Row   : constant Slid_Row :=
            (if Measured
             then [1 => Slid'(Known => True, Pixels => Share * Reach, Pixels_Sigma => 0.1,
-                             Fraction => Share, Fraction_Sigma => 0.002),
+                             Fraction => Share, Fraction_Sigma => 0.002, others => <>),
                   2 => Slid'(others => <>)]
             else [1 => Slid'(others => <>), 2 => Slid'(others => <>)]);
       begin

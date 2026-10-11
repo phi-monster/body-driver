@@ -803,6 +803,7 @@ procedure Score is
 
    type Arm_Fit is record
       Found : Boolean := False;
+      Own   : Boolean := False;   --  fitted in the arm's own frame, with a similarity of its own ("frames": own)
       Link  : Unbounded_String;
       X     : Parameters := [others => 0.0];
       --  The links are ranked by the root mean square of the test positions'
@@ -1089,6 +1090,7 @@ procedure Score is
                            end if;
                         end;
                      end if;
+                     Best.Own := Own;
                      Fits (Own) := Best;
                   end;
                end if;
@@ -1411,9 +1413,9 @@ procedure Score is
             declare
                Train, Test : Pair_Vectors.Vector;
             begin
-               Split_Pairs (Arm, To_String (Link), Train, Test);
+               Split_Pairs (Arm, To_String (Link), Fit.Own, Train, Test);
                if Natural (Train.Length) >= 5 then
-                  Fit.X := Best_Fit (Train, True, World_X, World_Length);
+                  Fit.X := Best_Fit (Train, not Fit.Own, World_X, (if Fit.Own then Spread (Train, True) else World_Length));
                   Fit.Link := Link;
                end if;
             end;

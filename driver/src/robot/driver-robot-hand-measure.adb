@@ -402,6 +402,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Status : Sweeps.Progress := Sweeps.Measured;
          Helps  : Boolean := False;   --  more poses could place the lobes
          Have   : Natural := 0;
+         Share, Doubt : Real := 0.0;   --  of the last placing (Lobes.Located)
          procedure Read_Status (O : Observation) is
             P : constant Natural := Own_Pair (G);
          begin
@@ -428,7 +429,6 @@ procedure Measure (H : in out Hands; M : in out Model) is
          --  (A91's hand 1 doubled its raises with the lobes no further apart, up to the arm's end; item 5).
          Last_Share : Real := -1.0;
          Last_Doubt : Real := Real'Last;
-         Share, Doubt : Real := 0.0;
       begin
          loop
             Hold_Beat (Read_Status'Access);

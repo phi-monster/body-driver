@@ -2295,6 +2295,8 @@ package body Driver.Robot.Kinematics is
      (if Fitted (M, A) then M.Kinematics (Index_Of (M, A)).Result.Table else (others => <>));
 
    function Standing_Near (M : Model; A : Arm_Id; Point : Vec3; Within : Real) return Natural is
+      use Driver.Numerics.Arrays;
+      use Ada.Numerics.Long_Elementary_Functions;
       K     : constant Natural := Index_Of (M, A);
       Count : Natural := 0;
    begin
@@ -2316,13 +2318,16 @@ package body Driver.Robot.Kinematics is
                   --  The track's depth is uncertain by its logarithm's sigma: along its line of sight (the
                   --  reference eye is the origin), its length times that, of which the part along the normal
                   --  is the height's; with the plane's own there.
-                  Along   : constant Real := abs X * F.Track_Sigmas (T);
+                  Length  : constant Real := abs X;
+                  Along   : constant Real := Length * F.Track_Sigmas (T);
+                  Facing  : constant Real := (if Length > 0.0 then Real'(Unit (X) * P.Normal) else 0.0);
                   Sigma   : constant Real :=
-                    (if abs X > 0.0
-                     then Sqrt ((Along * abs (Unit (X) * P.Normal)) ** 2 + Driver.Geometry.Height_Sigma (P, X) ** 2)
+                    (if Length > 0.0
+                     then Sqrt ((Along * abs Facing) ** 2 + Driver.Geometry.Height_Sigma (P, X) ** 2)
                      else Real'Last);
                   Off     : constant Vec3 := X - Point;
-                  Lateral : constant Real := abs (Off - (Off * P.Normal) * P.Normal);
+                  Across  : constant Real := Real'(Off * P.Normal);
+                  Lateral : constant Real := abs (Off - Across * P.Normal);
                begin
                   if Sigma < Real'Last and then H > 0.0 and then Driver.Uncertain.Significant (H, Sigma)
                     and then Lateral <= Within
