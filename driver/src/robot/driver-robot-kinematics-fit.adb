@@ -602,6 +602,7 @@ package body Driver.Robot.Kinematics.Fit is
          type Choice_List is array (1 .. Real'Machine_Mantissa) of Flags_Access;
          Began  : Choice_List := [others => null];
          Passes : Natural := 0;
+         Rounds : Natural := 0;   --  descent rounds over every pass, for the log (what the stage's time is made of)
          --  Each parameter's variance at the solution, in the reduced set: the
          --  lens (6), then per joint its tilt (2), its point across the axis
          --  (2) and its reading scale (1).
@@ -1044,6 +1045,7 @@ package body Driver.Robot.Kinematics.Fit is
                   --  leave flat has not found the fit they determine (the covariance then says what is left
                   --  undetermined).
                   for Round in 1 .. Real'Machine_Mantissa loop
+                     Rounds := Rounds + 1;
                      --  The Jacobian: the parameters one by one; the depths all at
                      --  once, since each residual has one depth of its own.
                      --  The columns at once (Driver.Parallel_For): each moves its own
@@ -1475,6 +1477,10 @@ package body Driver.Robot.Kinematics.Fit is
                  or else (for some Earlier of Began (1 .. Passes) => Earlier.all = Inlier.all);
             end;
          end loop;
+         --  What the stage's time was made of (B0a: 14 to 115 s a stage on 95 workers, the rounds unknown).
+         Driver.Log.Line (Driver.Log.Robot, "kinematics: the tracks' fit took" & Passes'Image & " passes and"
+                          & Rounds'Image & " rounds over" & S'Image & " sightings of" & Tracks'Image & " tracks,"
+                          & Count'Image & " parameters");
          --  The covariance of the last pass's estimate, from what the pass
          --  kept. Too few keyframes or points, or no point seen twice, to tell
          --  how the errors depend on each other: not determined.
