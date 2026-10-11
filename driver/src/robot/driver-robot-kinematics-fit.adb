@@ -2639,6 +2639,15 @@ package body Driver.Robot.Kinematics.Fit is
                         Anchor := J;
                      end if;
                   end loop;
+                  --  Fewer pairs than joints beyond the anchor cannot determine the distances: the least
+                  --  squares below needs at least as many rows as unknowns (its precondition; a random body,
+                  --  B0aF1 of 10-13, reached it with too few pairs and the estimate died on the assertion
+                  --  instead of saying so).
+                  if N > 1 and then P_Count > 0 and then P_Count + 1 < N then
+                     Fail ("the joints share too few tracked points to tell their distances apart");
+                     Free_All;
+                     return;
+                  end if;
                   if N > 1 and then P_Count > 0 then
                      declare
                         --  Unknowns: log rho of every joint but the anchor.
