@@ -130,9 +130,24 @@ procedure Replay is
    procedure Write_Beat (O : Driver.Observations.Observation) is
       Line_Text : Unbounded_String := To_Unbounded_String ("{""beat"":" & Natural'Image (Natural (O.Beat)) & ",""tools"":[");
    begin
+      --  A tool in the driver's world or, while the driver has not placed its arm there, in the arm's own frame
+      --  (Tool_In_Arm), which "frames" says per tool: the scorer fits such a tool with a similarity of its own, so the
+      --  hand of an arm not placed is scored still (item 11).
+      for A in 1 .. Driver.Robot.Arm_Count (Robot) loop
+         declare
+            Arm    : constant Driver.Robot.Arm_Id := Driver.Robot.Arm_Id (A);
+            Placed : constant Boolean := Driver.Uncertain.Known (Driver.Robot.Arm_Unit (Robot, Arm));
+         begin
+            Append (Line_Text, (if A > 1 then "," else "")
+                    & Pose_Json ((if Placed then Driver.Robot.Tool_Pose (Robot, Arm, O)
+                                  else Driver.Robot.Tool_In_Arm (Robot, Arm, O)).Pose));
+         end;
+      end loop;
+      Append (Line_Text, "],""frames"":[");
       for A in 1 .. Driver.Robot.Arm_Count (Robot) loop
          Append (Line_Text, (if A > 1 then "," else "")
-                 & Pose_Json (Driver.Robot.Tool_Pose (Robot, Driver.Robot.Arm_Id (A), O).Pose));
+                 & (if Driver.Uncertain.Known (Driver.Robot.Arm_Unit (Robot, Driver.Robot.Arm_Id (A)))
+                    then """world""" else """own"""));
       end loop;
       Append (Line_Text, "],""eyes"":[");
       for E in 1 .. Driver.Robot.Eye_Count (Robot) loop
