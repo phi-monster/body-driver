@@ -921,6 +921,7 @@ driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	2_147_483
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	48_271	math	Park and Miller's minimal standard generator: the multiplier
 driver-robot-boot.adb	Group : Group_Id := 1;	1	structure	a placeholder, set before it is read
 driver-robot-boot.adb	Held_From, Held_To : array (1 .. 2 * Size) of Natural := [others => 0];	2	structure	two pushes a channel, one each way
+driver-robot-boot.adb	Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)))];	1	structure	the guessed hold begins at one beat, the unit, while the stream can tell no lag; the doubling goes on from it
 driver-robot-boot.adb	Last : Count_Grid := [others => [others => -1]];	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Needed : array (1 .. Count, 1 .. Natural'Max (1, Most_Channels)) of Boolean :=	1	structure	an array of at least one column: a group of no channels needs none
 driver-robot-boot.adb	Next_Pause (G) := Hold_After_A_Push (M, Group_Id (G), 2 * Pause (G));	2	math	doubling: the guessed hold climbs with the rounds until the seeing eyes lags are measured
@@ -933,9 +934,8 @@ driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	1.0	mat
 driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
-driver-robot-boot.adb	Pause : array (1 .. Count) of Natural := [others => Natural'Max (1, Driver.Robot.Lag.Longest (M))];	1	structure	the hold after a push begins at one beat, the unit, while the stream can tell no lag; the doubling goes on from it
-driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved, Pause => Natural'Max (1, Driver.Robot.Lag.Longest (M)));	1	structure	the hold after a push begins at one beat, the unit, while the stream can tell no lag
-driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved, Pause => Natural'Max (1, Driver.Robot.Lag.Longest (M)));	1.0	structure	the first round pushes by the amounts as recognized, once
+driver-robot-boot.adb	Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))));	1	structure	the guessed hold begins at one beat, the unit, while the stream can tell no lag
+driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved,	1.0	structure	the first round pushes by the amounts as recognized, once
 driver-robot-boot.adb	R := R / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	2	format	two digits after the point in the log
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	3	format	three exponent digits in the log

@@ -300,7 +300,8 @@ package body Driver.Robot.Boot is
          declare
             Moved : Boolean;
          begin
-            Push_Both_Ways (G, Size, 1.0, Moved, Pause => Natural'Max (1, Driver.Robot.Lag.Longest (M)));
+            Push_Both_Ways (G, Size, 1.0, Moved,
+                            Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))));
          end;
       end Recognize;
 
@@ -889,7 +890,9 @@ package body Driver.Robot.Boot is
                            --  The hold after each push (Pause_After_A_Push): the longest measured lag once every eye's
                            --  is measured, until then the longest lag the stream could tell when the rounds began,
                            --  doubled with the rounds (Push_Both_Ways).
-                           Pause  : array (1 .. Count) of Natural := [others => Natural'Max (1, Driver.Robot.Lag.Longest (M))];
+                           Pause  : array (1 .. Count) of Natural :=
+                             [for G in 1 .. Count =>
+                                Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)))];
                            --  Per group: every eye that sees it move at all has its lag measured, and the longest of
                            --  those lags (Read_Open). An eye that sees nothing of the group never gets a lag from its
                            --  pushes and must not keep the hold at the doubled guess: B0a (10-13), the head eye saw
