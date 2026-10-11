@@ -3,9 +3,12 @@
 --  Every command key is sent every beat, with as many values as its reading.
 --  A group with a target gets the target. A group without one holds: it gets
 --  the last target the driver sent it in this episode; if it was never
---  commanded in this episode, its reading of this beat; if this beat has no
---  reading, whatever was last sent for it; and if nothing was ever sent, the
---  key is left out. No value is ever invented.
+--  commanded in this episode, the reading of the beat it was first held at,
+--  kept until a target comes (not the reading of every beat: a body that
+--  gives under its load would be told each beat to stand where it had sagged
+--  to, and creep without end); if that beat has no reading, whatever was last
+--  sent for it; and if nothing was ever sent, the key is left out. No value is
+--  ever invented.
 
 with Ada.Containers.Indefinite_Ordered_Maps;
 with Driver.Bytes;
@@ -45,6 +48,7 @@ private
 
    type State is record
       Targets   : Value_Maps.Map;   --  last target per group in this episode
+      Held      : Value_Maps.Map;   --  per group never commanded this episode: the reading it was first held at
       Last_Sent : Value_Maps.Map;   --  last values sent per group, any episode
    end record;
 

@@ -19,6 +19,7 @@ with Driver.Robot.Tests;
 with Driver.Services;
 with Driver.Tests;
 with Driver.Twins.Tests;
+with Driver.Replies.Tests;
 with Driver.World.Tests;
 
 procedure Selftest is
@@ -33,6 +34,7 @@ begin
    Driver.Alignment.Tests.Register;
    Driver.Geometry.Tests.Register;
    Driver.Twins.Tests.Register;
+   Driver.Replies.Tests.Register;
    Driver.Pixels.Tests.Register;
    Driver.Instrument.Tests.Register;
    Driver.Robot.Tests.Register;
