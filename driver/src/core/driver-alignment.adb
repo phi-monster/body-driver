@@ -1205,7 +1205,9 @@ package body Driver.Alignment is
       Coarse        : Natural;
       Plain         : Place_Covariance;
       Radius        : Real;
-      Grow          : Positive) return Answer
+      Grow          : Positive;
+      Must_Beat     : Boolean := False;
+      Correlation_To_Beat : Real := 0.0) return Answer
    is
       Scale   : constant Real := Real (Halving) ** Coarse;
       A_Level : Level renames First.Sizes (Coarse);
@@ -1386,6 +1388,25 @@ package body Driver.Alignment is
       end;
 
       declare
+         --  The scan's best correlation: what a refusal from here on reports, for a retry to beat.
+         Best_Rho : constant Real := Rho (Peaks (1));
+
+         function Refuse (Why : Reason) return Answer is (Fail (Why) with delta Correlation => Best_Rho);
+      begin
+         --  A retry with a wider patch is fitted only where its scan shows more agreement at its best than the
+         --  narrower patch did: the wide patch's fits cost four times the narrow one's, and R1's retries found a
+         --  place for one in sixteen (2506 tried, 161 found), the scan telling most of the rest apart for nothing.
+         if Must_Beat and then Best_Rho <= Correlation_To_Beat then
+            return Refuse (No_Evidence);
+         end if;
+      end;
+
+      declare
+         Best_Rho : constant Real := Rho (Peaks (1));
+
+         function Refuse (Why : Reason; Verdict : Alignment.Verdict := Not_Found) return Answer is
+           (Fail (Why, Verdict) with delta Correlation => Best_Rho);
+
          Tries  : constant Positive := Peak_Count + 1;   --  every peak, and the place the prediction itself says
          Peak_Scratch : Peak_Fits (Peak_Count + 1);
          Fits   : Summary_Array renames Peak_Scratch.Fits.all;
@@ -1469,7 +1490,7 @@ package body Driver.Alignment is
             end if;
          end loop;
          if Reference = 0 then
-            return Fail (Not_Solvable);
+            return Refuse (Not_Solvable);
          end if;
 
          --  Which one is the place: the one that leaves least unexplained, in the noise the best of them leaves,
@@ -1506,7 +1527,7 @@ package body Driver.Alignment is
                end if;
             end loop;
             if Runner_Up > 0 and then Score (Best) - Score (Runner_Up) < Odds_Needed then
-               return Fail (Ambiguous);
+               return Refuse (Ambiguous);
             end if;
          end;
          Fitted := Fits (Best);
@@ -1523,11 +1544,11 @@ package body Driver.Alignment is
                Work.Add (Level_Fitting, Fitted.Passes, Driver.Clock.Seconds - T0);
             end;
             if not Fitted.Informative then
-               return Fail (Not_Solvable);
+               return Refuse (Not_Solvable);
             end if;
          end loop;
          if not Fitted.Converged then
-            return Fail (Not_Settled);
+            return Refuse (Not_Settled);
          end if;
 
          --  The verdict on the answer at the pixels.
@@ -1546,16 +1567,16 @@ package body Driver.Alignment is
             if Answer_U < 0.0 or else Answer_V < 0.0 or else Answer_U > Real (Second.Sizes (0).Width)
               or else Answer_V > Real (Second.Sizes (0).Height)
             then
-               return Fail (Outside_Picture, Not_In_View);
+               return Refuse (Outside_Picture, Not_In_View);
             end if;
             if 2 * Fitted.Count < Side_Of (Grow * Top_Half) ** 2 then
-               return Fail (Edge_Of_Picture);
+               return Refuse (Edge_Of_Picture);
             end if;
             if Squared_Length (Dx, Dy, Wide) > Window_Multiple ** 2 then
-               return Fail (Left_Window);
+               return Refuse (Left_Window);
             end if;
             if Fitted.Correlation <= 0.0 then
-               return Fail (No_Evidence);
+               return Refuse (No_Evidence);
             end if;
 
             --  How the answer moves with the choices the fit made. The noise of one fit does not say how far a place
@@ -1624,13 +1645,13 @@ package body Driver.Alignment is
             Eigenvalues (Cov, Largest, Smallest);
             Eigenvalues (Ridge, Ridge_Largest, Ridge_Smallest);
             if Smallest <= 0.0 then
-               return Fail (Not_Solvable);
+               return Refuse (Not_Solvable);
             end if;
             --  The pixels must tell the place along some direction better than the window does: the data's own
             --  precision there at least that of the window (then the covariance is no more than half the window's),
             --  or the answer is the prediction's own belief given back.
             if Smallest > Ridge_Smallest / 2.0 then
-               return Fail (Uninformative);
+               return Refuse (Uninformative);
             end if;
             return (Verdict => Found, Because => Matched, To => (U => Answer_U, V => Answer_V), Cov => Cov,
                     Linear => Fitted.Fitted.Linear, Correlation => Fitted.Correlation,
@@ -1715,7 +1736,7 @@ package body Driver.Alignment is
             function Checked (Found : Answer) return Answer is
               (if Found.Verdict = Driver.Alignment.Found
                     and then not Beats_Chance (First, Query, Plain, Found.Linear, Found.Correlation)
-               then Fail (No_Evidence) else Found);
+               then (Fail (No_Evidence) with delta Correlation => Found.Correlation) else Found);
 
             Answered   : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 1));
 
@@ -1731,7 +1752,9 @@ package body Driver.Alignment is
               and then Answered.Because in Ambiguous | Uninformative | No_Evidence | Left_Window | Not_Settled
             then
                declare
-                  Wider : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2));
+                  Wider : constant Answer :=
+                    Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2,
+                                       Must_Beat => True, Correlation_To_Beat => Answered.Correlation));
                begin
                   Work.Add (Retrying, (if Wider.Verdict = Found then 1 else 0), 0.0);
                   Work.Add_Retry (Answered.Because, Wider.Verdict = Found);

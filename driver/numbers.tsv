@@ -223,6 +223,7 @@ driver-alignment.adb	(if Shrinks then Natural (Real'Rounding (Log (1.0 / Smalles
 driver-alignment.adb	+ Integer'Min (Across - 1, Integer'Max (0, Integer (Real'Rounding (Centre_U - (Real (Low_X) + 0.5))))) + 1;	0.5	math	a pixel's centre lies half a pixel in from its corner
 driver-alignment.adb	Answered : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 1));	1	structure	a patch of the usual size: grown by one
 driver-alignment.adb	C (First + (Count - 1) * Step) := Pole / (Pole ** 2 - 1.0) * (Plus (Count) + Pole * Plus (Count - 1));	1.0	math	the closing term of the spline prefilter: the pole over its square less one
+driver-alignment.adb	Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2,	2	structure	a patch twice as wide
 driver-alignment.adb	Cost := 0.5 * (Current.Rss + Penalty (T, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
 driver-alignment.adb	Cost := 0.5 * (Current.Rss + Penalty (T, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
 driver-alignment.adb	Filter_Line (Spline.all, Spline'First + Row * Width, 1, Width);	1	structure	along a row the next pixel is one apart
@@ -285,7 +286,6 @@ driver-alignment.adb	Tolerance : constant Real := (if Final then Driver.Conventi
 driver-alignment.adb	Trial_Cost := 0.5 * (Trial.Rss + Penalty (Candidate, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
 driver-alignment.adb	Unit (J) := 1.0;	1.0	math	a unit vector: the column of the identity
 driver-alignment.adb	Whole : constant String := Natural'Image (T / 10);	10	format	seconds to a tenth in the log
-driver-alignment.adb	Wider : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2));	2	structure	a patch twice as wide
 driver-alignment.adb	Window_Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	statistics	a place has two coordinates
 driver-alignment.adb	Work.Add (Retrying, (if Wider.Verdict = Found then 1 else 0), 0.0);	0.0	structure	one found retry counted, none otherwise
 driver-alignment.adb	Work.Add (Retrying, (if Wider.Verdict = Found then 1 else 0), 0.0);	1	structure	one found retry counted, none otherwise
