@@ -288,7 +288,6 @@ driver-alignment.adb	Wx, Sx, Wy, Sy : array (0 .. 3) of Real;	3	math	the cubic B
 driver-alignment.adb	X : constant Real := U - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
 driver-alignment.adb	Y : constant Real := V - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
 driver-alignment.adb	and then (Axis = 2 or else (K - Field'First) mod Side < Side - 1)	2	structure	the second axis of a field on a grid, along its columns: it has a neighbour in every row but the last
-driver-alignment.adb	and then Score (K) + 0.5 * Pixels * ((Fits (K).Decrement + Fits (K).Penalty) / Real (Fits (K).Count))	0.5	math	the score weighs the residuals by a half, as the cost does
 driver-alignment.adb	elsif A < 2.0 then	2.0	math	the cubic B-spline's outer piece ends two knot spacings from its centre
 driver-alignment.adb	elsif Rho (Nearest) > -2.0 then	2.0	structure	a correlation is at least -1, so below -1 marks a cell that is not a candidate
 driver-alignment.adb	elsif Smallest > 1.0 then Natural (Real'Rounding (Log (Smallest, Real (Halving))))	1.0	math	a warp that enlarges in every direction
