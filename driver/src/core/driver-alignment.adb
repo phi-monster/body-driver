@@ -372,7 +372,6 @@ package body Driver.Alignment is
       Count    : Natural := 0;
       H        : Real_Matrix (1 .. Parameters, 1 .. Parameters) := [others => [others => 0.0]];
       G        : Real_Vector (1 .. Parameters) := [others => 0.0];
-      Own_H    : Real_Matrix (1 .. Parameters, 1 .. Parameters) := [others => [others => 0.0]];
       Residual : Real_Array (1 .. N) := [others => 0.0];
       Seen     : Real_Array (1 .. N) := [others => 0.0];
       Present  : Mask_Array (1 .. N) := [others => False];
@@ -515,7 +514,6 @@ package body Driver.Alignment is
       Result.Count := 0;
       Result.H := [others => [others => 0.0]];
       Result.G := [others => 0.0];
-      Result.Own_H := [others => [others => 0.0]];
       Result.Present := [others => False];
       Result.Residual := [others => 0.0];
       Result.Seen := [others => 0.0];
@@ -543,23 +541,6 @@ package body Driver.Alignment is
                            end loop;
                            Result.G (A) := Result.G (A) + Row (A) * R;
                         end loop;
-                        declare
-                           --  The slopes the second picture would have if it were the first, through the fitted gain
-                           --  and warp, which none of its noise is in.
-                           Det : constant Real := T.Linear.UU * T.Linear.VV - T.Linear.UV * T.Linear.VU;
-                           Own : constant Real_Vector (1 .. Parameters) :=
-                             Jacobian_Row
-                               (Di, Dj,
-                                T.Gain * (T.Linear.VV * Slope_U (K) - T.Linear.VU * Slope_V (K)) / Det,
-                                T.Gain * (T.Linear.UU * Slope_V (K) - T.Linear.UV * Slope_U (K)) / Det,
-                                Template (K));
-                        begin
-                           for A in 1 .. Parameters loop
-                              for B in A .. Parameters loop
-                                 Result.Own_H (A, B) := Result.Own_H (A, B) + Own (A) * Own (B);
-                              end loop;
-                           end loop;
-                        end;
                         Result.Rss := Result.Rss + R * R;
                         Result.Count := Result.Count + 1;
                         Result.Present (K) := True;
@@ -576,12 +557,51 @@ package body Driver.Alignment is
             Result.H (A, B) := Result.H (B, A);
          end loop;
       end loop;
-      for A in 1 .. Parameters loop
-         for B in 1 .. A - 1 loop
-            Result.Own_H (A, B) := Result.Own_H (B, A);
+   end Pass;
+
+   --  The information the first picture's own slopes carry through the fitted gain and warp (the slopes the second
+   --  picture would have if it were the first, which none of its noise is in), over the pixels a pass found present.
+   --  Taken once, where the fit ends: it reads no picture, and every pass took it before (R1 on the Pi, 10-13).
+   procedure Own_Information
+     (T        : Warp;
+      Template : Real_Array;
+      Slope_U  : Real_Array;
+      Slope_V  : Real_Array;
+      Present  : Mask_Array;
+      Half     : Natural;
+      Own_H    : out Real_Matrix)
+   is
+      Det : constant Real := T.Linear.UU * T.Linear.VV - T.Linear.UV * T.Linear.VU;
+      K   : Natural := 0;
+   begin
+      Own_H := [others => [others => 0.0]];
+      for J in -Integer (Half) .. Integer (Half) loop
+         for I in -Integer (Half) .. Integer (Half) loop
+            K := K + 1;
+            if Present (K) then
+               declare
+                  Own : constant Real_Vector (1 .. Parameters) :=
+                    Jacobian_Row
+                      (Real (I), Real (J),
+                       T.Gain * (T.Linear.VV * Slope_U (K) - T.Linear.VU * Slope_V (K)) / Det,
+                       T.Gain * (T.Linear.UU * Slope_V (K) - T.Linear.UV * Slope_U (K)) / Det,
+                       Template (K));
+               begin
+                  for A in 1 .. Parameters loop
+                     for B in A .. Parameters loop
+                        Own_H (A, B) := Own_H (A, B) + Own (A) * Own (B);
+                     end loop;
+                  end loop;
+               end;
+            end if;
          end loop;
       end loop;
-   end Pass;
+      for A in 1 .. Parameters loop
+         for B in 1 .. A - 1 loop
+            Own_H (A, B) := Own_H (B, A);
+         end loop;
+      end loop;
+   end Own_Information;
 
    ---------------------------------------------------------------------------
    --  The first picture's patch at a level
@@ -961,11 +981,12 @@ package body Driver.Alignment is
             --  (the cluster-robust, or sandwich, covariance: the inverse information on either side of the sum of
             --  the squares of the parts' scores).
             declare
-               Own_H : Real_Matrix (1 .. Parameters, 1 .. Parameters) := Current.Own_H;
+               Own_H : Real_Matrix (1 .. Parameters, 1 .. Parameters);
                Own_G : Real_Vector (1 .. Parameters) := Current.G;
                Own_Inv : Real_Matrix (1 .. Parameters, 1 .. Parameters);
                Own_Ok  : Boolean;
             begin
+               Own_Information (T, Template, Slope_U, Slope_V, Current.Present, Half, Own_H);
                Add_Prior (Own_H, Own_G, T, Held, S2);
                Information_Inverse (Own_H, Own_Inv, Own_Ok);
                if not Own_Ok then
