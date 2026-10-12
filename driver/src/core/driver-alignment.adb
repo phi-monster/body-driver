@@ -669,13 +669,15 @@ package body Driver.Alignment is
       Converged   : Boolean := False;
       Informative : Boolean := False;  --  the normal equations could be solved
       Passes      : Natural := 0;      --  the passes over the patch the fit took (Work_Report)
+      Iterations  : Natural := 0;      --  the Newton steps among them (the rest are the line search's trials)
    end record;
 
    --  The aligner's work, counted where it is done, in whichever task (Work_Report).
    type Work_Count is record
-      Calls   : Natural := 0;
-      Passes  : Natural := 0;    --  cells scanned, or passes over a patch
-      Seconds : Duration := 0.0;
+      Calls      : Natural := 0;
+      Passes     : Natural := 0;    --  cells scanned, or passes over a patch
+      Iterations : Natural := 0;    --  Newton steps, for the fits
+      Seconds    : Duration := 0.0;
    end record;
    type Work_Counts is array (Work_Phase) of Work_Count;
 
@@ -686,7 +688,7 @@ package body Driver.Alignment is
    type Retry_Counts is array (Reason) of Retry_Count;
 
    protected Work is
-      procedure Add (Phase : Work_Phase; Passes : Natural; Seconds : Duration);
+      procedure Add (Phase : Work_Phase; Passes : Natural; Seconds : Duration; Iterations : Natural := 0);
       procedure Add_Retry (First : Reason; Found : Boolean);
       procedure Take (Into : out Work_Counts; Retries : out Retry_Counts);
    private
@@ -695,10 +697,11 @@ package body Driver.Alignment is
    end Work;
 
    protected body Work is
-      procedure Add (Phase : Work_Phase; Passes : Natural; Seconds : Duration) is
+      procedure Add (Phase : Work_Phase; Passes : Natural; Seconds : Duration; Iterations : Natural := 0) is
       begin
          Totals (Phase).Calls := Totals (Phase).Calls + 1;
          Totals (Phase).Passes := Totals (Phase).Passes + Passes;
+         Totals (Phase).Iterations := Totals (Phase).Iterations + Iterations;
          Totals (Phase).Seconds := Totals (Phase).Seconds + Seconds;
       end Add;
 
@@ -738,7 +741,8 @@ package body Driver.Alignment is
       end Tenths;
 
       function Phase_Text (P : Work_Phase; Unit : String) return String is
-        (Work_Phase'Image (P) & W (P).Calls'Image & " times," & W (P).Passes'Image & " " & Unit & ", "
+        (Work_Phase'Image (P) & W (P).Calls'Image & " times," & W (P).Passes'Image & " " & Unit
+         & (if W (P).Iterations > 0 then " in" & W (P).Iterations'Image & " steps" else "") & ", "
          & Tenths (W (P).Seconds) & " s");
    begin
       Work.Take (W, R);
@@ -872,6 +876,7 @@ package body Driver.Alignment is
       Cost := 0.5 * (Current.Rss + Penalty (T, Held, Noise));
       Info.Informative := True;
       for Iteration in 1 .. Real'Machine_Mantissa loop
+         Info.Iterations := Info.Iterations + 1;
          declare
             H : Real_Matrix (1 .. Parameters, 1 .. Parameters) := Current.H;
             G : Real_Vector (1 .. Parameters) := Current.G;
@@ -1501,7 +1506,7 @@ package body Driver.Alignment is
                begin
                   Fit_Level (First, Second, Coarse, Query, Linear_Sigma, Ridge, Start_At (Peaks (K)), Fits (K),
                              Grow => Grow);
-                  Work.Add (Peak_Fitting, Fits (K).Passes, Driver.Clock.Seconds - T0);
+                  Work.Add (Peak_Fitting, Fits (K).Passes, Driver.Clock.Seconds - T0, Fits (K).Iterations);
                end;
             elsif Rho (Nearest) > -2.0 then
                declare
@@ -1511,7 +1516,7 @@ package body Driver.Alignment is
                   Here.Qu := Query.To.U;
                   Here.Qv := Query.To.V;
                   Fit_Level (First, Second, Coarse, Query, Linear_Sigma, Ridge, Here, Fits (K), Grow => Grow);
-                  Work.Add (Peak_Fitting, Fits (K).Passes, Driver.Clock.Seconds - T0);
+                  Work.Add (Peak_Fitting, Fits (K).Passes, Driver.Clock.Seconds - T0, Fits (K).Iterations);
                end;
             end if;
             if Fits (K).Informative
@@ -1574,7 +1579,7 @@ package body Driver.Alignment is
             begin
                Fit_Level (First, Second, Step, Query, Linear_Sigma, Ridge, Start, Fitted,
                           Grow => Grow, Final => Step = Finest);
-               Work.Add (Level_Fitting, Fitted.Passes, Driver.Clock.Seconds - T0);
+               Work.Add (Level_Fitting, Fitted.Passes, Driver.Clock.Seconds - T0, Fitted.Iterations);
             end;
             if not Fitted.Informative then
                return Refuse (Not_Solvable);
@@ -1641,7 +1646,7 @@ package body Driver.Alignment is
                begin
                   Fit_Level (First, Second, Level_Wanted, Query, Linear_Sigma, Ridge, Fitted.Fitted, Other,
                              Limit => Limit, Grow => Grow);
-                  Work.Add (Variant_Fitting, Other.Passes, Driver.Clock.Seconds - T0);
+                  Work.Add (Variant_Fitting, Other.Passes, Driver.Clock.Seconds - T0, Other.Iterations);
                   if Other.Informative then
                      Variants := Variants + 1;
                      Shift_U (Variants) := Other.Fitted.Qu - Answer_U;
