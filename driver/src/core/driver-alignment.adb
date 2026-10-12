@@ -1679,7 +1679,7 @@ package body Driver.Alignment is
    end Largest_Sigma;
 
    --  Align for pictures at about the same scale: the warp's scale within one halving.
-   function Align_Matched (First, Second : Pyramid; Query : Prediction) return Answer is
+   function Align_Matched (First, Second : Pyramid; Query : Prediction; Widen : Boolean) return Answer is
       Second_Top : Level renames Second.Sizes (0);
       --  The prediction's covariance, and what a place on a grid of pixels cannot be known to beyond.
       Plain      : constant Place_Covariance :=
@@ -1748,7 +1748,7 @@ package body Driver.Alignment is
             --  What a patch of the usual size cannot decide for lack of what lies around the point (it is
             --  ambiguous, tells the place no better than the window does, or is carried off by what the
             --  patch holds) may be decided by one twice as wide, the factor of a level of the pictures.
-            if Answered.Verdict = Not_Found
+            if Widen and then Answered.Verdict = Not_Found
               and then Answered.Because in Ambiguous | Uninformative | No_Evidence | Left_Window | Not_Settled
             then
                declare
@@ -1781,7 +1781,7 @@ package body Driver.Alignment is
    function Scaled (L : Linear_Part; By : Real) return Linear_Part is
      ((UU => L.UU * By, UV => L.UV * By, VU => L.VU * By, VV => L.VV * By));
 
-   function Align (First, Second : Pyramid; Query : Prediction) return Answer is
+   function Align (First, Second : Pyramid; Query : Prediction; Widen : Boolean := True) return Answer is
       Largest, Smallest : Real;
    begin
       Singular_Values (Query.Linear, Largest, Smallest);
@@ -1789,7 +1789,7 @@ package body Driver.Alignment is
       --  one that shows the point larger is halved until the two show it at about one size (its coordinates, the
       --  warp and the prediction's covariance with it), and the answer is carried back.
       if Query.Linear.UU * Query.Linear.VV - Query.Linear.UV * Query.Linear.VU <= 0.0 or else Smallest <= 0.0 then
-         return Align_Matched (First, Second, Query);
+         return Align_Matched (First, Second, Query, Widen);
       end if;
       declare
          --  The first picture is halved until no direction of it is made smaller by more than a halving; where the
@@ -1804,7 +1804,7 @@ package body Driver.Alignment is
          if Down = 0 or else (Shrinks and then Down >= Levels (First))
            or else (not Shrinks and then Down >= Levels (Second))
          then
-            return Align_Matched (First, Second, Query);
+            return Align_Matched (First, Second, Query, Widen);
          elsif Shrinks then
             declare
                Smaller : constant Pyramid := Shifted (First, Down);
@@ -1814,7 +1814,8 @@ package body Driver.Alignment is
                     (From => (U => Query.From.U / Size, V => Query.From.V / Size), To => Query.To,
                      Linear => Scaled (Query.Linear, Size), Cov => Query.Cov,
                      Linear_Sigma => (if Query.Linear_Sigma < Real'Last then Query.Linear_Sigma * Size
-                                      else Real'Last)));
+                                      else Real'Last)),
+                    Widen);
             begin
                if Result.Verdict = Found then
                   Result.Linear := Scaled (Result.Linear, 1.0 / Size);
@@ -1832,7 +1833,8 @@ package body Driver.Alignment is
                      Cov => (UU => Query.Cov.UU / Size ** 2, UV => Query.Cov.UV / Size ** 2,
                              VV => Query.Cov.VV / Size ** 2),
                      Linear_Sigma => (if Query.Linear_Sigma < Real'Last then Query.Linear_Sigma / Size
-                                      else Real'Last)));
+                                      else Real'Last)),
+                    Widen);
             begin
                if Result.Verdict = Found then
                   Result.To := (U => Result.To.U * Size, V => Result.To.V * Size);

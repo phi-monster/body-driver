@@ -969,7 +969,8 @@ package body Driver.Alignment.Keyframes is
       Given   : Prediction_Array;
       Only    : Flag_Array;
       Answers : in out Answer_Array;
-      Marks   : in out Located_Array)
+      Marks   : in out Located_Array;
+      Widen   : Boolean := True)
    is
       Count  : constant Natural := Given'Length;
       Pieces : constant Natural := Natural'Max (1, Natural'Min (Count, Natural (System.Multiprocessors.Number_Of_CPUs)));
@@ -983,7 +984,7 @@ package body Driver.Alignment.Keyframes is
                declare
                   Result : Answer renames Answers (Answers'First + K - 1);
                begin
-                  Result := Align (C.Pictures, Second, Given (Given'First + K - 1));
+                  Result := Align (C.Pictures, Second, Given (Given'First + K - 1), Widen);
                   Marks (K) :=
                     (if Result.Verdict = Found
                      then (Found => True, Place => Result.To, Sigma => Sqrt (Real'Max (Result.Cov.UU, Result.Cov.VV)))
@@ -1038,7 +1039,7 @@ package body Driver.Alignment.Keyframes is
             end;
          end loop;
          exit when Agreeing_Of (Todo) = 0;
-         Align_Some (C, Second, Given, Todo, Answers, Marks);
+         Align_Some (C, Second, Given, Todo, Answers, Marks, Widen => False);
          declare
             Refit : Field_Fit;
             Again : Flag_Array (1 .. Count);
@@ -1158,7 +1159,9 @@ package body Driver.Alignment.Keyframes is
                   end if;
                end loop;
                if Any then
-                  Align_Some (C, Second, Asked, Round, Answers, Marks);
+                  --  A wider patch only while the keyframe has no field to stand on: with one, the next round
+                  --  asks more points instead, at the usual cost.
+                  Align_Some (C, Second, Asked, Round, Answers, Marks, Widen => not Next.Field.Valid);
                   declare
                      Refit   : Field_Fit;
                      Again   : Flag_Array (1 .. Count);

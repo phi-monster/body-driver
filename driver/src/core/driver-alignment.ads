@@ -170,8 +170,11 @@ package Driver.Alignment is
 
    Not_Asked_Answer : constant Answer := (Verdict => Not_Found, Because => Not_Asked, others => <>);
 
-   function Align (First, Second : Pyramid; Query : Prediction) return Answer
+   function Align (First, Second : Pyramid; Query : Prediction; Widen : Boolean := True) return Answer
      with Pre => Levels (First) > 0 and then Levels (Second) > 0;
+   --  Widen: a point the usual patch cannot decide may be tried with one twice as wide (four times the
+   --  pixels); the caller allows that only while it has nothing else to stand on (Keyframes: no field yet).
+   --  R1 on the Pi: the wide retries found one point in twelve and were most of the aligner's time.
 
    function Largest_Window (First, Second : Pyramid) return Real
      with Pre => Levels (First) > 0 and then Levels (Second) > 0;
