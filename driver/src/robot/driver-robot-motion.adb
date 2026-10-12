@@ -445,16 +445,19 @@ package body Driver.Robot.Motion is
    end Look;
 
    --  The smallest change of the channel's reading that tells from its noise
-   --  (a change is the difference of two readings); without jitter, the
-   --  resolution of the group's readings (Channels.Resolution).
+   --  (a change is the difference of two readings), and no less than its wire
+   --  can carry (Channels.Resolution: one unit of an integer reading); without
+   --  jitter, the latter.
    function Smallest_Step (M : Model; G : Group_Id; Channel : Positive) return Real is
       Sigma : constant Real := Reading_Noise (M, G, Channel);
+      Wire  : constant Real := Channels.Resolution (M, G, M.Beats - 1);
    begin
       if Sigma > 0.0 and then Sigma < Real'Last then
-         return Driver.Uncertain.Threshold
-           (Driver.Uncertain.Scalar_Gate (Channels.Noise_Freedom (M, G, Channel))) * Sigma * Sqrt (2.0);
+         return Real'Max
+           (Wire, Driver.Uncertain.Threshold
+                    (Driver.Uncertain.Scalar_Gate (Channels.Noise_Freedom (M, G, Channel))) * Sigma * Sqrt (2.0));
       end if;
-      return Channels.Resolution (M, G, M.Beats - 1);
+      return Wire;
    end Smallest_Step;
 
    type Flag_Array is array (Positive range <>) of Boolean;

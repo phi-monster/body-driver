@@ -63,6 +63,7 @@ package Driver.Observations is
    package Image_Vectors is new Ada.Containers.Vectors (Camera_Id, Driver.Images.Image, Driver.Images."=");
    package Depth_Vectors is new Ada.Containers.Indefinite_Vectors (Camera_Id, Real_Array);
    package Turn_Vectors is new Ada.Containers.Vectors (Group_Id, Boolean);
+   package Precision_Vectors is new Ada.Containers.Vectors (Group_Id, Natural);
 
    type Observation is record
       Beat        : Driver.Clock.Beat := 0;
@@ -73,11 +74,23 @@ package Driver.Observations is
       Turned      : Turn_Vectors.Vector;   --  one per group; True at the beat its reading and its echo were found to
                                            --  be the other way round from the layout's order (Driver.Twins)
       Depth       : Depth_Vectors.Vector;  --  one per camera; empty when not reported
+      Precisions  : Precision_Vectors.Vector;   --  one per group: the significant bits of the float format its readings
+                                                --  came in over the wire, 0 when they came as integers
+                                                --  (Driver.Msgpack.Precision); meaningless when the reading is missing
+      Echo_Precisions : Precision_Vectors.Vector;   --  the same for the echoes
       Instruction : Unbounded_String;
    end record;
    --  Images, Readings, Echoes, Turned and Depth always have one element per camera
    --  or group of the layout, so an index never shifts when something is
-   --  missing for a beat.
+   --  missing for a beat; so do Precisions and Echo_Precisions when the
+   --  observation was parsed from the wire. A rig that builds an observation
+   --  of the driver's own Reals leaves them empty: its readings have the
+   --  Reals' bits (Precision_Of).
+
+   function Precision_Of (O : Observation; G : Group_Id) return Natural is
+     (if G <= O.Precisions.Last_Index then O.Precisions (G) else Real'Machine_Mantissa);
+   function Echo_Precision_Of (O : Observation; G : Group_Id) return Natural is
+     (if G <= O.Echo_Precisions.Last_Index then O.Echo_Precisions (G) else Real'Machine_Mantissa);
 
    function Has_Reading (O : Observation; G : Group_Id) return Boolean is
      (O.Readings.Element (G)'Length > 0);

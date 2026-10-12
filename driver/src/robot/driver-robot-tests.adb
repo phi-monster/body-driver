@@ -1178,6 +1178,38 @@ package body Driver.Robot.Tests is
       Check (not Channels.Moving (M, 1, 60), "the exact repeats at beat 60 are motion");
    end Channel_Noise_Of_A_Crawl;
 
+   --  Readings that come as integers (a servo's ticks: the SO-101 pair, R0) resolve to one unit, so the smallest push
+   --  of such a joint without jitter is one unit; a rig's Reals resolve to the unit in the last place of the group's
+   --  largest reading.
+   procedure Resolution_Of_Integer_Readings is
+      M    : Model;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Last : constant Natural := 9;
+   begin
+      for B in 0 .. Last loop
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         for G in 1 .. 2 loop
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         end loop;
+         O.Readings.Append (Real_Array'(1 => 2048.0, 2 => 10.0));
+         O.Readings.Append (Real_Array'(1 => 2048.0));
+         O.Precisions.Append (0);
+         O.Precisions.Append (Real'Machine_Mantissa);
+         Sent := Driver.Commands.Hold;
+         Observe (M, O, Sent);
+      end loop;
+      Estimate_Now (M);
+      Check (Channels.Resolution (M, 1, Last) = 1.0,
+             "integer readings resolve to one unit, got " & Real'Image (Channels.Resolution (M, 1, Last)));
+      Check (Channels.Resolution (M, 2, Last) = Real'Scaling (1.0, Real'Exponent (2048.0) - Real'Machine_Mantissa)
+             and then Channels.Resolution (M, 2, Last) < 1.0e-9,
+             "a Real of 2048 resolves to its unit in the last place, got " & Real'Image (Channels.Resolution (M, 2, Last)));
+   end Resolution_Of_Integer_Readings;
+
    procedure Channel_Noise_And_Pushes is
       M    : Model;
       Rng  : Generator;
@@ -7790,6 +7822,9 @@ package body Driver.Robot.Tests is
                              & "with it", Unprobed_Group_Stays_Unclassified'Access);
       Driver.Tests.Register ("robot.channels.creep", "a reading that crawls at the start and then repeats exactly, never "
                              & "pushed, is given its crawl as rest noise", Channel_Noise_Of_A_Crawl'Access);
+      Driver.Tests.Register ("robot.channels.integers", "readings that come as integers are given a float's resolution, "
+                             & "so the first push of a tick-counting joint is a trillionth of a tick (R0)",
+                             Resolution_Of_Integer_Readings'Access);
       Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "
                              & "given noise zero, so its jitter passes for motion), a hold is taken for a push, or a "
                              & "push never ends", Channel_Noise_And_Pushes'Access);

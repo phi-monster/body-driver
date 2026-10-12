@@ -53,10 +53,12 @@ private package Driver.Robot.Channels is
 
    function Resolution (M : Model; G : Group_Id; Beat : Natural) return Real
      with Pre => Has_Reading (M, G, Beat);
-   --  The least change of the group's readings that float arithmetic on them
-   --  can tell, whatever their noise (none, when they repeat exactly): the
-   --  float's resolution of the group's largest reading at Beat, or of one
-   --  reading unit when every reading is zero.
+   --  The least change of the group's readings their wire can carry, whatever
+   --  their noise (none, when they repeat exactly): one unit when they come as
+   --  integers; for floats, the unit in the last place of the group's largest
+   --  reading at Beat (of one reading unit when every reading is zero) in the
+   --  format they came in (Driver.Observations.Precision_Of). A push below it
+   --  cannot show in the readings.
 
    function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean
      with Pre => D'First = 1 and then D'Length = Group_Size (M, G);

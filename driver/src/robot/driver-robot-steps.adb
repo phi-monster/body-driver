@@ -66,14 +66,14 @@ package body Driver.Robot.Steps is
                   E.Delivered := (Value => Along / E.Length, Sigma => Sigma / E.Length, Degrees_Of_Freedom => 0);
                   if Natural (S.Free_Shortfalls.Length) > 2 then
                      declare
-                        --  What the float arithmetic on the readings of the push,
-                        --  where it began and where it stopped, can tell.
+                        --  What the readings of the push, where it began and
+                        --  where it stopped, can tell: their wire's resolution.
                         Floor   : constant Real :=
                           Real'Max (Channels.Resolution (M, G, E.Start - 1), Channels.Resolution (M, G, Beat));
                         --  The most any free push of the group fell short by,
                         --  either way, or by as much as the readings could
                         --  tell from none: their noise, and where they repeat
-                        --  exactly the resolution of the float.
+                        --  exactly the resolution of their wire.
                         Largest : Real := Real'Max (Sigma, Floor);
                      begin
                         for F of S.Free_Shortfalls loop

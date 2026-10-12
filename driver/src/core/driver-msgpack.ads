@@ -63,6 +63,12 @@ package Driver.Msgpack is
      with Pre => Is_Numeric (Doc, N);
    --  All values in row-major order.
 
+   function Precision (Doc : Document; N : Node) return Natural
+     with Pre => Is_Numeric (Doc, N);
+   --  The significant bits of the float format the numbers of N came in over
+   --  the wire (the fewest when they differ): 0 when one of them is an integer
+   --  or a boolean, which changes by whole units or not at all.
+
    procedure Read_Binary
      (Doc     : Document;
       N       : Node;
@@ -87,6 +93,7 @@ private
       Flag        : Boolean := False;
       Int         : Long_Long_Integer := 0;
       Flt         : Real := 0.0;
+      Bits        : Natural := 0;     --  of a float: the significant bits of its wire format (0: an integer on the wire)
       First, Size : Natural := 0;     --  string, binary and extension payload in Raw
       Kids, Kids_Count : Natural := 0;--  children in Children, from index Kids
    end record;

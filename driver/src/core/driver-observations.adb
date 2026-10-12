@@ -261,6 +261,16 @@ package body Driver.Observations is
          end if;
          return None;
       end Values;
+
+      --  The wire format of the group's numbers at Keys; 0 when they are not there.
+      function Wire_Precision (Keys : Unbounded_String; Size : Natural) return Natural is
+         N : constant Node := (if Length (Keys) = 0 then No_Node else Find (Doc, Root, Keys));
+      begin
+         if N /= No_Node and then Is_Numeric (Doc, N) and then Numbers (Doc, N)'Length = Size then
+            return Precision (Doc, N);
+         end if;
+         return 0;
+      end Wire_Precision;
    begin
       O := (Beat => Beat, Received => Driver.Clock.Seconds, others => <>);
       for C of L.Cameras loop
@@ -284,6 +294,8 @@ package body Driver.Observations is
       for G of L.Groups loop
          O.Readings.Append (Values (G.Keys, G.Size));
          O.Echoes.Append (Values (G.Echo_Keys, G.Size));
+         O.Precisions.Append (Wire_Precision (G.Keys, G.Size));
+         O.Echo_Precisions.Append (Wire_Precision (G.Echo_Keys, G.Size));
          O.Turned.Append (False);
       end loop;
       if L.Has_Instruction then

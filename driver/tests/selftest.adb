@@ -11,6 +11,7 @@ with Driver.Distributions.Tests;
 with Driver.Geometry.Tests;
 with Driver.Instrument.Tests;
 with Driver.Lanes_Tests;
+with Driver.Observations.Tests;
 with Driver.Parallel_For_Tests;
 with Driver.Shared_For_Tests;
 with Driver.Pixels.Tests;
@@ -34,6 +35,7 @@ begin
    Driver.Alignment.Tests.Register;
    Driver.Geometry.Tests.Register;
    Driver.Twins.Tests.Register;
+   Driver.Observations.Tests.Register;
    Driver.Replies.Tests.Register;
    Driver.Pixels.Tests.Register;
    Driver.Instrument.Tests.Register;

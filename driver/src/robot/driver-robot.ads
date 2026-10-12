@@ -429,6 +429,9 @@ private
       Values      : Real_Vectors.Vector;   --  Size readings per beat
       Twin_Values : Real_Vectors.Vector;   --  Size values per beat of the other group of its command key's pair (the robot's
                                            --  echo of its command, Driver.Twins), kept to turn Values round with
+      Precisions  : Count_Vectors.Vector;  --  per beat: the significant bits of the float format the readings came in over
+                                           --  the wire, 0 when they came as integers (the last one's at a beat without)
+      Twin_Precisions : Count_Vectors.Vector;   --  the same for Twin_Values
       Present     : Flag_Vectors.Vector;   --  a reading arrived that beat
       Targets     : Real_Vectors.Vector;   --  Size targets per beat
       Targeted    : Flag_Vectors.Vector;   --  the command in effect carried a target

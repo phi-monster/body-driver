@@ -51,10 +51,13 @@ package body Driver.Robot.Channels is
               and then Natural (S.Twin_Values.Length) = Natural (S.Values.Length)
             then
                declare
-                  Kept : constant Real_Vectors.Vector := S.Values;
+                  Kept      : constant Real_Vectors.Vector := S.Values;
+                  Kept_Bits : constant Count_Vectors.Vector := S.Precisions;
                begin
                   S.Values := S.Twin_Values;
                   S.Twin_Values := Kept;
+                  S.Precisions := S.Twin_Precisions;
+                  S.Twin_Precisions := Kept_Bits;
                end;
                S.Low_Seen.Clear;
                S.High_Seen.Clear;
@@ -77,14 +80,21 @@ package body Driver.Robot.Channels is
                end loop;
                M.Due := True;
             end if;
+            --  The wire format of a reading that did not come this beat is the last one's.
             if G <= O.Echoes.Last_Index and then O.Echoes.Element (G)'Length = S.Size then
                for V of O.Echoes.Element (G) loop
                   S.Twin_Values.Append (V);
                end loop;
+               S.Twin_Precisions.Append (Driver.Observations.Echo_Precision_Of (O, G));
             else
                S.Twin_Values.Append (0.0, Ada.Containers.Count_Type (S.Size));
+               S.Twin_Precisions.Append
+                 (if S.Twin_Precisions.Is_Empty then Real'Machine_Mantissa else S.Twin_Precisions.Last_Element);
             end if;
             S.Present.Append (Have);
+            S.Precisions.Append
+              (if Have then Driver.Observations.Precision_Of (O, G)
+               elsif S.Precisions.Is_Empty then Real'Machine_Mantissa else S.Precisions.Last_Element);
             if Have then
                for V of O.Readings.Element (G) loop
                   S.Values.Append (V);
@@ -317,12 +327,17 @@ package body Driver.Robot.Channels is
      (First_Channel (M, G) + M.Groups (G).Size <= Natural (M.Noise.Length));
 
    function Resolution (M : Model; G : Group_Id; Beat : Natural) return Real is
+      Bits  : constant Natural := M.Groups (G).Precisions (Beat);
       Scale : Real := 0.0;
    begin
+      if Bits = 0 then
+         --  An integer on the wire: it changes by one unit or not at all.
+         return 1.0;
+      end if;
       for C in 1 .. M.Groups (G).Size loop
          Scale := Real'Max (Scale, abs Reading (M, G, Beat, C));
       end loop;
-      return Real'Model_Epsilon * (if Scale > 0.0 then Scale else 1.0);
+      return Real'Scaling (1.0, Real'Exponent (if Scale > 0.0 then Scale else 1.0) - Bits);
    end Resolution;
 
    function Noise_Freedom (M : Model; G : Group_Id; Channel : Positive) return Natural is
