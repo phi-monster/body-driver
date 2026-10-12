@@ -301,18 +301,22 @@ package body Driver.Robot.Motion is
       Note_Stopped (M, G, Ignored);
    end Note_Stopped;
 
-   function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
+   function Least_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real is
       Step  : constant Real := Kinematics.Keyframe_Step (M, A, Channel);
       Noise : constant Real := Channels.Noise (M, Arm_Group (M, A), Channel);
-      --  The least turn a keyframe counts: the step, and what the readings'
-      --  noise can take off a turn asked of exactly it (a keyframe counts as
-      --  a joint's own, and is kept at all, from the step on, and a turn of
-      --  the step itself lands below it half the time: fake body V6, arm 1,
-      --  the first joint's turns of its step, 38 units, left no keyframe
-      --  through eleven rounds, and the fit said the joint had none of its
-      --  own).
-      Least : constant Real :=
-        (if Step > 0.0 and then Noise < Real'Last then Step + Driver.Conventions.Z * Sqrt (2.0) * Noise else Step);
+   begin
+      --  The step, and what the readings' noise can take off a turn asked of
+      --  exactly it (a keyframe counts as a joint's own, and is kept at all,
+      --  from the step on, and a turn of the step itself lands below it half
+      --  the time: fake body V6, arm 1, the first joint's turns of its step,
+      --  38 units, left no keyframe through eleven rounds, and the fit said
+      --  the joint had none of its own).
+      return (if Step > 0.0 and then Noise < Real'Last then Step + Driver.Conventions.Z * Sqrt (2.0) * Noise else Step);
+   end Least_Turn;
+
+   function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
+      Step  : constant Real := Kinematics.Keyframe_Step (M, A, Channel);
+      Least : constant Real := Least_Turn (M, A, Channel);
    begin
       --  The first level is the largest turn the aligner follows by itself,
       --  half a patch of view (Kinematics.Follow_Step), and never less than

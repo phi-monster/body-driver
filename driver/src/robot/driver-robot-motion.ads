@@ -89,6 +89,11 @@ package Driver.Robot.Motion is
    --  matcher's noise is known before the arm is swept; an arm that carries
    --  no eye is not held.
 
+   function Least_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real;
+   --  The least turn of a joint of the arm a keyframe counts: the keyframe
+   --  step (Kinematics.Keyframe_Step), and what the readings' noise can take
+   --  off a turn asked of exactly it. Zero while the arm has no step.
+
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real;
    --  The first level of the sweep's ladder for a joint of the arm: the
    --  largest turn whose keyframe the aligner follows from the reference by

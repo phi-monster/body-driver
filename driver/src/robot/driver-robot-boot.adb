@@ -335,6 +335,7 @@ package body Driver.Robot.Boot is
          Driver.Robot.Motion.Hold_For_Twin (M, A);
          declare
             First, Per_Unit : Real_Array (1 .. Size) := [others => 0.0];
+            Least  : Real_Array (1 .. Size) := [others => 0.0];   --  per channel: the least turn a keyframe counts
             Half   : Real := 0.0;
             Eye    : Natural := 0;
             procedure Read_Plan is
@@ -350,6 +351,7 @@ package body Driver.Robot.Boot is
                   for C in 1 .. Size loop
                      Per_Unit (C) := Lockin.Shift (M, Eye_Id (Eye), G, C);
                      First (C) := Driver.Robot.Motion.Sweep_Start (M, A, C);
+                     Least (C) := Driver.Robot.Motion.Least_Turn (M, A, C);
                   end loop;
                end if;
             end Read_Plan;
@@ -403,6 +405,8 @@ package body Driver.Robot.Boot is
                type Stop is (Climbing, Not_Followed, Blocked, Widest);
                Offset  : Real_Array (1 .. 2 * Size) := [others => 0.0];
                State   : array (1 .. 2 * Size) of Stop := [others => Blocked];
+               --  Per push: its ladder is going down from a first level the aligner could not follow.
+               Descending : array (1 .. 2 * Size) of Boolean := [others => False];
                --  Per push: the beats the arm was held for its latest keyframe.
                Held_From, Held_To : array (1 .. 2 * Size) of Natural := [others => 0];
                --  Per channel: the largest offset a followed keyframe of it was taken at.
@@ -588,6 +592,7 @@ package body Driver.Robot.Boot is
                                  if Followed_Now then
                                     Followed_In_Pass := Followed_In_Pass + 1;
                                     Reached (P.Channel) := Real'Max (Reached (P.Channel), Offset (I));
+                                    Descending (I) := False;
                                  end if;
                                  if Followed_Now or else not Framed_Now then
                                     --  Followed, or too small to count: no keyframe came of the push
@@ -597,11 +602,27 @@ package body Driver.Robot.Boot is
                                     --  exactly their step, judged against a step grown since, and
                                     --  left unswept, so the arm never fitted). Either way the ladder
                                     --  climbs; only a keyframe the aligner could not follow, too
-                                    --  large, stops it.
-                                    Offset (I) := 2.0 * Offset (I);
-                                    if Offset (I) * Per_Unit (P.Channel) > Half then
-                                       State (I) := Widest;
+                                    --  large, stops it. A ladder going down that reaches a level too
+                                    --  small to count has no level the aligner follows.
+                                    if Descending (I) then
+                                       State (I) := Not_Followed;
+                                    else
+                                       Offset (I) := 2.0 * Offset (I);
+                                       if Offset (I) * Per_Unit (P.Channel) > Half then
+                                          State (I) := Widest;
+                                       end if;
                                     end if;
+                                 elsif Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel) then
+                                    --  Not followed before any level of the joint was: the first level is
+                                    --  sized by how far the view moves per unit of the joint, and that is
+                                    --  wrong where the eye the arm is thought to carry is another's (an eye
+                                    --  credited to the arm by a lag it could not tell yet: the rig of
+                                    --  robot.boot.reread, whose first level stopped the sweep in its first
+                                    --  round and left arm 2 unswept). The ladder goes down, halving, until
+                                    --  a level is followed, and climbs from there, or until the least turn
+                                    --  a keyframe counts.
+                                    Offset (I) := Offset (I) / 2.0;
+                                    Descending (I) := True;
                                  else
                                     State (I) := Not_Followed;
                                  end if;
