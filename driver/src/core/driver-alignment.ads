@@ -63,6 +63,16 @@ private with System.Atomic_Counters;
 package Driver.Alignment is
 
    type Pyramid is private;
+
+   --  The aligner's work, phase by phase: the scan of a prediction's window
+   --  for candidates, the fits of the peaks found there, the fits down the
+   --  levels to the pixels, and the variant fits the covariance rests on.
+   type Work_Phase is (Scanning, Peak_Fitting, Level_Fitting, Variant_Fitting);
+
+   function Work_Report return String;
+   --  The work done since the last report, in whichever tasks: per phase how
+   --  many times it was done, how many cells were scanned or passes over a
+   --  patch were made, and the seconds it took; the counts start again.
    --  A picture's luma at the full size and at every
    --  halving of it that still holds a patch. Made once per picture and used
    --  for every point asked of it.

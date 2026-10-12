@@ -1,5 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
+with Driver.Clock;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Numerics;
@@ -635,7 +636,58 @@ package body Driver.Alignment is
       Count       : Natural := 0;
       Converged   : Boolean := False;
       Informative : Boolean := False;  --  the normal equations could be solved
+      Passes      : Natural := 0;      --  the passes over the patch the fit took (Work_Report)
    end record;
+
+   --  The aligner's work, counted where it is done, in whichever task (Work_Report).
+   type Work_Count is record
+      Calls   : Natural := 0;
+      Passes  : Natural := 0;    --  cells scanned, or passes over a patch
+      Seconds : Duration := 0.0;
+   end record;
+   type Work_Counts is array (Work_Phase) of Work_Count;
+
+   protected Work is
+      procedure Add (Phase : Work_Phase; Passes : Natural; Seconds : Duration);
+      procedure Take (Into : out Work_Counts);
+   private
+      Totals : Work_Counts;
+   end Work;
+
+   protected body Work is
+      procedure Add (Phase : Work_Phase; Passes : Natural; Seconds : Duration) is
+      begin
+         Totals (Phase).Calls := Totals (Phase).Calls + 1;
+         Totals (Phase).Passes := Totals (Phase).Passes + Passes;
+         Totals (Phase).Seconds := Totals (Phase).Seconds + Seconds;
+      end Add;
+
+      procedure Take (Into : out Work_Counts) is
+      begin
+         Into := Totals;
+         Totals := (others => <>);
+      end Take;
+   end Work;
+
+   function Work_Report return String is
+      W : Work_Counts;
+
+      function Tenths (D : Duration) return String is
+         T : constant Natural := Natural (D * 10);
+         Whole : constant String := Natural'Image (T / 10);
+         Tenth : constant String := Natural'Image (T mod 10);
+      begin
+         return Whole (Whole'First + 1 .. Whole'Last) & "." & Tenth (Tenth'First + 1 .. Tenth'Last);
+      end Tenths;
+
+      function Phase_Text (P : Work_Phase; Unit : String) return String is
+        (Work_Phase'Image (P) & W (P).Calls'Image & " times," & W (P).Passes'Image & " " & Unit & ", "
+         & Tenths (W (P).Seconds) & " s");
+   begin
+      Work.Take (W);
+      return Phase_Text (Scanning, "cells") & "; " & Phase_Text (Peak_Fitting, "passes") & "; "
+        & Phase_Text (Level_Fitting, "passes") & "; " & Phase_Text (Variant_Fitting, "passes");
+   end Work_Report;
 
    type Summary_Array is array (Positive range <>) of Summary;
    type Summary_Access is access Summary_Array;
@@ -724,6 +776,7 @@ package body Driver.Alignment is
       procedure Run (W : Warp; Into : out Pass_Result) is
       begin
          Pass (W, Template, Slope_U, Slope_V, Valid, Half, B_Spline, B_Level.Width, B_Level.Height, Into);
+         Info.Passes := Info.Passes + 1;
       end Run;
    begin
       Info := (Fitted => Start, others => <>);
@@ -1163,6 +1216,7 @@ package body Driver.Alignment is
 
       Peaks      : Natural_Array renames Window_Candidates.Peaks.all;
       Peak_Count : Natural := 0;
+      Scan_From  : Duration := 0.0;   --  when the scan of the window began (Work_Report)
 
       --  The place of a cell, at this level's scale, and the pixel it is the centre of.
       function Cell_X (Index : Positive) return Integer is (Low_X + (Index - 1) mod Across);
@@ -1186,6 +1240,7 @@ package body Driver.Alignment is
       end if;
 
       --  Every candidate in the window: the correlation of the patch with the second picture's pixels there.
+      Scan_From := Driver.Clock.Seconds;
       for B in 0 .. Down - 1 loop
          for A in 0 .. Across - 1 loop
             declare
@@ -1239,6 +1294,8 @@ package body Driver.Alignment is
             end;
          end loop;
       end loop;
+
+      Work.Add (Scanning, Tested, Driver.Clock.Seconds - Scan_From);
 
       --  The places that are peaks of their own, the best first: a place is a peak when no candidate within a
       --  pixel of it is better (a tie goes to the one met first).
@@ -1351,15 +1408,22 @@ package body Driver.Alignment is
          --  Every peak, refined where it was found, so that none is penalized for the pixel the search put it on.
          for K in 1 .. Tries loop
             if K <= Peak_Count then
-               Fit_Level (First, Second, Coarse, Query, Linear_Sigma, Ridge, Start_At (Peaks (K)), Fits (K),
-                          Grow => Grow);
+               declare
+                  T0 : constant Duration := Driver.Clock.Seconds;
+               begin
+                  Fit_Level (First, Second, Coarse, Query, Linear_Sigma, Ridge, Start_At (Peaks (K)), Fits (K),
+                             Grow => Grow);
+                  Work.Add (Peak_Fitting, Fits (K).Passes, Driver.Clock.Seconds - T0);
+               end;
             elsif Rho (Nearest) > -2.0 then
                declare
                   Here : Warp := Start_At (Nearest);
+                  T0   : constant Duration := Driver.Clock.Seconds;
                begin
                   Here.Qu := Query.To.U;
                   Here.Qv := Query.To.V;
                   Fit_Level (First, Second, Coarse, Query, Linear_Sigma, Ridge, Here, Fits (K), Grow => Grow);
+                  Work.Add (Peak_Fitting, Fits (K).Passes, Driver.Clock.Seconds - T0);
                end;
             end if;
             if Fits (K).Informative
@@ -1415,7 +1479,12 @@ package body Driver.Alignment is
          --  Down the levels to the pixels.
          for Step in reverse 0 .. Coarse - 1 loop
             Start := Fitted.Fitted;
-            Fit_Level (First, Second, Step, Query, Linear_Sigma, Ridge, Start, Fitted, Grow => Grow);
+            declare
+               T0 : constant Duration := Driver.Clock.Seconds;
+            begin
+               Fit_Level (First, Second, Step, Query, Linear_Sigma, Ridge, Start, Fitted, Grow => Grow);
+               Work.Add (Level_Fitting, Fitted.Passes, Driver.Clock.Seconds - T0);
+            end;
             if not Fitted.Informative then
                return Fail (Not_Solvable);
             end if;
@@ -1477,9 +1546,11 @@ package body Driver.Alignment is
                end Sum;
 
                procedure Take (Level_Wanted : Natural; Limit : Natural) is
+                  T0 : constant Duration := Driver.Clock.Seconds;
                begin
                   Fit_Level (First, Second, Level_Wanted, Query, Linear_Sigma, Ridge, Fitted.Fitted, Other,
                              Limit => Limit, Grow => Grow);
+                  Work.Add (Variant_Fitting, Other.Passes, Driver.Clock.Seconds - T0);
                   if Other.Informative then
                      Variants := Variants + 1;
                      Shift_U (Variants) := Other.Fitted.Qu - Answer_U;
