@@ -1,0 +1,19 @@
+# Franka 抓取场子。旧箱上那份是我自写的、没进 git,随箱没了 —— 这是重写版,已进 git。
+config_name: arx_x5   # 布局按 config_name 查 Eval_Layout/RoboDojo/<config_name>/<seed>/,官方只发 arx_x5 那套
+config:
+  sim: sim_config
+  scene: default
+  robot: franka_single
+  camera: camera_rgbd_franka
+
+observation:
+  collect_freq: 25
+  robot:
+    joint_states: true
+    world_ee_state: true
+  vision:
+    approximate_depth: false
+    depth: true
+    intrinsic_matrix: true
+    extrinsic_matrix: true
+    shape: true

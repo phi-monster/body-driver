@@ -1,0 +1,20 @@
+# body-driver humanoid test: G1 + Inspire hands, official scene/table/cameras, depth/intrinsics on (the driver ignores depth).
+config_name: g1
+
+config:
+  sim: sim_config
+  scene: default
+  robot: g1
+  camera: camera_rgbd
+
+observation:
+  collect_freq: 25
+  robot:
+    joint_states: true
+    world_ee_state: true
+  vision:
+    approximate_depth: false
+    depth: true
+    intrinsic_matrix: true
+    extrinsic_matrix: true
+    shape: true

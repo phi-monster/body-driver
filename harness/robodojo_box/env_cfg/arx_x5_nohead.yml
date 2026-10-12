@@ -1,0 +1,18 @@
+# body-driver: official arx_x5 with the head camera removed (no fixed eye)
+config_name: arx_x5_nohead
+config:
+  sim: sim_config
+  scene: default
+  robot: dual_x5
+  camera: camera_nohead
+observation:
+  collect_freq: 25
+  robot:
+    joint_states: true
+    world_ee_state: true
+  vision:
+    approximate_depth: false
+    depth: false
+    intrinsic_matrix: false
+    extrinsic_matrix: false
+    shape: true

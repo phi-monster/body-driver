@@ -1,0 +1,17 @@
+# body-driver: camera_config.yml without cam_head (no fixed eye)
+annotator:
+  common:
+    enabled: true
+    rgb_capture:
+      type: rgb
+      device: cpu
+  cam_left_wrist:
+    enabled: true
+    rgb_capture:
+      type: rgb
+      device: cpu
+  cam_right_wrist:
+    enabled: true
+    rgb_capture:
+      type: rgb
+      device: cpu

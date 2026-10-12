@@ -1,0 +1,20 @@
+# body-driver walking humanoid rig (大并行 §2 第 40 条,路 8): RGB + joint readings only; head eye on the torso, wrist eyes; legs belong to the vendor walking controller.
+config_name: g1walk
+
+config:
+  sim: sim_config
+  scene: default
+  robot: g1walk
+  camera: camera_g1walk
+
+observation:
+  collect_freq: 25
+  robot:
+    joint_states: true
+    world_ee_state: true
+  vision:
+    approximate_depth: false
+    depth: false
+    intrinsic_matrix: false
+    extrinsic_matrix: false
+    shape: true
