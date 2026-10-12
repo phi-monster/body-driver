@@ -861,6 +861,7 @@ package body Driver.Robot.Kinematics is
             From    : Keyframes.Source;
             Known   : Boolean;
             Set     : Match_Set;
+            Rss_Before, Rss_After : Natural := 0;   --  resident MB before and after the alignment, for the log
          begin
             for C in 1 .. N loop
                Change (C) := R.Frames (F).Readings (C - 1) - R.Frames.First_Element.Readings (C - 1);
@@ -871,7 +872,9 @@ package body Driver.Robot.Kinematics is
             else
                Keyframes.Predict (R.Chain, Change, Noise, Shift, Keyframes.No_Offer, Given.all, From);
             end if;
+            Rss_Before := Driver.Memory.Resident_Kilobytes / 1024;
             Keyframes.Add (R.Chain, R.Frames (F).Image, Change, Given.all, Answers.all, Agree.all);
+            Rss_After := Driver.Memory.Resident_Kilobytes / 1024;
             for A of Answers.all loop
                Because (A.Because) := Because (A.Because) + 1;
             end loop;
@@ -895,8 +898,9 @@ package body Driver.Robot.Kinematics is
                                 & R.Frames (F).Beat'Image & ", change" & Ada.Strings.Unbounded.To_String (Text)
                                 & ", predicted " & Ada.Characters.Handling.To_Lower (From'Image) & " stating "
                                 & Driver.Log.Image (Stated_By (Given.all), 1) & " px:" & Here'Image
-                                & " of" & Queries'Image & " points found; resident"
-                                & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & " MB");
+                                & " of" & Queries'Image & " points found; resident" & Rss_Before'Image & " /"
+                                & Rss_After'Image & " /" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)
+                                & " MB before the alignment, after it, now");
             end;
             R.Matches.Append (Set);
             R.Aligned := F;

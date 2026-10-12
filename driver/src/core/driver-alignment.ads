@@ -67,7 +67,8 @@ package Driver.Alignment is
    --  The aligner's work, phase by phase: the scan of a prediction's window
    --  for candidates, the fits of the peaks found there, the fits down the
    --  levels to the pixels, and the variant fits the covariance rests on.
-   type Work_Phase is (Scanning, Peak_Fitting, Level_Fitting, Variant_Fitting);
+   type Work_Phase is (Scanning, Peak_Fitting, Level_Fitting, Variant_Fitting, Retrying);
+   --  Retrying: the alignments tried again with a patch twice as wide; its passes count the ones then found.
 
    function Work_Report return String;
    --  The work done since the last report, in whichever tasks: per phase how

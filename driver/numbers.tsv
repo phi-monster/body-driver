@@ -281,6 +281,8 @@ driver-alignment.adb	Unit (J) := 1.0;	1.0	math	a unit vector: the column of the 
 driver-alignment.adb	Whole : constant String := Natural'Image (T / 10);	10	format	seconds to a tenth in the log
 driver-alignment.adb	Wider : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2));	2	structure	a patch twice as wide
 driver-alignment.adb	Window_Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	statistics	a place has two coordinates
+driver-alignment.adb	Work.Add (Retrying, (if Wider.Verdict = Found then 1 else 0), 0.0);	0.0	structure	one found retry counted, none otherwise
+driver-alignment.adb	Work.Add (Retrying, (if Wider.Verdict = Found then 1 else 0), 0.0);	1	structure	one found retry counted, none otherwise
 driver-alignment.adb	Wx, Sx, Wy, Sy : array (0 .. 3) of Real;	3	math	the cubic B-spline reads four coefficients along an axis: one before the cell and two after
 driver-alignment.adb	X : constant Real := U - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
 driver-alignment.adb	Y : constant Real := V - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
@@ -2207,7 +2209,6 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Report.Sigma_Px, 3) & ""	3	forma
 driver-robot-kinematics.adb	& Driver.Log.Image (Scale, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Stated_By (Given.all), 1) & "" & Here'Image	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & "");	1024	format	kilobytes in a megabyte, for the log
-driver-robot-kinematics.adb	& Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & "");	1024	format	kilobytes in a megabyte, for the log
 driver-robot-kinematics.adb	& Pm (Report.L.Fy, Report.L.Fy * Sd (2), 2) & "" & Pm (Report.L.Cx, Sd (3), 2)	2	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	& Pm (Report.L.Fy, Report.L.Fy * Sd (2), 2) & "" & Pm (Report.L.Cx, Sd (3), 2)	2	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	& Pm (Report.L.Fy, Report.L.Fy * Sd (2), 2) & "" & Pm (Report.L.Cx, Sd (3), 2)	2	structure	the index of a term of the covariance
@@ -2223,6 +2224,7 @@ driver-robot-kinematics.adb	& Pm (Turn (1), Sd (7), 4) & "" & Pm (Turn (2), Sd (
 driver-robot-kinematics.adb	& Pm (Turn (1), Sd (7), 4) & "" & Pm (Turn (2), Sd (8), 4) & "" & Pm (Turn (3), Sd (9), 4);	8	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	& Pm (Turn (1), Sd (7), 4) & "" & Pm (Turn (2), Sd (8), 4) & "" & Pm (Turn (3), Sd (9), 4);	9	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	& Report.Used'Image & "" & Driver.Log.Image (Report.Median_Px, 3)	3	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Rss_After'Image & "" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)	1024	format	kilobytes in a megabyte, for the log
 driver-robot-kinematics.adb	(Covariance (1, 1) + Covariance (2, 2) + Covariance (3, 3)), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	(Covariance (4, 4) + Covariance (5, 5) + Covariance (6, 6)), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	(Pending_Match'(Frame => 1,	1	structure	the reference keyframe is the first
@@ -2292,6 +2294,8 @@ driver-robot-kinematics.adb	R.Scale := 1.0;	1.0	math	the identity's scale: the f
 driver-robot-kinematics.adb	Report.Depth_Gains.Append (0.0);	0.0	structure	a query no sighting names has no track in the fit: its depth moves with no term
 driver-robot-kinematics.adb	Rows : constant Positive := (if Position_Only then 3 else 6);	3	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	Rows : constant Positive := (if Position_Only then 3 else 6);	6	structure	three rows of position, three of turn
+driver-robot-kinematics.adb	Rss_After := Driver.Memory.Resident_Kilobytes / 1024;	1024	format	kilobytes in a megabyte, for the log
+driver-robot-kinematics.adb	Rss_Before := Driver.Memory.Resident_Kilobytes / 1024;	1024	format	kilobytes in a megabyte, for the log
 driver-robot-kinematics.adb	Scale := 1.0;	1.0	math	the identity's scale: the first arm is the world as it is
 driver-robot-kinematics.adb	Scale := 1.0;	1.0	structure	the identity's scale until the arm is placed
 driver-robot-kinematics.adb	Seen (N) := (Point => N, Pose => 1, U => Answer_U, V => Answer_V);	1	structure	one pose: the base, where the points stand still

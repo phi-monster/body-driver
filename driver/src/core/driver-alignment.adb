@@ -686,7 +686,8 @@ package body Driver.Alignment is
    begin
       Work.Take (W);
       return Phase_Text (Scanning, "cells") & "; " & Phase_Text (Peak_Fitting, "passes") & "; "
-        & Phase_Text (Level_Fitting, "passes") & "; " & Phase_Text (Variant_Fitting, "passes");
+        & Phase_Text (Level_Fitting, "passes") & "; " & Phase_Text (Variant_Fitting, "passes") & "; "
+        & Phase_Text (Retrying, "found");
    end Work_Report;
 
    type Summary_Array is array (Positive range <>) of Summary;
@@ -1696,6 +1697,7 @@ package body Driver.Alignment is
                declare
                   Wider : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2));
                begin
+                  Work.Add (Retrying, (if Wider.Verdict = Found then 1 else 0), 0.0);
                   if Wider.Verdict = Found then
                      return Marked (Wider);
                   end if;
