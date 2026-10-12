@@ -255,14 +255,26 @@ package body Driver.Alignment is
          J  : constant Natural := Natural (Real'Floor (Y));
          Fx : constant Real := X - Real (I);
          Fy : constant Real := Y - Real (J);
-         Wx, Sx, Wy, Sy : array (0 .. 3) of Real;   --  weights and slopes of the taps one before to two after
+         type Taps is array (0 .. 3) of Real;
+         Wx, Sx, Wy, Sy : Taps;   --  weights and slopes of the taps one before to two after
+
+         --  The pieces of the cubic B-spline (Basis, Basis_Slope) at T + 1, T, T - 1 and T - 2, written out: the
+         --  weights and slopes of the four taps at a fraction T of the way from the tap at 0 to the one at 1.
+         procedure Weights (T : Real; W, S : out Taps) is
+            U : constant Real := 1.0 - T;
+         begin
+            W := (U ** 3 / 6.0,
+                  (4.0 - 6.0 * T * T + 3.0 * T ** 3) / 6.0,
+                  (1.0 + 3.0 * T + 3.0 * T * T - 3.0 * T ** 3) / 6.0,
+                  T ** 3 / 6.0);
+            S := (-(U * U) / 2.0,
+                  (3.0 * T * T - 4.0 * T) / 2.0,
+                  (1.0 + 2.0 * T - 3.0 * T * T) / 2.0,
+                  T * T / 2.0);
+         end Weights;
       begin
-         for K in 0 .. 3 loop
-            Wx (K) := Basis (Fx - Real (K - 1));
-            Sx (K) := Basis_Slope (Fx - Real (K - 1));
-            Wy (K) := Basis (Fy - Real (K - 1));
-            Sy (K) := Basis_Slope (Fy - Real (K - 1));
-         end loop;
+         Weights (Fx, Wx, Sx);
+         Weights (Fy, Wy, Sy);
          for Row in 0 .. 3 loop
             declare
                Base : constant Natural := Coefficients'First + (J + Row - 1) * Width + I - 1;

@@ -210,6 +210,22 @@ driver-alignment-keyframes.ads	Frame : Positive := 1;	1	structure	the first keyf
 driver-alignment-keyframes.ads	Orders : constant := 2;	2	structure	an extrapolation is linear (one earlier keyframe) or quadratic (two) in the amount
 driver-alignment-keyframes.ads	Terms : constant := 6;	6	math	a quadratic of two coordinates has six coefficients: one, two, three
 driver-alignment.adb	((C.VV * Du ** 2 - 2.0 * C.UV * Du * Dv + C.UU * Dv ** 2) / (C.UU * C.VV - C.UV ** 2));	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
+driver-alignment.adb	(1.0 + 2.0 * T - 3.0 * T * T) / 2.0,	1.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(1.0 + 2.0 * T - 3.0 * T * T) / 2.0,	2.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(1.0 + 2.0 * T - 3.0 * T * T) / 2.0,	2.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(1.0 + 2.0 * T - 3.0 * T * T) / 2.0,	3.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(1.0 + 3.0 * T + 3.0 * T * T - 3.0 * T ** 3) / 6.0,	1.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(1.0 + 3.0 * T + 3.0 * T * T - 3.0 * T ** 3) / 6.0,	3.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(1.0 + 3.0 * T + 3.0 * T * T - 3.0 * T ** 3) / 6.0,	3.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(1.0 + 3.0 * T + 3.0 * T * T - 3.0 * T ** 3) / 6.0,	3.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(1.0 + 3.0 * T + 3.0 * T * T - 3.0 * T ** 3) / 6.0,	6.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(3.0 * T * T - 4.0 * T) / 2.0,	2.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(3.0 * T * T - 4.0 * T) / 2.0,	3.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(3.0 * T * T - 4.0 * T) / 2.0,	4.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(4.0 - 6.0 * T * T + 3.0 * T ** 3) / 6.0,	3.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(4.0 - 6.0 * T * T + 3.0 * T ** 3) / 6.0,	4.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(4.0 - 6.0 * T * T + 3.0 * T ** 3) / 6.0,	6.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	(4.0 - 6.0 * T * T + 3.0 * T ** 3) / 6.0,	6.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
 driver-alignment.adb	(Noise * (((T.Qu - P.Centre_U) ** 2 * P.Place_UU + 2.0 * (T.Qu - P.Centre_U) * (T.Qv - P.Centre_V) * P.Place_UV	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
 driver-alignment.adb	(Real'Min (Real (Second.Sizes (0).Width), Real (Second.Sizes (0).Height)) / 2.0);	2.0	structure	the widest window is half the picture across: the farthest a point of the one can lie from the other that it is not as far from every edge
 driver-alignment.adb	([Sx, Sy, Sx * Di, Sx * Dj, Sy * Di, Sy * Dj, -Template, -1.0]);	1.0	math	a pixel's residual falls by one for each level of offset: its derivative by the offset is minus one
@@ -260,6 +276,7 @@ driver-alignment.adb	Result : Real := 1.0;	1.0	math	no inflation: the factor of 
 driver-alignment.adb	Result := Result * (1.0 + R) / (1.0 - R);	1.0	statistics	the variance of a mean of values with autocorrelation r is (1 + r) / (1 - r) times that of independent ones
 driver-alignment.adb	Result.Linear := Scaled (Result.Linear, 1.0 / Size);	1.0	math	carried back by the inverse of the factor it was scaled by
 driver-alignment.adb	Rho : Reals_Access := new Real_Array'(1 .. Count => -2.0);	2.0	structure	the value of a place that is not a candidate: below any correlation, as before
+driver-alignment.adb	S := (-(U * U) / 2.0,	2.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
 driver-alignment.adb	Scale (K) := 1.0 / Sqrt (H (K, K));	1.0	numerics	the unknown is scaled by the inverse root of its curvature, so the scaled matrix has a unit diagonal
 driver-alignment.adb	Scale (K) := 1.0 / Sqrt (H (K, K));	1.0	numerics	the unknown is scaled by the inverse root of its curvature, so the scaled matrix has a unit diagonal
 driver-alignment.adb	Score (K) := -0.5 * (Pixels * (Fits (K).Rss / Real (Fits (K).Count)) / (Noise * Spread)	0.5	statistics	the log posterior is minus half the sum of the pixels' squares in noise units and of the distance from the prediction in its deviations
@@ -270,6 +287,8 @@ driver-alignment.adb	Squares : Real := 1.0;	1.0	statistics	a sum of squares of a
 driver-alignment.adb	Squares := Squares + 2.0 * (Total / Real (Pairs) / Spread) ** 2;	2.0	statistics	Bartlett's sum: twice the squares of the autocorrelations at the lags
 driver-alignment.adb	Step : constant Positive := (if Axis = 1 then 1 else Side);	1	structure	and its next pixel is one apart
 driver-alignment.adb	Step : constant Positive := (if Axis = 1 then 1 else Side);	1	structure	the first axis runs along a row
+driver-alignment.adb	T * T / 2.0);	2.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
+driver-alignment.adb	T ** 3 / 6.0);	6.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
 driver-alignment.adb	T : constant Natural := Natural (D * 10);	10	format	seconds to a tenth in the log
 driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	1	math	the filter's first tap lies one pixel before the two pixels it replaces
 driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	1.0	math	the binomial filter 1 3 3 1: an outer tap is one part
@@ -285,11 +304,11 @@ driver-alignment.adb	Tenth : constant String := Natural'Image (T mod 10);	10	for
 driver-alignment.adb	Tolerance : constant Real := (if Final then Driver.Conventions.Unchanged_Fraction else 1.0);	1.0	statistics	one standard error: a step the fit cannot tell from none is nothing to hand on
 driver-alignment.adb	Trial_Cost := 0.5 * (Trial.Rss + Penalty (Candidate, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
 driver-alignment.adb	Unit (J) := 1.0;	1.0	math	a unit vector: the column of the identity
+driver-alignment.adb	W := (U ** 3 / 6.0,	6.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
 driver-alignment.adb	Whole : constant String := Natural'Image (T / 10);	10	format	seconds to a tenth in the log
 driver-alignment.adb	Window_Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	statistics	a place has two coordinates
 driver-alignment.adb	Work.Add (Retrying, (if Wider.Verdict = Found then 1 else 0), 0.0);	0.0	structure	one found retry counted, none otherwise
 driver-alignment.adb	Work.Add (Retrying, (if Wider.Verdict = Found then 1 else 0), 0.0);	1	structure	one found retry counted, none otherwise
-driver-alignment.adb	Wx, Sx, Wy, Sy : array (0 .. 3) of Real;	3	math	the cubic B-spline reads four coefficients along an axis: one before the cell and two after
 driver-alignment.adb	X : constant Real := U - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
 driver-alignment.adb	Y : constant Real := V - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
 driver-alignment.adb	and then (Axis = 2 or else (K - Field'First) mod Side < Side - 1)	2	structure	the second axis of a field on a grid, along its columns: it has a neighbour in every row but the last
@@ -307,7 +326,6 @@ driver-alignment.adb	for Dc in -1 .. 1 loop	1	structure	the neighbours of a cand
 driver-alignment.adb	for Dr in -1 .. 1 loop	1	structure	and one after it
 driver-alignment.adb	for Dr in -1 .. 1 loop	1	structure	and one after it
 driver-alignment.adb	for Dx in (if Dy = 0 then 1 else -Half) .. Half loop	1	structure	the first half of the neighbours of the row, each pair once
-driver-alignment.adb	for K in 0 .. 3 loop	3	math	the cubic B-spline reads four coefficients along an axis: one before the cell and two after
 driver-alignment.adb	for K in 2 .. Count loop	2	structure	the filter's recursion starts at the second sample: the first is summed apart
 driver-alignment.adb	for K in 2 .. Count loop	2	structure	the insertion starts at the second peak: one alone is in order
 driver-alignment.adb	for K in 3 .. 6 loop	3	structure	the linear part's four entries follow the place's two: unknowns 3 to 6
@@ -344,6 +362,7 @@ driver-alignment.adb	return 2.0 / 3.0 - A * A + A ** 3 / 2.0;	3.0	math	the cubic
 driver-alignment.adb	return Natural (Real'Rounding (Side / 2.0));	2.0	math	half the patch's side lies either side of its point
 driver-alignment.adb	return Real'Min (Real (Count), Real'Max (1.0, Real (Count) / Squares));	1.0	statistics	at least one independent sample
 driver-alignment.adb	return Sqrt (Real'Max (0.0, (Q_VV * Du ** 2 - 2.0 * Q_UV * Du * Dv + Q_UU * Dv ** 2) / Q_Det));	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
+driver-alignment.adb	type Taps is array (0 .. 3) of Real;	3	math	the cubic B-spline reads four taps, one before the place to two after
 driver-alignment.adb	while J >= 1 and then Rho (Peaks (J)) < Rho (Held) loop	1	structure	the insertion stops at the first peak
 driver-alignment.ads	Halving : constant := 2;	2	math	a size of the pyramid is half the one before: the pictures are halved
 driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);	1.0	math	the identity map: the first diagonal entry is one
