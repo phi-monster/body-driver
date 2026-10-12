@@ -227,7 +227,7 @@ driver-alignment.adb	Fraction := Fraction / 2.0;	2.0	numerics	a step that raises
 driver-alignment.adb	Freedom : constant Positive := Positive'Max (1, Natural (Real'Floor (Independent)) - 2);	1	statistics	at least one degree of freedom
 driver-alignment.adb	Freedom : constant Positive := Positive'Max (1, Natural (Real'Floor (Independent)) - 2);	2	statistics	a correlation's degrees of freedom: its independent observations less the two it was fitted by
 driver-alignment.adb	Gain : constant Real := 6.0;	6.0	math	the cubic B-spline weighs a sample and its neighbours one, four and one sixths: the prefilter's gain undoes the sum of six
-driver-alignment.adb	Grow : Positive := 1)	1	structure	a patch is the usual width unless asked to grow
+driver-alignment.adb	Grow : Positive := 1;	1	structure	the usual patch, one width
 driver-alignment.adb	Half : constant Natural := (Side - 1) / 2;	2	math	half a patch's side less the middle pixel
 driver-alignment.adb	High_X : constant Integer := Integer (Real'Ceiling (Centre_U + Extent_U - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
 driver-alignment.adb	High_Y : constant Integer := Integer (Real'Ceiling (Centre_V + Extent_V - 0.5));	0.5	math	a pixel's centre lies half a pixel in from its corner
@@ -276,6 +276,7 @@ driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 
 driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	8.0	math	the binomial weights 1 3 3 1 add up to eight
 driver-alignment.adb	Taps : constant array (-1 .. 2) of Real := [1.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0, 1.0 / 8.0];	8.0	math	the binomial weights 1 3 3 1 add up to eight
 driver-alignment.adb	Tenth : constant String := Natural'Image (T mod 10);	10	format	seconds to a tenth in the log
+driver-alignment.adb	Tolerance : constant Real := (if Final then Driver.Conventions.Unchanged_Fraction else 1.0);	1.0	statistics	one standard error: a step the fit cannot tell from none is nothing to hand on
 driver-alignment.adb	Trial_Cost := 0.5 * (Trial.Rss + Penalty (Candidate, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
 driver-alignment.adb	Unit (J) := 1.0;	1.0	math	a unit vector: the column of the identity
 driver-alignment.adb	Whole : constant String := Natural'Image (T / 10);	10	format	seconds to a tenth in the log
@@ -287,6 +288,7 @@ driver-alignment.adb	Wx, Sx, Wy, Sy : array (0 .. 3) of Real;	3	math	the cubic B
 driver-alignment.adb	X : constant Real := U - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
 driver-alignment.adb	Y : constant Real := V - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
 driver-alignment.adb	and then (Axis = 2 or else (K - Field'First) mod Side < Side - 1)	2	structure	the second axis of a field on a grid, along its columns: it has a neighbour in every row but the last
+driver-alignment.adb	and then Score (K) + 0.5 * Pixels * ((Fits (K).Decrement + Fits (K).Penalty) / Real (Fits (K).Count))	0.5	math	the score weighs the residuals by a half, as the cost does
 driver-alignment.adb	elsif A < 2.0 then	2.0	math	the cubic B-spline's outer piece ends two knot spacings from its centre
 driver-alignment.adb	elsif Rho (Nearest) > -2.0 then	2.0	structure	a correlation is at least -1, so below -1 marks a cell that is not a candidate
 driver-alignment.adb	elsif Smallest > 1.0 then Natural (Real'Rounding (Log (Smallest, Real (Halving))))	1.0	math	a warp that enlarges in every direction
@@ -326,7 +328,7 @@ driver-alignment.adb	if X < 1.0 or else Y < 1.0 or else X >= Real (Width - 2) or
 driver-alignment.adb	if X < 1.0 or else Y < 1.0 or else X >= Real (Width - 2) or else Y >= Real (Height - 2) then	1.0	math	the spline reads a coefficient one pixel before the cell: the first pixel is not read
 driver-alignment.adb	if X < 1.0 or else Y < 1.0 or else X >= Real (Width - 2) or else Y >= Real (Height - 2) then	2	math	and two after the cell: the last two pixels are not read
 driver-alignment.adb	if X < 1.0 or else Y < 1.0 or else X >= Real (Width - 2) or else Y >= Real (Height - 2) then	2	math	the same along the second axis
-driver-alignment.adb	or else (Last_Moved > Moved and then Moved ** 2 / (Last_Moved - Moved) <= 1.0 / Z)	1.0	statistics	what the steps to come add up to is under a standard error over Z, which no test the driver makes can tell from none
+driver-alignment.adb	or else (Final and then Last_Moved > Moved and then Moved ** 2 / (Last_Moved - Moved) <= 1.0 / Z)	1.0	statistics	one standard error over Z: what no test the driver makes can tell from none
 driver-alignment.adb	return (2.0 - A) ** 3 / 6.0;	2.0	math	the outer piece's distance to the end of its support
 driver-alignment.adb	return (2.0 - A) ** 3 / 6.0;	6.0	math	the cubic B-spline's outer piece is that distance cubed over six
 driver-alignment.adb	return 1.0;	1.0	statistics	a pixel is one independent sample when nothing says more
@@ -342,6 +344,7 @@ driver-alignment.adb	while J >= 1 and then Rho (Peaks (J)) < Rho (Held) loop	1	s
 driver-alignment.ads	Halving : constant := 2;	2	math	a size of the pyramid is half the one before: the pictures are halved
 driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);	1.0	math	the identity map: the first diagonal entry is one
 driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);	1.0	math	the identity map: the second diagonal entry is one
+driver-apart.adb	& Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & "");	1024	format	kilobytes in a megabyte, for the log
 driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end

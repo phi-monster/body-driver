@@ -637,6 +637,9 @@ package body Driver.Alignment is
       Converged   : Boolean := False;
       Informative : Boolean := False;  --  the normal equations could be solved
       Passes      : Natural := 0;      --  the passes over the patch the fit took (Work_Report)
+      Decrement   : Real := 0.0;       --  the Newton decrement squared where the fit stopped: what the quadratic
+                                       --  model says its cost may still lose (Rss by no more than it and Penalty)
+      Penalty     : Real := 0.0;       --  the prior's penalty where it stopped
    end record;
 
    --  The aligner's work, counted where it is done, in whichever task (Work_Report).
@@ -647,11 +650,19 @@ package body Driver.Alignment is
    end record;
    type Work_Counts is array (Work_Phase) of Work_Count;
 
+   --  The retries with a wider patch, by what the first attempt failed for: how many, and how many then found.
+   type Retry_Count is record
+      Tried, Found : Natural := 0;
+   end record;
+   type Retry_Counts is array (Reason) of Retry_Count;
+
    protected Work is
       procedure Add (Phase : Work_Phase; Passes : Natural; Seconds : Duration);
-      procedure Take (Into : out Work_Counts);
+      procedure Add_Retry (First : Reason; Found : Boolean);
+      procedure Take (Into : out Work_Counts; Retries : out Retry_Counts);
    private
-      Totals : Work_Counts;
+      Totals  : Work_Counts;
+      Retried : Retry_Counts;
    end Work;
 
    protected body Work is
@@ -662,15 +673,32 @@ package body Driver.Alignment is
          Totals (Phase).Seconds := Totals (Phase).Seconds + Seconds;
       end Add;
 
-      procedure Take (Into : out Work_Counts) is
+      procedure Add_Retry (First : Reason; Found : Boolean) is
+      begin
+         Retried (First).Tried := Retried (First).Tried + 1;
+         if Found then
+            Retried (First).Found := Retried (First).Found + 1;
+         end if;
+      end Add_Retry;
+
+      procedure Take (Into : out Work_Counts; Retries : out Retry_Counts) is
       begin
          Into := Totals;
+         Retries := Retried;
          Totals := (others => <>);
+         Retried := (others => <>);
       end Take;
    end Work;
 
    function Work_Report return String is
       W : Work_Counts;
+      R : Retry_Counts;
+
+      function Retries_Text (From : Reason) return String is
+        (if From = Reason'Last then ""
+         else (if R (From).Tried > 0
+               then " " & Reason'Image (From) & R (From).Tried'Image & "/" & Natural'Image (R (From).Found)
+               else "") & Retries_Text (Reason'Succ (From)));
 
       function Tenths (D : Duration) return String is
          T : constant Natural := Natural (D * 10);
@@ -684,10 +712,10 @@ package body Driver.Alignment is
         (Work_Phase'Image (P) & W (P).Calls'Image & " times," & W (P).Passes'Image & " " & Unit & ", "
          & Tenths (W (P).Seconds) & " s");
    begin
-      Work.Take (W);
+      Work.Take (W, R);
       return Phase_Text (Scanning, "cells") & "; " & Phase_Text (Peak_Fitting, "passes") & "; "
         & Phase_Text (Level_Fitting, "passes") & "; " & Phase_Text (Variant_Fitting, "passes") & "; "
-        & Phase_Text (Retrying, "found");
+        & Phase_Text (Retrying, "found") & " (tried/found by the first failure:" & Retries_Text (Reason'First) & ")";
    end Work_Report;
 
    type Summary_Array is array (Positive range <>) of Summary;
@@ -735,9 +763,16 @@ package body Driver.Alignment is
       Start         : Warp;
       Info          : out Summary;
       Limit         : Natural := Natural'Last;
-      Grow          : Positive := 1)
+      Grow          : Positive := 1;
+      Final         : Boolean := True)
    is
       Scale   : constant Real := Real (Halving) ** Step;
+      --  How far a step may still move the place before the fit has settled, in the place's own standard errors:
+      --  the unchanged fraction where the answer is the one used, one standard error where another fit takes the
+      --  answer as its start (the peaks' fits at the coarse level, which only rank them and start the descent, and
+      --  the levels above the pixels): a step the fit cannot tell from none is nothing to hand on, and R1's peak
+      --  fits spent 27 passes each settling to a hundredth of what the next level moved them by anyway.
+      Tolerance : constant Real := (if Final then Driver.Conventions.Unchanged_Fraction else 1.0);
       A_Level : Level renames First.Sizes (Step);
       B_Level : Level renames Second.Sizes (Step);
       A_Spline : Real_Array renames A_Level.Spline.Held.Values.all;
@@ -865,7 +900,7 @@ package body Driver.Alignment is
                      end if;
                   end if;
                   Fraction := Fraction / 2.0;
-                  exit when Length_Of (Fraction) <= Driver.Conventions.Unchanged_Fraction;
+                  exit when Length_Of (Fraction) <= Tolerance;
                end loop;
                if not Accepted then
                   Info.Converged := True;
@@ -882,8 +917,8 @@ package body Driver.Alignment is
                   --  and what the ones to come would add up to (a geometric series: the last step squared over how
                   --  much it fell short of the one before) is less than a standard error over Z, which no test the
                   --  driver makes can tell from none.
-                  if Moved <= Driver.Conventions.Unchanged_Fraction
-                    or else (Last_Moved > Moved and then Moved ** 2 / (Last_Moved - Moved) <= 1.0 / Z)
+                  if Moved <= Tolerance
+                    or else (Final and then Last_Moved > Moved and then Moved ** 2 / (Last_Moved - Moved) <= 1.0 / Z)
                   then
                      Info.Converged := True;
                      exit;
@@ -893,7 +928,27 @@ package body Driver.Alignment is
             end;
          end;
       end loop;
-      --  What the fit leaves.
+      --  What the fit leaves, and what it may still lose: the Newton decrement (the next step's length in the
+      --  information's own metric, squared) bounds the cost a fit that stopped short still takes off under the
+      --  quadratic model; the residuals fall by no more than it and the penalty the prior may give back. The
+      --  fits that only start another are compared by it (Align_At's peaks).
+      Info.Penalty := Penalty (T, Held, Noise);
+      declare
+         H    : Real_Matrix (1 .. Parameters, 1 .. Parameters) := Current.H;
+         G    : Real_Vector (1 .. Parameters) := Current.G;
+         Step : Real_Vector (1 .. Parameters);
+         Ok   : Boolean;
+      begin
+         Add_Prior (H, G, T, Held, Noise);
+         Newton_Step (H, G, Step, Ok);
+         Info.Decrement := 0.0;
+         if Ok then
+            for I in 1 .. Parameters loop
+               Info.Decrement := Info.Decrement + G (I) * Step (I);
+            end loop;
+            Info.Decrement := abs Info.Decrement;
+         end if;
+      end;
       Info.Count := Current.Count;
       Info.Fitted := (Qu => T.Qu * Scale, Qv => T.Qv * Scale, Linear => T.Linear, Gain => T.Gain, Offset => T.Offset);
       if not Info.Informative or else Current.Count <= Parameters then
@@ -1413,7 +1468,7 @@ package body Driver.Alignment is
                   T0 : constant Duration := Driver.Clock.Seconds;
                begin
                   Fit_Level (First, Second, Coarse, Query, Linear_Sigma, Ridge, Start_At (Peaks (K)), Fits (K),
-                             Grow => Grow);
+                             Grow => Grow, Final => False);
                   Work.Add (Peak_Fitting, Fits (K).Passes, Driver.Clock.Seconds - T0);
                end;
             elsif Rho (Nearest) > -2.0 then
@@ -1423,7 +1478,8 @@ package body Driver.Alignment is
                begin
                   Here.Qu := Query.To.U;
                   Here.Qv := Query.To.V;
-                  Fit_Level (First, Second, Coarse, Query, Linear_Sigma, Ridge, Here, Fits (K), Grow => Grow);
+                  Fit_Level (First, Second, Coarse, Query, Linear_Sigma, Ridge, Here, Fits (K), Grow => Grow,
+                             Final => False);
                   Work.Add (Peak_Fitting, Fits (K).Passes, Driver.Clock.Seconds - T0);
                end;
             end if;
@@ -1443,22 +1499,68 @@ package body Driver.Alignment is
          --  with neighbouring residuals that agree counted once, and that lies nearest the prediction in its own
          --  standard deviations (what is known beforehand weighs the candidates, never the answer's spread: the
          --  covariance below is the pixels' alone).
+         --
+         --  The peaks were fitted only to a standard error (a start, not an answer). A peak whose score, with all
+         --  its fit may still gain (its decrement and penalty, in the score's own units), stays below the best's by
+         --  the odds the answer needs cannot come out best nor tie it: it is left as it is. The others are fitted to
+         --  the end, and scored again (R1 on the Pi: three peaks a point fitted to the end, 27 passes each, were
+         --  four fifths of the aligner's 132 s; the best peak alone is usually the only one worth it).
          declare
-            Noise  : constant Real := Fits (Reference).Noise;
-            Spread : constant Real := Fits (Reference).Spread;
-            Pixels : constant Real := Real (Fits (Reference).Count);
             Score  : Real_Array renames Peak_Scratch.Score.all;
-         begin
-            for K in 1 .. Tries loop
-               if Fits (K).Informative then
-                  Score (K) := -0.5 * (Pixels * (Fits (K).Rss / Real (Fits (K).Count)) / (Noise * Spread)
-                                       + Squared_Length (Fits (K).Fitted.Qu - Query.To.U,
-                                                         Fits (K).Fitted.Qv - Query.To.V, Plain));
-                  if Best = 0 or else Score (K) > Score (Best) then
-                     Best := K;
+
+            procedure Score_All (Noise, Spread, Pixels : Real) is
+            begin
+               Best := 0;
+               for K in 1 .. Tries loop
+                  if Fits (K).Informative then
+                     Score (K) := -0.5 * (Pixels * (Fits (K).Rss / Real (Fits (K).Count)) / (Noise * Spread)
+                                          + Squared_Length (Fits (K).Fitted.Qu - Query.To.U,
+                                                            Fits (K).Fitted.Qv - Query.To.V, Plain));
+                     if Best = 0 or else Score (K) > Score (Best) then
+                        Best := K;
+                     end if;
                   end if;
-               end if;
-            end loop;
+               end loop;
+            end Score_All;
+
+            procedure Settle_The_Contenders is
+               Noise  : constant Real := Fits (Reference).Noise;
+               Spread : constant Real := Fits (Reference).Spread;
+               Pixels : constant Real := Real (Fits (Reference).Count);
+            begin
+               Score_All (Noise, Spread, Pixels);
+               for K in 1 .. Tries loop
+                  if Fits (K).Informative
+                    and then Score (K) + 0.5 * Pixels * ((Fits (K).Decrement + Fits (K).Penalty) / Real (Fits (K).Count))
+                                           / (Noise * Spread)
+                             >= Score (Best) - Odds_Needed
+                  then
+                     declare
+                        T0 : constant Duration := Driver.Clock.Seconds;
+                     begin
+                        Fit_Level (First, Second, Coarse, Query, Linear_Sigma, Ridge, Fits (K).Fitted, Fits (K),
+                                   Grow => Grow);
+                        Work.Add (Peak_Fitting, Fits (K).Passes, Driver.Clock.Seconds - T0);
+                     end;
+                  end if;
+               end loop;
+               Reference := 0;
+               for K in 1 .. Tries loop
+                  if Fits (K).Informative
+                    and then (Reference = 0
+                              or else Fits (K).Rss / Real (Fits (K).Count)
+                                      < Fits (Reference).Rss / Real (Fits (Reference).Count))
+                  then
+                     Reference := K;
+                  end if;
+               end loop;
+            end Settle_The_Contenders;
+         begin
+            Settle_The_Contenders;
+            if Reference = 0 then
+               return Fail (Not_Solvable);
+            end if;
+            Score_All (Fits (Reference).Noise, Fits (Reference).Spread, Real (Fits (Reference).Count));
             --  The best of the places that are not the same place (apart by more than their covariances allow).
             for K in 1 .. Tries loop
                if K /= Best and then Fits (K).Informative
@@ -1477,13 +1579,15 @@ package body Driver.Alignment is
          end;
          Fitted := Fits (Best);
 
-         --  Down the levels to the pixels.
-         for Step in reverse 0 .. Coarse - 1 loop
+         --  Down the levels to the pixels: each level's fit starts the next, and only the one at the pixels settles
+         --  to the unchanged fraction (the best peak was settled at the coarse level already).
+         for Step in reverse Finest .. Coarse - 1 loop
             Start := Fitted.Fitted;
             declare
                T0 : constant Duration := Driver.Clock.Seconds;
             begin
-               Fit_Level (First, Second, Step, Query, Linear_Sigma, Ridge, Start, Fitted, Grow => Grow);
+               Fit_Level (First, Second, Step, Query, Linear_Sigma, Ridge, Start, Fitted,
+                          Grow => Grow, Final => Step = Finest);
                Work.Add (Level_Fitting, Fitted.Passes, Driver.Clock.Seconds - T0);
             end;
             if not Fitted.Informative then
@@ -1698,6 +1802,7 @@ package body Driver.Alignment is
                   Wider : constant Answer := Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2));
                begin
                   Work.Add (Retrying, (if Wider.Verdict = Found then 1 else 0), 0.0);
+                  Work.Add_Retry (Answered.Because, Wider.Verdict = Found);
                   if Wider.Verdict = Found then
                      return Marked (Wider);
                   end if;
