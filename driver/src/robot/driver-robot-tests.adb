@@ -1148,6 +1148,36 @@ package body Driver.Robot.Tests is
       Check (Carrier_Group (M) = 0, "no group carries every eye");
    end Roles_Of_A_Synthetic_Body;
 
+   --  A reading that crawls for the first 25 beats (a servo on its way to a stale goal: R0, 10-11, 660 ticks in 25
+   --  beats) and then repeats exactly, never pushed: its rest noise is zero, measured on the trend-free rest, and the
+   --  crawl is motion.
+   procedure Channel_Noise_Of_A_Crawl is
+      M    : Model;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Creep_Beats : constant := 25;
+   begin
+      for B in 0 .. 79 loop
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => 1.0 + (if B < Creep_Beats then 0.5 * Real (Creep_Beats - B) / Real (Creep_Beats) else 0.0)));
+         Sent := Driver.Commands.Hold;
+         Observe (M, O, Sent);
+         if B in 2 .. 60 and then B mod 20 = 0 then
+            Estimate_Now (M);
+         end if;
+      end loop;
+      Estimate_Now (M);
+      Check (Reading_Noise (M, 1, 1) = 0.0,
+             "the crawling reading's rest noise is " & Real'Image (Reading_Noise (M, 1, 1))
+             & ", not 0: its crawl was taken for jitter");
+      Check (Channels.Moving (M, 1, 10), "the crawl at beat 10 is not motion");
+      Check (not Channels.Moving (M, 1, 60), "the exact repeats at beat 60 are motion");
+   end Channel_Noise_Of_A_Crawl;
+
    procedure Channel_Noise_And_Pushes is
       M    : Model;
       Rng  : Generator;
@@ -7758,6 +7788,8 @@ package body Driver.Robot.Tests is
                              Noisy_Cells_Far_Above_The_Rest'Access);
       Driver.Tests.Register ("robot.unprobed", "a group never pushed on its own is given a role from what moved "
                              & "with it", Unprobed_Group_Stays_Unclassified'Access);
+      Driver.Tests.Register ("robot.channels.creep", "a reading that crawls at the start and then repeats exactly, never "
+                             & "pushed, is given its crawl as rest noise", Channel_Noise_Of_A_Crawl'Access);
       Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "
                              & "given noise zero, so its jitter passes for motion), a hold is taken for a push, or a "
                              & "push never ends", Channel_Noise_And_Pushes'Access);

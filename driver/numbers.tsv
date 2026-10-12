@@ -926,6 +926,7 @@ driver-robot-boot.adb	Last : Count_Grid := [others => [others => -1]];	1	structu
 driver-robot-boot.adb	Needed : array (1 .. Count, 1 .. Natural'Max (1, Most_Channels)) of Boolean :=	1	structure	an array of at least one column: a group of no channels needs none
 driver-robot-boot.adb	Next_Pause (G) := Hold_After_A_Push (M, Group_Id (G), 2 * Pause (G));	2	math	doubling: the guessed hold climbs with the rounds until the seeing eyes lags are measured
 driver-robot-boot.adb	Now (G, E) := -1;	1	structure	no count: an eye that was not open after the round before
+driver-robot-boot.adb	Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)),	2.0	statistics	the standard error of a scale estimate from Dof degrees of freedom is the scale over the root of twice Dof
 driver-robot-boot.adb	Offset (Count + 2) := First (C);	2	structure	the second of a channel's two pushes, the other way
 driver-robot-boot.adb	Offset (I) := 2.0 * Offset (I);	2.0	math	doubling: the next level of the ladder
 driver-robot-boot.adb	Offset : Real_Array (1 .. 2 * Size) := [others => 0.0];	2	structure	two pushes a channel, one each way
@@ -949,6 +950,7 @@ driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 el
 driver-robot-boot.adb	State (Count + 2) := Climbing;	2	structure	the second of a channel's two pushes, the other way
 driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
 driver-robot-boot.adb	State : array (1 .. 2 * Size) of Stop := [others => Blocked];	2	structure	two pushes a channel, one each way
+driver-robot-boot.adb	if M.Beats >= 2 * Rest_Beats then	2	structure	the rest is compared with itself at every doubling of its beats, as the estimates are scheduled
 driver-robot-boot.adb	if N > 1 and then Followed_In_Pass > 0 and then Fitted_Now then	1	structure	joints move together only when there are at least two
 driver-robot-boot.adb	if N > 1 and then not Fitted_Now then	1	structure	joints move together only when there are at least two
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the parity and the next bit of a row and a column
@@ -963,6 +965,7 @@ driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total)
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, 0.0);	0.0	math	a reading that repeats exactly at every rest beat has no jitter: any change of it is motion
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. 2 * K)) / Sqrt (2.0));	2.0	math	a change is the difference of two readings
 driver-robot-channels.adb	Moved : Real_Access := new Real_Array (1 .. 2 * Rest);	2	structure	the changes and their negations
+driver-robot-channels.adb	N_Old : constant Natural := N / 2;	2	structure	the rest changes split into an older and a newer half, compared with each other
 driver-robot-channels.adb	Phi : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
 driver-robot-channels.adb	Phi : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
 driver-robot-channels.adb	S.Targets.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
@@ -971,7 +974,11 @@ driver-robot-channels.adb	S.Twin_Values.Append (0.0, Ada.Containers.Count_Type (
 driver-robot-channels.adb	S.Twin_Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without an echo; Present marks the beats a reading came, and an echo comes with it
 driver-robot-channels.adb	S.Values.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
+driver-robot-channels.adb	Start : Positive := 1;	1	structure	the trend-free rest starts at the first rest beat until a trend shows
+driver-robot-channels.adb	exit when N_Old < 2;	2	statistics	a half of fewer than two changes has no scatter to compare by
 driver-robot-channels.adb	if Back and then Round > 1 then	1	structure	a round brings back the marks of the one before the last only from its third round on
+driver-robot-channels.adb	if Count - Start + 1 < 2 and then Count >= 2 then	2	statistics	a trend of the changes needs two of them; fewer tell nothing
+driver-robot-channels.adb	if Count - Start + 1 < 2 and then Count >= 2 then	2	statistics	a trend of the changes needs two of them; fewer tell nothing
 driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	1	statistics	a sigma from two or more samples rests on at least one degree of freedom
 driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	2	statistics	a spread takes two samples
 driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	8.0	math	the median absolute deviation's asymptotic efficiency at the Gaussian is 8 c^2 phi (c)^2

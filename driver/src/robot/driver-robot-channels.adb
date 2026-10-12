@@ -200,14 +200,74 @@ package body Driver.Robot.Channels is
       Moved : Real_Access := new Real_Array (1 .. 2 * Rest);
       K     : Natural := 0;
       Index : constant Natural := First_Channel (M, G) + Channel - 1;
+      --  Every change at rest in beat order, zeros included, to tell a reading
+      --  that drifts from one that rests: a resting reading's changes have no
+      --  trend; a joint still travelling (R0, 10-11: the sticky wrist servo
+      --  crawling 660 ticks towards a stale goal after torque came on, 25
+      --  beats into the boot's rest) shows a mean change significant against
+      --  the changes' scatter. The oldest half is dropped while a trend shows;
+      --  the noise is measured on the trend-free rest that remains, and is
+      --  unknown when none remains, so the boot holds still on.
+      All_Changes : Real_Access := new Real_Array (1 .. Rest);
+      Count       : Natural := 0;
+      Start       : Positive := 1;
    begin
       for B in 1 .. Natural (M.Groups (G).Present.Length) - 1 loop
-         if At_Rest (M, G, B) and then Change (M, G, B, Channel) /= 0.0 then
-            K := K + 1;
-            Moved (K) := Change (M, G, B, Channel);
-            Moved (Rest + K) := -Change (M, G, B, Channel);
+         if At_Rest (M, G, B) then
+            Count := Count + 1;
+            All_Changes (Count) := Change (M, G, B, Channel);
          end if;
       end loop;
+      --  Rest is stationary: the older half of the rest changes and the newer
+      --  half have the same mean, within their scatter. A reading that drifts
+      --  at one rate for good (a sensor's creep, A15) is stationary too, and
+      --  its creep stays in its noise as before; a joint still travelling, or
+      --  one that stopped travelling, has halves that differ, and the older is
+      --  dropped until the rest that remains is one regime. Too short to
+      --  split, it is taken as it is: the boot compares the noise across a
+      --  doubling of the rest's beats before it trusts it.
+      loop
+         declare
+            N      : constant Natural := Count - Start + 1;
+            N_Old  : constant Natural := N / 2;
+            N_New  : constant Natural := N - N_Old;
+            Mid    : constant Natural := Start + N_Old;
+            Mean_Old, Mean_New : Real := 0.0;
+            S_Old, S_New       : Real;
+         begin
+            exit when N_Old < 2;
+            for V of All_Changes (Start .. Mid - 1) loop
+               Mean_Old := Mean_Old + V;
+            end loop;
+            for V of All_Changes (Mid .. Count) loop
+               Mean_New := Mean_New + V;
+            end loop;
+            Mean_Old := Mean_Old / Real (N_Old);
+            Mean_New := Mean_New / Real (N_New);
+            S_Old := Driver.Stats.Robust_Sigma (All_Changes (Start .. Mid - 1));
+            S_New := Driver.Stats.Robust_Sigma (All_Changes (Mid .. Count));
+            exit when not Driver.Uncertain.Significant
+              (Mean_New - Mean_Old, Sqrt (S_Old ** 2 / Real (N_Old) + S_New ** 2 / Real (N_New)),
+               Mad_Degrees_Of_Freedom (Natural'Min (N_Old, N_New)));
+            Start := Mid;
+         end;
+      end loop;
+      if Count - Start + 1 < 2 and then Count >= 2 then
+         --  Trending to its last beats: nothing of its rest is measured yet.
+         M.Noise.Replace_Element (Index, Real'Last);
+         M.Noise_Freedom.Replace_Element (Index, 0);
+         Free (All_Changes);
+         Free (Moved);
+         return;
+      end if;
+      for I in Start .. Count loop
+         if All_Changes (I) /= 0.0 then
+            K := K + 1;
+            Moved (K) := All_Changes (I);
+            Moved (Rest + K) := -All_Changes (I);
+         end if;
+      end loop;
+      Free (All_Changes);
       if K = 0 then
          M.Noise.Replace_Element (Index, 0.0);
          M.Noise_Freedom.Replace_Element (Index, 0);
@@ -402,7 +462,9 @@ package body Driver.Robot.Channels is
                      end loop;
                   end if;
                end loop;
-               if Answered and then (not M.Groups (G).Delay_Known or else Delay_Beats /= M.Groups (G).Delay_Beats) then
+               --  Logged when the longest wait grows (R0: a line every beat as the window slid over pushes of two to
+               --  eight beats).
+               if Answered and then (not M.Groups (G).Delay_Known or else Delay_Beats > M.Groups (G).Delay_Beats) then
                   Driver.Log.Line (Driver.Log.Robot, "group" & G'Image & " answers a push within" & Delay_Beats'Image
                                    & " beats, the longest wait of its pushes from their start to its readings' first motion");
                end if;

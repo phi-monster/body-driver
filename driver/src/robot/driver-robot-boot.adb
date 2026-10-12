@@ -9,12 +9,14 @@ with Driver.Commands;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Log;
+with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Robot.Body_File;
 with Driver.Robot.Kinematics;
 with Driver.Robot.Lag;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Regression;
+with Driver.Uncertain;
 
 package body Driver.Robot.Boot is
 
@@ -657,6 +659,74 @@ package body Driver.Robot.Boot is
          Count := Group_Count (M);
       end Read_Count;
 
+      --  Whether every commandable channel's rest noise is measured: a
+      --  reading still drifting at rest measures none (Channels.Measure_Channel
+      --  drops the trend), and the boot holds still on until it does.
+      Rest_Measured : Boolean := False;
+      Drifting      : Ada.Strings.Unbounded.Unbounded_String;
+      --  The rest is measured when a doubling of its beats repeats every
+      --  channel's noise within its own uncertainty: the tail of a crawl
+      --  left in the trend-free rest passes for jitter until more rest beats
+      --  expose it (robot.boot.creep), as a measurement is accepted elsewhere
+      --  when the next doubling of beats says the same.
+      type Noise_Access is access Real_Array;
+      Rest_Noises : Noise_Access;
+      Rest_Beats  : Natural := 0;     --  the beats the body had seen at the last comparison
+      Rest_Stable : Boolean := False;
+      procedure Read_Rest is
+         Index : Natural := 0;
+         Total : Natural := 0;
+      begin
+         Rest_Measured := True;
+         Drifting := Ada.Strings.Unbounded.Null_Unbounded_String;
+         for G in 1 .. Group_Count (M) loop
+            Total := Total + Group_Size (M, Group_Id (G));
+            if Is_Commandable (M, Group_Id (G)) then
+               for C in 1 .. Group_Size (M, Group_Id (G)) loop
+                  if Reading_Noise (M, Group_Id (G), C) = Real'Last then
+                     Rest_Measured := False;
+                     Ada.Strings.Unbounded.Append (Drifting, " group" & G'Image & " channel" & C'Image);
+                  end if;
+               end loop;
+            end if;
+         end loop;
+         if not Rest_Measured then
+            Rest_Stable := False;
+            return;
+         end if;
+         if Rest_Noises = null then
+            Rest_Noises := new Real_Array'(1 .. Total => Real'Last);
+         end if;
+         if M.Beats >= 2 * Rest_Beats then
+            Rest_Stable := Rest_Beats > 0;
+            for G in 1 .. Group_Count (M) loop
+               for C in 1 .. Group_Size (M, Group_Id (G)) loop
+                  Index := Index + 1;
+                  if Is_Commandable (M, Group_Id (G)) then
+                     declare
+                        Now_N  : constant Real := Reading_Noise (M, Group_Id (G), C);
+                        Then_N : constant Real := Rest_Noises (Index);
+                        Dof    : constant Natural :=
+                          (if Index <= Natural (M.Noise_Freedom.Length) then M.Noise_Freedom (Index - 1) else 0);
+                     begin
+                        if Then_N = Real'Last
+                          or else (if Dof = 0 then Now_N /= Then_N
+                                   else Driver.Uncertain.Significant
+                                          (Now_N - Then_N,
+                                           Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)),
+                                           Dof))
+                        then
+                           Rest_Stable := False;
+                        end if;
+                        Rest_Noises (Index) := Now_N;
+                     end;
+                  end if;
+               end loop;
+            end loop;
+            Rest_Beats := M.Beats;
+         end if;
+      end Read_Rest;
+
       procedure Read_Body is
       begin
          Driver.Log.Line (Driver.Log.Robot, "boot: the groups as recognized:" & ASCII.LF & Describe (M));
@@ -776,7 +846,26 @@ package body Driver.Robot.Boot is
                              & Ada.Strings.Unbounded.To_String (Why));
          end;
       end if;
-      Driver.Beats.Within_A_Beat (Estimate'Access);
+      --  The body is at rest when every commandable channel's noise is
+      --  measured: a reading that drifts (R0, 10-11: the sticky wrist servo
+      --  crawling 660 ticks towards a stale goal after torque came on, taken
+      --  for jitter, made the first push 175 ticks) measures none, and the
+      --  boot holds still on.
+      declare
+         Last : Ada.Strings.Unbounded.Unbounded_String;
+      begin
+         loop
+            Driver.Beats.Within_A_Beat (Estimate'Access);
+            Driver.Beats.Within_A_Beat (Read_Rest'Access);
+            exit when Rest_Measured and then Rest_Stable;
+            if Ada.Strings.Unbounded."/=" (Drifting, Last) then
+               Driver.Log.Line (Driver.Log.Robot, "boot: still moving at rest:"
+                                & Ada.Strings.Unbounded.To_String (Drifting) & "; holding still on");
+               Last := Drifting;
+            end if;
+            Driver.Robot.Motion.Settle (M, Waited);
+         end loop;
+      end;
       Driver.Beats.Within_A_Beat (Read_Count'Access);
       declare
          Recognized_Before, Fitted_Before : Boolean := False;
