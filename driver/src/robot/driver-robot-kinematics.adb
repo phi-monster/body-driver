@@ -7,6 +7,7 @@ with Ada.Unchecked_Deallocation;
 with Driver.Alignment;
 with Driver.Alignment.Keyframes;
 with Driver.Clock;
+with Driver.Memory;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Numerics.Dense;
@@ -894,7 +895,8 @@ package body Driver.Robot.Kinematics is
                                 & R.Frames (F).Beat'Image & ", change" & Ada.Strings.Unbounded.To_String (Text)
                                 & ", predicted " & Ada.Characters.Handling.To_Lower (From'Image) & " stating "
                                 & Driver.Log.Image (Stated_By (Given.all), 1) & " px:" & Here'Image
-                                & " of" & Queries'Image & " points found");
+                                & " of" & Queries'Image & " points found; resident"
+                                & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & " MB");
             end;
             R.Matches.Append (Set);
             R.Aligned := F;
@@ -913,7 +915,8 @@ package body Driver.Robot.Kinematics is
          & R.Aligned'Image & ":" & Found'Image & " of" & Natural'Image ((R.Aligned - First + 1) * Queries)
          & " points found, the aligner errs by " & Driver.Log.Image (Match_Sigma (R), 3) & " px, in "
          & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s" & Reasons_Text
-         & "; the aligner's work: " & Driver.Alignment.Work_Report);
+         & "; the aligner's work: " & Driver.Alignment.Work_Report & "; resident"
+         & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & " MB");
       --  The steps a keyframe of each channel needs, for the log: what the matcher tells apart against what the eye sees.
       declare
          Text : Ada.Strings.Unbounded.Unbounded_String;

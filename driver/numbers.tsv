@@ -608,6 +608,7 @@ driver-log.adb	Buffer : String (1 .. 64);	64	format	room for any Real printed in
 driver-log.adb	IO.Put (Buffer, X, Aft => Digits_After_Point, Exp => 3);	3	format	exponent digits when a value is too large for fixed point
 driver-log.adb	function Image (X : Real; Digits_After_Point : Natural := 3) return String is	3	format	default digits printed after the point
 driver-log.ads	function Image (X : Real; Digits_After_Point : Natural := 3) return String;	3	format	default digits printed after the point
+driver-memory.adb	Value := Value * 10 + (Character'Pos (C) - Character'Pos (''));	10	format	decimal digits of the kernel's text
 driver-msgpack.adb	(case B is when 16#D0# => 1, when 16#D1# => 2, when 16#D2# => 4, when others => 8);	1	format	MessagePack type codes, payload widths and length limits (msgpack spec)
 driver-msgpack.adb	(case B is when 16#D0# => 1, when 16#D1# => 2, when 16#D2# => 4, when others => 8);	16#D0#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
 driver-msgpack.adb	(case B is when 16#D0# => 1, when 16#D1# => 2, when 16#D2# => 4, when others => 8);	16#D1#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
@@ -2205,6 +2206,8 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Report.Seconds (K), 1));	1	forma
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Sigma_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Scale, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Stated_By (Given.all), 1) & "" & Here'Image	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & "");	1024	format	kilobytes in a megabyte, for the log
+driver-robot-kinematics.adb	& Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & "");	1024	format	kilobytes in a megabyte, for the log
 driver-robot-kinematics.adb	& Pm (Report.L.Fy, Report.L.Fy * Sd (2), 2) & "" & Pm (Report.L.Cx, Sd (3), 2)	2	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	& Pm (Report.L.Fy, Report.L.Fy * Sd (2), 2) & "" & Pm (Report.L.Cx, Sd (3), 2)	2	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	& Pm (Report.L.Fy, Report.L.Fy * Sd (2), 2) & "" & Pm (Report.L.Cx, Sd (3), 2)	2	structure	the index of a term of the covariance
