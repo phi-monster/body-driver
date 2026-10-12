@@ -2,12 +2,12 @@ with Ada.Text_IO;
 
 package body Driver.Memory is
 
-   function Resident_Kilobytes return Natural is
+   --  The number after Key in the file, in kilobytes; Absent when the file or the key is not there.
+   function Kilobytes_Of (File_Name, Key : String; Absent : Natural) return Natural is
       use Ada.Text_IO;
       Status : File_Type;
-      Key    : constant String := "VmRSS:";
    begin
-      Open (Status, In_File, "/proc/self/status");
+      Open (Status, In_File, File_Name);
       while not End_Of_File (Status) loop
          declare
             Line : constant String := Get_Line (Status);
@@ -33,13 +33,17 @@ package body Driver.Memory is
          end;
       end loop;
       Close (Status);
-      return 0;
+      return Absent;
    exception
       when others =>
          if Is_Open (Status) then
             Close (Status);
          end if;
-         return 0;
-   end Resident_Kilobytes;
+         return Absent;
+   end Kilobytes_Of;
+
+   function Resident_Kilobytes return Natural is (Kilobytes_Of ("/proc/self/status", "VmRSS:", 0));
+
+   function Available_Kilobytes return Natural is (Kilobytes_Of ("/proc/meminfo", "MemAvailable:", Natural'Last));
 
 end Driver.Memory;

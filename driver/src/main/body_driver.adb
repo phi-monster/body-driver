@@ -36,6 +36,7 @@ with Driver.Brain;
 with Driver.Bytes;
 with Driver.Clock;
 with Driver.Commands;
+with Driver.Images;
 with Driver.Log;
 with Driver.Observations;
 with Driver.Protocol;
@@ -220,7 +221,16 @@ procedure Body_Driver is
       Fail ("the estimates failed", E);
    end Estimates_Failed;
 
-   package Apart is new Driver.Apart (Input, Robot_Part, Rest, Due, Compute, Estimates_Failed);
+   procedure Lighten (M : in out Input) is
+   begin
+      if M.Observed then
+         for C in M.O.Images.First_Index .. M.O.Images.Last_Index loop
+            M.O.Images.Replace_Element (C, Driver.Images.No_Image);
+         end loop;
+      end if;
+   end Lighten;
+
+   package Apart is new Driver.Apart (Input, Robot_Part, Rest, Due, Compute, Estimates_Failed, Lighten);
 
    procedure Handle (Data : Driver.Bytes.Byte_Array) is
       Req        : Driver.Protocol.Request;

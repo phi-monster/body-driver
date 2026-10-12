@@ -48,6 +48,13 @@ generic
    --  Computes them (Driver.Robot.Compute_Estimates).
    with procedure Failed (E : Ada.Exceptions.Exception_Occurrence);
    --  The estimator task failed; the models are in an unknown state.
+   with procedure Lighten (M : in out Message);
+   --  Drops what a message kept back may lose: its images. Called on a message
+   --  about to be kept back when what the kernel can still give without
+   --  swapping is less than a kept-back message has been taking (R1 on the
+   --  Pi, 10-12: 3338 beats kept back with three raw images each while the
+   --  estimates took 274 s, the swap filled and the Pi went down). The models
+   --  then see those beats without pictures, as beats a camera missed.
 package Driver.Apart is
 
    --  Main loop, for every robot message, in this order: Arrive; the message

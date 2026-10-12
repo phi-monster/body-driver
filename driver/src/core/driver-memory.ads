@@ -5,4 +5,8 @@ package Driver.Memory is
 
    function Resident_Kilobytes return Natural;
 
+   function Available_Kilobytes return Natural;
+   --  What the kernel says can still be allocated without swapping (Linux:
+   --  /proc/meminfo, MemAvailable); Natural'Last where it does not say.
+
 end Driver.Memory;

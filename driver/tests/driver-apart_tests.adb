@@ -27,6 +27,9 @@ package body Driver.Apart_Tests is
       N : Natural := 0;
    end record;
 
+   procedure Lighten (M : in out Msg) is null;   --  a test message has nothing to drop
+
+
    protected Log is
       procedure Add (Step : String);
       procedure Clear;
@@ -128,7 +131,7 @@ package body Driver.Apart_Tests is
       Longest     : out Duration;
       In_Time     : out Boolean)
    is
-      package Live is new Driver.Apart (Msg, Robot_Part, Rest, Due, Compute, Failed);
+      package Live is new Driver.Apart (Msg, Robot_Part, Rest, Due, Compute, Failed, Lighten);
       N : Natural := 0;
 
       procedure One (Step : Duration; Timed : Boolean) is
@@ -243,7 +246,7 @@ package body Driver.Apart_Tests is
       Driver.Recording.Stop_Shared;
       declare
          Ran      : constant String := Log.Text;
-         package Replayed is new Driver.Apart (Msg, Robot_Part, Rest, Due, Compute, Failed);
+         package Replayed is new Driver.Apart (Msg, Robot_Part, Rest, Due, Compute, Failed, Lighten);
          R        : Driver.Recording.Reader;
          Opened   : Boolean;
          More     : Boolean := True;
@@ -299,7 +302,7 @@ package body Driver.Apart_Tests is
       Reset_Model;
       Second_Due := 0;
       declare
-         package In_Place_Run is new Driver.Apart (Msg, Robot_Part, Rest, Due, Compute, Failed);
+         package In_Place_Run is new Driver.Apart (Msg, Robot_Part, Rest, Due, Compute, Failed, Lighten);
       begin
          for N in 1 .. 10 loop
             In_Place_Run.Replay_Message ((N => N));

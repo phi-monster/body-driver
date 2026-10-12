@@ -1088,6 +1088,23 @@ package body Driver.Alignment.Keyframes is
       Agree := Mine;
    end Realign;
 
+   --  Whether a field puts every point where another does, within what the two know of the place there.
+   function Unmoved (C : Chain; Old, Now : Field_Fit) return Boolean is
+   begin
+      for P of C.Points loop
+         declare
+            S : constant Real := Sqrt (Variance (C, Old, P) + Variance (C, Now, P));
+         begin
+            if Driver.Uncertain.Significant (Evaluate (C, Now.U, P) - Evaluate (C, Old.U, P), S)
+              or else Driver.Uncertain.Significant (Evaluate (C, Now.V, P) - Evaluate (C, Old.V, P), S)
+            then
+               return False;
+            end if;
+         end;
+      end loop;
+      return True;
+   end Unmoved;
+
    procedure Add
      (C       : in out Chain;
       Image   : Driver.Images.Image;
@@ -1099,7 +1116,7 @@ package body Driver.Alignment.Keyframes is
       Second : constant Pyramid := Pyramid_Of (Image);
       Count  : constant Natural := Given'Length;
       Marks  : Located_Array (1 .. Count);
-      Mine   : Flag_Array (1 .. Count);
+      Mine   : Flag_Array (1 .. Count) := [others => False];
       Next   : Frame;
 
       --  Whether the field puts the point inside the picture: where the prediction was of any use.
@@ -1110,8 +1127,57 @@ package body Driver.Alignment.Keyframes is
       for X of Change loop
          Next.Change.Append (X);
       end loop;
-      Align_Some (C, Second, Given, [1 .. Count => True], Answers, Marks);
-      Fit_Field (C, Marks, Next.Field, Mine);
+      Answers := [others => Not_Asked_Answer];
+      --  The points by doubling: first the fewest a field stands on, spread over the picture (every Stride-th
+      --  point, Stride the largest power of two that leaves that many), then twice as many each round, the new
+      --  points predicted from the field so far where there is one; the rounds end when a round's field puts
+      --  every point where the one before did, within what the two know, or when every point is aligned. The
+      --  points left unasked are so answered. (R1 on the Pi: 349 points a keyframe, every one aligned, 3490
+      --  alignments and 132 s for ten keyframes, for fields of twelve terms.)
+      declare
+         Asked  : Prediction_Array (1 .. Count) := Given;
+         Done   : Flag_Array (1 .. Count) := [others => False];
+         Stride : Positive := 1;
+      begin
+         while Count / (2 * Stride) >= Least_Points loop
+            Stride := 2 * Stride;
+         end loop;
+         loop
+            declare
+               Round : Flag_Array (1 .. Count) := [others => False];
+               Any   : Boolean := False;
+            begin
+               for K in 1 .. Count loop
+                  if not Done (K) and then (K - 1) mod Stride = 0 then
+                     Round (K) := True;
+                     Done (K) := True;
+                     Any := True;
+                     if Next.Field.Valid then
+                        Asked (K) := Asked_From (C, Next.Field, C.Points (K));
+                     end if;
+                  end if;
+               end loop;
+               if Any then
+                  Align_Some (C, Second, Asked, Round, Answers, Marks);
+                  declare
+                     Refit   : Field_Fit;
+                     Again   : Flag_Array (1 .. Count);
+                     Settled : Boolean := False;
+                  begin
+                     Fit_Field (C, Marks, Refit, Again);
+                     if Refit.Valid then
+                        Settled := Next.Field.Valid and then Unmoved (C, Next.Field, Refit);
+                        Next.Field := Refit;
+                        Mine := Again;
+                     end if;
+                     exit when Settled;
+                  end;
+               end if;
+               exit when Stride = 1;
+               Stride := Stride / 2;
+            end;
+         end loop;
+      end;
       Settle (C, Second, Answers, Marks, Next.Field, Mine);
       Agree := Mine;
       --  How far the extrapolation of each order that was tried was off, beyond what the fields it rested on carry:

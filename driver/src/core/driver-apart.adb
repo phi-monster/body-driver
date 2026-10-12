@@ -35,16 +35,19 @@ package body Driver.Apart is
       procedure Go_Apart;
       procedure Go_Apart_With (M : Message);
       procedure Arrive (Held : out Boolean; Back : out Boolean);
-      procedure Episode (Kept_Back, Longest_Queue : out Natural);
-      --  The messages kept back since the models went apart, and the most that waited at once; counted again.
-      procedure Append (M : Message);
+      procedure Weigh (Resident, Available : Natural; Light : out Boolean);
+      procedure Episode (Kept_Back, Longest_Queue, Lightened_Count : out Natural);
+      --  The messages kept back since the models went apart, the most that waited at once, and how many were
+      --  lightened; counted again.
+      procedure Append (M : Message; Lightened_One : Boolean);
       entry Settle;
       entry Next_Work (W : out Work_Kind; M : out Message);
       procedure Computed;
       procedure Due_Again (M : Message);
       function Apart return Boolean;
    private
-      Kept, Most : Natural := 0;   --  of the apart episode under way
+      Kept, Most, Lightened : Natural := 0;   --  of the apart episode under way
+      Last_Resident, Per_Message : Natural := 0;   --  the resident set at the last message kept back, and its growth
       Phase    : Phase_Kind := Home;
       Queue    : Message_Vectors.Vector;
       Has_Rest : Boolean := False;   --  the rest of Rest_Msg is still to be given
@@ -78,19 +81,37 @@ package body Driver.Apart is
          Held := Phase /= Home;
       end Arrive;
 
-      procedure Append (M : Message) is
+      --  Whether the next message kept back must be lightened: a kept-back message has been taking, at most,
+      --  the resident set's growth from one to the next, and the kernel can give less than that now.
+      procedure Weigh (Resident, Available : Natural; Light : out Boolean) is
+      begin
+         if Last_Resident > 0 and then Resident > Last_Resident then
+            Per_Message := Natural'Max (Per_Message, Resident - Last_Resident);
+         end if;
+         Last_Resident := Resident;
+         Light := Per_Message > 0 and then Available < Per_Message;
+      end Weigh;
+
+      procedure Append (M : Message; Lightened_One : Boolean) is
       begin
          Queue.Append (M);
          Kept := Kept + 1;
+         if Lightened_One then
+            Lightened := Lightened + 1;
+         end if;
          Most := Natural'Max (Most, Natural (Queue.Length));
       end Append;
 
-      procedure Episode (Kept_Back, Longest_Queue : out Natural) is
+      procedure Episode (Kept_Back, Longest_Queue, Lightened_Count : out Natural) is
       begin
          Kept_Back := Kept;
          Longest_Queue := Most;
+         Lightened_Count := Lightened;
          Kept := 0;
          Most := 0;
+         Lightened := 0;
+         Last_Resident := 0;
+         Per_Message := 0;
       end Episode;
 
       --  An answer waits until fewer messages are kept back than at the last
@@ -195,11 +216,12 @@ package body Driver.Apart is
       Backlog.Arrive (Held, Back);
       if Back then
          declare
-            Kept_Back, Longest : Natural;
+            Kept_Back, Longest, Lightened : Natural;
          begin
-            Backlog.Episode (Kept_Back, Longest);
+            Backlog.Episode (Kept_Back, Longest, Lightened);
             Driver.Log.Line (Driver.Log.Core, "apart: the models are back after" & Kept_Back'Image
-                             & " messages kept back, at most" & Longest'Image & " waiting at once; resident"
+                             & " messages kept back, at most" & Longest'Image & " waiting at once,"
+                             & Lightened'Image & " without their images (memory ran short); resident"
                              & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & " MB");
          end;
          Note (Driver.Recording.Estimates_Back);
@@ -208,8 +230,14 @@ package body Driver.Apart is
    end Arrive;
 
    procedure Hold_Back (M : Message) is
+      Kept  : Message := M;
+      Light : Boolean;
    begin
-      Backlog.Append (M);
+      Backlog.Weigh (Driver.Memory.Resident_Kilobytes, Driver.Memory.Available_Kilobytes, Light);
+      if Light then
+         Lighten (Kept);
+      end if;
+      Backlog.Append (Kept, Light);
       Backlog.Settle;
    end Hold_Back;
 

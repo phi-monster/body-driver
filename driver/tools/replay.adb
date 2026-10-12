@@ -384,7 +384,12 @@ procedure Replay is
    --  A replay computes in place; the estimator task of the main program
    --  never runs here.
 
-   package Apart is new Driver.Apart (Input, Robot_Part, Rest, Due, Compute, Never);
+   procedure Lighten (M : in out Input) is null;
+   --  A replay keeps nothing back, so nothing is lightened here. (A recording
+   --  does not say which beats the run lightened: a replay of a run that did
+   --  sees the pictures of beats the run's models never saw.)
+
+   package Apart is new Driver.Apart (Input, Robot_Part, Rest, Due, Compute, Never, Lighten);
 
    procedure Robot_Message (Data : Driver.Bytes.Byte_Array) is
       Req : Driver.Protocol.Request;

@@ -143,7 +143,8 @@ package Driver.Alignment is
       Not_Solvable,       --  the normal equations of the refinement have no solution (the patch fixes too little)
       Not_Settled,        --  the refinement did not settle within the bits of precision there are
       Left_Window,        --  the refinement carried the place out of the window the prediction allows
-      Uninformative);     --  the pixels leave the place as wide as the patch
+      Uninformative,      --  the pixels leave the place as wide as the patch
+      Not_Asked);         --  not aligned: the field of its keyframe settled on the points before it (Keyframes)
 
    type Answer is record
       Verdict     : Alignment.Verdict := Not_Found;
@@ -166,6 +167,8 @@ package Driver.Alignment is
       --  before something better than the prediction has been found out about the move.
    end record;
    --  To, Cov and Linear are meaningful only when the verdict is Found.
+
+   Not_Asked_Answer : constant Answer := (Verdict => Not_Found, Because => Not_Asked, others => <>);
 
    function Align (First, Second : Pyramid; Query : Prediction) return Answer
      with Pre => Levels (First) > 0 and then Levels (Second) > 0;
