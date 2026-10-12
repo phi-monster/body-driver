@@ -187,15 +187,20 @@ package body Driver.Robot.Channels is
    end Mad_Degrees_Of_Freedom;
 
    --  Whether the change into Beat is one of a resting reading: the beat and
-   --  the one before have readings, and for a commanded group no push of it was
-   --  under way. A target that changed is no push unless it asked for motion
-   --  (Asked): a group the driver never commanded is held by its own reading,
-   --  sent again every beat, and that target changes at every beat by the
-   --  reading's creep.
+   --  the one before have readings, and no push of any commanded group was
+   --  under way. A reading moves as a reaction to a push of something else
+   --  too (a sensor of what the arms do: the rig's sum of two joints), and
+   --  the beats of other groups' pushes are its motion, not its rest: counted
+   --  as rest, a long sweep was the latest regime of such a reading and its
+   --  reactions became its noise, so nothing it did was visible any more
+   --  (robot.roles, 10-12). A target that changed is no push unless it asked
+   --  for motion (Asked): a group the driver never commanded is held by its
+   --  own reading, sent again every beat, and that target changes at every
+   --  beat by the reading's creep.
    function At_Rest (M : Model; G : Group_Id; Beat : Natural) return Boolean is
      (Beat > 0 and then Has_Reading (M, G, Beat) and then Has_Reading (M, G, Beat - 1)
-      and then (not M.Groups (G).Commandable
-                or else not Pushed (M, G, Beat)));
+      and then (for all H in M.Groups.First_Index .. M.Groups.Last_Index =>
+                  not M.Groups (H).Commandable or else not Pushed (M, H, Beat)));
 
    --  One channel's noise from its rest changes. A resting reading either
    --  repeats exactly (a simulator between physics updates, a quantized or
