@@ -996,6 +996,7 @@ package body Driver.Robot.Boot is
                            Cells  : Count_Grid;   --  the cells it was reached over
                            Shows  : array (1 .. Count, 1 .. Eyes) of Eye_Response;
                            Rests  : array (1 .. Count, 1 .. Eyes) of Real;   --  the rest's motion together, in sigmas
+                           Last_Rests : array (1 .. Count, 1 .. Eyes) of Real := [others => [others => 0.0]];
                            Factor : array (1 .. Count) of Real := [others => 1.0];
                            --  The hold after each push (Pause_After_A_Push): the longest measured lag once every eye's
                            --  is measured, until then the longest lag the stream could tell when the rounds began,
@@ -1049,10 +1050,18 @@ package body Driver.Robot.Boot is
                                              Needed (G, C) := True;
                                           end if;
                                        end loop;
+                                       --  The cells that did not respond are pushed on for only while their motion
+                                       --  together grew with the last doubling: a whole showing itself grows with the
+                                       --  push (robot.boot.step: the far background twenty times fainter), a patch on
+                                       --  a base the push shakes does not (R4 on the Pi, 10-13: the head eye's rest
+                                       --  against arm a read 1.3, 7.2, 4.7 and -5.9 sigmas at 1, 2, 4 and 8 times
+                                       --  the amounts, its responding cells 226, 239, 228 and 219 of 525, and the
+                                       --  rounds went on to 16 times, the arm swinging further at each).
                                        Again (G) := not Spent (G)
                                          and then (Again (G) or else Last (G, E) < 0
                                                    or else Grew (Last (G, E), Now (G, E), Cells (G, E))
-                                                   or else Doubled * Rests (G, E) > Driver.Conventions.Z);
+                                                   or else (Rests (G, E) > Last_Rests (G, E)
+                                                            and then Doubled * Rests (G, E) > Driver.Conventions.Z));
                                     end if;
                                  end loop;
                               end loop;
@@ -1105,6 +1114,7 @@ package body Driver.Robot.Boot is
                                  end if;
                               end loop;
                               Last := Now;
+                              Last_Rests := Rests;
                               Driver.Beats.Within_A_Beat (Estimate'Access);
                            end loop;
                         end;
