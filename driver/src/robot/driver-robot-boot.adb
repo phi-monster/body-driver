@@ -995,8 +995,9 @@ package body Driver.Robot.Boot is
                            Now    : Count_Grid;
                            Cells  : Count_Grid;   --  the cells it was reached over
                            Shows  : array (1 .. Count, 1 .. Eyes) of Eye_Response;
-                           Rests  : array (1 .. Count, 1 .. Eyes) of Real;   --  the rest's motion together, in sigmas
-                           Last_Rests : array (1 .. Count, 1 .. Eyes) of Real := [others => [others => 0.0]];
+                           type Rest_Grid is array (1 .. Count, 1 .. Eyes) of Real;
+                           Rests      : Rest_Grid;   --  the rest's motion together, in sigmas
+                           Last_Rests : Rest_Grid := [others => [others => 0.0]];   --  the same at the round before
                            Factor : array (1 .. Count) of Real := [others => 1.0];
                            --  The hold after each push (Pause_After_A_Push): the longest measured lag once every eye's
                            --  is measured, until then the longest lag the stream could tell when the rounds began,
