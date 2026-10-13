@@ -1,4 +1,6 @@
+with Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions;
+with Driver.Distributions;
 with Ada.Unchecked_Conversion;
 with Interfaces;
 
@@ -192,5 +194,48 @@ package body Driver.Stats is
          end;
       end;
    end Fit_Line;
+
+   function Mad_Degrees_Of_Freedom (N : Natural) return Natural is
+      Half : constant Real := 0.5;
+      C    : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (Half);
+      Phi  : constant Real := Ada.Numerics.Long_Elementary_Functions.Exp (-C * C / 2.0)
+                              / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Ada.Numerics.Pi);
+   begin
+      --  Rounding a handful of samples down to none would call the sigma known.
+      return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));
+   end Mad_Degrees_Of_Freedom;
+
+   function Latest_Regime (X : Real_Array) return Positive is
+      Start : Positive := X'First;
+   begin
+      loop
+         declare
+            N      : constant Natural := X'Last - Start + 1;
+            N_Old  : constant Natural := N / 2;
+            N_New  : constant Natural := N - N_Old;
+            Mid    : constant Natural := Start + N_Old;
+            Mean_Old, Mean_New : Real := 0.0;
+            S_Old, S_New       : Real;
+         begin
+            exit when N_Old < 2;
+            for V of X (Start .. Mid - 1) loop
+               Mean_Old := Mean_Old + V;
+            end loop;
+            for V of X (Mid .. X'Last) loop
+               Mean_New := Mean_New + V;
+            end loop;
+            Mean_Old := Mean_Old / Real (N_Old);
+            Mean_New := Mean_New / Real (N_New);
+            S_Old := Robust_Sigma (X (Start .. Mid - 1));
+            S_New := Robust_Sigma (X (Mid .. X'Last));
+            exit when not Driver.Uncertain.Significant
+              (Mean_New - Mean_Old,
+               Ada.Numerics.Long_Elementary_Functions.Sqrt (S_Old ** 2 / Real (N_Old) + S_New ** 2 / Real (N_New)),
+               Mad_Degrees_Of_Freedom (Natural'Min (N_Old, N_New)));
+            Start := Mid;
+         end;
+      end loop;
+      return Start;
+   end Latest_Regime;
 
 end Driver.Stats;

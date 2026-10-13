@@ -29,6 +29,22 @@ package Driver.Stats with Pure is
    --  The standard deviation implied by the median absolute deviation for
    --  Gaussian data; a minority of outliers does not move it.
 
+   function Mad_Degrees_Of_Freedom (N : Natural) return Natural;
+   --  The degrees of freedom of a standard deviation told by the median
+   --  absolute deviation of N Gaussian samples (its efficiency against the
+   --  sample standard deviation); 0 below two samples, and never rounded
+   --  down to none above.
+
+   function Latest_Regime (X : Real_Array) return Positive
+     with Pre => X'Length > 0, Post => Latest_Regime'Result in X'Range;
+   --  The first index of the latest stationary stretch of the samples, in
+   --  their order: the older half of the stretch and the newer have the same
+   --  mean within their scatter (Robust_Sigma, with the degrees of freedom of
+   --  a median absolute deviation); while they differ, the older half is
+   --  dropped. A stretch too short to split (fewer than two samples in its
+   --  older half) is taken as it is. The readings' rest is measured on such a
+   --  stretch (Driver.Robot.Channels), and so is an eye's (Driver.Robot.Lockin).
+
    function Correlation (X, Y : Real_Array) return Real
      with Pre => X'Length = Y'Length and then X'Length > 1;
    --  Pearson correlation; zero when either sample has no spread.

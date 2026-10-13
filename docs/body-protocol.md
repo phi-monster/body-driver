@@ -70,7 +70,11 @@ costs the recognition some forty doublings of a push too small to happen.
 The driver starts once an observation has at least one camera and one group
 of readings; until then it says what it lacks and waits for the next one.
 Keep every camera in every observation: a camera missing from one beat is a
-gap at its place, not a shift of the others.
+gap at its place, not a shift of the others. Send each frame once: a camera
+that has given no new frame since the beat before (a camera slower than the
+beat) is left out of that beat, a gap. A frame sent again tells the driver
+nothing, and the driver drops a frame whose pixels are those of the beat
+before as such a gap.
 
 ### Command keys
 

@@ -997,14 +997,10 @@ driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the pari
 driver-robot-boot.adb	if Unswept.Length = 1 then	1	structure	one arm or hand needs no lanes; more than one are measured at once
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-channels.adb	(Change_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	statistics	a standardized statistic is tested against unit sigma
-driver-robot-channels.adb	Half : constant Real := 0.5;	0.5	math	the median of the absolute value of a unit Gaussian is its two-sided quantile at one half
 driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	the first round takes every change for motion: noise zero
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, 0.0);	0.0	math	a reading that repeats exactly at every rest beat has no jitter: any change of it is motion
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. 2 * K)) / Sqrt (2.0));	2.0	math	a change is the difference of two readings
 driver-robot-channels.adb	Moved : Real_Access := new Real_Array (1 .. 2 * Rest);	2	structure	the changes and their negations
-driver-robot-channels.adb	N_Old : constant Natural := N / 2;	2	structure	the rest changes split into an older and a newer half, compared with each other
-driver-robot-channels.adb	Phi : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
-driver-robot-channels.adb	Phi : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
 driver-robot-channels.adb	S.Targets.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Targets.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Twin_Values.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without an echo; Present marks the beats a reading came, and an echo comes with it
@@ -1012,13 +1008,9 @@ driver-robot-channels.adb	S.Twin_Values.Prepend (0.0, Ada.Containers.Count_Type 
 driver-robot-channels.adb	S.Values.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	Start : Positive := 1;	1	structure	the trend-free rest starts at the first rest beat until a trend shows
-driver-robot-channels.adb	exit when N_Old < 2;	2	statistics	a half of fewer than two changes has no scatter to compare by
 driver-robot-channels.adb	if Back and then Round > 1 then	1	structure	a round brings back the marks of the one before the last only from its third round on
 driver-robot-channels.adb	if Count - Start + 1 < 2 and then Count >= 2 then	2	statistics	a trend of the changes needs two of them; fewer tell nothing
 driver-robot-channels.adb	if Count - Start + 1 < 2 and then Count >= 2 then	2	statistics	a trend of the changes needs two of them; fewer tell nothing
-driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	1	statistics	a sigma from two or more samples rests on at least one degree of freedom
-driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	2	statistics	a spread takes two samples
-driver-robot-channels.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	8.0	math	the median absolute deviation's asymptotic efficiency at the Gaussian is 8 c^2 phi (c)^2
 driver-robot-channels.adb	return 1.0;	1.0	structure	one reading unit: an integer on the wire changes by whole units or not at all
 driver-robot-channels.adb	return Real'Scaling (1.0, Real'Exponent (if Scale > 0.0 then Scale else 1.0) - Bits);	1.0	math	the unit in the last place: one, scaled to the exponent of the largest reading less the format's bits; of one reading unit when every reading is zero
 driver-robot-channels.adb	return Real'Scaling (1.0, Real'Exponent (if Scale > 0.0 then Scale else 1.0) - Bits);	1.0	math	the unit in the last place: one, scaled to the exponent of the largest reading less the format's bits; of one reading unit when every reading is zero
@@ -2447,19 +2439,20 @@ driver-robot-lockin.adb	& Driver.Log.Image (Real (Marks_Took), 1) & ""	1	format	
 driver-robot-lockin.adb	& Driver.Log.Image (Real (Rows_Took), 1) & "" & Passes'Image	1	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Typical, 4) & "" & Driver.Log.Image (Sum_Energy, 4)	4	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Typical, 4) & "" & Driver.Log.Image (Sum_Energy, 4)	4	format	digits printed in a log line or a message
-driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));	0.5	math	the chi-square median with two degrees of freedom
-driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));	1.0	math	the chi-square median with two degrees of freedom
-driver-robot-lockin.adb	(1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));	2	math	the chi-square median with two degrees of freedom
 driver-robot-lockin.adb	(2.0 * Real (C.Freedom) * C.Variance ** 2 + 4.0 * C.Variance * Typical);	2.0	math	the variance of a chi-square statistic is twice its degrees of freedom
 driver-robot-lockin.adb	(2.0 * Real (C.Freedom) * C.Variance ** 2 + 4.0 * C.Variance * Typical);	4.0	math	the variance of a non-central chi-square statistic adds four times its non-centrality
 driver-robot-lockin.adb	Fit_Cells (1, N);	1	structure	the cells are numbered from one
 driver-robot-lockin.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	structure	a displacement has two components
 driver-robot-lockin.adb	Half : constant Real := 0.5;	0.5	math	a majority is more than half: a whole image moves when a significant majority of its cells do, and the cells far above the rest are what moves when they carry more than half the energy
+driver-robot-lockin.adb	Half_Chi : constant Real := Driver.Distributions.Chi_Square_Quantile (0.5, 2);	0.5	math	the chi-square median with two degrees of freedom: a resting displacement in two dimensions over its floor
+driver-robot-lockin.adb	Half_Chi : constant Real := Driver.Distributions.Chi_Square_Quantile (0.5, 2);	2	math	the chi-square median with two degrees of freedom: a resting displacement in two dimensions over its floor
 driver-robot-lockin.adb	High : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean + Z * Sigma) / Typical));	1.0	math	a share of the cells is at most all of them
 driver-robot-lockin.adb	Low : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));	1.0	math	a share of the cells is at most all of them
 driver-robot-lockin.adb	Noise_Of (Cell) := Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0);	2.0	math	the mean of the two components' variances
+driver-robot-lockin.adb	Of_Cell (C + 1) := Real'Max (1.0, Sqrt (Driver.Stats.Median (Ratios (1 .. K)) / Half_Chi));	1.0	math	a cell moves at rest by no less than the floor its pixels allow: the factor is one or more
 driver-robot-lockin.adb	Reached : Flags_Access := new Flags'(1 .. Natural'Max (1, M.Beats) => True);	1	structure	an array of at least one beat
-driver-robot-lockin.adb	S.Rest_Counts_Known := Rest > 1;	1	statistics	a spread takes two samples
+driver-robot-lockin.adb	Rest_At : Flags_Access := new Flags'(1 .. Natural'Max (1, Beats) => False);	1	structure	a flag per beat from the first beat that has a beat before it
+driver-robot-lockin.adb	S.Rest_Counts_Known := S.Rest_Count_Beats > 1;	1	statistics	a spread takes two samples
 driver-robot-lockin.adb	Sigma : constant Real := 1.0 / Sqrt (Weights);	1.0	math	the standard error of a mean weighted by inverse variances is one over the root of the weights' sum
 driver-robot-lockin.adb	Spread_Of ((Cell - 1) * Kept + K) := 4.0 * (Gu * Bu ** 2 + Gv * Bv ** 2);	4.0	math	the variance of a squared estimate b^2 with variance g is 4 g b^2 to first order
 driver-robot-lockin.adb	Usual (C) := 2 * Resolved (C) > Measured;	2	math	a majority: a cell resolved in more than half the measured beats usually resolves
@@ -2568,8 +2561,11 @@ driver-robot-stillness.adb	or else S.Watch_Run >= 2)	2	statistics	a level holds 
 driver-robot.adb	& "" & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	1	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	3	format	digits printed in a log line or a message
+driver-robot.adb	& "" & Driver.Log.Image (S.Rest_Factor, 2)	2	format	digits printed in a log line or a message
+driver-robot.adb	& Driver.Log.Image (Mean_Abs_Difference (S.Previous.all, S.Before.all), 2) & ""	2	format	digits printed in a log line or a message
 driver-robot.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot.adb	& Driver.Log.Image (Real (Now - Mark), 1));	1	format	digits printed in a log line or a message
+driver-robot.adb	& E.Start'Image & "" & Driver.Log.Image (E.Length, 3)	3	format	digits printed in a log line or a message
 driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Change (M, G, B, C) / Channels.Noise (M, G, C), 1));	1	format	digits printed in a log line or a message
 driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Reading (M, G, B, C), 6));	6	format	digits printed in a log line or a message
 driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Target (M, G, B, C), 6));	6	format	digits printed in a log line or a message
@@ -2587,6 +2583,9 @@ driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M
 driver-robot.adb	S.Dv.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
 driver-robot.adb	Spread : constant Real := Sqrt (((P.Tilt_11 - P.Tilt_22) / 2.0) ** 2 + P.Tilt_12 ** 2);	2.0	math	the larger eigenvalue of a symmetric 2 x 2: the mean of the diagonal plus the root of the half difference squared and the off diagonal squared
 driver-robot.adb	and then (Past >= 0.0 or else not Driver.Uncertain.Significant (Past, Sqrt (2.0) * Stop.Sigma));	2.0	statistics	the noise of a difference of two readings
+driver-robot.adb	else "" & Driver.Log.Image (Largest (M.Eyes (E).Rest_Factors), 1) & "")	1	format	digits printed in a log line or a message
+driver-robot.adb	else Driver.Log.Image (Sqrt (S.Luma_Variance.Element (Natural (S.Luma_Variance.Length) / 2)), 2)	2	format	digits printed in a log line or a message
+driver-robot.adb	else Driver.Log.Image (Sqrt (S.Luma_Variance.Element (Natural (S.Luma_Variance.Length) / 2)), 2)	2	structure	the middle cell of the grid, for the log line
 driver-robot.adb	function Up (M : Model) return Direction_Estimate is (Up_In_Arm (M, 1));	1	structure	the world is the first arm's reference frame
 driver-robot.adb	if G > M.Groups.Last_Index or else B < 1 or else not Channels.Has_Reading (M, G, B) then	1	structure	a change needs the beat before
 driver-robot.adb	if M.Beats >= 2 * M.Graph_Evidence then	2	numerics	re-estimating when the evidence doubles keeps the number of re-estimates logarithmic in the stream
@@ -2601,14 +2600,19 @@ driver-robot.ads	Frame : Positive := 1;	1	structure	keyframes are numbered from 
 driver-robot.ads	Rest_Factor : Real := 1.0;	1.0	math	before it is measured, a cell rests at its floor
 driver-robot.ads	Scale : Real := 1.0;	1.0	math	the identity's scale: the first arm is the world as it is
 driver-shared_for.adb	Shares (1, Natural'Min (Last - First + 1, Natural (System.Multiprocessors.Number_Of_CPUs)));	1	structure	the tasks are numbered from one, and a range counts both its ends
+driver-stats.adb	/ Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
 driver-stats.adb	Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
 driver-stats.adb	Digit_Bits : constant := 8;	8	structure	a byte of the key per pass: the order statistic is exact for any digit width
 driver-stats.adb	Gaussian_MAD_To_Sigma : constant := 1.482_602_218_505_602;	1.482_602_218_505_602	statistics	1 / Phi^-1 (3/4): MAD to sigma for Gaussian data
+driver-stats.adb	Half : constant Real := 0.5;	0.5	math	the median of the absolute value of a unit Gaussian is its two-sided quantile at one half
+driver-stats.adb	N_Old : constant Natural := N / 2;	2	structure	the samples split into an older and a newer half, compared with each other
+driver-stats.adb	Phi : constant Real := Ada.Numerics.Long_Elementary_Functions.Exp (-C * C / 2.0)	2.0	math	the standard Gaussian density
 driver-stats.adb	Radix : constant := 2 ** Digit_Bits;	2	math	a digit of Digit_Bits bits takes 2 ** Digit_Bits values
 driver-stats.adb	Rank : Positive := (N + 1) / 2;	2	math	the median's rank: the middle of N values
 driver-stats.adb	S2 : constant Real := Sse / (N - 2.0);	2.0	statistics	two degrees of freedom used by slope and intercept
 driver-stats.adb	Sigma => Sqrt (S2 * (1.0 / N + Mean (Mx) ** 2 / Sxx)),	1.0	math	standard error of the intercept, 1/n term
 driver-stats.adb	Sign : constant Key := 2 ** (Key'Size - 1);	2	format	an IEEE double's sign is its top bit
+driver-stats.adb	exit when N_Old < 2;	2	statistics	a half of fewer than two samples has no scatter to compare by
 driver-stats.adb	if A.N < 2 then	2	statistics	a variance needs two samples
 driver-stats.adb	if N mod 2 = 1 then	1	math	an odd count has one middle value
 driver-stats.adb	if N mod 2 = 1 then	2	math	an odd count has one middle value
@@ -2616,6 +2620,9 @@ driver-stats.adb	return (Lower + (if At_Most > N / 2 then Lower else Above)) / 2
 driver-stats.adb	return (Lower + (if At_Most > N / 2 then Lower else Above)) / 2.0;	2.0	math	an even count's median is the mean of its two middle values
 driver-stats.adb	return (Slope => (Value => B, Sigma => Sqrt (S2 / Sxx), Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
 driver-stats.adb	return (Value => (if A.N = 1 then A.Mean else 0.0), Sigma => Real'Last, Degrees_Of_Freedom => 0);	1	statistics	a single sample has a mean but no spread
+driver-stats.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	1	statistics	a sigma from two or more samples rests on at least one degree of freedom
+driver-stats.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	2	statistics	a spread takes two samples
+driver-stats.adb	return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));	8.0	math	the median absolute deviation's asymptotic efficiency against the sample standard deviation
 driver-stats.ads	with Pre => Count (A) > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 2;	2	statistics	a line fit with a residual spread needs three points

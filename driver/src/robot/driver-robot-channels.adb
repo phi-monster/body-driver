@@ -177,14 +177,7 @@ package body Driver.Robot.Channels is
       return N;
    end First_Channel;
 
-   function Mad_Degrees_Of_Freedom (N : Natural) return Natural is
-      Half : constant Real := 0.5;
-      C    : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (Half);
-      Phi  : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);
-   begin
-      --  Rounding a handful of samples down to none would call the sigma known.
-      return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));
-   end Mad_Degrees_Of_Freedom;
+   function Mad_Degrees_Of_Freedom (N : Natural) return Natural renames Driver.Stats.Mad_Degrees_Of_Freedom;
 
    --  Whether the change into Beat is one of a resting reading: the beat and
    --  the one before have readings, and no push of any commanded group was
@@ -238,35 +231,12 @@ package body Driver.Robot.Channels is
       --  at one rate for good (a sensor's creep, A15) is stationary too, and
       --  its creep stays in its noise as before; a joint still travelling, or
       --  one that stopped travelling, has halves that differ, and the older is
-      --  dropped until the rest that remains is one regime. Too short to
-      --  split, it is taken as it is: the boot compares the noise across a
-      --  doubling of the rest's beats before it trusts it.
-      loop
-         declare
-            N      : constant Natural := Count - Start + 1;
-            N_Old  : constant Natural := N / 2;
-            N_New  : constant Natural := N - N_Old;
-            Mid    : constant Natural := Start + N_Old;
-            Mean_Old, Mean_New : Real := 0.0;
-            S_Old, S_New       : Real;
-         begin
-            exit when N_Old < 2;
-            for V of All_Changes (Start .. Mid - 1) loop
-               Mean_Old := Mean_Old + V;
-            end loop;
-            for V of All_Changes (Mid .. Count) loop
-               Mean_New := Mean_New + V;
-            end loop;
-            Mean_Old := Mean_Old / Real (N_Old);
-            Mean_New := Mean_New / Real (N_New);
-            S_Old := Driver.Stats.Robust_Sigma (All_Changes (Start .. Mid - 1));
-            S_New := Driver.Stats.Robust_Sigma (All_Changes (Mid .. Count));
-            exit when not Driver.Uncertain.Significant
-              (Mean_New - Mean_Old, Sqrt (S_Old ** 2 / Real (N_Old) + S_New ** 2 / Real (N_New)),
-               Mad_Degrees_Of_Freedom (Natural'Min (N_Old, N_New)));
-            Start := Mid;
-         end;
-      end loop;
+      --  dropped until the rest that remains is one regime (Stats.Latest_Regime).
+      --  Too short to split, it is taken as it is: the boot compares the noise
+      --  across a doubling of the rest's beats before it trusts it.
+      if Count >= Start then
+         Start := Driver.Stats.Latest_Regime (All_Changes (Start .. Count));
+      end if;
       if Count - Start + 1 < 2 and then Count >= 2 then
          --  Trending to its last beats: nothing of its rest is measured yet.
          M.Noise.Replace_Element (Index, Real'Last);

@@ -511,7 +511,12 @@ private
       Is_Still      : Boolean := False;      --  at the latest beat, once judged (Driver.Robot.Stillness)
       Has_Judged    : Boolean := False;      --  the latest frame was judged, not only added to the first run
       Judged        : Flag_Vectors.Vector;   --  per beat: the eye had a frame and was judged
-      Rest_Factor   : Real := 1.0;           --  a resting cell's displacement noise over its floor (Lockin)
+      Rest_Factor   : Real := 1.0;           --  a resting cell's displacement noise over its floor (Lockin): the
+                                             --  typical cell's, for a cell that never resolved one at rest
+      Rest_Factors  : Real_Vectors.Vector;   --  per cell, the same measured on that cell alone (Lockin.Measure_Rest_Noise);
+                                             --  empty until measured
+      Settling_Tail : Natural := 0;          --  how many beats the picture goes on settling after the body stops
+                                             --  moving (Lockin.Measure); 0 until measured
       Rest_Counts_Known  : Boolean := False; --  how many cells move at a beat when nothing is pushed (Lockin):
       Rest_Count_Max     : Natural := 0;     --  the most of them at any such beat,
       Rest_Count_Beats   : Natural := 0;     --  over how many beats
@@ -519,6 +524,9 @@ private
       Settled_At    : Flag_Vectors.Vector;   --  per beat: its picture had stopped changing since the body last began
                                              --  to move (the watch's Done at that beat, Stillness)
    end record;
+
+   function Rest_Factor_Of (S : Eye_Stream; Cell : Natural) return Real;
+   --  The cell's displacement noise at rest over its floor: its own where measured, else the eye's typical.
 
    package Eye_Stream_Vectors is new Ada.Containers.Vectors (Eye_Id, Eye_Stream);
 

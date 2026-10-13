@@ -16,6 +16,7 @@ with Driver.Robot.Flow;
 with Driver.Robot.Graph;
 with Driver.Robot.Kinematics;
 with Driver.Robot.Lag;
+with Driver.Pixels;
 with Driver.Robot.Lockin;
 with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
@@ -31,6 +32,9 @@ package body Driver.Robot is
    type Flag_Access is access Flow.Flag_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Flow.Flag_Array, Flag_Access);
 
+   function Rest_Factor_Of (S : Eye_Stream; Cell : Natural) return Real is
+     (if Natural (S.Rest_Factors.Length) > Cell then S.Rest_Factors (Cell) else S.Rest_Factor);
+
    --  The displacement of every cell of the eye from its previous frame to
    --  its current one, appended to its stream.
    procedure Measure_Displacement (S : in out Eye_Stream)
@@ -44,9 +48,9 @@ package body Driver.Robot is
       Cell_Noise : Luma_Access := new Real_Array (1 .. N);
       Resolved   : Flag_Access := new Flow.Flag_Array (1 .. N);
    begin
-      --  A cell at rest moves by its pixels' noise times the eye's rest factor.
+      --  A cell at rest moves by its pixels' noise times its rest factor.
       for C in 1 .. N loop
-         Cell_Noise (C) := S.Luma_Variance.Element (C - 1) * S.Rest_Factor ** 2;
+         Cell_Noise (C) := S.Luma_Variance.Element (C - 1) * Rest_Factor_Of (S, C - 1) ** 2;
       end loop;
       Flow.Displacements (S.Grid, S.Previous.all, S.Current.all, Cell_Noise.all, Du.all, Dv.all, Condition.all,
                           Resolved.all);
@@ -77,6 +81,13 @@ package body Driver.Robot is
          declare
             S    : Eye_Stream renames M.Eyes (E);
             Have : constant Boolean := E <= O.Images.Last_Index and then Driver.Observations.Has_Image (O, E);
+            --  A camera slower than the beat gives no frame at some beats (docs/body-protocol.md: each frame is
+            --  sent once; R2 on the Pi, 10-13: a wrist eye at 15 frames a second under 19 beats a second had been
+            --  sent again at every other beat, and its rest noise, measured on differences of nothing, called every
+            --  fresh frame's noise motion in 290 of 525 cells). The driver itself cannot tell a frame given again
+            --  from a frame of a still scene by a camera without noise (the rig, a renderer), so it takes every
+            --  frame it is given as one.
+            Fresh : constant Boolean := Have;
          begin
             if Have then
                declare
@@ -106,7 +117,7 @@ package body Driver.Robot is
             declare
                N    : constant Natural := Cells (S.Grid);
                Same : constant Boolean :=
-                 Have and then Driver.Images.Width (O.Images (E)) = S.Grid.Width
+                 Fresh and then Driver.Images.Width (O.Images (E)) = S.Grid.Width
                  and then Driver.Images.Height (O.Images (E)) = S.Grid.Height;
             begin
                if Same and then S.Has_Previous then
@@ -118,15 +129,15 @@ package body Driver.Robot is
                   S.Resolved.Append (False, Ada.Containers.Count_Type (N));
                   S.Measured.Append (False);
                end if;
-               if Have then
+               if Fresh then
                   Stillness.Judge_Eye (S, O.Images (E), S.Current.all);
                   if S.Luma_Variance.Is_Empty then
                      Stillness.Measure_Luma_Noise (S);
                   end if;
                end if;
                --  An eye's first two frames start its noise and are not judged.
-               S.Judged.Append (Have and then S.Has_Judged);
-               S.Still_At.Append (Have and then S.Is_Still);
+               S.Judged.Append (Fresh and then S.Has_Judged);
+               S.Still_At.Append (Fresh and then S.Is_Still);
                --  Whether its picture has stopped changing (the one stop rule).
                declare
                   Shown : constant Integer := M.Beats - Natural'Max (0, Image_Lag (M, E));
@@ -827,6 +838,16 @@ package body Driver.Robot is
    function Resting_Motion (M : Model; G : Group_Id; E : Eye_Id) return Real is
      (Graph.Effect (M, G, E).Resting);
 
+   --  For the watch line: how far two frames' lumas differ on average, in levels a pixel.
+   function Mean_Abs_Difference (A, B : Real_Array) return Real is
+      Sum : Real := 0.0;
+   begin
+      for I in A'Range loop
+         Sum := Sum + abs (A (I) - B (B'First + (I - A'First)));
+      end loop;
+      return (if A'Length > 0 then Sum / Real (A'Length) else 0.0);
+   end Mean_Abs_Difference;
+
    function Eye_Watch (M : Model; E : Eye_Id) return String is
    begin
       if E > M.Eyes.Last_Index then
@@ -844,7 +865,7 @@ package body Driver.Robot is
                   K     : constant Natural := Count - N + C;
                   D     : constant Real := Sqrt (S.Du.Element (K) ** 2 + S.Dv.Element (K) ** 2);
                   Floor : constant Real :=
-                    Flow.Noise_Floor (S.Condition.Element (K), S.Luma_Variance.Element (C) * S.Rest_Factor ** 2);
+                    Flow.Noise_Floor (S.Condition.Element (K), S.Luma_Variance.Element (C) * Rest_Factor_Of (S, C) ** 2);
                begin
                   if S.Resolved.Element (K) then
                      Most_Px := Real'Max (Most_Px, D);
@@ -855,10 +876,28 @@ package body Driver.Robot is
                end;
             end loop;
          end if;
-         return "lag" & Image_Lag (M, E)'Image & (if Lag_Known (M, E) then "" else " (unknown)") & ", change " & Driver.Log.Image (S.Change_1, 3) & " " & Driver.Log.Image (S.Change_2, 3)
-           & (if S.Is_Still then ", still" else ", moving") & (if S.Watch_Done then ", settled" else ", settling")
-           & ", flow at most " & Driver.Log.Image (Most_Px, 3) & " px, " & Driver.Log.Image (Most_Sigmas, 1)
-           & " sigmas";
+         declare
+            Moved_Cells, Tested : Natural;
+         begin
+            Lockin.Count_Moved (S, M.Beats - 1, Moved_Cells, Tested);
+            return "lag" & Image_Lag (M, E)'Image & (if Lag_Known (M, E) then "" else " (unknown)") & ", change " & Driver.Log.Image (S.Change_1, 3) & " " & Driver.Log.Image (S.Change_2, 3)
+              & (if S.Is_Still then ", still" else ", moving") & (if S.Watch_Done then ", settled" else ", settling")
+              & ", flow at most " & Driver.Log.Image (Most_Px, 3) & " px, " & Driver.Log.Image (Most_Sigmas, 1)
+              & " sigmas," & Moved_Cells'Image & " of" & Tested'Image & " cells moved"
+              & (if S.Rest_Counts_Known
+                 then " (at rest at most" & S.Rest_Count_Max'Image & " over" & S.Rest_Count_Beats'Image & " beats)"
+                 else " (rest counts not measured)")
+              & "; luma noise " & (if S.Luma_Variance.Is_Empty then "unmeasured"
+                                   else Driver.Log.Image (Sqrt (S.Luma_Variance.Element (Natural (S.Luma_Variance.Length) / 2)), 2)
+                                        & " levels (a middle cell)")
+              & ", from" & Driver.Pixels.Frames (if S.Noise_Is_Settled then S.Settled else S.Noise_View)'Image
+              & " still frames, rest factor " & Driver.Log.Image (S.Rest_Factor, 2)
+              & (if S.Has_Before and then S.Before /= null and then S.Previous /= null
+                    and then S.Before'Length = S.Previous'Length and then S.Previous'Length > 0
+                 then ", this frame differs from the last by "
+                      & Driver.Log.Image (Mean_Abs_Difference (S.Previous.all, S.Before.all), 2) & " levels a pixel"
+                 else "");
+         end;
       end;
    end Eye_Watch;
 
@@ -887,6 +926,20 @@ package body Driver.Robot is
          for C in 1 .. M.Groups (G).Size loop
             Append (Text, " " & Driver.Log.Image (Channels.Target (M, G, B, C), 6));
          end loop;
+      end if;
+      --  The group's latest push (Steps): where it stands, for following a step beat by beat.
+      if M.Groups (G).Commandable and then not M.Groups (G).Episodes.Is_Empty then
+         declare
+            E : Episode renames M.Groups (G).Episodes.Last_Element;
+         begin
+            Append (Text, ", push" & Natural'Image (Natural (M.Groups (G).Episodes.Length)) & " from beat"
+                    & E.Start'Image & " asked " & Driver.Log.Image (E.Length, 3)
+                    & (if E.Moved then ", moved at" & E.Moved_At'Image else ", not moved")
+                    & (if E.Ended
+                       then ", ended at" & E.End_At'Image & (if E.Rested then " rested" else " given up")
+                            & (if E.Blocked then " blocked" else "")
+                       else ", under way, progress at" & E.Progress_At'Image));
+         end;
       end if;
       return To_String (Text);
    end Group_Watch;
@@ -922,6 +975,15 @@ package body Driver.Robot is
 
    function Contract_Breach (M : Model; G : Group_Id) return Natural is
      (if G <= M.Graph.Breach.Last_Index then M.Graph.Breach (G) else 0);
+
+   function Largest (V : Real_Vectors.Vector) return Real is
+      Most : Real := 0.0;
+   begin
+      for X of V loop
+         Most := Real'Max (Most, X);
+      end loop;
+      return Most;
+   end Largest;
 
    function Describe (M : Model) return String is
       use Ada.Strings.Unbounded;
@@ -967,10 +1029,13 @@ package body Driver.Robot is
                         elsif Kinematics.Fixed_Known (M, E) then ", placed in the world"
                         else ", not placed in the world (" & Kinematics.Fixed_Why (M, E) & ")")
                     & ", rest noise " & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & " times its floor"
+                    & (if M.Eyes (E).Rest_Factors.Is_Empty then ""
+                       else " (cells up to " & Driver.Log.Image (Largest (M.Eyes (E).Rest_Factors), 1) & ")")
                     & (if M.Eyes (E).Rest_Counts_Known
                         then ", at most" & M.Eyes (E).Rest_Count_Max'Image & " cells move at rest ("
                              & Driver.Log.Image (M.Eyes (E).Rest_Count_Beats) & " beats)"
-                        else "") & ASCII.LF);
+                        else "")
+                    & ASCII.LF);
          end;
       end loop;
       return To_String (T);
