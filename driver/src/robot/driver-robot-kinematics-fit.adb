@@ -1766,6 +1766,16 @@ package body Driver.Robot.Kinematics.Fit is
          end;
          return;
       end if;
+      --  Without a keyframe that moved two joints at once the order of the joints is not told and the fit cannot
+      --  end (stage 4): it ends here, on the keyframes' readings alone, before the focal search of stage 1 spends
+      --  its seconds on keyframes that cannot order the joints (R2 on the Pi, 10-13: 11 s, and a focal length of
+      --  15052 px from the recognition's small pushes), and before the refinement, which from a focal length the
+      --  joints alone did not tell can creep for most of an hour (A93's right arm at 3184 beats, its readings
+      --  drawn: two replays on the box sat in it for more than half an hour).
+      if N > 1 and then (for all X of Sight => not Several (X.Frame)) then
+         Fail ("no keyframe moved two joints at once: the order of the joints along the arm is not told");
+         return;
+      end if;
 
       ---------------------------------------------------------------------------
       --  Stage 1: every joint alone.
@@ -2825,13 +2835,6 @@ package body Driver.Robot.Kinematics.Fit is
       --  their turns after stage 2). The lens, the joints and every point's
       --  depth come out of it, for the order.
       Enter (4);
-      --  Without a keyframe that moved two joints at once the order is not told and the fit cannot end: it ends here,
-      --  before the refinement, which from a focal length the joints alone did not tell can creep for most of an hour
-      --  (A93's right arm at 3184 beats, its readings drawn: two replays on the box sat in it for more than half an hour).
-      if N > 1 and then (for all X of Sight => not Several (X.Frame)) then
-         Fail ("no keyframe moved two joints at once: the order of the joints along the arm is not told");
-         return;
-      end if;
       declare
          Alone_Count : Natural := 0;
       begin
