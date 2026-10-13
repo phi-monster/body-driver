@@ -13,6 +13,7 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Robot.Body_File;
 with Driver.Robot.Kinematics;
 with Driver.Robot.Lag;
+with Driver.Robot.Channels;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Regression;
@@ -346,6 +347,18 @@ package body Driver.Robot.Boot is
          Driver.Robot.Motion.Hold_For_Twin (M, A);
          declare
             First, Per_Unit : Real_Array (1 .. Size) := [others => 0.0];
+            --  The pose the sweep goes out from and comes back to: where the arm stands after the step to its hold,
+            --  read, not the hold's targets. A channel the hold's target lies beyond the end of (arm_a's fourth on
+            --  the kiwi, R5: its hold 15 units past where it rests on what stops it) would make every return a
+            --  blocked step, and every push of the sweep stopped by it.
+            Start  : Real_Array (1 .. Size) := [others => 0.0];
+            procedure Read_Start is
+               Last : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
+            begin
+               for C in 1 .. Size loop
+                  Start (C) := Channels.Reading (M, G, Last, C);
+               end loop;
+            end Read_Start;
             Least  : Real_Array (1 .. Size) := [others => 0.0];   --  per channel: the least turn a keyframe counts
             Moves  : array (1 .. Size) of Boolean := [others => False];   --  per channel: it moves the eye's view (Lockin.Seen)
             Half   : Real := 0.0;
@@ -377,7 +390,6 @@ package body Driver.Robot.Boot is
                   end loop;
                end if;
             end Read_Plan;
-            Start  : constant Real_Array := Holds_Of (G, Size);
             Report : Driver.Robot.Motion.Step_Report;
 
             --  The keyframes of a round are aligned, and the arm fitted again from
@@ -407,6 +419,7 @@ package body Driver.Robot.Boot is
                Beat_Now := M.Beats;
             end Read_Beat_Now;
          begin
+            Driver.Beats.Within_A_Beat (Read_Start'Access);
             Driver.Beats.Within_A_Beat (Read_Plan'Access);
             if Eye = 0 then
                Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " carries no eye; its joints are not swept");

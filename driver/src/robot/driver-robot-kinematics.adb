@@ -845,6 +845,43 @@ package body Driver.Robot.Kinematics is
       if K = 0 then
          return;
       end if;
+      --  A channel is measured only over keyframes that moved it, two at the least: one keyframe, predicted from
+      --  nothing and searched as wide as the aligner looks, can be answered by a false peak at many points at once
+      --  (R5 on the Pi, 10-13: arm_b's third channel, one keyframe of 31 units answered at 58 points, gave 5.07
+      --  px a unit against 0.59, and the next keyframe of it, predicted from that, found nothing); a second
+      --  keyframe that moved the channel either agrees with it in the regression or spreads it beyond significance.
+      declare
+         Moving : array (1 .. N) of Natural := [others => 0];   --  per channel: the keyframes that moved it
+      begin
+         for S of R.Matches loop
+            if S.Eye = 0 and then S.Frame <= Natural (R.Frames.Length) then
+               for C in 1 .. N loop
+                  if Active (C) and then Noise (C) < Real'Last
+                    and then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))
+                  then
+                     Moving (C) := Moving (C) + 1;
+                  elsif Active (C) and then Noise (C) >= Real'Last and then Change (S.Frame, C) /= 0.0 then
+                     Moving (C) := Moving (C) + 1;
+                  end if;
+               end loop;
+            end if;
+         end loop;
+         for C in 1 .. N loop
+            Active (C) := Active (C) and then Moving (C) >= 2;
+         end loop;
+      end;
+      --  The columns are numbered again over the channels left.
+      K := 0;
+      for C in 1 .. N loop
+         Column (C) := 0;
+         if Active (C) then
+            K := K + 1;
+            Column (C) := K;
+         end if;
+      end loop;
+      if K = 0 then
+         return;
+      end if;
       declare
          --  Per channel, the points' sizes of their motion per unit and the standard deviations of those.
          Values : Real_Access := new Real_Array (1 .. N * Queries);

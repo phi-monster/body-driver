@@ -426,6 +426,9 @@ private
    type Group_Stream is record
       Size        : Natural := 0;
       Commandable : Boolean := False;
+      Held        : Real_Vectors.Vector;   --  per channel: the pose a step last sent the group to, as a reading
+                                           --  (Motion.Step; the command that lands it there may differ by what
+                                           --  the servo stands short of its goal); empty before any step
       Values      : Real_Vectors.Vector;   --  Size readings per beat
       Twin_Values : Real_Vectors.Vector;   --  Size values per beat of the other group of its command key's pair (the robot's
                                            --  echo of its command, Driver.Twins), kept to turn Values round with

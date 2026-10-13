@@ -7,6 +7,7 @@ with Driver.Log;
 with Driver.Observations;
 with Driver.Robot.Channels;
 with Driver.Robot.Steps;
+with Driver.Robot.Stillness;
 with Driver.Robot.Lockin;
 with Driver.Robot.Kinematics;
 with Driver.Uncertain;
@@ -20,6 +21,12 @@ package body Driver.Robot.Motion is
 
    procedure Settle (M : in out Model; Beats_Waited : out Natural) is
       B : Driver.Clock.Beat;
+      --  What the wait was for, for the log: per group the beats its readings still moved, per eye the beats its
+      --  picture had not settled (R5 on the Pi, 10-13: the rounds' settling between pushes grew to 24 s a push).
+      Groups : constant Natural := Group_Count (M);
+      Eyes   : constant Natural := Eye_Count (M);
+      Group_Beats : array (1 .. Groups) of Natural := [others => 0];
+      Eye_Beats   : array (1 .. Eyes) of Natural := [others => 0];
    begin
       Beats_Waited := 0;
       loop
@@ -27,11 +34,40 @@ package body Driver.Robot.Motion is
          declare
             Done : constant Boolean := Still (M);
          begin
+            if not Done and then M.Beats > 0 then
+               for G in 1 .. Groups loop
+                  if not Driver.Robot.Stillness.Group_Still (M, Group_Id (G), M.Beats - 1) then
+                     Group_Beats (G) := Group_Beats (G) + 1;
+                  end if;
+               end loop;
+               for E in 1 .. Eyes loop
+                  if not Driver.Robot.Stillness.Eye_Settled (M, Eye_Id (E)) then
+                     Eye_Beats (E) := Eye_Beats (E) + 1;
+                  end if;
+               end loop;
+            end if;
             Driver.Beats.Send (Driver.Commands.Hold);
             exit when Done;
          end;
          Beats_Waited := Beats_Waited + 1;
       end loop;
+      if Beats_Waited > 0 then
+         declare
+            Text : Unbounded_String;
+         begin
+            for G in 1 .. Groups loop
+               if Group_Beats (G) > 0 then
+                  Append (Text, " group" & G'Image & " moving" & Group_Beats (G)'Image);
+               end if;
+            end loop;
+            for E in 1 .. Eyes loop
+               if Eye_Beats (E) > 0 then
+                  Append (Text, " eye" & E'Image & " unsettled" & Eye_Beats (E)'Image);
+               end if;
+            end loop;
+            Driver.Log.Line (Driver.Log.Robot, "motion: settled after" & Beats_Waited'Image & " beats:" & To_String (Text));
+         end;
+      end if;
    end Settle;
 
    procedure Judge
@@ -80,12 +116,14 @@ package body Driver.Robot.Motion is
       Report.Outcome := (if not Blocked_Any then Reached elsif Moved_Some then Short else Blocked);
    end Judge;
 
-   --  One sending of the targets, waited for and judged (Step).
+   --  One sending of the targets, waited for and judged (Step). With Hold_At, the targets are what the targeted
+   --  groups are held at from now on (Group_Stream.Held): a step's own targets, not a sending again of them.
    procedure One_Step
      (M       : in out Model;
       Targets : Driver.Commands.Command;
       Report  : out Step_Report;
-      Stop    : access function return Boolean := null)
+      Stop    : access function return Boolean := null;
+      Hold_At : Boolean := False)
    is
       B : Driver.Clock.Beat;
    begin
@@ -133,6 +171,16 @@ package body Driver.Robot.Motion is
       begin
          for G in 1 .. Groups loop
             Before (G) := Steps.Episodes (M, Group_Id (G));
+            if Hold_At and then Targeted (Group_Id (G)) then
+               declare
+                  T : constant Real_Array := Driver.Commands.Target (Targets, Group_Id (G));
+               begin
+                  M.Groups (Group_Id (G)).Held.Clear;
+                  for V of T loop
+                     M.Groups (Group_Id (G)).Held.Append (V);
+                  end loop;
+               end;
+            end if;
          end loop;
          Driver.Beats.Send (Targets);
          --  The push starts at the beat whose observation was taken under the
@@ -171,14 +219,16 @@ package body Driver.Robot.Motion is
       Groups : constant Natural := Group_Count (M);
       Worst  : Real := Real'Last;   --  the largest error of the last landing, in deviations of what the readings tell
    begin
-      One_Step (M, Targets, Report, Stop);
+      One_Step (M, Targets, Report, Stop, Hold_At => True);
       --  Landing where it was sent: a servo that holds a load with a proportional controller settles a few
       --  units short of its goal, the same few units at the same pose (the kiwi's arms, R4 on the Pi, 10-13:
       --  back from every push 4 to 7 units off the hold, so that no keyframe of the recognition turned one joint
       --  alone and the fit had no joint's own keyframe). Where a targeted channel reads off its target by more
       --  than the noise of a difference of two readings tells, the target is sent again moved by that error, as
       --  long as each landing comes nearer than the one before: what does not come nearer is not the servo's
-      --  steady error (a joint on what stops it), and what was reached stands.
+      --  steady error (a joint on what stops it), and what was reached stands. The error is asked over the share
+      --  of the last sending the group delivered (R5 on the Pi: the servos deliver about a third of a small
+      --  change, and an error asked as it is took eight sendings to close; each sending is a step's wait).
       loop
          exit when Report.Outcome /= Reached or else Report.Stopped;
          declare
@@ -186,6 +236,7 @@ package body Driver.Robot.Motion is
             Nudged  : Driver.Commands.Command := Driver.Commands.Hold;
             Largest : Real := 0.0;
             Any     : Boolean := False;
+            Off_By  : Ada.Strings.Unbounded.Unbounded_String;   --  the errors, per group and channel, for the log
          begin
             for G in 1 .. Groups loop
                if Is_Commandable (M, Group_Id (G)) and then Driver.Commands.Has_Target (Targets, Group_Id (G))
@@ -196,7 +247,24 @@ package body Driver.Robot.Motion is
                      Reading : constant Real_Array := O.Readings.Element (Group_Id (G));
                      Goal    : Real_Array := Target;
                      Off     : Boolean := False;
+                     --  What the group delivered of the last sending: a servo that moves a fraction of a small
+                     --  change asked of it (the kiwi's, R5 on the Pi, 10-13: 0.33 to 0.38 of 6 to 27 units) is
+                     --  asked for the error over that fraction, so that the fraction it delivers is the error.
+                     --  All of it when the fraction is not measured, or is not below one.
+                     Share : Real := 1.0;
+                     Errors : Ada.Strings.Unbounded.Unbounded_String;
                   begin
+                     if Steps.Episodes (M, Group_Id (G)) > 0 then
+                        declare
+                           D : constant Estimate := Steps.Latest (M, Group_Id (G)).Delivered;
+                        begin
+                           if Known (D) and then D.Value > 0.0 and then D.Value < 1.0
+                             and then Driver.Uncertain.Significant (D.Value, D.Sigma, D.Degrees_Of_Freedom)
+                           then
+                              Share := D.Value;
+                           end if;
+                        end;
+                     end if;
                      for C in 1 .. Natural'Min (Target'Length, Reading'Length) loop
                         declare
                            Noise : constant Real := Channels.Noise (M, Group_Id (G), C);
@@ -207,13 +275,16 @@ package body Driver.Robot.Motion is
                            then
                               Off := True;
                               Largest := Real'Max (Largest, abs Error / (Noise * Sqrt (2.0)));
-                              Goal (Goal'First + C - 1) := Target (Target'First + C - 1) + Error;
+                              Goal (Goal'First + C - 1) := Target (Target'First + C - 1) + Error / Share;
+                              Append (Errors, " c" & C'Image & " " & Driver.Log.Image (Error, 1));
                            end if;
                         end;
                      end loop;
                      if Off then
                         Any := True;
                         Driver.Commands.Set_Target (Nudged, Group_Id (G), Goal);
+                        Append (Off_By, " group" & G'Image & ":" & To_String (Errors) & " over the share "
+                                & Driver.Log.Image (Share, 2) & ";");
                      end if;
                   end;
                end if;
@@ -225,8 +296,8 @@ package body Driver.Robot.Motion is
             begin
                One_Step (M, Nudged, Again, Stop);
                Driver.Log.Line (Driver.Log.Robot, "motion: a step sent again by its landing's error of "
-                                & Driver.Log.Image (Largest, 1) & " deviations of what the readings tell, landed in"
-                                & Again.Beats'Image & " beats: " & To_String (Again.Detail));
+                                & Driver.Log.Image (Largest, 1) & " deviations of what the readings tell (" & To_String (Off_By)
+                                & "), landed in" & Again.Beats'Image & " beats: " & To_String (Again.Detail));
                Report.Beats := Report.Beats + Again.Beats;
                Report.At_Rest := Again.At_Rest;
                Report.Stopped := Again.Stopped;
@@ -478,6 +549,13 @@ package body Driver.Robot.Motion is
    function Hold_Of (M : Model; G : Group_Id; Channel : Positive) return Real is
       Last : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
    begin
+      --  The pose a step last sent the group to, as a reading (Group_Stream.Held): the command that holds it there
+      --  may stand off it by the servo's steady error (Step sends a step again by its landing's error), and a hold
+      --  read from the command would creep by that error at every step. Before any step, the last target (a group
+      --  never commanded is held at its first reading) or the reading.
+      if Natural (M.Groups (G).Held.Length) = M.Groups (G).Size and then Channel <= M.Groups (G).Size then
+         return M.Groups (G).Held (Channel - 1);
+      end if;
       return (if Channels.Has_Target (M, G, Last) then Channels.Target (M, G, Last, Channel)
               else Channels.Reading (M, G, Last, Channel));
    end Hold_Of;
