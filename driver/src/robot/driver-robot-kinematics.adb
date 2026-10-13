@@ -84,6 +84,10 @@ package body Driver.Robot.Kinematics is
       end loop;
    end Query_Points;
 
+   --  The point moves with the view, as far as its keyframes tell (Measure_Shifts: not Arm_Evidence.Still).
+   function Moving_Point (R : Arm_Evidence; P : Natural) return Boolean is
+     (P >= Natural (R.Still.Length) or else not R.Still (P));
+
    function Readings_Of (M : Model; G : Group_Id; Beat : Natural) return Real_Array is
       Result : Real_Array (1 .. M.Groups (G).Size);
    begin
@@ -203,7 +207,7 @@ package body Driver.Robot.Kinematics is
    begin
       for S of Sets loop
          for I in 0 .. Queries - 1 loop
-            if S.Found (I) then
+            if S.Found (I) and then Moving_Point (R, I) then
                Count := Count + 1;
             end if;
          end loop;
@@ -217,7 +221,7 @@ package body Driver.Robot.Kinematics is
       begin
          for S of Sets loop
             for I in 0 .. Queries - 1 loop
-               if S.Found (I) then
+               if S.Found (I) and then Moving_Point (R, I) then
                   Trips (K + 1) := abs (S.Back_U (I) - R.Query_U (I));
                   Trips (K + 2) := abs (S.Back_V (I) - R.Query_V (I));
                   K := K + 2;
@@ -244,13 +248,20 @@ package body Driver.Robot.Kinematics is
       pragma Unreferenced (M);
       Measured : constant Boolean :=
         Channel <= Natural (R.Shift_Sigmas.Length) and then R.Shift_Sigmas (Channel - 1) < Real'Last;
+      Seen     : constant Boolean := Channel > Natural (R.Shift_Seen.Length) or else R.Shift_Seen (Channel - 1);
    begin
-      return (if Measured and then Driver.Uncertain.Significant (R.Shifts (Channel - 1), R.Shift_Sigmas (Channel - 1))
+      return (if Measured and then Seen
+                and then Driver.Uncertain.Significant (R.Shifts (Channel - 1), R.Shift_Sigmas (Channel - 1))
               then R.Shifts (Channel - 1) else 0.0);
    end Pixels_Per_Unit;
 
    function Pixels_Per_Unit (M : Model; A : Arm_Id; Channel : Positive) return Real is
      (if Index_Of (M, A) > 0 then Pixels_Per_Unit (M, M.Kinematics (Index_Of (M, A)), Channel) else 0.0);
+
+   function Shift_Unseen (M : Model; A : Arm_Id; Channel : Positive) return Boolean is
+     (Index_Of (M, A) > 0
+      and then Channel <= Natural (M.Kinematics (Index_Of (M, A)).Shift_Seen.Length)
+      and then not M.Kinematics (Index_Of (M, A)).Shift_Seen (Channel - 1));
 
    function Held_Still (M : Model; A : Arm_Id; Beat : Natural) return Boolean is
       E : constant Eye_Id'Base := Eye_Of (M, A);
@@ -399,6 +410,7 @@ package body Driver.Robot.Kinematics is
                         if Fresh then
                            if Natural (R.Frames.Length) = 1 then
                               Query_Points (M, E, G, R.Query_U, R.Query_V);
+                              R.Still.Clear;
                               --  The reference's points into every other eye's view at
                               --  this beat: what links this arm to the others through
                               --  an eye that sees both (Place).
@@ -565,10 +577,12 @@ package body Driver.Robot.Kinematics is
                Kept   : constant Real_Vectors.Vector := R.Shifts;
                Sigmas : constant Real_Vectors.Vector := R.Shift_Sigmas;
                Points : constant Count_Vectors.Vector := R.Shift_Points;
+               Seen   : constant Flag_Vectors.Vector := R.Shift_Seen;
+               Told   : constant Count_Vectors.Vector := R.Shift_Told;
             begin
                M.Kinematics.Replace_Element
                  (K, (Arm => R.Arm, Group => R.Group, Eye => R.Eye, Shifts => Kept, Shift_Sigmas => Sigmas,
-                      Shift_Points => Points, others => <>));
+                      Shift_Points => Points, Shift_Seen => Seen, Shift_Told => Told, others => <>));
             end;
          end;
       end if;
@@ -784,8 +798,7 @@ package body Driver.Robot.Kinematics is
       Queries : constant Natural := Natural (R.Query_U.Length);
       Noise   : Real_Array (1 .. N);
       Active  : array (1 .. N) of Boolean := [others => False];
-      Column  : array (1 .. N) of Natural := [others => 0];
-      K       : Natural := 0;
+      K       : Natural := 0;   --  the channels the keyframes moved
 
       function Change (F : Positive; C : Positive) return Real is
         (R.Frames (F).Readings (C - 1) - R.Frames (1).Readings (C - 1));
@@ -814,6 +827,12 @@ package body Driver.Robot.Kinematics is
       while Natural (R.Shift_Points.Length) < N loop
          R.Shift_Points.Append (0);
       end loop;
+      while Natural (R.Shift_Seen.Length) < N loop
+         R.Shift_Seen.Append (True);
+      end loop;
+      while Natural (R.Shift_Told.Length) < N loop
+         R.Shift_Told.Append (0);
+      end loop;
       if Queries = 0 or else R.Matches.Is_Empty or else R.Frames.Is_Empty then
          return;
       end if;
@@ -839,7 +858,6 @@ package body Driver.Robot.Kinematics is
       for C in 1 .. N loop
          if Active (C) then
             K := K + 1;
-            Column (C) := K;
          end if;
       end loop;
       if K = 0 then
@@ -870,24 +888,33 @@ package body Driver.Robot.Kinematics is
             Active (C) := Active (C) and then Moving (C) >= 2;
          end loop;
       end;
-      --  The columns are numbered again over the channels left.
       K := 0;
       for C in 1 .. N loop
-         Column (C) := 0;
          if Active (C) then
             K := K + 1;
-            Column (C) := K;
          end if;
       end loop;
       if K = 0 then
          return;
       end if;
       declare
-         --  Per channel, the points' sizes of their motion per unit and the standard deviations of those.
+         --  Per point and channel: the size of its motion per unit, its standard deviation, and whether the point's
+         --  keyframes tell it (Regression.Test_Block: a channel that moved only with another in this point's
+         --  keyframes is not told apart from it, its coefficient's block has no rank, and the pseudo-inverse's
+         --  variance says nothing of the direction it leaves free).
+         Slope  : Real_Access := new Real_Array (1 .. N * Queries);
+         Spread : Real_Access := new Real_Array (1 .. N * Queries);
+         Told   : Flag_Access := new Flag_Array (0 .. N * Queries - 1);
+         --  Per point: it moves with some joint, significantly.
+         Informative : Flag_Access := new Flag_Array (0 .. Queries - 1);
+         --  Per channel, the informative points' sizes of their motion per unit and the standard deviations of those.
          Values : Real_Access := new Real_Array (1 .. N * Queries);
          Sigmas : Real_Access := new Real_Array (1 .. N * Queries);
          Counts : array (1 .. N) of Natural := [others => 0];
+         function Slot (C : Positive; P : Natural) return Positive is ((C - 1) * Queries + P + 1);
       begin
+         Told.all := [others => False];
+         Informative.all := [others => False];
          for P in 0 .. Queries - 1 loop
             declare
                Rows : Natural := 0;
@@ -897,68 +924,192 @@ package body Driver.Robot.Kinematics is
                      Rows := Rows + 1;
                   end if;
                end loop;
-               if Rows >= K then
+               --  The point is regressed on the channels that changed in its own keyframes (a column zero in every
+               --  row of a point is left out for it), and its coefficients are taken only when its rows determine
+               --  them all: the numerical rank of the whole block equals the columns (Regression.Test_Block). Fewer
+               --  rows than columns split one keyframe's displacement among the channels that changed in it, each
+               --  column alone of full rank, exactly and significantly: such slopes put arm_b's first channel at
+               --  0.35 px a unit over 241 points, where the points answered in four keyframes and more said 0.93
+               --  (R5 on 10-14). A point answered in one keyframe that turned one joint alone tells that joint's
+               --  motion per unit.
+               if Rows >= 1 then
                   declare
-                     X      : Real_Matrix (1 .. Rows, 1 .. K);
-                     Yu, Yv : Real_Array (1 .. Rows);
-                     Own    : Real_Array (1 .. Rows);   --  each answer's standard deviation
-                     I      : Natural := 0;
+                     Own : array (1 .. N) of Natural := [others => 0];   --  per channel: its column for this point
+                     Kp  : Natural := 0;
                   begin
-                     for S of R.Matches loop
-                        if Answered (S, P) then
-                           I := I + 1;
-                           Own (I) := Sigma_Of (S, P);
-                           for C in 1 .. N loop
-                              if Active (C) then
-                                 X (I, Column (C)) := Change (S.Frame, C) / Own (I);
+                     for C in 1 .. N loop
+                        if Active (C) then
+                           for S of R.Matches loop
+                              if Own (C) = 0 and then Answered (S, P)
+                                and then (if Noise (C) < Real'Last
+                                          then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))
+                                          else Change (S.Frame, C) /= 0.0)
+                              then
+                                 Kp := Kp + 1;
+                                 Own (C) := Kp;
                               end if;
                            end loop;
-                           Yu (I) := (S.To_U (P) - R.Query_U (P)) / Own (I);
-                           Yv (I) := (S.To_V (P) - R.Query_V (P)) / Own (I);
                         end if;
                      end loop;
-                     --  Scaled by their standard deviations, the residuals have unit variance at the least.
-                     declare
-                        Fu    : constant Regression.Fit := Regression.Solve (X, Yu, 1.0);
-                        Fv    : constant Regression.Fit := Regression.Solve (X, Yv, 1.0);
-                        Var_U : constant Real_Array := Regression.Coefficient_Variances (Fu);
-                        Var_V : constant Real_Array := Regression.Coefficient_Variances (Fv);
-                     begin
-                        for C in 1 .. N loop
-                           if Active (C) then
-                              declare
-                                 J : constant Positive := Column (C);
-                                 G : constant Real := Sqrt (Fu.Beta (J) ** 2 + Fv.Beta (J) ** 2);
-                                 V : constant Real :=
-                                   (if G > 0.0
-                                    then (Fu.Beta (J) ** 2 * Var_U (J) + Fv.Beta (J) ** 2 * Var_V (J)) / G ** 2
-                                    else Real'Max (Var_U (J), Var_V (J)));
-                                 --  A channel that moved only with another in this point's keyframes is not told
-                                 --  apart from it: its coefficient's block has no rank, and the pseudo-inverse's
-                                 --  variance says nothing of the direction it leaves free.
-                                 Stat_U, Stat_V : Real;
-                                 Rank_U, Rank_V : Natural;
-                              begin
-                                 Regression.Test_Block (Fu, J, J, Stat_U, Rank_U);
-                                 Regression.Test_Block (Fv, J, J, Stat_V, Rank_V);
-                                 if V < Real'Last and then Rank_U + Rank_V > 0 then
-                                    Counts (C) := Counts (C) + 1;
-                                    Values ((C - 1) * Queries + Counts (C)) := G;
-                                    Sigmas ((C - 1) * Queries + Counts (C)) := Sqrt (Real'Max (0.0, V));
-                                 end if;
-                              end;
-                           end if;
-                        end loop;
-                     end;
+                     if Kp >= 1 and then Rows >= Kp then
+                        declare
+                           X      : Real_Matrix (1 .. Rows, 1 .. Kp) := [others => [others => 0.0]];
+                           Yu, Yv : Real_Array (1 .. Rows);
+                           Own_S  : Real_Array (1 .. Rows);   --  each answer's standard deviation
+                           I      : Natural := 0;
+                        begin
+                           for S of R.Matches loop
+                              if Answered (S, P) then
+                                 I := I + 1;
+                                 Own_S (I) := Sigma_Of (S, P);
+                                 for C in 1 .. N loop
+                                    if Own (C) > 0 then
+                                       X (I, Own (C)) := Change (S.Frame, C) / Own_S (I);
+                                    end if;
+                                 end loop;
+                                 Yu (I) := (S.To_U (P) - R.Query_U (P)) / Own_S (I);
+                                 Yv (I) := (S.To_V (P) - R.Query_V (P)) / Own_S (I);
+                              end if;
+                           end loop;
+                           --  Scaled by their standard deviations, the residuals have unit variance at the least.
+                           declare
+                              Fu    : constant Regression.Fit := Regression.Solve (X, Yu, 1.0);
+                              Fv    : constant Regression.Fit := Regression.Solve (X, Yv, 1.0);
+                              Var_U : constant Real_Array := Regression.Coefficient_Variances (Fu);
+                              Var_V : constant Real_Array := Regression.Coefficient_Variances (Fv);
+                              Stat  : Real;
+                              Rank  : Natural;
+                           begin
+                              Regression.Test_Block (Fu, 1, Kp, Stat, Rank);
+                              if Rank = Kp then
+                                 for C in 1 .. N loop
+                                    if Own (C) > 0 then
+                                       declare
+                                          J : constant Positive := Own (C);
+                                          G : constant Real := Sqrt (Fu.Beta (J) ** 2 + Fv.Beta (J) ** 2);
+                                          V : constant Real :=
+                                            (if G > 0.0
+                                             then (Fu.Beta (J) ** 2 * Var_U (J) + Fv.Beta (J) ** 2 * Var_V (J)) / G ** 2
+                                             else Real'Max (Var_U (J), Var_V (J)));
+                                       begin
+                                          if V < Real'Last then
+                                             Told (Slot (C, P) - 1) := True;
+                                             Slope (Slot (C, P)) := G;
+                                             Spread (Slot (C, P)) := Sqrt (Real'Max (0.0, V));
+                                          end if;
+                                       end;
+                                    end if;
+                                 end loop;
+                              end if;
+                           end;
+                        end;
+                     end if;
                   end;
                end if;
             end;
          end loop;
+         --  A point tells how far the view moves when it moves with some joint, significantly. One that moves with
+         --  none says nothing of the view: fixed to the eye (the hand's jaws in a wrist eye's view, two fifths of
+         --  the kiwi's), or answered at its place by false peaks, it is answered in every keyframe at zero motion
+         --  per unit of every joint, and the median over every point put arm_b's first joint at 0.012 px a unit
+         --  where its moving points said 0.87 (R5 on 10-14: the sweep took the joint for unseen and climbed its
+         --  ladder to 3016 units). A channel's measurement is the median over the informative points of what
+         --  they move per unit of it, whether or not that is significant in the channel itself: a point's motion
+         --  with a joint that moves the view little is small, and only the points that move with some joint are
+         --  the world's.
+         declare
+            Told_Of, Moving_Of : array (1 .. N) of Natural := [others => 0];
+            Whole : array (1 .. N) of Boolean := [others => True];
+            --  The per-point test's own false-alarm rate.
+            Alarm : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+         begin
+            for P in 0 .. Queries - 1 loop
+               for C in 1 .. N loop
+                  if Told (Slot (C, P) - 1) then
+                     Told_Of (C) := Told_Of (C) + 1;
+                     if Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P))) then
+                        Moving_Of (C) := Moving_Of (C) + 1;
+                     end if;
+                  end if;
+               end loop;
+            end loop;
+            --  A channel moves the view when the points that move with it are not a patch of those told: the
+            --  silent ones are no significant majority (Lockin.Still_A_Patch, the lock-in's own rule for an eye).
+            --  One that moves a patch moves a part of the body in the view, not the view: the kiwi's wrist eyes
+            --  are mounted before the wrist roll, which turns the hand's jaws in their pictures (R5 on 10-14: 97
+            --  of some 300 points moved with arm_b's fifth channel, 0.34 px a unit, and they were the jaws'; taken
+            --  for the world's, they put the first channel at 0.49 px a unit where the world's points said 0.87).
+            --  A patch needs movers: points that move with the channel beyond what the per-point test alarms on
+            --  by chance (as Lockin.Judge asks of an eye's cells), and a silent majority among the points that
+            --  could tell: a point tells the movers' motion from none when their median stands Z of its own
+            --  standard deviation beyond what is significant for it (the lock-in's cells that could tell and did
+            --  not, against those too noisy to tell); one that could not tell is neither silent nor moving. A
+            --  channel no point moves with yet is not told, and what was told before stands (a turn too small to
+            --  move the view: the rig of robot.boot.short, whose first pushes rest short of the keyframe step,
+            --  and whose few points told of a joint, two of sixteen significant, the rest uncertain by a quarter
+            --  of their motion, made a patch of it).
+            for C in 1 .. N loop
+               if Told_Of (C) > 0 and then Regression.Count_Significant (Moving_Of (C), Told_Of (C), Alarm) then
+                  declare
+                     Movers : Real_Array (1 .. Moving_Of (C));
+                     K      : Natural := 0;
+                     Silent : Natural := 0;
+                  begin
+                     for P in 0 .. Queries - 1 loop
+                        if Told (Slot (C, P) - 1)
+                          and then Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P)))
+                        then
+                           K := K + 1;
+                           Movers (K) := Slope (Slot (C, P));
+                        end if;
+                     end loop;
+                     declare
+                        Typical : constant Real := Driver.Stats.Median (Movers);
+                     begin
+                        for P in 0 .. Queries - 1 loop
+                           if Told (Slot (C, P) - 1)
+                             and then not Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P)))
+                             and then Driver.Uncertain.Significant
+                                        (Typical - Driver.Conventions.Z * Spread (Slot (C, P)), Spread (Slot (C, P)))
+                           then
+                              Silent := Silent + 1;
+                           end if;
+                        end loop;
+                     end;
+                     Whole (C) := not Lockin.Still_A_Patch (Moving_Of (C), Moving_Of (C) + Silent);
+                  end;
+                  R.Shift_Seen.Replace_Element (C - 1, Whole (C));
+                  R.Shift_Told.Replace_Element (C - 1, Told_Of (C));
+               else
+                  Whole (C) := R.Shift_Seen (C - 1);
+               end if;
+            end loop;
+            for P in 0 .. Queries - 1 loop
+               for C in 1 .. N loop
+                  if Whole (C) and then Told (Slot (C, P) - 1)
+                    and then Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P)))
+                  then
+                     Informative (P) := True;
+                  end if;
+               end loop;
+            end loop;
+         end;
+         for P in 0 .. Queries - 1 loop
+            if Informative (P) then
+               for C in 1 .. N loop
+                  if Told (Slot (C, P) - 1) then
+                     Counts (C) := Counts (C) + 1;
+                     Values (Slot (C, Counts (C) - 1)) := Slope (Slot (C, P));
+                     Sigmas (Slot (C, Counts (C) - 1)) := Spread (Slot (C, P));
+                  end if;
+               end loop;
+            end if;
+         end loop;
          for C in 1 .. N loop
             if Counts (C) > 0 then
                declare
-                  First : constant Positive := (C - 1) * Queries + 1;
-                  Last  : constant Positive := (C - 1) * Queries + Counts (C);
+                  First : constant Positive := Slot (C, 0);
+                  Last  : constant Positive := Slot (C, Counts (C) - 1);
                   Med   : constant Real := Driver.Stats.Median (Values (First .. Last));
                   --  The median's own standard error, from the points' typical one: the points err apart.
                   Sig   : constant Real :=
@@ -970,6 +1121,36 @@ package body Driver.Robot.Kinematics is
                end;
             end if;
          end loop;
+         --  The points that do not move with the view: moving with no joint, and told apart from a view that moves
+         --  per unit of some channel (Pixels_Per_Unit) by a motion per unit of it significantly below the view's.
+         --  Such a point is no evidence that the view followed a keyframe nor of where the world is (Set_Of, the
+         --  fits); one whose keyframes do not tell is neither still nor informative. Told anew from every
+         --  keyframe: a point of the world answered at its place by false peaks is found where it is once a
+         --  prediction reaches it.
+         while Natural (R.Still.Length) < Queries loop
+            R.Still.Append (False);
+         end loop;
+         for P in 0 .. Queries - 1 loop
+            declare
+               Still : Boolean := False;
+            begin
+               if not Informative (P) then
+                  for C in 1 .. N loop
+                     if Told (Slot (C, P) - 1) and then Pixels_Per_Unit (M, R, C) > 0.0
+                       and then Driver.Uncertain.Significant (Pixels_Per_Unit (M, R, C) - Slope (Slot (C, P)),
+                                                              Spread (Slot (C, P)))
+                     then
+                        Still := True;
+                     end if;
+                  end loop;
+               end if;
+               R.Still.Replace_Element (P, Still);
+            end;
+         end loop;
+         Free (Slope);
+         Free (Spread);
+         Free (Told);
+         Free (Informative);
          Free (Values);
          Free (Sigmas);
       end;
@@ -985,14 +1166,19 @@ package body Driver.Robot.Kinematics is
         (Ada.Numerics.Long_Elementary_Functions.Sqrt (Real'Max (A.Cov.UU, A.Cov.VV)));
       function Agrees (I : Natural) return Boolean is (Agree (Agree'First + I - Answers'First));
       function Answered (I : Natural) return Boolean is (Answers (I).Verdict = Driver.Alignment.Found and then Agrees (I));
+      --  Answered by a point that moves with the view: one that does not (Arm_Evidence.Still, Measure_Shifts) is
+      --  found at its place in every keyframe, and is no evidence that the view followed, nor of where the world
+      --  is (the hand's jaws in the kiwi's wrist eyes, R5 on 10-14: every keyframe of a joint turned 2277 units
+      --  was followed by them).
+      function Moving (I : Natural) return Boolean is (Answered (I) and then Moving_Point (R, I - 1));
       Followed : Boolean := False;
-      function Sighted (I : Natural) return Boolean is (Followed and then Answered (I) and then Answers (I).Narrow);
+      function Sighted (I : Natural) return Boolean is (Followed and then Moving (I) and then Answers (I).Narrow);
    begin
       declare
          Found, From_Narrow : Natural := 0;
       begin
          for I in Answers'Range loop
-            if Answered (I) then
+            if Moving (I) then
                Found := Found + 1;
                if Answers (I).Narrow then
                   From_Narrow := From_Narrow + 1;
@@ -1032,9 +1218,7 @@ package body Driver.Robot.Kinematics is
          Set.Back_V.Append (R.Query_V (I - 1));
          Set.Found.Append (Sighted (I) and then Sigma_Of (Answers (I)) <= Driver.Conventions.Z * Typical);
          Set.Answered.Append (Answered (I));
-         if Keyframes.Prediction_Caused (Answers (I))
-           or else (Answers (I).Verdict = Driver.Alignment.Found and then not Sighted (I))
-         then
+         if Keyframes.Prediction_Caused (Answers (I)) or else (Moving (I) and then not Sighted (I)) then
             Set.Wide := Set.Wide + 1;
          end if;
       end loop;
@@ -1223,13 +1407,26 @@ package body Driver.Robot.Kinematics is
                   & (if C <= Natural (R.Shift_Sigmas.Length) and then R.Shift_Sigmas (C - 1) < Real'Last
                      then Driver.Log.Image (R.Shifts (C - 1), 4) & " +- " & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)
                           & " over" & Natural'Image (R.Shift_Points (C - 1)) & " points"
+                          & (if C <= Natural (R.Shift_Seen.Length) and then not R.Shift_Seen (C - 1)
+                             then ", a patch of the" & Natural'Image (R.Shift_Told (C - 1)) & " told: not the view"
+                             else "")
                      else "none")
                   & ", lock-in " & Driver.Log.Image (Lockin.Shift (M, R.Eye, R.Group, C), 4) & ", used "
                   & Driver.Log.Image (Pixels_Per_Unit (M, R, C), 4) & ")");
             end;
          end loop;
-         Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe steps, matcher (eye):"
-                          & Ada.Strings.Unbounded.To_String (Text));
+         declare
+            Fixed : Natural := 0;
+         begin
+            for F of R.Still loop
+               if F then
+                  Fixed := Fixed + 1;
+               end if;
+            end loop;
+            Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe steps, matcher (eye):"
+                             & Ada.Strings.Unbounded.To_String (Text) & ";" & Fixed'Image & " of"
+                             & Natural'Image (Natural (R.Query_U.Length)) & " points do not move with the view");
+         end;
       end;
    end Align_Arm;
 
@@ -1518,7 +1715,7 @@ package body Driver.Robot.Kinematics is
                end loop;
                declare
                   function Round_Trip (S : Match_Set; I : Natural) return Boolean is
-                    (S.Found (I)
+                    (S.Found (I) and then Moving_Point (R, I)
                      and then (Sigma = 0.0
                                or else (not Driver.Uncertain.Significant (S.Back_U (I) - R.Query_U (I), Sigma)
                                         and then not Driver.Uncertain.Significant (S.Back_V (I) - R.Query_V (I), Sigma))));
@@ -1829,10 +2026,10 @@ package body Driver.Robot.Kinematics is
       end Side_Of;
 
       --  Where an eye answered the side's tracks.
-      procedure Answers_Of (S : in out Fit.Chain_Side; Set : Match_Set; Of_Query : Index_Access) is
+      procedure Answers_Of (R : Arm_Evidence; S : in out Fit.Chain_Side; Set : Match_Set; Of_Query : Index_Access) is
       begin
          for I in 0 .. Natural (Set.Found.Length) - 1 loop
-            if I <= Of_Query'Last and then Of_Query (I) > 0 and then Set.Found (I) then
+            if I <= Of_Query'Last and then Of_Query (I) > 0 and then Set.Found (I) and then Moving_Point (R, I) then
                declare
                   U      : constant Real := Set.To_U (I);
                   V      : constant Real := Set.To_V (I);
@@ -1874,10 +2071,10 @@ package body Driver.Robot.Kinematics is
          Side_Of (R1, S1, Map1);
          Side_Of (R2, S2, Map2);
          if Way.Own then
-            Answers_Of (S1, R2.World_Matches.First_Element, Map1);
+            Answers_Of (R1, S1, R2.World_Matches.First_Element, Map1);
          else
-            Answers_Of (S1, R1.Eye_Matches (Set_Into (R1, Way.Eye)), Map1);
-            Answers_Of (S2, R2.Eye_Matches (Set_Into (R2, Way.Eye)), Map2);
+            Answers_Of (R1, S1, R1.Eye_Matches (Set_Into (R1, Way.Eye)), Map1);
+            Answers_Of (R2, S2, R2.Eye_Matches (Set_Into (R2, Way.Eye)), Map2);
          end if;
          Free (Map1);
          Free (Map2);
@@ -2124,6 +2321,7 @@ package body Driver.Robot.Kinematics is
             --  The answer comes back to its query, within the noise of all the round trips.
             function Returns (I : Natural) return Boolean is
               (I < Natural (Set.Found.Length) and then I < Natural (Set.Back_U.Length) and then Set.Found (I)
+               and then Moving_Point (R, I)
                and then (Sigma = 0.0
                          or else (not Driver.Uncertain.Significant (Set.Back_U (I) - R.Query_U (I), Sigma)
                                   and then not Driver.Uncertain.Significant (Set.Back_V (I) - R.Query_V (I), Sigma))));

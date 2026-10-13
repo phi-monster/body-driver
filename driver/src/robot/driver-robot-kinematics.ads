@@ -53,6 +53,11 @@ private package Driver.Robot.Kinematics is
    --  under its error on pictures that moved.
 
    function Pixels_Per_Unit (M : Model; A : Arm_Id; Channel : Positive) return Real;
+
+   function Shift_Unseen (M : Model; A : Arm_Id; Channel : Positive) return Boolean;
+   --  The arm's eye does not see its view move with the channel, as the keyframes measured it: the points that
+   --  move with it are a patch of those told (Measure_Shifts), a part of the body in the view and not the view
+   --  (a wrist roll behind the eye turns the hand's jaws in its picture). False until the keyframes tell.
    --  How far the view of the eye the arm carries moves per reading unit of
    --  the channel, in pixels: what the arm's aligned keyframes measure of it
    --  (per point, the displacements the aligner found regressed on the

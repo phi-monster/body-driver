@@ -118,7 +118,8 @@ package Driver.Robot is
    --  group's push does to each eye (the lock-in), the body's graph (roles,
    --  arms, mounts) and the kinematics with their lenses.
    type Stored is
-     (Stored_Noise, Stored_Travel, Stored_Ends, Stored_Steps, Stored_Lags, Stored_Responses, Stored_Graph, Stored_Kinematics);
+     (Stored_Noise, Stored_Travel, Stored_Ends, Stored_Steps, Stored_Lags, Stored_Responses, Stored_Graph, Stored_Shifts,
+      Stored_Kinematics);
 
    procedure Load_Body
      (M   : in out Model;
@@ -448,6 +449,9 @@ private
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
       Asks        : Flag_Vectors.Vector;   --  of the push under way: the channels it asked a step the one test of motion sees
       Free_Shortfalls : Real_Vectors.Vector;   --  of every answered push that was not blocked, along its ask, in order
+      Executed    : Real_Vectors.Vector;   --  per channel: the least ask of it a push moved it for (Driver.Robot.Steps:
+                                           --  the body executes asks that large; a servo stands still for one within
+                                           --  its dead band), Real'Last until one did; empty before any push
       Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
       Stopped_Low, Stopped_High : Real_Vectors.Vector;   --  per channel, the ends: where the body stopped a push of the
                                                          --  channel at the same reading from two poses, the furthest
@@ -723,6 +727,14 @@ private
       --  channel at all. A channel's measurement may be insignificant yet bound the lock-in's slope
       --  (Kinematics.Pixels_Per_Unit).
       Shift_Points : Count_Vectors.Vector;   --  per channel: how many points that measurement rests on
+      Shift_Seen   : Flag_Vectors.Vector;    --  per channel, once told: the view moves with it (the points that move
+                                             --  with it are not a patch of those told: Kinematics.Measure_Shifts);
+                                             --  False for a channel that moves a part of the body in the view
+      Shift_Told   : Count_Vectors.Vector;   --  per channel: how many points were told of it
+      Still    : Flag_Vectors.Vector;   --  per query point, once its keyframes tell: it does not move with the view
+                                        --  (Kinematics.Measure_Shifts: fixed to the eye, as the hand's jaws in a
+                                        --  wrist eye's view are, or answered at its place by false peaks); nothing
+                                        --  is known of a point beyond its length
       Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
       --  The first arm's reference view matched into this arm's, its query
       --  points into this arm's reference image (Kinematics.Observe), and of

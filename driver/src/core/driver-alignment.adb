@@ -205,34 +205,13 @@ package body Driver.Alignment is
 
    function Levels (P : Pyramid) return Natural is (Natural (P.Sizes.Length));
 
-   --  The cubic B-spline basis and its derivative. A picture read between its pixels by the spline through them
-   --  is smooth to the second derivative and agrees with every pixel exactly; a bilinear reading has a corner at
-   --  every pixel centre, which a fit lands on and bounces across when two pictures agree exactly, and a cubic
-   --  convolution reads a texture of three pixels' period (the finest the pixels hold) wrong by a tenth of its
-   --  strength at the places between pixels, a phase-dependent error that decides between two periods.
-   function Basis (T : Real) return Real is
-      A : constant Real := abs T;
-   begin
-      if A < 1.0 then
-         return 2.0 / 3.0 - A * A + A ** 3 / 2.0;
-      elsif A < 2.0 then
-         return (2.0 - A) ** 3 / 6.0;
-      else
-         return 0.0;
-      end if;
-   end Basis;
-
-   function Basis_Slope (T : Real) return Real is
-      A : constant Real := abs T;
-      Slope : constant Real :=
-        (if A < 1.0 then -2.0 * A + 1.5 * A * A elsif A < 2.0 then -0.5 * (2.0 - A) ** 2 else 0.0);
-   begin
-      return (if T < 0.0 then -Slope else Slope);
-   end Basis_Slope;
-
-   --  The value of a picture at a place (corner-origin coordinates) by the spline whose coefficients are given,
-   --  and its derivatives along u and v; not Ok when the sixteen coefficients around the place are not all in the
-   --  picture.
+   --  The value of a picture at a place (corner-origin coordinates) by the cubic B-spline whose coefficients are
+   --  given, and its derivatives along u and v; not Ok when the sixteen coefficients around the place are not all
+   --  in the picture. A picture read between its pixels by the spline through them is smooth to the second
+   --  derivative and agrees with every pixel exactly; a bilinear reading has a corner at every pixel centre, which
+   --  a fit lands on and bounces across when two pictures agree exactly, and a cubic convolution reads a texture
+   --  of three pixels' period (the finest the pixels hold) wrong by a tenth of its strength at the places between
+   --  pixels, a phase-dependent error that decides between two periods.
    procedure Sample
      (Coefficients  : Real_Array;
       Width, Height : Natural;
@@ -263,14 +242,14 @@ package body Driver.Alignment is
          procedure Weights (T : Real; W, S : out Taps) is
             U : constant Real := 1.0 - T;
          begin
-            W := (U ** 3 / 6.0,
+            W := [U ** 3 / 6.0,
                   (4.0 - 6.0 * T * T + 3.0 * T ** 3) / 6.0,
                   (1.0 + 3.0 * T + 3.0 * T * T - 3.0 * T ** 3) / 6.0,
-                  T ** 3 / 6.0);
-            S := (-(U * U) / 2.0,
+                  T ** 3 / 6.0];
+            S := [-(U * U) / 2.0,
                   (3.0 * T * T - 4.0 * T) / 2.0,
                   (1.0 + 2.0 * T - 3.0 * T * T) / 2.0,
-                  T * T / 2.0);
+                  T * T / 2.0];
          end Weights;
       begin
          Weights (Fx, Wx, Sx);
@@ -512,8 +491,6 @@ package body Driver.Alignment is
    procedure Pass
      (T        : Warp;
       Template : Real_Array;
-      Slope_U  : Real_Array;
-      Slope_V  : Real_Array;
       Valid    : Mask_Array;
       Half     : Natural;
       Luma : Real_Array;
@@ -724,8 +701,8 @@ package body Driver.Alignment is
       begin
          Into := Totals;
          Retries := Retried;
-         Totals := (others => <>);
-         Retried := (others => <>);
+         Totals := [others => <>];
+         Retried := [others => <>];
       end Take;
    end Work;
 
@@ -852,7 +829,7 @@ package body Driver.Alignment is
 
       procedure Run (W : Warp; Into : out Pass_Result) is
       begin
-         Pass (W, Template, Slope_U, Slope_V, Valid, Half, B_Spline, B_Level.Width, B_Level.Height, Into);
+         Pass (W, Template, Valid, Half, B_Spline, B_Level.Width, B_Level.Height, Into);
          Info.Passes := Info.Passes + 1;
       end Run;
    begin

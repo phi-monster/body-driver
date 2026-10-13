@@ -322,10 +322,16 @@ package body Driver.Robot.Tests is
       Step (M, R, Target, Target);
    end Step;
 
-   type Push_Kind is (Arm_1, Arm_2, Closer, Part, Idle, Lockstep, Closer_With_Arm_1);
+   type Push_Kind is (Arm_1, Arm_2, Arm_1_Joint_2, Arm_2_Joint_1, Closer, Part, Idle, Lockstep, Closer_With_Arm_1);
 
    --  Pushes one group away by Amount and back, Times times, holding two
-   --  beats after each move; Lockstep moves both arms together.
+   --  beats after each move; Lockstep moves both arms together. Arm_1 and
+   --  Arm_2 move both joints of the arm at once, in one ratio; Arm_1_Joint_2
+   --  and Arm_2_Joint_1 move the arm's other joint alone, as the recognition's
+   --  directions rounds push one channel at a time: keyframes of joints that
+   --  only ever moved together in one ratio cannot tell how far the view
+   --  moves per unit of each (Kinematics.Measure_Shifts takes a point's
+   --  coefficients only when its keyframes determine them all).
    procedure Exercise (M : in out Model; R : in out Rig; Kind : Push_Kind; Amount : Real; Times : Positive) is
       Rest : constant Rig_State := (others => <>);
       Away : Rig_State := Rest;
@@ -333,6 +339,8 @@ package body Driver.Robot.Tests is
       case Kind is
          when Arm_1    => Away.Arm_1 := [Amount, Amount / 2.0];
          when Arm_2    => Away.Arm_2 := [Amount / 2.0, Amount];
+         when Arm_1_Joint_2 => Away.Arm_1 := [0.0, Amount];
+         when Arm_2_Joint_1 => Away.Arm_2 := [Amount, 0.0];
          when Closer   => Away.Closer := Amount;
          when Part     => Away.Part := Amount;
          when Idle     => Away.Idle := Amount;
@@ -405,6 +413,8 @@ package body Driver.Robot.Tests is
       end loop;
       Exercise (M, R, Arm_1, 0.1, 8);
       Exercise (M, R, Arm_2, 0.1, 8);
+      Exercise (M, R, Arm_1_Joint_2, 0.1, 8);
+      Exercise (M, R, Arm_2_Joint_1, 0.1, 8);
       Exercise (M, R, Closer, 0.1, 8);
       Exercise (M, R, Part, 0.1, 8);
       Exercise (M, R, Idle, 0.1, 8);
@@ -2336,6 +2346,84 @@ package body Driver.Robot.Tests is
       end if;
    end Step_Let_Go_Is_Not_Blocked;
 
+   --  A servo's dead band: a push that asks less than the body is known to execute (Steps.Executed_Least, the
+   --  least ask a push moved the channel for) and is not answered is not judged, neither blocked nor delivered;
+   --  one that asks at least that and is not answered is blocked. Pushes 1 to 3 ask 0.5 and are followed (the
+   --  body executes 0.5); after the estimate at beat 128 has measured the body's delay from them (a push nothing
+   --  answers ends after that wait), push 4 asks 0.1 and nothing moves, push 5 asks 0.6 and nothing moves (the
+   --  kiwi's joints, asked 2.4 to 3.8 units within their dead band at the sweep's first levels, were every one
+   --  called blocked where they stood, R5 on 10-14).
+   procedure Step_Within_The_Dead_Band_Is_Not_Judged is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Target, Reading, From : Real := 0.0;
+   begin
+      for B in 0 .. 160 loop
+         if B = 64 or else B = 128 then
+            --  What a lock-in measured of an eye watching the channel: ten cells moving 100 pixels per reading unit
+            --  (Visible_Step 0.009), set again after the estimate at 128 has measured the eye.
+            declare
+               S : Eye_Stream renames M.Eyes (1);
+            begin
+               S.Kept_Groups.Clear;
+               S.Kept_Channels.Clear;
+               S.Gains.Clear;
+               S.Gain_Variances.Clear;
+               S.Kept_Groups.Append (1);
+               S.Kept_Channels.Append (1);
+               for Cell in 1 .. 10 loop
+                  S.Gains.Append (1.0e4);
+                  S.Gain_Variances.Append (1.0);
+               end loop;
+               M.Graph.Effects.Replace_Element
+                 (1, (Verdict => Whole, Responding => 10, Textured => 10,
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+            end;
+         end if;
+         if B in 66 .. 80 or else B in 130 .. 141 then
+            declare
+               K     : constant Natural := (if B < 130 then (B - 66) / 5 + 1 else 4 + (B - 130) / 6);
+               Phase : constant Natural := (if B < 130 then (B - 66) mod 5 else (B - 130) mod 6);
+            begin
+               if Phase = 0 then
+                  Target := Reading + (case K is when 4 => 0.1, when 5 => 0.6, when others => 0.5);
+                  From := Reading;
+               elsif Phase = 1 and then K <= 3 then
+                  Reading := From + 0.9855 * (Target - From);
+               end if;
+            end;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Reading + 1.0e-12 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Known (Visible_Step (M, 1, 1)), "the eye's visible step is known");
+      Check (Steps.Episodes (M, 1) = 5, "five pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 5 then
+         declare
+            Within : constant Episode := M.Groups (1).Episodes (4);
+            Beyond : constant Episode := M.Groups (1).Episodes (5);
+         begin
+            Check (abs (Steps.Executed_Least (M, 1, 1) - 0.5) < 0.01,
+                   "the least ask the body executed is" & Real'Image (Steps.Executed_Least (M, 1, 1)) & ", not 0.5");
+            Check (Within.Ended and then not Within.Blocked and then not Known (Within.Delivered),
+                   "a push of 0.1, within the dead band of a body known to execute 0.5, that nothing answered is "
+                   & "judged (blocked " & Within.Blocked'Image & ", delivered known " & Known (Within.Delivered)'Image
+                   & ")");
+            Check (Beyond.Ended and then Beyond.Blocked,
+                   "a push of 0.6, as large as the body executes, that nothing answered is not called blocked");
+         end;
+      end if;
+   end Step_Within_The_Dead_Band_Is_Not_Judged;
+
 
    --  The same joint, read as exactly, with a lock-in's step of 3e-17
    --  credited to it (what a lock-in that credits a group with the pictures'
@@ -2791,8 +2879,10 @@ package body Driver.Robot.Tests is
       --  and settles three beats later, 0.05 short of the target with a
       --  scatter of 0.001, as a joint held against gravity does, which is many
       --  times the readings' noise. Pushes 1 to 5 and 7 move freely; push 6
-      --  meets an obstacle at 2.0; push 8 is never answered.
-      Targets : constant Real_Array (1 .. 8) := [1.0, 2.0, 1.0, 2.0, 1.0, 3.0, 1.0, 1.5];
+      --  meets an obstacle at 2.0; push 8, asking more than any push the
+      --  joint executed (a push within a servo's dead band is not judged,
+      --  Steps.Executed_Least), is never answered.
+      Targets : constant Real_Array (1 .. 8) := [1.0, 2.0, 1.0, 2.0, 1.0, 3.0, 1.0, 2.5];
       Stop_At : constant Real := 2.0;
       Target, Reading, From, To : Real := 0.0;
       Blocked_From : Real := 0.0;   --  where push 6 started
@@ -7840,6 +7930,10 @@ package body Driver.Robot.Tests is
                              & "meanwhile, or joins the free pushes, or a push the joint is moved against by a visible "
                              & "motion is not blocked with a negative delivered fraction",
                              Step_Let_Go_Is_Not_Blocked'Access);
+      Driver.Tests.Register ("robot.steps.deadband",
+                             "a push that asks less than the least ask the body is known to execute, and is not "
+                             & "answered, is judged blocked or delivered, or one that asks as much is not blocked",
+                             Step_Within_The_Dead_Band_Is_Not_Judged'Access);
       Driver.Tests.Register ("robot.steps.free", "a push of a joint an eye watches is called blocked though it stopped short by "
                              & "no more than every free push of the joint does, because the joint's own error is as large "
                              & "as the step an eye can see", Step_Free_Error_As_Big_As_The_Step'Access);

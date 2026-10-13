@@ -6,7 +6,6 @@ with Driver.Json;
 with Driver.Log;
 with Driver.Robot.Flow;
 with Driver.Robot.Graph;
-with Driver.Robot.Kinematics;
 
 package body Driver.Robot.Body_File is
 
@@ -42,17 +41,45 @@ package body Driver.Robot.Body_File is
       return To_String (T);
    end Reals;
 
-   --  Per channel of an arm, the pixels per reading unit the driver uses (Kinematics.Pixels_Per_Unit), 0 where none.
-   function Used_Shifts (M : Model; R : Arm_Evidence) return Real_Vectors.Vector is
+   --  Per channel of an arm, the standard deviation of how far the view moves per unit as its keyframes
+   --  measured it (Kinematics.Measure_Shifts), 0 where it is not measured, and which are.
+   function Shift_Sigmas_Of (R : Arm_Evidence) return Real_Vectors.Vector is
       V : Real_Vectors.Vector;
    begin
-      if R.Arm in 1 .. Arm_Id'Base (Arm_Count (M)) and then R.Group in M.Groups.First_Index .. M.Groups.Last_Index then
-         for C in 1 .. M.Groups (R.Group).Size loop
-            V.Append (Driver.Robot.Kinematics.Pixels_Per_Unit (M, R.Arm, C));
-         end loop;
-      end if;
+      for S of R.Shift_Sigmas loop
+         V.Append (if S < Real'Last then S else 0.0);
+      end loop;
       return V;
-   end Used_Shifts;
+   end Shift_Sigmas_Of;
+
+   function Shifts_Known_Of (R : Arm_Evidence) return Flag_Vectors.Vector is
+      V : Flag_Vectors.Vector;
+   begin
+      for S of R.Shift_Sigmas loop
+         V.Append (S < Real'Last);
+      end loop;
+      return V;
+   end Shifts_Known_Of;
+
+   --  Per channel of a group, the least ask a push moved it for (Group_Stream.Executed), 0 where none did yet,
+   --  and which did.
+   function Executed_Of (S : Group_Stream) return Real_Vectors.Vector is
+      V : Real_Vectors.Vector;
+   begin
+      for X of S.Executed loop
+         V.Append (if X < Real'Last then X else 0.0);
+      end loop;
+      return V;
+   end Executed_Of;
+
+   function Executed_Known_Of (S : Group_Stream) return Flag_Vectors.Vector is
+      V : Flag_Vectors.Vector;
+   begin
+      for X of S.Executed loop
+         V.Append (X < Real'Last);
+      end loop;
+      return V;
+   end Executed_Known_Of;
 
    function Counts (V : Count_Vectors.Vector) return String is
       T : Unbounded_String := To_Unbounded_String ("[");
@@ -138,13 +165,15 @@ package body Driver.Robot.Body_File is
       end loop;
       Add ("]}," & LF);
 
-      --  The step responses: the longest wait for an answer, and every free
-      --  push's shortfall.
+      --  The step responses: the longest wait for an answer, every free
+      --  push's shortfall, and per channel the least ask a push moved it for.
       Add (" ""steps"": {""method"": " & Int (Steps_Method) & ", ""groups"": [");
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          Add (Separator (G = M.Groups.First_Index) & "{""delay"": " & Int (M.Groups (G).Delay_Beats)
               & ", ""delay_known"": " & Flag (M.Groups (G).Delay_Known)
-              & ", ""free_shortfalls"": " & Reals (M.Groups (G).Free_Shortfalls) & "}");
+              & ", ""free_shortfalls"": " & Reals (M.Groups (G).Free_Shortfalls)
+              & ", ""executed"": " & Reals (Executed_Of (M.Groups (G)))
+              & ", ""executed_known"": " & Flags (Executed_Known_Of (M.Groups (G))) & "}");
       end loop;
       Add ("]}," & LF);
 
@@ -222,7 +251,9 @@ package body Driver.Robot.Body_File is
          begin
             Add (Separator (K = M.Kinematics.First_Index) & LF & "  {""arm"": " & Int (Integer (R.Arm))
                  & ", ""group"": " & Int (Integer (R.Group)) & ", ""eye"": " & Int (Integer (R.Eye))
-                 & ", ""shifts"": " & Reals (Used_Shifts (M, R))
+                 & ", ""shifts"": " & Reals (R.Shifts) & ", ""shift_sigmas"": " & Reals (Shift_Sigmas_Of (R))
+                 & ", ""shifts_known"": " & Flags (Shifts_Known_Of (R)) & ", ""shift_points"": " & Counts (R.Shift_Points)
+                 & ", ""shifts_seen"": " & Flags (R.Shift_Seen) & ", ""shift_told"": " & Counts (R.Shift_Told)
                  & ", ""fitted"": " & Flag (F.Fitted) & ", ""reference"": " & Reals (F.Reference)
                  & ", ""chain"": " & Counts (F.Chain) & ", ""joints"": [");
             for J in F.Joints.First_Index .. F.Joints.Last_Index loop
@@ -532,6 +563,15 @@ package body Driver.Robot.Body_File is
                      S.Delay_Beats := Natural'Max (0, Whole (Item (Gs, I), "delay"));
                      S.Delay_Known := Truth (Item (Gs, I), "delay_known");
                      S.Free_Shortfalls := Reals_Of (Field (Item (Gs, I), "free_shortfalls"));
+                     declare
+                        Ex    : constant Real_Vectors.Vector := Reals_Of (Field (Item (Gs, I), "executed"));
+                        Known : constant Flag_Vectors.Vector := Flags_Of (Field (Item (Gs, I), "executed_known"));
+                     begin
+                        S.Executed.Clear;
+                        for J in Ex.First_Index .. Ex.Last_Index loop
+                           S.Executed.Append (if J <= Known.Last_Index and then Known (J) then Ex (J) else Real'Last);
+                        end loop;
+                     end;
                   end;
                end loop;
                Restored (Stored_Steps) := True;
@@ -659,12 +699,20 @@ package body Driver.Robot.Body_File is
                      Js : constant Node := Field (X, "joints");
                      L  : constant Node := Field (X, "lens");
                   begin
-                     --  What its keyframes measured of how far the view moves per unit (Kinematics.Pixels_Per_Unit):
-                     --  the values written are the ones that were used, taken back as known.
+                     --  What its keyframes measured of how far the view moves per unit (Kinematics.Measure_Shifts),
+                     --  with its standard deviation, as it was.
                      R.Shifts := Reals_Of (Field (X, "shifts"));
-                     for V of R.Shifts loop
-                        R.Shift_Sigmas.Append (if V > 0.0 then 0.0 else Real'Last);
-                     end loop;
+                     R.Shift_Points := Counts_Of (Field (X, "shift_points"));
+                     R.Shift_Seen := Flags_Of (Field (X, "shifts_seen"));
+                     R.Shift_Told := Counts_Of (Field (X, "shift_told"));
+                     declare
+                        Sigmas : constant Real_Vectors.Vector := Reals_Of (Field (X, "shift_sigmas"));
+                        Known  : constant Flag_Vectors.Vector := Flags_Of (Field (X, "shifts_known"));
+                     begin
+                        for J in Sigmas.First_Index .. Sigmas.Last_Index loop
+                           R.Shift_Sigmas.Append (if J <= Known.Last_Index and then Known (J) then Sigmas (J) else Real'Last);
+                        end loop;
+                     end;
                      R.Result.Fitted := Truth (X, "fitted");
                      R.Result.Reference := Reals_Of (Field (X, "reference"));
                      R.Result.Chain := Counts_Of (Field (X, "chain"));
@@ -771,10 +819,27 @@ package body Driver.Robot.Body_File is
                         end;
                      end if;
                   end loop;
+                  for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+                     if (for some S of M.Kinematics (K).Shift_Sigmas => S < Real'Last) then
+                        Restored (Stored_Shifts) := True;
+                     end if;
+                  end loop;
                   if All_Fitted then
                      Restored (Stored_Kinematics) := True;
                   else
-                     M.Kinematics.Clear;
+                     --  The fits go; what the arms' keyframes measured of how far the view moves per unit of
+                     --  each joint stays: the recognition's keyframes measured it, the sweep's first levels are
+                     --  sized by it, and a boot that reloaded the graph without it began its sweep from turns
+                     --  of 2.4 units, which the servos did not execute (R5 on the Pi, 10-14).
+                     for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+                        declare
+                           R : Arm_Evidence renames M.Kinematics (K);
+                        begin
+                           R := (Arm => R.Arm, Group => R.Group, Eye => R.Eye, Shifts => R.Shifts,
+                                 Shift_Sigmas => R.Shift_Sigmas, Shift_Points => R.Shift_Points,
+                                 Shift_Seen => R.Shift_Seen, Shift_Told => R.Shift_Told, others => <>);
+                        end;
+                     end loop;
                      M.Fixed_Eyes.Clear;
                   end if;
                end;
@@ -794,6 +859,7 @@ package body Driver.Robot.Body_File is
                when Stored_Lags       => "the image lags",
                when Stored_Responses  => "the eyes' responses",
                when Stored_Graph      => "the graph",
+               when Stored_Shifts     => "how far the view moves per unit of each joint",
                when Stored_Kinematics => "the kinematics");
       begin
          for Q in Stored loop

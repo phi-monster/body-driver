@@ -18,11 +18,11 @@ private package Driver.Robot.Body_File is
    Noise_Method      : constant := 1;
    Travel_Method     : constant := 1;
    Ends_Method       : constant := 2;
-   Steps_Method      : constant := 2;
+   Steps_Method      : constant := 3;
    Lag_Method        : constant := 2;
    Lockin_Method     : constant := 4;
    Graph_Method      : constant := 1;
-   Kinematics_Method : constant := 8;
+   Kinematics_Method : constant := 9;
 
    function Text (M : Model) return String;
    --  The whole file.

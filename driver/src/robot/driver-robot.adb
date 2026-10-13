@@ -16,7 +16,6 @@ with Driver.Robot.Flow;
 with Driver.Robot.Graph;
 with Driver.Robot.Kinematics;
 with Driver.Robot.Lag;
-with Driver.Pixels;
 with Driver.Robot.Lockin;
 with Driver.Robot.Steps;
 with Driver.Robot.Stillness;

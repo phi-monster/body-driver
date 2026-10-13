@@ -127,7 +127,6 @@ package body Driver.Stats is
    end Robust_Sigma;
 
    function Median_Sigma (Sigma : Real; N : Positive) return Real is
-      use Ada.Numerics.Long_Elementary_Functions;
    begin
       return Sqrt (Ada.Numerics.Pi / 2.0) * Sigma / Sqrt (Real (N));
    end Median_Sigma;

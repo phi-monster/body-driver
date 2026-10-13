@@ -375,6 +375,16 @@ package body Driver.Robot.Boot is
                   Per_Unit (C) := Driver.Robot.Kinematics.Pixels_Per_Unit (M, A, C);
                end loop;
             end Read_Shifts;
+            --  Per channel: the eye does not see its view move with it, as the keyframes measured it
+            --  (Kinematics.Shift_Unseen: a joint behind the eye, which turns the hand in its picture); read again
+            --  after every round.
+            Unseen_Now : array (1 .. Size) of Boolean := [others => False];
+            procedure Read_Unseen is
+            begin
+               for C in 1 .. Size loop
+                  Unseen_Now (C) := Driver.Robot.Kinematics.Shift_Unseen (M, A, C);
+               end loop;
+            end Read_Unseen;
             procedure Read_Plan is
             begin
                for E in 1 .. Eye_Count (M) loop
@@ -440,7 +450,7 @@ package body Driver.Robot.Boot is
                   Shuffle (Order (1 .. Count), Rng);
                end Draw_Order;
                --  Per push: the offset of its next level, whether it climbs on, and why it stopped.
-               type Stop is (Climbing, Not_Followed, Blocked, Widest);
+               type Stop is (Climbing, Not_Followed, Blocked, Widest, Unseen);
                Offset  : Real_Array (1 .. 2 * Size) := [others => 0.0];
                State   : array (1 .. 2 * Size) of Stop := [others => Blocked];
                --  Per push: its ladder is going down from a first level the aligner could not follow.
@@ -660,6 +670,7 @@ package body Driver.Robot.Boot is
                         end if;
                         Measure_The_Round;
                         Driver.Beats.Within_A_Beat (Read_Shifts'Access);
+                        Driver.Beats.Within_A_Beat (Read_Unseen'Access);
                         for I in 1 .. Count loop
                            if State (I) = Climbing then
                               declare
@@ -694,7 +705,13 @@ package body Driver.Robot.Boot is
                                     --  from the keyframes before it by the step the fit counts): the ladder climbs
                                     --  past it.
                                  end loop;
-                                 if Lost > 0 then
+                                 if Unseen_Now (P.Channel) then
+                                    --  The view does not move with the joint: a joint behind the eye (the kiwi's
+                                    --  wrist roll, whose eye is mounted before it, R5 on 10-14: unmeasured, its
+                                    --  ladder doubled a level a pass to 3016 units, every level followed by the
+                                    --  jaws' points), and no level of it moves the view, however far.
+                                    State (I) := Unseen;
+                                 elsif Lost > 0 then
                                     if Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel) then
                                        --  Not followed before any level of the joint was: the first level is sized
                                        --  by how far the view moves per unit of the joint, and that is wrong where
@@ -1099,7 +1116,6 @@ package body Driver.Robot.Boot is
                            Shows  : array (1 .. Count, 1 .. Eyes) of Eye_Response;
                            type Rest_Grid is array (1 .. Count, 1 .. Eyes) of Real;
                            Rests      : Rest_Grid;   --  the rest's motion together, in sigmas
-                           Last_Rests : Rest_Grid := [others => [others => 0.0]];   --  the same at the round before
                            Factor : array (1 .. Count) of Real := [others => 1.0];
                            --  The hold after each push (Pause_After_A_Push): the longest measured lag once every eye's
                            --  is measured, until then the longest lag the stream could tell when the round began
@@ -1133,9 +1149,6 @@ package body Driver.Robot.Boot is
                            --  pushed every channel of the group both ways, whatever was already seen (item 17).
                            Needed : array (1 .. Count, 1 .. Natural'Max (1, Most_Channels)) of Boolean :=
                              [others => [others => False]];
-                           --  What a round that doubles the push makes of the motion the cells that did not respond
-                           --  show together: their energies grow with the square of the push, and so does the sum.
-                           Doubled : constant Real := 2.0 ** 2;
 
                            procedure Read_Open is
                            begin
@@ -1227,7 +1240,6 @@ package body Driver.Robot.Boot is
                                  end if;
                               end loop;
                               Last := Now;
-                              Last_Rests := Rests;
                               Driver.Beats.Within_A_Beat (Estimate'Access);
                            end loop;
                         end;

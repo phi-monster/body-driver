@@ -1,6 +1,5 @@
 with Ada.Containers.Vectors;
 with Driver.Beats;
-with Driver.Clock;
 with Driver.Log;
 with Driver.Memory;
 with Driver.Bytes;

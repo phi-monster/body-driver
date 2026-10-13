@@ -3,7 +3,6 @@ with Ada.Containers;
 with Ada.Containers.Ordered_Maps;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
-with Driver.Distributions;
 with Driver.Stats;
 
 package body Driver.Robot.Channels is
