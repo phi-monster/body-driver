@@ -245,6 +245,11 @@ package body Driver.Robot.Hand.Sweep is
                Renew_Stops (S, C, Motion);
             end if;
          elsif Status (S, C) = Measured
+           --  Only while the ends are seen: a reading that moved starts an end's view again, and until it has two
+           --  frames there is no end to place a stop between (Stops is 0 then, not what was seen) — R3 on the Pi,
+           --  10-13: hand b's lobes placed, its ends started again after a push, and Renew_Stops asked for the low
+           --  end that was not there; the driver died at beat 6166 on Low_End's precondition.
+           and then Driver.Robot.Hand.Views.Has_Ends (S.Views, C)
            and then Driver.Robot.Hand.Views.Stops (S.Views, C) /= S.Per_Channel.Constant_Reference.Element (C).Stops_Seen
          then
             Renew_Stops (S, C, Motion);
