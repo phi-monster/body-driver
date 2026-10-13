@@ -332,6 +332,16 @@ package body Driver.Robot.Boot is
          end Begin_Anew;
       begin
          Driver.Beats.Within_A_Beat (Read_Size'Access);
+         --  The arm is brought to its hold before the reference is taken. A servo holding a load stands off the
+         --  hold's target by its steady error, and every push and every return lands on its target (Motion.Step
+         --  sends a step again by its landing's error): a reference taken where the arm merely stood would lie off
+         --  every keyframe of the sweep by that error, in every channel, and no keyframe would turn one joint alone
+         --  (R5 on the Pi, 10-13: 2 to 8 units on four of arm_a's channels in every keyframe of the recognition).
+         declare
+            Report : Driver.Robot.Motion.Step_Report;
+         begin
+            Go_To (G, Holds_Of (G, Size), Report);
+         end;
          Driver.Beats.Within_A_Beat (Begin_Anew'Access);
          Driver.Robot.Motion.Hold_For_Twin (M, A);
          declare

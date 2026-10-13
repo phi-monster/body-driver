@@ -224,6 +224,9 @@ package body Driver.Robot.Motion is
                Again : Step_Report;
             begin
                One_Step (M, Nudged, Again, Stop);
+               Driver.Log.Line (Driver.Log.Robot, "motion: a step sent again by its landing's error of "
+                                & Driver.Log.Image (Largest, 1) & " deviations of what the readings tell, landed in"
+                                & Again.Beats'Image & " beats: " & To_String (Again.Detail));
                Report.Beats := Report.Beats + Again.Beats;
                Report.At_Rest := Again.At_Rest;
                Report.Stopped := Again.Stopped;
