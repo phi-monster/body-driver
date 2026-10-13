@@ -116,14 +116,19 @@ package body Driver.Robot.Motion is
       Report.Outcome := (if not Blocked_Any then Reached elsif Moved_Some then Short else Blocked);
    end Judge;
 
-   --  One sending of the targets, waited for and judged (Step). With Hold_At, the targets are what the targeted
-   --  groups are held at from now on (Group_Stream.Held): a step's own targets, not a sending again of them.
+   --  One sending (Sent) of a step whose targets, as readings, are Targets; waited for and judged (Step). With
+   --  Hold_At, the targets are what the targeted groups are held at from now on (Group_Stream.Held): a step's own
+   --  targets, not a sending again of them. Where a channel reads its target when the sending has ended, the
+   --  command less the reading is the servo's steady error there, kept for the next step's first sending
+   --  (Group_Stream.Landing).
    procedure One_Step
      (M       : in out Model;
+      Sent    : Driver.Commands.Command;
       Targets : Driver.Commands.Command;
       Report  : out Step_Report;
       Stop    : access function return Boolean := null;
-      Hold_At : Boolean := False)
+      Hold_At : Boolean := False;
+      Land    : Boolean := False)
    is
       B : Driver.Clock.Beat;
    begin
@@ -182,7 +187,7 @@ package body Driver.Robot.Motion is
                end;
             end if;
          end loop;
-         Driver.Beats.Send (Targets);
+         Driver.Beats.Send (Sent);
          --  The push starts at the beat whose observation was taken under the
          --  new targets; it is over when the step tracker has seen it end.
          loop
@@ -196,6 +201,41 @@ package body Driver.Robot.Motion is
                   Judge (M, Targets, Before, Waited, Report);
                   Report.Started := Started;
                   Report.Stopped := Stopped;
+                  --  The channels that read their target: what was sent for them, less what they read, is the
+                  --  servo's steady error there (Group_Stream.Landing); learned from positionings only.
+                  if Land and then not Stopped then
+                     declare
+                        O : constant Driver.Beats.Observation_View := Driver.Beats.Latest;
+                     begin
+                        for G in 1 .. Groups loop
+                           if Targeted (Group_Id (G)) and then Driver.Observations.Has_Reading (O.all, Group_Id (G)) then
+                              declare
+                                 T : constant Real_Array := Driver.Commands.Target (Targets, Group_Id (G));
+                                 C : constant Real_Array := Driver.Commands.Target (Sent, Group_Id (G));
+                                 R : constant Real_Array := O.Readings.Element (Group_Id (G));
+                                 L : Real_Vectors.Vector renames M.Groups (Group_Id (G)).Landing;
+                              begin
+                                 while Natural (L.Length) < M.Groups (Group_Id (G)).Size loop
+                                    L.Append (0.0);
+                                 end loop;
+                                 for K in 1 .. Natural'Min (T'Length, Natural'Min (C'Length, R'Length)) loop
+                                    declare
+                                       Noise : constant Real := Channels.Noise (M, Group_Id (G), K);
+                                       Error : constant Real := T (T'First + K - 1) - R (R'First + K - 1);
+                                    begin
+                                       if Noise < Real'Last and then Noise > 0.0
+                                         and then not Driver.Uncertain.Significant
+                                                        (Error, Noise * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))
+                                       then
+                                          L.Replace_Element (K - 1, C (C'First + K - 1) - R (R'First + K - 1));
+                                       end if;
+                                    end;
+                                 end loop;
+                              end;
+                           end if;
+                        end loop;
+                     end;
+                  end if;
                end if;
                if Halt then
                   Stopped := True;
@@ -213,13 +253,42 @@ package body Driver.Robot.Motion is
      (M       : in out Model;
       Targets : Driver.Commands.Command;
       Report  : out Step_Report;
-      Stop    : access function return Boolean := null)
+      Stop    : access function return Boolean := null;
+      Land    : Boolean := False)
    is
       use Ada.Numerics.Long_Elementary_Functions;
       Groups : constant Natural := Group_Count (M);
       Worst  : Real := Real'Last;   --  the largest error of the last landing, in deviations of what the readings tell
+
+      --  The first sending: every targeted channel's target plus the servo's steady error where the group last
+      --  landed on a target (Group_Stream.Landing), so that it lands on this one at the first sending where the
+      --  error is the same (R5 on the Pi, 10-14: 4 to 17 units, nearly the same at every landing; each sending
+      --  again is a step's wait).
+      function With_Landing return Driver.Commands.Command is
+         C : Driver.Commands.Command := Targets;
+      begin
+         for G in 1 .. Groups loop
+            if Is_Commandable (M, Group_Id (G)) and then Driver.Commands.Has_Target (Targets, Group_Id (G))
+              and then Natural (M.Groups (Group_Id (G)).Landing.Length) = M.Groups (Group_Id (G)).Size
+            then
+               declare
+                  T : Real_Array := Driver.Commands.Target (Targets, Group_Id (G));
+               begin
+                  for K in T'Range loop
+                     T (K) := T (K) + M.Groups (Group_Id (G)).Landing (K - T'First);
+                  end loop;
+                  Driver.Commands.Set_Target (C, Group_Id (G), T);
+               end;
+            end if;
+         end loop;
+         return C;
+      end With_Landing;
    begin
-      One_Step (M, Targets, Report, Stop, Hold_At => True);
+      if not Land then
+         One_Step (M, Targets, Targets, Report, Stop, Hold_At => True);
+         return;
+      end if;
+      One_Step (M, With_Landing, Targets, Report, Stop, Hold_At => True, Land => True);
       --  Landing where it was sent: a servo that holds a load with a proportional controller settles a few
       --  units short of its goal, the same few units at the same pose (the kiwi's arms, R4 on the Pi, 10-13:
       --  back from every push 4 to 7 units off the hold, so that no keyframe of the recognition turned one joint
@@ -309,7 +378,7 @@ package body Driver.Robot.Motion is
             declare
                Again : Step_Report;
             begin
-               One_Step (M, Nudged, Again, Stop);
+               One_Step (M, Nudged, Targets, Again, Stop, Land => True);
                Driver.Log.Line (Driver.Log.Robot, "motion: a step sent again by its landing's error of "
                                 & Driver.Log.Image (Largest, 1) & " deviations of what the readings tell (" & To_String (Off_By)
                                 & "), landed in" & Again.Beats'Image & " beats: " & To_String (Again.Detail));

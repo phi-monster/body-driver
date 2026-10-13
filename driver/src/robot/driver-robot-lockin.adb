@@ -267,6 +267,9 @@ package body Driver.Robot.Lockin is
       Free (Energies);
    end Cells_Showing;
 
+   function Still_A_Patch (Responding, Textured : Natural) return Boolean is
+     (Responding < Textured and then Regression.Count_Significant (Textured - Responding, Textured, Half));
+
    function Judge (Responding, Textured, Least, Most : Natural; Able_Disagree : Boolean) return Eye_Response is
       --  The per-cell test's own false-alarm rate.
       P0 : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);

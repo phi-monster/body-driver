@@ -1204,7 +1204,9 @@ package body Driver.Robot.Kinematics is
         (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " aligned keyframes" & First'Image & " to"
          & R.Aligned'Image & ":" & Found'Image & " of" & Natural'Image ((R.Aligned - First + 1) * Queries)
          & " points found, the aligner errs by " & Driver.Log.Image (Match_Sigma (R), 3) & " px, in "
-         & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s" & Reasons_Text
+         & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s ("
+         & Driver.Log.Image (Real (Driver.Clock.Seconds - Start) / Real (Natural'Max (1, R.Aligned - First + 1)), 2)
+         & " s a keyframe)" & Reasons_Text
          & "; the aligner's work: " & Driver.Alignment.Work_Report & "; resident"
          & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & " MB");
       --  The steps a keyframe of each channel needs, for the log: what the matcher tells apart against what the eye sees.

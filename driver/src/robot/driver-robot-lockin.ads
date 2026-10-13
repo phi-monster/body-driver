@@ -65,6 +65,13 @@ private package Driver.Robot.Lockin is
    --  more, stay in the mean when the cells that can tell agree (A31's first arm, at 252 beats: 14 cells carried
    --  three quarters of the energy and 103 of its 108 cells that can tell showed the motion).
 
+   function Still_A_Patch (Responding, Textured : Natural) return Boolean;
+   --  Whether an eye with that many of its textured cells responding to a group is a patch by the verdict's
+   --  own rule: the silent cells are a significant majority. The boot asks it of a patch's responding count
+   --  doubled: a patch one more doubling of the push cannot make anything else is not pushed on (R5 on the
+   --  Pi, 10-13: a gripper's own patch in its wrist eye grew 17, 22, 46 of 525 with every doubling, as a jaw
+   --  opening wider does, and the rounds went to 64 times the amounts for it).
+
    function Judge (Responding, Textured, Least, Most : Natural; Able_Disagree : Boolean) return Eye_Response;
    --  What an eye makes of a group from how many of its Textured cells Responding to it and how many show its motion,
    --  Least at least and Most at most: nothing unless the responding cells outnumber the false alarms the per-cell test

@@ -961,15 +961,16 @@ driver-robot-boot.adb	G : Group_Id := 1;	1	structure	a group number before the a
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	2_147_483_647	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	48_271	math	Park and Miller's minimal standard generator: the multiplier
 driver-robot-boot.adb	Group : Group_Id := 1;	1	structure	a placeholder, set before it is read
-driver-robot-boot.adb	Held_From, Held_To : array (1 .. 2 * Size) of Natural := [others => 0];	2	structure	two pushes a channel, one each way
 driver-robot-boot.adb	Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)));	1	structure	a hold of one beat at the least while no lag is told: the beat after the push
 driver-robot-boot.adb	Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)))];	1	structure	the guessed hold begins at one beat, the unit, while the stream can tell no lag; the doubling goes on from it
 driver-robot-boot.adb	Last : Count_Grid := [others => [others => -1]];	1	structure	no count: an eye that was not open after the round before
+driver-robot-boot.adb	Levels : array (1 .. 2 * Size) of Level_Vectors.Vector;	2	structure	two pushes a channel: one each way
 driver-robot-boot.adb	Needed : array (1 .. Count, 1 .. Natural'Max (1, Most_Channels)) of Boolean :=	1	structure	an array of at least one column: a group of no channels needs none
 driver-robot-boot.adb	Now (G, E) := -1;	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)),	2.0	statistics	the standard error of a scale estimate from Dof degrees of freedom is the scale over the root of twice Dof
+driver-robot-boot.adb	Off := 2.0 * Off;	2.0	structure	the ladder doubles: each level twice the one before
 driver-robot-boot.adb	Offset (Count + 2) := First (C);	2	structure	the second of a channel's two pushes, the other way
-driver-robot-boot.adb	Offset (I) := 2.0 * Offset (I);	2.0	math	doubling: the next level of the ladder
+driver-robot-boot.adb	Offset (I) := 2.0 * Last.Offset;	2.0	structure	the next pass climbs on from twice the last level
 driver-robot-boot.adb	Offset (I) := Offset (I) / 2.0;	2.0	structure	the ladder goes down by the same doubling it climbs by
 driver-robot-boot.adb	Offset : Real_Array (1 .. 2 * Size) := [others => 0.0];	2	structure	two pushes a channel, one each way
 driver-robot-boot.adb	Order (Count + 1) := (Channel => C, Sign => 1.0);	1.0	math	the two directions of a push
@@ -992,7 +993,9 @@ driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 el
 driver-robot-boot.adb	State (Count + 2) := Climbing;	2	structure	the second of a channel's two pushes, the other way
 driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
 driver-robot-boot.adb	State : array (1 .. 2 * Size) of Stop := [others => Blocked];	2	structure	two pushes a channel, one each way
-driver-robot-boot.adb	elsif Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel) then	2.0	structure	the ladder goes down by the same doubling it climbs by
+driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));	2	structure	one more doubling of the push: the responding cells grew at most as the push did
+driver-robot-boot.adb	elsif Per_Unit (P.Channel) > 0.0 and then 2.0 * Last.Offset * Per_Unit (P.Channel) > Half then	2.0	structure	the next level, twice this one, would move the view by more than half of it
+driver-robot-boot.adb	if Followed_Now or else (K = 1 and then Measured_Now) then	1	structure	the first level of the pass is the one that measured the shift
 driver-robot-boot.adb	if M.Beats >= 2 * Rest_Beats then	2	structure	the rest is compared with itself at every doubling of its beats, as the estimates are scheduled
 driver-robot-boot.adb	if N > 1 and then Followed_In_Pass > 0 and then Fitted_Now then	1	structure	joints move together only when there are at least two
 driver-robot-boot.adb	if N > 1 and then not Fitted_Now then	1	structure	joints move together only when there are at least two
@@ -1000,6 +1003,7 @@ driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the pari
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
+driver-robot-boot.adb	if Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel) then	2.0	structure	the ladder goes down by halving
 driver-robot-boot.adb	if Unswept.Length = 1 then	1	structure	one arm or hand needs no lanes; more than one are measured at once
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-channels.adb	(Change_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	statistics	a standardized statistic is tested against unit sigma
@@ -2225,7 +2229,9 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Link.Sigma, 3) & "" & Driver.Log
 driver-robot-kinematics.adb	& Driver.Log.Image (Pixels_Per_Unit (M, R, C), 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (R2.Result.Scale_Sigma, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Placed), 1) & "");	1	format	digits printed in a log line or a message
-driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "" & Reasons_Text	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start) / Real (Natural'Max (1, R.Aligned - First + 1)), 2)	1	format	seconds a keyframe in the log: at least one keyframe
+driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start) / Real (Natural'Max (1, R.Aligned - First + 1)), 2)	2	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Real (Fitted - Start), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Real (Placed - Fitted), 1) & ""	1	format	digits printed in a log line or a message
@@ -2504,6 +2510,7 @@ driver-robot-motion.adb	& Driver.Log.Image (Kinematics.Conditioning (M, A, Faile
 driver-robot-motion.adb	& Driver.Log.Image (Largest, 1) & "" & To_String (Off_By)	1	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Share, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	(Driver.Uncertain.Scalar_Gate (Channels.Noise_Freedom (M, G, Channel))) * Sigma * Sqrt (2.0));	2.0	math	a change is the difference of two readings
+driver-robot-motion.adb	(Error, Noise * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
 driver-robot-motion.adb	(if M.Eyes (E).Rest_Counts_Known then 1.0 / Real (M.Eyes (E).Rest_Count_Beats + 1) else Tail);	1.0	math	the order statistic: one in n plus one
 driver-robot-motion.adb	(if Q'Length = 0 then "" else Readings_Image (Q (Q'First .. Q'Last - 1)) & "" & Driver.Log.Image (Q (Q'Last), 6));	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	* (S.High_Seen (I) - S.Low_Seen (I)) / 2.0)	2.0	math	two independent stops fall anywhere in the channel's travel and meet within D of one another with probability 2 D over the travel: D is that probability, the false alarm rate of Z, times the travel over two
@@ -2514,6 +2521,7 @@ driver-robot-motion.adb	Driver.Log.Line (Driver.Log.Robot, Where & "" & Driver.L
 driver-robot-motion.adb	Driver.Log.Line (Driver.Log.Robot, Where & "" & Driver.Log.Image (Found_At, 6)	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	Freedom : Count_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only and then B_Of = 1.0,	1.0	structure	the path from its start (0) to its goal (1), halved where it cannot be closed
+driver-robot-motion.adb	L.Append (0.0);	0.0	structure	no steady error known yet
 driver-robot-motion.adb	Largest := Real'Max (Largest, abs Error / (Noise * Sqrt (2.0)));	2.0	statistics	the noise of a difference of two readings
 driver-robot-motion.adb	Least : Estimate := (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0);	1.0	math	the whole step delivered, until a push says less
 driver-robot-motion.adb	Listed : constant Channel_Refs (1 .. 1) := [1 => Ref];	1	structure	one channel

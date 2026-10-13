@@ -36,17 +36,26 @@ package Driver.Robot.Motion is
      (M       : in out Model;
       Targets : Driver.Commands.Command;
       Report  : out Step_Report;
-      Stop    : access function return Boolean := null);
+      Stop    : access function return Boolean := null;
+      Land    : Boolean := False);
    --  Sends the targets, waits until the body settles, and judges the step.
-   --  A step that reached is sent again, moved by the error of its landing,
-   --  for every targeted channel that reads off its target by more than the
-   --  noise of a difference of two readings tells, as long as each landing
-   --  comes nearer than the one before: a servo holding a load settles a few
-   --  units short of its goal, the same few at the same pose (the kiwi's arms,
-   --  R4 on the Pi, 10-13: 4 to 7 units off the hold after every push, so
-   --  that no keyframe turned one joint alone). The report's beats count the
-   --  sendings again, its detail names them; what a sending again meets
-   --  changes nothing of what the step reached.
+   --  With Land, the step is a positioning: its first sending adds every
+   --  targeted channel's steady error where the group last landed on a target
+   --  (Group_Stream.Landing), and a step that reached is sent again, moved by
+   --  the error of its landing, for every targeted channel that reads off its
+   --  target by more than the noise of a difference of two readings tells, as
+   --  long as each landing comes nearer than the one before: a servo holding
+   --  a load settles a few units short of its goal, the same few at the same
+   --  pose (the kiwi's arms, R4 on the Pi, 10-13: 4 to 7 units off the hold
+   --  after every push, so that no keyframe turned one joint alone). The
+   --  report's beats count the sendings again, its detail names them; what a
+   --  sending again meets changes nothing of what the step reached. Without
+   --  Land, the step is a push whose answer is what is measured (a probe, the
+   --  recognition's pushes, a press): it is sent once, as asked, and its
+   --  episode is the latest of the group (robot.probe.droop: a sending again
+   --  of a probe's push by a reading short of its target by a hundred
+   --  thousandth was an episode of no length, and the probe read it as the
+   --  joint's end).
    --  Stop, when given, is asked at every beat of the wait (between Next and
    --  Send, so it may read the latest observation): once it holds, every
    --  targeted group is held where it was read at that beat, the push ends as
