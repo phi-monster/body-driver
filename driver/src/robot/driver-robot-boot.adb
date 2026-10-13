@@ -217,8 +217,8 @@ package body Driver.Robot.Boot is
                --  Held after the push for Pause beats before the pictures are asked to settle: a picture that trails
                --  the readings (an eye of the rig ten beats behind them) is settled the beat after they stop, before it
                --  has moved, and pushes a few beats apart make one burst that no lag longer than their spacing can be
-               --  told across (Lag: the shifts tried reach the stretch between bursts); the pause doubles with the
-               --  rounds (Factor), from the longest lag the stream could tell at the first (robot.boot.reread).
+               --  told across (Lag: the shifts tried reach the stretch between bursts); the pause is the longest lag
+               --  the stream could tell when the round began, until every eye's lag is measured (robot.boot.reread).
                if Pause > 0 then
                   Driver.Robot.Motion.Hold (M, Pause);
                   Settled := Settled + Pause;
@@ -1060,8 +1060,12 @@ package body Driver.Robot.Boot is
                            Last_Rests : Rest_Grid := [others => [others => 0.0]];   --  the same at the round before
                            Factor : array (1 .. Count) of Real := [others => 1.0];
                            --  The hold after each push (Pause_After_A_Push): the longest measured lag once every eye's
-                           --  is measured, until then the longest lag the stream could tell when the rounds began,
-                           --  doubled with the rounds (Push_Both_Ways).
+                           --  is measured, until then the longest lag the stream could tell when the round began
+                           --  (Push_Both_Ways). It used to double with the rounds: an eye that sees a group too faintly
+                           --  for its lag to stand out (the kiwi's head eye against either arm, R5 on the Pi, 10-13:
+                           --  undecided, its lag 0 but not known) kept the hold doubling, 320 beats a push by the round
+                           --  at 32 times the amounts, 3360 of a round's 3734 beats; the stream's own reach grows with
+                           --  the rounds as it is.
                            Pause  : array (1 .. Count) of Natural :=
                              [for G in 1 .. Count =>
                                 Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)))];
@@ -1096,7 +1100,8 @@ package body Driver.Robot.Boot is
                               Needed := [others => [others => False]];
                               for G in 1 .. Count loop
                                  Again (G) := False;
-                                 Next_Pause (G) := Hold_After_A_Push (M, Group_Id (G), 2 * Pause (G));
+                                 Next_Pause (G) :=
+                                   Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)));
                                  for E in 1 .. Eyes loop
                                     Now (G, E) := -1;
                                     if Commandable (G)

@@ -962,10 +962,10 @@ driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	2_147_483
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	48_271	math	Park and Miller's minimal standard generator: the multiplier
 driver-robot-boot.adb	Group : Group_Id := 1;	1	structure	a placeholder, set before it is read
 driver-robot-boot.adb	Held_From, Held_To : array (1 .. 2 * Size) of Natural := [others => 0];	2	structure	two pushes a channel, one each way
+driver-robot-boot.adb	Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)));	1	structure	a hold of one beat at the least while no lag is told: the beat after the push
 driver-robot-boot.adb	Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)))];	1	structure	the guessed hold begins at one beat, the unit, while the stream can tell no lag; the doubling goes on from it
 driver-robot-boot.adb	Last : Count_Grid := [others => [others => -1]];	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Needed : array (1 .. Count, 1 .. Natural'Max (1, Most_Channels)) of Boolean :=	1	structure	an array of at least one column: a group of no channels needs none
-driver-robot-boot.adb	Next_Pause (G) := Hold_After_A_Push (M, Group_Id (G), 2 * Pause (G));	2	math	doubling: the guessed hold climbs with the rounds until the seeing eyes lags are measured
 driver-robot-boot.adb	Now (G, E) := -1;	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)),	2.0	statistics	the standard error of a scale estimate from Dof degrees of freedom is the scale over the root of twice Dof
 driver-robot-boot.adb	Offset (Count + 2) := First (C);	2	structure	the second of a channel's two pushes, the other way
