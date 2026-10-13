@@ -1038,6 +1038,7 @@ driver-robot-flow.adb	Gy (I) := (At_Before (X, Y + 1) - At_Before (X, Y - 1)) / 
 driver-robot-flow.adb	Gy : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_X * Most_Y));	1	structure	at least one element, so a grid without cells allocates an empty-sized buffer no smaller than one
 driver-robot-flow.adb	Px : Index_Access := new Index_Array (0 .. Natural'Max (1, Most_X));	1	structure	at least one element, so a grid without cells allocates an empty-sized buffer no smaller than one
 driver-robot-flow.adb	Py : Index_Access := new Index_Array (0 .. Natural'Max (1, Most_Y));	1	structure	at least one element, so a grid without cells allocates an empty-sized buffer no smaller than one
+driver-robot-flow.adb	S11 := S11 + 1.0;	1.0	structure	the light's offset column is one at every pixel: its square sums the pixels
 driver-robot-flow.adb	X0 := Natural'Max (X0, 1);	1	structure	the central difference needs the pixel before
 driver-robot-flow.adb	Y0 := Natural'Max (Y0, 1);	1	structure	the central difference needs the pixel before
 driver-robot-flow.adb	and then abs U <= Real (Nx) / 2.0 and then abs V <= Real (Ny) / 2.0;	2.0	structure	a translation beyond half the cell has moved most of the template out of the window it is matched in
