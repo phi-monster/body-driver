@@ -439,11 +439,17 @@ package body Driver.Robot.Channels is
             if M.Groups (G).Commandable then
                --  The response delay: the longest wait from a push's start to
                --  its reading's first motion, over the pushes that were
-               --  answered before the next one started.
+               --  answered while their target stood: a target that changed
+               --  at all (the next push, or the group taken back to its hold)
+               --  ends the push's window, a motion after it is not its answer
+               --  (R4 on the Pi, 10-13: arm b was asked two ticks it never
+               --  followed and taken back to its hold; its readings jumped a
+               --  tick 444 beats later when arm a's push shook the base, the
+               --  delay was taken for 444 beats, and every look waited 445).
                for B in 0 .. Beats - 1 loop
                   if Asked (M, G, B) then
                      for D in B .. Beats - 1 loop
-                        exit when D > B and then Asked (M, G, D);
+                        exit when D > B and then Target_Changed (M, G, D);
                         if Moving (M, G, D) then
                            Delay_Beats := Natural'Max (Delay_Beats, D - B);
                            Answered := True;
