@@ -458,25 +458,22 @@ package body Driver.Robot.Channels is
             Onset  : Natural := 0;
          begin
             if M.Groups (G).Commandable then
-               --  The response delay: the longest wait from a push's start to
-               --  its reading's first motion, over the pushes that were
-               --  answered while their target stood: a target that changed
-               --  at all (the next push, or the group taken back to its hold)
-               --  ends the push's window, a motion after it is not its answer
-               --  (R4 on the Pi, 10-13: arm b was asked two ticks it never
-               --  followed and taken back to its hold; its readings jumped a
-               --  tick 444 beats later when arm a's push shook the base, the
-               --  delay was taken for 444 beats, and every look waited 445).
-               for B in 0 .. Beats - 1 loop
-                  if Asked (M, G, B) then
-                     for D in B .. Beats - 1 loop
-                        exit when D > B and then Target_Changed (M, G, D);
-                        if Moving (M, G, D) then
-                           Delay_Beats := Natural'Max (Delay_Beats, D - B);
-                           Answered := True;
-                           exit;
-                        end if;
-                     end loop;
+               --  The response delay: the longest wait from a push's start to its reading's first motion, over
+               --  the pushes that delivered what they asked (Steps' episodes: answered, ended, not blocked, and
+               --  their delivered fraction significant). A push into a stop delivers nothing and may still see its
+               --  reading creep when the servo yields after seconds (R4 on the Pi, 10-13: arm a's joint 4 asked
+               --  29 ticks against its end moved after 75 beats; hand a's closed jaws after 77; hand b's after
+               --  865), and a tick's flip when the other arm shakes the base is no answer either (R3: 194, 444):
+               --  taken for responses, they made every look thereafter wait that long. The command's path is
+               --  measured where the body followed the command.
+               for E of M.Groups (G).Episodes loop
+                  if E.Moved and then E.Ended and then not E.Blocked and then Known (E.Delivered)
+                    and then E.Delivered.Value > 0.0
+                    and then Driver.Uncertain.Significant (E.Delivered.Value, E.Delivered.Sigma, E.Delivered.Degrees_Of_Freedom)
+                    and then E.Moved_At >= E.Start
+                  then
+                     Delay_Beats := Natural'Max (Delay_Beats, E.Moved_At - E.Start);
+                     Answered := True;
                   end if;
                end loop;
                --  Logged when the longest wait grows (R0: a line every beat as the window slid over pushes of two to
