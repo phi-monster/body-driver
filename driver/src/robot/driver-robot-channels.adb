@@ -485,27 +485,35 @@ package body Driver.Robot.Channels is
                M.Groups (G).Delay_Beats := Delay_Beats;
                M.Groups (G).Delay_Known := Answered;
             end if;
-            for B in 0 .. Beats - 1 loop
-               if M.Groups (G).Commandable and then Asked (M, G, B) then
-                  Active := True;
-                  Onset := B;
-                  Moved := Moving (M, G, B);
-               elsif Active then
-                  --  Until the reading first moves the push waits out the
-                  --  delay; after that its response lasts, overshoot and all,
-                  --  until the reading is still. A push that is not answered
-                  --  within the delay is over.
-                  if not Moved then
-                     Moved := Moving (M, G, B);
-                     if not Moved and then B - Onset >= Delay_Beats then
+            declare
+               --  The visible steps once per group and round, not once per beat: Steps_Of sums every eye's cells
+               --  for every channel, and asked at every beat of every round it was most of a measurement (R4 on
+               --  the Pi, 10-13: the channels' phase 389 s at 4467 beats; the lock-in takes the same table once,
+               --  item 2).
+               Steps : constant Real_Array := Steps_Of (M, G);
+            begin
+               for B in 0 .. Beats - 1 loop
+                  if M.Groups (G).Commandable and then Asked (M, G, B) then
+                     Active := True;
+                     Onset := B;
+                     Moved := Moving (M, G, B, Steps);
+                  elsif Active then
+                     --  Until the reading first moves the push waits out the
+                     --  delay; after that its response lasts, overshoot and all,
+                     --  until the reading is still. A push that is not answered
+                     --  within the delay is over.
+                     if not Moved then
+                        Moved := Moving (M, G, B, Steps);
+                        if not Moved and then B - Onset >= Delay_Beats then
+                           Active := False;
+                        end if;
+                     elsif not Moving (M, G, B, Steps) then
                         Active := False;
                      end if;
-                  elsif not Moving (M, G, B) then
-                     Active := False;
                   end if;
-               end if;
-               Marks.Append (Active);
-            end loop;
+                  Marks.Append (Active);
+               end loop;
+            end;
             M.Groups (G).Pushed := Marks;
          end;
       end loop;
@@ -534,17 +542,18 @@ package body Driver.Robot.Channels is
       --  change for motion (noise zero), so a push lasts as long as its
       --  reading changes at all and the tail of a slow response is never
       --  taken for rest; the noise measured outside those pushes is then the
-      --  jitter alone, or zero where a reading has none. Each round can only
-      --  move push marks, so as many rounds as beats bound it. The rounds can
-      --  also alternate: a beat right after a push whose change is
+      --  jitter alone, or zero where a reading has none. From the second
+      --  round on a beat can only be released from the pushes, never taken
+      --  back: a change once judged jitter against a noise measured on more
+      --  rest stays jitter, the rest the noise is measured on only grows, and
+      --  the rounds end as soon as no beat is released. (Marks that could go
+      --  both ways alternated: a beat right after a push whose change is
       --  significant against the noise measured with it among the rest
-      --  beats, and not against the noise measured without it (with few
-      --  nonzero rest changes, their degrees of freedom move with it), is
-      --  rest one round and pushed the next, for good (A9's replay spent 540
-      --  s in such rounds at 1024 beats). When a round brings back the marks
-      --  of the round before the last, every beat either of the two marked
-      --  is taken as pushed, not as rest, and the noise is measured once more
-      --  outside them.
+      --  beats, and not against the noise measured without it, was rest one
+      --  round and pushed the next, for good; A9's replay spent 540 s in such
+      --  rounds at 1024 beats, R3 replayed 1489 rounds at 1488 beats, and R4
+      --  on the Pi, 10-13, 4468 rounds and 389 s at 4467 beats, the boot
+      --  waiting for the estimate throughout.)
       declare
          Total : Natural := 0;
       begin
@@ -557,38 +566,36 @@ package body Driver.Robot.Channels is
          M.Noise_Freedom.Append (0, Ada.Containers.Count_Type (Total));
       end;
       declare
-         --  The marks of the round before, and of the one before that.
+         --  The marks of the round before.
          type Marks is array (M.Groups.First_Index .. M.Groups.Last_Index) of Flag_Vectors.Vector;
-         Before, Older : Marks;
+         Before : Marks;
       begin
          for Round in 0 .. Beats loop
+            M.Measure_Rounds := Round + 1;
             if Round > 0 then
                Measure_Noise (M);
             end if;
             declare
-               Same, Back : Boolean := True;
+               Same : Boolean := True;
             begin
                for G in Before'Range loop
-                  Older (G) := Before (G);
                   Before (G) := M.Groups (G).Pushed;
                end loop;
                Measure_Pushes (M);
-               for G in Before'Range loop
-                  Same := Same and then Flag_Vectors."=" (Before (G), M.Groups (G).Pushed);
-                  Back := Back and then Flag_Vectors."=" (Older (G), M.Groups (G).Pushed);
-               end loop;
-               exit when Same and then Round > 0;
-               if Back and then Round > 1 then
+               if Round > 0 then
+                  --  A beat released from the pushes stays released.
                   for G in Before'Range loop
                      for B in 0 .. Natural (M.Groups (G).Pushed.Length) - 1 loop
-                        if B < Natural (Before (G).Length) and then Before (G) (B) then
-                           M.Groups (G).Pushed.Replace_Element (B, True);
+                        if B < Natural (Before (G).Length) and then not Before (G) (B) then
+                           M.Groups (G).Pushed.Replace_Element (B, False);
                         end if;
                      end loop;
                   end loop;
-                  Measure_Noise (M);
-                  exit;
                end if;
+               for G in Before'Range loop
+                  Same := Same and then Flag_Vectors."=" (Before (G), M.Groups (G).Pushed);
+               end loop;
+               exit when Same and then Round > 0;
             end;
          end loop;
       end;

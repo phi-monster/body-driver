@@ -215,6 +215,7 @@ package body Driver.Robot is
          end if;
       end loop;
       Took ("channels");
+      Ada.Strings.Unbounded.Append (Parts, " (" & Driver.Log.Image (M.Measure_Rounds) & " rounds)");
       if not M.From_File (Stored_Lags) then
          Lag.Measure (M);
       end if;

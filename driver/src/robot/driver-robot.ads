@@ -723,6 +723,7 @@ private
       Groups         : Group_Stream_Vectors.Vector;
       Eyes           : Eye_Stream_Vectors.Vector;
       Noise          : Real_Vectors.Vector;        --  per channel of every group, in group order
+      Measure_Rounds : Natural := 0;               --  the rounds of noise and pushes the last measurement took (Channels.Measure)
       Noise_Freedom  : Count_Vectors.Vector;       --  the degrees of freedom each noise rests on
       Lags           : Lag_Vectors.Vector;
       Lag_Known      : Eye_Flag_Vectors.Vector;    --  per eye: its lag stood out of every shift tried
