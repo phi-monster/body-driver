@@ -2864,13 +2864,43 @@ package body Driver.Robot.Tests is
      (M : in out Model; Settling : Boolean; Done, Ok : out Boolean; Beats : out Natural; Still_Poses : out Natural;
       Arm_2_Poses : out Natural; Eye_2_Noise : Real := 0.0; Eye_2_Lag : Positive := 1;
       Eye_2_Near : Real := 1.0; Eye_2_Mid : Real := 1.0; Eye_2_Far : Real := 1.0;
-      File : String := ""; Stop_Once_Kept : Boolean := False; Delivers : Real := 1.0)
+      File : String := ""; Stop_Once_Kept : Boolean := False; Delivers : Real := 1.0;
+      Tick : Real := 0.0; Deadband : Natural := 0; Speed : Natural := 0)
    is
       --  File is the body file the boot is given. With Stop_Once_Kept, the main
       --  loop stops answering a few beats after the file first exists, as if
       --  the boot had died there, and the decider is aborted. The arms' joints
       --  read Delivers of what they are sent (1: exactly it; a body under load,
       --  or whose command and reading scales differ, reads less).
+      --  Tick > 0 puts servos on the arms as the SO-101's on the Pi (R1 to R4, 10-13): the wire carries the arms'
+      --  readings and targets as whole ticks of Tick rig units each (the integer the driver reads as exact), a
+      --  target within Deadband ticks of the reading moves the servo nothing (it stands two to four ticks off a
+      --  goal and the first levels of a ladder are swallowed), and a servo moves at most Speed ticks a beat
+      --  (0: at once). The rig's own state stays in its units.
+      function Ticked (X : Real_Array) return Real_Array is
+        (if Tick > 0.0 then [for V of X => Real'Rounding (V / Tick)] else X);
+      function Unticked (X : Real_Array) return Real_Array is
+        (if Tick > 0.0 then [for V of X => V * Tick] else X);
+      --  What an arm's servos stand at a beat after they were sent Target (in the wire's units), from Reading.
+      function Served (Reading, Target : Real_Array) return Real_Array is
+         Goal   : constant Real_Array := [for V of Unticked (Target) => Delivers * V];
+         Result : Real_Array := Reading;
+      begin
+         for I in Result'Range loop
+            declare
+               Gap : constant Real := Goal (Goal'First + I - Result'First) - Reading (I);
+            begin
+               if Tick = 0.0 then
+                  Result (I) := Goal (Goal'First + I - Result'First);
+               elsif abs Gap > Real (Deadband) * Tick then
+                  Result (I) :=
+                    (if Speed = 0 or else abs Gap <= Real (Speed) * Tick then Goal (Goal'First + I - Result'First)
+                     else Reading (I) + Real (Speed) * Tick * (if Gap > 0.0 then 1.0 else -1.0));
+               end if;
+            end;
+         end loop;
+         return Result;
+      end Served;
       Since_Kept : Natural := 0;
       --  What each beat showed, for an eye that lags more than one beat.
       History   : array (0 .. Eye_2_Lag - 1) of Rig_State;
@@ -2989,19 +3019,25 @@ package body Driver.Robot.Tests is
                   O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
                end loop;
             end;
-            O.Readings.Append (Now.Arm_1);
-            O.Readings.Append (Now.Arm_2);
+            O.Readings.Append (Ticked (Now.Arm_1));
+            O.Readings.Append (Ticked (Now.Arm_2));
             O.Readings.Append (Real_Array'(1 => Now.Closer));
             O.Readings.Append (Real_Array'(1 => Now.Part));
             O.Readings.Append (Real_Array'(1 => Now.Idle));
-            O.Readings.Append (Real_Array'(1 => Now.Arm_1 (1) + Now.Arm_2 (1)));
+            O.Readings.Append (Ticked (Real_Array'(1 => Now.Arm_1 (1) + Now.Arm_2 (1))));
             O.Readings.Append (Real_Array'(1 => 7.0));
             for G in 1 .. 7 loop
                O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
             end loop;
+            if Tick > 0.0 then
+               --  The wire's formats: the arms and the sum sensor in whole ticks, the rest floats.
+               for G in 1 .. 7 loop
+                  O.Precisions.Append (if G in 1 | 2 | 6 then 0 else Real'Machine_Mantissa);
+               end loop;
+            end if;
             if B = 0 then
-               Driver.Commands.Set_Target (Sent, 1, Now.Arm_1);
-               Driver.Commands.Set_Target (Sent, 2, Now.Arm_2);
+               Driver.Commands.Set_Target (Sent, 1, Ticked (Now.Arm_1));
+               Driver.Commands.Set_Target (Sent, 2, Ticked (Now.Arm_2));
                Driver.Commands.Set_Target (Sent, 3, [Now.Closer]);
                Driver.Commands.Set_Target (Sent, 4, [Now.Part]);
                Driver.Commands.Set_Target (Sent, 5, [Now.Idle]);
@@ -3066,8 +3102,8 @@ package body Driver.Robot.Tests is
             end if;
             History (B mod Eye_2_Lag) := Now;
             Shown := Now;
-            Now.Arm_1 := [for X of Driver.Commands.Target (Sent, 1) => Delivers * X];
-            Now.Arm_2 := [for X of Driver.Commands.Target (Sent, 2) => Delivers * X];
+            Now.Arm_1 := Served (Now.Arm_1, Driver.Commands.Target (Sent, 1));
+            Now.Arm_2 := Served (Now.Arm_2, Driver.Commands.Target (Sent, 2));
             Now.Closer := Driver.Commands.Target (Sent, 3) (1);
             Now.Part := Driver.Commands.Target (Sent, 4) (1);
             Now.Idle := Driver.Commands.Target (Sent, 5) (1);
@@ -3229,6 +3265,33 @@ package body Driver.Robot.Tests is
       end loop;
       Driver.Log.Line (Driver.Log.Robot, "boot with short deliveries took" & Beats'Image & " beats");
    end Boot_With_Short_Deliveries;
+
+   --  The rig's boot with the SO-101's servos on its arms: readings and targets in whole ticks, a deadband of
+   --  three ticks and forty ticks a beat (the Pi's arms, R1 to R4, 10-13: the deadband swallowed the ladder's
+   --  first levels, the pushes into stops and the jaws' creep were taken for responses hundreds of beats late,
+   --  and every look waited that long). The boot must recognize both arms with their eyes, and the delay it
+   --  measures must be what a servo takes to answer, not what a stop or a creep took.
+   procedure Boot_With_Servos is
+      M     : Model;
+      Done  : Boolean;
+      Ok    : Boolean;
+      Beats : Natural;
+      Poses, Poses_2 : Natural;
+   begin
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, Tick => 2.0 * Ada.Numerics.Pi / 4096.0, Deadband => 3, Speed => 40);
+      Check (Done, "the boot did not finish");
+      Check (Role (M, 1) = Arm and then Role (M, 2) = Arm, "the boot recognized both arms, got "
+             & Role (M, 1)'Image & " and " & Role (M, 2)'Image);
+      Check (Eye_Mount (M, 1).Kind = Arm_Carried and then Eye_Mount (M, 1).Arm = 1, "eye 1 rides on arm 1");
+      Check (Eye_Mount (M, 2).Kind = Arm_Carried and then Eye_Mount (M, 2).Arm = 2, "eye 2 rides on arm 2");
+      for G in Group_Id range 1 .. 2 loop
+         Check (M.Groups (G).Delay_Known and then M.Groups (G).Delay_Beats <= 2,
+                "group" & G'Image & " answers within the beat a servo takes, got "
+                & (if M.Groups (G).Delay_Known then M.Groups (G).Delay_Beats'Image else " unknown"));
+      end loop;
+      Driver.Log.Line (Driver.Log.Robot, "boot with servos took" & Beats'Image & " beats, arm 1 swept at" & Poses'Image
+                       & " poses, arm 2 at" & Poses_2'Image);
+   end Boot_With_Servos;
 
    --  The rig's boot with arm 2's eye noisy (luma noise of 2 in its every
    --  pixel): pushed by the amount another eye first sees it at, arm 2 leaves
@@ -7713,6 +7776,9 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.boot.hold", "an eye that sees nothing of a group keeps its recognition hold at "
                              & "the doubled guess because its own lag is never measured (B0a: the head eye)",
                              Hold_Counts_The_Seeing_Eyes'Access);
+      Driver.Tests.Register ("robot.boot.servos", "arms on servos that read whole ticks, stand off a goal by a "
+                             & "deadband and move so many ticks a beat are not recognized, or their delay is taken "
+                             & "from a push a stop swallowed", Boot_With_Servos'Access);
       Driver.Tests.Register ("robot.boot.short", "an arm whose joints read less than they are sent is left unswept: "
                              & "its first pushes, sized by the keyframe step, rest short of it, leave no keyframe, "
                              & "and the sweep's ladder stops there as if the aligner had lost them",
