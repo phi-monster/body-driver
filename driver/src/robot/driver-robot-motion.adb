@@ -469,9 +469,10 @@ package body Driver.Robot.Motion is
    --  Moves the listed channels to Base plus the offsets and looks for as
    --  long as a response takes to show in the readings and then in the
    --  images: whether some eye saw motion, the chance that a look at so many
-   --  verdicts finds one by noise, and each reading at the end. Unlooked is
-   --  the first beat no look has judged: the looks tile the probe, so a
-   --  response that shows later than expected falls in the next one.
+   --  verdicts finds one by noise, and each reading once the readings are
+   --  still. Unlooked is the first beat no look has judged: the looks tile
+   --  the probe, so a response that shows later than expected falls in the
+   --  next one.
    procedure Move_And_Look
      (M        : in out Model;
       Listed   : Channel_Refs;
@@ -489,6 +490,28 @@ package body Driver.Robot.Motion is
       C      : Driver.Commands.Command := Base;
       From   : Natural;
       Looked : Natural := 0;
+      --  How many pushes each listed group had before this move; a push of the move is one after them.
+      Before : Count_Array (1 .. N) := [others => 0];
+
+      --  Some listed group's push of this move is still under way (Steps follows it to its end: its readings
+      --  still, or plainly going nowhere).
+      function Still_Pushing return Boolean is
+        (for some I in 1 .. N =>
+           Usable (I) and then Steps.Episodes (M, Listed (I).Group) > Before (I)
+           and then not Steps.Latest (M, Listed (I).Group).Ended);
+
+      --  Each listed channel's reading at the last beat, and whether its group's readings still move there.
+      procedure Read_Ends is
+      begin
+         for I in 1 .. N loop
+            Now (I) := 0.0;
+            Moving (I) := False;
+            if Usable (I) and then Channels.Has_Reading (M, Listed (I).Group, M.Beats - 1) then
+               Now (I) := Channels.Reading (M, Listed (I).Group, M.Beats - 1, Listed (I).Channel);
+               Moving (I) := Channels.Moving (M, Listed (I).Group, M.Beats - 1);
+            end if;
+         end loop;
+      end Read_Ends;
    begin
       for I in 1 .. N loop
          if Usable (I) then
@@ -504,6 +527,11 @@ package body Driver.Robot.Motion is
       end loop;
       Driver.Beats.Next (B);
       From := Unlooked;
+      for I in 1 .. N loop
+         if Usable (I) then
+            Before (I) := Steps.Episodes (M, Listed (I).Group);
+         end if;
+      end loop;
       Driver.Beats.Send (C);
       loop
          Driver.Beats.Next (B);
@@ -538,18 +566,24 @@ package body Driver.Robot.Motion is
             if Done then
                Look (M, From, Seen, Chance);
                Unlooked := M.Beats;
-               for I in 1 .. N loop
-                  Now (I) := 0.0;
-                  Moving (I) := False;
-                  if Usable (I) and then Channels.Has_Reading (M, Listed (I).Group, M.Beats - 1) then
-                     Now (I) := Channels.Reading (M, Listed (I).Group, M.Beats - 1, Listed (I).Channel);
-                     Moving (I) := Channels.Moving (M, Listed (I).Group, M.Beats - 1);
-                  end if;
-               end loop;
+               Read_Ends;
             end if;
             Driver.Beats.Send (Driver.Commands.Hold);
             exit when Done;
          end;
+      end loop;
+      --  A channel whose push is still under way when the look is over has not shown where the level takes it:
+      --  judged while it was still travelling, every level went further than the one before, and the ladder
+      --  doubled its ask up to 2 ** 18 units of a servo that travels for seconds to a far target, swinging the arm
+      --  from end to end at each level (R2 on the Pi, 10-13: arm b's joint 1, whose own eye did not see it move).
+      --  The push is waited for to its end as Steps judges it (the readings still, or plainly going nowhere: a
+      --  joint that creeps towards its target for good is not waited for for good), held meanwhile, and the
+      --  readings are read then. What an eye sees meanwhile falls in the next look, as any response that shows
+      --  later than expected does.
+      while Still_Pushing loop
+         Driver.Beats.Next (B);
+         Read_Ends;
+         Driver.Beats.Send (Driver.Commands.Hold);
       end loop;
    end Move_And_Look;
 
