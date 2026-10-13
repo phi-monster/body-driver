@@ -1001,6 +1001,7 @@ driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total)
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, 0.0);	0.0	math	a reading that repeats exactly at every rest beat has no jitter: any change of it is motion
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. 2 * K)) / Sqrt (2.0));	2.0	math	a change is the difference of two readings
 driver-robot-channels.adb	Moved : Real_Access := new Real_Array (1 .. 2 * Rest);	2	structure	the changes and their negations
+driver-robot-channels.adb	Quantum : constant Real := Resolution (M, G, Last) / Sqrt (12.0);	12.0	math	the variance of a uniform spread over one unit is a twelfth of it: the noise of rounding to the unit
 driver-robot-channels.adb	S.Targets.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Targets.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Twin_Values.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without an echo; Present marks the beats a reading came, and an echo comes with it

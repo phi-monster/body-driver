@@ -199,7 +199,7 @@ package body Driver.Robot.Channels is
    --  repeats exactly (a simulator between physics updates, a quantized or
    --  echoed value) or changes by its jitter; the changes that are not exact
    --  repeats measure the jitter. A channel that repeats exactly at every rest
-   --  beat has noise zero: any change of it is motion.
+   --  beat has no noise beyond its quantization (the floor below).
    procedure Measure_Channel (M : in out Model; G : Group_Id; Channel : Positive; Rest : Natural) is
       --  Every nonzero change at rest, and its negation: a change at rest has
       --  no sign of its own, so its scale is measured about zero. About their
@@ -261,6 +261,27 @@ package body Driver.Robot.Channels is
          M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. 2 * K)) / Sqrt (2.0));
          M.Noise_Freedom.Replace_Element (Index, Mad_Degrees_Of_Freedom (K));
       end if;
+      --  A reading that comes in whole units of its wire (an integer: a servo's ticks) is known no closer than
+      --  half a unit either way: its noise is at least that of rounding to the unit, the unit over the root of
+      --  twelve (the standard deviation of a uniform spread over one unit), however exactly it repeats at rest.
+      --  Without it a reading that repeated exactly had a noise of nothing, so any single-tick flip was motion,
+      --  asked for, or an answer: on the Pi (R3 and R4, 10-13) the held arm's ticks flipped when the other arm's
+      --  push shook the base, pushes were taken to be answered 194, 293 and 444 beats late, and every look
+      --  thereafter waited that long. A float's unit is its last bit: what repeats exactly there is kept exact
+      --  (the rules on Resolution in Steps and Smallest_Step tell such a reading from none).
+      declare
+         Last : constant Natural := Natural (M.Groups (G).Present.Length) - 1;
+      begin
+         if Last < Natural (M.Groups (G).Precisions.Length) and then M.Groups (G).Precisions (Last) = 0 then
+            declare
+               Quantum : constant Real := Resolution (M, G, Last) / Sqrt (12.0);
+            begin
+               if M.Noise (Index) < Quantum then
+                  M.Noise.Replace_Element (Index, Quantum);
+               end if;
+            end;
+         end if;
+      end;
       Free (Moved);
    end Measure_Channel;
 
