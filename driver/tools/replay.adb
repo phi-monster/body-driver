@@ -384,10 +384,18 @@ procedure Replay is
    --  A replay computes in place; the estimator task of the main program
    --  never runs here.
 
-   procedure Lighten (M : in out Input) is null;
-   --  A replay keeps nothing back, so nothing is lightened here. (A recording
-   --  does not say which beats the run lightened: a replay of a run that did
-   --  sees the pictures of beats the run's models never saw.)
+   --  As the run's (body_driver): every message kept back loses its pictures,
+   --  in a replay as in the run, so the replay's models see what the run's
+   --  saw. (The recording holds the pictures: a replay of a recording made
+   --  before this rule drops pictures its run's models did see.)
+   procedure Lighten (M : in out Input) is
+   begin
+      if M.Observed then
+         for C in M.O.Images.First_Index .. M.O.Images.Last_Index loop
+            M.O.Images.Replace_Element (C, Driver.Images.No_Image);
+         end loop;
+      end if;
+   end Lighten;
 
    package Apart is new Driver.Apart (Input, Robot_Part, Rest, Due, Compute, Never, Lighten);
 

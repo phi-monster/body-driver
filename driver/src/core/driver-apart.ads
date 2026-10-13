@@ -49,12 +49,15 @@ generic
    with procedure Failed (E : Ada.Exceptions.Exception_Occurrence);
    --  The estimator task failed; the models are in an unknown state.
    with procedure Lighten (M : in out Message);
-   --  Drops what a message kept back may lose: its images. Called on a message
-   --  about to be kept back when what the kernel can still give without
-   --  swapping is less than a kept-back message has been taking (R1 on the
-   --  Pi, 10-12: 3338 beats kept back with three raw images each while the
-   --  estimates took 274 s, the swap filled and the Pi went down). The models
-   --  then see those beats without pictures, as beats a camera missed.
+   --  Drops what a message kept back may lose: its images. Called on every
+   --  message kept back: while the models are apart the robot is answered
+   --  with Hold, so the pictures of those beats show the body holding still,
+   --  and the models see them as beats a camera missed. Kept with their
+   --  pictures, they cost memory and time alike: R2 on the Pi (10-13), 3517
+   --  beats kept back during a 116 s estimate took the resident set to
+   --  5.2 GB of the Pi's 8, and once the models were back it took them
+   --  1760 beats to take those messages in, computing the flow of pictures
+   --  that showed nothing moving, with the boot idle meanwhile.
 package Driver.Apart is
 
    --  Main loop, for every robot message, in this order: Arrive; the message

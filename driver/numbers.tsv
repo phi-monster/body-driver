@@ -367,7 +367,7 @@ driver-alignment.adb	while J >= 1 and then Rho (Peaks (J)) < Rho (Held) loop	1	s
 driver-alignment.ads	Halving : constant := 2;	2	math	a size of the pyramid is half the one before: the pictures are halved
 driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);	1.0	math	the identity map: the first diagonal entry is one
 driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);	1.0	math	the identity map: the second diagonal entry is one
-driver-apart.adb	& Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & "");	1024	format	kilobytes in a megabyte, for the log
+driver-apart.adb	& "" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)	1024	format	kilobytes in a megabyte, for the log
 driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
