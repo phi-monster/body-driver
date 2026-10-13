@@ -493,11 +493,16 @@ package body Driver.Robot.Motion is
       --  How many pushes each listed group had before this move; a push of the move is one after them.
       Before : Count_Array (1 .. N) := [others => 0];
 
-      --  Some listed group's push of this move is still under way (Steps follows it to its end: its readings
-      --  still, or plainly going nowhere).
+      --  Some listed group's push of this move was answered (its readings moved) and is still under way (Steps
+      --  follows it to its end: its readings still, or plainly going nowhere). A push nothing answered is not
+      --  waited for: before the body's delay is measured such a push waits as many beats as the stream had
+      --  before it (Steps: no wait is longer than all the waiting so far), and the ladder's first levels, one
+      --  tick each under a servo's deadband, stood 99, 200, 400 and 750 beats in a row (R3 on the Pi, 10-13:
+      --  the "rest" that took a minute); the next level cuts such a push short, as it always did.
       function Still_Pushing return Boolean is
         (for some I in 1 .. N =>
            Usable (I) and then Steps.Episodes (M, Listed (I).Group) > Before (I)
+           and then Steps.Latest (M, Listed (I).Group).Moved
            and then not Steps.Latest (M, Listed (I).Group).Ended);
 
       --  Each listed channel's reading at the last beat, and whether its group's readings still move there.
