@@ -545,13 +545,20 @@ package body Driver.Alignment is
                   if Ok then
                      declare
                         R   : constant Real := S - (T.Gain * Template (K) + T.Offset);
-                        Row : constant Real_Vector (1 .. Parameters) := Jacobian_Row (Di, Dj, Sx, Sy, Template (K));
+                        --  The row of the Jacobian at this pixel (Jacobian_Row), written out: a function returning
+                        --  an array a pixel at a time was a third of a pass on the Pi.
+                        Row : constant array (1 .. Parameters) of Real :=
+                          [Sx, Sy, Sx * Di, Sx * Dj, Sy * Di, Sy * Dj, -Template (K), -1.0];
                      begin
                         for A in 1 .. Parameters loop
-                           for B in A .. Parameters loop
-                              Result.H (A, B) := Result.H (A, B) + Row (A) * Row (B);
-                           end loop;
-                           Result.G (A) := Result.G (A) + Row (A) * R;
+                           declare
+                              Ra : constant Real := Row (A);
+                           begin
+                              for B in A .. Parameters loop
+                                 Result.H (A, B) := Result.H (A, B) + Ra * Row (B);
+                              end loop;
+                              Result.G (A) := Result.G (A) + Ra * R;
+                           end;
                         end loop;
                         Result.Rss := Result.Rss + R * R;
                         Result.Count := Result.Count + 1;
