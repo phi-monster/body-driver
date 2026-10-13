@@ -1116,18 +1116,20 @@ package body Driver.Robot.Boot is
                                              Needed (G, C) := True;
                                           end if;
                                        end loop;
-                                       --  The cells that did not respond are pushed on for only while their motion
-                                       --  together grew with the last doubling: a whole showing itself grows with the
-                                       --  push (robot.boot.step: the far background twenty times fainter), a patch on
-                                       --  a base the push shakes does not (R4 on the Pi, 10-13: the head eye's rest
-                                       --  against arm a read 1.3, 7.2, 4.7 and -5.9 sigmas at 1, 2, 4 and 8 times
-                                       --  the amounts, its responding cells 226, 239, 228 and 219 of 525, and the
-                                       --  rounds went on to 16 times, the arm swinging further at each).
+                                       --  The group is pushed again at twice the amounts for an eye undecided about
+                                       --  it or showing a patch only while the cells that respond to it grew with the
+                                       --  last doubling (Grew): a whole showing itself grows with the push. It used to
+                                       --  be pushed on as well while the motion the cells that did not respond show
+                                       --  together grew in significance (Eye_Effect.Resting); that is a z-score of
+                                       --  their pooled energy, which grows with the push's size and the beats whatever
+                                       --  moves them, and on the kiwi (R5 on the Pi, 10-13) the head eye, undecided
+                                       --  about either arm (a patch of half the view on a base every push shakes:
+                                       --  4.4, 5.9, 6.2, 10.5, 14.4 sigmas at 1 to 64 times the amounts, the responding
+                                       --  cells 171, 261, 250, 235, 206, 189 of 525), took the rounds to 128 times the
+                                       --  amounts, the arm swinging into the head camera.
                                        Again (G) := not Spent (G)
                                          and then (Again (G) or else Last (G, E) < 0
-                                                   or else Grew (Last (G, E), Now (G, E), Cells (G, E))
-                                                   or else (Rests (G, E) > Last_Rests (G, E)
-                                                            and then Doubled * Rests (G, E) > Driver.Conventions.Z));
+                                                   or else Grew (Last (G, E), Now (G, E), Cells (G, E)));
                                     end if;
                                  end loop;
                               end loop;

@@ -252,12 +252,21 @@ package body Driver.Robot.Motion is
                      --  asked for the error over that fraction, so that the fraction it delivers is the error.
                      --  All of it when the fraction is not measured, or is not below one.
                      Share : Real := 1.0;
+                     --  How far the last sending asked the group to move, in all: no sending again asks a channel
+                     --  farther than that (R5 on the Pi, 10-13: a push of 314 units stopped 525 short against
+                     --  the head camera, was judged reached, and the sending again asked the error over a share
+                     --  of 0.16, then of 0.01: 3727 and 216445 units, the arm thrown against what stopped it).
+                     Farthest : Real := Real'Last;
+                     Stopped  : Boolean := False;   --  the last sending ended against something: no sending again
                      Errors : Ada.Strings.Unbounded.Unbounded_String;
                   begin
                      if Steps.Episodes (M, Group_Id (G)) > 0 then
                         declare
-                           D : constant Estimate := Steps.Latest (M, Group_Id (G)).Delivered;
+                           E : constant Episode := Steps.Latest (M, Group_Id (G));
+                           D : constant Estimate := E.Delivered;
                         begin
+                           Stopped := E.Blocked;
+                           Farthest := E.Length;
                            if Known (D) and then D.Value > 0.0 and then D.Value < 1.0
                              and then Driver.Uncertain.Significant (D.Value, D.Sigma, D.Degrees_Of_Freedom)
                            then
@@ -270,12 +279,18 @@ package body Driver.Robot.Motion is
                            Noise : constant Real := Channels.Noise (M, Group_Id (G), C);
                            Error : constant Real := Target (Target'First + C - 1) - Reading (Reading'First + C - 1);
                         begin
-                           if Noise < Real'Last and then Noise > 0.0
+                           if not Stopped and then Noise < Real'Last and then Noise > 0.0
                              and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))
                            then
                               Off := True;
                               Largest := Real'Max (Largest, abs Error / (Noise * Sqrt (2.0)));
-                              Goal (Goal'First + C - 1) := Target (Target'First + C - 1) + Error / Share;
+                              declare
+                                 Asked : constant Real := Error / Share;
+                                 Most  : constant Real := Real'Min (abs Asked, Farthest);
+                              begin
+                                 Goal (Goal'First + C - 1) :=
+                                   Target (Target'First + C - 1) + (if Asked < 0.0 then -Most else Most);
+                              end;
                               Append (Errors, " c" & C'Image & " " & Driver.Log.Image (Error, 1));
                            end if;
                         end;
