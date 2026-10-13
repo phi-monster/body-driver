@@ -269,14 +269,19 @@ package body Driver.Robot.Steps is
                            E.Moved := True;
                            E.Moved_At := Beat;
                            S.Episodes.Replace_Element (S.Episodes.Last_Index, E);
-                           Follow (M, G, Beat, Wait);
+                           Follow (M, G, Beat, Natural'Max (Delay_Beats, E.Moved_At - E.Start));
                         elsif Beat - E.Start > Wait then
                            Finish (M, G, Beat, Answered => False, Settled => True, Rested => True);
                         end if;
                      elsif not Channels.Moving (M, G, Beat) then
                         Finish (M, G, Beat, Answered => True, Settled => True, Rested => True);
                      else
-                        Follow (M, G, Beat, Wait);
+                        --  An answered push is given up by its own progress; the least it is followed for is the
+                        --  body's delay where that is measured, else the wait this push itself took to answer:
+                        --  not the beats the stream had before it (R4 on the Pi, 10-13: before any delay was
+                        --  measured, the ladder's first answered levels, servos hunting a tick about their
+                        --  targets, were followed for 266 and 524 beats).
+                        Follow (M, G, Beat, Natural'Max (Delay_Beats, E.Moved_At - E.Start));
                      end if;
                   end;
                end if;
