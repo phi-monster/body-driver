@@ -22,6 +22,7 @@ with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Lockin;
+with Driver.Robot.Regression;
 
 package body Driver.Robot.Kinematics is
 
@@ -234,6 +235,23 @@ package body Driver.Robot.Kinematics is
    --  How far the aligner errs on the arm's keyframes (Driver.Alignment.Keyframes.Scatter).
    function Match_Sigma (R : Arm_Evidence) return Real is (Driver.Alignment.Keyframes.Scatter (R.Chain));
 
+   --  The pixels the arm's eye's view moves per reading unit of a channel: the keyframes' own measurement
+   --  (Measure_Shifts) when it is significant; 0 otherwise. The lock-in's slope is no measurement of it on every
+   --  scene (R4 on the Pi, 10-13: a flow locked on the table's JPEG blocks gave 0.01 px a unit against 0.4 from
+   --  the keyframes) and enters only as the prediction a keyframe is aligned from when a search as wide as the
+   --  aligner looks has found nothing (Align_Arm).
+   function Pixels_Per_Unit (M : Model; R : Arm_Evidence; Channel : Positive) return Real is
+      pragma Unreferenced (M);
+      Measured : constant Boolean :=
+        Channel <= Natural (R.Shift_Sigmas.Length) and then R.Shift_Sigmas (Channel - 1) < Real'Last;
+   begin
+      return (if Measured and then Driver.Uncertain.Significant (R.Shifts (Channel - 1), R.Shift_Sigmas (Channel - 1))
+              then R.Shifts (Channel - 1) else 0.0);
+   end Pixels_Per_Unit;
+
+   function Pixels_Per_Unit (M : Model; A : Arm_Id; Channel : Positive) return Real is
+     (if Index_Of (M, A) > 0 then Pixels_Per_Unit (M, M.Kinematics (Index_Of (M, A)), Channel) else 0.0);
+
    function Held_Still (M : Model; A : Arm_Id; Beat : Natural) return Boolean is
       E : constant Eye_Id'Base := Eye_Of (M, A);
       G : constant Group_Id := Arm_Group (M, A);
@@ -325,9 +343,9 @@ package body Driver.Robot.Kinematics is
                         --  pair of pictures resolves: on the fake body 7 microradians of
                         --  the wrist, a thousandth of a pixel, and a settling arm gave a
                         --  keyframe every other beat, 304 by beat 4224 against 41. Where
-                        --  the matcher's step is not measured yet (no cell responds to the
-                        --  channel), the step the eye can see stands in. None is taken
-                        --  before either is measured. The second keyframe is the
+                        --  the matcher's step is not measured yet (no keyframe has turned the
+                        --  channel alone), the step the eye can see stands in (Step_Of). None
+                        --  is taken before either is measured. The second keyframe is the
                         --  reference's still twin, at its pose.
                         declare
                            Steps   : Real_Array (Now'Range) := [others => 0.0];
@@ -335,29 +353,8 @@ package body Driver.Robot.Kinematics is
                            At_Reference : Boolean := False;   --  at the reference's readings, to within the steps
                         begin
                            for C in Now'Range loop
-                              declare
-                                 Told   : constant Real := Keyframe_Step (M, Arm, C);
-                                 Seen   : constant Estimate := Visible_Step (M, G, C);
-                                 Jitter : constant Real := Channels.Noise (M, G, C);
-                              begin
-                                 if Told > 0.0 then
-                                    --  And no nearer than the readings tell apart (Z of the noise of
-                                    --  a difference of two readings, as Visible_Step has it): a
-                                    --  matcher that errs by a thousandth of a pixel gives a step
-                                    --  below the readings' own jitter, and an arm at rest gave a
-                                    --  keyframe every thirty-seven beats at one pose (fake body Z9,
-                                    --  arm 1: 295 of them, each aligned for nothing).
-                                    Steps (C) :=
-                                      (if Jitter < Real'Last
-                                       then Real'Max (Told, Driver.Conventions.Z
-                                                            * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Jitter)
-                                       else Told);
-                                    Seeable := True;
-                                 elsif Known (Seen) then
-                                    Steps (C) := Seen.Value;
-                                    Seeable := True;
-                                 end if;
-                              end;
+                              Steps (C) := Step_Of (M, Arm, C);
+                              Seeable := Seeable or else Steps (C) > 0.0;
                            end loop;
                            for F in R.Frames.First_Index .. R.Frames.Last_Index loop
                               declare
@@ -493,7 +490,7 @@ package body Driver.Robot.Kinematics is
          return 0.0;
       end if;
       declare
-         Per_Unit : constant Real := Lockin.Shift (M, E, Arm_Group (M, A), Channel);
+         Per_Unit : constant Real := Pixels_Per_Unit (M, A, Channel);
          --  The larger of the cells' displacement noise and the matcher's: a
          --  keyframe is judged by the matcher, its view by the cells.
          Noise    : constant Real := Real'Max (Lockin.Cell_Noise (M, E), Match_Noise (M, A));
@@ -509,13 +506,36 @@ package body Driver.Robot.Kinematics is
          return 0.0;
       end if;
       declare
-         Per_Unit : constant Real := Lockin.Shift (M, E, Arm_Group (M, A), Channel);
+         Per_Unit : constant Real := Pixels_Per_Unit (M, A, Channel);
          Half     : constant Natural :=
            Driver.Alignment.Half_Patch (M.Eyes (E).Grid.Width, M.Eyes (E).Grid.Height);
       begin
          return (if Per_Unit > 0.0 then Real (Half) / Per_Unit else 0.0);
       end;
    end Follow_Step;
+
+   function Step_Of (M : Model; A : Arm_Id; Channel : Positive) return Real is
+      G      : constant Group_Id := Arm_Group (M, A);
+      Told   : constant Real := Keyframe_Step (M, A, Channel);
+      Seen   : constant Estimate := Visible_Step (M, G, Channel);
+      Jitter : constant Real := Channels.Noise (M, G, Channel);
+   begin
+      if Told > 0.0 then
+         --  And no nearer than the readings tell apart (Z of the noise of a
+         --  difference of two readings, as Visible_Step has it): a matcher
+         --  that errs by a thousandth of a pixel gives a step below the
+         --  readings' own jitter, and an arm at rest gave a keyframe every
+         --  thirty-seven beats at one pose (fake body Z9, arm 1: 295 of
+         --  them, each aligned for nothing).
+         return (if Jitter < Real'Last
+                 then Real'Max (Told, Driver.Conventions.Z * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Jitter)
+                 else Told);
+      elsif Known (Seen) then
+         return Seen.Value;
+      else
+         return 0.0;
+      end if;
+   end Step_Of;
 
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean is
    begin
@@ -537,8 +557,19 @@ package body Driver.Robot.Kinematics is
             R : Arm_Evidence renames M.Kinematics (K);
          begin
             Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & A'Image & " begins anew at beat" & M.Beats'Image
-                             & ", dropping" & R.Frames.Length'Image & " keyframes");
-            M.Kinematics.Replace_Element (K, (Arm => R.Arm, Group => R.Group, Eye => R.Eye, others => <>));
+                             & ", dropping" & R.Frames.Length'Image & " keyframes, keeping what they measured of how far"
+                             & " the view moves per unit");
+            --  What the dropped keyframes measured of the view's motion per unit holds at any reference: it is
+            --  kept, without the keyframes it came from, until the new keyframes measure it again.
+            declare
+               Kept   : constant Real_Vectors.Vector := R.Shifts;
+               Sigmas : constant Real_Vectors.Vector := R.Shift_Sigmas;
+               Points : constant Count_Vectors.Vector := R.Shift_Points;
+            begin
+               M.Kinematics.Replace_Element
+                 (K, (Arm => R.Arm, Group => R.Group, Eye => R.Eye, Shifts => Kept, Shift_Sigmas => Sigmas,
+                      Shift_Points => Points, others => <>));
+            end;
          end;
       end if;
    end Begin_Anew;
@@ -733,6 +764,180 @@ package body Driver.Robot.Kinematics is
    --  widest keyframe of a joint for the one that tells its axis best, and a keyframe of a handful of points is no
    --  such. The points refused for the prediction's uncertainty, those found that do not agree and those a wide
    --  window found are Wide: the prediction may have been what failed them, and a better one may find them.
+   --  Measures how far the eye's view moves per reading unit of every channel from the arm's aligned keyframes
+   --  (Arm_Evidence.Shifts). The channels whose change varies over the keyframes by more than the readings' noise
+   --  tells are the regressors; for every query point, its displacements in the keyframes it was answered in, from
+   --  windows of any width, are regressed on those keyframes' changes (Regression.Solve, twice, for u and v: robust,
+   --  so a wrong answer in one keyframe keeps little weight, and by a pseudo-inverse where channels moved only
+   --  together), every row scaled by its answer's standard deviation (the least a residual can have) so that the
+   --  answers weigh by their certainty: the point's motion per unit of each channel, a vector, with the variance the
+   --  regression gives it. A channel is measured by the median over the points of the size of that vector, with the
+   --  standard error of that median from the median of the points' standard deviations (the points err apart: the
+   --  answers' own errors); a point answered in fewer keyframes than there are regressors says nothing, and a
+   --  channel that moved only with another keeps a variance that says it is not told apart. A keyframe need not
+   --  turn one channel alone: a real arm comes back a few units off after every push, so no keyframe does; and no
+   --  intercept is fitted: at the reference's readings the points are where the reference has them.
+   procedure Measure_Shifts (M : Model; R : in out Arm_Evidence) is
+      use Ada.Numerics.Long_Elementary_Functions;
+      use Driver.Numerics.Arrays;
+      N       : constant Natural := M.Groups (R.Group).Size;
+      Queries : constant Natural := Natural (R.Query_U.Length);
+      Noise   : Real_Array (1 .. N);
+      Active  : array (1 .. N) of Boolean := [others => False];
+      Column  : array (1 .. N) of Natural := [others => 0];
+      K       : Natural := 0;
+
+      function Change (F : Positive; C : Positive) return Real is
+        (R.Frames (F).Readings (C - 1) - R.Frames (1).Readings (C - 1));
+
+      --  The point was answered in the keyframe: from a window of any width where the set records that
+      --  (Match_Set.Answered, the aligner's sets), else where it records an answer a fit rests on (Found: sets
+      --  made elsewhere, which hold no wider answers).
+      function Answered (S : Match_Set; P : Natural) return Boolean is
+        (S.Eye = 0 and then S.Frame <= Natural (R.Frames.Length)
+         and then (if P < Natural (S.Answered.Length) then S.Answered (P)
+                   else P < Natural (S.Found.Length) and then S.Found (P)));
+
+      --  The standard deviation an answer states; an answer stating none (an instrument's, a test's) weighs as
+      --  one with a pixel's, and the regression's own residual scale stands above it.
+      function Sigma_Of (S : Match_Set; P : Natural) return Real is
+        (if P < Natural (S.Sigma.Length) and then S.Sigma (P) > 0.0 then S.Sigma (P) else 1.0);
+   begin
+      --  What was measured before stands for every channel the keyframes do not determine now: the chain that began
+      --  anew (Begin_Anew) has its measurements from the keyframes it dropped until its own keyframes measure them.
+      while Natural (R.Shifts.Length) < N loop
+         R.Shifts.Append (0.0);
+      end loop;
+      while Natural (R.Shift_Sigmas.Length) < N loop
+         R.Shift_Sigmas.Append (Real'Last);
+      end loop;
+      while Natural (R.Shift_Points.Length) < N loop
+         R.Shift_Points.Append (0);
+      end loop;
+      if Queries = 0 or else R.Matches.Is_Empty or else R.Frames.Is_Empty then
+         return;
+      end if;
+      for C in 1 .. N loop
+         Noise (C) := Channels.Noise (M, R.Group, C);
+      end loop;
+      for C in 1 .. N loop
+         declare
+            Low, High : Real := 0.0;   --  the reference itself is at zero
+         begin
+            for S of R.Matches loop
+               if S.Eye = 0 and then S.Frame <= Natural (R.Frames.Length) then
+                  Low := Real'Min (Low, Change (S.Frame, C));
+                  High := Real'Max (High, Change (S.Frame, C));
+               end if;
+            end loop;
+            --  While the readings' noise is not measured, any variation counts: a column of jitter alone is told
+            --  by its rank and variance below.
+            Active (C) := (if Noise (C) < Real'Last then Driver.Uncertain.Significant (High - Low, Noise (C) * Sqrt (2.0))
+                           else High > Low);
+         end;
+      end loop;
+      for C in 1 .. N loop
+         if Active (C) then
+            K := K + 1;
+            Column (C) := K;
+         end if;
+      end loop;
+      if K = 0 then
+         return;
+      end if;
+      declare
+         --  Per channel, the points' sizes of their motion per unit and the standard deviations of those.
+         Values : Real_Access := new Real_Array (1 .. N * Queries);
+         Sigmas : Real_Access := new Real_Array (1 .. N * Queries);
+         Counts : array (1 .. N) of Natural := [others => 0];
+      begin
+         for P in 0 .. Queries - 1 loop
+            declare
+               Rows : Natural := 0;
+            begin
+               for S of R.Matches loop
+                  if Answered (S, P) then
+                     Rows := Rows + 1;
+                  end if;
+               end loop;
+               if Rows >= K then
+                  declare
+                     X      : Real_Matrix (1 .. Rows, 1 .. K);
+                     Yu, Yv : Real_Array (1 .. Rows);
+                     Own    : Real_Array (1 .. Rows);   --  each answer's standard deviation
+                     I      : Natural := 0;
+                  begin
+                     for S of R.Matches loop
+                        if Answered (S, P) then
+                           I := I + 1;
+                           Own (I) := Sigma_Of (S, P);
+                           for C in 1 .. N loop
+                              if Active (C) then
+                                 X (I, Column (C)) := Change (S.Frame, C) / Own (I);
+                              end if;
+                           end loop;
+                           Yu (I) := (S.To_U (P) - R.Query_U (P)) / Own (I);
+                           Yv (I) := (S.To_V (P) - R.Query_V (P)) / Own (I);
+                        end if;
+                     end loop;
+                     --  Scaled by their standard deviations, the residuals have unit variance at the least.
+                     declare
+                        Fu    : constant Regression.Fit := Regression.Solve (X, Yu, 1.0);
+                        Fv    : constant Regression.Fit := Regression.Solve (X, Yv, 1.0);
+                        Var_U : constant Real_Array := Regression.Coefficient_Variances (Fu);
+                        Var_V : constant Real_Array := Regression.Coefficient_Variances (Fv);
+                     begin
+                        for C in 1 .. N loop
+                           if Active (C) then
+                              declare
+                                 J : constant Positive := Column (C);
+                                 G : constant Real := Sqrt (Fu.Beta (J) ** 2 + Fv.Beta (J) ** 2);
+                                 V : constant Real :=
+                                   (if G > 0.0
+                                    then (Fu.Beta (J) ** 2 * Var_U (J) + Fv.Beta (J) ** 2 * Var_V (J)) / G ** 2
+                                    else Real'Max (Var_U (J), Var_V (J)));
+                                 --  A channel that moved only with another in this point's keyframes is not told
+                                 --  apart from it: its coefficient's block has no rank, and the pseudo-inverse's
+                                 --  variance says nothing of the direction it leaves free.
+                                 Stat_U, Stat_V : Real;
+                                 Rank_U, Rank_V : Natural;
+                              begin
+                                 Regression.Test_Block (Fu, J, J, Stat_U, Rank_U);
+                                 Regression.Test_Block (Fv, J, J, Stat_V, Rank_V);
+                                 if V < Real'Last and then Rank_U + Rank_V > 0 then
+                                    Counts (C) := Counts (C) + 1;
+                                    Values ((C - 1) * Queries + Counts (C)) := G;
+                                    Sigmas ((C - 1) * Queries + Counts (C)) := Sqrt (Real'Max (0.0, V));
+                                 end if;
+                              end;
+                           end if;
+                        end loop;
+                     end;
+                  end;
+               end if;
+            end;
+         end loop;
+         for C in 1 .. N loop
+            if Counts (C) > 0 then
+               declare
+                  First : constant Positive := (C - 1) * Queries + 1;
+                  Last  : constant Positive := (C - 1) * Queries + Counts (C);
+                  Med   : constant Real := Driver.Stats.Median (Values (First .. Last));
+                  --  The median's own standard error, from the points' typical one: the points err apart.
+                  Sig   : constant Real :=
+                    Driver.Stats.Median_Sigma (Driver.Stats.Median (Sigmas (First .. Last)), Counts (C));
+               begin
+                  R.Shifts.Replace_Element (C - 1, Med);
+                  R.Shift_Sigmas.Replace_Element (C - 1, Sig);
+                  R.Shift_Points.Replace_Element (C - 1, Counts (C));
+               end;
+            end if;
+         end loop;
+         Free (Values);
+         Free (Sigmas);
+      end;
+   end Measure_Shifts;
+
    procedure Set_Of
      (F : Positive; R : Arm_Evidence; Given : Keyframes.Prediction_Array; Answers : Keyframes.Answer_Array;
       Agree : Keyframes.Flag_Array; Set : out Match_Set)
@@ -789,6 +994,7 @@ package body Driver.Robot.Kinematics is
          Set.Back_U.Append (R.Query_U (I - 1));
          Set.Back_V.Append (R.Query_V (I - 1));
          Set.Found.Append (Sighted (I) and then Sigma_Of (Answers (I)) <= Driver.Conventions.Z * Typical);
+         Set.Answered.Append (Answered (I));
          if Keyframes.Prediction_Caused (Answers (I))
            or else (Answers (I).Verdict = Driver.Alignment.Found and then not Sighted (I))
          then
@@ -833,7 +1039,6 @@ package body Driver.Robot.Kinematics is
    begin
       for C in 1 .. N loop
          Noise (C) := Channels.Noise (M, R.Group, C);
-         Shift (C) := Lockin.Shift (M, R.Eye, R.Group, C);
       end loop;
       if (for some X of Noise => X >= Real'Last) then
          return;
@@ -865,6 +1070,9 @@ package body Driver.Robot.Kinematics is
          begin
             for C in 1 .. N loop
                Change (C) := R.Frames (F).Readings (C - 1) - R.Frames.First_Element.Readings (C - 1);
+               --  As measured by the keyframes aligned so far: the first keyframe that turns a channel is predicted
+               --  from nothing (Keyframes.Predict: a window as wide as the aligner searches), the next from it.
+               Shift (C) := Pixels_Per_Unit (M, R, C);
             end loop;
             Offer_Of (M, R, Readings_Array (R.Frames (F)), Offered.all, Known);
             if Known then
@@ -875,13 +1083,46 @@ package body Driver.Robot.Kinematics is
             Rss_Before := Driver.Memory.Resident_Kilobytes / 1024;
             Keyframes.Add (R.Chain, R.Frames (F).Image, Change, Given.all, Answers.all, Agree.all);
             Rss_After := Driver.Memory.Resident_Kilobytes / 1024;
+            Set_Of (F, R, Given.all, Answers.all, Agree.all, Set);
+            --  A change of a channel whose shift the keyframes have not measured is predicted to have moved the
+            --  view as far as the aligner searches. When that search finds nothing (a view too small or too uniform
+            --  for a search at its coarsest size: the rigs' pictures of 64 by 48), the keyframe is aligned again
+            --  from the lock-in's slope for those channels, the one other measurement of how far the view moves per
+            --  unit, as the prediction; what it finds the regression then measures. It is not the first prediction:
+            --  on a scene whose flow locks on what does not move with it, that slope is wrong by far, and a narrow
+            --  window there finds false matches that would stand in the chain's field (R4 on the Pi, 10-13).
+            if not Known and then (for all Seen of Set.Answered => not Seen)
+              and then (for some C in 1 .. N =>
+                          Shift (C) = 0.0
+                          and then Driver.Uncertain.Significant
+                                     (Change (C), Noise (C) * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))
+                          and then Lockin.Shift (M, R.Eye, R.Group, C) > 0.0)
+            then
+               declare
+                  Again : Real_Array (1 .. N) := Shift;
+               begin
+                  for C in 1 .. N loop
+                     if Again (C) = 0.0 then
+                        Again (C) := Lockin.Shift (M, R.Eye, R.Group, C);
+                     end if;
+                  end loop;
+                  Keyframes.Forget_Last (R.Chain);
+                  Keyframes.Predict (R.Chain, Change, Noise, Again, Keyframes.No_Offer, Given.all, From);
+                  Keyframes.Add (R.Chain, R.Frames (F).Image, Change, Given.all, Answers.all, Agree.all);
+                  Rss_After := Driver.Memory.Resident_Kilobytes / 1024;
+                  Set_Of (F, R, Given.all, Answers.all, Agree.all, Set);
+                  Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe" & F'Image
+                                   & " found nothing from a window as wide as the aligner searches; aligned again from"
+                                   & " the lock-in's slope, stating " & Driver.Log.Image (Stated_By (Given.all), 1) & " px");
+               end;
+            end if;
             for A of Answers.all loop
                Because (A.Because) := Because (A.Because) + 1;
             end loop;
-            Set_Of (F, R, Given.all, Answers.all, Agree.all, Set);
             declare
-               Here : Natural := 0;
-               Text : Ada.Strings.Unbounded.Unbounded_String;
+               Here    : Natural := 0;
+               Replied : Natural := 0;   --  answered from a window of any width (Match_Set.Answered)
+               Text    : Ada.Strings.Unbounded.Unbounded_String;
             begin
                for Seen of Set.Found loop
                   if Seen then
@@ -889,6 +1130,11 @@ package body Driver.Robot.Kinematics is
                   end if;
                end loop;
                Found := Found + Here;
+               for Seen of Set.Answered loop
+                  if Seen then
+                     Replied := Replied + 1;
+                  end if;
+               end loop;
                --  Each keyframe's line, for the study of what the aligner finds at what motion: the change of every
                --  channel from the reference, how the prediction was made, and how many points were found.
                for C in 1 .. N loop
@@ -898,12 +1144,15 @@ package body Driver.Robot.Kinematics is
                                 & R.Frames (F).Beat'Image & ", change" & Ada.Strings.Unbounded.To_String (Text)
                                 & ", predicted " & Ada.Characters.Handling.To_Lower (From'Image) & " stating "
                                 & Driver.Log.Image (Stated_By (Given.all), 1) & " px:" & Here'Image
-                                & " of" & Queries'Image & " points found; resident" & Rss_Before'Image & " /"
+                                & " of" & Queries'Image & " points found," & Replied'Image & " answered; resident"
+                                & Rss_Before'Image & " /"
                                 & Rss_After'Image & " /" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)
                                 & " MB before the alignment, after it, now");
             end;
             R.Matches.Append (Set);
             R.Aligned := F;
+            --  What the keyframes measure of the view's motion per unit, with this one: the next is predicted by it.
+            Measure_Shifts (M, R);
             --  A keyframe that refused nothing for its prediction needs its picture no more.
             if Set.Wide = 0 then
                R.Frames (F).Image := Driver.Images.No_Image;
@@ -931,7 +1180,13 @@ package body Driver.Robot.Kinematics is
             begin
                Ada.Strings.Unbounded.Append
                  (Text, " c" & C'Image & " " & Driver.Log.Image (Keyframe_Step (M, R.Arm, C), 6) & " (eye "
-                  & (if Known (Seen) then Driver.Log.Image (Seen.Value, 6) else "?") & ")");
+                  & (if Known (Seen) then Driver.Log.Image (Seen.Value, 6) else "?") & "; px a unit: keyframes "
+                  & (if C <= Natural (R.Shift_Sigmas.Length) and then R.Shift_Sigmas (C - 1) < Real'Last
+                     then Driver.Log.Image (R.Shifts (C - 1), 4) & " +- " & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)
+                          & " over" & Natural'Image (R.Shift_Points (C - 1)) & " points"
+                     else "none")
+                  & ", lock-in " & Driver.Log.Image (Lockin.Shift (M, R.Eye, R.Group, C), 4) & ", used "
+                  & Driver.Log.Image (Pixels_Per_Unit (M, R, C), 4) & ")");
             end;
          end loop;
          Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe steps, matcher (eye):"
@@ -1012,6 +1267,7 @@ package body Driver.Robot.Kinematics is
                   end if;
                end loop;
                if Done > 0 then
+                  Measure_Shifts (M, R);
                   Driver.Log.Line
                     (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " aligned" & Done'Image
                      & " keyframes again from the fitted arm, in "
@@ -1194,13 +1450,32 @@ package body Driver.Robot.Kinematics is
                Visible : Real_Array (1 .. N);
                Sigma   : constant Real := Match_Sigma (R);
             begin
+               --  The fit judges a keyframe's joints by the keyframe step, which rests on how far the view moves
+               --  per unit: measured from these answers (the aligner's measure it as it aligns; answers that came
+               --  otherwise, an instrument's or a test's, are measured here).
+               Measure_Shifts (M, R);
+               declare
+                  Text : Ada.Strings.Unbounded.Unbounded_String;
+               begin
+                  for C in 1 .. N loop
+                     Ada.Strings.Unbounded.Append
+                       (Text, " c" & C'Image & " "
+                        & (if C <= Natural (R.Shift_Sigmas.Length) and then R.Shift_Sigmas (C - 1) < Real'Last
+                           then Driver.Log.Image (R.Shifts (C - 1), 4) & " +- " & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)
+                                & " over" & Natural'Image (R.Shift_Points (C - 1)) & " points"
+                           else "none")
+                        & ", step " & Driver.Log.Image (Step_Of (M, R.Arm, C), 4));
+                  end loop;
+                  Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " before its fit, px a unit (keyframes)"
+                                   & " and the step a keyframe counts from:" & Ada.Strings.Unbounded.To_String (Text));
+               end;
                for F in 1 .. Frames loop
                   for C in 1 .. N loop
                      Changes (F, C) := R.Frames (F).Readings (C - 1) - R.Frames (1).Readings (C - 1);
                   end loop;
                end loop;
                for C in 1 .. N loop
-                  Visible (C) := Keyframe_Step (M, R.Arm, C);
+                  Visible (C) := Step_Of (M, R.Arm, C);
                end loop;
                declare
                   function Round_Trip (S : Match_Set; I : Natural) return Boolean is

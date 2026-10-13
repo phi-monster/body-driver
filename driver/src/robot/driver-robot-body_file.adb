@@ -6,6 +6,7 @@ with Driver.Json;
 with Driver.Log;
 with Driver.Robot.Flow;
 with Driver.Robot.Graph;
+with Driver.Robot.Kinematics;
 
 package body Driver.Robot.Body_File is
 
@@ -40,6 +41,18 @@ package body Driver.Robot.Body_File is
       Append (T, "]");
       return To_String (T);
    end Reals;
+
+   --  Per channel of an arm, the pixels per reading unit the driver uses (Kinematics.Pixels_Per_Unit), 0 where none.
+   function Used_Shifts (M : Model; R : Arm_Evidence) return Real_Vectors.Vector is
+      V : Real_Vectors.Vector;
+   begin
+      if R.Arm in 1 .. Arm_Id'Base (Arm_Count (M)) and then R.Group in M.Groups.First_Index .. M.Groups.Last_Index then
+         for C in 1 .. M.Groups (R.Group).Size loop
+            V.Append (Driver.Robot.Kinematics.Pixels_Per_Unit (M, R.Arm, C));
+         end loop;
+      end if;
+      return V;
+   end Used_Shifts;
 
    function Counts (V : Count_Vectors.Vector) return String is
       T : Unbounded_String := To_Unbounded_String ("[");
@@ -209,6 +222,7 @@ package body Driver.Robot.Body_File is
          begin
             Add (Separator (K = M.Kinematics.First_Index) & LF & "  {""arm"": " & Int (Integer (R.Arm))
                  & ", ""group"": " & Int (Integer (R.Group)) & ", ""eye"": " & Int (Integer (R.Eye))
+                 & ", ""shifts"": " & Reals (Used_Shifts (M, R))
                  & ", ""fitted"": " & Flag (F.Fitted) & ", ""reference"": " & Reals (F.Reference)
                  & ", ""chain"": " & Counts (F.Chain) & ", ""joints"": [");
             for J in F.Joints.First_Index .. F.Joints.Last_Index loop
@@ -645,6 +659,12 @@ package body Driver.Robot.Body_File is
                      Js : constant Node := Field (X, "joints");
                      L  : constant Node := Field (X, "lens");
                   begin
+                     --  What its keyframes measured of how far the view moves per unit (Kinematics.Pixels_Per_Unit):
+                     --  the values written are the ones that were used, taken back as known.
+                     R.Shifts := Reals_Of (Field (X, "shifts"));
+                     for V of R.Shifts loop
+                        R.Shift_Sigmas.Append (if V > 0.0 then 0.0 else Real'Last);
+                     end loop;
                      R.Result.Fitted := Truth (X, "fitted");
                      R.Result.Reference := Reals_Of (Field (X, "reference"));
                      R.Result.Chain := Counts_Of (Field (X, "chain"));

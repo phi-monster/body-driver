@@ -580,13 +580,16 @@ private
       Back_U, Back_V : Real_Vectors.Vector;   --  and where that matched back to in the reference
       Sigma    : Real_Vectors.Vector;    --  and the standard deviation the aligner stated of the answer (none from the instrument)
       Freedom  : Count_Vectors.Vector;   --  and how many degrees of freedom that standard deviation rests on (0: it is known)
-      Found    : Flag_Vectors.Vector;    --  the aligner or the instrument gave an answer
+      Found    : Flag_Vectors.Vector;    --  the aligner or the instrument gave an answer a fit may rest on (an own keyframe: from a
+                                         --  narrow window, Followed, within Z of the typical uncertainty)
+      Answered : Flag_Vectors.Vector;    --  the aligner gave an answer at all, from a window of any width (own keyframes)
       Stated   : Real := Real'Last;      --  an own keyframe: the median standard deviation its prediction stated
       Followed : Boolean := False;       --  and whether most of its answers came from a window no wider than a patch
       Wide     : Natural := 0;           --  and how many points it refused for that prediction's uncertainty
    end record;
 
    package Match_Set_Vectors is new Ada.Containers.Vectors (Positive, Match_Set);
+
 
    type Pending_Match is record
       Frame  : Positive := 1;
@@ -700,6 +703,20 @@ private
       Twin_Taken : Boolean := False;   --  a keyframe at the reference's readings was taken after it: its still twin
       Revision : Natural := 0;   --  how many keyframes were aligned again from the fitted arm (Kinematics.Realign)
       Matches  : Match_Set_Vectors.Vector;   --  one per aligned keyframe after the reference, in order
+      Shifts   : Real_Vectors.Vector;
+      --  Per channel: how far the eye's view moves per reading unit of it, in pixels, as the aligner measured it over
+      --  the keyframes (Kinematics.Measure_Shifts: per point, the displacements regressed on the changes of every
+      --  channel that moved; the median over the points); 0 while not measured. Measured by the aligner, whose
+      --  windows reach half the picture through its pyramid, not by the lock-in's flow of one beat: that flow locks
+      --  on what does not move with the scene (a near-textureless table under JPEG blocks, the jaws the camera
+      --  carries) and reads a still picture where the camera moved (R4 on the Pi, 10-13: its slope came out 50 to
+      --  300 times under what the keyframes showed, the sweep's first level was 1087 reading units, and every
+      --  prediction's window was sized by it). Kept when the chain begins anew, and in the body file.
+      Shift_Sigmas : Real_Vectors.Vector;
+      --  Per channel: the standard deviation of that measurement; Real'Last while the keyframes do not determine the
+      --  channel at all. A channel's measurement may be insignificant yet bound the lock-in's slope
+      --  (Kinematics.Pixels_Per_Unit).
+      Shift_Points : Count_Vectors.Vector;   --  per channel: how many points that measurement rests on
       Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
       --  The first arm's reference view matched into this arm's, its query
       --  points into this arm's reference image (Kinematics.Observe), and of

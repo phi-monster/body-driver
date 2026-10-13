@@ -100,6 +100,11 @@ package Driver.Alignment.Keyframes is
    --  chain is not changed. For a keyframe aligned before from a prediction too uncertain to search, and now offered
    --  a better one. Agree is as Add's.
 
+   procedure Forget_Last (C : in out Chain)
+     with Pre => Keyframes (C) > 0;
+   --  Drops the keyframe added last, as if Add had not been called for it: for a keyframe whose prediction was too
+   --  uncertain to find anything, to be added again from another prediction (Kinematics.Align_Arm).
+
    function Prediction_Caused (A : Answer) return Boolean;
    --  The aligner's refusal may be the prediction's doing and not the point's: it found no place within what the
    --  prediction allowed, or several, or none that beats chance.

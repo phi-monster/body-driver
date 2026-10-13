@@ -29,6 +29,11 @@ package Driver.Stats with Pure is
    --  The standard deviation implied by the median absolute deviation for
    --  Gaussian data; a minority of outliers does not move it.
 
+   function Median_Sigma (Sigma : Real; N : Positive) return Real;
+   --  The standard error of the median of N Gaussian samples whose own
+   --  standard deviation is Sigma: the root of pi over two times Sigma over
+   --  the root of N (the median's asymptotic efficiency against the mean).
+
    function Mad_Degrees_Of_Freedom (N : Natural) return Natural;
    --  The degrees of freedom of a standard deviation told by the median
    --  absolute deviation of N Gaussian samples (its efficiency against the

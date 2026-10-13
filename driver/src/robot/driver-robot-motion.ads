@@ -38,6 +38,15 @@ package Driver.Robot.Motion is
       Report  : out Step_Report;
       Stop    : access function return Boolean := null);
    --  Sends the targets, waits until the body settles, and judges the step.
+   --  A step that reached is sent again, moved by the error of its landing,
+   --  for every targeted channel that reads off its target by more than the
+   --  noise of a difference of two readings tells, as long as each landing
+   --  comes nearer than the one before: a servo holding a load settles a few
+   --  units short of its goal, the same few at the same pose (the kiwi's arms,
+   --  R4 on the Pi, 10-13: 4 to 7 units off the hold after every push, so
+   --  that no keyframe turned one joint alone). The report's beats count the
+   --  sendings again, its detail names them; what a sending again meets
+   --  changes nothing of what the step reached.
    --  Stop, when given, is asked at every beat of the wait (between Next and
    --  Send, so it may read the latest observation): once it holds, every
    --  targeted group is held where it was read at that beat, the push ends as
@@ -90,9 +99,9 @@ package Driver.Robot.Motion is
    --  no eye is not held.
 
    function Least_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real;
-   --  The least turn of a joint of the arm a keyframe counts: the keyframe
-   --  step (Kinematics.Keyframe_Step), and what the readings' noise can take
-   --  off a turn asked of exactly it. Zero while the arm has no step.
+   --  The least turn of a joint of the arm a keyframe counts: the step a
+   --  keyframe counts from (Kinematics.Step_Of), and what the readings' noise
+   --  can take off a turn asked of exactly it. Zero while the arm has no step.
 
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real;
    --  The first level of the sweep's ladder for a joint of the arm: the
@@ -101,12 +110,14 @@ package Driver.Robot.Motion is
    --  never less than the least turn a keyframe counts: Z times the larger
    --  of the cells' displacement noise (Lockin.Cell_Noise) and the matcher's
    --  (Kinematics.Match_Noise, from the still twin), over how far the view
-   --  moves per reading unit of the joint (Lockin.Shift), the keyframe step,
-   --  plus what the readings' noise can take off a turn (Z of the noise of a
-   --  difference of two readings), so that the turn lands at the step or
-   --  beyond; a keyframe that moves less tells the kinematics nothing, and
-   --  A9's showed it makes the fit worse. Zero when the arm carries no eye or
-   --  the shift or the cells' noise is not measured.
+   --  moves per reading unit of the joint (Kinematics.Pixels_Per_Unit, from
+   --  the keyframes that turned it alone), the keyframe step, plus what the
+   --  readings' noise can take off a turn (Z of the noise of a difference of
+   --  two readings), so that the turn lands at the step or beyond; a keyframe
+   --  that moves less tells the kinematics nothing, and A9's showed it makes
+   --  the fit worse. While no keyframe has turned the joint alone, the least
+   --  turn by the step the eye can see (Channels.Visible_Step). Zero when the
+   --  arm carries no eye or neither step is measured.
 
    procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id);
    --  Holds the body until the arm can give its kinematics a keyframe: its

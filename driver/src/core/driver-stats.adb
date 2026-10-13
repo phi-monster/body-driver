@@ -126,6 +126,12 @@ package body Driver.Stats is
       return Gaussian_MAD_To_Sigma * Median_Of_Deviations (X);
    end Robust_Sigma;
 
+   function Median_Sigma (Sigma : Real; N : Positive) return Real is
+      use Ada.Numerics.Long_Elementary_Functions;
+   begin
+      return Sqrt (Ada.Numerics.Pi / 2.0) * Sigma / Sqrt (Real (N));
+   end Median_Sigma;
+
    function Correlation (X, Y : Real_Array) return Real is
       Mx, My : Accumulator;
       Sxy : Real := 0.0;

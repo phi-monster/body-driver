@@ -457,10 +457,17 @@ package body Driver.Alignment.Keyframes is
    function Is_None (Change, Noise : Real_Array) return Boolean is
      (for all K in Change'Range => not Driver.Uncertain.Significant (Change (K), Noise (K) * Sqrt (2.0)));
 
+   --  Whether every channel the change moved (by more than the noise tells) has a known shift: when one has not,
+   --  how far the change can have moved the view is not known at all.
+   function Shifts_Known (Change, Noise, Shift : Real_Array) return Boolean is
+     (for all K in Change'Range =>
+        Shift (K) > 0.0 or else not Driver.Uncertain.Significant (Change (K), Noise (K) * Sqrt (2.0)));
+
    --  How far along the direction of Change an earlier keyframe lies (signed, in the units of the readings), and
    --  how far at most the part of its change off that direction can have moved the view: the sizes of that part's
-   --  entries times the pixels a unit of each channel moves the view.
-   procedure Along (Before : Frame; Change, Shift : Real_Array; Amount, Off : out Real) is
+   --  entries times the pixels a unit of each channel moves the view; as far as anything when an entry of that part
+   --  the noise can tell is of a channel whose shift is not known.
+   procedure Along (Before : Frame; Change, Noise, Shift : Real_Array; Amount, Off : out Real) is
       Past : constant Real_Array := To_Array (Before.Change);
       Own  : constant Real := Dot (Change, Change);
       Unit : constant Real := Dot (Past, Change) / Own;
@@ -468,7 +475,12 @@ package body Driver.Alignment.Keyframes is
       Amount := Unit * Sqrt (Own);
       Off := 0.0;
       for K in Change'Range loop
-         Off := Off + abs (Past (K) - Unit * Change (K)) * Shift (K);
+         if Shift (K) > 0.0 then
+            Off := Off + abs (Past (K) - Unit * Change (K)) * Shift (K);
+         elsif Driver.Uncertain.Significant (Past (K) - Unit * Change (K), Noise (K) * Sqrt (2.0)) then
+            Off := Real'Last;
+            return;
+         end if;
       end loop;
    end Along;
 
@@ -740,7 +752,9 @@ package body Driver.Alignment.Keyframes is
          --  How far the change can have moved the points, at most: a unit of each channel moves the view by
          --  its shift. When no shift is known, as far as the aligner searches.
          Moved   : constant Real := Moved_By (Changes, Shifts);
-         Reach   : constant Real := (if Moved > 0.0 then Moved else Largest_Sigma (C.Pictures, C.Pictures));
+         Reach   : constant Real :=
+           (if Moved > 0.0 and then Shifts_Known (Changes, Noises, Shifts) then Moved
+            else Largest_Sigma (C.Pictures, C.Pictures));
          --  How far the aligner errs on these keyframes' views: what a change must move the view by to be told from none.
          Precision : constant Real := Scatter (C);
          Amounts : Real_Array (1 .. Frames) := [others => 0.0];
@@ -812,13 +826,13 @@ package body Driver.Alignment.Keyframes is
             end if;
          end if;
          for J in 1 .. Frames loop
-            Along (C.Frames (J), Changes, Shifts, Amounts (J), Off (J));
+            Along (C.Frames (J), Changes, Noises, Shifts, Amounts (J), Off (J));
             --  A keyframe that tells nothing of the direction (the reference's twin, or one at right angles), or
             --  whose off-direction part alone carries more into the prediction than not having moved at all,
             --  gives no prediction that could state less.
             Usable (J) := C.Frames (J).Field.Valid and then Amounts (J) /= 0.0
               and then not Is_None (To_Array (C.Frames (J).Change), Noises)
-              and then Own * Off (J) < Reach * abs Amounts (J);
+              and then Off (J) < Real'Last and then Own * Off (J) < Reach * abs Amounts (J);
          end loop;
          for J in 1 .. Frames loop
             if Usable (J) then
@@ -1090,6 +1104,14 @@ package body Driver.Alignment.Keyframes is
    end Realign;
 
    --  Whether a field puts every point where another does, within what the two know of the place there.
+   procedure Forget_Last (C : in out Chain) is
+   begin
+      C.Frames.Delete_Last;
+      C.Last := Supplied;
+      C.Latest := [others => <>];
+      C.Combined := (others => <>);
+   end Forget_Last;
+
    function Unmoved (C : Chain; Old, Now : Field_Fit) return Boolean is
    begin
       for P of C.Points loop

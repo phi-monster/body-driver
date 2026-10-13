@@ -52,34 +52,56 @@ private package Driver.Robot.Kinematics is
    --  cannot say: the aligner's own error on two identical pictures is far
    --  under its error on pictures that moved.
 
+   function Pixels_Per_Unit (M : Model; A : Arm_Id; Channel : Positive) return Real;
+   --  How far the view of the eye the arm carries moves per reading unit of
+   --  the channel, in pixels: what the arm's aligned keyframes measure of it
+   --  (per point, the displacements the aligner found regressed on the
+   --  changes of every channel that moved; the median over the points) when
+   --  that is significant; else the lock-in's slope (Lockin.Shift) when the
+   --  keyframes have measured the channel at all and the slope lies within
+   --  what they measured; 0 otherwise. The keyframes' measurement is kept
+   --  when the arm's kinematics begins anew (Begin_Anew), and in the body
+   --  file.
+
    function Keyframe_Step (M : Model; A : Arm_Id; Channel : Positive) return Real;
    --  The smallest change of the arm's channel that moves the view of the eye
    --  it carries by more than a keyframe's match can tell: Z times the larger
    --  of the eye's cell displacement noise and the matcher's (Match_Noise),
-   --  over the pixels its view moves per reading unit (Lockin.Shift); 0 while
-   --  either is unmeasured. The sweep starts from it, and the fit judges by it
-   --  which joints a keyframe moved: a lock-in sees far smaller steps over
-   --  many beats than one pair of keyframes shows (A10's arm 2: its reference
-   --  keyframe, taken in a push of the recognition rounds, lay 3e-5 rad off
-   --  the sweep's base, ten times the lock-in's step, a twentieth of this).
+   --  over the pixels its view moves per reading unit (Pixels_Per_Unit); 0
+   --  while either is unmeasured. The sweep starts from it, and the fit judges
+   --  by it which joints a keyframe moved: a lock-in sees far smaller steps
+   --  over many beats than one pair of keyframes shows (A10's arm 2: its
+   --  reference keyframe, taken in a push of the recognition rounds, lay
+   --  3e-5 rad off the sweep's base, ten times the lock-in's step, a
+   --  twentieth of this).
+
+   function Step_Of (M : Model; A : Arm_Id; Channel : Positive) return Real;
+   --  The change of the arm's channel from which a keyframe counts as having
+   --  moved it, and the fit judges a keyframe's joints by: the keyframe step
+   --  when it is measured, and no nearer than the readings tell apart (Z of
+   --  the noise of a difference of two readings); else the step the eye can
+   --  see at all (Channels.Visible_Step), which the lock-in tells over many
+   --  beats; 0 while neither is measured.
 
    function Follow_Step (M : Model; A : Arm_Id; Channel : Positive) return Real;
    --  The change of the arm's channel that moves the view of the eye it
    --  carries by half the aligner's patch at the full size: the largest turn
    --  whose keyframe the aligner follows from the reference by itself
    --  (Followed), over the pixels the view moves per reading unit
-   --  (Lockin.Shift); 0 while the shift is unmeasured. The sweep's ladder
-   --  starts here (Motion.Sweep_Start). From the keyframe step it took a
-   --  doubling a round, a fit a round, to reach a turn the fit could use
-   --  (B0a_1, x5, 10-13: the step 1e-4 reading units, the eye seeing 5.7e-6,
-   --  four rounds and 1100 beats to turns of 0.0013 units, every fit of them
-   --  undetermined: "at most 2.7e-4 rad by that scale").
+   --  (Pixels_Per_Unit); 0 while that is unmeasured. The sweep's ladder
+   --  starts here once it is (Motion.Sweep_Start). From the keyframe step it
+   --  took a doubling a round, a fit a round, to reach a turn the fit could
+   --  use (B0a_1, x5, 10-13: the step 1e-4 reading units, the eye seeing
+   --  5.7e-6, four rounds and 1100 beats to turns of 0.0013 units, every fit
+   --  of them undetermined: "at most 2.7e-4 rad by that scale").
 
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean;
    --  The arm's still twin of its reference was taken.
 
    procedure Begin_Anew (M : in out Model; A : Arm_Id);
-   --  Drops what the arm's kinematics gathered so far: the next still frame
+   --  Drops what the arm's kinematics gathered so far, but what its keyframes
+   --  measured of how far the view moves per unit (Pixels_Per_Unit), which
+   --  holds at any reference: the next still frame
    --  of its eye is its reference, the one after its twin. The boot calls it
    --  in a held beat where the arm's sweep begins, so that the reference is
    --  the pose the arm is swept from: the fit tells which joints a keyframe

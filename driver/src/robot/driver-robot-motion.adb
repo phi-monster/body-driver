@@ -80,7 +80,8 @@ package body Driver.Robot.Motion is
       Report.Outcome := (if not Blocked_Any then Reached elsif Moved_Some then Short else Blocked);
    end Judge;
 
-   procedure Step
+   --  One sending of the targets, waited for and judged (Step).
+   procedure One_Step
      (M       : in out Model;
       Targets : Driver.Commands.Command;
       Report  : out Step_Report;
@@ -158,6 +159,82 @@ package body Driver.Robot.Motion is
             end;
          end loop;
       end;
+   end One_Step;
+
+   procedure Step
+     (M       : in out Model;
+      Targets : Driver.Commands.Command;
+      Report  : out Step_Report;
+      Stop    : access function return Boolean := null)
+   is
+      use Ada.Numerics.Long_Elementary_Functions;
+      Groups : constant Natural := Group_Count (M);
+      Worst  : Real := Real'Last;   --  the largest error of the last landing, in deviations of what the readings tell
+   begin
+      One_Step (M, Targets, Report, Stop);
+      --  Landing where it was sent: a servo that holds a load with a proportional controller settles a few
+      --  units short of its goal, the same few units at the same pose (the kiwi's arms, R4 on the Pi, 10-13:
+      --  back from every push 4 to 7 units off the hold, so that no keyframe of the recognition turned one joint
+      --  alone and the fit had no joint's own keyframe). Where a targeted channel reads off its target by more
+      --  than the noise of a difference of two readings tells, the target is sent again moved by that error, as
+      --  long as each landing comes nearer than the one before: what does not come nearer is not the servo's
+      --  steady error (a joint on what stops it), and what was reached stands.
+      loop
+         exit when Report.Outcome /= Reached or else Report.Stopped;
+         declare
+            O       : constant Driver.Beats.Observation_View := Driver.Beats.Latest;
+            Nudged  : Driver.Commands.Command := Driver.Commands.Hold;
+            Largest : Real := 0.0;
+            Any     : Boolean := False;
+         begin
+            for G in 1 .. Groups loop
+               if Is_Commandable (M, Group_Id (G)) and then Driver.Commands.Has_Target (Targets, Group_Id (G))
+                 and then Driver.Observations.Has_Reading (O.all, Group_Id (G))
+               then
+                  declare
+                     Target  : constant Real_Array := Driver.Commands.Target (Targets, Group_Id (G));
+                     Reading : constant Real_Array := O.Readings.Element (Group_Id (G));
+                     Goal    : Real_Array := Target;
+                     Off     : Boolean := False;
+                  begin
+                     for C in 1 .. Natural'Min (Target'Length, Reading'Length) loop
+                        declare
+                           Noise : constant Real := Channels.Noise (M, Group_Id (G), C);
+                           Error : constant Real := Target (Target'First + C - 1) - Reading (Reading'First + C - 1);
+                        begin
+                           if Noise < Real'Last and then Noise > 0.0
+                             and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))
+                           then
+                              Off := True;
+                              Largest := Real'Max (Largest, abs Error / (Noise * Sqrt (2.0)));
+                              Goal (Goal'First + C - 1) := Target (Target'First + C - 1) + Error;
+                           end if;
+                        end;
+                     end loop;
+                     if Off then
+                        Any := True;
+                        Driver.Commands.Set_Target (Nudged, Group_Id (G), Goal);
+                     end if;
+                  end;
+               end if;
+            end loop;
+            exit when not Any or else Largest >= Worst;
+            Worst := Largest;
+            declare
+               Again : Step_Report;
+            begin
+               One_Step (M, Nudged, Again, Stop);
+               Report.Beats := Report.Beats + Again.Beats;
+               Report.At_Rest := Again.At_Rest;
+               Report.Stopped := Again.Stopped;
+               Append (Report.Detail, "sent again by the landing's error (" & Driver.Log.Image (Largest, 1)
+                       & " deviations): " & To_String (Again.Detail));
+               --  A sending again that meets something changes nothing of what the step reached: the joint stands
+               --  where what stops it leaves it.
+               exit when Again.Outcome /= Reached;
+            end;
+         end;
+      end loop;
    end Step;
 
    procedure Note_Stopped (M : in out Model; G : Group_Id; Noted : out Boolean) is
@@ -302,20 +379,20 @@ package body Driver.Robot.Motion is
    end Note_Stopped;
 
    function Least_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real is
-      Step  : constant Real := Kinematics.Keyframe_Step (M, A, Channel);
+      Step  : constant Real := Kinematics.Step_Of (M, A, Channel);
       Noise : constant Real := Channels.Noise (M, Arm_Group (M, A), Channel);
    begin
-      --  The step, and what the readings' noise can take off a turn asked of
-      --  exactly it (a keyframe counts as a joint's own, and is kept at all,
-      --  from the step on, and a turn of the step itself lands below it half
-      --  the time: fake body V6, arm 1, the first joint's turns of its step,
-      --  38 units, left no keyframe through eleven rounds, and the fit said
-      --  the joint had none of its own).
+      --  The step a keyframe counts from, and what the readings' noise can
+      --  take off a turn asked of exactly it (a keyframe counts as a joint's
+      --  own, and is kept at all, from the step on, and a turn of the step
+      --  itself lands below it half the time: fake body V6, arm 1, the first
+      --  joint's turns of its step, 38 units, left no keyframe through eleven
+      --  rounds, and the fit said the joint had none of its own).
       return (if Step > 0.0 and then Noise < Real'Last then Step + Driver.Conventions.Z * Sqrt (2.0) * Noise else Step);
    end Least_Turn;
 
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
-      Step  : constant Real := Kinematics.Keyframe_Step (M, A, Channel);
+      Step  : constant Real := Kinematics.Step_Of (M, A, Channel);
       Least : constant Real := Least_Turn (M, A, Channel);
    begin
       --  The first level is the largest turn the aligner follows by itself,
@@ -325,7 +402,11 @@ package body Driver.Robot.Motion is
       --  fitted arm's prediction. From the least turn, a doubling a round and
       --  a fit a round, the x5's eye (no pixel noise, a step of 1e-4 reading
       --  units) climbed four levels in 1100 beats to turns of 0.0013 units,
-      --  and every fit of them was undetermined (B0a_1, 10-13).
+      --  and every fit of them was undetermined (B0a_1, 10-13). Before any
+      --  keyframe has turned the joint alone, how far the view moves per unit
+      --  is not measured (Kinematics.Pixels_Per_Unit) and the first level is
+      --  the least turn: its keyframe, predicted from nothing, is what
+      --  measures it, and the ladder climbs from there.
       return (if Step > 0.0 then Real'Max (Least, Kinematics.Follow_Step (M, A, Channel)) else Step);
    end Sweep_Start;
 

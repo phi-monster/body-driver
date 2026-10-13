@@ -921,16 +921,18 @@ package body Driver.Robot.Tests is
       begin
          for C in 1 .. 2 loop
             declare
-               Start : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
-               Shift : constant Real := Lockin.Shift (M, 1, 1, C);
+               Start  : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
+               Shift  : constant Real := Driver.Robot.Kinematics.Pixels_Per_Unit (M, 1, C);
+               Jitter : constant Real := Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C);
             begin
-               Check (Shift > 0.0, "arm 1's shift is not measured");
+               Check (Shift > 0.0, "arm 1's view's motion per unit of joint" & C'Image
+                      & " is not measured by the keyframes before the sweep");
                if Shift > 0.0 then
-                  --  The larger of half the aligner's patch of view and the least turn a keyframe counts
-                  --  (Motion.Sweep_Start).
+                  --  The larger of half the aligner's patch of view and the least turn a keyframe counts: the step
+                  --  the matcher tells apart, no nearer than the readings tell apart, plus what the readings' noise
+                  --  can take off a turn asked of exactly it (Motion.Sweep_Start, Kinematics.Step_Of).
                   declare
-                     Least  : constant Real := Driver.Conventions.Z * Noise / Shift
-                       + Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C);
+                     Least  : constant Real := Real'Max (Driver.Conventions.Z * Noise / Shift, Jitter) + Jitter;
                      Follow : constant Real := Real (Driver.Alignment.Half_Patch (Rig_Width, Rig_Height)) / Shift;
                   begin
                      Check_Close (Start, Real'Max (Least, Follow), 1.0e-9 * Real'Max (Least, Follow),
@@ -1053,19 +1055,20 @@ package body Driver.Robot.Tests is
       Exercise_Rig (M);
       for C in 1 .. 2 loop
          declare
-            Start : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
-            Shift : constant Real := Lockin.Shift (M, 1, 1, C);
-            Noise : constant Real :=
+            Start  : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
+            Shift  : constant Real := Driver.Robot.Kinematics.Pixels_Per_Unit (M, 1, C);
+            Jitter : constant Real := Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C);
+            Noise  : constant Real :=
               Real'Max (Lockin.Cell_Noise (M, 1), Driver.Robot.Kinematics.Match_Noise (M, 1));
          begin
             Check (Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last, "arm 1's sweep plan is not measured");
             if Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last then
                --  The larger of: half the aligner's patch of view (the largest turn it follows by itself), and the
-               --  step the matcher tells apart plus what the readings' noise can take off a turn asked of exactly it
-               --  (Motion.Sweep_Start: a turn of the step itself lands below it half the time).
+               --  step the matcher tells apart, no nearer than the readings tell apart, plus what the readings'
+               --  noise can take off a turn asked of exactly it (Motion.Sweep_Start: a turn of the step itself
+               --  lands below it half the time).
                declare
-                  Least  : constant Real := Driver.Conventions.Z * Noise / Shift
-                    + Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C);
+                  Least  : constant Real := Real'Max (Driver.Conventions.Z * Noise / Shift, Jitter) + Jitter;
                   Follow : constant Real := Real (Driver.Alignment.Half_Patch (Rig_Width, Rig_Height)) / Shift;
                begin
                   Check_Close (Start, Real'Max (Least, Follow), 1.0e-9 * Real'Max (Least, Follow),
@@ -3427,7 +3430,7 @@ package body Driver.Robot.Tests is
          for C in 1 .. 2 loop
             declare
                First  : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
-               Shift  : constant Real := Lockin.Shift (M, 1, 1, C);
+               Shift  : constant Real := Driver.Robot.Kinematics.Pixels_Per_Unit (M, 1, C);
                Offset : Real := First;
                Level  : Positive := 1;
             begin

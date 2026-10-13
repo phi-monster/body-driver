@@ -308,13 +308,14 @@ package body Driver.Robot.Boot is
       end Recognize;
 
       --  Turns every joint of the arm both ways from where it rests, by steps
-      --  that double from the smallest one that moves its eye's view by what
-      --  one cell of it can tell (Z times the cells' displacement noise, over
-      --  how far the view moves per reading unit: a keyframe that moves less
-      --  tells the fit nothing), until a step is blocked or short, or the eye
-      --  would have turned by half its view: beyond that a view shares less
-      --  than half of itself with the one it started from. Every step is held
-      --  until the eye gives the keyframe (Motion.Hold_For_Keyframe).
+      --  that double from the smallest one a keyframe counts (Motion.Sweep_Start:
+      --  the least turn by the step the fit judges a joint's motion by, or the
+      --  largest turn the aligner follows by itself once how far the view moves
+      --  per reading unit is measured, by the keyframes so far,
+      --  Kinematics.Pixels_Per_Unit), until a step is blocked or short,
+      --  or the eye would have turned by half its view: beyond that a view
+      --  shares less than half of itself with the one it started from. Every
+      --  step is held until the eye gives the keyframe (Motion.Hold_For_Keyframe).
       procedure Sweep (A : Arm_Id) is
          G    : Group_Id := 1;
          Size : Natural := 0;
@@ -336,8 +337,18 @@ package body Driver.Robot.Boot is
          declare
             First, Per_Unit : Real_Array (1 .. Size) := [others => 0.0];
             Least  : Real_Array (1 .. Size) := [others => 0.0];   --  per channel: the least turn a keyframe counts
+            Moves  : array (1 .. Size) of Boolean := [others => False];   --  per channel: it moves the eye's view (Lockin.Seen)
             Half   : Real := 0.0;
             Eye    : Natural := 0;
+            --  How far the view moves per reading unit of each channel, as the keyframes have measured it so far
+            --  (Kinematics.Pixels_Per_Unit; 0 until the keyframes determine the channel): read again after every
+            --  round, since the rounds' keyframes measure it.
+            procedure Read_Shifts is
+            begin
+               for C in 1 .. Size loop
+                  Per_Unit (C) := Driver.Robot.Kinematics.Pixels_Per_Unit (M, A, C);
+               end loop;
+            end Read_Shifts;
             procedure Read_Plan is
             begin
                for E in 1 .. Eye_Count (M) loop
@@ -348,8 +359,9 @@ package body Driver.Robot.Boot is
                if Eye > 0 then
                   Half := Real (Natural'Min (M.Eyes (Eye_Id (Eye)).Grid.Width, M.Eyes (Eye_Id (Eye)).Grid.Height))
                     / 2.0;
+                  Read_Shifts;
                   for C in 1 .. Size loop
-                     Per_Unit (C) := Lockin.Shift (M, Eye_Id (Eye), G, C);
+                     Moves (C) := Lockin.Seen (M, Eye_Id (Eye), G, C);
                      First (C) := Driver.Robot.Motion.Sweep_Start (M, A, C);
                      Least (C) := Driver.Robot.Motion.Least_Turn (M, A, C);
                   end loop;
@@ -407,6 +419,8 @@ package body Driver.Robot.Boot is
                State   : array (1 .. 2 * Size) of Stop := [others => Blocked];
                --  Per push: its ladder is going down from a first level the aligner could not follow.
                Descending : array (1 .. 2 * Size) of Boolean := [others => False];
+               --  Per channel: how far the view moved per unit as known when the round's pushes were made.
+               Shift_Before : Real_Array (1 .. Size) := [others => 0.0];
                --  Per push: the beats the arm was held for its latest keyframe.
                Held_From, Held_To : array (1 .. 2 * Size) of Natural := [others => 0];
                --  Per channel: the largest offset a followed keyframe of it was taken at.
@@ -519,9 +533,24 @@ package body Driver.Robot.Boot is
                   end loop;
                   return Ada.Strings.Unbounded.To_String (Text);
                end Image;
+               --  The plan, for the log: per channel its first level, the least turn and the view's motion per unit.
+               function Plan_Text return String is
+                  Text : Ada.Strings.Unbounded.Unbounded_String;
+               begin
+                  for C in 1 .. Size loop
+                     Ada.Strings.Unbounded.Append
+                       (Text, " c" & C'Image & " " & Driver.Log.Image (First (C), 3) & " (least "
+                        & Driver.Log.Image (Least (C), 3) & ", "
+                        & (if Per_Unit (C) > 0.0 then Driver.Log.Image (Per_Unit (C), 4) & " px a unit" else "px a unit unmeasured")
+                        & (if Moves (C) then ")" else ", does not move the eye)"));
+                  end loop;
+                  return Ada.Strings.Unbounded.To_String (Text);
+               end Plan_Text;
             begin
+               Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " sweep plan, first levels in reading units:"
+                                & Plan_Text & "; the widest turn moves the view " & Driver.Log.Image (Half, 1) & " px");
                for C in 1 .. Size loop
-                  if Per_Unit (C) > 0.0 and then First (C) > 0.0 then
+                  if Moves (C) and then First (C) > 0.0 then
                      Order (Count + 1) := (Channel => C, Sign => 1.0);
                      Order (Count + 2) := (Channel => C, Sign => -1.0);
                      Offset (Count + 1) := First (C);
@@ -564,6 +593,7 @@ package body Driver.Robot.Boot is
                   begin
                      while (for some I in 1 .. Count => State (I) = Climbing) loop
                         Rounds := Rounds + 1;
+                        Shift_Before := Per_Unit;
                         for I in 1 .. Count loop
                            if State (I) = Climbing then
                               Take (I);
@@ -581,10 +611,17 @@ package body Driver.Robot.Boot is
                            Together (Shares);
                         end if;
                         Measure_The_Round;
+                        Driver.Beats.Within_A_Beat (Read_Shifts'Access);
                         for I in 1 .. Count loop
                            if State (I) = Climbing then
                               declare
                                  P : Push renames Order (I);
+                                 --  The round's keyframe of the push measured how far the view moves per unit of its
+                                 --  joint, which nothing had before: predicted from nothing, from a window as wide as
+                                 --  the aligner searches, it is not followed in the aligner's sense, but the next
+                                 --  level is predicted from it. The ladder climbs.
+                                 Measured_Now : constant Boolean :=
+                                   Shift_Before (P.Channel) = 0.0 and then Per_Unit (P.Channel) > 0.0;
                               begin
                                  Ask_From := Held_From (I);
                                  Ask_To := Held_To (I);
@@ -594,7 +631,7 @@ package body Driver.Robot.Boot is
                                     Reached (P.Channel) := Real'Max (Reached (P.Channel), Offset (I));
                                     Descending (I) := False;
                                  end if;
-                                 if Followed_Now or else not Framed_Now then
+                                 if Followed_Now or else not Framed_Now or else Measured_Now then
                                     --  Followed, or too small to count: no keyframe came of the push
                                     --  (the held pose was not apart from the keyframes before it by
                                     --  the step the fit counts, which is re-estimated after the push
