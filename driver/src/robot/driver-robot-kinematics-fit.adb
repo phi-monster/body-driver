@@ -97,6 +97,73 @@ package body Driver.Robot.Kinematics.Fit is
       return (if Den > 0.0 then F * Dot (H2, Ex1) / Den else 0.0);
    end Sampson;
 
+   --  How far eye B saw the point from where the model allows it, in pixels at focal length F: under
+   --  X_B = R X_A + T, the point of eye A's line of sight H1 appears in eye B somewhere on a half-line of its
+   --  picture, at the line's vanishing point V (the rotated line of sight, the point infinitely far) when it is
+   --  infinitely far, and from there along the direction D of the epipole as its depth comes down. The residual
+   --  is the distance from H2 to that half-line: the perpendicular to it where H2 projects onto it at a positive
+   --  depth, and the distance to V itself where H2 lies beyond V (a depth the model has none for). The Sampson
+   --  residual measures the distance to the whole epipolar line, both ways from V: an eye that turns without
+   --  travelling (a wrist on a short lever, small turns) keeps its points on their lines under any translation
+   --  once its rotation is right, and a wrong focal length that bends the rotation's field moved V along the
+   --  line without cost, so the focal search found 27, 57 and 24453 px on the kiwi (R6's starts of 10-14) at
+   --  scores below the true lens's. Where parallax is there the two measures agree.
+   procedure Reprojected (R : Mat3; T : Vec3; H1, H2 : Vec3; F : Real; Du, Dv : out Real) is
+      Y  : constant Vec3 := Times (R, H1);
+   begin
+      if Y (3) <= 0.0 or else H2 (3) <= 0.0 then
+         --  A line of sight turned behind eye B: as far off as the lines of sight are long, in both directions.
+         Du := F * Sqrt (Dot (Y, Y) + Dot (H2, H2));
+         Dv := Du;
+         return;
+      end if;
+      declare
+         Vx  : constant Real := Y (1) / Y (3);
+         Vy  : constant Real := Y (2) / Y (3);
+         Hx  : constant Real := H2 (1) / H2 (3);
+         Hy  : constant Real := H2 (2) / H2 (3);
+         --  The way the point's image moves from V as its depth comes down from infinity: towards the epipole.
+         Dx  : constant Real := T (1) - Vx * T (3);
+         Dy  : constant Real := T (2) - Vy * T (3);
+         Dd  : constant Real := Dx * Dx + Dy * Dy;
+         Ex  : constant Real := Hx - Vx;
+         Ey  : constant Real := Hy - Vy;
+         Along : constant Real := (if Dd > 0.0 then (Ex * Dx + Ey * Dy) / Dd else 0.0);
+      begin
+         if Along <= 0.0 then
+            Du := F * Ex;
+            Dv := F * Ey;
+         else
+            Du := F * (Ex - Along * Dx);
+            Dv := F * (Ey - Along * Dy);
+         end if;
+      end;
+   end Reprojected;
+
+   function Reprojected (R : Mat3; T : Vec3; H1, H2 : Vec3; F : Real) return Real is
+      Du, Dv : Real;
+   begin
+      Reprojected (R, T, H1, H2, F, Du, Dv);
+      return Sqrt (Du * Du + Dv * Dv);
+   end Reprojected;
+
+   --  One keyframe's residuals less what its sightings share: the median of each component over the keyframe.
+   --  A shift of the whole picture, from a small turn the model has no term for or from an error the aligner
+   --  gives every point of a keyframe alike, says nothing of the lens or the axis; what differs between the
+   --  points (the field's bend, the parallax) does (robot.kinematics.shared: every keyframe's points share an
+   --  error, and the search of stage 1 bent the lens to 123 px to meet it).
+   procedure Share_Out (Du, Dv : in out Real_Array) is
+      Mu : constant Real := Driver.Stats.Median (Du);
+      Mv : constant Real := Driver.Stats.Median (Dv);
+   begin
+      for I in Du'Range loop
+         Du (I) := Du (I) - Mu;
+      end loop;
+      for I in Dv'Range loop
+         Dv (I) := Dv (I) - Mv;
+      end loop;
+   end Share_Out;
+
    ---------------------------------------------------------------------------
    --  The lens
 
@@ -2081,7 +2148,7 @@ package body Driver.Robot.Kinematics.Fit is
                         Tt : Vec3;
                      begin
                         Relative (Identity, (Rotation => R, Translation => P - R * P), Rr, Tt);
-                        Rs (I) := Sampson (Rr, Tt, L (I).H0, L (I).H, F);
+                        Rs (I) := Reprojected (Rr, Tt, L (I).H0, L (I).H, F);
                      end;
                   end loop;
                end;
@@ -2207,12 +2274,17 @@ package body Driver.Robot.Kinematics.Fit is
                                  Rr   : constant Mat3 := Rot (W, -Turn);
                                  Tt   : constant Vec3 := (-V (2)) * E1 + V (1) * E2;
                                  M    : Natural := 0;
+                                 Du, Dv : Real_Array (1 .. K);
                               begin
                                  for I in 1 .. K loop
                                     if L (I).Frame = Frame then
                                        M := M + 1;
-                                       Rs (M) := Sampson (Rr, Tt, L (I).H0, L (I).H, F);
+                                       Reprojected (Rr, Tt, L (I).H0, L (I).H, F, Du (M), Dv (M));
                                     end if;
+                                 end loop;
+                                 Share_Out (Du (1 .. M), Dv (1 .. M));
+                                 for Q in 1 .. M loop
+                                    Rs (Q) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
                                  end loop;
                                  declare
                                     Sigma : constant Real := Noise_Of (Rs (1 .. M));
@@ -2246,12 +2318,19 @@ package body Driver.Robot.Kinematics.Fit is
                         declare
                            Rr : constant Mat3 := Rot (W, -Turn_Of (V));
                            Tt : constant Vec3 := (-V (2)) * E1 + V (1) * E2;
+                           Du, Dv : Real_Array (1 .. K);
+                           M  : Natural := 0;
                         begin
                            for I in 1 .. K loop
                               if L (I).Frame = Frame then
-                                 Filled := Filled + 1;
-                                 Fits (Filled) := abs Sampson (Rr, Tt, L (I).H0, L (I).H, F);
+                                 M := M + 1;
+                                 Reprojected (Rr, Tt, L (I).H0, L (I).H, F, Du (M), Dv (M));
                               end if;
+                           end loop;
+                           Share_Out (Du (1 .. M), Dv (1 .. M));
+                           for Q in 1 .. M loop
+                              Filled := Filled + 1;
+                              Fits (Filled) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
                            end loop;
                         end;
                      end if;
@@ -2277,7 +2356,7 @@ package body Driver.Robot.Kinematics.Fit is
          procedure Refine (J : Positive; F : Real; Result : in out Best_Record) is
             L      : Sight_Line_Array renames Every (J).all;
             M      : constant Positive := L'Length;
-            Rm     : Real_Access := new Real_Array (1 .. M);
+            Rm     : Real_Access := new Real_Array (1 .. 2 * M);   --  two residuals a sighting (Reprojected)
             W0     : constant Vec3 := Result.W;
             Sign   : constant Real := (if Result.Scale < 0.0 then -1.0 else 1.0);
             E1, E2 : Vec3;
@@ -2302,22 +2381,55 @@ package body Driver.Robot.Kinematics.Fit is
                      Rj := Rot (W, C * L (I).Reading);
                   end if;
                   Relative (Identity, (Rotation => Rj, Translation => P - Rj * P), Rr, Tt);
-                  R (R'First + I - L'First) := Sampson (Rr, Tt, L (I).H0, L (I).H, F);
+                  Reprojected (Rr, Tt, L (I).H0, L (I).H, F,
+                               R (R'First + 2 * (I - L'First)), R (R'First + 2 * (I - L'First) + 1));
                end loop;
+               --  Less what each keyframe's sightings share (Share_Out); the sightings come grouped by keyframe.
+               declare
+                  From : Positive := L'First;
+               begin
+                  while From <= L'Last loop
+                     declare
+                        To : Positive := From;
+                     begin
+                        while To < L'Last and then L (To + 1).Frame = L (From).Frame loop
+                           To := To + 1;
+                        end loop;
+                        declare
+                           Du, Dv : Real_Array (1 .. To - From + 1);
+                        begin
+                           for I in From .. To loop
+                              Du (I - From + 1) := R (R'First + 2 * (I - L'First));
+                              Dv (I - From + 1) := R (R'First + 2 * (I - L'First) + 1);
+                           end loop;
+                           Share_Out (Du, Dv);
+                           for I in From .. To loop
+                              R (R'First + 2 * (I - L'First)) := Du (I - From + 1);
+                              R (R'First + 2 * (I - L'First) + 1) := Dv (I - From + 1);
+                           end loop;
+                        end;
+                        From := To + 1;
+                     end;
+                  end loop;
+               end;
             end Evaluate;
 
-            procedure Solve is new Robust_Fit (4, M, Driver.Conventions.Initial_Damping, Evaluate);
+            procedure Solve is new Robust_Fit (4, 2 * M, Driver.Conventions.Initial_Damping, Evaluate);
             X : Real_Array (1 .. 4) := [0.0, 0.0, Result.Phi, Ln (abs Result.Scale)];
          begin
             Perp (W0, E1, E2);
             Evaluate (X, Rm.all);
             Solve (X, Noise_Of (Rm.all));
             Evaluate (X, Rm.all);
-            for I in Rm'Range loop
-               Rm (I) := abs Rm (I);
-            end loop;
-            Result := (Score => Driver.Stats.Median (Rm.all), W => W_Of (X), Phi => X (3),
-                       Scale => Sign * Exp (X (4)));
+            declare
+               Norms : Real_Array (1 .. M);
+            begin
+               for I in 1 .. M loop
+                  Norms (I) := Sqrt (Rm (2 * I - 1) ** 2 + Rm (2 * I) ** 2);
+               end loop;
+               Result := (Score => Driver.Stats.Median (Norms), W => W_Of (X), Phi => X (3),
+                          Scale => Sign * Exp (X (4)));
+            end;
             Free (Rm);
          end Refine;
 

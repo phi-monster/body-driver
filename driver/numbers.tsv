@@ -1682,6 +1682,8 @@ driver-robot-kinematics-fit.adb	Depth_Sigma (T) := (if C (T) > 0.0 then 1.0 / Sq
 driver-robot-kinematics-fit.adb	Directions : constant Natural := 2562;	2562	numerics	the directions the first search scans, as many as an icosahedron split four times; only where the later fits start depends on it
 driver-robot-kinematics-fit.adb	Dp (T) := Dp (T) + H * Real'Max (1.0, abs Depth (T));	1.0	numerics	the scale floor of a finite difference
 driver-robot-kinematics-fit.adb	Driver.Log.Line (Driver.Log.Robot, "" & Who & ""	"3	format	the stage named in a log line
+driver-robot-kinematics-fit.adb	Du (I - From + 1) := R (R'First + 2 * (I - L'First));	2	structure	two residuals a sighting, one along each image axis
+driver-robot-kinematics-fit.adb	Dv (I - From + 1) := R (R'First + 2 * (I - L'First) + 1);	2	structure	two residuals a sighting, one along each image axis
 driver-robot-kinematics-fit.adb	Dy : constant Real := Y - Xv (Xv'First + S_First + 2);	2	structure	the similarity's terms in order: log scale, turn, two shifts
 driver-robot-kinematics-fit.adb	E (P) := 1.0;	1.0	math	a column of the identity: the inverse column by column
 driver-robot-kinematics-fit.adb	E (P) := 1.0;	1.0	math	a unit vector of the identity
@@ -1766,6 +1768,8 @@ driver-robot-kinematics-fit.adb	Minimal : constant := 3;	3	math	three points fix
 driver-robot-kinematics-fit.adb	Minimal : constant := 4;	4	math	four points fix a homography of a plane
 driver-robot-kinematics-fit.adb	N : constant Vec3 := (1.0 / Length) * P.A;	1.0	math	the unit direction of the inverse-depth vector
 driver-robot-kinematics-fit.adb	N : constant Vec3 := (1.0 / Length) * P.A;	1.0	math	the unit direction of the inverse-depth vector
+driver-robot-kinematics-fit.adb	Norms (I) := Sqrt (Rm (2 * I - 1) ** 2 + Rm (2 * I) ** 2);	2	structure	two residuals a sighting, one along each image axis
+driver-robot-kinematics-fit.adb	Norms (I) := Sqrt (Rm (2 * I - 1) ** 2 + Rm (2 * I) ** 2);	2	structure	two residuals a sighting, one along each image axis
 driver-robot-kinematics-fit.adb	O : constant Natural := 6 + 5 * (J - 1);	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	O : constant Natural := 6 + 5 * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	O : constant Natural := 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
@@ -1797,6 +1801,10 @@ driver-robot-kinematics-fit.adb	R (2 * K - 1) := U - Sg.U;	2	structure	two resid
 driver-robot-kinematics-fit.adb	R (2 * K) := V - Sg.V;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	R (K + 2) := (if Ahead then (V - Obs_V) / Sigma else Real'Last);	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	R (K + 2) := (if Ahead then V - X.V else Real'Last);	2	structure	a reprojection has two residuals, across and down
+driver-robot-kinematics-fit.adb	R (R'First + 2 * (I - L'First) + 1) := Dv (I - From + 1);	2	structure	two residuals a sighting, one along each image axis
+driver-robot-kinematics-fit.adb	R (R'First + 2 * (I - L'First)) := Du (I - From + 1);	2	structure	two residuals a sighting, one along each image axis
+driver-robot-kinematics-fit.adb	R (R'First + 2 * (I - L'First)), R (R'First + 2 * (I - L'First) + 1));	2	structure	two residuals a sighting, one along each image axis
+driver-robot-kinematics-fit.adb	R (R'First + 2 * (I - L'First)), R (R'First + 2 * (I - L'First) + 1));	2	structure	two residuals a sighting, one along each image axis
 driver-robot-kinematics-fit.adb	R (R'First + 2 * J - 1) := (if Ahead then V - P.V else Real'Last);	2	structure	two residuals per point, across and down
 driver-robot-kinematics-fit.adb	R (R'First + 2 * J - 2) := (if Ahead then U - P.U else Real'Last);	2	structure	two residuals per point, across and down
 driver-robot-kinematics-fit.adb	R (R'First + 2 * J - 2) := (if Ahead then U - P.U else Real'Last);	2	structure	two residuals per point, across and down
@@ -1813,6 +1821,7 @@ driver-robot-kinematics-fit.adb	Reduced : constant Positive := 2 * N;	2	structur
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Rho : Real_Array (1 .. N) := [others => 1.0];	1.0	structure	distances before they are measured
+driver-robot-kinematics-fit.adb	Rm : Real_Access := new Real_Array (1 .. 2 * M);	2	structure	two residuals a sighting, one along each image axis
 driver-robot-kinematics-fit.adb	Rn : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
@@ -2011,7 +2020,8 @@ driver-robot-kinematics-fit.adb	if Result.Scale /= 0.0 and then Warm (J).Scale /
 driver-robot-kinematics-fit.adb	or else Driver.Distributions.F_Upper_Tail (Link.F, 4, 2 * Link.Used - Apart_Terms)	2	structure	two residuals per answer, across and down
 driver-robot-kinematics-fit.adb	or else Driver.Distributions.F_Upper_Tail (Link.F, 4, 2 * Link.Used - Apart_Terms)	4	statistics	the four constraints one homography for both sides adds: the F statistic's numerator degrees of freedom
 driver-robot-kinematics-fit.adb	or else not Driver.Uncertain.Significant (C, Sqrt (Variance (O + 5))))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
-driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (4, M, Driver.Conventions.Initial_Damping, Evaluate);	4	structure	the refinement's four terms; more sightings than terms
+driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (4, 2 * M, Driver.Conventions.Initial_Damping, Evaluate);	2	structure	two residuals a sighting, one along each image axis
+driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (4, 2 * M, Driver.Conventions.Initial_Damping, Evaluate);	4	structure	the four terms the refinement moves: two of the axis, the point's angle, the scale's logarithm
 driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate, At_Once => True);	2	structure	two residuals a point, across and down
 driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate, At_Once => True);	8	math	a homography has eight free terms
 driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);	2	structure	two residuals per answer, across and down
