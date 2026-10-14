@@ -2500,6 +2500,7 @@ driver-robot-motion.adb	& Driver.Log.Image (Failed_At, 4) & ""	4	format	digits p
 driver-robot-motion.adb	& Driver.Log.Image (Kinematics.Conditioning (M, A, Failed_From), 6)),	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Largest, 1) & "" & To_String (Off_By)	1	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Share, 2) & "");	2	format	digits printed in a log line or a message
+driver-robot-motion.adb	(Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom));	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	(Driver.Uncertain.Scalar_Gate (Channels.Noise_Freedom (M, G, Channel))) * Sigma * Sqrt (2.0));	2.0	math	a change is the difference of two readings
 driver-robot-motion.adb	(Error, Noise * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
 driver-robot-motion.adb	(if M.Eyes (E).Rest_Counts_Known then 1.0 / Real (M.Eyes (E).Rest_Count_Beats + 1) else Tail);	1.0	math	the order statistic: one in n plus one

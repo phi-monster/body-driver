@@ -757,10 +757,15 @@ package body Driver.Robot.Motion is
       --  readings where they stood: the level counted as not executed, and the ladder doubled its ask twenty-four
       --  times, the arm swinging between its range's ends (R6's fourth start on the kiwi, 10-14, arm_b's first
       --  joint, once the eye's threshold for motion came down).
+      --  A push nothing answered and no eye saw is not waited for: before the body's delay is measured, Steps
+      --  gives such a push up only after as many beats as the stream has had, and the first probe's levels below
+      --  the dead band would each wait that long (R6's fifth start, 10-14: 500 beats into the first probe).
+      Seen_Any : Boolean := False;
       function Still_Pushing return Boolean is
         (for some I in 1 .. N =>
            Usable (I) and then Steps.Episodes (M, Listed (I).Group) > Before (I)
-           and then not Steps.Latest (M, Listed (I).Group).Ended);
+           and then not Steps.Latest (M, Listed (I).Group).Ended
+           and then (Seen_Any or else Steps.Latest (M, Listed (I).Group).Moved));
 
       --  Each listed channel's reading at the last beat, and whether its group's readings still move there.
       procedure Read_Ends is
@@ -827,6 +832,7 @@ package body Driver.Robot.Motion is
             end if;
             if Done then
                Look (M, From, Seen, Chance);
+               Seen_Any := Seen;
                Unlooked := M.Beats;
                Read_Ends;
             end if;
@@ -867,6 +873,13 @@ package body Driver.Robot.Motion is
       return Advance > 0.0 and then (not Known (V) or else Advance >= V.Value)
         and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom);
    end Further;
+
+   --  The body executed a level: the reading went along the ask, significantly against its own noise. The eye's
+   --  visible step is not asked here: it is the lock-in's, measured from the few pushes before, and asked of an
+   --  executed turn it made arm_a's second joint, moved 19.6 units at every level, "not further" at every one,
+   --  and the probe doubled nineteen times (R6's fifth start, 10-14).
+   function Executed (Advance, Noise : Real; Freedom : Natural) return Boolean is
+     (Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom));
 
    --  A level some eye saw, confirmed by moves back and forth by the same
    --  offsets, each of them seen, as many as the chance of one false alarm
@@ -1002,6 +1015,7 @@ package body Driver.Robot.Motion is
       Freedom   : Count_Array (1 .. N);
       Following : Flag_Array (1 .. N);
       Delivered : Flag_Array (1 .. N) := [others => False];   --  some level moved it along the ask
+      Did       : Flag_Array (1 .. N) := [others => False];   --  this level's ask was executed (Executed)
       Farthest  : Real_Array (1 .. N) := [others => 0.0];   --  the farthest a level took it along the ask
       Kept      : Real_Array (1 .. N) := [others => 0.0];   --  the offset where it last followed
       Amount    : Real;
@@ -1028,6 +1042,7 @@ package body Driver.Robot.Motion is
             Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving);
             --  Which channels still follow: whether asking further took each
             --  further than any smaller offset did.
+            Did := [others => False];
             for I in 1 .. N loop
                if Usable (I) and then Following (I) then
                   declare
@@ -1035,6 +1050,7 @@ package body Driver.Robot.Motion is
                      Went      : constant Boolean :=
                        Further (M, Listed (I), Excursion - Farthest (I), Noise (I), Freedom (I));
                   begin
+                     Did (I) := Executed (Excursion - Farthest (I), Noise (I), Freedom (I));
                      if Delivered (I) and then not Went and then not Moving (I) then
                         --  Its own end: held where it last followed.
                         Following (I) := False;
@@ -1053,7 +1069,7 @@ package body Driver.Robot.Motion is
             --  reading moved (R6 on the kiwi, 10-14: every channel together "first seen" at 4.9 units while no
             --  reading changed, and the recognition ran on 4.9-unit asks the servos ignored, each waited for as
             --  long as the stream was old).
-            if Seen and then (for some I in 1 .. N => Usable (I) and then Delivered (I)) then
+            if Seen and then (for some I in 1 .. N => Usable (I) and then (Delivered (I) or else Did (I))) then
                declare
                   Confirmed : Boolean;
                begin
@@ -1090,6 +1106,7 @@ package body Driver.Robot.Motion is
       Other     : constant array (Sense) of Sense := [Increasing => Decreasing, Decreasing => Increasing];
       Open      : Sense_Flags := [others => True];
       Delivered : Sense_Flags := [others => False];
+      Did       : Sense_Flags := [others => False];   --  the way's latest level was executed (Executed)
       Answered  : Sense_Counts := [others => 0];   --  the level at which it first followed that way
       Farthest  : array (Sense) of Real := [others => 0.0];
    begin
@@ -1130,6 +1147,7 @@ package body Driver.Robot.Motion is
                   Excursion : constant Real := Signs (Way) * (Now (1) - Start (1));
                   Went      : constant Boolean := Further (M, Ref, Excursion - Farthest (Way), Noise (1), Freedom (1));
                begin
+                  Did (Way) := Executed (Excursion - Farthest (Way), Noise (1), Freedom (1));
                   if Delivered (Way) and then not Went and then not Moving (1) then
                      --  Its own end.
                      Open (Way) := False;
@@ -1144,7 +1162,7 @@ package body Driver.Robot.Motion is
                end;
                --  Seen only at a level the body executed that way (as Probe_Together: a humming servo shakes
                --  its camera without moving its reading).
-               if Seen and then Delivered (Way) then
+               if Seen and then (Delivered (Way) or else Did (Way)) then
                   declare
                      Confirmed : Boolean;
                   begin
