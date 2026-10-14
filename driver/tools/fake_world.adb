@@ -1,6 +1,7 @@
 with Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Fixed;
+with Ada.Text_IO;
 with Driver.Json;
 
 package body Fake_World is
@@ -34,6 +35,9 @@ package body Fake_World is
    Jitter_Share : constant := 1.0e-16;
    Drift_Rate   : constant := 1.2e-12;
    Jitter_Beats : constant := 5;
+
+   --  How near a finger must stand to a thing to touch it: the give's depth, the most a press goes in.
+   Grip_Margin : constant := Give_Depth;
 
    type Corner_Array is array (1 .. 8) of Vec3;
 
@@ -107,14 +111,14 @@ package body Fake_World is
    begin
       W.Solids.Append
         (Solid'(Name => To_Unbounded_String (Name), Kind => Box, Half => Half, Local => Local, Pose => Local,
-                Mat => Mat, Link => Link_Index, Arm => Arm, Finger => Finger));
+                Mat => Mat, Link => Link_Index, Arm => Arm, Finger => Finger, others => <>));
    end Add_Box;
 
    procedure Add_Plane (W : in out World; Name : String; Pose : Rigid; Mat : Material) is
    begin
       W.Solids.Append
         (Solid'(Name => To_Unbounded_String (Name), Kind => Plane, Half => [0.0, 0.0, 0.0], Local => Pose,
-                Pose => Pose, Mat => Mat, Link => 0, Arm => 0, Finger => False));
+                Pose => Pose, Mat => Mat, Link => 0, Arm => 0, Finger => False, others => <>));
    end Add_Plane;
 
    --  A camera frame (x right, y down, z forward) at Position that looks
@@ -204,12 +208,19 @@ package body Fake_World is
       High : constant array (1 .. 6) of Real := [2.9, 1.6, 1.5, 1.8, 3.0, 1.8];
       Sag  : array (1 .. 6) of Real;
       Speed : array (1 .. 6) of Real;
+      --  The servos' gears have slack: the link turns that much while the servo, whose reading the robot reports,
+      --  stands still, and gravity takes it up (the kiwi's arm_a elbow: about 40 ticks of 4096, 10-14). Up to a
+      --  degree a joint and one joint of the arm up to four. Drawn, with the jaw's sizes, from a generator of the
+      --  arm's own, so that every other draw of the body stays as it was.
+      Arm_Draws : Ada.Numerics.Float_Random.Generator;
+      function Arm_Random return Real is (Real (Ada.Numerics.Float_Random.Random (Arm_Draws)));
+      Play_Rad  : array (1 .. 6) of Real := [others => 0.0];
 
       function Joint (Name : String; Parent : Positive; Origin : Rigid; Axis : Vec3; N : Positive) return Link is
         (Name => To_Unbounded_String (Prefix & Name), Parent => Parent, Arm => A, Kind => Revolute, Origin => Origin,
          Axis => Axis, Unit => Arm_Unit, Q => Rest (N) / Arm_Unit, Target => Rest (N) / Arm_Unit,
          Lo => Low (N) / Arm_Unit, Hi => High (N) / Arm_Unit, Tau => Tau, Droop_Gain => Sag (N), Rate => Speed (N),
-         Dead => Dead_Rad / Arm_Unit, others => <>);
+         Dead => Dead_Rad / Arm_Unit, Play => Play_Rad (N) / Arm_Unit, others => <>);
       --  A servo-driven closer reads its ticks too: a quarter turn of the servo from closed to open.
       Closer_Hi   : constant Real := (if In_Ticks then Ticks / 4.0 else 1.0);
       Closer_Unit : constant Real := (Open_Width / 2.0) / Closer_Hi;
@@ -219,6 +230,11 @@ package body Fake_World is
       for N in Sag'Range loop
          Sag (N) := Random (W, 0.0005, 0.002);
       end loop;
+      Ada.Numerics.Float_Random.Reset (Arm_Draws, Integer (W.Seed) * 41 + A);
+      for N in Play_Rad'Range loop
+         Play_Rad (N) := Arm_Random * Pi / 180.0;
+      end loop;
+      Play_Rad (1 + Natural'Min (5, Integer (Real'Floor (Arm_Random * 6.0)))) := (2.0 + 2.0 * Arm_Random) * Pi / 180.0;
       --  How fast a joint can turn: a real arm's controller limits it to about one to two and a half radians a
       --  second, 0.08 to 0.25 rad a beat at ten beats a second. Without the limit a joint followed a target of
       --  half a radian within three beats, the wrist eye's picture jumped by far more than a flow cell between two
@@ -319,6 +335,41 @@ package body Fake_World is
                   W.Groups.Append (G);
                end;
             end loop;
+         when Jaw =>
+            --  One jaw swung onto a jaw that does not move, as a desktop arm's gripper is (the LeKiwi's SO-101,
+            --  10-15). The fixed jaw stands on the palm along the hand's way, its inner face on the hand's middle;
+            --  the moving jaw turns about an upright axis through the root of its own inner face, so that closed (its
+            --  low end) it lies flat on the fixed jaw, and open its tip stands the swing's chord away. The servo's stop
+            --  at closed is the fixed jaw itself. Both jaws are black and ribbed across, as the kiwi's are.
+            declare
+               Jaw_Length : constant Real := 0.05 + 0.03 * Arm_Random;
+               Jaw_Thick  : constant Real := 0.008 + 0.006 * Arm_Random;
+               Jaw_Height : constant Real := 0.012 + 0.010 * Arm_Random;
+               Swing      : constant Real := 0.7 + 0.4 * Arm_Random;   --  radians from closed to open
+               Ribbed     : constant Material :=
+                 (Kind => Stripes, Albedo => [0.05, 0.05, 0.05], Contrast => 0.3 + 0.4 * Arm_Random,
+                  Scale => 200.0 + 200.0 * Arm_Random, Gloss => 0.4);
+               Jaw_Hi     : constant Real := (if In_Ticks then Swing / (2.0 * Pi / Ticks) else 1.0);
+               Fixed_Jaw  : Positive;
+            begin
+               Add_Link (W, (Name => To_Unbounded_String (Prefix & "jaw_fixed"), Parent => J6, Arm => A, Kind => Fixed,
+                             Origin => Moved_To (0.0, L6 + 0.024, 0.0), others => <>), Fixed_Jaw);
+               Add_Box (W, Prefix & "jaw_fixed", [Jaw_Thick / 2.0, Jaw_Length / 2.0, Jaw_Height / 2.0],
+                        Moved_To (-Jaw_Thick / 2.0, Jaw_Length / 2.0, 0.0), Ribbed, Fixed_Jaw, A, Finger => True);
+               Add_Link (W, (Name => To_Unbounded_String (Prefix & "jaw"), Parent => J6, Arm => A, Kind => Revolute,
+                             Origin => Moved_To (0.0, L6 + 0.024, 0.0), Axis => [0.0, 0.0, -1.0], Unit => Swing / Jaw_Hi,
+                             Q => Jaw_Hi, Target => Jaw_Hi, Lo => 0.0, Hi => Jaw_Hi, Tau => Tau, Dead => Closer_Dead,
+                             others => <>), F1);
+               Add_Box (W, Prefix & "jaw", [Jaw_Thick / 2.0, Jaw_Length / 2.0, Jaw_Height / 2.0],
+                        Moved_To (Jaw_Thick / 2.0, Jaw_Length / 2.0, 0.0), Ribbed, F1, A, Finger => True);
+               W.Closers.Append (F1);
+               W.Hand_Reach.Replace_Element (A, Jaw_Length * (1.0 + Sin (Swing)));
+               G := (Name => To_Unbounded_String ("arm" & Trim (A) & "_closer"), Commandable => True,
+                     Integers => In_Ticks, others => <>);
+               G.Joints.Append (F1);
+               G.Echoed.Append (Jaw_Hi);
+               W.Groups.Append (G);
+            end;
          when Drawn =>
             raise Program_Error with "a hand to build must be drawn first";
       end case;
@@ -327,10 +378,16 @@ package body Fake_World is
       --  picture and the table beyond them fills the rest; or ahead at the wall.
       if With_Eye then
          declare
-            Pitch : constant Real := (if Eye_Up then -0.3 else Tilt);
+            --  A desktop gripper's camera sits on the gripper over the roots of its jaws, the palm behind it, and
+            --  looks down along them: they come into the bottom of its picture and fill two fifths of it (the kiwi's
+            --  wrist eyes, 10-14).
+            Near  : constant Boolean := Kind = Jaw;
+            Ahead : constant Real := (if Near then 0.024 + 0.005 else -Eye_Back);
+            Above : constant Real := (if Near then 0.024 + 0.015 * Arm_Random else Eye_Above);
+            Pitch : constant Real := (if Eye_Up then -0.3 elsif Near then 0.6 + 0.3 * Arm_Random else Tilt);
          begin
             Add_Camera (W, "eye_arm" & Trim (A), J6, A,
-                        Look ([0.0, L6 - Eye_Back, Eye_Above], [0.0, Cos (Pitch), -Sin (Pitch)], [0.0, 0.0, 1.0]),
+                        Look ([0.0, L6 + Ahead, Above], [0.0, Cos (Pitch), -Sin (Pitch)], [0.0, 0.0, 1.0]),
                         Width, Height, 0.62);
          end;
       end if;
@@ -402,7 +459,7 @@ package body Fake_World is
                     (Rotation => About ([0.0, 0.0, 1.0], Turn), Translation => [X, Y, W.Table_Z + Hz]);
                   S    : constant Solid :=
                     (Name => To_Unbounded_String ("thing" & Trim (N)), Kind => Box, Half => [Hx, Hy, Hz], Local => Pose,
-                     Pose => Pose, Mat => Mat, Link => 0, Arm => 0, Finger => False);
+                     Pose => Pose, Mat => Mat, Link => 0, Arm => 0, Finger => False, others => <>);
                begin
                   if not (for some O of W.Solids => O.Link > 0 and then Overlap (S, O)) and then not Under_A_Hand (S) then
                      W.Solids.Append (S);
@@ -411,6 +468,41 @@ package body Fake_World is
                end;
             end loop;
          end;
+      end loop;
+      --  A black box within reach of each arm that ends in a jaw, just past where its hand rests: the thing the
+      --  person asks for (the kiwi's mouse, 10-15), narrow enough across for the jaw to take.
+      for A in 1 .. W.Arms loop
+         if W.Kinds (A) = Jaw then
+            declare
+               Tool   : constant Vec3 := W.Links (W.Tools (A)).Pose.Translation;
+               Half   : constant Vec3 := [0.02, 0.04, 0.016];
+               Mat    : constant Material :=
+                 (Kind => Noise, Albedo => [0.06, 0.06, 0.07], Contrast => 0.25, Scale => 150.0, Gloss => 0.3);
+               Placed : Boolean := False;
+            begin
+               for Try in 1 .. 20 loop
+                  exit when Placed;
+                  declare
+                     Beyond : constant Real := Random (W, 0.02, 0.08);
+                     Out_By : constant Real := W.Hand_Reach (A) + Half (2) + Beyond;
+                     Side   : constant Real := Random (W, -0.06, 0.06);
+                     Turn   : constant Real := Random (W, -0.4, 0.4);
+                     Pose   : constant Rigid :=
+                       (Rotation    => About ([0.0, 0.0, 1.0], Turn),
+                        Translation => [Tool (1) + Side, Tool (2) + Out_By, W.Table_Z + Half (3)]);
+                     S      : constant Solid :=
+                       (Name => To_Unbounded_String ("target" & Trim (A)), Kind => Box, Half => Half, Local => Pose,
+                        Pose => Pose, Mat => Mat, Link => 0, Arm => 0, Finger => False, others => <>);
+                  begin
+                     if not (for some O of W.Solids => O.Kind = Box and then Overlap (S, O)) and then not Under_A_Hand (S)
+                     then
+                        W.Solids.Append (S);
+                        Placed := True;
+                     end if;
+                  end;
+               end loop;
+            end;
+         end if;
       end loop;
    end Add_Things;
 
@@ -430,6 +522,13 @@ package body Fake_World is
       --  (the owner's: the environment is given, and the arm's own surfaces are then the only texture).
       Wood.Contrast := (if T.Plain_Table then 0.0 else Random (W, 0.0, 0.3));
       Wall.Contrast := Random (W, 0.0, 0.35);
+      --  A white room: the table and the walls near white, faint broad veins their only texture (the kiwi's room,
+      --  10-14), from the same draws as their texture would have been.
+      if T.White_Room then
+         Wood := (Kind => Noise, Albedo => [0.88, 0.88, 0.86], Contrast => Wood.Contrast / 6.0, Scale => 6.0, Gloss => 0.1);
+         Wall := (Kind => Noise, Albedo => [0.90, 0.90, 0.89], Contrast => Wall.Contrast / 10.0, Scale => 4.0,
+                  Gloss => 0.0);
+      end if;
       Add_Plane (W, "table", Moved_To (0.0, 0.0, W.Table_Z), Wood);
       Add_Plane (W, "floor", Moved_To (0.0, 0.0, 0.0), Dark);
       Add_Plane (W, "wall", (Rotation => About ([1.0, 0.0, 0.0], Pi / 2.0), Translation => [0.0, 1.3, 0.8]), Wall);
@@ -449,7 +548,7 @@ package body Fake_World is
                Pick : constant Real := Real (Ada.Numerics.Float_Random.Random (Draws));
             begin
                if Kinds (A) = Drawn then
-                  Kinds (A) := (if Pick < 0.5 then Pair elsif Pick < 0.7 then Hook
+                  Kinds (A) := (if Pick < 0.35 then Pair elsif Pick < 0.55 then Jaw elsif Pick < 0.7 then Hook
                                 elsif Pick < 0.85 then Pair_And_Thumb else Fingers);
                end if;
             end;
@@ -457,6 +556,14 @@ package body Fake_World is
          Build_Arm (W, 1, -1.0, Width, Height, Kinds (1), T.Eyeless /= 1, T.Eye_Up = 1);
          Build_Arm (W, 2, 1.0, Width, Height, Kinds (2), T.Eyeless /= 2, T.Eye_Up = 2);
       end;
+      --  An arm whose bus is dead stands at rest where it was built, seen and never heard from.
+      if T.Dead_Arm > 0 then
+         for G of W.Groups loop
+            if Ada.Strings.Fixed.Index (To_String (G.Name), "arm" & Trim (T.Dead_Arm) & "_") = 1 then
+               G.Silent := True;
+            end if;
+         end loop;
+      end if;
       --  The fixed eye above and behind the arms, looking down at the table between them.
       declare
          Px  : constant Real := Random (W, -0.05, 0.05);
@@ -530,7 +637,8 @@ package body Fake_World is
          declare
             L      : Link renames W.Links (I);
             Parent : constant Rigid := (if L.Parent = 0 then Identity else W.Links (L.Parent).Pose);
-            Q      : constant Real := (if L.Mirror = 0 then L.Q else W.Links (L.Mirror).Q);
+            --  The link stands where its servo reads less the slack gravity takes up.
+            Q      : constant Real := (if L.Mirror = 0 then L.Q - L.Play_Offset else W.Links (L.Mirror).Q);
          begin
             L.Pose := Parent * L.Origin * Motion (L, Q);
          end;
@@ -538,6 +646,8 @@ package body Fake_World is
       for S of W.Solids loop
          if S.Link > 0 then
             S.Pose := W.Links (S.Link).Pose * S.Local;
+         elsif S.Held_By > 0 then
+            S.Pose := W.Links (W.Tools (S.Held_By)).Pose * S.Held_Rel;
          end if;
       end loop;
       for C of W.Cameras loop
@@ -604,7 +714,18 @@ package body Fake_World is
                end if;
             end loop;
             for O of W.Solids loop
-               if O.Arm = 0 and then O.Kind = Box and then O.Link /= Mount and then Overlap (S, O) then
+               if O.Arm = 0 and then O.Kind = Box and then O.Link /= Mount and then O.Held_By /= A and then Overlap (S, O)
+               then
+                  return True;
+               end if;
+            end loop;
+         end if;
+      end loop;
+      --  What the arm holds goes with it, into the table or not.
+      for O of W.Solids loop
+         if O.Held_By = A then
+            for P of Corners (O) loop
+               if P (3) < W.Table_Z - 1.0e-7 then
                   return True;
                end if;
             end loop;
@@ -624,7 +745,7 @@ package body Fake_World is
             for P of Corners (S) loop
                D := Real'Max (D, W.Table_Z - P (3));
                for O of W.Solids loop
-                  if O.Arm = 0 and then O.Kind = Box and then O.Link /= Mount then
+                  if O.Arm = 0 and then O.Kind = Box and then O.Link /= Mount and then O.Held_By /= A then
                      declare
                         Q : constant Vec3 := Inverse (O.Pose) * P;
                      begin
@@ -669,7 +790,7 @@ package body Fake_World is
             begin
                if not Hit then
                   for O of W.Solids loop
-                     if O.Arm = 0 and then O.Kind = Box and then Overlap (S, O) then
+                     if O.Arm = 0 and then O.Kind = Box and then O.Held_By /= A and then Overlap (S, O) then
                         Hit := True;
                      end if;
                   end loop;
@@ -688,7 +809,7 @@ package body Fake_World is
    procedure Command (W : in out World; G : Positive; Values : Real_Array) is
       Grp : Group renames W.Groups (G);
    begin
-      if not Grp.Commandable or else Values'Length /= Natural (Grp.Joints.Length) then
+      if not Grp.Commandable or else Grp.Silent or else Values'Length /= Natural (Grp.Joints.Length) then
          return;
       end if;
       for I in 1 .. Natural (Grp.Joints.Length) loop
@@ -734,6 +855,20 @@ package body Fake_World is
          Forward (W);
       end Place;
    begin
+      --  Gravity takes up each joint's slack on the side it pulls the tool's load to.
+      for I in W.Links.First_Index .. W.Links.Last_Index loop
+         declare
+            L : Link renames W.Links (I);
+         begin
+            if L.Arm = A and then L.Kind = Revolute and then L.Play > 0.0 and then W.Quirk.Play then
+               declare
+                  Load : constant Real := Droop ((L with delta Droop_Gain => 1.0), Tool_Before);
+               begin
+                  L.Play_Offset := (if Load > 0.0 then L.Play / 2.0 elsif Load < 0.0 then -L.Play / 2.0 else 0.0);
+               end;
+            end if;
+         end;
+      end loop;
       for I in Old'Range loop
          Old (I) := W.Links (I).Q;
          Wanted (I) := W.Links (I).Q;
@@ -861,6 +996,77 @@ package body Fake_World is
       end loop;
    end Move_Arm;
 
+
+   ---------------------------------------------------------------------------
+   --  Holding
+
+   --  A box grown by Margin on every side.
+   function Grown (S : Solid; Margin : Real) return Solid is
+     ((S with delta Half => [S.Half (1) + Margin, S.Half (2) + Margin, S.Half (3) + Margin]));
+
+   --  Two of arm A's fingers touch the thing S from opposite sides: each within the grip margin of it, their middles
+   --  on either side of its middle.
+   function Pinched (W : World; A : Positive; S : Solid) return Boolean is
+      package Offsets is new Ada.Containers.Vectors (Positive, Vec3, Driver.Numerics.Arrays."=");
+      Touching : Offsets.Vector;
+   begin
+      for F of W.Solids loop
+         if F.Arm = A and then F.Finger and then Overlap (Grown (F, Grip_Margin), S) then
+            Touching.Append (Minus (F.Pose.Translation, S.Pose.Translation));
+         end if;
+      end loop;
+      for I in Touching.First_Index .. Touching.Last_Index loop
+         for J in I + 1 .. Touching.Last_Index loop
+            if Dot (Touching (I), Touching (J)) < 0.0 then
+               return True;
+            end if;
+         end loop;
+      end loop;
+      return False;
+   end Pinched;
+
+   --  A thing pinched by arm A's fingers while its closer is asked further shut than it stands goes with the hand,
+   --  rigidly, from where it was when it was taken; once the fingers no longer pinch it (the closer opened), it is
+   --  let go and comes down onto the table where it is, turned only about the upright as it was. Nothing slips:
+   --  a pinch holds whatever it holds.
+   procedure Grip (W : in out World; A : Positive) is
+      C : constant Natural := W.Closers (A);
+   begin
+      if C = 0 then
+         return;
+      end if;
+      declare
+         Closer   : Link renames W.Links (C);
+         Pressing : constant Boolean := Closer.Target < Closer.Q - Closer.Dead;
+         Tool     : constant Rigid := W.Links (W.Tools (A)).Pose;
+      begin
+         for S of W.Solids loop
+            if S.Link = 0 and then S.Arm = 0 and then S.Kind = Box then
+               if S.Held_By = A then
+                  if not Pinched (W, A, S) then
+                     declare
+                        R   : constant Mat3 := S.Pose.Rotation;
+                        Yaw : constant Real := Arctan (R (2, 1), R (1, 1));
+                     begin
+                        S.Held_By := 0;
+                        S.Pose := (Rotation => About ([0.0, 0.0, 1.0], Yaw),
+                                   Translation => [S.Pose.Translation (1), S.Pose.Translation (2), W.Table_Z + S.Half (3)]);
+                        S.Local := S.Pose;
+                        Ada.Text_IO.Put_Line ("fake_robot: beat" & W.Beat'Image & ": arm" & A'Image & " let go of "
+                                              & To_String (S.Name));
+                     end;
+                  end if;
+               elsif S.Held_By = 0 and then Pressing and then Pinched (W, A, S) then
+                  S.Held_By := A;
+                  S.Held_Rel := Inverse (Tool) * S.Pose;
+                  Ada.Text_IO.Put_Line ("fake_robot: beat" & W.Beat'Image & ": arm" & A'Image & " holds "
+                                        & To_String (S.Name) & " at " & Img (S.Pose.Translation (3) - W.Table_Z - S.Half (3))
+                                        & " m above its rest");
+               end if;
+            end if;
+         end loop;
+      end;
+   end Grip;
    procedure Step (W : in out World) is
    begin
       W.Beat := W.Beat + 1;
@@ -881,6 +1087,10 @@ package body Fake_World is
       end;
       for A in 1 .. W.Arms loop
          Move_Arm (W, A);
+      end loop;
+      Forward (W);
+      for A in 1 .. W.Arms loop
+         Grip (W, A);
       end loop;
       Forward (W);
       Report (W);

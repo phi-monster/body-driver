@@ -50,6 +50,7 @@ with Driver.Json;
 with Driver.Msgpack;
 with Driver.Numerics;
 with Driver.Wire;
+with Fake_Camera;
 with Fake_Render;
 with Fake_World;
 
@@ -109,6 +110,10 @@ procedure Fake_Robot is
    type Real_Access is access Real_Array;
    Pixels  : array (1 .. 16) of Byte_Access;   --  one buffer per camera, the picture sent
    Scratch : array (1 .. 16) of Real_Access;   --  one per camera, the picture rendered
+   Cam_State : array (1 .. 16) of Fake_Camera.State;   --  one per camera: its exposure, MJPEG and hiccups
+   Cam_Exposure, Cam_Mjpeg, Cam_Gaps : Boolean := True;
+   --  The person's words, the task the robot hands the brain.
+   Instruction : Unbounded_String := To_Unbounded_String ("Pick up the thing by 10 cm.");
 
    Link : Driver.Wire.Connection;
 
@@ -607,13 +612,16 @@ procedure Fake_Robot is
          Keys : String_Vectors.Vector;
       begin
          if Key = "vision" then
-            for Cm of W.Cameras loop
-               Keys.Append (To_String (Cm.Name));
+            --  A camera in a hiccup gives no frame this beat: the eye is a gap at its place (body protocol).
+            for C in W.Cameras.First_Index .. W.Cameras.Last_Index loop
+               if Fake_Camera.Gives (Cam_State (C)) then
+                  Keys.Append (To_String (W.Cameras (C).Name));
+               end if;
             end loop;
             Put_Keys (B, "vision", Keys, Cam_Value'Access);
          elsif Key = "state" or else Key = "action" then
             for G of W.Groups loop
-               if not G.Joints.Is_Empty and then (Key = "state" or else G.Commandable) then
+               if not G.Joints.Is_Empty and then not G.Silent and then (Key = "state" or else G.Commandable) then
                   Keys.Append (To_String (G.Name));
                end if;
             end loop;
@@ -626,7 +634,7 @@ procedure Fake_Robot is
             end loop;
             Put_Keys (B, "additional_info", Keys, Const_Value'Access);
          elsif Key = "instruction" then
-            Driver.Msgpack.Put_String (B, "Pick up the thing by 10 cm.");
+            Driver.Msgpack.Put_String (B, To_String (Instruction));
          else
             Driver.Msgpack.Put_String (B, "v1.0");
          end if;
@@ -757,17 +765,14 @@ procedure Fake_Robot is
             Cam   : Camera renames W.Cameras (C);
             Share : constant Real := (if W.Quirk.Settle and then not Cam.Fresh then W.Quirk.Settle_Share else 1.0);
          begin
+            Fake_Camera.Next_Beat (Cam_State (C));
             Fake_Render.Render (W, Cam, Scratch (C).all);
             for I in Scratch (C)'Range loop
                Cam.Shown (I) := (1.0 - Share) * Cam.Shown (I) + Share * Scratch (C) (I);
-               declare
-                  Noise : constant Real := (if W.Quirk.Image_Noise > 0.0 then W.Quirk.Image_Noise * Noise_Gauss else 0.0);
-                  Seen  : constant Real := Cam.Shown (I) + Noise;
-               begin
-                  Pixels (C) (Driver.Bytes.Offset (I)) :=
-                    Driver.Bytes.Byte (Integer (Real'Floor (Real'Max (0.0, Real'Min (255.0, Seen)) + 0.5)));
-               end;
             end loop;
+            --  What the camera makes of it: its exposure, the sensor's noise, MJPEG (Fake_Camera).
+            Fake_Camera.Expose (Cam_State (C), Cam.Shown.all, Cam.Width, Cam.Height, W.Quirk.Image_Noise,
+                                Noise_Gauss'Access, Pixels (C).all);
             Cam.Fresh := False;
          end;
       end loop;
@@ -857,6 +862,14 @@ procedure Fake_Robot is
          W.Quirk.Bounce := On;
       elsif Name = "reading_noise" then
          W.Quirk.Reading_Noise := Real'Value (Value);
+      elsif Name = "play" then
+         W.Quirk.Play := On;
+      elsif Name = "exposure" then
+         Cam_Exposure := On;
+      elsif Name = "mjpeg" then
+         Cam_Mjpeg := On;
+      elsif Name = "eye_gaps" then
+         Cam_Gaps := On;
       else
          Put_Line ("fake_robot: no quirk called " & Name);
          raise Program_Error;
@@ -890,7 +903,7 @@ begin
       Comma : constant Natural := Ada.Strings.Fixed.Index (Hands, ",");
       function Kind_Of (Name : String) return Hand_Kind is
         (if Name = "pair" then Pair elsif Name = "hook" then Hook elsif Name = "thumb" then Pair_And_Thumb
-         elsif Name = "fingers" then Fingers elsif Name = "" or else Name = "drawn" then Drawn
+         elsif Name = "fingers" then Fingers elsif Name = "jaw" then Jaw elsif Name = "" or else Name = "drawn" then Drawn
          else raise Program_Error with "no hand called " & Name);
    begin
       if Comma > 0 then
@@ -901,6 +914,11 @@ begin
       Shape.Eyeless := Natural'Value (Option ("--eyeless", "0"));
       Shape.Eye_Up := Natural'Value (Option ("--eye-up", "0"));
       Shape.Plain_Table := Option ("--table", "grain") = "plain";
+      Shape.White_Room := Option ("--room", "drawn") = "white";
+      Shape.Dead_Arm := Natural'Value (Option ("--dead-arm", "0"));
+      if Option ("--instruction") /= "" then
+         Instruction := To_Unbounded_String (Option ("--instruction"));
+      end if;
    end;
    for I in 1 .. Ada.Command_Line.Argument_Count - 1 loop
       if Ada.Command_Line.Argument (I) = "--quirk" then
@@ -915,6 +933,8 @@ begin
    for C in W.Cameras.First_Index .. W.Cameras.Last_Index loop
       Pixels (C) := new Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset (3 * Width * Height));
       Scratch (C) := new Real_Array (1 .. 3 * Width * Height);
+      Cam_State (C) := Fake_Camera.Start (Seed, C, Cam_Exposure, Cam_Mjpeg, Cam_Gaps);
+      Put_Line ("fake_robot: " & To_String (W.Cameras (C).Name) & ": " & Fake_Camera.Describe (Cam_State (C)));
    end loop;
    declare
       F : File_Type;

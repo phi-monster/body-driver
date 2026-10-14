@@ -9,7 +9,9 @@
 # measured), driver.log, fake.log, meta.txt, and after the run estimates.jsonl, replay.log and
 # score.txt (replay --estimates then score, as qscore.sh does). The run ends when the driver's log
 # says the body is measured, when the boot fails, when either side exits, or at FAKE_MINUTES
-# (default 60). BIN names the driver's tools (default the repository's driver/bin); FAKE_PORT the
+# (default 60). FAKE_BRAIN=HOST:PORT gives the driver a brain service (Qwen behind llama-server, as the kiwi has) with
+# the model card's non-thinking sampling; FAKE_UNTIL=task does not stop when the body is measured but when the brain
+# says done or the episode fails (the run then goes on to the task the robot hands the brain). # (default 60). BIN names the driver's tools (default the repository's driver/bin); FAKE_PORT the
 # port (default 9500 plus the seed modulo 400, so runs of different seeds can go at once).
 set -u
 NAME=$1; SEED=$2; shift 2
@@ -28,14 +30,18 @@ LIM=${FAKE_MINUTES:-60}
 mkfifo "$R/run.rec.fifo"
 zstd -q -T2 -3 -o "$R/run.rec.zst" < "$R/run.rec.fifo" &
 ZST=$!
-"$R/bin/body_driver" --listen "$PORT" --body "$R/body.json" --record "$R/run.rec.fifo" > "$R/driver.log" 2>&1 &
+BRAIN=(); if [ -n "${FAKE_BRAIN:-}" ]; then BRAIN=(--eye "$FAKE_BRAIN"); export BL_BRAIN_SAMPLING='{"temperature":1.0,"top_p":1.0,"top_k":20,"min_p":0,"presence_penalty":2.0,"repetition_penalty":1.0,"chat_template_kwargs":{"enable_thinking":false}}'; fi
+"$R/bin/body_driver" --listen "$PORT" --body "$R/body.json" --record "$R/run.rec.fifo" ${BRAIN[@]+"${BRAIN[@]}"} > "$R/driver.log" 2>&1 &
 DRV=$!
 for _ in $(seq 1 120); do grep -q "listening on port" "$R/driver.log" 2>/dev/null && break; sleep 0.5; done
 "$R/bin/fake_robot" --connect "127.0.0.1:$PORT" --seed "$SEED" --out "$R" --stop "$R/stop" "$@" > "$R/fake.log" 2>&1 &
 FAKE=$!
 end=$(( $(date +%s) + LIM * 60 )); why=limit
 while [ "$(date +%s)" -lt "$end" ]; do
-  if grep -q "the body as measured:" "$R/driver.log"; then why=measured; break; fi
+  if [ "${FAKE_UNTIL:-measured}" = task ]; then
+    if grep -q "the brain said done" "$R/driver.log"; then why=done; break; fi
+    if grep -q "the episode failed" "$R/driver.log"; then why=episode_failed; break; fi
+  elif grep -q "the body as measured:" "$R/driver.log"; then why=measured; break; fi
   if grep -qE "could not be measured|the boot failed|the driver failed|the estimates failed" "$R/driver.log"; then why=boot_failed; break; fi
   kill -0 "$FAKE" 2>/dev/null || { why=fake_exit; break; }
   kill -0 "$DRV" 2>/dev/null || { why=driver_exit; break; }
