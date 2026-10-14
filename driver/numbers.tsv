@@ -2232,7 +2232,10 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Keyframe, 3) & ""	
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Persistent, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Seconds (K), 1));	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Sigma_Px, 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Res_U (F) / Real (Res_N (F)), 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Res_V (F) / Real (Res_N (F)), 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Scale, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Sqrt (Res_Sq (F) / Real (Res_N (F))), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Stated_By (Given.all), 1) & "" & Here'Image	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & "");	1024	format	kilobytes in a megabyte, for the log
 driver-robot-kinematics.adb	& Pm (Report.L.Fy, Report.L.Fy * Sd (2), 2) & "" & Pm (Report.L.Cx, Sd (3), 2)	2	structure	the index of a term of the covariance
@@ -2330,6 +2333,11 @@ driver-robot-kinematics.adb	R.Scale := 1.0;	1.0	math	the identity's scale: the f
 driver-robot-kinematics.adb	R.Shifts.Append (0.0);	0.0	structure	not measured yet
 driver-robot-kinematics.adb	Regression.Test_Block (Fu, 1, Kp, Stat, Rank);	1	structure	the whole block of the point's columns, from the first: its numerical rank must equal their count for the point's coefficients to be determined
 driver-robot-kinematics.adb	Report.Depth_Gains.Append (0.0);	0.0	structure	a query no sighting names has no track in the fit: its depth moves with no term
+driver-robot-kinematics.adb	Res_N : Counts_Access := new Count_List'(1 .. Natural'Max (1, Frame_Count) => 0);	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	Res_Sq : Real_Access := new Real_Array'(1 .. Natural'Max (1, Frame_Count) => 0.0);	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	Res_U : Real_Access := new Real_Array'(1 .. Natural'Max (1, Frame_Count) => 0.0);	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	Res_V : Real_Access := new Real_Array'(1 .. Natural'Max (1, Frame_Count) => 0.0);	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	Row_Frame : array (1 .. Rows) of Positive := [others => 1];	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	Rows : constant Positive := (if Position_Only then 3 else 6);	3	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	Rows : constant Positive := (if Position_Only then 3 else 6);	6	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	Rss_After := Driver.Memory.Resident_Kilobytes / 1024;	1024	format	kilobytes in a megabyte, for the log

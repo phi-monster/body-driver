@@ -33,6 +33,9 @@ package body Driver.Robot.Kinematics is
    --  heap: the estimates also run in the decider's task, whose stack is
    --  small.
    type Real_Access is access Real_Array;
+   type Count_List is array (Positive range <>) of Natural;
+   type Counts_Access is access Count_List;
+   procedure Free is new Ada.Unchecked_Deallocation (Count_List, Counts_Access);
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
    type Answer_Access is access Driver.Instrument.Answer_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Driver.Instrument.Answer_Array, Answer_Access);
@@ -1045,6 +1048,16 @@ package body Driver.Robot.Kinematics is
          Sigmas : Real_Access := new Real_Array (1 .. N * Queries);
          Counts : array (1 .. N) of Natural := [others => 0];
          function Slot (C : Positive; P : Natural) return Positive is ((C - 1) * Queries + P + 1);
+         --  What the per-point lines leave unexplained, by keyframe, for the log: the mean and the root mean
+         --  square of the residuals in pixels over the points whose lines were accepted. A keyframe whose
+         --  residuals share a sign and a size beyond the aligner's error is a pose the readings do not describe
+         --  (a joint with play beyond its encoder lands elsewhere according to the way it came: the kiwi's
+         --  fit left 1.7 to 4.8 px unexplained, R6's tenth start, 10-14).
+         Frame_Count : constant Natural := Natural (R.Frames.Length);
+         Res_U  : Real_Access := new Real_Array'(1 .. Natural'Max (1, Frame_Count) => 0.0);
+         Res_V  : Real_Access := new Real_Array'(1 .. Natural'Max (1, Frame_Count) => 0.0);
+         Res_Sq : Real_Access := new Real_Array'(1 .. Natural'Max (1, Frame_Count) => 0.0);
+         Res_N  : Counts_Access := new Count_List'(1 .. Natural'Max (1, Frame_Count) => 0);
       begin
          Told.all := [others => False];
          Informative.all := [others => False];
@@ -1089,11 +1102,13 @@ package body Driver.Robot.Kinematics is
                            X      : Real_Matrix (1 .. Rows, 1 .. Kp) := [others => [others => 0.0]];
                            Yu, Yv : Real_Array (1 .. Rows);
                            Own_S  : Real_Array (1 .. Rows);   --  each answer's standard deviation
+                           Row_Frame : array (1 .. Rows) of Positive := [others => 1];   --  each row's keyframe
                            I      : Natural := 0;
                         begin
                            for S of R.Matches loop
                               if Answered (S, P) then
                                  I := I + 1;
+                                 Row_Frame (I) := S.Frame;
                                  Own_S (I) := Sigma_Of (S, P);
                                  for C in 1 .. N loop
                                     if Own (C) > 0 then
@@ -1115,6 +1130,24 @@ package body Driver.Robot.Kinematics is
                            begin
                               Regression.Test_Block (Fu, 1, Kp, Stat, Rank);
                               if Rank = Kp then
+                                 for Row in 1 .. Rows loop
+                                    declare
+                                       Pu, Pv : Real := 0.0;
+                                       F : constant Positive := Row_Frame (Row);
+                                    begin
+                                       for J in 1 .. Kp loop
+                                          Pu := Pu + X (Row, J) * Fu.Beta (J);
+                                          Pv := Pv + X (Row, J) * Fv.Beta (J);
+                                       end loop;
+                                       if F <= Frame_Count then
+                                          Res_U (F) := Res_U (F) + (Yu (Row) - Pu) * Own_S (Row);
+                                          Res_V (F) := Res_V (F) + (Yv (Row) - Pv) * Own_S (Row);
+                                          Res_Sq (F) := Res_Sq (F)
+                                            + ((Yu (Row) - Pu) ** 2 + (Yv (Row) - Pv) ** 2) * Own_S (Row) ** 2;
+                                          Res_N (F) := Res_N (F) + 1;
+                                       end if;
+                                    end;
+                                 end loop;
                                  for C in 1 .. N loop
                                     if Own (C) > 0 then
                                        declare
@@ -1150,6 +1183,27 @@ package body Driver.Robot.Kinematics is
          --  they move per unit of it, whether or not that is significant in the channel itself: a point's motion
          --  with a joint that moves the view little is small, and only the points that move with some joint are
          --  the world's.
+         declare
+            Text : Ada.Strings.Unbounded.Unbounded_String;
+         begin
+            for F in 1 .. Frame_Count loop
+               if Res_N (F) > 0 then
+                  Ada.Strings.Unbounded.Append
+                    (Text, " f" & Ada.Strings.Fixed.Trim (F'Image, Ada.Strings.Left) & " "
+                     & Driver.Log.Image (Res_U (F) / Real (Res_N (F)), 2) & "/"
+                     & Driver.Log.Image (Res_V (F) / Real (Res_N (F)), 2) & "/"
+                     & Driver.Log.Image (Sqrt (Res_Sq (F) / Real (Res_N (F))), 2)
+                     & " (" & Ada.Strings.Fixed.Trim (Res_N (F)'Image, Ada.Strings.Left) & ")");
+               end if;
+            end loop;
+            Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image
+                             & " shift lines' residuals by keyframe, px (mean u/mean v/rms, points):"
+                             & Ada.Strings.Unbounded.To_String (Text));
+         end;
+         Free (Res_U);
+         Free (Res_V);
+         Free (Res_Sq);
+         Free (Res_N);
          declare
             Told_Of, Moving_Of : array (1 .. N) of Natural := [others => 0];
             Whole : array (1 .. N) of Boolean := [others => True];
