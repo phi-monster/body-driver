@@ -610,6 +610,8 @@ package body Driver.Robot is
       end;
    end Tool_In_Arm;
 
+   function World_Table (M : Model) return Driver.Geometry.Plane_Estimate is (Kinematics.World_Table (M));
+
    function Table_In_Arm (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate is
       use Driver.Numerics.Arrays;
    begin

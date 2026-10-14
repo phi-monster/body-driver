@@ -47,6 +47,9 @@ package body Driver.World is
         (Driver.World.Cameras.Of_Body'(Robot => M'Access, Seen => Seen, Eye => E));
    begin
       Ensure (S);
+      --  The table the first arm's eye measured (the world is that arm's frame): a surface things rest on, whether
+      --  or not pairs of eyes find it.
+      Driver.World.Estimates.Note_Table (S.Data.State, Driver.Robot.World_Table (M));
       Driver.World.Estimates.Observe
         (S.Data.State, Driver.Robot.Eye_Count (M), Camera_Of'Access, Driver.Robot.Up (M), Driver.Robot.Still (M), O);
    end Observe;
@@ -99,6 +102,7 @@ package body Driver.World is
       E      : Eye_Id;
       O      : Observation;
       Region : Driver.Images.Mask;
+      Placed : Driver.Robot.Surfaces.Surface_Point_Array;
       Thing  : out Thing_Id)
    is
       pragma Unreferenced (M);
@@ -120,18 +124,56 @@ package body Driver.World is
                   end if;
                end loop;
             end loop;
-            Driver.Msgpack.Put_Array_Header (B, 6);
+            Driver.Msgpack.Put_Array_Header (B, 7);
             Driver.Msgpack.Put_String (B, "adopt");
             Driver.Msgpack.Put_Integer (B, Long_Long_Integer (E));
             Driver.Msgpack.Put_Integer (B, Long_Long_Integer (O.Beat));
             Driver.Msgpack.Put_Integer (B, Long_Long_Integer (W));
             Driver.Msgpack.Put_Integer (B, Long_Long_Integer (H));
             Driver.Msgpack.Put_Binary (B, Bits);
+            --  The points the eye placed, as placed: a replay applies them as the run had them.
+            Driver.Msgpack.Put_Array_Header (B, Placed'Length);
+            for P of Placed loop
+               Driver.Msgpack.Put_Array_Header (B, 4);
+               Driver.Msgpack.Put_Float (B, P.Pixel.U);
+               Driver.Msgpack.Put_Float (B, P.Pixel.V);
+               Put_Point (B, P.Point);
+               Driver.Msgpack.Put_Array_Header (B, Vec3'Length);
+               for V of P.Normal loop
+                  Driver.Msgpack.Put_Float (B, V);
+               end loop;
+            end loop;
             Record_Write (B);
          end;
       end if;
       Ensure (S);
       Driver.World.Estimates.Adopt (S.Data.State, E, O, Region, Thing);
+      declare
+         Points  : Driver.World.Pairs.Match_Vectors.Vector;
+         Normals : Driver.World.Estimates.Normal_Vectors.Vector;
+      begin
+         for P of Placed loop
+            Points.Append (Driver.World.Pairs.Match'(In_First => P.Pixel, In_Second => P.Pixel, Point => P.Point, First => E));
+            Normals.Append (P.Normal);
+         end loop;
+         if not Points.Is_Empty then
+            Driver.World.Estimates.Place_Points (S.Data.State, Thing, Points, Normals);
+         end if;
+      end;
+   end Adopt;
+
+   procedure Adopt
+     (S      : in out Scene;
+      M      : Driver.Robot.Model;
+      E      : Eye_Id;
+      O      : Observation;
+      Region : Driver.Images.Mask;
+      Thing  : out Thing_Id)
+   is
+   begin
+      --  An eye that rides on a fitted arm places what it shows there by itself, from the places the arm's sweep
+      --  held it at (Driver.Robot.Surfaces): no instrument and no other eye seeing the same instant is needed.
+      Adopt (S, M, E, O, Region, Driver.Robot.Surfaces.In_Region (M, E, O, Region), Thing);
    end Adopt;
 
    function Seen_In (S : Scene; T : Thing_Id; E : Eye_Id) return Boolean is
@@ -183,6 +225,10 @@ package body Driver.World is
       Points : constant Driver.World.Pairs.Match_Vectors.Vector :=
         (if Known_Thing (S, T) then Driver.World.Estimates.Points_Of (S.Data.State, T)
          else Driver.World.Pairs.Match_Vectors.Empty_Vector);
+      --  The normals the eye that placed a point gave it (Place_Points); zero for the pairs' points.
+      Placed_Normals : constant Driver.World.Estimates.Normal_Vectors.Vector :=
+        (if Known_Thing (S, T) then Driver.World.Estimates.Normals_Of (S.Data.State, T)
+         else Driver.World.Estimates.Normal_Vectors.Empty_Vector);
       --  Each point by the pixel of the first eye it was seen at, so a
       --  point's neighbours on the surface are its neighbours in the image.
       type Key is record
@@ -216,9 +262,11 @@ package body Driver.World is
                Left, Right, Above, Below : Vec3;
                Normal : Vec3 := Zero3;
             begin
-               --  The surface's normal from the points beside it in the image;
-               --  none where a neighbour is missing.
-               if At_Key ((K.Eye, K.Column - 1, K.Row), Left) and then At_Key ((K.Eye, K.Column + 1, K.Row), Right)
+               --  The normal the eye placed the point with, else the surface's normal from the points beside it in
+               --  the image; none where a neighbour is missing.
+               if I <= Natural (Placed_Normals.Length) and then abs Placed_Normals (I) > 0.0 then
+                  Normal := Placed_Normals (I);
+               elsif At_Key ((K.Eye, K.Column - 1, K.Row), Left) and then At_Key ((K.Eye, K.Column + 1, K.Row), Right)
                  and then At_Key ((K.Eye, K.Column, K.Row - 1), Above)
                  and then At_Key ((K.Eye, K.Column, K.Row + 1), Below)
                then
@@ -326,7 +374,7 @@ package body Driver.World is
          elsif What = "friction" and then N = 4 then
             Learn_Friction (S, Thing_Id (Whole (2)),
                             (Low => Number (Doc, Element (Doc, R, 3)), High => Number (Doc, Element (Doc, R, 4))));
-         elsif What = "adopt" and then N = 6 then
+         elsif What = "adopt" and then N in 6 .. 7 then
             declare
                W      : constant Natural := Natural (Whole (4));
                H      : constant Natural := Natural (Whole (5));
@@ -344,7 +392,28 @@ package body Driver.World is
                end Unpack;
             begin
                Read_Binary (Doc, Element (Doc, R, 6), Unpack'Access);
-               Adopt (S, M, Eye_Id (Whole (2)), O, Region, Thing);
+               if N = 7 then
+                  --  The points the run's eye placed, as it placed them.
+                  declare
+                     List   : constant Node := Element (Doc, R, 7);
+                     Placed : Driver.Robot.Surfaces.Surface_Point_Array (1 .. Count (Doc, List));
+                  begin
+                     for K in Placed'Range loop
+                        declare
+                           P : constant Node := Element (Doc, List, K);
+                           Nm : constant Node := Element (Doc, P, 4);
+                        begin
+                           Placed (K) := (Pixel  => (U => Number (Doc, Element (Doc, P, 1)),
+                                                     V => Number (Doc, Element (Doc, P, 2))),
+                                          Point  => Point_Of (Doc, Element (Doc, P, 3)),
+                                          Normal => [for A in 1 .. 3 => Number (Doc, Element (Doc, Nm, A))]);
+                        end;
+                     end loop;
+                     Adopt (S, M, Eye_Id (Whole (2)), O, Region, Placed, Thing);
+                  end;
+               else
+                  Adopt (S, M, Eye_Id (Whole (2)), O, Region, Thing);
+               end if;
             end;
          else
             Ok := False;

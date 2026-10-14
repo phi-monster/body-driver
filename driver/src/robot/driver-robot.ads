@@ -218,6 +218,10 @@ package Driver.Robot is
    --  least sure of. Up is the first arm's.
 
    function Table_In_Arm (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate;
+
+   function World_Table (M : Model) return Driver.Geometry.Plane_Estimate;
+   --  The table in the world: the first arm's, as its eye saw it (the world is that arm's frame); its normal
+   --  towards what rests on it. Not Known until that arm is fitted with a table.
    --  The table the arm's eye saw at its reference keyframe, in the arm's own
    --  frame, its normal towards that eye: the plane most of the eye's tracked
    --  points lie on, uncertain by their scatter about it, by what the fit

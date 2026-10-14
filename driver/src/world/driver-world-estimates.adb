@@ -342,10 +342,27 @@ package body Driver.World.Estimates is
             end if;
          end;
       end loop;
-      if Driver.World.Pairs.Match_Vectors."/=" (Now, R.Points) then
-         R.Points := Now;
-         R.Points_At := Seen.Beat;
-      end if;
+      --  The points an eye placed by itself (Place_Points): each was found again in two views and in both
+      --  directions, so it needs no other pair to bear it out, and it was taken from inside the region the eye held
+      --  the thing in at the beat it was placed. It is not judged again by that region later: a region no matcher
+      --  follows stays where it was pointed at while the eye moves on (the body without the instrument), and would
+      --  throw out every point the moment the arm turned.
+      declare
+         Normals : Normal_Vectors.Vector;
+      begin
+         for P of Now loop
+            Normals.Append (Zero3);
+         end loop;
+         for K in R.Placed.First_Index .. R.Placed.Last_Index loop
+            Now.Append (R.Placed (K));
+            Normals.Append (R.Placed_Normals (K));
+         end loop;
+         if Driver.World.Pairs.Match_Vectors."/=" (Now, R.Points) then
+            R.Points := Now;
+            R.Normals := Normals;
+            R.Points_At := Seen.Beat;
+         end if;
+      end;
       R.Has_Points := not R.Points.Is_Empty;
       --  How far the thing reaches as the eyes it was pointed at in see it:
       --  each region's pixels, on a grid as many pixels apart as the square
@@ -1368,6 +1385,71 @@ package body Driver.World.Estimates is
    function Points_Of (S : State; T : Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector is (S.Things (T).Points);
 
    function Points_Eye (S : State; T : Thing_Id) return Eye_Id is (S.Things (T).Points_In);
+
+   procedure Place_Points
+     (S : in out State; T : Thing_Id; Points : Driver.World.Pairs.Match_Vectors.Vector; Normals : Normal_Vectors.Vector)
+   is
+      R   : Thing_Record := S.Things (T);
+      Old : constant Driver.World.Pairs.Match_Vectors.Vector := R.Placed;
+   begin
+      R.Placed := Points;
+      R.Placed_Normals := Normals;
+      --  Into its points at once, in place of the ones placed before, as Gather keeps them; its support is worked
+      --  out again.
+      declare
+         Now     : Driver.World.Pairs.Match_Vectors.Vector;
+         Normals_Now : Normal_Vectors.Vector;
+      begin
+         for K in R.Points.First_Index .. R.Points.Last_Index loop
+            if not Old.Contains (R.Points (K)) then
+               Now.Append (R.Points (K));
+               Normals_Now.Append (if K <= R.Normals.Last_Index then R.Normals (K) else Zero3);
+            end if;
+         end loop;
+         for K in Points.First_Index .. Points.Last_Index loop
+            Now.Append (Points (K));
+            Normals_Now.Append (Normals (K));
+         end loop;
+         R.Points := Now;
+         R.Normals := Normals_Now;
+         R.Has_Points := not R.Points.Is_Empty;
+      end;
+      R.Under_Due := True;
+      S.Things.Replace_Element (T, R);
+      Driver.Log.Line (Driver.Log.World, "thing" & T'Image & ":" & Points.Length'Image
+                       & " points placed by the eye that holds it, from the places its arm held it at");
+   end Place_Points;
+
+   function Normals_Of (S : State; T : Thing_Id) return Normal_Vectors.Vector is (S.Things (T).Normals);
+
+   procedure Note_Table (S : in out State; Plane : Driver.Geometry.Plane_Estimate) is
+      use type Driver.Geometry.Plane_Estimate;
+   begin
+      if not Driver.Geometry.Known (Plane) or else Plane = S.Table then
+         return;
+      end if;
+      declare
+         --  Its reach: the whole plane, since the eye measured it as one surface wherever its points lay.
+         New_Surface : constant Driver.World.Supports.Surface :=
+           (Plane  => Plane, Low_1 => Real'First, High_1 => Real'Last, Low_2 => Real'First, High_2 => Real'Last,
+            Members => Driver.World.Supports.Member_Vectors.Empty_Vector);
+         Replaced : Boolean := False;
+      begin
+         if Driver.Geometry.Known (S.Table) then
+            for F in S.Surfaces.First_Index .. S.Surfaces.Last_Index loop
+               if S.Surfaces (F).Plane = S.Table then
+                  S.Surfaces.Replace_Element (F, New_Surface);
+                  Replaced := True;
+               end if;
+            end loop;
+         end if;
+         if not Replaced then
+            S.Surfaces.Append (New_Surface);
+         end if;
+         S.Table := Plane;
+         Surfaces_Changed (S);
+      end;
+   end Note_Table;
 
    function Centre (S : State; T : Thing_Id) return Point_Estimate is
       R          : constant Thing_Record := S.Things (T);

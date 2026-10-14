@@ -383,6 +383,8 @@ driver-brain-keyboard.adb	Rule ("");	"1	format	GBNF character class of decimal d
 driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
 driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
 driver-brain-keyboard.adb	Sentence_Rule : constant String := "";	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-live.adb	Half : constant Natural := Natural'Max (1, Driver.Alignment.Half_Patch (W, H)) / 2;	1	numerics	a patch of at least one pixel
+driver-brain-live.adb	Half : constant Natural := Natural'Max (1, Driver.Alignment.Half_Patch (W, H)) / 2;	2	math	half of the patch's half width on either side of a point: the square about it a point was asked at
 driver-brain-live.adb	return 2 * Inside > Driver.Images.Count (Whole);	2	math	more than half: twice the part exceeds the whole
 driver-brain-pictures.adb	Channels : constant := 3;	3	format	bytes per RGB pixel
 driver-brain-rounds.adb	& (if Wait_Beats = 1 then "" else ""));	1	format	one beat is said in the singular
@@ -2691,8 +2693,8 @@ driver-robot-stillness.adb	if Natural (S.Watch_Diffs.Length) >= 2 * Natural'Max 
 driver-robot-stillness.adb	if Natural (S.Watch_Diffs.Length) >= 2 * Natural'Max (1, S.Watch_Scatter_Counted) then	2	math	doubling: the medians are recomputed when the stationary beats have doubled
 driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then	2	statistics	a variance needs two frames
 driver-robot-stillness.adb	or else S.Watch_Run >= 2)	2	statistics	a level holds when two stationary steps in a row agree on it (the agreed settling rule)
-driver-robot-surfaces.adb	(Arccos (Real'Min (1.0, Dot (Ray (U, W), Ray (U + 1.0, W)))));	1.0	math	the next pixel across: the angle one pixel spans
 driver-robot-surfaces.adb	(Arccos (Real'Min (1.0, Dot (Ray (U, W), Ray (U + 1.0, W)))));	1.0	math	a cosine is at most one
+driver-robot-surfaces.adb	(Arccos (Real'Min (1.0, Dot (Ray (U, W), Ray (U + 1.0, W)))));	1.0	math	the next pixel across: the angle one pixel spans
 driver-robot-surfaces.adb	A := A + (1.0 / (Angles (L) * R) ** 2) * P;	1.0	math	a weight is the inverse of a variance
 driver-robot-surfaces.adb	Angles : array (1 .. 3) of Real := [others => 0.0];	3	structure	at most three lines of sight meet: the eye now and the two views
 driver-robot-surfaces.adb	Columns : constant Positive := Positive'Max (1, (W + Step - 1) / Step);	1	numerics	at least one column, and the grid's columns rounded up
@@ -2729,6 +2731,8 @@ driver-robot-surfaces.adb	V : constant Natural := R * Step + Step / 2;	2xStep	ma
 driver-robot-surfaces.adb	W : constant Real := (if Weighted then 1.0 / (Angles (L) * R) ** 2 else 1.0);	1.0	math	a weight is the inverse of a variance
 driver-robot-surfaces.adb	W : constant Real := (if Weighted then 1.0 / (Angles (L) * R) ** 2 else 1.0);	1.0	math	the unweighted meeting: every line weighs one
 driver-robot-surfaces.adb	Ways : array (1 .. 3) of Vec3 := [others => Zero3];	3	structure	at most three lines of sight meet: the eye now and the two views
+driver-robot-surfaces.adb	and then Driver.Distributions.Chi_Square_Deviate (Miss, 2 * Lines - 3) <= Z	2	math	two constraints a line of sight puts on a point, three coordinates the point takes
+driver-robot-surfaces.adb	and then Driver.Distributions.Chi_Square_Deviate (Miss, 2 * Lines - 3) <= Z	3	math	two constraints a line of sight puts on a point, three coordinates the point takes
 driver-robot-surfaces.adb	for Pick in 1 .. 2 loop	2	structure	the two views: the farthest and the one farthest off its line
 driver-robot-surfaces.adb	if Lines >= 2 then	2	math	two lines of sight are the fewest that meet in a point
 driver-robot-surfaces.adb	return Driver.Distributions.Chi_Square_Deviate (Q, 2) > Driver.Conventions.Z;	2	statistics	two degrees of freedom: a place in a picture has two coordinates
@@ -3006,6 +3010,7 @@ driver-world-tracking.adb	if Driver.Pixels.Frames (T.Reference) >= 2 and then no
 driver-world-tracking.adb	if Error.Right < 1.0 then	1.0	statistics	not even one right match to tell the error by
 driver-world.adb	(Low => Number (Doc, Element (Doc, R, 3)), High => Number (Doc, Element (Doc, R, 4))));	3	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	(Low => Number (Doc, Element (Doc, R, 3)), High => Number (Doc, Element (Doc, R, 4))));	4	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	Adopt (S, M, Eye_Id (Whole (2)), O, Region, Placed, Thing);	2	format	the recorded adopt's eye is its second element
 driver-world.adb	Adopt (S, M, Eye_Id (Whole (2)), O, Region, Thing);	2	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Bits (Driver.Bytes.Offset ((Y * W + X) / 8 + 1)) :=	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	Bits (Driver.Bytes.Offset ((Y * W + X) / 8 + 1)) or 2 ** ((Y * W + X) mod 8);	2	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
@@ -3016,24 +3021,33 @@ driver-world.adb	Bits : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset ((W * 
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 2);	2	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 3);	3	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 4);	4	format	the field count or a field's place in a W record (Replay_Write)
-driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 6);	6	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 4);	4	format	a placed point's record: its pixel's two coordinates, its point, its normal
+driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 7);	7	format	the adopt record's elements: its name, the eye, the beat, the width, the height, the region, the placed points
 driver-world.adb	H : constant Natural := Natural (Whole (5));	5	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	K : Positive := 1;	1	structure	msgpack array elements count from one
 driver-world.adb	Learn_Friction (S, Thing_Id (Whole (2)),	2	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	List : constant Node := Element (Doc, R, 7);	7	format	the placed points are the adopt record's seventh element
+driver-world.adb	Nm : constant Node := Element (Doc, P, 4);	4	format	a placed point's normal is its record's fourth element
+driver-world.adb	Normal => [for A in 1 .. 3 => Number (Doc, Element (Doc, Nm, A))]);	3	math	a normal has three coordinates
+driver-world.adb	Placed (K) := (Pixel => (U => Number (Doc, Element (Doc, P, 1)),	1	format	a placed point's pixel column is its record's first element
+driver-world.adb	Point => Point_Of (Doc, Element (Doc, P, 3)),	3	format	a placed point's point is its record's third element
 driver-world.adb	Read_Binary (Doc, Element (Doc, R, 6), Unpack'Access);	6	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Remember (S, Point_Of (Doc, Element (Doc, R, 2)), Place);	2	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Sum := Sum + (M.Point.Covariance (1, 1) + M.Point.Covariance (2, 2) + M.Point.Covariance (3, 3)) / 3.0;	3.0	math	the mean of the three axes' variances
 driver-world.adb	Touched (S, Thing_Id (Whole (2)), Point_Of (Doc, Element (Doc, R, 3)));	2	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Touched (S, Thing_Id (Whole (2)), Point_Of (Doc, Element (Doc, R, 3)));	3	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	V => Number (Doc, Element (Doc, P, 2))),	2	format	a placed point's pixel row is its record's second element
 driver-world.adb	W : constant Natural := Natural (Whole (4));	4	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	What : constant String := Text (Doc, Element (Doc, R, 1));	1	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	and then Kind_Of (Doc, Element (Doc, R, 1)) = String_Value;	1	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	elsif What = "" and then N = 3 then	3	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	elsif What = "" and then N = 4 then	4	format	the field count or a field's place in a W record (Replay_Write)
-driver-world.adb	elsif What = "" and then N = 6 then	6	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	elsif What = "" and then N in 6 .. 7 then	6	format	an adopt record has six elements, seven with the placed points
+driver-world.adb	elsif What = "" and then N in 6 .. 7 then	7	format	an adopt record has six elements, seven with the placed points
 driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mod 8) mod 2 = 1 then	1	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mod 8) mod 2 = 1 then	2	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mod 8) mod 2 = 1 then	2	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mod 8) mod 2 = 1 then	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mod 8) mod 2 = 1 then	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
+driver-world.adb	if N = 7 then	7	format	an adopt record with the placed points has seven elements
 driver-world.adb	if What = "" and then N = 2 then	2	format	the field count or a field's place in a W record (Replay_Write)

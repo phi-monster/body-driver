@@ -18,6 +18,7 @@ with Ada.Strings.Fixed;
 with Driver.Robot.Body_File;
 with Driver.Robot.Kinematics.Errors.Tests;
 with Driver.Robot.Kinematics.Fixed.Tests;
+with Driver.Robot.Surfaces.Tests;
 with Driver.Recording;
 with Ada.Text_IO;
 with GNAT.OS_Lib;
@@ -7935,6 +7936,7 @@ package body Driver.Robot.Tests is
                              & "that moved far are outliers", Scales_Beside_Stated_Sigmas'Access);
       Driver.Robot.Kinematics.Errors.Tests.Register;
       Driver.Robot.Kinematics.Fixed.Tests.Register;
+      Driver.Robot.Surfaces.Tests.Register;
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
                              & "stack, as the decider's does", Estimate_In_A_Task'Access);
       Driver.Tests.Register ("robot.probe.limits", "a channel at its limit one way is asked ever further that way though "

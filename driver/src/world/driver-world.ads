@@ -32,6 +32,7 @@ with Driver.Numerics;
 with Driver.Observations;
 with Driver.Robot;
 with Driver.Robot.Hand;
+with Driver.Robot.Surfaces;
 with Driver.Uncertain;
 
 private with Ada.Finalization;
@@ -72,7 +73,20 @@ package Driver.World is
       Region : Driver.Images.Mask;
       Thing  : out Thing_Id);
    --  Makes a region of one eye a thing: the existing thing that occupies the
-   --  same pixels, or a new one.
+   --  same pixels, or a new one. An eye that rides on a fitted arm places what it
+   --  shows there by itself (Driver.Robot.Surfaces.In_Region).
+
+   procedure Adopt
+     (S      : in out Scene;
+      M      : Driver.Robot.Model;
+      E      : Eye_Id;
+      O      : Observation;
+      Region : Driver.Images.Mask;
+      Placed : Driver.Robot.Surfaces.Surface_Point_Array;
+      Thing  : out Thing_Id);
+   --  As Adopt, with the points the eye placed in exactly this region given
+   --  (Driver.Robot.Surfaces.In_Region of it), so they are not placed twice: a
+   --  replay, given the region alone, places the same points again.
 
    function Seen_In (S : Scene; T : Thing_Id; E : Eye_Id) return Boolean;
    --  Seen by that eye at the latest beat.

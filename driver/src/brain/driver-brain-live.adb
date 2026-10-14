@@ -5,6 +5,8 @@ with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot;
 with Driver.Robot.Hand;
+with Driver.Robot.Surfaces;
+with Driver.Alignment;
 with Driver.Uncertain;
 
 package body Driver.Brain.Live is
@@ -178,10 +180,92 @@ package body Driver.Brain.Live is
          Driver.World.Adopt (S, B.C.Robot.all, E, O, Region, T);
          Found := Driver.Brain.Names.A_Thing;
       end During;
+      --  An eye that rides on a fitted arm tells which pixels in the box are the thing by itself: those whose
+      --  points, placed from the places the arm's sweep held the eye at, stand above the surface they rest on
+      --  (Driver.Robot.Surfaces), each the patch of half a patch's width about it that the point was asked at. No
+      --  instrument segments the box for it: the body on the Pi has none, and what stands on a surface is what
+      --  the body can reach for. An eye that stands still in the world has no such views of its own, and needs the
+      --  instrument's segmentation; without it the next eye is asked (Driver.Brain.Names).
+      Placed_By_Eye : Boolean := False;
+      procedure Placing is
+         use type Driver.Robot.Mount_Kind;
+         O    : constant Driver.Observations.Observation := Driver.Beats.Latest.all;
+         M    : Driver.Robot.Model renames B.C.Robot.all;
+         S    : Driver.World.Scene renames B.C.Scene.all;
+      begin
+         if Natural (E) > Driver.Robot.Eye_Count (M)
+           or else Driver.Robot.Eye_Mount (M, E).Kind /= Driver.Robot.Arm_Carried
+           or else Natural (E) > Natural (O.Images.Length)
+         then
+            return;
+         end if;
+         declare
+            W    : constant Natural := Driver.Images.Width (O.Images (E));
+            H    : constant Natural := Driver.Images.Height (O.Images (E));
+            Self : constant Driver.Images.Mask := Driver.Robot.Self_Mask (M, E, O);
+            Box_Mask : Driver.Images.Mask := Driver.Images.Create (W, H);
+            Half : constant Natural := Natural'Max (1, Driver.Alignment.Half_Patch (W, H)) / 2;
+         begin
+            for R in Natural (Real'Max (0.0, Real'Floor (Where.Top_Left.V))) ..
+                     Natural (Real'Min (Real (H - 1), Real'Floor (Where.Bottom_Right.V)))
+            loop
+               for C in Natural (Real'Max (0.0, Real'Floor (Where.Top_Left.U))) ..
+                        Natural (Real'Min (Real (W - 1), Real'Floor (Where.Bottom_Right.U)))
+               loop
+                  if not (Driver.Images.Width (Self) = W and then Driver.Images.Contains (Self, C, R)) then
+                     Driver.Images.Include (Box_Mask, C, R);
+                  end if;
+               end loop;
+            end loop;
+            declare
+               Placed : constant Driver.Robot.Surfaces.Surface_Point_Array :=
+                 Driver.Robot.Surfaces.In_Region (M, E, O, Box_Mask);
+            begin
+               Placed_By_Eye := True;
+               if Placed'Length = 0 then
+                  Why := To_Unbounded_String ("nothing in the box stands above the surface it rests on, as this eye "
+                                              & "places it from the places its arm held it at");
+                  return;
+               end if;
+               Region := Driver.Images.Create (W, H);
+               for P of Placed loop
+                  for R in Natural (Real'Max (0.0, Real'Floor (P.Pixel.V) - Real (Half))) ..
+                           Natural (Real'Min (Real (H - 1), Real'Floor (P.Pixel.V) + Real (Half)))
+                  loop
+                     for C in Natural (Real'Max (0.0, Real'Floor (P.Pixel.U) - Real (Half))) ..
+                              Natural (Real'Min (Real (W - 1), Real'Floor (P.Pixel.U) + Real (Half)))
+                     loop
+                        if Driver.Images.Contains (Box_Mask, C, R) then
+                           Driver.Images.Include (Region, C, R);
+                        end if;
+                     end loop;
+                  end loop;
+               end loop;
+               for K in 1 .. Driver.World.Thing_Count (S) loop
+                  declare
+                     Known : constant Driver.World.Thing_Id := Driver.World.Thing_Id (K);
+                  begin
+                     if Driver.World.Seen_In (S, Known, E) and then Mostly (Driver.World.Region_In (S, Known, E), Region)
+                     then
+                        Found := Driver.Brain.Names.A_Thing;
+                        T := Known;
+                        return;
+                     end if;
+                  end;
+               end loop;
+               Driver.World.Adopt (S, M, E, O, Region, Placed, T);
+               Found := Driver.Brain.Names.A_Thing;
+            end;
+         end;
+      end Placing;
    begin
       T := Driver.Brain.Names.Thing_Id'First;
       Why := Null_Unbounded_String;
       Found := Driver.Brain.Names.No_Patch;
+      Within_A_Beat (Placing'Access);
+      if Placed_By_Eye then
+         return;
+      end if;
       Driver.Instrument.Segment
         (B.Now.Images (E), Has_Box => True,
          Around => (X0 => Where.Top_Left.U, Y0 => Where.Top_Left.V, X1 => Where.Bottom_Right.U, Y1 => Where.Bottom_Right.V),

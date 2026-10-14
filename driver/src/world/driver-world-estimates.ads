@@ -81,6 +81,24 @@ private package Driver.World.Estimates is
    --  they were seen at.
 
    function Points_Eye (S : State; T : Thing_Id) return Eye_Id;
+
+   package Normal_Vectors is new Ada.Containers.Vectors (Positive, Vec3, Driver.Numerics.Arrays."=");
+
+   procedure Place_Points
+     (S : in out State; T : Thing_Id; Points : Driver.World.Pairs.Match_Vectors.Vector; Normals : Normal_Vectors.Vector)
+     with Pre => Natural (Points.Length) = Natural (Normals.Length);
+   --  Points an eye that holds the thing placed by itself, from the places its arm held it at
+   --  (Driver.Robot.Surfaces), each with its normal (zero where not told): the thing's own beside every pair's,
+   --  those inside it where it was pointed at. Each was found again along its line of sight in two views and in
+   --  both directions, so it needs no other pair to bear it out as a pair's point does (Gather).
+
+   function Normals_Of (S : State; T : Thing_Id) return Normal_Vectors.Vector;
+   --  Per point of Points_Of, in order, the normal its eye placed it with; zero for the pairs' points.
+
+   procedure Note_Table (S : in out State; Plane : Driver.Geometry.Plane_Estimate);
+   --  The table an arm's eye measured, in the world frame, its normal towards what rests on it: a surface things
+   --  rest on beside the ones the scene's pairs of eyes find, replaced when it is measured again; nothing while it
+   --  is not known.
    --  The eye those pixels are in.
 
    function Centre (S : State; T : Thing_Id) return Point_Estimate;
@@ -181,6 +199,9 @@ private
       Starts    : Start_Vectors.Vector;
       By_Pair   : Pair_Seen_Vectors.Vector;
       Points    : Driver.World.Pairs.Match_Vectors.Vector;   --  every pair's, inside it in the eyes holding it
+      Normals   : Normal_Vectors.Vector;                     --  per point of Points, its placed normal (Place_Points)
+      Placed    : Driver.World.Pairs.Match_Vectors.Vector;   --  the points an eye placed by itself (Place_Points)
+      Placed_Normals : Normal_Vectors.Vector;
       Points_In : Eye_Id := Eye_Id'First;
       Points_At : Driver.Clock.Beat := 0;
       Has_Points : Boolean := False;
@@ -239,6 +260,7 @@ private
       Round_Seen  : Observation_Holders.Holder;   --  the observation they were asked at
       Up          : Direction_Estimate;
       Places      : Place_Vectors.Vector;
+      Table       : Driver.Geometry.Plane_Estimate;   --  the table an arm's eye measured, as noted (Note_Table)
    end record;
 
 end Driver.World.Estimates;
