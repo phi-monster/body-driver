@@ -5544,6 +5544,8 @@ package body Driver.Robot.Tests is
                K.Beat := F;
                for J in 1 .. N loop
                   K.Readings.Append (Changes (F, J));
+                  --  What the sweep asked: every joint away from the base the frames are drawn about.
+                  K.Asked.Append (Changes (F, J) /= 0.0);
                   D (J) := Changes (F, J);
                end loop;
                Arms (A).Frames.Append (K);
