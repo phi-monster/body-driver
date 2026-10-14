@@ -4468,9 +4468,13 @@ package body Driver.Robot.Tests is
    --  arm's (harness/robodojo_scramble): reading I is joint Order_Of (I) of
    --  the chain times Gain (I), a power of two of either sign, so that
    --  neither the readings' order is the chain's nor their unit radians.
+   --  Matcher_Noise is the spread of every sighting's own error, in pixels (0.2 unless given; the kiwi's aligner
+   --  left 0.6 to 1.2 px a keyframe, R6 10-14); Kept_Share keeps that share of the grid's points, drawn once for the
+   --  sweep (a white table leaves the aligner a fifth of its query points, R6).
    procedure Synthetic_Sweep
      (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0; Track_Error : Real := 0.0;
-      Local_Error : Real := 0.0; Pending : Boolean := False; Drawn : Boolean := False)
+      Local_Error : Real := 0.0; Pending : Boolean := False; Drawn : Boolean := False;
+      Matcher_Noise : Real := 0.2; Kept_Share : Real := 1.0; Either : Boolean := False; Distortion : Real := 0.0)
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N       : constant := 6;
@@ -4482,10 +4486,16 @@ package body Driver.Robot.Tests is
       Frames  : constant Positive := 1 + N * Levels'Length + Cells;
       Columns : constant := 16;
       Rows    : constant := 12;
-      Noise   : constant := 0.2;
+      Noise   : constant Real := Matcher_Noise;
+      Keep_Rng : Generator := (State => 13);
+      Kept_Point : constant array (1 .. Columns * Rows) of Boolean :=
+        [for K in 1 .. Columns * Rows => Kept_Share >= 1.0 or else Uniform (Keep_Rng) < Kept_Share];
       Table   : constant Vec3 := [0.0, -0.6, -0.8];   --  its normal, towards the eye
       Truth   : Fit.Joint_Array (1 .. N);
-      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => Distortion, K2 => 0.0);
+      --  The checks against fixed fractions of the noise hold for the fine sightings (0.2 px, every point, no
+      --  distortion) they were set on; elsewhere the fit is judged by its own uncertainty alone.
+      Fine    : constant Boolean := Matcher_Noise <= 0.2 and then Kept_Share >= 1.0 and then Distortion = 0.0;
       Changes : Real_Matrix (1 .. Frames, 1 .. N) := [others => [others => 0.0]];
       Rng     : Generator;
       type Sighting_Access is access Fit.Sighting_Array;
@@ -4578,7 +4588,7 @@ package body Driver.Robot.Tests is
                         Fit.Project (Lens, T * X, U, V, Ahead);
                         U := U + Noise * Gaussian (Rng) + Shared_U + Track_U (K) + Local_U (K);
                         V := V + Noise * Gaussian (Rng) + Shared_V + Track_V (K) + Local_V (K);
-                        if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
+                        if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 and then Kept_Point (K) then
                            Seen := Seen + 1;
                            All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V, Own => 0.0, Own_Freedom => 0);
                         end if;
@@ -4639,9 +4649,17 @@ package body Driver.Robot.Tests is
          end loop;
          Fit.Fit (Given, Asked, [for I in 1 .. N => abs Gain (I) * 0.01 * Scale], All_Seen (1 .. Seen), 640, 480, 0, Joints,
                   Chain, Found, Report);
+         Driver.Log.Line (Driver.Log.Robot, "kinematics test: widest turn" & Real'Image (0.2 * Scale) & " rad, noise"
+                          & Real'Image (Noise) & " px, " & Seen'Image & " sightings: " & (if Report.Fitted then "fitted, focal "
+                          & Driver.Log.Image (Found.Fx, 2) & " +- " & Driver.Log.Image (Report.Focal_Sigma, 2) & " px"
+                          else "not fitted at stage" & Report.Stage'Image & ", " & Ada.Strings.Unbounded.To_String (Report.Why)));
          if not Expect_Fit then
             Check (not Report.Fitted, "a sweep of" & Real'Image (0.2 * Scale) & " rad at most was fitted, focal"
                    & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy));
+            return;
+         end if;
+         --  Either: a sweep that may or may not tell the arm; what the fit reports, it reports right.
+         if Either and then not Report.Fitted then
             return;
          end if;
          Check (Report.Fitted, "the fit did not succeed: stage" & Report.Stage'Image & ", "
@@ -4665,7 +4683,7 @@ package body Driver.Robot.Tests is
             Driver.Log.Line (Driver.Log.Robot, "kinematics test lens: chi square" & Real'Image (Chi) & " on"
                              & Fit.Lens_Terms'Image & " terms");
          end;
-         if Frame_Error = 0.0 then
+         if Frame_Error = 0.0 and then Fine then
             Check_Close (Found.Fx, Lens.Fx, Lens.Fx * Noise / 40.0, "the focal length across");
             Check_Close (Found.Fy, Lens.Fy, Lens.Fy * Noise / 40.0, "the focal length down");
             --  Each reading's turn per unit, as a vector: an axis and its
@@ -4704,7 +4722,7 @@ package body Driver.Robot.Tests is
             Scale := Sqrt (Scale / Real (Frames));
             Want := Fit.Eye_At (Truth, Along (Truth), Test);
             Got := Fit.Eye_At (Joints, Chain, Drawn_Of (Test));
-            if Frame_Error = 0.0 then
+            if Frame_Error = 0.0 and then Fine then
                Check (abs (Scale * Got.Translation - Want.Translation) < Scale * Noise / 40.0,
                       "the eye at a new pose is off by" & Real'Image (abs (Scale * Got.Translation - Want.Translation) / Scale)
                       & " of the arm's reach");
@@ -4774,9 +4792,25 @@ package body Driver.Robot.Tests is
             --  to: its distance from the table is minus the offset.
             Check (Offset < 0.0 and then Offset_Sigma < -Offset, "the table's offset is" & Offset'Image & " +-"
                    & Offset_Sigma'Image);
-            Check (Arccos (Real'Min (1.0, Normal * Unit (Table))) < Noise / 40.0,
-                   "the table's normal is off by" & Real'Image (Arccos (Real'Min (1.0, Normal * Unit (Table)))) & " rad");
-            Check (Sigma < Noise / 40.0, "the table's normal is uncertain by" & Sigma'Image & " rad");
+            if Fine then
+               Check (Arccos (Real'Min (1.0, Normal * Unit (Table))) < Noise / 40.0,
+                      "the table's normal is off by" & Real'Image (Arccos (Real'Min (1.0, Normal * Unit (Table)))) & " rad");
+               Check (Sigma < Noise / 40.0, "the table's normal is uncertain by" & Sigma'Image & " rad");
+            else
+               --  The table a desktop arm's eye sees: its normal within Z of its uncertainty as the driver takes it,
+               --  the points' scatter and what the fit's own uncertainty moves every depth by together
+               --  (Plane_Covariance, as Kinematics has the table): sparse sightings a pixel off leave the second the
+               --  larger.
+               declare
+                  Whole : Fit.Sight_Plane := Plane;
+               begin
+                  Whole.Covariance := Fit.Plane_Covariance (Sights, On, Plane, Report.Depth_Gains, Report.Covariance);
+                  Check (Arccos (Real'Min (1.0, Normal * Unit (Table))) <= Driver.Conventions.Z * Fit.Plane_Tilt_Sigma (Whole),
+                         "the table's normal is off by" & Real'Image (Arccos (Real'Min (1.0, Normal * Unit (Table))))
+                         & " rad, its sigma" & Real'Image (Fit.Plane_Tilt_Sigma (Whole)) & " (the points' scatter alone"
+                         & Sigma'Image & ")");
+               end;
+            end if;
          end;
          end if;
          Driver.Log.Line (Driver.Log.Robot, "kinematics test: focal " & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy)
@@ -7257,6 +7291,19 @@ package body Driver.Robot.Tests is
       Synthetic_Sweep (0.002, Expect_Fit => False);
    end Kinematics_Of_A_Small_Sweep;
 
+   --  The kiwi's regime (R6, 10-14): the first passes turned each joint by 1.5 to 3.4 degrees, the aligner's
+   --  sightings erred by about a pixel, and a white table left it a quarter of its points. Swept that little, the
+   --  fit may or may not tell the arm, but what it reports it must report right: a wrong lens taken for fitted
+   --  (the kiwi's 27, 57 and 24453 px) puts every later measurement off. Swept to 11.5 degrees, as the passes'
+   --  ladder climbs to, it must tell it.
+   procedure Kinematics_In_A_Desktop_Regime is
+   begin
+      Synthetic_Sweep (0.3, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Either => True);
+      Synthetic_Sweep (1.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25);
+      --  The same with a wide-angle wrist camera's barrel distortion.
+      Synthetic_Sweep (1.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Distortion => -0.2);
+   end Kinematics_In_A_Desktop_Regime;
+
    --  The same arm, every keyframe's points sharing an error of 0.3 pixels
    --  (a rendering, a view, the matcher on that pair), as A9's matches did:
    --  sightings taken as independent hide it, and the fit's focal length
@@ -8032,6 +8079,10 @@ package body Driver.Robot.Tests is
                              & "less than a keyframe's match can tell is not fitted", Kinematics_With_An_Offset_Reference'Access);
       Driver.Tests.Register ("robot.kinematics.small", "a sweep too small to determine the lens and the joints is "
                              & "reported fitted", Kinematics_Of_A_Small_Sweep'Access);
+      Driver.Tests.Register ("robot.kinematics.desktop", "a desktop servo arm swept by 1.5 to 3.4 degrees, its sightings "
+                             & "erring by a pixel, a quarter of the points left, is reported fitted with a lens off by "
+                             & "more than Z of its sigma, or swept to 11.5 degrees is not fitted right",
+                             Kinematics_In_A_Desktop_Regime'Access);
       Driver.Tests.Register ("robot.kinematics", "the arm's axes, the eye's lens or the eye's pose at a new pose come "
                              & "out wrong from noisy matches of single-joint and Hadamard keyframes",
                              Kinematics_Of_A_Synthetic_Arm'Access);

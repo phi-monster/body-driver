@@ -1646,6 +1646,15 @@ package body Driver.Robot.Kinematics.Fit is
                   Report.Median_Px := Driver.Stats.Median (Fit_Abs.all);
                   Free (Fit_Abs);
                end if;
+               if S > 0 then
+                  Fit_Abs := new Real_Array (1 .. S);
+                  for I in 1 .. S loop
+                     Fit_Abs (I) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);
+                  end loop;
+                  Report.All_Median_Px := Driver.Stats.Median (Fit_Abs.all);
+                  Report.All_Count := S;
+                  Free (Fit_Abs);
+               end if;
                Free (All_Index);
                Free (All_R);
                Free (All_Own);
@@ -1847,6 +1856,9 @@ package body Driver.Robot.Kinematics.Fit is
       --  (its ended bracket); 0 before the search. The last stage takes the search's focal length as a
       --  measurement of this width (Refine_Tracks).
       Focal_Within : Real := 0.0;
+      --  The focal lengths the search of stage 1 ranged over, least and most: how far the last stage's profile of
+      --  the focal length may go (Profile_Focal).
+      Searched_Least, Searched_Most : Real := 0.0;
       Counts : array (1 .. N) of Natural := [others => 0];
       --  The joints along the arm, from the base (stage 4 finds it; the joints alone are fitted before it).
       Order  : Chain_Order (1 .. N) := [for K in 1 .. N => K];
@@ -2845,6 +2857,8 @@ package body Driver.Robot.Kinematics.Fit is
                end loop;
             end loop;
             Focal_Within := Told_Within;
+            Searched_Least := F_Least;
+            Searched_Most := F_Most;
             declare
                Focal : constant Real := Exp (Best_At);
             begin
@@ -3599,6 +3613,79 @@ package body Driver.Robot.Kinematics.Fit is
       --  Stage 5: the tracks.
       Enter (5);
       Refine_Tracks (Changes, Sight, Joints, Order, L, Report, Focal_Within);
+      --  The focal length's profile. The covariance at the solution says how far the focal length can move within
+      --  the basin the solution lies in, nothing of another basin along the direction the sightings tell worst:
+      --  with a wide lens's barrel distortion free, the focal length, the distortion and the joints' turns per unit
+      --  trade along a valley, and a desktop arm swept to 11.5 degrees settled at 330 px of 400, its sigma 4.5 px
+      --  (robot.kinematics.desktop, 10-15). Each way from the solution, the focal length is held at steps
+      --  doubling from Z of its own sigma (held within that sigma, the search's measurement of it), everything
+      --  else refitted; a step whose sightings' median residual, over every sighting, lies below the solution's
+      --  by more than Z of the two medians' standard errors is a better basin, refitted from there and profiled
+      --  again; a step above by as much ends that way, as does the range the focal search ranged over.
+      declare
+         type Sign_Way is (Up, Down);
+         pragma Unreferenced (Down);
+         Moved : Boolean := True;
+         Base  : Real;
+      begin
+         --  Only a solution that would be reported fitted is profiled: one the sightings leave undetermined is refitted
+         --  when the evidence grows, and its profile would cost the boot that time for nothing.
+         while Moved and then Report.Determined and then Report.All_Count > 0 and then Report.Focal_Sigma < Real'Last
+           and then Report.Focal_Sigma > 0.0 and then Searched_Least > 0.0
+         loop
+            Moved := False;
+            Base := Report.All_Median_Px;
+            declare
+               Held     : constant Real := Report.Focal_Sigma / L.Fx;   --  the focal length's own sigma, in the logarithm
+               Base_Err : constant Real := Median_Error (Base, Report.All_Count);
+            begin
+               for Way in Sign_Way loop
+                  declare
+                     Offset : Real := Driver.Conventions.Z * Held;
+                  begin
+                     loop
+                        declare
+                           Factor : constant Real := Exp ((if Way = Up then Offset else -Offset));
+                           Lp     : Lens := L;
+                           Jp     : Joint_Array := Joints;
+                           Rp     : Fit_Report;
+                        begin
+                           exit when L.Fx * Factor < Searched_Least or else L.Fx * Factor > Searched_Most;
+                           Lp.Fx := L.Fx * Factor;
+                           Lp.Fy := L.Fy * Factor;
+                           Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Held);
+                           exit when Rp.All_Count = 0;
+                           declare
+                              Err : constant Real :=
+                                Sqrt (Median_Error (Rp.All_Median_Px, Rp.All_Count) ** 2 + Base_Err ** 2);
+                           begin
+                              Driver.Log.Line (Driver.Log.Robot, "kinematics: the focal length's profile at "
+                                               & Driver.Log.Image (Lp.Fx, 1) & " px leaves a median "
+                                               & Driver.Log.Image (Rp.All_Median_Px, 3) & " px over every sighting, "
+                                               & "against " & Driver.Log.Image (Base, 3) & " px at "
+                                               & Driver.Log.Image (L.Fx, 1) & " (+- " & Driver.Log.Image (Err, 3) & ")");
+                              if Rp.All_Median_Px + Driver.Conventions.Z * Err < Base then
+                                 --  A better basin: refitted from there, the focal length free within the search's width.
+                                 Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Focal_Within);
+                                 if Rp.All_Count > 0 and then Rp.All_Median_Px < Base then
+                                    L := Lp;
+                                    Joints := Jp;
+                                    Report := Rp;
+                                    Moved := True;
+                                 end if;
+                                 exit;
+                              end if;
+                              exit when Rp.All_Median_Px > Base + Driver.Conventions.Z * Err;
+                           end;
+                           Offset := 2.0 * Offset;
+                        end;
+                     end loop;
+                  end;
+                  exit when Moved;
+               end loop;
+            end;
+         end loop;
+      end;
       declare
          Sum : Real := 0.0;
       begin

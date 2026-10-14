@@ -1581,6 +1581,7 @@ driver-robot-kinematics-errors.ads	with Pre => Frame'First = 1 and then Track'Fi
 driver-robot-kinematics-errors.ads	with Pre => Frame'First = 1 and then Track'First = 1 and then Track'Length = Frame'Length	1	structure	indexes start at one
 driver-robot-kinematics-errors.ads	with Pre => Frame'First = 1 and then Track'First = 1 and then Track'Length = Frame'Length	1	structure	indexes start at one
 driver-robot-kinematics-errors.ads	with Pre => Frame'First = 1 and then Track'First = 1 and then Track'Length = Frame'Length	1	structure	indexes start at one
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Base, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Exp (Best_At - Told_Within), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Exp (Low), 1) & "" & Driver.Log.Image (Exp (High), 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Exp (Low), 1) & "" & Driver.Log.Image (Exp (High), 1)	1	format	digits printed in a log line or a message
@@ -1594,10 +1595,14 @@ driver-robot-kinematics-fit.adb	& "" & Real'Image (C) & "" & Real'Image (Sqrt (V
 driver-robot-kinematics-fit.adb	& (case (P - 7) mod 5 is	5	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	& (case (P - 7) mod 5 is	7	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Exp (Best_At + Told_Within), 1) & "" & Warm_Tries'Image	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Err, 3) & "");	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Err, 3) & "");	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Least_Pivot, 6) & ""	6	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Lp.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element, 1) & "")	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rp.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Sqrt (Sum (F) / Real (Cnt (F))), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
@@ -1708,6 +1713,8 @@ driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / 
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	F_Least := (if Searches = 1 then F else Real'Min (F_Least, F));	1	structure	the first focal length tried starts the least
+driver-robot-kinematics-fit.adb	Fit_Abs (I) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	math	a sighting's two residuals, u then v, at 2 I - 1 and 2 I
+driver-robot-kinematics-fit.adb	Fit_Abs (I) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	math	a sighting's two residuals, u then v, at 2 I - 1 and 2 I
 driver-robot-kinematics-fit.adb	Fit_Abs (Kf) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Fit_Abs (Kf) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Focal : constant Real := (L.Fx + L.Fy) / 2.0;	2.0	math	the focal length: the mean of the two
@@ -1788,6 +1795,7 @@ driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint 
 driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the vector
+driver-robot-kinematics-fit.adb	Offset := 2.0 * Offset;	2.0	structure	the profile's steps double: any distance is reached within a factor two in a number of steps that grows only with its logarithm
 driver-robot-kinematics-fit.adb	Out_J (Out_J'First + J - 1).C := X (O + 5);	5	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Out_J (Out_J'First + J - 1).C := X (O + 5);	5	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Out_J (Out_J'First + J - 1).P := Cos (X (O + 2)) * F1 + Sin (X (O + 2)) * F2;	2	structure	the positions of the parameters in the vector
@@ -2683,6 +2691,47 @@ driver-robot-stillness.adb	if Natural (S.Watch_Diffs.Length) >= 2 * Natural'Max 
 driver-robot-stillness.adb	if Natural (S.Watch_Diffs.Length) >= 2 * Natural'Max (1, S.Watch_Scatter_Counted) then	2	math	doubling: the medians are recomputed when the stationary beats have doubled
 driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then	2	statistics	a variance needs two frames
 driver-robot-stillness.adb	or else S.Watch_Run >= 2)	2	statistics	a level holds when two stationary steps in a row agree on it (the agreed settling rule)
+driver-robot-surfaces.adb	(Arccos (Real'Min (1.0, Dot (Ray (U, W), Ray (U + 1.0, W)))));	1.0	math	the next pixel across: the angle one pixel spans
+driver-robot-surfaces.adb	(Arccos (Real'Min (1.0, Dot (Ray (U, W), Ray (U + 1.0, W)))));	1.0	math	a cosine is at most one
+driver-robot-surfaces.adb	A := A + (1.0 / (Angles (L) * R) ** 2) * P;	1.0	math	a weight is the inverse of a variance
+driver-robot-surfaces.adb	Angles : array (1 .. 3) of Real := [others => 0.0];	3	structure	at most three lines of sight meet: the eye now and the two views
+driver-robot-surfaces.adb	Columns : constant Positive := Positive'Max (1, (W + Step - 1) / Step);	1	numerics	at least one column, and the grid's columns rounded up
+driver-robot-surfaces.adb	Cu : constant Real := (if Half > 0.0 then (Uf - Un) / (2.0 * Half) else 1.0);	1.0	math	the unit step along u when the segment has no length
+driver-robot-surfaces.adb	Cu : constant Real := (if Half > 0.0 then (Uf - Un) / (2.0 * Half) else 1.0);	2.0	math	the segment's half length: its direction is the difference over twice it
+driver-robot-surfaces.adb	Cv : constant Real := (if Half > 0.0 then (Vf - Vn) / (2.0 * Half) else 0.0);	2.0	math	the segment's half length: its direction is the difference over twice it
+driver-robot-surfaces.adb	D : constant Natural := At_Offset (0, 1);	1	math	the neighbour one row down
+driver-robot-surfaces.adb	Gate : constant Real := Driver.Alignment.Window_Radius (1.0);	1.0	math	the window of a unit standard deviation: the gate's radius in sigmas
+driver-robot-surfaces.adb	Half : constant Real := Sqrt ((Uf - Un) ** 2 + (Vf - Vn) ** 2) / 2.0;	2.0	math	half the segment's length
+driver-robot-surfaces.adb	Into (V, Centre + (Near / 2.0) * D_Now, U2, V2, F2);	2.0	structure	the depth halves while the view still sees the place: the nearest depth within the halvings a float can tell
+driver-robot-surfaces.adb	Into (V, Centre + Dist * Sight (Now, Q.U + 1.0, Q.V), U1, V1, F1);	1.0	math	the next pixel across, for the warp's derivative by u
+driver-robot-surfaces.adb	Into (V, Centre + Dist * Sight (Now, Q.U, Q.V + 1.0), U2, V2, F2);	1.0	math	the next pixel down, for the warp's derivative by v
+driver-robot-surfaces.adb	K : constant Natural := (if Pick = 1 then First else Second);	1	structure	the first of the two views
+driver-robot-surfaces.adb	L : constant Natural := At_Offset (-1, 0);	1	math	the neighbour one column left
+driver-robot-surfaces.adb	Lines : Natural := 1;	1	structure	the eye now is the first line of sight
+driver-robot-surfaces.adb	Mid_S : constant Real := (Far + Near) / 2.0;	2.0	math	the middle of the segment's depths
+driver-robot-surfaces.adb	Mid_U : constant Real := (Uf + Un) / 2.0;	2.0	math	the middle of the segment's ends
+driver-robot-surfaces.adb	Mid_V : constant Real := (Vf + Vn) / 2.0;	2.0	math	the middle of the segment's ends
+driver-robot-surfaces.adb	Near := Near / 2.0;	2.0	structure	the depth halves while the view still sees the place: the nearest depth within the halvings a float can tell
+driver-robot-surfaces.adb	Origins : array (1 .. 3) of Vec3 := [others => Zero3];	3	structure	at most three lines of sight meet: the eye now and the two views
+driver-robot-surfaces.adb	Q : constant Real := (C.VV * Du * Du - 2.0 * C.UV * Du * Dv + C.UU * Dv * Dv) / Det;	2.0	math	the quadratic form's cross term is counted twice
+driver-robot-surfaces.adb	Queries (K) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
+driver-robot-surfaces.adb	Queries (K) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
+driver-robot-surfaces.adb	Queries (K) := (U => Real (U) + 0.5, V => Real (V) + 0.5);	0.5	format	a pixel's centre lies half a pixel from its corner
+driver-robot-surfaces.adb	Queries (K) := (U => Real (U) + 0.5, V => Real (V) + 0.5);	0.5	format	a pixel's centre lies half a pixel from its corner
+driver-robot-surfaces.adb	R : constant Natural := At_Offset (1, 0);	1	math	the neighbour one column right
+driver-robot-surfaces.adb	Rows : constant Positive := Positive'Max (1, (H + Step - 1) / Step);	1	numerics	at least one row, and the grid's rows rounded up
+driver-robot-surfaces.adb	Step : constant Positive := Positive'Max (1, Driver.Alignment.Half_Patch (W, H));	1	numerics	a step of at least one pixel
+driver-robot-surfaces.adb	U : constant Natural := At_Offset (0, -1);	1	math	the neighbour one row up
+driver-robot-surfaces.adb	U : constant Natural := C * Step + Step / 2;	2	math	a grid point at the middle of its step
+driver-robot-surfaces.adb	U : constant Natural := C * Step + Step / 2;	2xStep	math	a grid point at the middle of its step
+driver-robot-surfaces.adb	V : constant Natural := R * Step + Step / 2;	2	math	a grid point at the middle of its step
+driver-robot-surfaces.adb	V : constant Natural := R * Step + Step / 2;	2xStep	math	a grid point at the middle of its step
+driver-robot-surfaces.adb	W : constant Real := (if Weighted then 1.0 / (Angles (L) * R) ** 2 else 1.0);	1.0	math	a weight is the inverse of a variance
+driver-robot-surfaces.adb	W : constant Real := (if Weighted then 1.0 / (Angles (L) * R) ** 2 else 1.0);	1.0	math	the unweighted meeting: every line weighs one
+driver-robot-surfaces.adb	Ways : array (1 .. 3) of Vec3 := [others => Zero3];	3	structure	at most three lines of sight meet: the eye now and the two views
+driver-robot-surfaces.adb	for Pick in 1 .. 2 loop	2	structure	the two views: the farthest and the one farthest off its line
+driver-robot-surfaces.adb	if Lines >= 2 then	2	math	two lines of sight are the fewest that meet in a point
+driver-robot-surfaces.adb	return Driver.Distributions.Chi_Square_Deviate (Q, 2) > Driver.Conventions.Z;	2	statistics	two degrees of freedom: a place in a picture has two coordinates
 driver-robot.adb	& "" & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	1	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	3	format	digits printed in a log line or a message

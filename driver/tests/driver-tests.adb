@@ -31,6 +31,8 @@ package body Driver.Tests is
             First_Failure := To_Unbounded_String (What);
          end if;
          Failures := Failures + 1;
+         --  Every failure goes to the log, not only the first the summary line names.
+         Driver.Log.Line (Driver.Log.Core, "test check failed: " & What);
       end if;
    end Check;
 

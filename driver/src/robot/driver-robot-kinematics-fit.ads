@@ -221,6 +221,9 @@ package Driver.Robot.Kinematics.Fit is
       Why        : Ada.Strings.Unbounded.Unbounded_String;
       Used       : Natural := 0;       --  sightings in the last fit
       Median_Px  : Real := 0.0;        --  their median Sampson residual
+      All_Median_Px : Real := 0.0;     --  the median residual over every sighting given, inlier or not: comparable
+                                       --  between two fits of the same sightings that keep different inliers
+      All_Count  : Natural := 0;       --  the sightings that median is over
       Sigma_Px   : Real := 0.0;        --  the noise measured from them
       Flipped    : Boolean := False;   --  every translation changed sign to put the points in front
       Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
