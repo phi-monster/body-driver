@@ -20,8 +20,15 @@ package body Driver.Brain.Service is
 
    Own_Members : constant array (Positive range <>) of access constant String :=
      [new String'("model"), new String'("messages"), new String'("stream"), new String'("structured_outputs"),
-      new String'("response_format")];
+      new String'("grammar"), new String'("response_format")];
    --  The members the driver writes itself; the deployment may not set them.
+
+   --  The grammar goes in the two members the servers read it from: vLLM's structured_outputs.grammar and
+   --  llama.cpp's grammar (its server takes a GBNF grammar there and ignores the other member, as vLLM ignores
+   --  this one). A small model is held to the keyboard only by the decoder: a service that drops the grammar
+   --  lets it type lines the driver refuses.
+   function Grammar_Members (Grammar : String) return String is
+     ("""structured_outputs"":{""grammar"":" & Driver.Json.Quote (Grammar) & "},""grammar"":" & Driver.Json.Quote (Grammar));
 
    Thousandths : constant := 1000.0;
    --  Boxes are given in thousandths of the picture's width and height.
@@ -84,7 +91,7 @@ package body Driver.Brain.Service is
       & Driver.Json.Quote (Picture_Url) & "}},{""type"":""text"",""text"":" & Driver.Json.Quote (Text) & "}]}]");
 
    function Program_Request (Picture_Url, Prompt, Grammar : String) return String is
-     (Head & ",""stream"":true,""structured_outputs"":{""grammar"":" & Driver.Json.Quote (Grammar) & "},"
+     (Head & ",""stream"":true," & Grammar_Members (Grammar) & ","
       & User_Message (Picture_Url, Prompt) & "}");
 
    --  The where-is-it answer exactly, with no blank anywhere and every edge
@@ -101,7 +108,7 @@ package body Driver.Brain.Service is
       & "that is a normal answer and I will look with another eye rather than guess.");
 
    function Where_Request (Picture_Url, Name : String) return String is
-     (Head & ",""structured_outputs"":{""grammar"":" & Driver.Json.Quote (Where_Grammar) & "},"
+     (Head & "," & Grammar_Members (Where_Grammar) & ","
       & User_Message (Picture_Url, Where_Prompt (Name)) & "}");
 
    function Where_Answer_Grammar return String is (Where_Grammar);

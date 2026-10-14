@@ -1835,8 +1835,8 @@ driver-robot-kinematics-fit.adb	Ray (Lx, Sight (I).U, Sight (I).V), (Lx.Fx + Lx.
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 2 * N;	2	structure	two numbers across each joint's axis
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
-driver-robot-kinematics-fit.adb	Rel : constant Real := (if Dot (T0_Of (1), T0_Of (2)) > 0.0 then -1.0 else 1.0);	1.0	math	the unit sign: the turn down's translation made anti-parallel to the turn up'sdriver-robot-kinematics-fit.adb
 driver-robot-kinematics-fit.adb	Rel : constant Real := (if Dot (T0_Of (1), T0_Of (2)) > 0.0 then -1.0 else 1.0);	1.0	math	the unit sign: the turn down's translation made anti-parallel to the turn up's
+driver-robot-kinematics-fit.adb	Rel : constant Real := (if Dot (T0_Of (1), T0_Of (2)) > 0.0 then -1.0 else 1.0);	1.0	math	the unit sign: the turn down's translation made anti-parallel to the turn up'sdriver-robot-kinematics-fit.adb
 driver-robot-kinematics-fit.adb	Reprojected (Rr, (-1.0) * T0, L (I).H0, L (I).H, F, Du, Dv);	1.0	math	the unit sign: the translation flipped
 driver-robot-kinematics-fit.adb	Rho : Real_Array (1 .. N) := [others => 1.0];	1.0	structure	distances before they are measured
 driver-robot-kinematics-fit.adb	Rm : Real_Access := new Real_Array (1 .. 2 * M);	2	structure	two residuals a sighting, one along each image axis

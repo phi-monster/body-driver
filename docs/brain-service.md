@@ -48,7 +48,7 @@ Anything else the service needs per request belongs here too, for example
 
 - Not set: nothing is merged and the service samples by its own defaults.
 - Not one JSON object, or setting a member the driver writes itself
-  (`model`, `messages`, `stream`, `structured_outputs`, `response_format`):
+  (`model`, `messages`, `stream`, `structured_outputs`, `grammar`, `response_format`):
   it is not used at all.
 
 Either way the first question logs once what happened:
@@ -75,7 +75,9 @@ Either way the first question logs once what happened:
 
 - `structured_outputs.grammar` is this round's keyboard as a GBNF grammar
   (the `structured_outputs` member of vLLM 0.10 and later, with its xgrammar
-  backend). The service must decode under it: the brain can then type only
+  backend). The same grammar is also the top-level member `grammar`, which
+  is where llama.cpp's `llama-server` reads one; each server ignores the
+  other's member. The service must decode under it: the brain can then type only
   what this body can do now. The grammar is rebuilt every round from what the
   body measured; the prompt prints the same keyboard for the brain to read
   ([`language.md`](language.md), section 2). A service that ignores the
