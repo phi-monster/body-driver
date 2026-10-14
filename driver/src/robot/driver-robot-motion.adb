@@ -1,4 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings.Fixed;
+with Ada.Text_IO;
 with Driver.Beats;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -686,6 +688,16 @@ package body Driver.Robot.Motion is
 
    function Ln (X : Real) return Real renames Ada.Numerics.Long_Elementary_Functions.Log;
 
+   package Real_IO is new Ada.Text_IO.Float_IO (Real);
+
+   --  A number in the log with its magnitude: probe sizes span many decades (as Boot writes them).
+   function Scientific (X : Real) return String is
+      S : String (1 .. 32);
+   begin
+      Real_IO.Put (S, X, Aft => 2, Exp => 3);
+      return Ada.Strings.Fixed.Trim (S, Ada.Strings.Both);
+   end Scientific;
+
    --  Readings for a log line, each to the six places the group lines give them (Driver.Robot.Group_Watch).
    function Readings_Image (Q : Real_Array) return String is
      (if Q'Length = 0 then "" else Readings_Image (Q (Q'First .. Q'Last - 1)) & " " & Driver.Log.Image (Q (Q'Last), 6));
@@ -732,6 +744,12 @@ package body Driver.Robot.Motion is
             end if;
          end loop;
       end loop;
+      --  The chance that at least one of the verdicts looked at is a false alarm: one less the chance that none
+      --  is, the verdicts independent. Summed instead, a look of twenty beats over three eyes with rest counts of
+      --  53 beats "had a chance" of 1.1, above one, and Run_Needed found no run of moves that could make such a
+      --  level certain: the ladder doubled past every level an eye saw, to 56 radians and the arm's ends (seed 2
+      --  of the fake robot, 10-14: levels 10 to 21 all seen, none confirmed).
+      Chance := 1.0 - Ada.Numerics.Long_Elementary_Functions.Exp (-Chance);
    end Look;
 
    --  The smallest change of the channel's reading that tells from its noise
@@ -839,14 +857,49 @@ package body Driver.Robot.Motion is
          declare
             Wait : Natural := 1;
             Delay_Beats : Natural := 0;
+            Delay_Known : Boolean;
+            Earliest : Natural := Natural'Last;
             Lag : Natural := 0;
             Done : Boolean;
          begin
+            --  How long the readings may take to answer: the body's delay where any push of it was answered
+            --  (Steps.Body_Delay: a command travels one path to every group). Before one was, this move's own
+            --  answer where its readings have moved, else as long as Steps gives an unanswered push before any
+            --  was answered (First_Push): read a beat after it was sent, a body that answers a beat later shows
+            --  nothing yet, the level is judged not executed, the next level is sent into the answer of this
+            --  one, and no push is ever clean enough to measure the delay from (seed 2 of the fake robot, 10-14:
+            --  every channel "stopped following" at the third level, the boot ended with nothing seen; seed 1's
+            --  ladder doubled 33 times before an eye saw).
+            Steps.Body_Delay (M, Delay_Beats, Delay_Known);
+            --  The earliest beat a listed group's readings can answer: the least of their own measured delays
+            --  (a closer answering in five beats beside arms answering in one made every look of every channel
+            --  together six beats long, and its chance of a false alarm that much larger, seed 2 of the fake
+            --  robot, 10-14); the wait above is the longest.
             for I in 1 .. N loop
                if Usable (I) and then M.Groups (Listed (I).Group).Delay_Known then
-                  Delay_Beats := Natural'Max (Delay_Beats, M.Groups (Listed (I).Group).Delay_Beats);
+                  Earliest := Natural'Min (Earliest, M.Groups (Listed (I).Group).Delay_Beats);
                end if;
             end loop;
+            if Earliest = Natural'Last then
+               Earliest := 0;
+            end if;
+            if not Delay_Known then
+               declare
+                  Own : Natural := 0;
+                  Any : Boolean := False;
+               begin
+                  for I in 1 .. N loop
+                     if Usable (I) and then Steps.Episodes (M, Listed (I).Group) > Before (I)
+                       and then Steps.Latest (M, Listed (I).Group).Moved
+                     then
+                        Own := Natural'Max (Own, Steps.Latest (M, Listed (I).Group).Moved_At
+                                                 - Steps.Latest (M, Listed (I).Group).Start);
+                        Any := True;
+                     end if;
+                  end loop;
+                  Delay_Beats := (if Any then Own else Steps.First_Push (M));
+               end;
+            end if;
             for E in 1 .. Eye_Count (M) loop
                Lag := Natural'Max (Lag, Natural'Max (0, Image_Lag (M, Eye_Id (E))));
             end loop;
@@ -859,7 +912,9 @@ package body Driver.Robot.Motion is
             --  where nothing is seen. The chance of a false alarm is summed
             --  over every beat looked at, whenever the look ends (Look).
             Done := Looked >= Wait;
-            if not Done and then Looked > Delay_Beats then
+            --  Before the body's delay is known, every beat is looked at from the first: an eye may show the move
+            --  before the readings do, and the wait above is then only how long an unanswered push is given.
+            if not Done and then (not Delay_Known or else Looked > Earliest) then
                Look (M, From, Seen, Chance);
                Done := Seen;
             end if;
@@ -1116,8 +1171,16 @@ package body Driver.Robot.Motion is
                   if Confirmed then
                      Report.Seen := True;
                      Report.Excursion := Amount;
+                  else
+                     Driver.Log.Line (Driver.Log.Robot, "probe: level" & Level'Image & " of every channel together, "
+                                      & Scientific (Amount) & " units, was seen by an eye but not confirmed by"
+                                      & Run_Needed (Chance)'Image & " moves back and forth (the look's chance of a false"
+                                      & " alarm " & Driver.Log.Image (Chance, 3) & ")");
                   end if;
                end;
+            elsif Seen then
+               Driver.Log.Line (Driver.Log.Robot, "probe: level" & Level'Image & " of every channel together, "
+                                & Scientific (Amount) & " units, was seen by an eye while no reading went along its ask");
             end if;
             exit when Report.Seen or else (for all I in 1 .. N => not (Usable (I) and then Following (I)));
             Amount := 2.0 * Amount;

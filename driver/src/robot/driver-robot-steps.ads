@@ -78,6 +78,16 @@ private package Driver.Robot.Steps is
 
    function Episodes (M : Model; G : Group_Id) return Natural;
 
+   procedure Body_Delay (M : Model; Beats : out Natural; Known : out Boolean);
+   --  The longest wait any answered push of the body took, over every commandable group whose delay is
+   --  measured (Channels.Measure_Pushes): a command travels one path to every group. Known is False before any
+   --  push of the body was answered.
+
+   function First_Push (M : Model) return Natural;
+   --  The beat the body's first push started at: the stream's age then, the wait an unanswered push is given
+   --  before any push was answered (the same for every push: no wait is longer than all the waiting so far). 0
+   --  before any push.
+
    function Executed_Least (M : Model; G : Group_Id; Channel : Positive) return Real;
    --  The least ask of the channel a push of the group moved it for, in reading units: the body is known to
    --  execute asks that large, and nothing is known of smaller ones (a servo stands still for an ask within its

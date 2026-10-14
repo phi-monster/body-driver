@@ -464,9 +464,10 @@ package body Driver.Robot.Channels is
                --  29 ticks against its end moved after 75 beats; hand a's closed jaws after 77; hand b's after
                --  865), and a tick's flip when the other arm shakes the base is no answer either (R3: 194, 444):
                --  taken for responses, they made every look thereafter wait that long. The command's path is
-               --  measured where the body followed the command.
+               --  measured where the body followed the command, from pushes that began with the group still: one
+               --  born moving (Episode.Born_Moving) is answered at its start by the push before it.
                for E of M.Groups (G).Episodes loop
-                  if E.Moved and then E.Ended and then not E.Blocked and then Known (E.Delivered)
+                  if E.Moved and then not E.Born_Moving and then E.Ended and then not E.Blocked and then Known (E.Delivered)
                     and then E.Delivered.Value > 0.0
                     and then Driver.Uncertain.Significant (E.Delivered.Value, E.Delivered.Sigma, E.Delivered.Degrees_Of_Freedom)
                     and then E.Moved_At >= E.Start

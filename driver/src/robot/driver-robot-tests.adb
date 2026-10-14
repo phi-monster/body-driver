@@ -1721,6 +1721,50 @@ package body Driver.Robot.Tests is
       end if;
    end Unanswered_Push_Of_An_Unanswered_Group;
 
+   --  A push sent while its group is still on its way from the push before is answered at its own start beat by
+   --  that motion. Measured from such pushes the body's delay was 0 (seed 2 of the fake robot, 10-14: each probe
+   --  level sent a beat after the one before), and every look thereafter read the body a beat before it had
+   --  moved. The first push, cut short by the second, has no delivered fraction and does not count; the second,
+   --  born moving, must not either: the delay stays unmeasured rather than measured as nothing.
+   procedure Push_Born_Moving_Gives_No_Delay is
+      M      : Model;
+      Rng    : Generator;
+      O      : Observation;
+      Sent   : Driver.Commands.Command;
+      Arm, Arm_Target : Real := 0.0;
+   begin
+      for B in 0 .. 200 loop
+         if B = 40 then
+            Arm_Target := 0.01;
+         elsif B = 42 then
+            Arm_Target := 0.02;
+         end if;
+         --  The reading follows a beat late, a quarter of the first ask a beat: it is on its way when the second
+         --  push arrives, and goes on to the second target.
+         if B in 41 .. 48 then
+            Arm := 0.0025 * Real (B - 40);
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Arm + 1.0e-12 * Gaussian (Rng)));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Arm_Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Steps.Episodes (M, 1) = 2, "the group is pushed twice, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 2 then
+         Check (not M.Groups (1).Episodes (1).Born_Moving, "the first push, from rest, is called born moving");
+         Check (M.Groups (1).Episodes (2).Born_Moving,
+                "the second push, sent while the group was on its way from the first, is not called born moving");
+      end if;
+      Check (not M.Groups (1).Delay_Known or else M.Groups (1).Delay_Beats >= 1,
+             "the body's delay was measured as" & M.Groups (1).Delay_Beats'Image
+             & " beats from a push born into the motion of the push before");
+   end Push_Born_Moving_Gives_No_Delay;
+
    --  The noise and push rounds of the channel measure can alternate for
    --  good (A9's replay spent 540 s in them at 1024 beats): a six-channel
    --  group read exactly but for five jitters of 1e-16 and 2e-16 at rest,
@@ -3626,8 +3670,15 @@ package body Driver.Robot.Tests is
    --  as Lost).
    type Noise_Before is (As_Measured, Idle_Beat, Lost_Noise);
 
+   --  Late is how many beats after a command is in effect the readings show it (0: the beat after it is sent, as
+   --  the lab's simulator; 1: a beat later, as the fake robot and a servo bus); Primed says whether the body is
+   --  pushed a few times before the probe, so that its delay and the eyes' lag are measured, or the probe's
+   --  first level is the body's first push. Delay_Seen is the first push of the joint's wait from its start to
+   --  its readings' first motion (-1 when it never moved), Chained how many of the joint's pushes began while it
+   --  was still moving from the push before.
    procedure Probe_Drooping_Joint
-     (First : Real; Before : Noise_Before; Taken : out Natural; Finished : out Boolean)
+     (First : Real; Before : Noise_Before; Late : Natural; Primed : Boolean;
+      Taken : out Natural; Finished : out Boolean; Delay_Seen : out Integer; Chained : out Natural)
    is
       M     : Model;
       Done  : Boolean := False with Atomic;
@@ -3662,20 +3713,22 @@ package body Driver.Robot.Tests is
          --  show it.
          Driver.Robot.Motion.Settle (M, W);
          Driver.Robot.Motion.Hold (M, 100);
-         for K in 1 .. 16 loop
-            declare
-               C  : Driver.Commands.Command;
-               SR : Driver.Robot.Motion.Step_Report;
-            begin
-               Driver.Commands.Set_Target (C, 5, [(if K mod 2 = 1 then 1.0e-6 else 0.0)]);
-               Driver.Robot.Motion.Step (M, C, SR);
-               Driver.Robot.Motion.Hold (M, 2 + K mod 3);
-               --  Arm 1, which eye 1 sees, for the eyes' lag.
-               Driver.Commands.Set_Target (C, 1, [(if K mod 2 = 1 then 0.1 else 0.0), 0.0]);
-               Driver.Robot.Motion.Step (M, C, SR);
-               Driver.Robot.Motion.Hold (M, 2 + K mod 4);
-            end;
-         end loop;
+         if Primed then
+            for K in 1 .. 16 loop
+               declare
+                  C  : Driver.Commands.Command;
+                  SR : Driver.Robot.Motion.Step_Report;
+               begin
+                  Driver.Commands.Set_Target (C, 5, [(if K mod 2 = 1 then 1.0e-6 else 0.0)]);
+                  Driver.Robot.Motion.Step (M, C, SR);
+                  Driver.Robot.Motion.Hold (M, 2 + K mod 3);
+                  --  Arm 1, which eye 1 sees, for the eyes' lag.
+                  Driver.Commands.Set_Target (C, 1, [(if K mod 2 = 1 then 0.1 else 0.0), 0.0]);
+                  Driver.Robot.Motion.Step (M, C, SR);
+                  Driver.Robot.Motion.Hold (M, 2 + K mod 4);
+               end;
+            end loop;
+         end if;
          Driver.Beats.Within_A_Beat (Estimate'Access);
          Driver.Robot.Motion.Gather_Rest (M, 2);
          case Before is
@@ -3692,7 +3745,7 @@ package body Driver.Robot.Tests is
             Done := True;
       end Decider;
 
-      Now, Shown : Rig_State;
+      Now, Shown, Due : Rig_State;
       Sent  : Driver.Commands.Command;
       Rng   : Generator;
    begin
@@ -3738,14 +3791,22 @@ package body Driver.Robot.Tests is
                   end if;
                end loop;
                Shown := Now;
-               Now.Arm_1 := Driver.Commands.Target (Sent, 1);
-               Now.Arm_2 := Driver.Commands.Target (Sent, 2);
-               Now.Closer := Driver.Commands.Target (Sent, 3) (1);
-               Now.Part := Driver.Commands.Target (Sent, 4) (1);
                declare
-                  T : constant Real := Real'Min (Driver.Commands.Target (Sent, 5) (1), Limit);
+                  Next : Rig_State;
+                  T    : constant Real := Real'Min (Driver.Commands.Target (Sent, 5) (1), Limit);
                begin
-                  Now.Idle := T - T * abs T;
+                  Next.Arm_1 := Driver.Commands.Target (Sent, 1);
+                  Next.Arm_2 := Driver.Commands.Target (Sent, 2);
+                  Next.Closer := Driver.Commands.Target (Sent, 3) (1);
+                  Next.Part := Driver.Commands.Target (Sent, 4) (1);
+                  Next.Idle := T - T * abs T;
+                  --  The readings show a command the beat after it is in effect, or Late beats later.
+                  if Late = 0 then
+                     Now := Next;
+                  else
+                     Now := Due;
+                     Due := Next;
+                  end if;
                end;
             end;
          end loop;
@@ -3759,6 +3820,22 @@ package body Driver.Robot.Tests is
       end if;
       Finished := Done;
       Taken := Steps;
+      Delay_Seen := -1;
+      Chained := 0;
+      if Driver.Robot.Steps.Episodes (M, 5) > 0 then
+         declare
+            E : constant Episode := M.Groups (5).Episodes.First_Element;
+         begin
+            if E.Moved then
+               Delay_Seen := Integer (E.Moved_At) - Integer (E.Start);
+            end if;
+         end;
+         for E of M.Groups (5).Episodes loop
+            if E.Born_Moving then
+               Chained := Chained + 1;
+            end if;
+         end loop;
+      end if;
    end Probe_Drooping_Joint;
 
    --  The probe must double until the joint stops, not call the second
@@ -3766,15 +3843,40 @@ package body Driver.Robot.Tests is
    procedure Probe_A_Drooping_Joint is
       Steps    : Natural;
       Finished : Boolean;
+      Seen     : Integer;
+      Chained  : Natural;
    begin
       --  From an offset of 1e-5, as a group's probe starts from the amount
       --  the probe of every channel together was first seen at.
-      Probe_Drooping_Joint (1.0e-5, As_Measured, Steps, Finished);
+      Probe_Drooping_Joint (1.0e-5, As_Measured, 0, True, Steps, Finished, Seen, Chained);
       Check (Finished, "the probe did not finish");
       --  From 1e-5 the joint follows seven doublings, to 1.28e-3, and stops at
       --  1e-3: the ninth level is the first that takes it no further.
       Check (Steps = 9, "the probe called the joint's end after" & Steps'Image & " levels, not 9");
    end Probe_A_Drooping_Joint;
+
+   --  The same joint on a body whose readings show a command a beat later than the lab's simulator's, probed as
+   --  the body's first push, before any delay is measured: each level must be read after the body has answered
+   --  it, not a beat after it was sent. Read too soon, every level reads the one before it (the first level is
+   --  judged not executed, the second is sent into the first's answer and credited with it, and so on), the
+   --  joint's end comes a level late, no push begins with the joint still, and the body's delay, measured from
+   --  pushes born into the motion of the push before, is 0 (seed 2 of the fake robot, 10-14: the boot ended with
+   --  nothing seen).
+   procedure Probe_A_Delayed_Joint is
+      Steps    : Natural;
+      Finished : Boolean;
+      Seen     : Integer;
+      Chained  : Natural;
+   begin
+      Probe_Drooping_Joint (1.0e-5, As_Measured, 1, False, Steps, Finished, Seen, Chained);
+      Check (Finished, "the probe of the delayed joint did not finish");
+      Check (Steps = 9, "the probe called the delayed joint's end after" & Steps'Image & " levels, not 9: its levels"
+             & " were read before the joint answered them");
+      Check (Seen = 1, "the delayed joint's first push was answered" & Seen'Image & " beats after its start, not 1:"
+             & " the first level was cut short by the second before its answer");
+      Check (Chained = 0, Chained'Image & " of the delayed joint's pushes began while it was still moving from the"
+             & " push before: a level was sent before the one before it was answered");
+   end Probe_A_Delayed_Joint;
 
    --  A probe that begins at the smallest step its channel's noise tells takes
    --  that step from the noise the estimates have measured when it begins,
@@ -3787,9 +3889,11 @@ package body Driver.Robot.Tests is
    procedure Probe_Reads_After_It_Measures is
       Kept, Lost         : Natural;
       Kept_Done, Lost_Done : Boolean;
+      Kept_Seen, Lost_Seen : Integer;
+      Kept_Chained, Lost_Chained : Natural;
    begin
-      Probe_Drooping_Joint (0.0, Idle_Beat, Kept, Kept_Done);
-      Probe_Drooping_Joint (0.0, Lost_Noise, Lost, Lost_Done);
+      Probe_Drooping_Joint (0.0, Idle_Beat, 0, True, Kept, Kept_Done, Kept_Seen, Kept_Chained);
+      Probe_Drooping_Joint (0.0, Lost_Noise, 0, True, Lost, Lost_Done, Lost_Seen, Lost_Chained);
       Check (Kept_Done and then Lost_Done, "a probe from the smallest step the noise tells did not finish");
       Check (Kept < Real'Machine_Mantissa,
              "the probe from the measured noise doubled as many times as a float has bits (" & Kept'Image
@@ -7754,6 +7858,10 @@ package body Driver.Robot.Tests is
                              Probe_Limits_And_Deadbands'Access);
       Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
+      Driver.Tests.Register ("robot.probe.delayed", "a probe of a body whose readings show a command a beat later, "
+                             & "before any delay is measured, reads each level a beat after sending it: the joint's "
+                             & "end comes a level late, the first level is cut short before its answer, and levels "
+                             & "are sent into the answer of the one before", Probe_A_Delayed_Joint'Access);
       Driver.Tests.Register ("robot.probe.apart", "a probe that asks for the estimates as it begins loses what an eye saw "
                              & "when they come back beats later", Probe_Confirms_Through_Apart_Estimates'Access);
       Driver.Tests.Register ("robot.probe.lost", "a probe whose channel's noise was lost measures it again before "
@@ -7935,6 +8043,9 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.steps.unanswered", "a push of a group that never answered yet, which nothing "
                              & "answers, is waited for longer than any push of the body took to answer",
                              Unanswered_Push_Of_An_Unanswered_Group'Access);
+      Driver.Tests.Register ("robot.steps.born", "a push sent while its group is still on its way from the push "
+                             & "before is answered at its own start, and the body's delay is measured as nothing "
+                             & "from it", Push_Born_Moving_Gives_No_Delay'Access);
       Driver.Tests.Register ("robot.channels.rounds", "the channels' noise and push rounds alternate for good, or take a "
                              & "beat whose mark alternates for rest", Alternating_Rounds_Stop'Access);
       Driver.Tests.Register ("robot.channels.echo", "a group held by sending it its own reading, never commanded, has no rest and no noise because its target changes at every beat", Held_Group_Reaches_Its_Noise'Access);

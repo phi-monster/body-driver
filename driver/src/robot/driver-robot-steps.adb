@@ -169,6 +169,13 @@ package body Driver.Robot.Steps is
       E.Length := Sqrt (Length);
       E.Moved := Channels.Moving (M, G, Beat);
       E.Moved_At := Beat;
+      --  Moving at the beat before it started, before this push could act, the group was on its way from the push
+      --  before: its motion at this push's start answers that one, not this one, and measured from such pushes
+      --  alone the body's delay was 0 (seed 2 of the fake robot, 10-14: each probe level sent a beat after the one
+      --  before, the first level's answer credited to the second, and every level thereafter read a beat before
+      --  the body had moved). Motion at the start beat itself is not that: a body that answers within the beat
+      --  moves at every push's start.
+      E.Born_Moving := Beat > 0 and then Channels.Moving (M, G, Beat - 1);
       --  Where it starts from: its whole ask away from its target, nowhere from where it began.
       E.Progress_At := Beat - 1;
       E.Nearest := (Value => Sqrt (Near), others => <>);

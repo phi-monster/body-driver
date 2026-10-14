@@ -392,6 +392,8 @@ private
       Start     : Natural := 0;       --  the beat its target changed
       Moved     : Boolean := False;
       Moved_At  : Natural := 0;       --  the first beat its reading moved
+      Born_Moving : Boolean := False; --  its group was still moving from the push before at the beat it started: its
+                                      --  first motion is that push's answer, not its own, and tells nothing of the delay
       Ended     : Boolean := False;
       End_At    : Natural := 0;       --  the first still beat, or where it was given up or cut short
       Settled   : Boolean := False;   --  judged: not cut short by the next push
