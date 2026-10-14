@@ -469,9 +469,148 @@ package body Driver.Robot.Hand.Lobes.Tests is
                 "one moving finger gave" & Natural'Image (Natural (Found.Lobes.Length)) & " lobes");
          Check (Direction (Found.Lobes, Still_Finger) = Towards_There, "closing against the still finger not seen");
          Check (Direction (Found.Lobes, Create (W, H)) = Undecided, "one lobe judged closing with nothing to close on");
+         --  The placing finds the still finger itself among the robot's pixels that did not change, and nothing
+         --  of the world that slides past.
+         declare
+            Inside_It, Outside_It : Natural := 0;
+         begin
+            for R in 0 .. H - 1 loop
+               for C in 0 .. W - 1 loop
+                  if Contains (Found.Still, C, R) then
+                     if Contains (Still_Finger, C, R) then
+                        Inside_It := Inside_It + 1;
+                     else
+                        Outside_It := Outside_It + 1;
+                     end if;
+                  end if;
+               end loop;
+            end loop;
+            Check (Inside_It * 100 >= 98 * Count (Still_Finger) and then Real (Outside_It) <= Found.Doubt,
+                   "the robot's pixels that did not change hold" & Inside_It'Image & " of the still finger's"
+                   & Count (Still_Finger)'Image & " and" & Outside_It'Image & " others");
+            Check (Direction (Found.Lobes, Found.Still) = Towards_There,
+                   "closing against the still finger the placing found not seen");
+         end;
       end;
    end Change_One_Against_Still;
 
+
+   --  A jaw swung on a pivot at the bottom border, a band Jaw_Half either side of its axis and Jaw_Length long,
+   --  turned by an angle from straight up (positive to the right); the fixed jaw a band of columns beside it, which
+   --  the swung jaw meets at the closed angle (the kiwi's SO-101 grippers, 10-15). Between the ends the swung jaw
+   --  overlaps itself near the pivot: those pixels are the robot's and do not change.
+   Pivot_U    : constant Real := 60.5;
+   Pivot_V    : constant Real := 120.0;
+   Jaw_Length : constant Real := 85.0;
+   Jaw_Half   : constant Real := 7.0;
+   Open_Angle   : constant Real := -0.30;
+   Closed_Angle : constant Real := 0.40;   --  the swung jaw's far corner reaches column 100, where the fixed jaw begins
+   Fixed_Left   : constant := 100;
+   Fixed_Right  : constant := 114;
+   Fixed_Top    : constant := 30;
+
+   function On_Jaw (C, R : Natural; Angle : Real) return Boolean is
+      Du : constant Real := Real (C) + 0.5 - Pivot_U;
+      Dv : constant Real := Real (R) + 0.5 - Pivot_V;
+      T  : constant Real := Du * Sin (Angle) - Dv * Cos (Angle);   --  along the axis, from the pivot
+      N  : constant Real := Du * Cos (Angle) + Dv * Sin (Angle);   --  across it
+   begin
+      return T >= 0.0 and then T <= Jaw_Length and then abs N <= Jaw_Half;
+   end On_Jaw;
+
+   function Swung (Angle : Real; Pose : Natural; With_Fixed : Boolean) return Driver.Images.Image is
+      use Driver.Bytes;
+      use type Driver.Bytes.Offset;
+      Data : Byte_Array (1 .. 3 * W * H);
+   begin
+      for Row in 0 .. H - 1 loop
+         for Column in 0 .. W - 1 loop
+            declare
+               Level : constant Natural :=
+                 (if On_Jaw (Column, Row, Angle)
+                    or else (With_Fixed and then Column in Fixed_Left .. Fixed_Right and then Row >= Fixed_Top)
+                  then Finger_Level
+                  else World (Column + 5 * Pose, Row + 3 * Pose));
+            begin
+               for K in Offset range 1 .. 3 loop
+                  Data (Offset (3 * (Row * W + Column)) + K) := Byte (Level);
+               end loop;
+            end;
+         end loop;
+      end loop;
+      return Driver.Images.Create (W, H, Data);
+   end Swung;
+
+   function Swung_View (Angle : Real; Poses : Positive; Fixed : Boolean; With_Fixed : Boolean)
+     return Driver.Pixels.View
+   is
+      V : Driver.Pixels.View := Driver.Pixels.Empty (W, H);
+   begin
+      for P in 0 .. Poses - 1 loop
+         Driver.Pixels.Add (V, Swung (Angle, (if Fixed then 0 else P), With_Fixed));
+      end loop;
+      return V;
+   end Swung_View;
+
+   procedure Swing_Onto_A_Fixed_Jaw is
+   begin
+      for With_Fixed in Boolean loop
+         for Closed_There in Boolean loop
+            declare
+               First  : constant Real := (if Closed_There then Open_Angle else Closed_Angle);
+               Second : constant Real := (if Closed_There then Closed_Angle else Open_Angle);
+               Here   : constant Driver.Pixels.View := Swung_View (First, 2, True, With_Fixed);
+               There  : constant Driver.Pixels.View := Swung_View (Second, 2, True, With_Fixed);
+               Anchor : constant Driver.Pixels.View := Swung_View (First, 12, False, With_Fixed);
+               Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Here, There);
+               Found  : constant Located :=
+                 From_Change (Compared.Changed, Here, There, Anchor, True, Compared.Spread, Create (W, H));
+               Fixed_Seen, Overlap_Seen, Overlap : Natural := 0;
+               Name   : constant String :=
+                 (if With_Fixed then "a jaw swung onto a fixed one" else "a jaw swung onto nothing")
+                 & (if Closed_There then ", closed in the other view" else ", closed in the first");
+            begin
+               Check (Found.How = Placed and then Natural (Found.Lobes.Length) = 1,
+                      Name & " gave" & Natural'Image (Natural (Found.Lobes.Length)) & " lobes, "
+                      & Placing'Image (Found.How));
+               for R in 0 .. H - 1 loop
+                  for C in 0 .. W - 1 loop
+                     if On_Jaw (C, R, Open_Angle) and then On_Jaw (C, R, Closed_Angle) then
+                        Overlap := Overlap + 1;
+                        Overlap_Seen := Overlap_Seen + Boolean'Pos (Contains (Found.Still, C, R));
+                     end if;
+                     if With_Fixed and then C in Fixed_Left .. Fixed_Right and then R >= Fixed_Top
+                       and then not On_Jaw (C, R, Closed_Angle)
+                     then
+                        Fixed_Seen := Fixed_Seen + Boolean'Pos (Contains (Found.Still, C, R));
+                     end if;
+                  end loop;
+               end loop;
+               --  The fixed jaw and the swung jaw's overlap with itself are the robot's and did not change.
+               Check (not With_Fixed
+                      or else Fixed_Seen * 100 >= 98 * ((Fixed_Right - Fixed_Left + 1) * (H - Fixed_Top) - 1),
+                      Name & ": the placing found" & Fixed_Seen'Image & " of the fixed jaw's pixels among the robot's"
+                      & " that did not change");
+               Check (Overlap > 0 and then Overlap_Seen * 100 >= 98 * Overlap,
+                      Name & ": the placing found" & Overlap_Seen'Image & " of the" & Overlap'Image
+                      & " pixels the swung jaw covers at both ends among the robot's that did not change");
+               if Natural (Found.Lobes.Length) = 1 then
+                  declare
+                     Judged : constant Closing := Direction (Found.Lobes, Found.Still);
+                  begin
+                     if With_Fixed then
+                        Check (Judged = (if Closed_There then Towards_There else Towards_Here),
+                               Name & ": judged " & Closing'Image (Judged));
+                     else
+                        Check (Judged = Undecided, Name & ": judged " & Closing'Image (Judged)
+                               & ", closing against its own pixels where it overlaps itself");
+                     end if;
+                  end;
+               end if;
+            end;
+         end loop;
+      end loop;
+   end Swing_Onto_A_Fixed_Jaw;
    procedure Change_Floating is
       --  A moving patch attached to nothing (a shadow, a thing pushed along) is
       --  not a part of the robot: it is no lobe.
@@ -1055,6 +1194,10 @@ package body Driver.Robot.Hand.Lobes.Tests is
                              Chance_Pixel_Is_No_Tip'Access);
       Driver.Tests.Register ("hand.lobes.touching", "fingers touching at the closed end merge into one lobe",
                              Touching_At_The_Closed_End'Access);
+      Driver.Tests.Register ("hand.lobes.swing", "a jaw swung on a pivot onto a fixed jaw is not seen closing "
+                             & "towards it, or one swung onto nothing is seen closing against its own pixels "
+                             & "where it overlaps itself",
+                             Swing_Onto_A_Fixed_Jaw'Access);
       Driver.Tests.Register ("hand.lobes.one", "a finger closing against a still one is not seen closing",
                              One_Finger_Against_A_Still_One'Access);
       Driver.Tests.Register ("hand.lobes.floating", "a moving patch attached to nothing is given a tip",

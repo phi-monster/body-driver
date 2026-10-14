@@ -122,8 +122,14 @@ package Driver.World is
    --  the surface, which bounds a gap or what they do not see of it. False
    --  when it rests on none.
 
+   procedure Hold (S : in out Scene; T : Thing_Id; Hand : Driver.Robot.Hand.Hand_Id);
+   --  The hand closed on the thing and its closer stopped short of closed on
+   --  nothing: from the next beat the thing is carried with the hand's arm
+   --  while the closer stays short, and let go when it closes on nothing or
+   --  opens (Driver.World.Holding). A decider's write, in the recording.
+
    function Held_By (S : Scene; T : Thing_Id) return Driver.Robot.Hand.Hand_Id'Base;
-   --  The hand holding it, or 0.
+   --  The hand holding it (Hold), or 0.
 
    function Moving (S : Scene; T : Thing_Id) return Boolean;
    --  Its motion is significant against its own measured noise.

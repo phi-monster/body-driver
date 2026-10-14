@@ -286,6 +286,13 @@ package body Driver.Action.Snapshots.Tests is
       return H;
    end Gripper;
 
+   function One_Jaw (Arm : Arm_Id; Hand : Hand_Id; Opening, Depth, Sigma : Real) return Hand_State is
+      H : Hand_State := Hand_Of (Arm, Hand, Depth, Sigma);
+   begin
+      H.Lobes.Append (Straight ([Opening, 0.0, Depth], [0.0, 0.0, Depth], Sigma));
+      return H;
+   end One_Jaw;
+
    function Curling_Gripper (Arm : Arm_Id; Hand : Hand_Id; Opening, Depth, Bow, Sigma : Real) return Hand_State is
       H : Hand_State := Hand_Of (Arm, Hand, Depth, Sigma);
    begin

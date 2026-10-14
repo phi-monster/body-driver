@@ -704,6 +704,19 @@ package body Driver.Action.Execution is
                   Ok := True;
                   return;
                end if;
+               --  Down beside it first when faces that do not open touch it: the hand moves on onto them after.
+               if abs (Best.Tool.Translation - Best.Near.Translation) > 0.0 then
+                  Go (P, X, Arm_Of_Best, Best.Near, Out_Come, Why,
+                      Slack => Margin_Of (X.S, Sqrt (E.Sigma ** 2 + Thing (X.S, T).Sigma ** 2)));
+                  if Out_Come = Refused then
+                     Note_Tried (X, "coming down beside it: " & To_String (Why));
+                     return;
+                  elsif Out_Come = Blocked then
+                     Say (X, "something stopped my hand " & Img (abs (Arm (X.S, Arm_Of_Best).Tool.Pose.Translation
+                                                                     - Best.Near.Translation))
+                          & " short of where it was to come down beside it");
+                  end if;
+               end if;
                --  The lobes were cleared of the thing by the search's margin all the way in.
                Go (P, X, Arm_Of_Best, Best.Tool, Out_Come, Why,
                    Slack => Margin_Of (X.S, Sqrt (E.Sigma ** 2 + Thing (X.S, T).Sigma ** 2)));
@@ -737,6 +750,8 @@ package body Driver.Action.Execution is
                   end loop;
                   if Holding then
                      Say (X, "my lobes closed on it");
+                     --  The world carries it with the hand from now, while the closer stays short of closed.
+                     P.Learn ((Kind => Held_In, Thing => T, Hand => E.Closers.First_Element.Hand));
                      Ok := True;
                      return;
                   end if;

@@ -76,7 +76,9 @@ package body Driver.Robot.Hand.Sweep is
       Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Low.Frames, High.Frames);
       Per_Channel : Channel_Array := S.Per_Channel.Element;
       Now      : Channel_State;
-      Nothing  : constant Mask := Create (0, 0);   --  the robot's own pixels that did not change: not yet known
+      --  The lobes' parts are attached to the picture's border alone; the robot's own pixels that did not change
+      --  are found by the placing (Located.Still), and a single lobe closes against them.
+      Nothing  : constant Mask := Create (0, 0);
    begin
       Now.Low_From := Low.From;
       Now.High_From := High.From;
@@ -102,8 +104,8 @@ package body Driver.Robot.Hand.Sweep is
             Now.Located := Driver.Robot.Hand.Lobes.From_Change
               (Compared.Changed, Low.Frames, High.Frames, Anchor, At_Low, Compared.Spread, Nothing,
                Motion => (if Motion = null then null else Channel_Motion'Access));
-            Now.Closing := Driver.Robot.Hand.Lobes.Direction (Now.Located.Lobes, Nothing);
-            Now.Change := Driver.Robot.Hand.Lobes.Closing_Change (Now.Located.Lobes, Nothing);
+            Now.Closing := Driver.Robot.Hand.Lobes.Direction (Now.Located.Lobes, Now.Located.Still);
+            Now.Change := Driver.Robot.Hand.Lobes.Closing_Change (Now.Located.Lobes, Now.Located.Still);
             Now.Status := (if Now.Located.How = Driver.Robot.Hand.Lobes.Placed then Measured else Unplaced);
          end;
       end if;
@@ -358,7 +360,8 @@ package body Driver.Robot.Hand.Sweep is
                  then "closing direction not significant: their distances changed by "
                       & Driver.Log.Image (Here.Change.Value, 3) & " +- " & Driver.Log.Image (Here.Change.Sigma, 3)
                       & " pixels between the ends"
-                 else "closing direction not known: there is nothing to compare their distances with")
+                 else "closing direction not known: there is nothing to compare their distances with ("
+                      & Driver.Images.Count (Here.Located.Still)'Image & " of the robot's pixels did not change)")
               & " (" & Pixels_Text & ";" & Here.Located.Here'Image & " given to the low end,"
               & Here.Located.There'Image & " to the high end," & Here.Located.Unassigned'Image & " to neither, of doubt "
               & Driver.Log.Image (Here.Located.Doubt, 0) & " pixels, after" & Here.Located.Rounds'Image & " rounds; its parts:"

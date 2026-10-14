@@ -38,6 +38,16 @@ package Driver.Action.Snapshots is
 
    package Sample_Vectors is new Ada.Containers.Vectors (Positive, Sample);
 
+   function Unseen_Sides (Seen : Sample_Vectors.Vector; Pitch : Real; On, Up : Vec3) return Sample_Vectors.Vector;
+   --  What no eye saw of a thing resting on the surface through On, with normal Up towards the thing: it fills
+   --  the space under what is seen of it down to that surface, as far out as the outline of what is seen looked
+   --  at along Up, and no further, the least solid the sightings allow (under an overhang it is wrong, and a
+   --  touch made there fails as any other does). Its sides stand on the convex outline of the seen points in the
+   --  surface's plane, from the surface up to the seen points' height along the outline, one Pitch apart, facing
+   --  out of the outline, wherever no seen sample lies within a Pitch: there an eye saw the place. A thing seen
+   --  from one side by an arm's eye (the kiwi's wrist eyes, 10-15) has no far side to close a hand across
+   --  without them. Empty when the points span no outline or Pitch is not positive.
+
    type Arm_State is record
       Id          : Arm_Id;
       Tool        : Pose_Estimate;
@@ -62,6 +72,9 @@ package Driver.Action.Snapshots is
 
    type Lobe_State is record
       Path : Node_Vectors.Vector;
+      Footprint : Real := 0.0;
+      --  The radius of its end where it touches (Driver.Robot.Hand.Tip_Footprint), the smaller of its openings':
+      --  zero where it is not measured, an end that touches at a point.
       --  Where the lobe's end is at every setting of its closer the body measured, from opened fully (fraction 0)
       --  to closed on nothing (fraction 1), by fraction; between two settings the end goes straight, as nothing
       --  of the way was measured, and the body carries what that interpolation can be wrong by in the sigma.

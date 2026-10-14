@@ -190,6 +190,13 @@ package Driver.Robot.Hand is
    function Closer_Reading (H : Hands; Id : Hand_Id; At_Opening : Opening) return Real_Array;
    --  The closer group's readings at that opening, the ones Tip refers to.
 
+   function Fraction (H : Hands; M : Model; Id : Hand_Id; O : Observation) return Estimate;
+   --  How far the closer is closed at the beat of O, 0 open and 1 closed on
+   --  nothing: its readings projected on the way from its open readings to
+   --  its readings closed on nothing, with the variance of that projection
+   --  from each channel's noise at rest. Unknown for a hand with no closer,
+   --  or when the beat has no reading of it.
+
    function Grip_Centre (H : Hands; M : Model; Id : Hand_Id; O : Observation) return Point_Estimate;
    --  The middle of the region the lobes close on, at the opening of O, in
    --  the world as Tip is.
@@ -202,6 +209,11 @@ package Driver.Robot.Hand is
 
    function Tip_Sight (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Ray_Estimate;
    --  The line of sight to that tip, in the tool frame: the tip lies on it.
+
+   function Tip_Footprint (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Real;
+   --  The radius of the lobe's end where it touches, in the arm's own unit: its tip region's spread about the
+   --  tip as an angle (Sight.Spread) at the tip's distance from the eye, the footprint pressing aims with. Zero
+   --  while that distance is not fitted: the end is a point until it is measured.
 
    --  The hand's sizes (Driver.Robot.Hand.Shape): from the surface of each
    --  lobe its own eye sees, fixed by the two views of the closer's sweep

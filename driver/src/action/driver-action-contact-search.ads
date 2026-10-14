@@ -110,7 +110,10 @@ package Driver.Action.Contact.Search is
 
    type Candidate is record
       Tool       : Rigid;               --  tool pose at the touch
-      Hover      : Rigid;               --  tool pose where the last straight stretch begins
+      Hover      : Rigid;               --  tool pose where the way in begins, straight from there
+      Near       : Rigid;               --  tool pose the way in comes down to, the hand clear of the thing; from
+                                        --  there it moves straight on to Tool, onto the touches of faces it does
+                                        --  not open (10-15): Tool itself when every face of the set moves
       Before     : Real_Vectors.Vector; --  each closer's fraction on the way in
       At_Touch   : Real_Vectors.Vector; --  each closer's fraction at the touch
       Touches    : Touch_Vectors.Vector;

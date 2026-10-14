@@ -145,6 +145,7 @@ package Driver.Robot.Hand.Lobes is
       Turned         : Boolean := False;  --  the robot's look gave each end the other's pixels, and the closer's motion turned them
       With_Motion    : Natural := 0;      --  the lobes' pixels, as first given, whose way from end to end goes with the closer's motion
       Against_Motion : Natural := 0;      --  and against it (neither, without a motion to tell)
+      Still          : Mask;              --  the robot's own pixels that did not change between the ends (From_Change)
    end record;
 
    function From_Change
@@ -200,6 +201,20 @@ package Driver.Robot.Hand.Lobes is
    --  keyboard: the closed fingers' pixels went to the open end and the open
    --  ones' to the closed, the hand took its open reading for its closed one,
    --  and its tips were 31 to 104 mm from the fingers').
+   --
+   --  Still, last: the robot's own pixels that did not change between the
+   --  ends, what a single lobe closes against (Direction). A pixel that did
+   --  not change is the robot's when the poses call it so as they call a
+   --  seed (it varies over them less than the cut) and its brightness at the
+   --  anchored end is the robot's where it changed rather than the world's
+   --  there, by more than one test of Z tells apart (twice the log of the
+   --  ratio of the two histograms' shares above Z squared; each histogram
+   --  begins with one pixel a bin, as Tell_Ends' do): a flat world varies
+   --  as little as the robot over poses that hardly moved the eye (the
+   --  kiwi's white table, 10-15), and is told by its brightness. Of those,
+   --  the parts larger than the doubt: a smaller part could be made of
+   --  nothing but pixels given the wrong kind. When the closer's motion
+   --  turned the ends, the kinds' brightness are each other's too.
 
    type Places is array (Positive range <>) of Natural;
    type Flags is array (Positive range <>) of Boolean;
@@ -317,14 +332,17 @@ package Driver.Robot.Hand.Lobes is
    function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Estimate;
    --  How far apart the lobes are in the other view less how far apart they
    --  are in the first, in pixels, summed over their pairs; with a single
-   --  lobe, how far it is from the robot's still pixels it can close against.
+   --  lobe, how far ahead of its leading side the robot's still pixels it
+   --  closes against lie in the other view less in the first, each end
+   --  leading the way it came there from the other (a gap that never closes
+   --  is the picture's diagonal).
    --  Its sigma is that of the lobes' centres, from the matcher's noise and
    --  the pixel grid. Unknown when there is nothing to compare.
 
    function Direction (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Closing;
-   --  Which view has the lobes closer to each other; with a single lobe,
-   --  closer to the robot's still pixels it can close against: the sign of
-   --  Closing_Change when it is significant.
+   --  Which view has the lobes closer to each other; with a single lobe, the
+   --  one where its leading side is nearer the robot's still pixels: the
+   --  sign of Closing_Change when it is significant.
 
    function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask) return Estimate;
    function Direction (Lobes : Lobe_Vectors.Vector; Attached : Mask) return Closing;

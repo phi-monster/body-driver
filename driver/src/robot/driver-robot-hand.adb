@@ -1687,8 +1687,52 @@ package body Driver.Robot.Hand is
    function Tip_Sight (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Ray_Estimate is
      (Found (H, Id).Lobes (Lobe).Sights (At_Opening).Ray);
 
+   function Tip_Footprint (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Real is
+      Distance : constant Estimate := Driver.Robot.Hand.Tips.Distance (Found (H, Id).Book, Lobe, At_Opening);
+   begin
+      return (if Known (Distance) then abs Distance.Value * Found (H, Id).Lobes (Lobe).Sights (At_Opening).Spread
+              else 0.0);
+   end Tip_Footprint;
+
    function Closer_Reading (H : Hands; Id : Hand_Id; At_Opening : Opening) return Real_Array is
      (Found (H, Id).Readings (At_Opening).Element);
+
+   function Fraction (H : Hands; M : Model; Id : Hand_Id; O : Observation) return Estimate is
+      G : constant Group_Id'Base := Closer_Group (H, Id);
+   begin
+      --  The hand an arm's tool is has no closer: nothing of it closes.
+      if G = 0 or else Natural (G) > Natural (O.Readings.Length) or else not Driver.Observations.Has_Reading (O, G) then
+         return Unknown;
+      end if;
+      declare
+         Now    : constant Real_Array := O.Readings (G);
+         Open   : constant Real_Array := Closer_Reading (H, Id, Hand.Open);
+         Closed : constant Real_Array := Closer_Reading (H, Id, Closed_Empty);
+         Way    : Real := 0.0;
+         Along  : Real := 0.0;
+         Var    : Real := 0.0;
+      begin
+         if Now'Length /= Open'Length or else Open'Length /= Closed'Length then
+            return Unknown;
+         end if;
+         for K in Open'Range loop
+            Way := Way + (Closed (K) - Open (K)) ** 2;
+         end loop;
+         if not (Way > 0.0) then
+            return Unknown;
+         end if;
+         for K in Open'Range loop
+            declare
+               Channel : constant Positive := K - Open'First + 1;
+               D       : constant Real := Closed (K) - Open (K);
+            begin
+               Along := Along + (Now (K - Open'First + Now'First) - Open (K)) * D;
+               Var := Var + (D / Way) ** 2 * Reading_Noise (M, G, Channel) ** 2;
+            end;
+         end loop;
+         return (Value => Along / Way, Sigma => Sqrt (Var), Degrees_Of_Freedom => 0);
+      end;
+   end Fraction;
 
    function Lobe_Width (H : Hands; Id : Hand_Id; Lobe : Positive) return Estimate is
      (Found (H, Id).Lobes (Lobe).Size.Width);

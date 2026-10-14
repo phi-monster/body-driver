@@ -1,10 +1,13 @@
 with Ada.Containers.Ordered_Maps;
+with Ada.Containers.Vectors;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Msgpack;
 with Driver.Recording;
 with Driver.World.Cameras;
+with Driver.Log;
 with Driver.World.Estimates;
+with Driver.World.Holding;
 with Driver.World.Pairs;
 
 package body Driver.World is
@@ -13,8 +16,23 @@ package body Driver.World is
    use Driver.Numerics.Arrays;
    use type Driver.Observations.Camera_Id;
 
+   --  A thing a hand holds (Hold): the hand, and once a beat has measured them the arm's tool, the closer's
+   --  fraction and the thing's placed points as they were when it took the thing.
+   type Hold_Record is record
+      Thing   : Thing_Id;
+      Hand    : Driver.Robot.Hand.Hand_Id;
+      Taken   : Boolean := False;
+      Tool    : Pose_Estimate;
+      Closer  : Estimate;
+      Points  : Driver.World.Pairs.Match_Vectors.Vector;
+      Normals : Driver.World.Estimates.Normal_Vectors.Vector;
+   end record;
+
+   package Hold_Vectors is new Ada.Containers.Vectors (Positive, Hold_Record);
+
    type Scene_Data is record
       State : Driver.World.Estimates.State;
+      Holds : Hold_Vectors.Vector;
    end record;
 
    procedure Free is new Ada.Unchecked_Deallocation (Scene_Data, Scene_Data_Access);
@@ -41,7 +59,7 @@ package body Driver.World is
       O    : Observation;
       Sent : Driver.Commands.Command)
    is
-      pragma Unreferenced (H, Sent);
+      pragma Unreferenced (Sent);
       function Camera_Of (E : Eye_Id; Seen : not null access constant Observation)
         return Driver.World.Cameras.Camera'Class is
         (Driver.World.Cameras.Of_Body'(Robot => M'Access, Seen => Seen, Eye => E));
@@ -52,12 +70,61 @@ package body Driver.World is
       Driver.World.Estimates.Note_Table (S.Data.State, Driver.Robot.World_Table (M));
       Driver.World.Estimates.Observe
         (S.Data.State, Driver.Robot.Eye_Count (M), Camera_Of'Access, Driver.Robot.Up (M), Driver.Robot.Still (M), O);
+      --  What the hands hold goes with their arms (Driver.World.Holding).
+      for K in reverse S.Data.Holds.First_Index .. S.Data.Holds.Last_Index loop
+         declare
+            Hd : Hold_Record := S.Data.Holds (K);
+         begin
+            if not Driver.Robot.Hand.Exists (H, Hd.Hand) then
+               Driver.Log.Line (Driver.Log.World, "thing" & Hd.Thing'Image & ": hand" & Hd.Hand'Image
+                                & " that held it is no longer measured; it stays where it was carried to");
+               S.Data.Holds.Delete (K);
+            else
+               declare
+                  Tool   : constant Pose_Estimate :=
+                    Driver.Robot.Tool_Pose (M, Driver.Robot.Hand.Arm_Of (H, Hd.Hand), O);
+                  Closer : constant Estimate := Driver.Robot.Hand.Fraction (H, M, Hd.Hand, O);
+                  Posed  : constant Boolean := Tool.Position_Covariance (1, 1) < Real'Last
+                                               and then Tool.Rotation_Covariance (1, 1) < Real'Last;
+               begin
+                  if not Hd.Taken then
+                     if Posed and then Known (Closer) then
+                        Hd := (Thing   => Hd.Thing, Hand => Hd.Hand, Taken => True, Tool => Tool, Closer => Closer,
+                               Points  => Driver.World.Estimates.Placed_Of (S.Data.State, Hd.Thing),
+                               Normals => Driver.World.Estimates.Placed_Normals_Of (S.Data.State, Hd.Thing));
+                        S.Data.Holds.Replace_Element (K, Hd);
+                        Driver.Log.Line (Driver.Log.World, "thing" & Hd.Thing'Image & ": held by hand" & Hd.Hand'Image
+                                         & ", its closer at " & Driver.Log.Image (Closer.Value, 3) & " +- "
+                                         & Driver.Log.Image (Closer.Sigma, 3) & "; its" & Hd.Points.Length'Image
+                                         & " placed points go with the arm while the closer stays short of closed");
+                     end if;
+                  elsif not Driver.World.Holding.Still_Held (Hd.Closer, Closer) then
+                     Driver.Log.Line (Driver.Log.World, "thing" & Hd.Thing'Image & ": let go by hand" & Hd.Hand'Image
+                                      & ", its closer at "
+                                      & (if Known (Closer) then Driver.Log.Image (Closer.Value, 3) else "unknown")
+                                      & " (it held at " & Driver.Log.Image (Hd.Closer.Value, 3)
+                                      & "); it stays where it was carried to");
+                     S.Data.Holds.Delete (K);
+                  elsif Posed and then not Hd.Points.Is_Empty then
+                     declare
+                        Points  : Driver.World.Pairs.Match_Vectors.Vector := Hd.Points;
+                        Normals : Driver.World.Estimates.Normal_Vectors.Vector := Hd.Normals;
+                     begin
+                        Driver.World.Holding.Carry (Points, Normals, Hd.Tool, Tool);
+                        Driver.World.Estimates.Place_Points (S.Data.State, Hd.Thing, Points, Normals, Carried => True);
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
    end Observe;
 
    procedure New_Episode (S : in out Scene) is
    begin
       Ensure (S);
       Driver.World.Estimates.New_Episode (S.Data.State);
+      S.Data.Holds.Clear;
    end New_Episode;
 
    function Thing_Count (S : Scene) return Natural is
@@ -197,9 +264,42 @@ package body Driver.World is
    function No_Gap_Seen (S : Scene; T : Thing_Id) return Boolean is
      (Known_Thing (S, T) and then Driver.World.Estimates.No_Gap_Seen (S.Data.State, T));
 
-   --  Not measured yet: what holds a thing, and its motion.
+   procedure Hold (S : in out Scene; T : Thing_Id; Hand : Driver.Robot.Hand.Hand_Id) is
+   begin
+      if Driver.Recording.Shared_Started then
+         declare
+            B : Driver.Bytes.Buffer;
+         begin
+            Driver.Msgpack.Put_Array_Header (B, 3);
+            Driver.Msgpack.Put_String (B, "hold");
+            Driver.Msgpack.Put_Integer (B, Long_Long_Integer (T));
+            Driver.Msgpack.Put_Integer (B, Long_Long_Integer (Hand));
+            Record_Write (B);
+         end;
+      end if;
+      Ensure (S);
+      --  One hand holds a thing: a new hold of it is the one that stands.
+      for K in reverse S.Data.Holds.First_Index .. S.Data.Holds.Last_Index loop
+         if S.Data.Holds (K).Thing = T then
+            S.Data.Holds.Delete (K);
+         end if;
+      end loop;
+      S.Data.Holds.Append (Hold_Record'(Thing => T, Hand => Hand, others => <>));
+   end Hold;
 
-   function Held_By (S : Scene; T : Thing_Id) return Driver.Robot.Hand.Hand_Id'Base is (0);
+   function Held_By (S : Scene; T : Thing_Id) return Driver.Robot.Hand.Hand_Id'Base is
+   begin
+      if S.Data /= null then
+         for Hd of S.Data.Holds loop
+            if Hd.Thing = T then
+               return Hd.Hand;
+            end if;
+         end loop;
+      end if;
+      return 0;
+   end Held_By;
+
+   --  Not measured yet: a thing's motion.
 
    function Moving (S : Scene; T : Thing_Id) return Boolean is (False);
 
@@ -371,6 +471,8 @@ package body Driver.World is
             end;
          elsif What = "touched" and then N = 3 then
             Touched (S, Thing_Id (Whole (2)), Point_Of (Doc, Element (Doc, R, 3)));
+         elsif What = "hold" and then N = 3 then
+            Hold (S, Thing_Id (Whole (2)), Driver.Robot.Hand.Hand_Id (Whole (3)));
          elsif What = "friction" and then N = 4 then
             Learn_Friction (S, Thing_Id (Whole (2)),
                             (Low => Number (Doc, Element (Doc, R, 3)), High => Number (Doc, Element (Doc, R, 4))));

@@ -1387,7 +1387,11 @@ package body Driver.World.Estimates is
    function Points_Eye (S : State; T : Thing_Id) return Eye_Id is (S.Things (T).Points_In);
 
    procedure Place_Points
-     (S : in out State; T : Thing_Id; Points : Driver.World.Pairs.Match_Vectors.Vector; Normals : Normal_Vectors.Vector)
+     (S       : in out State;
+      T       : Thing_Id;
+      Points  : Driver.World.Pairs.Match_Vectors.Vector;
+      Normals : Normal_Vectors.Vector;
+      Carried : Boolean := False)
    is
       R   : Thing_Record := S.Things (T);
       Old : constant Driver.World.Pairs.Match_Vectors.Vector := R.Placed;
@@ -1416,9 +1420,16 @@ package body Driver.World.Estimates is
       end;
       R.Under_Due := True;
       S.Things.Replace_Element (T, R);
-      Driver.Log.Line (Driver.Log.World, "thing" & T'Image & ":" & Points.Length'Image
-                       & " points placed by the eye that holds it, from the places its arm held it at");
+      if not Carried then
+         Driver.Log.Line (Driver.Log.World, "thing" & T'Image & ":" & Points.Length'Image
+                          & " points placed by the eye that holds it, from the places its arm held it at");
+      end if;
    end Place_Points;
+
+   function Placed_Of (S : State; T : Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector is
+     (S.Things (T).Placed);
+
+   function Placed_Normals_Of (S : State; T : Thing_Id) return Normal_Vectors.Vector is (S.Things (T).Placed_Normals);
 
    function Normals_Of (S : State; T : Thing_Id) return Normal_Vectors.Vector is (S.Things (T).Normals);
 

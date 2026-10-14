@@ -16,9 +16,18 @@ driver-action-contact-search.adb	(if L <= Res then 1 else Positive (Real'Ceiling
 driver-action-contact-search.adb	(if Natural (T.Length) >= 2 and then abs (T (2).Point - T (1).Point) > 0.0	2	math	a direction between touches needs two of them
 driver-action-contact-search.adb	(if Pin.Any_Angle then Steps_For (Lever (Pin.Pad_Index, E.Depth)) else 1);	1	math	a pin fixed at its own turn is one placement
 driver-action-contact-search.adb	Apart : constant Gate := Vector_Gate (3);	3	structure	points of space have three coordinates
-driver-action-contact-search.adb	F : constant Vec3 := Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face - Mid;	0.0	math	no extra length: the box as the lobe is
-driver-action-contact-search.adb	First_Meeting (A0, Where (Fb) - A0, Look ((Fa + Fb) / 2.0), Back, Face, T, H);	2.0	math	the middle of a stretch, where its look is taken
-driver-action-contact-search.adb	Mid := Mid + Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face / Real (N_Pads);	0.0	math	no extra length: the box as the lobe is
+driver-action-contact-search.adb	Approach := Approach + Facing_At (L, 1.0);	1.0	structure	the closed end of a lobe's path: fraction 1, closed on nothing
+driver-action-contact-search.adb	F : constant Vec3 := Box_Of (P, R, Touch, At_Touch (P.Closer), 0.0).Face - Mid;	0.0	math	no extra length: the box as the lobe is
+driver-action-contact-search.adb	First_Meeting (A0, Where (Fb) - A0, Look ((Fa + Fb) / 2.0), Back, Face, T, H, Sp);	2.0	math	the middle of a stretch, where its look is taken
+driver-action-contact-search.adb	First_Meeting (Placed (0.0) - Res * Way, 2.0 * Res * Way, Way, Back, Face, T, Hits (J), Patches (J));	0.0	structure	a face that does not move stands the same at every fraction: the open one stands for all
+driver-action-contact-search.adb	First_Meeting (Placed (0.0) - Res * Way, 2.0 * Res * Way, Way, Back, Face, T, Hits (J), Patches (J));	2.0	math	the stretch reaches the resolution to either side of the face: twice it
+driver-action-contact-search.adb	First_Meeting (X - Way + R * At_Fraction (P, 0.0), Ahead, Look, Back, Whole_Face, S, Hit, Spread);	0.0	structure	a face that does not move stands the same at every fraction: the open one stands for all
+driver-action-contact-search.adb	From : constant Box := Box_Of (P, R, X - Way, Before (P.Closer), 0.0);	0.0	math	no extra length: the box as the lobe is
+driver-action-contact-search.adb	Hi : Real := 1.0;	1.0	math	the whole move: its share runs from none of it to all of it
+driver-action-contact-search.adb	Hi := Lo - 1.0;	1.0	math	an empty stretch of the move: its end below its start
+driver-action-contact-search.adb	Least := Real'Min (Least, Unit (Toward) * (R * Facing_Of (E.Pads (J), 0.0)));	0.0	structure	a face that does not move looks the same at every fraction: the open one stands for all
+driver-action-contact-search.adb	Look : constant Vec3 := R * Facing_Of (P, 0.0);	0.0	structure	a face that does not move looks the same at every fraction: the open one stands for all
+driver-action-contact-search.adb	Mid := Mid + Box_Of (P, R, Touch, At_Touch (P.Closer), 0.0).Face / Real (N_Pads);	0.0	math	no extra length: the box as the lobe is
 driver-action-contact-search.adb	Most : constant Real := Real'Min (Friction.High, 1.0 / Physics.Least_Distinct (Resolution));	1.0	math	the friction whose angle is as far from a right angle as the least distinct one is from none: tan (pi/2 - a) = 1 / tan a
 driver-action-contact-search.adb	N := 1;	1	structure	the first break, the open end
 driver-action-contact-search.adb	Next : Positive := 1;	1	structure	the first position in the order
@@ -33,10 +42,13 @@ driver-action-contact-search.adb	Result : Real_Array (1 .. Natural (P.Lobe.Path.
 driver-action-contact-search.adb	Result := (if Count >= 2 then Touching else On_Air);	2	math	a closing set needs at least two touches; one touch alone is a single touch
 driver-action-contact-search.adb	Sample : Positive := 1;	1	structure	placeholder sample of a meeting slot, overwritten before use
 driver-action-contact-search.adb	Steps : constant Positive := Steps_For (Lever (K, 0.0));	0.0	math	no extra reach beyond the faces' centres
+driver-action-contact-search.adb	Toward := Toward + R * Facing_Of (E.Pads (J), 0.0);	0.0	structure	a face that does not move looks the same at every fraction: the open one stands for all
+driver-action-contact-search.adb	Way : constant Vec3 := Look (0.0);	0.0	structure	a face that does not move looks the same at every fraction: the open one stands for all
 driver-action-contact-search.adb	for C in 1 .. 3 loop	3	structure	the three coordinates of a point
 driver-action-contact-search.adb	for C in 1 .. 3 loop	3	structure	the three coordinates of a point
 driver-action-contact-search.adb	for C in 1 .. 3 loop	3	structure	the three coordinates of a point
 driver-action-contact-search.adb	for Count in reverse 2 .. N loop	2	math	a hand repeats under a rotation only if at least two make a circle; one is no symmetry
+driver-action-contact-search.adb	if Below_Floor (Box_Of (P, R, X, Before (P.Closer), 0.0)) then	0.0	math	no extra length: the box as the lobe is
 driver-action-contact-search.adb	if Natural (E.Pads.Length) < 2 then	2	math	closing on something needs at least two lobes
 driver-action-contact-search.adb	if Natural (E.Pads.Length) >= 2 and then abs E.Along > 0.0 and then Tip_Sd < Real'Last then	2	math	a turn can take a pad onto another only when there are at least two
 driver-action-contact-search.adb	if Node.Fraction > Result (N) and then Node.Fraction < 1.0 then	1.0	structure	the closing runs from 0 (open) to 1 (closed): a break strictly inside it
@@ -134,7 +146,18 @@ driver-action-plants-live.adb	(if Known (R.Delivered) and then R.Delivered.Value
 driver-action-plants-live.adb	Open_At : constant Real := Robot_Hand.Setting_Sight_At (Hands, Id, L, 1).Reading;	1	structure	the first measured setting is the open end
 driver-action-plants-live.adb	R.Beats := 1;	1	structure	an order that moves nothing lets exactly one beat pass
 driver-action-plants-live.adb	if N < 2 then	2	math	a nearest neighbour needs at least two samples
+driver-action-snapshots.adb	Hull : array (1 .. 2 * N) of Positive := [others => 1];	1	structure	a placeholder index until the chain fills the place
+driver-action-snapshots.adb	Hull : array (1 .. 2 * N) of Positive := [others => 1];	2	math	the monotone chain holds a point at most twice, once in each half of the outline
 driver-action-snapshots.adb	L.Path.Append (Tip_Node'(Fraction => 1.0, Tip => Closed_Tip, Sigma => Sigma));	1.0	structure	the closed end of the closing as a fraction
+driver-action-snapshots.adb	Least : Positive := 1;	1	structure	the first axis, where the search for the least begins
+driver-action-snapshots.adb	T1 := Unit (Cross (U, [for K in 1 .. 3 => (if K = Least then 1.0 else 0.0)]));	1.0	structure	a unit axis vector
+driver-action-snapshots.adb	T1 := Unit (Cross (U, [for K in 1 .. 3 => (if K = Least then 1.0 else 0.0)]));	3	structure	the three axes of space
+driver-action-snapshots.adb	for I in 2 .. N loop	2	structure	insertion sort: the first element is in order by itself
+driver-action-snapshots.adb	for K in 2 .. 3 loop	2	structure	the axes after the first of the three
+driver-action-snapshots.adb	for K in 2 .. 3 loop	3	structure	the three axes of space
+driver-action-snapshots.adb	if N < 3 or else not (Pitch > 0.0) or else not (abs Up > 0.0) then	3	math	an outline needs three points
+driver-action-snapshots.adb	while J >= 1 and then (Pts (Order (J)).A > Pts (V).A	1	structure	the first place of the order
+driver-action-snapshots.adb	while Top >= 2 and then Turn (Hull (Top - 1), Hull (Top), Order (I)) <= 0.0 loop	2	math	a turn needs two points before the third
 driver-alignment-keyframes.adb	((C.Points (I).U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
 driver-alignment-keyframes.adb	((C.Points (I).U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
 driver-alignment-keyframes.adb	((C.Points (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
@@ -1059,14 +1082,14 @@ driver-robot-hand-lobes.adb	(Change_Of (Lobes, Attached, 1.0 / 12.0, 0, Averaged
 driver-robot-hand-lobes.adb	(Change_Of (Lobes, Attached, 1.0 / 12.0, 0, Averaged => False));	12.0	math	the variance of a uniform step of one pixel is 1/12
 driver-robot-hand-lobes.adb	(Change_Of (Lobes, Attached, Noise.Displacement.Sigma ** 2 + 1.0 / 12.0, Noise.Displacement.Degrees_Of_Freedom, Averaged => True));	1.0	math	the variance of a uniform step of one pixel is 1/12
 driver-robot-hand-lobes.adb	(Change_Of (Lobes, Attached, Noise.Displacement.Sigma ** 2 + 1.0 / 12.0, Noise.Displacement.Degrees_Of_Freedom, Averaged => True));	12.0	math	the variance of a uniform step of one pixel is 1/12
+driver-robot-hand-lobes.adb	2.0 * (Log (Robot_Bins (Level) / Robot_Sum) - Log (World_Bins (Level) / World_Sum));	2.0	statistics	twice the log of the ratio of the likelihoods, against Z squared, as Tell_Ends' turned parts
 driver-robot-hand-lobes.adb	Along : constant Real := ((Real (C) + 0.5 - Au) * Reach_U + (Real (R) + 0.5 - Av) * Reach_V) / Length;	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Along : constant Real := ((Real (C) + 0.5 - Au) * Reach_U + (Real (R) + 0.5 - Av) * Reach_V) / Length;	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Au := Au + Real (C) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Av := Av + Real (R) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Best : Real := -1.0;	1.0	structure	below any between-group variance: no cut found yet
-driver-robot-hand-lobes.adb	Best := Real'Min (Best, Sqrt ((Real (C) + 0.5 - P.U) ** 2 + (Real (R) + 0.5 - P.V) ** 2));	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
-driver-robot-hand-lobes.adb	Best := Real'Min (Best, Sqrt ((Real (C) + 0.5 - P.U) ** 2 + (Real (R) + 0.5 - P.V) ** 2));	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-lobes.adb	Cap := Kind_A / (Real (Total) + 2.0);	2.0	statistics	a share of n pixels with one counted in each of the two kinds: n + 2 pseudo-counts
+driver-robot-hand-lobes.adb	Column := Integer (Real'Floor (Real (C) + 0.5 + Real (K) * Su));	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-lobes.adb	Cu := Cu + Real (C) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Cut := (Sorted (K) + Sorted (K + 1)) / 2.0;	2.0	math	the cut lies midway between the two values it parts
 driver-robot-hand-lobes.adb	Cv := Cv + Real (R) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
@@ -1099,9 +1122,13 @@ driver-robot-hand-lobes.adb	Robot (B_Bin (P)) := Robot (B_Bin (P)) + 1.0;	1.0	st
 driver-robot-hand-lobes.adb	Robot (B_Bin (P)) := Robot (B_Bin (P)) - 1.0;	1.0	statistics	a pixel counted once in a histogram
 driver-robot-hand-lobes.adb	Robot, World : Histogram := [others => 1.0];	1.0	statistics	every histogram begins with one pixel a bin
 driver-robot-hand-lobes.adb	Robot, World : Histogram := [others => 1.0];	1.0	statistics	every histogram begins with one pixel a bin
+driver-robot-hand-lobes.adb	Robot_Bins (Bin (Robot)) := Robot_Bins (Bin (Robot)) + 1.0;	1.0	statistics	one pixel counted in its bin
+driver-robot-hand-lobes.adb	Robot_Bins, World_Bins : Bins := [others => 1.0];	1.0	statistics	every histogram begins with one pixel a bin
 driver-robot-hand-lobes.adb	Robot_Is_Darker := 2 * Darker >= Seeded;	2	math	twice the seeds whose anchored end is darker is at least all the seeds: at least half of them
+driver-robot-hand-lobes.adb	Robot_Sum := Robot_Sum + 1.0;	1.0	statistics	one pixel counted in all
 driver-robot-hand-lobes.adb	Round_Trip_Gate => Vector_Gate (2));	2	structure	an image displacement has two components
 driver-robot-hand-lobes.adb	Round_Trip_Gate => Vector_Gate (2, Dof));	2	structure	an image displacement has two components
+driver-robot-hand-lobes.adb	Row := Integer (Real'Floor (Real (R) + 0.5 + Real (K) * Sv));	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-lobes.adb	Seeded_A, Seeded_B : Real := 1.0;	1.0	statistics	one pseudo-pixel with a seed counted in each kind, as in every histogram
 driver-robot-hand-lobes.adb	Share (J) := (if Label (J) then 1.0 else 0.0);	1.0	math	a pixel begins wholly of the kind it is labelled
 driver-robot-hand-lobes.adb	Share (P) := (if Now_A then 1.0 else 0.0);	1.0	math	a pixel turned is wholly of its new kind
@@ -1118,17 +1145,21 @@ driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0
 driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Trips : Real_Access := new Real_Array (1 .. 2 * Count);	2	structure	two coordinates per correspondence
 driver-robot-hand-lobes.adb	Turn : constant Real := Driver.Conventions.Z ** 2 / 2.0;	2.0	math	twice the log of the likelihood ratio is above Z squared when two kinds are told apart (Wilks)
+driver-robot-hand-lobes.adb	Variance := 2.0 * Pixel_Variance;	2.0	statistics	two places, one at each end, each known to one pixel's variance
 driver-robot-hand-lobes.adb	World (A_Bin (J)) := World (A_Bin (J)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
 driver-robot-hand-lobes.adb	World (A_Bin (P)) := World (A_Bin (P)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
 driver-robot-hand-lobes.adb	World (A_Bin (P)) := World (A_Bin (P)) - 1.0;	1.0	statistics	a pixel counted once in a histogram
 driver-robot-hand-lobes.adb	World (B_Bin (J)) := World (B_Bin (J)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
 driver-robot-hand-lobes.adb	World (B_Bin (P)) := World (B_Bin (P)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
 driver-robot-hand-lobes.adb	World (B_Bin (P)) := World (B_Bin (P)) - 1.0;	1.0	statistics	a pixel counted once in a histogram
+driver-robot-hand-lobes.adb	World_Bins (Bin (World)) := World_Bins (Bin (World)) + 1.0;	1.0	statistics	one pixel counted in its bin
+driver-robot-hand-lobes.adb	World_Sum := World_Sum + 1.0;	1.0	statistics	one pixel counted in all
+driver-robot-hand-lobes.adb	and then 0.5 * Log (Driver.Pixels.Variance (Anchor, C, R)) < Cut	0.5	math	the log of a deviation is half the log of the variance
 driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0.5, Real (R) + 0.5)	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0.5, Real (R) + 0.5)	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0.5, Real (R) + 0.5)	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0.5, Real (R) + 0.5)	0.5	math	a pixel is at its centre, half a pixel in
-driver-robot-hand-lobes.adb	elsif Natural (Lobes.Length) = 1 and then Width (Attached) > 0 and then Count (Attached) > 0 then	1	structure	a single lobe closes against what it is attached to
+driver-robot-hand-lobes.adb	elsif Natural (Lobes.Length) = 1 and then Count (Attached) > 0	1	structure	a single lobe closes against the robot's still pixels
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
@@ -1171,6 +1202,7 @@ driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 
 driver-robot-hand-lobes.adb	if N < 3 then	3	statistics	a spread within two groups needs a third value
 driver-robot-hand-lobes.adb	if N >= 2 then	2	statistics	a spread needs two values
 driver-robot-hand-lobes.adb	if Natural (Lobes.Length) >= 2 then	2	structure	lobes close towards one another when there are two or more
+driver-robot-hand-lobes.adb	if not (Ahead (C, R, 1, Nc, Nr) and then Contains (M, Nc, Nr)) then	1	structure	the next pixel along the way: one step
 driver-robot-hand-lobes.adb	or else (Last >= Doubts.First_Index + 3 and then Still (Last, Last - 2) and then Still (Last - 1, Last - 3));	2	structure	a round and the one two before it
 driver-robot-hand-lobes.adb	or else (Last >= Doubts.First_Index + 3 and then Still (Last, Last - 2) and then Still (Last - 1, Last - 3));	3	structure	four doubts compared, two rounds apart twice: the last four
 driver-robot-hand-lobes.adb	or else (Last >= Doubts.First_Index + 3 and then Still (Last, Last - 2) and then Still (Last - 1, Last - 3));	3	structure	four doubts compared, two rounds apart twice: the last four
@@ -1178,6 +1210,7 @@ driver-robot-hand-lobes.adb	or else Exp (Driver.Stats.Median (Above (1 .. Over))
 driver-robot-hand-lobes.adb	return (Last >= Doubts.First_Index + 2 and then Still (Last, Last - 1) and then Still (Last - 1, Last - 2))	2	structure	two rounds in a row: three doubts compared, the last and the two before
 driver-robot-hand-lobes.adb	return (Last >= Doubts.First_Index + 2 and then Still (Last, Last - 1) and then Still (Last - 1, Last - 2))	2	structure	two rounds in a row: three doubts compared, the last and the two before
 driver-robot-hand-lobes.adb	return (if Region = 0 then 0.0 else Sqrt (Sum / (2.0 * Real (Region))));	2.0	statistics	the mean over the two axes of the squared distance
+driver-robot-hand-lobes.adb	type Bins is array (0 .. 255) of Real;	255	format	a luma level of the eye's 8-bit pictures (Driver.Images)
 driver-robot-hand-lobes.ads	and then Driver.Pixels.Frames (Anchor) >= 2;	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-lowering.adb	Enough : constant Boolean := T.Count > 2;	2	statistics	a scatter of shares needs more than two pushes before it, as a shortfall's does in the step tracker
 driver-robot-hand-lowering.adb	Lowering := Lowering / Real (Natural'Max (1, Where'Length));	1	structure	a hand has a point at the least (the tool's origin), so a mean never divides by nothing
@@ -3008,6 +3041,10 @@ driver-world-tracking.adb	Trips : Real_Access := new Real_Array (1 .. 2 * Still_
 driver-world-tracking.adb	for K in 1 .. 3 loop	3	format	three bytes per RGB pixel
 driver-world-tracking.adb	if Driver.Pixels.Frames (T.Reference) >= 2 and then not T.Older.Is_Empty and then Changed (T) then	2	statistics	a pixel's own variance needs two frames
 driver-world-tracking.adb	if Error.Right < 1.0 then	1.0	statistics	not even one right match to tell the error by
+driver-world.adb	& "" & Driver.Log.Image (Closer.Value, 3) & ""	3	format	digits printed in a log line or a message
+driver-world.adb	& "" & Driver.Log.Image (Hd.Closer.Value, 3)	3	format	digits printed in a log line or a message
+driver-world.adb	& (if Known (Closer) then Driver.Log.Image (Closer.Value, 3) else "")	3	format	digits printed in a log line or a message
+driver-world.adb	& Driver.Log.Image (Closer.Sigma, 3) & "" & Hd.Points.Length'Image	3	format	digits printed in a log line or a message
 driver-world.adb	(Low => Number (Doc, Element (Doc, R, 3)), High => Number (Doc, Element (Doc, R, 4))));	3	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	(Low => Number (Doc, Element (Doc, R, 3)), High => Number (Doc, Element (Doc, R, 4))));	4	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Adopt (S, M, Eye_Id (Whole (2)), O, Region, Placed, Thing);	2	format	the recorded adopt's eye is its second element
@@ -3020,10 +3057,13 @@ driver-world.adb	Bits : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset ((W * 
 driver-world.adb	Bits : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset ((W * H + 7) / 8)) := [others => 0];	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 2);	2	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 3);	3	format	the field count or a field's place in a W record (Replay_Write)
-driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 4);	4	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 3);	3	format	the field count of a W record (Replay_Write): the hold's name, its thing and its hand
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 4);	4	format	a placed point's record: its pixel's two coordinates, its point, its normal
+driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 4);	4	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 7);	7	format	the adopt record's elements: its name, the eye, the beat, the width, the height, the region, the placed points
 driver-world.adb	H : constant Natural := Natural (Whole (5));	5	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	Hold (S, Thing_Id (Whole (2)), Driver.Robot.Hand.Hand_Id (Whole (3)));	2	format	a field's place in a W record (Replay_Write): the thing
+driver-world.adb	Hold (S, Thing_Id (Whole (2)), Driver.Robot.Hand.Hand_Id (Whole (3)));	3	format	a field's place in a W record (Replay_Write): the hand
 driver-world.adb	K : Positive := 1;	1	structure	msgpack array elements count from one
 driver-world.adb	Learn_Friction (S, Thing_Id (Whole (2)),	2	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	List : constant Node := Element (Doc, R, 7);	7	format	the placed points are the adopt record's seventh element
@@ -3041,6 +3081,7 @@ driver-world.adb	W : constant Natural := Natural (Whole (4));	4	format	the field
 driver-world.adb	What : constant String := Text (Doc, Element (Doc, R, 1));	1	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	and then Kind_Of (Doc, Element (Doc, R, 1)) = String_Value;	1	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	elsif What = "" and then N = 3 then	3	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	elsif What = "" and then N = 3 then	3	format	the field count of a W record (Replay_Write): the hold's
 driver-world.adb	elsif What = "" and then N = 4 then	4	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	elsif What = "" and then N in 6 .. 7 then	6	format	an adopt record has six elements, seven with the placed points
 driver-world.adb	elsif What = "" and then N in 6 .. 7 then	7	format	an adopt record has six elements, seven with the placed points

@@ -85,12 +85,22 @@ private package Driver.World.Estimates is
    package Normal_Vectors is new Ada.Containers.Vectors (Positive, Vec3, Driver.Numerics.Arrays."=");
 
    procedure Place_Points
-     (S : in out State; T : Thing_Id; Points : Driver.World.Pairs.Match_Vectors.Vector; Normals : Normal_Vectors.Vector)
+     (S       : in out State;
+      T       : Thing_Id;
+      Points  : Driver.World.Pairs.Match_Vectors.Vector;
+      Normals : Normal_Vectors.Vector;
+      Carried : Boolean := False)
      with Pre => Natural (Points.Length) = Natural (Normals.Length);
    --  Points an eye that holds the thing placed by itself, from the places its arm held it at
    --  (Driver.Robot.Surfaces), each with its normal (zero where not told): the thing's own beside every pair's,
    --  those inside it where it was pointed at. Each was found again along its line of sight in two views and in
    --  both directions, so it needs no other pair to bear it out as a pair's point does (Gather).
+   --  Carried: the points are the ones placed before, carried where the hand that holds the thing took them
+   --  (Driver.World.Holding), every beat it moves: the log says so when the hold begins and ends, not each beat.
+
+   function Placed_Of (S : State; T : Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector;
+   function Placed_Normals_Of (S : State; T : Thing_Id) return Normal_Vectors.Vector;
+   --  The points an eye placed by itself (Place_Points), and their normals, as they stand.
 
    function Normals_Of (S : State; T : Thing_Id) return Normal_Vectors.Vector;
    --  Per point of Points_Of, in order, the normal its eye placed it with; zero for the pairs' points.

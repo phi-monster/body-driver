@@ -7,6 +7,7 @@ with Driver.Tests;
 with Driver.World.Pairs.Tests;
 with Driver.World.Regions.Tests;
 with Driver.World.Estimates.Tests;
+with Driver.World.Holding.Tests;
 with Driver.World.Supports.Tests;
 with Driver.World.Tracking.Tests;
 with GNAT.OS_Lib;
@@ -94,6 +95,7 @@ package body Driver.World.Tests is
    --  made, and the recorded writes applied to a fresh scene give back the
    --  same things, place, friction and touch, to the bit.
    procedure Writes_In_The_Recording is
+      use type Driver.Robot.Hand.Hand_Id;
       use type Driver.Recording.Record_Kind;
       use type GNAT.OS_Lib.File_Descriptor;
       use type GNAT.OS_Lib.String_Access;
@@ -124,6 +126,7 @@ package body Driver.World.Tests is
       Remember (Live, (Mean => [0.1, 0.2, 1.0 / 7.0], Covariance => [others => [others => 0.0]]), Home);
       Learn_Friction (Live, First, (Low => 0.2, High => 1.0 / 3.0));
       Touched (Live, Other, Touch);
+      Hold (Live, Other, 1);
       Driver.Recording.Stop_Shared;
       declare
          R       : Driver.Recording.Reader;
@@ -152,7 +155,7 @@ package body Driver.World.Tests is
             Driver.Recording.Close (R);
          end if;
       end;
-      Check (Writes = 5, "five writes are in the recording" & Writes'Image & " times");
+      Check (Writes = 6, "six writes are in the recording" & Writes'Image & " times");
       Check (Applied, "a recorded write could not be applied");
       Check (Thing_Count (Again) = Thing_Count (Live) and then Place_Count (Again) = Place_Count (Live),
              "the recorded writes made other things or places");
@@ -168,6 +171,9 @@ package body Driver.World.Tests is
       Check (Where (Again, Home) = Where (Live, Home), "a remembered place came back other than it was");
       Check (Friction (Again, First) = Friction (Live, First), "a learned friction came back other than it was");
       Check (Samples (Again, Other) = Samples (Live, Other), "a touch came back other than it was");
+      Check (Held_By (Again, Other) = Held_By (Live, Other) and then Held_By (Live, Other) = 1
+               and then Held_By (Again, First) = 0,
+             "a hold came back other than it was");
       GNAT.OS_Lib.Delete_File (Name.all, Gone);
       GNAT.OS_Lib.Free (Name);
    end Writes_In_The_Recording;
@@ -183,6 +189,7 @@ package body Driver.World.Tests is
       Driver.World.Supports.Tests.Register;
       Driver.World.Estimates.Tests.Register;
       Driver.World.Tracking.Tests.Register;
+      Driver.World.Holding.Tests.Register;
    end Register;
 
 end Driver.World.Tests;
