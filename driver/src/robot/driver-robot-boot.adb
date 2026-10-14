@@ -1073,6 +1073,12 @@ package body Driver.Robot.Boot is
                      Driver.Log.Line
                        (Driver.Log.Robot, "boot: every commandable channel moved together is first seen at "
                         & Scientific (P.Excursion) & " reading units, after" & P.Steps'Image & " doublings");
+                     --  The body's delay and the eyes' lags are measured from the pushes just executed before
+                     --  the channels are pushed one by one: a push nothing answers is waited for as long as the
+                     --  longest answer took, and until that is measured as long as the stream is old (R6 on
+                     --  10-14: 170 to 400 beats a push, the estimates on their doubling schedule not due for
+                     --  thousands of beats).
+                     Driver.Beats.Within_A_Beat (Estimate'Access);
                      for G in 1 .. Count loop
                         if Commandable (G) and then Sizes (G) > 0 then
                            Recognize (Group_Id (G), Sizes (G), P.Excursion);

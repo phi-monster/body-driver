@@ -1044,7 +1044,12 @@ package body Driver.Robot.Motion is
                   end;
                end if;
             end loop;
-            if Seen then
+            --  A level is seen only when the body executed it: some channel's reading went along its ask. A
+            --  camera on an arm whose servo hums against its dead band shakes, and an eye sees motion where no
+            --  reading moved (R6 on the kiwi, 10-14: every channel together "first seen" at 4.9 units while no
+            --  reading changed, and the recognition ran on 4.9-unit asks the servos ignored, each waited for as
+            --  long as the stream was old).
+            if Seen and then (for some I in 1 .. N => Usable (I) and then Delivered (I)) then
                declare
                   Confirmed : Boolean;
                begin
@@ -1133,7 +1138,9 @@ package body Driver.Robot.Motion is
                      Farthest (Way) := Excursion;
                   end if;
                end;
-               if Seen then
+               --  Seen only at a level the body executed that way (as Probe_Together: a humming servo shakes
+               --  its camera without moving its reading).
+               if Seen and then Delivered (Way) then
                   declare
                      Confirmed : Boolean;
                   begin
