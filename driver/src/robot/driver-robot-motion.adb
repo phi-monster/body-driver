@@ -555,12 +555,14 @@ package body Driver.Robot.Motion is
       Counted  : constant Real :=
         (if Step > 0.0 and then Noise < Real'Last then Step + Driver.Conventions.Z * Sqrt (2.0) * Noise else Step);
    begin
-      --  And no less than the least ask the body is known to execute
-      --  (Steps.Executed_Least): a turn asked within a servo's dead band
-      --  moves nothing, and a keyframe needs the joint to have turned (the
-      --  kiwi's sweep, R5 on 10-14: first levels of 2.4 units, every one
-      --  called blocked where it stood).
-      return (if Step > 0.0 and then Executed < Real'Last then Real'Max (Counted, Executed) else Counted);
+      --  And the least ask the body is known to execute (Steps.Executed_Least) on top: a turn asked within a
+      --  servo's dead band moves nothing, and a keyframe needs the joint to have turned (the kiwi's sweep, R5
+      --  on 10-14: first levels of 2.4 units, every one called blocked where it stood); and a turn that does
+      --  execute lands short by up to that dead band, so a level of the counted step alone lands within the
+      --  step of the pose it left as often as not and leaves no keyframe (R6's eleventh start, 10-14: first
+      --  levels of 4.9 units at a dead band of 4.9, the first pass of arm_a without one keyframe, its pushes
+      --  blocked or too small to count). The level is the counted step plus the dead band it can lose.
+      return (if Step > 0.0 and then Executed < Real'Last then Counted + Executed else Counted);
    end Least_Turn;
 
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
