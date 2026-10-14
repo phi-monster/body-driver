@@ -38,6 +38,8 @@ package body Driver.Robot.Kinematics is
    procedure Free is new Ada.Unchecked_Deallocation (Driver.Instrument.Point_Array, Point_Access);
    type Matrix_Access is access Driver.Numerics.Arrays.Real_Matrix;
    procedure Free is new Ada.Unchecked_Deallocation (Driver.Numerics.Arrays.Real_Matrix, Matrix_Access);
+   type Flags_Access is access Fit.Flag_Matrix;
+   procedure Free is new Ada.Unchecked_Deallocation (Fit.Flag_Matrix, Flags_Access);
    type Flag_Array is array (Natural range <>) of Boolean;
    type Flag_Access is access Flag_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flag_Access);
@@ -406,6 +408,7 @@ package body Driver.Robot.Kinematics is
                                     K.Readings.Append (X);
                                  end loop;
                                  K.Image := O.Images (E);
+                                 K.Asked := R.Asking;
                                  R.Frames.Append (K);
                               end;
                               if At_Reference and then Natural (R.Frames.Length) > 1 then
@@ -574,6 +577,30 @@ package body Driver.Robot.Kinematics is
          return R.Twin_Taken;
       end;
    end Twin_Answered;
+
+   procedure Asking (M : in out Model; A : Arm_Id; Channels : Channel_Flags) is
+      K : constant Natural := Index_Of (M, A);
+   begin
+      if K > 0 then
+         M.Kinematics (K).Asking.Clear;
+         for F of Channels loop
+            M.Kinematics (K).Asking.Append (F);
+         end loop;
+      end if;
+   end Asking;
+
+   --  The channels the sweep asked a keyframe's joints to turn for, for the log: ", asked c2 c4"; nothing when none.
+   function Asked_Image (K : Keyframe) return String is
+      Text : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      for C in 0 .. Natural (K.Asked.Length) - 1 loop
+         if K.Asked (C) then
+            Ada.Strings.Unbounded.Append (Text, " c" & Ada.Strings.Fixed.Trim (Natural'Image (C + 1), Ada.Strings.Left));
+         end if;
+      end loop;
+      return (if Ada.Strings.Unbounded.Length (Text) = 0 then ""
+              else ", asked" & Ada.Strings.Unbounded.To_String (Text));
+   end Asked_Image;
 
    procedure Begin_Anew (M : in out Model; A : Arm_Id) is
       K : constant Natural := Index_Of (M, A);
@@ -1397,6 +1424,7 @@ package body Driver.Robot.Kinematics is
                end loop;
                Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe" & F'Image & " at beat"
                                 & R.Frames (F).Beat'Image & ", change" & Ada.Strings.Unbounded.To_String (Text)
+                                & Asked_Image (R.Frames (F))
                                 & ", predicted " & Ada.Characters.Handling.To_Lower (From'Image) & " stating "
                                 & Driver.Log.Image (Stated_By (Given.all), 1) & " px:" & Here'Image
                                 & " of" & Queries'Image & " points found," & Replied'Image & " answered; resident"
@@ -1717,6 +1745,9 @@ package body Driver.Robot.Kinematics is
                Frames  : constant Natural := Natural (R.Frames.Length);
                Queries : constant Natural := Natural (R.Query_U.Length);
                Changes : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. N);
+               --  Per keyframe and channel: the sweep asked the joint to turn for it (Keyframe.Asked; a frame with
+               --  none asked nothing).
+               Asked   : Flags_Access := new Fit.Flag_Matrix'(1 .. Frames => [1 .. N => False]);
                Visible : Real_Array (1 .. N);
                Sigma   : constant Real := Match_Sigma (R);
             begin
@@ -1742,6 +1773,7 @@ package body Driver.Robot.Kinematics is
                for F in 1 .. Frames loop
                   for C in 1 .. N loop
                      Changes (F, C) := R.Frames (F).Readings (C - 1) - R.Frames (1).Readings (C - 1);
+                     Asked (F, C) := C - 1 < Natural (R.Frames (F).Asked.Length) and then R.Frames (F).Asked (C - 1);
                   end loop;
                end loop;
                for C in 1 .. N loop
@@ -1817,7 +1849,7 @@ package body Driver.Robot.Kinematics is
                      --  The unit of length is the first fit's (Fit's Unit_Frames): a
                      --  keyframe taken after it refines every term, and moves none of
                      --  the lengths the world was measured in.
-                     Fit.Fit (Changes.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width, M.Eyes (R.Eye).Grid.Height,
+                     Fit.Fit (Changes.all, Asked.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width, M.Eyes (R.Eye).Grid.Height,
                               R.Result.Unit_Frames, Joints, Chain, Lens, Report, Who => "arm" & R.Arm'Image);
                      --  The table its eye sees, away from it towards the eye,
                      --  and its tracks' points: Up is the first arm's (the world
@@ -1937,6 +1969,7 @@ package body Driver.Robot.Kinematics is
                   Free (Moving);
                end;
                Free (Changes);
+               Free (Asked);
             end;
          end if;
       end Fit_Arm;

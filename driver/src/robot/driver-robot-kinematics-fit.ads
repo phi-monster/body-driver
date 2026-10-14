@@ -244,8 +244,11 @@ package Driver.Robot.Kinematics.Fit is
    --  depth at all (the first fit of an arm once had one at 1.7E97 units, its logarithm uncertain by 2.5E6) is not
    --  known; it is not a point of little weight.
 
+   type Flag_Matrix is array (Positive range <>, Positive range <>) of Boolean;
+
    procedure Fit
      (Changes    : Driver.Numerics.Arrays.Real_Matrix;   --  per keyframe (row), every joint's reading change from the reference
+      Asked      : Flag_Matrix;        --  per keyframe (row) and joint: the sweep asked the joint to turn for it
       Visible    : Real_Array;         --  per joint, the reading change its eye can just see (0: unknown)
       Sightings  : Sighting_Array;
       Width, Height : Positive;
@@ -256,6 +259,7 @@ package Driver.Robot.Kinematics.Fit is
       Report     : out Fit_Report;
       Who        : String := "")   --  what is fitted, for a line at every stage it enters; none when empty
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length
+                 and then Asked'Length (1) = Changes'Length (1) and then Asked'Length (2) = Visible'Length
                  and then Chain'Length = Visible'Length and then Unit_Frames <= Changes'Length (1);
    --  The covariance is the inverse normal equations around the spread of the
    --  gradient (Conley's sandwich), made positive semi-definite (Sandwich). The

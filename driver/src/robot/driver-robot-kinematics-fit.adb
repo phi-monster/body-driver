@@ -1604,6 +1604,7 @@ package body Driver.Robot.Kinematics.Fit is
 
    procedure Fit
      (Changes    : Driver.Numerics.Arrays.Real_Matrix;
+      Asked      : Flag_Matrix;
       Visible    : Real_Array;
       Sightings  : Sighting_Array;
       Width, Height : Positive;
@@ -1635,18 +1636,18 @@ package body Driver.Robot.Kinematics.Fit is
          return D;
       end Changes_Of;
 
-      --  Where each joint rests through the keyframes: the median of its changes over them. A servo sent back to
-      --  the sweep's start settles a few units off it, within its dead band, and stays there for the pass (R6's
-      --  sixth start on the kiwi, 10-14: arm_b's third and fifth joints 2 to 3 units off the reference in every
-      --  keyframe, so that no keyframe was any other joint's own); most keyframes leave a joint where it rests,
-      --  so its median change is that rest, and a joint has moved in a keyframe when it stands a step away from
-      --  it. The reference's own pose is one keyframe among them. The model below uses the readings as they are.
-      Rest : Real_Array (1 .. N) := [others => 0.0];
-
-      --  The keyframe moved joint J by a step its eye can see, away from where the joint rests.
+      --  The keyframe turned joint J: the sweep asked it to (Asked), and its reading changed by a step its eye can
+      --  see. What the sweep asked tells which joint a keyframe is of; the readings alone cannot: a servo sent
+      --  back to the sweep's start lands within its dead band of it, two or three units on the kiwi against a
+      --  matcher's step of two (R6's sixth and seventh starts, 10-14), and by the readings every such landing was
+      --  a turn of that joint, no keyframe was any other joint's own, and a joint that never turned had two
+      --  hundred tracks of its own from its reading's jitter. A median rest over the keyframes (the fix before
+      --  this one) left the landings at the matcher's step still counted. The model below uses the readings as
+      --  they are.
       function Moved (Frame, J : Positive) return Boolean is
-        (Visible (Visible'First + J - 1) > 0.0
-         and then abs (Change (Frame, J) - Rest (J)) >= Visible (Visible'First + J - 1));
+        (Asked (Asked'First (1) + Frame - 1, Asked'First (2) + J - 1)
+         and then Visible (Visible'First + J - 1) > 0.0
+         and then abs Change (Frame, J) >= Visible (Visible'First + J - 1));
 
       --  Only joint J moved in the keyframe, as far as its eye can tell.
       function Only (Frame, J : Positive) return Boolean is
@@ -1755,16 +1756,6 @@ package body Driver.Robot.Kinematics.Fit is
          Fail ("no keyframes or no matches");
          return;
       end if;
-      declare
-         Column : Real_Array (1 .. Frames);
-      begin
-         for J in 1 .. N loop
-            for Frame in 1 .. Frames loop
-               Column (Frame) := Change (Frame, J);
-            end loop;
-            Rest (J) := Driver.Stats.Median (Column);
-         end loop;
-      end;
       for X of Sight loop
          if Single (X.Frame) > 0 then
             Counts (Single (X.Frame)) := Counts (Single (X.Frame)) + 1;

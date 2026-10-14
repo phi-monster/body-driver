@@ -164,7 +164,6 @@ package body Driver.Robot.Boot is
       --  channel is pushed from where the last push left the group, settled before and after as before, and the
       --  group comes back to its hold once at the end, not after every channel (the way back cost as much as
       --  the way out: a round of a six-joint group took a thousand beats, four rounds ten thousand, item 17).
-      type Channel_Flags is array (Positive range <>) of Boolean;
       procedure Push_Both_Ways
         (G : Group_Id; Size : Positive; Factor : Real; Moved : out Boolean; Only : Channel_Flags := [1 .. 0 => False];
          Pause : Natural := 0)
@@ -377,6 +376,14 @@ package body Driver.Robot.Boot is
                   Per_Unit (C) := Driver.Robot.Kinematics.Pixels_Per_Unit (M, A, C);
                end loop;
             end Read_Shifts;
+            --  The channels the sweep is turning now, told to the kinematics for the keyframes it takes meanwhile
+            --  (Kinematics.Asking): a push's joint from the pose it is asked to until the arm is asked elsewhere, every
+            --  swept joint through a cell of Together, none while the arm is brought back.
+            Asked_Now : Channel_Flags (1 .. Size) := [others => False];
+            procedure Tell_Asking is
+            begin
+               Driver.Robot.Kinematics.Asking (M, A, Asked_Now);
+            end Tell_Asking;
             --  Per channel: the eye does not see its view move with it, as the keyframes measured it
             --  (Kinematics.Shift_Unseen: a joint behind the eye, which turns the hand in its picture); read again
             --  after every round.
@@ -514,6 +521,9 @@ package body Driver.Robot.Boot is
                   Mark : Level_Mark;
                begin
                   Levels (I).Clear;
+                  Asked_Now := [others => False];
+                  Asked_Now (P.Channel) := True;
+                  Driver.Beats.Within_A_Beat (Tell_Asking'Access);
                   loop
                      Pose (P.Channel) := Start (P.Channel) + P.Sign * Off;
                      Driver.Beats.Within_A_Beat (Read_Beat_Now'Access);
@@ -536,6 +546,8 @@ package body Driver.Robot.Boot is
                      --  times too small, and the elbow swung 245 degrees before its ladder met the servo's range).
                      exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else Patch);
                   end loop;
+                  Asked_Now := [others => False];
+                  Driver.Beats.Within_A_Beat (Tell_Asking'Access);
                end Take;
 
                --  Every swept joint at once, in cells whose signs no two share
@@ -555,6 +567,11 @@ package body Driver.Robot.Boot is
                   while Rows < N + 1 loop
                      Rows := 2 * Rows;
                   end loop;
+                  Asked_Now := [others => False];
+                  for K in 1 .. N loop
+                     Asked_Now (Swept (K)) := True;
+                  end loop;
+                  Driver.Beats.Within_A_Beat (Tell_Asking'Access);
                   for Row in 1 .. Rows - 1 loop
                      declare
                         Scale : Real := 1.0;   --  of the shares: halved where the cell met something
@@ -597,6 +614,8 @@ package body Driver.Robot.Boot is
                         end loop;
                      end;
                   end loop;
+                  Asked_Now := [others => False];
+                  Driver.Beats.Within_A_Beat (Tell_Asking'Access);
                   Go_To (G, Start, Report, Land => True);
                end Together;
 

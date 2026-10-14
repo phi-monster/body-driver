@@ -366,6 +366,7 @@ private
    pragma Suppress (Tampering_Check);
    package Real_Vectors is new Ada.Containers.Vectors (Natural, Real);
    package Flag_Vectors is new Ada.Containers.Vectors (Natural, Boolean);
+   type Channel_Flags is array (Positive range <>) of Boolean;   --  per channel of a group
    type Luma_Access is access Real_Array;
    --  A frame's luma (Driver.Images.Luma), on the heap: two per eye, swapped
    --  every beat, never on a stack.
@@ -582,6 +583,8 @@ private
       Beat     : Natural := 0;
       Readings : Real_Vectors.Vector;   --  the arm's readings, still
       Image    : Driver.Images.Image;    --  what its eye saw, still
+      Asked    : Flag_Vectors.Vector;    --  per channel: the sweep asked the joint to turn for this frame
+                                         --  (Kinematics.Asking); none for a frame no push of the sweep's asked for
    end record;
 
    package Keyframe_Vectors is new Ada.Containers.Vectors (Positive, Keyframe);
@@ -736,6 +739,8 @@ private
                                              --  with it are not a patch of those told: Kinematics.Measure_Shifts);
                                              --  False for a channel that moves a part of the body in the view
       Shift_Told   : Count_Vectors.Vector;   --  per channel: how many points were told of it
+      Asking   : Flag_Vectors.Vector;   --  per channel: the sweep is turning it now (Kinematics.Asking), copied into
+                                        --  the keyframes taken meanwhile (Keyframe.Asked)
       Sweeping : Boolean := False;   --  the arm's sweep has begun (Kinematics.Begin_Anew): its keyframes are taken
                                      --  from then on, none before (the recognition's holds would give the aligner
                                      --  a keyframe at every pose, minutes of work, for a measurement the sweep's

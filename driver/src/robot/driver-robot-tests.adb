@@ -4477,6 +4477,7 @@ package body Driver.Robot.Tests is
          --  arm it should find, by reading: joint Order_Of (I) turning by one
          --  over Gain (I) per reading unit, and the chain through the draw.
          Given      : Real_Matrix (1 .. Frames, 1 .. N);
+         Asked      : Fit.Flag_Matrix (1 .. Frames, 1 .. N);   --  the draw's joints that turned: what a sweep asked
          Want_Joints : Fit.Joint_Array (1 .. N);
          Want_Chain  : Fit.Chain_Order (1 .. N);
          function Drawn_Of (D : Real_Array) return Real_Array is
@@ -4485,6 +4486,7 @@ package body Driver.Robot.Tests is
          for F in 1 .. Frames loop
             for I in 1 .. N loop
                Given (F, I) := Gain (I) * Changes (F, Order_Of (I));
+               Asked (F, I) := Changes (F, Order_Of (I)) /= 0.0;
             end loop;
          end loop;
          for I in 1 .. N loop
@@ -4492,7 +4494,7 @@ package body Driver.Robot.Tests is
             Want_Joints (I).C := 1.0 / Gain (I);
             Want_Chain (Order_Of (I)) := I;
          end loop;
-         Fit.Fit (Given, [for I in 1 .. N => abs Gain (I) * 0.01 * Scale], All_Seen (1 .. Seen), 640, 480, 0, Joints,
+         Fit.Fit (Given, Asked, [for I in 1 .. N => abs Gain (I) * 0.01 * Scale], All_Seen (1 .. Seen), 640, 480, 0, Joints,
                   Chain, Found, Report);
          if not Expect_Fit then
             Check (not Report.Fitted, "a sweep of" & Real'Image (0.2 * Scale) & " rad at most was fitted, focal"
@@ -5112,7 +5114,8 @@ package body Driver.Robot.Tests is
       Readings : Real_Array;
       Ref      : Real_Array;
       Truth    : Driver.Robot.Kinematics.Fit.Joint_Array;
-      Rng      : in out Generator)
+      Rng      : in out Generator;
+      Base     : Real_Array)
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       K : Keyframe;
@@ -5120,6 +5123,10 @@ package body Driver.Robot.Tests is
       K.Beat := Natural (R.Frames.Length) + 1;
       for X of Readings loop
          K.Readings.Append (X);
+      end loop;
+      --  What the sweep asked: every joint away from the sweep's base (the reference may lie off it).
+      for J in Readings'Range loop
+         K.Asked.Append (Readings (J) /= Base (Base'First + J - Readings'First));
       end loop;
       R.Frames.Append (K);
       if Natural (R.Frames.Length) > 1 then
@@ -5183,7 +5190,7 @@ package body Driver.Robot.Tests is
 
       procedure Add_Frame (Readings : Real_Array) is
       begin
-         Add_Keyframe (R, Readings, Ref, Truth, Rng);
+         Add_Keyframe (R, Readings, Ref, Truth, Rng, Base);
       end Add_Frame;
    begin
       for J in 1 .. N loop
@@ -7035,7 +7042,7 @@ package body Driver.Robot.Tests is
             for J in Q'Range loop
                Q (J) := 0.4 * Real ((Row * J) mod 3 - 1);
             end loop;
-            Add_Keyframe (M.Kinematics (1), Q, Base, Truth, Rng);
+            Add_Keyframe (M.Kinematics (1), Q, Base, Truth, Rng, Base);
          end;
       end loop;
       Driver.Robot.Kinematics.Refit (M);
@@ -7170,6 +7177,7 @@ package body Driver.Robot.Tests is
          Gain      : constant Real_Array (1 .. N) :=
            (if Drawn and then N = 6 then [-0.5, -1.0, 4.0, -1.0, -0.25, 4.0] else [1 .. N => 1.0]);
          Given     : Real_Matrix (1 .. Frames, 1 .. N);
+         Asked     : Fit.Flag_Matrix (1 .. Frames, 1 .. N);   --  the recorded joints that turned: what the sweep asked
          Want_Chain : Fit.Chain_Order (1 .. N);
       begin
          Check (not Drawn or else N = 6, "the recorded arm has" & N'Image & " joints, the draw six");
@@ -7199,12 +7207,13 @@ package body Driver.Robot.Tests is
          for F in 1 .. Frames loop
             for I in 1 .. N loop
                Given (F, I) := Gain (I) * Changes (F, Order_Of (I));
+               Asked (F, I) := Changes (F, Order_Of (I)) /= 0.0;
             end loop;
          end loop;
          for I in 1 .. N loop
             Want_Chain (Order_Of (I)) := I;
          end loop;
-         Fit.Fit (Given, [for I in 1 .. N => abs Gain (I) * Visible (Order_Of (I))], Seen.all, Width, Height, Unit, Joints,
+         Fit.Fit (Given, Asked, [for I in 1 .. N => abs Gain (I) * Visible (Order_Of (I))], Seen.all, Width, Height, Unit, Joints,
                   Chain, Found, Report);
          Check (Fit."=" (Chain, Want_Chain), "the joints along the recorded arm, by their readings, came out as "
                 & Chain_Text (Chain) & ", not " & Chain_Text (Want_Chain));

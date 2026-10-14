@@ -103,6 +103,13 @@ private package Driver.Robot.Kinematics is
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean;
    --  The arm's still twin of its reference was taken.
 
+   procedure Asking (M : in out Model; A : Arm_Id; Channels : Channel_Flags);
+   --  The channels of the arm the sweep is turning for the keyframes taken from now on; none (an empty array)
+   --  when no push of the sweep's is under way. A keyframe carries them (Keyframe.Asked), and the fit tells
+   --  which joint a keyframe is of by what the sweep asked, and by its readings only whether the joint turned
+   --  by a step its eye sees (Fit.Fit): a servo sent back to the sweep's start lands within its dead band of
+   --  it, and by the readings alone every such landing was a turn of that joint (R6's seventh start, 10-14).
+
    procedure Begin_Anew (M : in out Model; A : Arm_Id);
    --  Drops what the arm's kinematics gathered so far, but what its keyframes
    --  measured of how far the view moves per unit (Pixels_Per_Unit), which
