@@ -1586,9 +1586,12 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Lens0.Fx, 1) & "");	1	f
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Warm_Far * 180.0 / Ada.Numerics.Pi, 2)	180.0	format	radians to degrees for the log
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Warm_Far * 180.0 / Ada.Numerics.Pi, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Real'Image (C) & "" & Real'Image (Sqrt (Variance (O + 5)))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	& (case (P - 7) mod 5 is	5	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	& (case (P - 7) mod 5 is	7	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Exp (Best_At + Told_Within), 1) & "" & Warm_Tries'Image	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Least_Pivot, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element, 1) & "")	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Sqrt (Sum (F) / Real (Cnt (F))), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
@@ -1620,6 +1623,7 @@ driver-robot-kinematics-fit.adb	([Across_Columns (3 * I - 2, C), Across_Columns 
 driver-robot-kinematics-fit.adb	([[X (X'First), X (X'First + 1), X (X'First + 2)],	2	structure	the positions of a homography's eight free entries in the vector
 driver-robot-kinematics-fit.adb	(if Base (Base'First + J - 1).C < 0.0 then -Exp (X (O + 3)) else Exp (X (O + 3)));	3	structure	the fourth of a joint's four terms in stage 2: the logarithm of the size of its turn
 driver-robot-kinematics-fit.adb	(if Base (Base'First + J - 1).C < 0.0 then -Exp (X (O + 3)) else Exp (X (O + 3)));	3	structure	the fourth of a joint's four terms in stage 2: the logarithm of the size of its turn
+driver-robot-kinematics-fit.adb	(if P <= 6 then	6	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	(if P.Found then (-1.0 / Sqrt (P.A * P.A)) * P.A else [0.0, 0.0, -1.0]);	1.0	math	a plane's unit normal towards the eye is minus its inverse-depth vector over its length; facing the eye before it is found
 driver-robot-kinematics-fit.adb	(if P.Found then -1.0 / Sqrt (P.A * P.A) else 0.0);	1.0	math	a plane's offset is minus one over the length of its inverse-depth vector
 driver-robot-kinematics-fit.adb	(if abs Z_Value <= Driver.Conventions.Z then 0.5 * Z_Value ** 2	0.5	math	the Huber function
@@ -1932,6 +1936,9 @@ driver-robot-kinematics-fit.adb	[X (X'First + 6), X (X'First + 7), 1.0]]);	7	str
 driver-robot-kinematics-fit.adb	and then (Driver.Conventions.Z * Tilt >= Ada.Numerics.Pi / 2.0	2.0	math	a quarter turn
 driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Scale, Freedom)	2	structure	a sighting's two residuals, the horizontal and the vertical
 driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I), Scale, Freedom);	2	structure	a sighting's two residuals, the horizontal and the vertical
+driver-robot-kinematics-fit.adb	else "" & Ada.Strings.Fixed.Trim (Positive'Image ((P - 7) / 5 + 1), Ada.Strings.Left)	5	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	else "" & Ada.Strings.Fixed.Trim (Positive'Image ((P - 7) / 5 + 1), Ada.Strings.Left)	7	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	else "") & "" & Driver.Log.Image (L.Fx, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	else Driver.Conventions.Z * (abs Z_Value - 0.5 * Driver.Conventions.Z));	0.5	math	the Huber function
 driver-robot-kinematics-fit.adb	elsif N > 1 then	1	structure	cells move several joints
 driver-robot-kinematics-fit.adb	exit when 2 * Used <= Count + Tracks;	2	structure	two residuals per sighting, across and down
@@ -2024,6 +2031,14 @@ driver-robot-kinematics-fit.adb	return [1 => H (1) * H0 (3), 2 => H (2) * H0 (3)
 driver-robot-kinematics-fit.adb	return [1 => H (1) * H0 (3), 2 => H (2) * H0 (3), 3 => H (3) * H0 (1), 4 => H (3) * H0 (2)];	3	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	return [1 => H (1) * H0 (3), 2 => H (2) * H0 (3), 3 => H (3) * H0 (1), 4 => H (3) * H0 (2)];	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	return [X, Y, 1.0];	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
+driver-robot-kinematics-fit.adb	when 0 => "", when 1 => "", when 2 => "",	1	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	when 0 => "", when 1 => "", when 2 => "",	2	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	when 1 => "", when 2 => "", when 3 => "",	1	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	when 1 => "", when 2 => "", when 3 => "",	2	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	when 1 => "", when 2 => "", when 3 => "",	3	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	when 3 => "", when others => ""));	3	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	when 4 => "", when 5 => "", when others => "")	4	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	when 4 => "", when 5 => "", when others => "")	5	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	while I >= 1	1	structure	an insertion sort of the joints by their axes' distance from the eye
 driver-robot-kinematics-fit.ads	(Decrease > 0.5 * Driver.Conventions.Unchanged_Fraction ** 2);	0.5	statistics	a step of m standard errors along an axis of the information lowers the cost, half the chi square, by m squared over two at most
 driver-robot-kinematics-fit.ads	C : Real := 1.0;	1.0	structure	a joint turns one radian per reading unit until fitted

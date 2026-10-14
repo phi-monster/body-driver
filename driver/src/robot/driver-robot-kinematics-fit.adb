@@ -1294,6 +1294,67 @@ package body Driver.Robot.Kinematics.Fit is
                                     end loop;
                                     Driver.Numerics.Dense.Cholesky (Scaled, Lf, Pd);
                                     Pd := Pd and then (for all E of Equal => E > 0.0);
+                                    --  When the equations are singular, which term is the first that the terms
+                                    --  before it already determine, for the log: the pivots of an elimination over
+                                    --  the scaled matrix in the terms' order (the lens's six, then each joint's two
+                                    --  of its axis, two of its point across the axis, and its scale), and the terms
+                                    --  with no information at all. What the sightings fail to determine is the
+                                    --  question (the kiwi, R6's tenth start, 10-14: a lens, or a joint's point that
+                                    --  no parallax reaches).
+                                    if not Pd then
+                                       declare
+                                          Work  : Driver.Numerics.Arrays.Real_Matrix := Scaled;
+                                          Text  : Ada.Strings.Unbounded.Unbounded_String;
+                                          Least_Pivot : Real := Real'Last;
+                                          Least_At    : Natural := 0;
+                                          function Name_Of (P : Positive) return String is
+                                            (if P <= 6 then
+                                               (case P is
+                                                  when 1 => "fx", when 2 => "fy", when 3 => "cx",
+                                                  when 4 => "cy", when 5 => "k1", when others => "k2")
+                                             else "j" & Ada.Strings.Fixed.Trim (Positive'Image ((P - 7) / 5 + 1), Ada.Strings.Left)
+                                                  & (case (P - 7) mod 5 is
+                                                       when 0 => " axis a", when 1 => " axis b", when 2 => " point a",
+                                                       when 3 => " point b", when others => " scale"));
+                                       begin
+                                          for P in 1 .. Reduced loop
+                                             if Equal (P) = 0.0 then
+                                                Ada.Strings.Unbounded.Append (Text, " " & Name_Of (P) & ": nothing");
+                                             end if;
+                                          end loop;
+                                          for P in 1 .. Reduced loop
+                                             declare
+                                                Pivot : constant Real := Work (P, P);
+                                             begin
+                                                if Pivot < Least_Pivot then
+                                                   Least_Pivot := Pivot;
+                                                   Least_At := P;
+                                                end if;
+                                                if Pivot > 0.0 then
+                                                   for Q in P + 1 .. Reduced loop
+                                                      declare
+                                                         Factor : constant Real := Work (Q, P) / Pivot;
+                                                      begin
+                                                         if Factor /= 0.0 then
+                                                            for Rr in P .. Reduced loop
+                                                               Work (Q, Rr) := Work (Q, Rr) - Factor * Work (P, Rr);
+                                                            end loop;
+                                                         end if;
+                                                      end;
+                                                   end loop;
+                                                end if;
+                                             end;
+                                          end loop;
+                                          Driver.Log.Line
+                                            (Driver.Log.Robot, "kinematics: the tracks' fit's normal equations are singular; the"
+                                             & " least pivot of the scaled terms in order is "
+                                             & Driver.Log.Image (Least_Pivot, 6) & " at "
+                                             & (if Least_At > 0 then Name_Of (Least_At) else "none")
+                                             & (if Ada.Strings.Unbounded.Length (Text) > 0
+                                                then "; terms without information:" & Ada.Strings.Unbounded.To_String (Text)
+                                                else "") & "; focal " & Driver.Log.Image (L.Fx, 1) & " px");
+                                       end;
+                                    end if;
                                  end;
                                  Determined := Pd;
                                  Why_Not := Ada.Strings.Unbounded.To_Unbounded_String
