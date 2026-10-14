@@ -752,10 +752,14 @@ package body Driver.Robot.Motion is
       --  before it (Steps: no wait is longer than all the waiting so far), and the ladder's first levels, one
       --  tick each under a servo's deadband, stood 99, 200, 400 and 750 beats in a row (R3 on the Pi, 10-13:
       --  the "rest" that took a minute); the next level cuts such a push short, as it always did.
+      --  A push under way: begun and not ended, whether or not its readings have moved yet. An eye sees the move
+      --  a beat before the readings do (its lag, the servo's delay), and a look that ends at that beat read the
+      --  readings where they stood: the level counted as not executed, and the ladder doubled its ask twenty-four
+      --  times, the arm swinging between its range's ends (R6's fourth start on the kiwi, 10-14, arm_b's first
+      --  joint, once the eye's threshold for motion came down).
       function Still_Pushing return Boolean is
         (for some I in 1 .. N =>
            Usable (I) and then Steps.Episodes (M, Listed (I).Group) > Before (I)
-           and then Steps.Latest (M, Listed (I).Group).Moved
            and then not Steps.Latest (M, Listed (I).Group).Ended);
 
       --  Each listed channel's reading at the last beat, and whether its group's readings still move there.
