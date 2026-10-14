@@ -1933,8 +1933,17 @@ package body Driver.Robot.Kinematics is
                      Asked (F, C) := C - 1 < Natural (R.Frames (F).Asked.Length) and then R.Frames (F).Asked (C - 1);
                   end loop;
                end loop;
+               --  And no nearer than two landings of one asked pose can differ: the reference is a landing, and a
+               --  joint the sweep did not ask lands within its dead band of where it was sent (Steps.Executed_Least)
+               --  every time it is sent back, so it stands from the reference by up to twice that (f15c on 10-15, arm
+               --  2: joints not asked stood 4 and 8 units off the reference at a dead band of 4, against a step of 4).
                for C in 1 .. N loop
-                  Visible (C) := Step_Of (M, R.Arm, C);
+                  declare
+                     Band : constant Real := Steps.Executed_Least (M, R.Group, C);
+                  begin
+                     Visible (C) := (if Band < Real'Last then Real'Max (Step_Of (M, R.Arm, C), 2.0 * Band)
+                                     else Step_Of (M, R.Arm, C));
+                  end;
                end loop;
                declare
                   function Round_Trip (S : Match_Set; I : Natural) return Boolean is

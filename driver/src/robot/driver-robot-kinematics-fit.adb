@@ -1862,6 +1862,32 @@ package body Driver.Robot.Kinematics.Fit is
       function Several (Frame : Positive) return Boolean is
         (for some J in 1 .. N => Away (Frame, J) and then (for some K in J + 1 .. N => Away (Frame, K)));
 
+      --  Each keyframe's joint of its own, and the keyframe it shows that joint's turn against: the reference when
+      --  every other joint stands where it stood there (Single); else, of the keyframes with sightings, the one that
+      --  differs from it in that joint alone and by the most. A servo sent back to the sweep's start lands within its
+      --  dead band of it, so two landings differ by up to twice that, and the reference is a landing too (f15c on
+      --  10-15, arm 2: the joints not asked stood 4 and 8 units from the reference at a dead band of 4, and five
+      --  joints of six had no keyframe of their own against it). Two pushes of one joint from one start share every
+      --  other joint's landing. Stages 1 and 2 fit one joint at a time and take a keyframe's sightings against its
+      --  partner (the point's place there: Pairs); the stages after take them against the reference, with every
+      --  joint's reading.
+      Own_Joint : array (1 .. Frames) of Natural := [others => 0];
+      Partner   : array (1 .. Frames) of Natural := [others => 0];
+
+      function Own_Change (Frame, J : Positive) return Real is
+        (Change (Frame, J) - (if Partner (Frame) > 0 then Change (Partner (Frame), J) else 0.0));
+
+      --  Joint J alone differs between keyframes A and B, as far as their eyes can tell, and B asked it to turn.
+      function Pair_Only (A, B, J : Positive) return Boolean is
+        (Asked (Asked'First (1) + B - 1, Asked'First (2) + J - 1)
+         and then Visible (Visible'First + J - 1) > 0.0
+         and then abs (Change (B, J) - Change (A, J)) >= Visible (Visible'First + J - 1)
+         and then (for all C in 1 .. N =>
+                     C = J or else Visible (Visible'First + C - 1) <= 0.0
+                     or else abs (Change (B, C) - Change (A, C)) < Visible (Visible'First + C - 1)));
+
+      Pairs : Sighting_Access;
+
       Lens0  : Lens := (Fx | Fy => 1.0, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, others => 0.0);
       --  Half the width, in the logarithm, the focal search of stage 1 could tell the focal length within
       --  (its ended bracket); 0 before the search. The last stage takes the search's focal length as a
@@ -1904,6 +1930,7 @@ package body Driver.Robot.Kinematics.Fit is
 
       procedure Fail (Why : String) is
       begin
+         Free (Pairs);
          Report.Why := Ada.Strings.Unbounded.To_Unbounded_String (Why);
          L := Lens0;
          Close_Stage;
@@ -1954,10 +1981,81 @@ package body Driver.Robot.Kinematics.Fit is
          Fail ("no keyframes or no matches");
          return;
       end if;
-      for X of Sight loop
-         if Single (X.Frame) > 0 then
-            Counts (Single (X.Frame)) := Counts (Single (X.Frame)) + 1;
-         end if;
+      declare
+         Sighted : array (1 .. Frames) of Boolean := [others => False];
+         Tracks  : Natural := 0;
+      begin
+         for X of Sight loop
+            Sighted (X.Frame) := True;
+            Tracks := Natural'Max (Tracks, X.Track);
+         end loop;
+         for B in 2 .. Frames loop
+            if Sighted (B) then
+               if Single (B) > 0 then
+                  Own_Joint (B) := Single (B);
+                  Partner (B) := 1;
+               else
+                  for J in 1 .. N loop
+                     for A in 2 .. Frames loop
+                        if A /= B and then Sighted (A) and then Pair_Only (A, B, J)
+                          and then (Partner (B) = 0
+                                    or else abs (Change (B, J) - Change (A, J))
+                                            > abs (Change (B, Own_Joint (B)) - Change (Partner (B), Own_Joint (B))))
+                        then
+                           Own_Joint (B) := J;
+                           Partner (B) := A;
+                        end if;
+                     end loop;
+                  end loop;
+               end if;
+            end if;
+         end loop;
+         declare
+            type Index_Grid is array (1 .. Frames, 1 .. Tracks) of Natural;
+            type Grid_Access is access Index_Grid;
+            procedure Free is new Ada.Unchecked_Deallocation (Index_Grid, Grid_Access);
+            --  Where each keyframe saw each track: its sighting's index, 0 for none.
+            Where : Grid_Access := new Index_Grid'(others => [others => 0]);
+            Count : Natural := 0;
+            function Pairable (X : Sighting) return Boolean is
+              (Own_Joint (X.Frame) > 0
+               and then (Partner (X.Frame) = 1 or else Where (Partner (X.Frame), X.Track) > 0));
+         begin
+            for I in Sight'Range loop
+               Where (Sight (I).Frame, Sight (I).Track) := I;
+            end loop;
+            for X of Sight loop
+               if Pairable (X) then
+                  Count := Count + 1;
+               end if;
+            end loop;
+            Pairs := new Sighting_Array (1 .. Count);
+            Count := 0;
+            for X of Sight loop
+               if Pairable (X) then
+                  Count := Count + 1;
+                  if Partner (X.Frame) = 1 then
+                     Pairs (Count) := X;
+                  else
+                     --  The point's place in the partner, and both places' uncertainty.
+                     declare
+                        P : Sighting renames Sight (Where (Partner (X.Frame), X.Track));
+                     begin
+                        Pairs (Count) :=
+                          (X with delta U0 => P.U, V0 => P.V, Own => Sqrt (X.Own ** 2 + P.Own ** 2),
+                                        Own_Freedom =>
+                                          (if X.Own_Freedom = 0 or else P.Own_Freedom = 0
+                                           then Natural'Max (X.Own_Freedom, P.Own_Freedom)
+                                           else Natural'Min (X.Own_Freedom, P.Own_Freedom)));
+                     end;
+                  end if;
+               end if;
+            end loop;
+            Free (Where);
+         end;
+      end;
+      for X of Pairs.all loop
+         Counts (Own_Joint (X.Frame)) := Counts (Own_Joint (X.Frame)) + 1;
       end loop;
       for J in 1 .. N loop
          Usable (J) := Counts (J) > 0;
@@ -2046,8 +2144,8 @@ package body Driver.Robot.Kinematics.Fit is
          Seen_In : array (1 .. Frames) of Natural := [others => 0];
 
          function Widest (Frame : Positive) return Boolean is
-           (Single (Frame) > 0
-            and then (Frame = Up_Frame (Single (Frame)) or else Frame = Down_Frame (Single (Frame))));
+           (Own_Joint (Frame) > 0
+            and then (Frame = Up_Frame (Own_Joint (Frame)) or else Frame = Down_Frame (Own_Joint (Frame))));
 
          procedure Prepare (F : Real) is
          begin
@@ -2062,14 +2160,14 @@ package body Driver.Robot.Kinematics.Fit is
                declare
                   E : array (1 .. N) of Natural := [others => 0];
                begin
-                  for X of Sight loop
-                     if Single (X.Frame) in 1 .. N then
+                  for X of Pairs.all loop
+                     if Own_Joint (X.Frame) in 1 .. N then
                         declare
-                           J : constant Positive := Single (X.Frame);
+                           J : constant Positive := Own_Joint (X.Frame);
                         begin
                            E (J) := E (J) + 1;
                            Centred (J) (E (J)) :=
-                             (Frame => X.Frame, Reading => Change (X.Frame, J),
+                             (Frame => X.Frame, Reading => Own_Change (X.Frame, J),
                               X0 => X.U0 - Lens0.Cx, Y0 => X.V0 - Lens0.Cy,
                               X1 => X.U - Lens0.Cx, Y1 => X.V - Lens0.Cy, Wide => Widest (X.Frame));
                         end;
@@ -2703,29 +2801,29 @@ package body Driver.Robot.Kinematics.Fit is
          Golden    : constant Real := (3.0 - Sqrt (5.0)) * Ada.Numerics.Pi;
          Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;
       begin
-         for X of Sight loop
+         for X of Pairs.all loop
             Seen_In (X.Frame) := Seen_In (X.Frame) + 1;
          end loop;
          for Frame in 2 .. Frames loop
             declare
-               J : constant Natural := Single (Frame);
+               J : constant Natural := Own_Joint (Frame);
             begin
                if J > 0 and then Seen_In (Frame) > 0 then
-                  if Change (Frame, J) > 0.0
-                    and then (Up_Frame (J) = 0 or else Change (Frame, J) > Change (Up_Frame (J), J))
+                  if Own_Change (Frame, J) > 0.0
+                    and then (Up_Frame (J) = 0 or else Own_Change (Frame, J) > Own_Change (Up_Frame (J), J))
                   then
                      Up_Frame (J) := Frame;
-                  elsif Change (Frame, J) < 0.0
-                    and then (Down_Frame (J) = 0 or else Change (Frame, J) < Change (Down_Frame (J), J))
+                  elsif Own_Change (Frame, J) < 0.0
+                    and then (Down_Frame (J) = 0 or else Own_Change (Frame, J) < Own_Change (Down_Frame (J), J))
                   then
                      Down_Frame (J) := Frame;
                   end if;
                end if;
             end;
          end loop;
-         for X of Sight loop
+         for X of Pairs.all loop
             if Widest (X.Frame) then
-               Grid_Counts (Single (X.Frame)) := Grid_Counts (Single (X.Frame)) + 1;
+               Grid_Counts (Own_Joint (X.Frame)) := Grid_Counts (Own_Joint (X.Frame)) + 1;
             end if;
          end loop;
          for I in 1 .. Directions loop
@@ -2738,12 +2836,12 @@ package body Driver.Robot.Kinematics.Fit is
          end loop;
          --  Some keyframe of a joint alone moved its matches, or there is nothing to fit.
          for Frame in 2 .. Frames loop
-            if Single (Frame) > 0 then
+            if Own_Joint (Frame) > 0 then
                declare
                   D : Real_Access := new Real_Array (1 .. S);
                   K : Natural := 0;
                begin
-                  for X of Sight loop
+                  for X of Pairs.all loop
                      if X.Frame = Frame then
                         K := K + 1;
                         D (K) := Sqrt ((X.U - X.U0) ** 2 + (X.V - X.V0) ** 2);
@@ -2928,8 +3026,8 @@ package body Driver.Robot.Kinematics.Fit is
          Base  : constant Joint_Array := Joints;
          Used  : Natural := 0;
       begin
-         for X of Sight loop
-            if Single (X.Frame) > 0 then
+         for X of Pairs.all loop
+            if Own_Joint (X.Frame) > 0 then
                Used := Used + 1;
             end if;
          end loop;
@@ -2965,9 +3063,9 @@ package body Driver.Robot.Kinematics.Fit is
             begin
                for I in 1 .. Used loop
                   declare
-                     J  : constant Positive := Single (Kept (I).Frame);
+                     J  : constant Positive := Own_Joint (Kept (I).Frame);
                      A  : Joint renames Jx (Jx'First + J - 1);
-                     Rj : constant Mat3 := Rot (A.W, A.C * Change (Kept (I).Frame, J));
+                     Rj : constant Mat3 := Rot (A.W, A.C * Own_Change (Kept (I).Frame, J));
                      Rr : Mat3;
                      Tt : Vec3;
                   begin
@@ -2982,8 +3080,8 @@ package body Driver.Robot.Kinematics.Fit is
               (Count, Used, Driver.Conventions.Initial_Damping, Evaluate, At_Once => True);
             X : Real_Array (1 .. Count) := [others => 0.0];
          begin
-            for Xs of Sight loop
-               if Single (Xs.Frame) > 0 then
+            for Xs of Pairs.all loop
+               if Own_Joint (Xs.Frame) > 0 then
                   K := K + 1;
                   Kept (K) := Xs;
                end if;
@@ -3047,14 +3145,14 @@ package body Driver.Robot.Kinematics.Fit is
                Free (Den);
             end Free_All;
          begin
-            for X of Sight loop
+            for X of Pairs.all loop
                declare
-                  J : constant Natural := Single (X.Frame);
+                  J : constant Natural := Own_Joint (X.Frame);
                begin
                   if J > 0 then
                      declare
                         A  : Joint renames Joints (Joints'First + J - 1);
-                        R  : constant Mat3 := Rot (A.W, A.C * Change (X.Frame, J));
+                        R  : constant Mat3 := Rot (A.W, A.C * Own_Change (X.Frame, J));
                         T  : constant Vec3 := A.P - R * A.P;
                         H0 : constant Vec3 := Ray (Lens0, X.U0, X.V0);
                         Bv : constant Vec3 := R * Ray (Lens0, X.U, X.V);
@@ -3207,10 +3305,13 @@ package body Driver.Robot.Kinematics.Fit is
          end;
       end;
 
+      Free (Pairs);
+
       ---------------------------------------------------------------------------
       --  Stage 4 begins with every keyframe of one joint in one refinement of
       --  the tracks (Refine_Tracks), which any order of the joints explains
-      --  alike. A joint whose turn shifts the view the way its shift moves it
+      --  alike (one whose partner is not the reference, nearly: what it turned
+      --  besides its own joint is a landing, within the steps the eyes see). A joint whose turn shifts the view the way its shift moves it
       --  (a pitch joint whose axis lies behind the eye) has its turn told by
       --  no epipolar residual: a point's depth along its line of sight takes it
       --  up. The depth every point has for all the joints pins it (the
@@ -3222,7 +3323,7 @@ package body Driver.Robot.Kinematics.Fit is
          Alone_Count : Natural := 0;
       begin
          for X of Sight loop
-            if Single (X.Frame) > 0 then
+            if Own_Joint (X.Frame) > 0 then
                Alone_Count := Alone_Count + 1;
             end if;
          end loop;
@@ -3233,7 +3334,7 @@ package body Driver.Robot.Kinematics.Fit is
             Rep   : Fit_Report;
          begin
             for X of Sight loop
-               if Single (X.Frame) > 0 then
+               if Own_Joint (X.Frame) > 0 then
                   K := K + 1;
                   Alone (K) := X;
                end if;
