@@ -538,13 +538,18 @@ package body Driver.Robot.Boot is
                      Levels (I).Append (Mark);
                      exit when Mark.Short or else Per_Unit (P.Channel) = 0.0;
                      Off := 2.0 * Off;
-                     --  Before the arm is fitted, the ladder climbs only as far as the aligner follows by itself: the
-                     --  first level moves the view by half a patch, the next by a patch, and the levels beyond are
-                     --  followed only by a fitted arm's prediction (Motion.Sweep_Start). Taken blind in one pass, they
-                     --  are keyframes nothing finds (R6's second start, 10-14: arm_a's levels at 214, 463, 967 and
-                     --  2792 units of its elbow, 0 of 441 points each, from a view's motion per unit measured ten
-                     --  times too small, and the elbow swung 245 degrees before its ladder met the servo's range).
-                     exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else Patch);
+                     --  Before the arm is fitted, the ladder climbs only as far as the aligner follows by itself: an
+                     --  extrapolation from the levels before to about a patch of displacement beyond them (A22, A23).
+                     --  A doubled level's increment is the level before it, so a level whose whole motion is two
+                     --  patches is one patch beyond the followed level before it; the levels beyond are followed only
+                     --  by a fitted arm's prediction (Motion.Sweep_Start). Taken blind in one pass, they are keyframes
+                     --  nothing finds (R6's second start, 10-14: arm_a's levels at 214, 463, 967 and 2792 units of its
+                     --  elbow, 0 of 441 points each, from a view's motion per unit measured ten times too small, and
+                     --  the elbow swung 245 degrees before its ladder met the servo's range). The brake stood at one
+                     --  patch of whole motion, half the increment the aligner follows: the kiwi's ladders took one
+                     --  doubling a pass, and the parallax that tells a wrist joint's lever (a turn of ~150 units)
+                     --  lay five passes and ten minutes away (R6's tenth start, 10-14).
+                     exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else 2.0 * Patch);
                   end loop;
                   Asked_Now := [others => False];
                   Driver.Beats.Within_A_Beat (Tell_Asking'Access);
