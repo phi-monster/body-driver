@@ -407,9 +407,14 @@ package body Driver.Robot.Boot is
                      --  channel, an executed turn the eye saw (Probe_Both_Ways): the first keyframe needs the view to
                      --  have moved, and before any keyframe the step a keyframe counts from may be none (the rig of
                      --  robot.boot.short: no visible step from the lock-in, a first level of 0, nothing swept).
+                     --  A channel the probe saw move an eye moves the eye, whatever the latest lock-in estimate kept as
+                     --  regressors: the estimate before R6's third sweep (10-14) kept 9 columns of 12, its rows after
+                     --  the rounds' pushes mostly in settling tails of 274 beats, and arm_a's second, third and fourth
+                     --  joints were left unswept though the probe had seen each at 9.8 to 157 units.
                      for R of Recognized loop
                         if R.Ref.Group = G and then R.Ref.Channel = C then
                            First (C) := Real'Max (First (C), R.Amount);
+                           Moves (C) := Moves (C) or else R.Amount > 0.0;
                         end if;
                      end loop;
                      Least (C) := Driver.Robot.Motion.Least_Turn (M, A, C);

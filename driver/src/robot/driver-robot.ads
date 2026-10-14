@@ -529,6 +529,11 @@ private
                                              --  moving (Lockin.Measure); 0 until measured
       Rest_Counts_Known  : Boolean := False; --  how many cells move at a beat when nothing is pushed (Lockin):
       Rest_Count_Max     : Natural := 0;     --  the most of them at any such beat,
+      Rest_Count_Level   : Real := 0.0;      --  the count a beat's moved cells must exceed to be motion: the rest
+                                             --  counts' median plus Z of their robust scatter (not their most: one
+                                             --  flickering frame among 116 at rest put the most at 273 of 525 cells
+                                             --  for the kiwi's wrist eye, and a jaw opening 1250 units moved 130 to
+                                             --  156 cells, unseen, R6 on 10-14)
       Rest_Count_Beats   : Natural := 0;     --  over how many beats
       Still_At      : Flag_Vectors.Vector;   --  per beat: judged still
       Settled_At    : Flag_Vectors.Vector;   --  per beat: its picture had stopped changing since the body last began

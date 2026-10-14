@@ -20,7 +20,7 @@ private package Driver.Robot.Body_File is
    Ends_Method       : constant := 2;
    Steps_Method      : constant := 3;
    Lag_Method        : constant := 2;
-   Lockin_Method     : constant := 4;
+   Lockin_Method     : constant := 5;
    Graph_Method      : constant := 1;
    Kinematics_Method : constant := 9;
 

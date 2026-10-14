@@ -916,7 +916,7 @@ driver-robot-body_file.ads	Ends_Method : constant := 2;	2	format	the second vers
 driver-robot-body_file.ads	Graph_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Kinematics_Method : constant := 9;	9	structure	the kinematics method version: as 8, and every arm's measurements of how far its eye's view moves per reading unit are stored with their standard deviations and point counts, and kept when the fits are not (Stored_Shifts)
 driver-robot-body_file.ads	Lag_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
-driver-robot-body_file.ads	Lockin_Method : constant := 4;	4	structure	the lock-in method version: a held group's motion no cell of an eye can see keeps a push's beat
+driver-robot-body_file.ads	Lockin_Method : constant := 5;	5	format	the fifth version of this method; the body file records per eye the count above which a beat's moved cells are motion (Rest_Count_Level)
 driver-robot-body_file.ads	Noise_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Steps_Method : constant := 3;	3	format	the third version of this method; the body file records per channel the least ask a push moved it for (Steps.Executed_Least)
 driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
@@ -2595,6 +2595,7 @@ driver-robot.adb	& "" & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & ""	2	form
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	1	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	3	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (S.Rest_Factor, 2)	2	format	digits printed in a log line or a message
+driver-robot.adb	& Driver.Log.Image (M.Eyes (E).Rest_Count_Level, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot.adb	& Driver.Log.Image (Mean_Abs_Difference (S.Previous.all, S.Before.all), 2) & ""	2	format	digits printed in a log line or a message
 driver-robot.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot.adb	& Driver.Log.Image (Real (Now - Mark), 1));	1	format	digits printed in a log line or a message

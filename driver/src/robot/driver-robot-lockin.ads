@@ -97,7 +97,9 @@ private package Driver.Robot.Lockin is
    --  The eye's image moved at that beat as the lock-in can tell: more of its
    --  textured cells resolved a displacement beyond their noise at rest (their
    --  floor times the eye's rest factor, Measure_Rest_Noise), or
-   --  moved too far to be resolved, than that per-cell test alarms on by
+   --  moved too far to be resolved, than the rest's beats do: significantly
+   --  above the rest counts' median by their robust scatter (Rest_Count_Level),
+   --  or, before the rest is measured, than that per-cell test alarms on by
    --  chance. The step that makes an eye move this way is one the lock-in
    --  can measure; a change the stillness judgment sees (a pixel's rounding
    --  flipping) can be far smaller.

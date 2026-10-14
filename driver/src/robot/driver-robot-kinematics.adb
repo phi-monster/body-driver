@@ -1039,13 +1039,20 @@ package body Driver.Robot.Kinematics is
             Whole : array (1 .. N) of Boolean := [others => True];
             --  The per-point test's own false-alarm rate.
             Alarm : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+            --  The points of the world: those that move with some channel, significantly. A point that moves with
+            --  none (the hand's jaws, fixed to the eye) is neither a mover nor silent for any channel: counted as
+            --  silent, the jaws made a patch of every channel of arm_b (R6's third start, 10-14: its first pass
+            --  stopped seven of ten pushes as unseen).
+            Of_World : Flag_Access := new Flag_Array (0 .. Queries - 1);
          begin
+            Of_World.all := [others => False];
             for P in 0 .. Queries - 1 loop
                for C in 1 .. N loop
                   if Told (Slot (C, P) - 1) then
                      Told_Of (C) := Told_Of (C) + 1;
                      if Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P))) then
                         Moving_Of (C) := Moving_Of (C) + 1;
+                        Of_World (P) := True;
                      end if;
                   end if;
                end loop;
@@ -1084,7 +1091,7 @@ package body Driver.Robot.Kinematics is
                         Typical : constant Real := Driver.Stats.Median (Movers);
                      begin
                         for P in 0 .. Queries - 1 loop
-                           if Told (Slot (C, P) - 1)
+                           if Of_World (P) and then Told (Slot (C, P) - 1)
                              and then not Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P)))
                              and then Driver.Uncertain.Significant
                                         (Typical - Driver.Conventions.Z * Spread (Slot (C, P)), Spread (Slot (C, P)))
@@ -1110,6 +1117,7 @@ package body Driver.Robot.Kinematics is
                   end if;
                end loop;
             end loop;
+            Free (Of_World);
          end;
          for P in 0 .. Queries - 1 loop
             if Informative (P) then

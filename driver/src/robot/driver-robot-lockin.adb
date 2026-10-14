@@ -1053,6 +1053,15 @@ package body Driver.Robot.Lockin is
                         S.Rest_Count_Max := Most;
                         S.Rest_Count_Beats := K - Start + 1;
                         S.Rest_Counts_Known := S.Rest_Count_Beats > 1;
+                        --  Motion is a count significantly above what the rest produces: the rest counts' median
+                        --  plus Z of their robust scatter. The most of them is one beat's: a frame that flickered
+                        --  once among 116 at rest put it at 273 of 525 cells for the kiwi's wrist eye, and a jaw
+                        --  opening 1250 units moved 130 to 156 cells, unseen (R6, 10-14).
+                        if S.Rest_Counts_Known then
+                           S.Rest_Count_Level :=
+                             Driver.Stats.Median (Counts (Start .. K))
+                             + Driver.Conventions.Z * Driver.Stats.Robust_Sigma (Counts (Start .. K));
+                        end if;
                      end;
                   end;
                   Free (Ratios);
@@ -1111,7 +1120,7 @@ package body Driver.Robot.Lockin is
       --  whatever their distribution. Before that is measured, against the
       --  false alarms of the per-cell test alone.
       return (if S.Rest_Counts_Known
-              then Count > S.Rest_Count_Max
+              then Real (Count) > S.Rest_Count_Level
               else Regression.Count_Significant
                      (Count, Tested, Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z)));
    end Moved;
