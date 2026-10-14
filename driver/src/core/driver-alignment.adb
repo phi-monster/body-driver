@@ -671,13 +671,25 @@ package body Driver.Alignment is
    end record;
    type Retry_Counts is array (Reason) of Retry_Count;
 
+   --  Which of a window's peaks the place chosen came from (Align_At refines every peak of the scan): the scan's
+   --  best, its second, or a later one; and how many winners lay further below the best peak's correlation than
+   --  one pixel of misalignment costs the patch (Drop), the gap a refinement could close. For the measurement of
+   --  whether refining every peak is needed (R6's seventh start on the Pi, 10-14: ten peak fits an asked point,
+   --  424 of the aligner's 524 CPU seconds over 30 keyframes).
+   type Winner_Count is record
+      First, Second, Later, Beyond_Drop : Natural := 0;
+      Largest_Over_Drop : Real := 0.0;   --  the largest gap, in drops, a winner closed
+   end record;
+
    protected Work is
       procedure Add (Phase : Work_Phase; Passes : Natural; Seconds : Duration; Iterations : Natural := 0);
       procedure Add_Retry (First : Reason; Found : Boolean);
-      procedure Take (Into : out Work_Counts; Retries : out Retry_Counts);
+      procedure Add_Winner (Rank : Positive; Gap, Drop : Real);
+      procedure Take (Into : out Work_Counts; Retries : out Retry_Counts; Winners : out Winner_Count);
    private
       Totals  : Work_Counts;
       Retried : Retry_Counts;
+      Won     : Winner_Count;
    end Work;
 
    protected body Work is
@@ -697,18 +709,36 @@ package body Driver.Alignment is
          end if;
       end Add_Retry;
 
-      procedure Take (Into : out Work_Counts; Retries : out Retry_Counts) is
+      procedure Add_Winner (Rank : Positive; Gap, Drop : Real) is
+      begin
+         case Rank is
+            when 1 => Won.First := Won.First + 1;
+            when 2 => Won.Second := Won.Second + 1;
+            when others => Won.Later := Won.Later + 1;
+         end case;
+         if Gap > Drop then
+            Won.Beyond_Drop := Won.Beyond_Drop + 1;
+         end if;
+         if Drop > 0.0 then
+            Won.Largest_Over_Drop := Real'Max (Won.Largest_Over_Drop, Gap / Drop);
+         end if;
+      end Add_Winner;
+
+      procedure Take (Into : out Work_Counts; Retries : out Retry_Counts; Winners : out Winner_Count) is
       begin
          Into := Totals;
          Retries := Retried;
          Totals := [others => <>];
          Retried := [others => <>];
+         Winners := Won;
+         Won := (others => <>);
       end Take;
    end Work;
 
    function Work_Report return String is
       W : Work_Counts;
       R : Retry_Counts;
+      V : Winner_Count;
 
       function Retries_Text (From : Reason) return String is
         (if From = Reason'Last then ""
@@ -729,10 +759,14 @@ package body Driver.Alignment is
          & (if W (P).Iterations > 0 then " in" & W (P).Iterations'Image & " steps" else "") & ", "
          & Tenths (W (P).Seconds) & " s");
    begin
-      Work.Take (W, R);
+      Work.Take (W, R, V);
       return Phase_Text (Scanning, "cells") & "; " & Phase_Text (Peak_Fitting, "passes") & "; "
         & Phase_Text (Level_Fitting, "passes") & "; " & Phase_Text (Variant_Fitting, "passes") & "; "
-        & Phase_Text (Retrying, "found") & " (tried/found by the first failure:" & Retries_Text (Reason'First) & ")";
+        & Phase_Text (Retrying, "found") & " (tried/found by the first failure:" & Retries_Text (Reason'First) & ")"
+        & "; the place chosen was the scan's best peak" & V.First'Image & " times, its second" & V.Second'Image
+        & ", a later one" & V.Later'Image & ";" & V.Beyond_Drop'Image
+        & " lay below the best by more than a pixel costs the patch (the largest gap "
+        & Tenths (Duration (V.Largest_Over_Drop)) & " of that)";
    end Work_Report;
 
    type Summary_Array is array (Positive range <>) of Summary;
@@ -1550,6 +1584,36 @@ package body Driver.Alignment is
             end loop;
             if Runner_Up > 0 and then Score (Best) - Score (Runner_Up) < Odds_Needed then
                return Refuse (Ambiguous);
+            end if;
+         end;
+         --  For the measurement (Work.Add_Winner): which peak won, how far its scan correlation lay below the
+         --  best peak's, and what one pixel of misalignment costs this patch's correlation: to second order,
+         --  the slope's energy along the steeper axis over twice the patch's variance.
+         declare
+            Mean_T, Var_T, Energy_U, Energy_V : Real := 0.0;
+            Used : Natural := 0;
+         begin
+            for K in 1 .. N loop
+               if Valid (K) then
+                  Used := Used + 1;
+                  Mean_T := Mean_T + Template (K);
+               end if;
+            end loop;
+            if Used > 0 then
+               Mean_T := Mean_T / Real (Used);
+               for K in 1 .. N loop
+                  if Valid (K) then
+                     Var_T := Var_T + (Template (K) - Mean_T) ** 2;
+                     Energy_U := Energy_U + Slope_U (K) ** 2;
+                     Energy_V := Energy_V + Slope_V (K) ** 2;
+                  end if;
+               end loop;
+               if Var_T > 0.0 then
+                  Work.Add_Winner
+                    (Rank => (if Best <= Peak_Count then Best else Tries),
+                     Gap  => Rho (Peaks (1)) - (if Best <= Peak_Count then Rho (Peaks (Best)) else Rho (Nearest)),
+                     Drop => Real'Max (Energy_U, Energy_V) / (2.0 * Var_T));
+               end if;
             end if;
          end;
          Fitted := Fits (Best);

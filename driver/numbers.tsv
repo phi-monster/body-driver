@@ -238,6 +238,7 @@ driver-alignment.adb	C (First + (Count - 1) * Step) := Pole / (Pole ** 2 - 1.0) 
 driver-alignment.adb	Checked (Align_At (First, Second, Query, Level_Used, Plain, Radius, 2,	2	structure	a patch twice as wide
 driver-alignment.adb	Cost := 0.5 * (Current.Rss + Penalty (T, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
 driver-alignment.adb	Cost := 0.5 * (Current.Rss + Penalty (T, Held, Noise));	0.5	math	the cost is half the sum of squares, the one whose gradient is the normal equations
+driver-alignment.adb	Drop => Real'Max (Energy_U, Energy_V) / (2.0 * Var_T));	2.0	math	second-order correlation drop: the slope's energy over twice the patch's variance
 driver-alignment.adb	Filter_Line (Spline.all, Spline'First + Row * Width, 1, Width);	1	structure	along a row the next pixel is one apart
 driver-alignment.adb	Finest : constant := 0;	0	structure	the finest size of the pyramid is the picture itself: size 0
 driver-alignment.adb	Fraction : Real := 1.0;	1.0	numerics	the line search starts with the whole step
@@ -352,6 +353,8 @@ driver-alignment.adb	return Natural (Real'Rounding (Side / 2.0));	2.0	math	half 
 driver-alignment.adb	return Real'Min (Real (Count), Real'Max (1.0, Real (Count) / Squares));	1.0	statistics	at least one independent sample
 driver-alignment.adb	return Sqrt (Real'Max (0.0, (Q_VV * Du ** 2 - 2.0 * Q_UV * Du * Dv + Q_UU * Dv ** 2) / Q_Det));	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
 driver-alignment.adb	type Taps is array (0 .. 3) of Real;	3	math	the cubic B-spline reads four taps, one before the place to two after
+driver-alignment.adb	when 1 => Won.First := Won.First + 1;	1	structure	the rank of the winning peak the count is kept by (first, second, later)
+driver-alignment.adb	when 2 => Won.Second := Won.Second + 1;	2	structure	the rank of the winning peak the count is kept by (first, second, later)
 driver-alignment.adb	while J >= 1 and then Rho (Peaks (J)) < Rho (Held) loop	1	structure	the insertion stops at the first peak
 driver-alignment.ads	Halving : constant := 2;	2	math	a size of the pyramid is half the one before: the pictures are halved
 driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);	1.0	math	the identity map: the first diagonal entry is one
