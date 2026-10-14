@@ -1833,9 +1833,19 @@ package body Driver.Robot.Kinematics.Fit is
          and then Visible (Visible'First + J - 1) > 0.0
          and then abs Change (Frame, J) >= Visible (Visible'First + J - 1));
 
-      --  Only joint J moved in the keyframe, as far as its eye can tell.
+      --  A joint's reading in the keyframe stands from the reference's by a step its eye can see, asked or not: a
+      --  joint the sweep left where an earlier push took it is turned from the reference as much as one it asks now
+      --  (f15c on 10-15: arm 1's keyframe 51 asked joint 6 by 6.2 units with joint 5 left at -24.5; taken for joint
+      --  6 alone, its two-joint motion fitted no turn of joint 6, that joint's score at stage 1 was three times the
+      --  others' and fell with the focal length, and the search put a 194 px lens at 12 px). A landing error stays
+      --  below the step, which is floored at the least turn the body executes (Step_Of in Kinematics).
+      function Away (Frame, J : Positive) return Boolean is
+        (Visible (Visible'First + J - 1) > 0.0 and then abs Change (Frame, J) >= Visible (Visible'First + J - 1));
+
+      --  Only joint J moved in the keyframe, as far as its eye can tell: it was asked to, and every other joint
+      --  stands where it stood in the reference.
       function Only (Frame, J : Positive) return Boolean is
-        (Moved (Frame, J) and then (for all C in 1 .. N => C = J or else not Moved (Frame, C)));
+        (Moved (Frame, J) and then (for all C in 1 .. N => C = J or else not Away (Frame, C)));
 
       function Single (Frame : Positive) return Natural is
       begin
@@ -1847,9 +1857,10 @@ package body Driver.Robot.Kinematics.Fit is
          return 0;
       end Single;
 
-      --  The keyframe moved two joints or more, as far as their eyes can tell: what tells the joints' order.
+      --  The keyframe stands from the reference by two joints or more, as far as their eyes can tell, asked now or
+      --  left there before: what tells the joints' order.
       function Several (Frame : Positive) return Boolean is
-        (for some J in 1 .. N => Moved (Frame, J) and then (for some K in J + 1 .. N => Moved (Frame, K)));
+        (for some J in 1 .. N => Away (Frame, J) and then (for some K in J + 1 .. N => Away (Frame, K)));
 
       Lens0  : Lens := (Fx | Fy => 1.0, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, others => 0.0);
       --  Half the width, in the logarithm, the focal search of stage 1 could tell the focal length within
@@ -3288,7 +3299,13 @@ package body Driver.Robot.Kinematics.Fit is
                      end if;
                   end loop;
                   Median := Median_Abs (R (1 .. K));
-                  Error := Median_Error (Median, K);
+                  --  The median point lands behind the eye: no residual, and none to lower by a standard error.
+                  if Median >= Real'Last then
+                     Median := Real'Last;
+                     Error := 0.0;
+                  else
+                     Error := Median_Error (Median, K);
+                  end if;
                end Score;
 
                --  C with the joint at place From moved to place To, the joints between shifted over.
@@ -3370,12 +3387,22 @@ package body Driver.Robot.Kinematics.Fit is
                            end if;
                         end loop;
                      end loop;
-                     exit when Here - Best <= Here_Error;
+                     --  Written so that it ends on a score that is no number: the median of residuals of which half
+                     --  or more lay behind the eye was the mean of the two largest reals, infinite, and the
+                     --  difference of two of them none, which no comparison stopped (f15c replayed on 10-15: the
+                     --  search went on for ten minutes at one order).
+                     exit when not (Best < Here - Here_Error);
                      Order := Best_Order;
                      Here := Best;
                      Here_Error := Best_Error;
                   end;
                end loop;
+               if Here >= Real'Last then
+                  Free_All;
+                  Fail ("no order of the joints puts the points the keyframes of one joint placed before the eye in "
+                        & "the keyframes that moved several: the order of the joints along the arm is not told");
+                  return;
+               end if;
                Free_All;
             end;
          end;

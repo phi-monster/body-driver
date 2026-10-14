@@ -113,15 +113,32 @@ package Driver.Alignment.Keyframes is
      with Pre => Has_Reference (C) and then Answers'Length = Point_Count (C) and then Agree'Length = Answers'Length;
    --  Which of the answers found lie in a smooth field of displacements with the others (as Add says of a keyframe's).
 
+   type Motion is record
+      Told       : Boolean := False;   --  a field of displacements the points agree with, beyond any other
+      Level      : Natural := 0;       --  the size of the pyramids it was told at, or tried at last
+      Points     : Natural := 0;       --  the points that had places of their own to go to there
+      Agree      : Natural := 0;       --  of them, the ones that have a place on the field
+      Own, Other : Natural := 0;       --  on the field and not on the next best one, and the other way round
+      Turn       : Real := 0.0;        --  how far the field turns the view, in radians
+      Shift_U, Shift_V : Real := 0.0;  --  how far it moves the picture's centre, in pixels
+      Sigma      : Real := 0.0;        --  how far the places of the points on it lie from it, in pixels
+      Draws      : Natural := 0;       --  the pairs of places the fields were drawn from, over the sizes tried
+   end record;
+   --  The view's common motion a keyframe from a new direction was predicted from (Add).
+
+   No_Riding : constant Flag_Array (1 .. 0) := [];
+
    procedure Add
      (C       : in out Chain;
       Image   : Driver.Images.Image;
       Change  : Driver.Real_Array;
       Given   : Prediction_Array;
       Answers : out Answer_Array;
-      Agree   : out Flag_Array)
+      Agree   : out Flag_Array;
+      Riding  : Flag_Array := No_Riding)
      with Pre => Has_Reference (C) and then Given'Length = Point_Count (C) and then Answers'Length = Given'Length
-                 and then Agree'Length = Answers'Length;
+                 and then Agree'Length = Answers'Length
+                 and then (Riding'Length = 0 or else Riding'Length = Point_Count (C));
    --  Aligns every point of the reference into Image from its prediction (the one Predict gave, or the caller's
    --  own), and keeps the answers as a keyframe the next is predicted from. Agree says which points the keyframe
    --  lies in a smooth field of displacements with (the displacements of the found points, a quadratic of the place,
@@ -130,6 +147,22 @@ package Driver.Alignment.Keyframes is
    --  are too few found points for a field. The predictions of each order that
    --  Predict made are judged by the answers (how far each was off beyond what it stated), whichever one was used,
    --  and the relative error that showed is what the next use of that order allows for.
+   --
+   --  A keyframe Predict could only give a new direction (the points have moved as far as the aligner searches)
+   --  is asked from the view's common motion instead: the field of displacements of a turned view that more of the
+   --  points have places of their own on than on any other, significantly, at the coarsest size of the pyramids
+   --  that tells it (Last_Motion). Searched alone over a window that wide, each point was refused or found where
+   --  something that does not move lies (f15c on 10-15: the arm's base turned ten degrees, the view moved 90 px and
+   --  turned with it, and every point searched at the 20 by 15 size was refused or found at no motion, where the
+   --  arm's own hand and the grain of the table lie). When no field is told, no point is asked.
+   --  Riding marks the points the caller knows to ride with the eye (its own body in its picture: they stay where
+   --  they are whatever the view does): they tell nothing of the view's motion and are left out of it, though they
+   --  are asked from it like the rest. Where they are most of the points, the field of no motion is theirs and
+   --  wins (f15c on 10-15, arm 2: the wrist eye's picture mostly its own fingers, thumb and palm, the arm's base
+   --  turned 44 degrees, the table moved 60 px, and the field the most points agreed on was no motion).
+
+   function Last_Motion (C : Chain) return Motion;
+   --  The view's common motion the keyframe added last was asked from; not Told when it was not asked so.
 
 private
 
@@ -223,6 +256,7 @@ private
       Latest   : Candidate_Array;   --  per order, the prediction that stated the least for the keyframe being added
       Combined : Combination;   --  the sum of single-channel moves considered for the keyframe being added
       Last     : Source := Supplied;   --  where the last prediction came from, until the keyframe it was for is added
+      Motion   : Driver.Alignment.Keyframes.Motion;   --  the common motion the keyframe added last was asked from
    end record;
 
 end Driver.Alignment.Keyframes;

@@ -57,6 +57,7 @@
 with Driver.Images;
 
 private with Ada.Containers.Vectors;
+private with Driver.Uncertain;
 private with Ada.Finalization;
 private with System.Atomic_Counters;
 
@@ -191,6 +192,12 @@ package Driver.Alignment is
    --  (Largest_Window less what a place on a grid of pixels cannot be known to beyond): the width of "anywhere
    --  the aligner can look".
 
+   function Window_Level (First, Second : Pyramid; Radius : Real) return Natural
+     with Pre => Levels (First) > 0 and then Levels (Second) > 0;
+   --  The size of the pyramids Align searches a window of this radius (pixels of the full size) at: the finest where
+   --  the window is no wider than a patch there; where it is wider than a patch at every size, the one where it is
+   --  the least wider than its patch.
+
    function Window_Radius (Sigma : Real) return Real;
    --  The radius, in pixels, of the window of a prediction whose standard deviation is Sigma along both axes: as far
    --  as a vector of two dimensions is significant, and a place on a grid of pixels cannot be known to beyond.
@@ -202,6 +209,17 @@ package Driver.Alignment is
    --  pictures are, and such a point is followed (Driver.Robot.Kinematics.Followed).
 
 private
+
+   Window_Gate     : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
+   Window_Multiple : constant Real := Driver.Uncertain.Threshold (Window_Gate);
+   --  How many standard deviations of a prediction a place may lie from it: the length of a two-dimensional
+   --  difference, significant at the tail probability Z has for one dimension.
+
+   Quantization : constant Real := 1.0 / 12.0;
+   --  The variance of a uniform rounding to a whole unit: of a pixel's level, and of a place known to a pixel.
+
+   Finest : constant := 0;
+   --  The size of the pyramid that is the picture itself.
 
    --  An array of reals made once and read after by any number of alignments at once (Driver.Parallel_For). The
    --  levels that share it count themselves with an atomic counter, and reading it writes nothing. (A reference

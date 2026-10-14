@@ -1,6 +1,8 @@
+with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
+with Driver.Distributions;
 with Driver.Numerics.Dense;
 with Driver.Parallel_For;
 with Driver.Stats;
@@ -1128,13 +1130,637 @@ package body Driver.Alignment.Keyframes is
       return True;
    end Unmoved;
 
+   ---------------------------------------------------------------------------
+   --  The view's common motion
+
+   --  A place where a point's patch correlates with the keyframe better than at the eight places around it, all
+   --  within the window: how far the point moved to get there, in pixels of the size scanned, and the correlation.
+   type Peak is record
+      Du, Dv : Real := 0.0;
+      Rho    : Real := 0.0;
+   end record;
+
+   type Peak_Array is array (Positive range <>) of Peak;
+   type Peaks_Access is access Peak_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Peak_Array, Peaks_Access);
+   type Peak_Lists is array (Positive range <>) of Peaks_Access;
+   type Flags_Access is access Flag_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flags_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Reals_Access);
+
+   --  The field of displacements d (p) = M p + T of a place p, in pixels of the size scanned.
+   type Affine is record
+      M11, M12, M21, M22, Tu, Tv : Real := 0.0;
+   end record;
+
+   function Move_U (F : Affine; U, V : Real) return Real is (F.M11 * U + F.M12 * V + F.Tu);
+   function Move_V (F : Affine; U, V : Real) return Real is (F.M21 * U + F.M22 * V + F.Tv);
+
+   --  Every point's peaks over a window of Radius (pixels of the full size) at size Size of the pyramids: the
+   --  candidates are the second picture's pixels there, as Align scans a window (Align_At), and a point whose patch
+   --  lies more than half outside the reference's picture has none.
+   procedure Scan_Peaks
+     (C : Chain; Second : Pyramid; Riding : Flag_Array; Size : Natural; Radius : Real; Peaks : out Peak_Lists)
+   is
+      Scale  : constant Real := Real (Halving) ** Size;
+      Half   : constant Natural := Half_Patch (C.Pictures.Sizes (Size).Width, C.Pictures.Sizes (Size).Height);
+      Side   : constant Positive := 2 * Half + 1;
+      Reach  : constant Real := Radius / Scale;
+      B_Level : Level renames Second.Sizes (Size);
+      B_Luma  : Real_Array renames B_Level.Luma.Held.Values.all;
+
+      procedure One (K : Positive) is
+         P  : constant Driver.Images.Pixel := C.Points (K);
+         Pu : constant Real := P.U / Scale;
+         Pv : constant Real := P.V / Scale;
+         X0 : constant Integer := Integer (Real'Floor (Pu - Reach - 0.5));
+         X1 : constant Integer := Integer (Real'Ceiling (Pu + Reach - 0.5));
+         Y0 : constant Integer := Integer (Real'Floor (Pv - Reach - 0.5));
+         Y1 : constant Integer := Integer (Real'Ceiling (Pv + Reach - 0.5));
+         Across : constant Positive := X1 - X0 + 1;
+         Down   : constant Positive := Y1 - Y0 + 1;
+         Template : Real_Array (1 .. Side * Side);
+         Valid    : array (1 .. Side * Side) of Boolean := [others => False];
+         Present  : Natural := 0;
+         Rho      : Reals_Access := new Real_Array'(1 .. Across * Down => -2.0);   --  -2: no candidate there
+         Count    : Natural := 0;
+         function Cell (X, Y : Integer) return Positive is ((Y - Y0) * Across + (X - X0) + 1);
+         function In_Picture (X, Y : Integer) return Boolean is
+           (X >= 0 and then Y >= 0 and then X < B_Level.Width and then Y < B_Level.Height);
+      begin
+         Peaks (K) := null;
+         if Riding'Length > 0 and then Riding (Riding'First + K - 1) then
+            Free (Rho);
+            return;
+         end if;
+         declare
+            I : Natural := 0;
+            Value, Du, Dv : Real;
+            Ok : Boolean;
+         begin
+            for J in -Integer (Half) .. Integer (Half) loop
+               for Ii in -Integer (Half) .. Integer (Half) loop
+                  I := I + 1;
+                  Sample_Level (C.Pictures, Size, Pu + Real (Ii), Pv + Real (J), Value, Du, Dv, Ok);
+                  Template (I) := Value;
+                  Valid (I) := Ok;
+                  if Ok then
+                     Present := Present + 1;
+                  end if;
+               end loop;
+            end loop;
+         end;
+         if 2 * Present < Side * Side then
+            Free (Rho);
+            return;
+         end if;
+         for Y in Y0 .. Y1 loop
+            for X in X0 .. X1 loop
+               if (Real (X) + 0.5 - Pu) ** 2 + (Real (Y) + 0.5 - Pv) ** 2 <= Reach ** 2 then
+                  declare
+                     Sum_S, Sum_T, Sum_SS, Sum_TT, Sum_ST : Real := 0.0;
+                     N : Natural := 0;
+                     I : Natural := 0;
+                  begin
+                     for J in -Integer (Half) .. Integer (Half) loop
+                        for Ii in -Integer (Half) .. Integer (Half) loop
+                           I := I + 1;
+                           if Valid (I) and then In_Picture (X + Ii, Y + J) then
+                              declare
+                                 S : constant Real := B_Luma (B_Luma'First + (Y + J) * B_Level.Width + X + Ii);
+                                 T : constant Real := Template (I);
+                              begin
+                                 N := N + 1;
+                                 Sum_S := Sum_S + S;
+                                 Sum_T := Sum_T + T;
+                                 Sum_SS := Sum_SS + S * S;
+                                 Sum_TT := Sum_TT + T * T;
+                                 Sum_ST := Sum_ST + S * T;
+                              end;
+                           end if;
+                        end loop;
+                     end loop;
+                     if 2 * N >= Side * Side then
+                        declare
+                           Nr  : constant Real := Real (N);
+                           Vss : constant Real := Sum_SS - Sum_S ** 2 / Nr;
+                           Vtt : constant Real := Sum_TT - Sum_T ** 2 / Nr;
+                           Vst : constant Real := Sum_ST - Sum_S * Sum_T / Nr;
+                        begin
+                           if Vss > 0.0 and then Vtt > 0.0 then
+                              Rho (Cell (X, Y)) := Vst / Sqrt (Vss * Vtt);
+                           end if;
+                        end;
+                     end if;
+                  end;
+               end if;
+            end loop;
+         end loop;
+         --  The peaks: better than every one of the eight candidates around, all of which are in the window (a
+         --  place on the window's rim is the end of a slope, not a place of the point's own).
+         declare
+            function Is_Peak (X, Y : Integer) return Boolean is
+               Here : constant Real := Rho (Cell (X, Y));
+            begin
+               if Here <= 0.0 then
+                  return False;
+               end if;
+               for Ey in -1 .. 1 loop
+                  for Ex in -1 .. 1 loop
+                     if Ex /= 0 or else Ey /= 0 then
+                        if X + Ex not in X0 .. X1 or else Y + Ey not in Y0 .. Y1
+                          or else Rho (Cell (X + Ex, Y + Ey)) <= -2.0
+                          or else Rho (Cell (X + Ex, Y + Ey)) > Here
+                        then
+                           return False;
+                        end if;
+                     end if;
+                  end loop;
+               end loop;
+               return True;
+            end Is_Peak;
+         begin
+            for Y in Y0 .. Y1 loop
+               for X in X0 .. X1 loop
+                  if Is_Peak (X, Y) then
+                     Count := Count + 1;
+                  end if;
+               end loop;
+            end loop;
+            if Count > 0 then
+               Peaks (K) := new Peak_Array (1 .. Count);
+               Count := 0;
+               for Y in Y0 .. Y1 loop
+                  for X in X0 .. X1 loop
+                     if Is_Peak (X, Y) then
+                        Count := Count + 1;
+                        Peaks (K) (Count) :=
+                          (Du => Real (X) + 0.5 - Pu, Dv => Real (Y) + 0.5 - Pv, Rho => Rho (Cell (X, Y)));
+                     end if;
+                  end loop;
+               end loop;
+            end if;
+         end;
+         Free (Rho);
+      end One;
+
+      procedure Run is new Driver.Parallel_For (One);
+   begin
+      Run (Peaks'First, Peaks'Last);
+   end Scan_Peaks;
+
+   procedure Common_Motion
+     (C      : Chain;
+      Second : Pyramid;
+      Spread : Real;
+      Riding : Flag_Array;
+      Into   : out Prediction_Array;
+      Result : out Motion)
+   is
+      Count  : constant Natural := Natural (C.Points.Length);
+      Radius : constant Real := Window_Radius (Spread);
+      Start  : constant Natural := Window_Level (C.Pictures, Second, Radius);
+      --  Two places, each known to the pixel of the size scanned, agree within the window of their difference.
+      Tolerance : constant Real := Window_Multiple * Sqrt (2.0 * Quantization);
+      --  How sure the drawing must be not to have missed a field: the tail probability Z has.
+      Miss : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Z);
+      Gen  : Ada.Numerics.Float_Random.Generator;
+      --  The sizes tried: from the one Align searches the window at, finer while the field is not told, down to the
+      --  coarsest size where a place known to its pixel is a window a patch carries at the full size (Align's own
+      --  test of a narrow window): a finer size narrows the prediction no further and scans four times the places
+      --  a halving. A coarse size may hold too few places of their own to tell any (the boot's rigs, 64 by 48:
+      --  told at 32 by 24, not at 16 by 12; the finest tried there is 32 by 24, at 320 by 240 it is 80 by 60).
+      function Finest_Tried return Natural is
+         Finest_Narrow : Natural := Finest;
+      begin
+         for Size in Finest .. Start loop
+            exit when Window_Radius (Real (Halving) ** Size * Sqrt (Quantization)) + 1.0
+                        > Real (Half_Patch (C.Width, C.Height));
+            Finest_Narrow := Size;
+         end loop;
+         return Finest_Narrow;
+      end Finest_Tried;
+   begin
+      Result := (others => <>);
+      Ada.Numerics.Float_Random.Reset (Gen, Count);
+      for Size in reverse Finest_Tried .. Start loop
+         declare
+            Scale : constant Real := Real (Halving) ** Size;
+            Peaks : Peak_Lists (1 .. Count) := [others => null];
+            --  Per point and peak: still drawn from (not a place of a field already taken).
+            type Flag_Lists is array (1 .. Count) of Flags_Access;
+            Open  : Flag_Lists := [others => null];
+            Usable : Natural := 0;
+
+            function U_Of (K : Positive) return Real is (C.Points (K).U / Scale);
+            function V_Of (K : Positive) return Real is (C.Points (K).V / Scale);
+
+            --  The open peak of point K nearest the field's displacement there, and its squared distance from it.
+            --  Of the open peaks within the tolerance down the window, the nearest (none farther is ever on a field). The
+            --  peaks run down the window row by row (Scan_Peaks): the first of them is found by halving, and a draw
+            --  costs the rows within the tolerance, not every peak of the point (f15c replayed on 10-15: at the full
+            --  size a point had hundreds, and the draws sat for ten minutes).
+            procedure Nearest (F : Affine; K : Positive; Index : out Natural; Gap : out Real) is
+               Du : constant Real := Move_U (F, U_Of (K), V_Of (K));
+               Dv : constant Real := Move_V (F, U_Of (K), V_Of (K));
+            begin
+               Index := 0;
+               Gap := Real'Last;
+               if Peaks (K) /= null then
+                  declare
+                     P  : Peak_Array renames Peaks (K).all;
+                     Lo : Positive := P'First;
+                     Hi : Positive := P'Last + 1;
+                  begin
+                     while Lo < Hi loop
+                        declare
+                           Mid : constant Positive := (Lo + Hi) / 2;
+                        begin
+                           if P (Mid).Dv < Dv - Tolerance then
+                              Lo := Mid + 1;
+                           else
+                              Hi := Mid;
+                           end if;
+                        end;
+                     end loop;
+                     for I in Lo .. P'Last loop
+                        exit when P (I).Dv > Dv + Tolerance;
+                        if Open (K) (I) then
+                           declare
+                              D : constant Real := (P (I).Du - Du) ** 2 + (P (I).Dv - Dv) ** 2;
+                           begin
+                              if D < Gap then
+                                 Gap := D;
+                                 Index := I;
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                  end;
+               end if;
+            end Nearest;
+
+            function On_Field (F : Affine; K : Positive) return Boolean is
+               I   : Natural;
+               Gap : Real;
+            begin
+               Nearest (F, K, I, Gap);
+               return I > 0 and then Gap <= Tolerance ** 2;
+            end On_Field;
+
+            function Agreeing (F : Affine) return Natural is
+               N : Natural := 0;
+            begin
+               for K in 1 .. Count loop
+                  if On_Field (F, K) then
+                     N := N + 1;
+                  end if;
+               end loop;
+               return N;
+            end Agreeing;
+
+            --  The affine field through the places on F, by least squares; F itself when they do not determine one.
+            function Refit (F : Affine) return Affine is
+               N : Natural := 0;
+               A : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];
+               Bu, Bv : Real_Vector (1 .. 3) := [others => 0.0];
+            begin
+               for K in 1 .. Count loop
+                  declare
+                     I   : Natural;
+                     Gap : Real;
+                  begin
+                     Nearest (F, K, I, Gap);
+                     if I > 0 and then Gap <= Tolerance ** 2 then
+                        declare
+                           Row : constant Real_Vector (1 .. 3) := [U_Of (K), V_Of (K), 1.0];
+                        begin
+                           N := N + 1;
+                           for R in 1 .. 3 loop
+                              for S in 1 .. 3 loop
+                                 A (R, S) := A (R, S) + Row (R) * Row (S);
+                              end loop;
+                              Bu (R) := Bu (R) + Row (R) * Peaks (K) (I).Du;
+                              Bv (R) := Bv (R) + Row (R) * Peaks (K) (I).Dv;
+                           end loop;
+                        end;
+                     end if;
+                  end;
+               end loop;
+               if N < 3 then
+                  return F;
+               end if;
+               declare
+                  L      : Real_Matrix (1 .. 3, 1 .. 3);
+                  Definite : Boolean;
+               begin
+                  Driver.Numerics.Dense.Cholesky (A, L, Definite);
+                  if not Definite then
+                     return F;
+                  end if;
+                  declare
+                     Xu : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (L, Bu);
+                     Xv : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (L, Bv);
+                  begin
+                     return (M11 => Xu (1), M12 => Xu (2), Tu => Xu (3), M21 => Xv (1), M22 => Xv (2), Tv => Xv (3));
+                  end;
+               end;
+            end Refit;
+
+            --  The field the most points agree with, of those drawn from two open places at a time (a turn, a scale
+            --  and a shift), the points drawn alike and each point's places in proportion to their correlation, as
+            --  many draws as find with probability 1 - Miss a field that half the points have a typical place on,
+            --  fewer once the best so far shows that many find it; then refitted while more points agree.
+            procedure Draw (Best : out Affine; Best_N : out Natural) is
+               Drawable : Natural := 0;
+               Total    : Natural := 0;
+               Index    : array (1 .. Count) of Natural := [others => 0];   --  the points with open places
+               function Weight (K : Positive) return Real is
+                  Sum : Real := 0.0;
+               begin
+                  for I in Peaks (K)'Range loop
+                     if Open (K) (I) then
+                        Sum := Sum + Peaks (K) (I).Rho;
+                     end if;
+                  end loop;
+                  return Sum;
+               end Weight;
+               function Pick_Place (K : Positive) return Positive is
+                  Target : constant Real := Real (Ada.Numerics.Float_Random.Random (Gen)) * Weight (K);
+                  Sum    : Real := 0.0;
+                  Last   : Positive := 1;
+               begin
+                  for I in Peaks (K)'Range loop
+                     if Open (K) (I) then
+                        Sum := Sum + Peaks (K) (I).Rho;
+                        Last := I;
+                        if Sum >= Target then
+                           return I;
+                        end if;
+                     end if;
+                  end loop;
+                  return Last;
+               end Pick_Place;
+               function Pick_Point return Positive is
+                  R : constant Natural :=
+                    Natural'Min (Drawable - 1,
+                                 Natural (Real'Floor (Real (Ada.Numerics.Float_Random.Random (Gen)) * Real (Drawable))));
+               begin
+                  return Index (R + 1);
+               end Pick_Point;
+               function Needed (W : Real) return Natural is
+                 (if W >= 1.0 then 1
+                  elsif W <= 0.0 then Natural'Last
+                  else Natural (Real'Min (Real (Natural'Last), Real'Ceiling (Log (Miss) / Log (1.0 - W * W)))));
+               Cap    : Natural;
+               Enough : Natural;
+               Drawn  : Natural := 0;
+            begin
+               Best := (others => 0.0);
+               Best_N := 0;
+               for K in 1 .. Count loop
+                  if Peaks (K) /= null and then (for some F of Open (K).all => F) then
+                     Drawable := Drawable + 1;
+                     Index (Drawable) := K;
+                     for F of Open (K).all loop
+                        if F then
+                           Total := Total + 1;
+                        end if;
+                     end loop;
+                  end if;
+               end loop;
+               if Drawable < 2 then
+                  return;
+               end if;
+               Cap := Needed (0.5 * Real (Drawable) / Real (Total));
+               Enough := Cap;
+               while Drawn < Natural'Min (Cap, Enough) loop
+                  Drawn := Drawn + 1;
+                  declare
+                     K1 : constant Positive := Pick_Point;
+                     K2 : constant Positive := Pick_Point;
+                  begin
+                     if K1 /= K2 then
+                        declare
+                           P1 : constant Peak := Peaks (K1) (Pick_Place (K1));
+                           P2 : constant Peak := Peaks (K2) (Pick_Place (K2));
+                           Dpu : constant Real := U_Of (K2) - U_Of (K1);
+                           Dpv : constant Real := V_Of (K2) - V_Of (K1);
+                           Dqu : constant Real := Dpu + P2.Du - P1.Du;
+                           Dqv : constant Real := Dpv + P2.Dv - P1.Dv;
+                           Den : constant Real := Dpu ** 2 + Dpv ** 2;
+                        begin
+                           --  Two points closer than the tolerance tell no turn.
+                           if Den > Tolerance ** 2 then
+                              declare
+                                 A  : constant Real := (Dpu * Dqu + Dpv * Dqv) / Den;
+                                 B  : constant Real := (Dpu * Dqv - Dpv * Dqu) / Den;
+                                 Sq : constant Real := A ** 2 + B ** 2;
+                              begin
+                                 --  A view the aligner can compare: no scale beyond a halving either way (Align).
+                                 if Sq >= 1.0 / Real (Halving) ** 2 and then Sq <= Real (Halving) ** 2 then
+                                    declare
+                                       Q1u : constant Real := U_Of (K1) + P1.Du;
+                                       Q1v : constant Real := V_Of (K1) + P1.Dv;
+                                       --  The view turned and scaled by (A, B) and shifted: q = (A, B) p + T at both points,
+                                       --  so d (p) = q - p = ((A, B) - I) p + T.
+                                       G   : constant Affine :=
+                                         (M11 => A - 1.0, M12 => -B, M21 => B, M22 => A - 1.0,
+                                          Tu => Q1u - (A * U_Of (K1) - B * V_Of (K1)),
+                                          Tv => Q1v - (B * U_Of (K1) + A * V_Of (K1)));
+                                       N   : constant Natural := Agreeing (G);
+                                    begin
+                                       if N > Best_N then
+                                          Best := G;
+                                          Best_N := N;
+                                          --  How often a draw is of two places on this field: the share of the
+                                          --  points on it, times the chance their place on it is the one drawn.
+                                          declare
+                                             Chance : Real := 0.0;
+                                          begin
+                                             for K in 1 .. Count loop
+                                                declare
+                                                   I   : Natural;
+                                                   Gap : Real;
+                                                begin
+                                                   Nearest (G, K, I, Gap);
+                                                   if I > 0 and then Gap <= Tolerance ** 2 then
+                                                      Chance := Chance + Peaks (K) (I).Rho / Weight (K);
+                                                   end if;
+                                                end;
+                                             end loop;
+                                             Enough := Needed (Chance / Real (Drawable));
+                                          end;
+                                       end if;
+                                    end;
+                                 end if;
+                              end;
+                           end if;
+                        end;
+                     end if;
+                  end;
+               end loop;
+               Result.Draws := Result.Draws + Drawn;
+               if Best_N > 0 then
+                  loop
+                     declare
+                        Next   : constant Affine := Refit (Best);
+                        Next_N : constant Natural := Agreeing (Next);
+                     begin
+                        exit when Next_N <= Best_N;
+                        Best := Next;
+                        Best_N := Next_N;
+                     end;
+                  end loop;
+               end if;
+            end Draw;
+
+            Best, Other : Affine;
+            Best_N, Other_N : Natural := 0;
+            On_Best : Flag_Array (1 .. Count) := [others => False];
+         begin
+            Scan_Peaks (C, Second, Riding, Size, Radius, Peaks);
+            for K in 1 .. Count loop
+               if Peaks (K) /= null then
+                  Open (K) := new Flag_Array'(Peaks (K)'Range => True);
+                  Usable := Usable + 1;
+               end if;
+            end loop;
+            Result.Level := Size;
+            Result.Points := Usable;
+            Draw (Best, Best_N);
+            Result.Agree := Best_N;
+            if Best_N > 0 then
+               --  The next best field: drawn from the places the best one does not take.
+               for K in 1 .. Count loop
+                  On_Best (K) := On_Field (Best, K);
+                  if Peaks (K) /= null then
+                     declare
+                        Du : constant Real := Move_U (Best, U_Of (K), V_Of (K));
+                        Dv : constant Real := Move_V (Best, U_Of (K), V_Of (K));
+                     begin
+                        for I in Peaks (K)'Range loop
+                           if (Peaks (K) (I).Du - Du) ** 2 + (Peaks (K) (I).Dv - Dv) ** 2 <= Tolerance ** 2 then
+                              Open (K) (I) := False;
+                           end if;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+               Draw (Other, Other_N);
+               --  Each point for the field whose place it correlates with better, where it has a place on either: a
+               --  texture that repeats puts most points on a field one period off as well (the boot's rigs: 35 of 40
+               --  points on a field 6 px off the true one), and there the point's own correlation tells them apart.
+               Result.Own := 0;
+               Result.Other := 0;
+               for K in 1 .. Count loop
+                  declare
+                     function Place_On (F : Affine) return Real is
+                        Du  : constant Real := Move_U (F, U_Of (K), V_Of (K));
+                        Dv  : constant Real := Move_V (F, U_Of (K), V_Of (K));
+                        Rho : Real := Real'First;
+                     begin
+                        if Peaks (K) /= null then
+                           for I in Peaks (K)'Range loop
+                              if (Peaks (K) (I).Du - Du) ** 2 + (Peaks (K) (I).Dv - Dv) ** 2 <= Tolerance ** 2 then
+                                 Rho := Real'Max (Rho, Peaks (K) (I).Rho);
+                              end if;
+                           end loop;
+                        end if;
+                        return Rho;
+                     end Place_On;
+                     On_Best  : constant Real := Place_On (Best);
+                     On_Other : constant Real := (if Other_N > 0 then Place_On (Other) else Real'First);
+                  begin
+                     if On_Best > On_Other then
+                        Result.Own := Result.Own + 1;
+                     elsif On_Other > On_Best then
+                        Result.Other := Result.Other + 1;
+                     end if;
+                  end;
+               end loop;
+               --  Told: more points for the best field than for the next, significantly (a sign test: each point is
+               --  for either as likely when the two are as good).
+               Result.Told :=
+                 Real (Result.Own) - Real (Result.Other) > Z * Sqrt (Real (Result.Own + Result.Other));
+               if Result.Told then
+                  declare
+                     Residuals : Real_Array (1 .. 2 * Count);
+                     R         : Natural := 0;
+                     Sigma     : Real;
+                  begin
+                     for K in 1 .. Count loop
+                        if On_Best (K) then
+                           --  Its place on the field, among all its places (the open ones are no longer all).
+                           declare
+                              Du : constant Real := Move_U (Best, U_Of (K), V_Of (K));
+                              Dv : constant Real := Move_V (Best, U_Of (K), V_Of (K));
+                              Gap : Real := Real'Last;
+                              Iu, Iv : Real := 0.0;
+                           begin
+                              for I in Peaks (K)'Range loop
+                                 if (Peaks (K) (I).Du - Du) ** 2 + (Peaks (K) (I).Dv - Dv) ** 2 < Gap then
+                                    Gap := (Peaks (K) (I).Du - Du) ** 2 + (Peaks (K) (I).Dv - Dv) ** 2;
+                                    Iu := Peaks (K) (I).Du - Du;
+                                    Iv := Peaks (K) (I).Dv - Dv;
+                                 end if;
+                              end loop;
+                              Residuals (R + 1) := Iu;
+                              Residuals (R + 2) := Iv;
+                              R := R + 2;
+                           end;
+                        end if;
+                     end loop;
+                     Sigma := Driver.Stats.Robust_Sigma (Residuals (1 .. R));
+                     Result.Sigma := Sigma * Scale;
+                     Result.Turn := Arctan (Best.M21 - Best.M12, 2.0 + Best.M11 + Best.M22);
+                     declare
+                        Cu : constant Real := Real (C.Width) / 2.0;
+                        Cv : constant Real := Real (C.Height) / 2.0;
+                     begin
+                        Result.Shift_U := Scale * Move_U (Best, Cu / Scale, Cv / Scale);
+                        Result.Shift_V := Scale * Move_V (Best, Cu / Scale, Cv / Scale);
+                     end;
+                     --  Every point where the field puts it: as far off as the places on it lie from it, and a
+                     --  place known to a pixel of the size scanned; the patch turned and stretched as the field
+                     --  turns and stretches the view.
+                     for K in Into'Range loop
+                        declare
+                           P  : constant Driver.Images.Pixel := C.Points (K - Into'First + 1);
+                           Pu : constant Real := P.U / Scale;
+                           Pv : constant Real := P.V / Scale;
+                           Spread : constant Real := (Sigma ** 2 + Quantization) * Scale ** 2;
+                        begin
+                           Into (K) :=
+                             (From => P,
+                              To => (U => P.U + Scale * Move_U (Best, Pu, Pv), V => P.V + Scale * Move_V (Best, Pu, Pv)),
+                              Linear => (UU => 1.0 + Best.M11, UV => Best.M12, VU => Best.M21, VV => 1.0 + Best.M22),
+                              Cov => (UU => Spread, UV => 0.0, VV => Spread),
+                              Linear_Sigma => Real'Last);
+                        end;
+                     end loop;
+                  end;
+               end if;
+            end if;
+            for K in 1 .. Count loop
+               Free (Peaks (K));
+               Free (Open (K));
+            end loop;
+            exit when Result.Told;
+         end;
+      end loop;
+   end Common_Motion;
+
+   function Last_Motion (C : Chain) return Motion is (C.Motion);
+
    procedure Add
      (C       : in out Chain;
       Image   : Driver.Images.Image;
       Change  : Driver.Real_Array;
       Given   : Prediction_Array;
       Answers : out Answer_Array;
-      Agree   : out Flag_Array)
+      Agree   : out Flag_Array;
+      Riding  : Flag_Array := No_Riding)
    is
       Second : constant Pyramid := Pyramid_Of (Image);
       Count  : constant Natural := Given'Length;
@@ -1151,6 +1777,7 @@ package body Driver.Alignment.Keyframes is
          Next.Change.Append (X);
       end loop;
       Answers := [others => Not_Asked_Answer];
+      C.Motion := (others => <>);
       --  The points by doubling: first the fewest a field stands on, spread over the picture (every Stride-th
       --  point, Stride the largest power of two that leaves that many), then twice as many each round, the new
       --  points predicted from the field so far where there is one; the rounds end when a round's field puts
@@ -1162,6 +1789,28 @@ package body Driver.Alignment.Keyframes is
          Done   : Flag_Array (1 .. Count) := [others => False];
          Stride : Positive := 1;
       begin
+         --  From a new direction whose window is wider than a patch at the full size (where several places may
+         --  fit a patch alike), the view's common motion; none told, no point is asked. A window a patch carries at
+         --  the full size is searched there as given: there is nothing to tell apart.
+         if C.Last = New_Direction and then Count > 0
+           and then Window_Radius (Sqrt (Given (Given'First).Cov.UU)) + 1.0
+                    > Real (Half_Patch (C.Width, C.Height))
+         then
+            declare
+               Common : Motion;
+            begin
+               --  No wider than the aligner searches: a prediction wider than that says only "anywhere" (f15c
+               --  replayed on 10-15: a new direction's window, from a channel's shift measured far beyond the
+               --  view's, was over 40,000 pixels across, and the count of its places overflowed).
+               Common_Motion
+                 (C, Second, Real'Min (Sqrt (Given (Given'First).Cov.UU), Largest_Sigma (C.Pictures, Second)), Riding,
+                  Asked, Common);
+               C.Motion := Common;
+               if not Common.Told then
+                  Done := [others => True];
+               end if;
+            end;
+         end if;
          while Count / (2 * Stride) >= Least_Points loop
             Stride := 2 * Stride;
          end loop;

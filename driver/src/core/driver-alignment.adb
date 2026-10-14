@@ -5,7 +5,6 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Numerics;
 with Driver.Numerics.Dense;
-with Driver.Uncertain;
 
 package body Driver.Alignment is
 
@@ -59,22 +58,11 @@ package body Driver.Alignment is
 
    Least_Side : constant Positive := Side_Of (Least_Half);
 
-   Finest : constant := 0;
-   --  The size of the pyramid that is the picture itself.
-
    Most_Variants : constant := 3;
    --  The other fits of a patch an answer's covariance rests on: its middle at the finest size, and the next two
    --  coarser sizes.
 
    Z : constant Real := Driver.Conventions.Z;
-
-   Window_Gate     : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
-   Window_Multiple : constant Real := Driver.Uncertain.Threshold (Window_Gate);
-   --  How many standard deviations of a prediction a place may lie from it: the length of a two-dimensional
-   --  difference, significant at the tail probability Z has for one dimension.
-
-   Quantization : constant Real := 1.0 / 12.0;
-   --  The variance of a uniform rounding to a whole unit: of a pixel's level, and of a place known to a pixel.
 
    Light_Noise_Floor : constant Real := 2.0 * Quantization;
    --  The variance of the difference of two rounded levels: what two noiseless pictures cannot agree on.
@@ -1747,6 +1735,27 @@ package body Driver.Alignment is
       end;
    end Align_At;
 
+   function Window_Level (First, Second : Pyramid; Radius : Real) return Natural is
+      Deepest : constant Natural := Natural'Min (Levels (First), Levels (Second)) - 1;
+      Chosen  : Natural := 0;
+      Least   : Real := Real'Last;
+   begin
+      for Step in 0 .. Deepest loop
+         declare
+            H    : constant Natural := Half_Patch (Second.Sizes (Step).Width, Second.Sizes (Step).Height);
+            Need : constant Real := Radius / Real (Halving) ** Step + 1.0;
+         begin
+            if Need <= Real (H) then
+               return Step;
+            elsif Need / Real (H) < Least then
+               Least := Need / Real (H);
+               Chosen := Step;
+            end if;
+         end;
+      end loop;
+      return Chosen;
+   end Window_Level;
+
    function Largest_Window (First, Second : Pyramid) return Real is
      (Real'Min (Real (Second.Sizes (0).Width), Real (Second.Sizes (0).Height)) / 2.0);
 
@@ -1788,30 +1797,14 @@ package body Driver.Alignment is
       then
          return Fail (Outside_Picture, Not_In_View);
       end if;
-      --  The level the window is searched at: the finest where it is no wider than a patch there; where it is wider
-      --  than a patch at every level, the level where it is the least wider than its patch, so long as the window
-      --  is narrower than the picture (Largest_Window).
+      --  The level the window is searched at (Window_Level), so long as the window is narrower than the picture
+      --  (Largest_Window).
       declare
-         Deepest : constant Natural := Natural'Min (Levels (First), Levels (Second)) - 1;
-         Chosen  : Natural := 0;
-         Narrow  : Boolean := False;
-         Least   : Real := Real'Last;
+         Chosen : constant Natural := Window_Level (First, Second, Radius);
+         Narrow : constant Boolean :=
+           Radius / Real (Halving) ** Chosen + 1.0
+             <= Real (Half_Patch (Second.Sizes (Chosen).Width, Second.Sizes (Chosen).Height));
       begin
-         for Step in 0 .. Deepest loop
-            declare
-               H    : constant Natural := Half_Patch (Second.Sizes (Step).Width, Second.Sizes (Step).Height);
-               Need : constant Real := Radius / Real (Halving) ** Step + 1.0;
-            begin
-               if Need <= Real (H) then
-                  Chosen := Step;
-                  Narrow := True;
-                  exit;
-               elsif Need / Real (H) < Least then
-                  Least := Need / Real (H);
-                  Chosen := Step;
-               end if;
-            end;
-         end loop;
          if not Narrow and then Radius > Largest_Window (First, Second) then
             return Fail (Window_Too_Large);
          end if;

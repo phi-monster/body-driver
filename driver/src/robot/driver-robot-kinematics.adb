@@ -742,6 +742,7 @@ package body Driver.Robot.Kinematics is
    package Keyframes renames Driver.Alignment.Keyframes;
 
    use type Driver.Alignment.Verdict;
+   use type Keyframes.Source;
 
    type Prediction_Access is access Keyframes.Prediction_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Keyframes.Prediction_Array, Prediction_Access);
@@ -891,6 +892,19 @@ package body Driver.Robot.Kinematics is
    end Offer_Of;
 
    --  The median standard deviation, over the points, that predictions state: the larger axis of each.
+   --  The view's common motion a keyframe from a new direction was asked from (Keyframes.Add), for its line.
+   function Motion_Image (Common : Keyframes.Motion) return String is
+     (if Common.Told
+      then " from the view's common motion at size" & Common.Level'Image & ": turned "
+           & Driver.Log.Image (Common.Turn * 180.0 / Ada.Numerics.Pi, 1) & " deg, its centre moved "
+           & Driver.Log.Image (Common.Shift_U, 1) & " " & Driver.Log.Image (Common.Shift_V, 1) & " px +- "
+           & Driver.Log.Image (Common.Sigma, 2) & ";" & Common.Agree'Image & " of" & Common.Points'Image
+           & " points on it," & Common.Own'Image & " on it alone against" & Common.Other'Image & " on the next best;"
+           & Common.Draws'Image & " draws"
+      else ", no common motion of the view told (at size" & Common.Level'Image & "," & Common.Own'Image
+           & " points on the best field alone against" & Common.Other'Image & " on the next, of"
+           & Common.Points'Image & ";" & Common.Draws'Image & " draws)");
+
    function Stated_By (Given : Keyframes.Prediction_Array) return Real is
       Sigmas : Real_Access := new Real_Array (1 .. Given'Length);
    begin
@@ -1521,41 +1535,24 @@ package body Driver.Robot.Kinematics is
                Keyframes.Predict (R.Chain, Change, Noise, Shift, Keyframes.No_Offer, Given.all, From);
             end if;
             Rss_Before := Driver.Memory.Resident_Kilobytes / 1024;
-            Keyframes.Add (R.Chain, R.Frames (F).Image, Change, Given.all, Answers.all, Agree.all);
+            declare
+               --  The points that ride with the eye, as the keyframes so far told them (Measure_Shifts): they tell
+               --  nothing of how the view moved.
+               Riding : Keyframes.Flag_Array (1 .. Queries);
+            begin
+               for I in Riding'Range loop
+                  Riding (I) := not Moving_Point (R, I - 1);
+               end loop;
+               Keyframes.Add (R.Chain, R.Frames (F).Image, Change, Given.all, Answers.all, Agree.all, Riding);
+            end;
             Rss_After := Driver.Memory.Resident_Kilobytes / 1024;
             Set_Of (F, R, Given.all, Answers.all, Agree.all, Set);
-            --  A change of a channel whose shift the keyframes have not measured is predicted to have moved the
-            --  view as far as the aligner searches. When that search finds nothing (a view too small or too uniform
-            --  for a search at its coarsest size: the rigs' pictures of 64 by 48), the keyframe is aligned again
-            --  from the lock-in's slope for those channels, the one other measurement of how far the view moves per
-            --  unit, as the prediction; what it finds the regression then measures. It is not the first prediction:
-            --  on a scene whose flow locks on what does not move with it, that slope is wrong by far, and a narrow
-            --  window there finds false matches that would stand in the chain's field (R4 on the Pi, 10-13).
-            if not Known and then (for all Seen of Set.Answered => not Seen)
-              and then (for some C in 1 .. N =>
-                          Shift (C) = 0.0
-                          and then Driver.Uncertain.Significant
-                                     (Change (C), Noise (C) * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))
-                          and then Lockin.Shift (M, R.Eye, R.Group, C) > 0.0)
-            then
-               declare
-                  Again : Real_Array (1 .. N) := Shift;
-               begin
-                  for C in 1 .. N loop
-                     if Again (C) = 0.0 then
-                        Again (C) := Lockin.Shift (M, R.Eye, R.Group, C);
-                     end if;
-                  end loop;
-                  Keyframes.Forget_Last (R.Chain);
-                  Keyframes.Predict (R.Chain, Change, Noise, Again, Keyframes.No_Offer, Given.all, From);
-                  Keyframes.Add (R.Chain, R.Frames (F).Image, Change, Given.all, Answers.all, Agree.all);
-                  Rss_After := Driver.Memory.Resident_Kilobytes / 1024;
-                  Set_Of (F, R, Given.all, Answers.all, Agree.all, Set);
-                  Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe" & F'Image
-                                   & " found nothing from a window as wide as the aligner searches; aligned again from"
-                                   & " the lock-in's slope, stating " & Driver.Log.Image (Stated_By (Given.all), 1) & " px");
-               end;
-            end if;
+            --  A change of a channel whose shift the keyframes have not measured is a new direction: the keyframe is
+            --  asked from the view's common motion (Keyframes.Add). Before, a new direction searched every point
+            --  alone as wide as the aligner looks, and when that found nothing it was aligned again from the lock-in's
+            --  slope: the flow had locked on what does not move with the view, the window was a fortieth of the
+            --  motion, and its answers stood false in the chain (f15c on 10-15: arm 1's base turned ten degrees,
+            --  the view moved 90 px, the slope said 2 px; all 35 answers lay 78 px from the truth).
             for A of Answers.all loop
                Because (A.Because) := Because (A.Because) + 1;
             end loop;
@@ -1583,8 +1580,10 @@ package body Driver.Robot.Kinematics is
                Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe" & F'Image & " at beat"
                                 & R.Frames (F).Beat'Image & ", change" & Ada.Strings.Unbounded.To_String (Text)
                                 & Asked_Image (R.Frames (F))
-                                & ", predicted " & Ada.Characters.Handling.To_Lower (From'Image) & " stating "
-                                & Driver.Log.Image (Stated_By (Given.all), 1) & " px:" & Here'Image
+                                & ", predicted " & Ada.Characters.Handling.To_Lower (From'Image)
+                                & (if From = Keyframes.New_Direction then Motion_Image (Keyframes.Last_Motion (R.Chain))
+                                   else " stating " & Driver.Log.Image (Stated_By (Given.all), 1) & " px")
+                                & ":" & Here'Image
                                 & " of" & Queries'Image & " points found," & Replied'Image & " answered; resident"
                                 & Rss_Before'Image & " /"
                                 & Rss_After'Image & " /" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)
