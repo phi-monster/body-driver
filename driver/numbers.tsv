@@ -977,6 +977,7 @@ driver-robot-boot.adb	Rows : Positive := 1;	1	structure	a Sylvester matrix start
 driver-robot-boot.adb	Rows := 2 * Rows;	2	structure	Sylvester orders double
 driver-robot-boot.adb	S : String (1 .. 32);	32	format	wide enough for any Long_Float image
 driver-robot-boot.adb	Scale : Real := 1.0;	1.0	structure	the whole share before any halving
+driver-robot-boot.adb	Scale : constant Real := Real'Max (0.0, (2.0 * Patch - Fixed) / (Motion - Fixed));	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
 driver-robot-boot.adb	Scale := Scale / 2.0;	2.0	math	halving when a cell meets something
 driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
 driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
@@ -989,13 +990,14 @@ driver-robot-boot.adb	exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then
 driver-robot-boot.adb	if Followed_Now or else (K = 1 and then Measured_Now) then	1	structure	the first level of the pass is the one that measured the shift
 driver-robot-boot.adb	if M.Beats >= 2 * Rest_Beats then	2	structure	the rest is compared with itself at every doubling of its beats, as the estimates are scheduled
 driver-robot-boot.adb	if N > 1 and then Followed_In_Pass > 0 and then Fitted_Now then	1	structure	joints move together only when there are at least two
-driver-robot-boot.adb	if N > 1 and then not Fitted_Now then	1	structure	joints move together only when there are at least two
+driver-robot-boot.adb	if N > 1 and then not Fitted_Now	1	structure	a zero start of a sum
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel) then	2.0	structure	the ladder goes down by halving
 driver-robot-boot.adb	if Unswept.Length = 1 or else See_Each_Other then	1	structure	one arm left to sweep: alone, not a lane
+driver-robot-boot.adb	if not Fitted_Now and then Motion > 2.0 * Patch and then Motion > Fixed then	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-channels.adb	(Change_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	statistics	a standardized statistic is tested against unit sigma
 driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	the first round takes every change for motion: noise zero

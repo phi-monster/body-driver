@@ -627,11 +627,28 @@ package body Driver.Robot.Boot is
                --  Each swept joint's share of a frame that moves them together: its part of the offset it was
                --  followed to, and no less than its first level (Together).
                function Shares return Real_Array is
-                  Share : Real_Array (1 .. Size) := [others => 0.0];
+                  Share  : Real_Array (1 .. Size) := [others => 0.0];
+                  Motion : Real := 0.0;   --  the view's motion the cell asks, px, by the measured motion per unit
+                  Fixed  : Real := 0.0;   --  of it, the part the first levels hold
                begin
                   for K in 1 .. N loop
                      Share (Swept (K)) := Real'Max (First (Swept (K)), Reached (Swept (K)) / Real (N));
+                     Motion := Motion + Share (Swept (K)) * Per_Unit (Swept (K));
+                     Fixed := Fixed + First (Swept (K)) * Per_Unit (Swept (K));
                   end loop;
+                  --  And no more motion of the view in all than the ladder's own brake before a fit, two patches
+                  --  beyond the keyframes before (Take): the shares above their first levels are scaled down to it,
+                  --  the first levels themselves stand (below them a joint does not move).
+                  if not Fitted_Now and then Motion > 2.0 * Patch and then Motion > Fixed then
+                     declare
+                        Scale : constant Real := Real'Max (0.0, (2.0 * Patch - Fixed) / (Motion - Fixed));
+                     begin
+                        for K in 1 .. N loop
+                           Share (Swept (K)) :=
+                             First (Swept (K)) + Scale * (Share (Swept (K)) - First (Swept (K)));
+                        end loop;
+                     end;
+                  end if;
                   return Share;
                end Shares;
 
@@ -717,7 +734,15 @@ package body Driver.Robot.Boot is
                         --  stop unfollowed (Y10, arm 1: thirteen rounds of ladders
                         --  passed stages 0 to 3 at every round and waited at stage 4
                         --  for the last).
-                        if N > 1 and then not Fitted_Now then
+                        --  And only once every swept joint's motion of the view per unit is measured (the pass's own
+                        --  levels, aligned, measure it): a cell's shares are sized by it (Shares), and a cell taken
+                        --  blind at every joint's first level moved the kiwi's view by the sum of them, 50 to 90 px,
+                        --  beyond what the aligner searches from no prediction, and gave 0 of 361 points six times
+                        --  of seven (R6's thirteenth start, 10-14); from the next pass on the keyframes before
+                        --  predict a cell (the chain's sum of single-channel moves).
+                        if N > 1 and then not Fitted_Now
+                          and then (for all K in 1 .. N => Per_Unit (Swept (K)) > 0.0)
+                        then
                            Together (Shares);
                         end if;
                         Measure_The_Round;

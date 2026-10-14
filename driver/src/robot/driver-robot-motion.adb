@@ -282,11 +282,30 @@ package body Driver.Robot.Motion is
          end loop;
          return C;
       end With_Landing;
+      --  Where every group's readings stood when the step was sent: no sending again asks a channel farther than
+      --  the step itself asked it from there. The bound used to be the last push's length over all its channels,
+      --  and a step that brought the elbow back 157 units while asking the wrist 19.6 let the wrist's sendings
+      --  again ask 27, 46 and 70 units of a joint that was not following, until it stood 161 units off (R6's
+      --  thirteenth start, 10-14: the camera dropped out of its view for the rest of the sweep).
+      Began : array (1 .. Groups) of Real_Vectors.Vector;
+      procedure Read_Began is
+         O : constant Driver.Beats.Observation_View := Driver.Beats.Latest;
+      begin
+         for G in 1 .. Groups loop
+            Began (G).Clear;
+            if Driver.Observations.Has_Reading (O.all, Group_Id (G)) then
+               for V of O.Readings.Element (Group_Id (G)) loop
+                  Began (G).Append (V);
+               end loop;
+            end if;
+         end loop;
+      end Read_Began;
    begin
       if not Land then
          One_Step (M, Targets, Targets, Report, Stop, Hold_At => True);
          return;
       end if;
+      Read_Began;
       One_Step (M, With_Landing, Targets, Report, Stop, Hold_At => True, Land => True);
       --  Landing where it was sent: a servo that holds a load with a proportional controller settles a few
       --  units short of its goal, the same few units at the same pose (the kiwi's arms, R4 on the Pi, 10-13:
@@ -361,7 +380,12 @@ package body Driver.Robot.Motion is
                               Largest := Real'Max (Largest, abs Error / (Noise * Sqrt (2.0)));
                               declare
                                  Asked : constant Real := Error / Share;
-                                 Most  : constant Real := Real'Min (abs Asked, Farthest);
+                                 --  This channel's own ask in the step, where its readings were read when it was sent;
+                                 --  the last push's length over every channel otherwise.
+                                 Own   : constant Real :=
+                                   (if C - 1 < Natural (Began (G).Length)
+                                    then abs (Target (Target'First + C - 1) - Began (G) (C - 1)) else Farthest);
+                                 Most  : constant Real := Real'Min (abs Asked, Real'Min (Own, Farthest));
                               begin
                                  Goal (Goal'First + C - 1) :=
                                    Target (Target'First + C - 1) + (if Asked < 0.0 then -Most else Most);
