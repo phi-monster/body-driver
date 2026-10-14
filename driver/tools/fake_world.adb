@@ -30,6 +30,10 @@ package body Fake_World is
    --  The creep of a hand resting on the table, radians a beat.
    Creep_Step : constant := 1.0e-6;
 
+   --  The gears' friction, as a share of the hardest gravity pull on any joint of the arm: a joint pulled less keeps
+   --  its slack where the motor left it.
+   Play_Friction : constant := 0.05;
+
    --  The jitter of a reading after a push, in the last bits, and the drift
    --  of every reading, radians a beat.
    Jitter_Share : constant := 1.0e-16;
@@ -855,20 +859,37 @@ package body Fake_World is
          Forward (W);
       end Place;
    begin
-      --  Gravity takes up each joint's slack on the side it pulls the tool's load to.
-      for I in W.Links.First_Index .. W.Links.Last_Index loop
-         declare
-            L : Link renames W.Links (I);
-         begin
-            if L.Arm = A and then L.Kind = Revolute and then L.Play > 0.0 and then W.Quirk.Play then
-               declare
-                  Load : constant Real := Droop ((L with delta Droop_Gain => 1.0), Tool_Before);
-               begin
-                  L.Play_Offset := (if Load > 0.0 then L.Play / 2.0 elsif Load < 0.0 then -L.Play / 2.0 else 0.0);
-               end;
-            end if;
-         end;
-      end loop;
+      --  Gravity takes up a joint's slack on the side it pulls the tool's load to when it pulls harder than the
+      --  gears' friction holds, a twentieth of the hardest pull on any joint of the arm; a joint pulled less (a
+      --  wrist roll balanced on its axis) stays where the motor last pushed it in its slack. Snapping to the side of
+      --  the load's sign, a balanced wrist roll flipped its whole play at every command of a ten-millionth of a
+      --  unit and turned the wrist eye's view by 0.8 degrees, and the boot saw it as the body moving (10-15).
+      declare
+         Hardest : Real := 0.0;
+      begin
+         if W.Quirk.Play then
+            for L of W.Links loop
+               if L.Arm = A and then L.Kind = Revolute and then L.Play > 0.0 then
+                  Hardest := Real'Max (Hardest, abs Droop ((L with delta Droop_Gain => 1.0), Tool_Before));
+               end if;
+            end loop;
+         end if;
+         for I in W.Links.First_Index .. W.Links.Last_Index loop
+            declare
+               L : Link renames W.Links (I);
+            begin
+               if L.Arm = A and then L.Kind = Revolute and then L.Play > 0.0 and then W.Quirk.Play then
+                  declare
+                     Load : constant Real := Droop ((L with delta Droop_Gain => 1.0), Tool_Before);
+                  begin
+                     if abs Load > Play_Friction * Hardest then
+                        L.Play_Offset := (if Load > 0.0 then L.Play / 2.0 else -L.Play / 2.0);
+                     end if;
+                  end;
+               end if;
+            end;
+         end loop;
+      end;
       for I in Old'Range loop
          Old (I) := W.Links (I).Q;
          Wanted (I) := W.Links (I).Q;
@@ -989,6 +1010,21 @@ package body Fake_World is
             end if;
          end loop;
       end;
+      --  The motor turns within the slack before it takes the link along: the link stands where it stood until the
+      --  motor meets the slack's other end.
+      if W.Quirk.Play then
+         for I in Old'Range loop
+            declare
+               L : Link renames W.Links (I);
+            begin
+               if L.Arm = A and then L.Kind = Revolute and then L.Play > 0.0 then
+                  L.Play_Offset :=
+                    Real'Max (-L.Play / 2.0, Real'Min (L.Play / 2.0, L.Play_Offset + (L.Q - Old (I))));
+               end if;
+            end;
+         end loop;
+         Forward (W);
+      end if;
       for I in Old'Range loop
          if W.Links (I).Arm = A and then abs (W.Links (I).Q - Old (I)) > 1.0e-15 * Real'Max (1.0, abs Old (I)) then
             W.Links (I).Moved_Beat := W.Beat;
