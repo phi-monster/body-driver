@@ -63,13 +63,61 @@ package body Driver.Robot.Kinematics is
    --  The centres of the eye's cells that respond to the group's push: they
    --  show the world the arm moves its eye through. Every textured cell when
    --  the lock-in has not told yet.
-   procedure Query_Points (M : Model; E : Eye_Id; G : Group_Id; U, V : out Real_Vectors.Vector) is
+   procedure Query_Points
+     (M : Model; E : Eye_Id; G : Group_Id; Picture : Driver.Images.Image; U, V : out Real_Vectors.Vector)
+   is
       S    : Eye_Stream renames M.Eyes (E);
       N    : constant Natural := Cells (S.Grid);
       Kept : constant Natural := Natural (S.Kept_Groups.Length);
+      W    : constant Natural := Driver.Images.Width (Picture);
+      H    : constant Natural := Driver.Images.Height (Picture);
+      --  Where in a cell the aligner can place a patch best: the pixel whose patch (the aligner's, Half_Patch
+      --  either side) holds the most slope energy, the quantity the aligner's own Newton step rests on. A cell's
+      --  centre lies on a flat place as often as not (the kiwi's white table: of the points asked, 19 % failed
+      --  for want of texture and 17 % for a patch over the picture's edge, R6's seventh and eighth starts,
+      --  10-14), and a point put on the cell's texture is the same spread over the picture at no extra cost.
+      --  The slope energy is summed over each patch through an integral image of the squared differences
+      --  between a pixel's neighbours, one pass over the picture.
+      Half : constant Natural := Driver.Alignment.Half_Patch (W, H);
+      type Reals_Access is access Real_Array;
+      procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Reals_Access);
+      --  The integral image of the squared differences; none without a picture (a rig's eye without pictures,
+      --  whose cells keep their centres).
+      Pictured : constant Boolean := W > 0 and then H > 0;
+      Total : Reals_Access := (if Pictured then new Real_Array'(1 .. (W + 1) * (H + 1) => 0.0) else null);
+      --  The integral image's entry for the box up to column X and row Y (exclusive), from 1.
+      function Place (X, Y : Natural) return Positive is (Y * (W + 1) + X + 1);
+      function At_Total (X, Y : Natural) return Real is (Total (Place (X, Y)));
+      --  The slope energy summed over the patch around (X, Y): the integral image's box.
+      function Energy (X, Y : Natural) return Real is
+        (At_Total (X + Half + 1, Y + Half + 1) - At_Total (X - Half, Y + Half + 1)
+         - At_Total (X + Half + 1, Y - Half) + At_Total (X - Half, Y - Half));
    begin
       U.Clear;
       V.Clear;
+      if Pictured then
+         declare
+            Luma : Reals_Access := new Real_Array (1 .. W * H);
+            function Pixel (X, Y : Natural) return Positive is (Y * W + X + 1);
+         begin
+            Driver.Images.Luma (Picture, Luma.all);
+         for Y in 0 .. H - 1 loop
+            for X in 0 .. W - 1 loop
+               declare
+                  Squared : Real := 0.0;
+               begin
+                  if X > 0 and then X < W - 1 and then Y > 0 and then Y < H - 1 then
+                     Squared := (Luma (Pixel (X + 1, Y)) - Luma (Pixel (X - 1, Y))) ** 2
+                       + (Luma (Pixel (X, Y + 1)) - Luma (Pixel (X, Y - 1))) ** 2;
+                  end if;
+                  Total (Place (X + 1, Y + 1)) :=
+                    Squared + At_Total (X + 1, Y) + At_Total (X, Y + 1) - At_Total (X, Y);
+               end;
+            end loop;
+         end loop;
+            Free (Luma);
+         end;
+      end if;
       for C in 1 .. N loop
          declare
             Responds : Boolean := Kept = 0;
@@ -82,11 +130,32 @@ package body Driver.Robot.Kinematics is
             end loop;
             if Responds and then (Natural (S.Textured.Length) < N or else S.Textured (C - 1)) then
                Flow.Bounds (S.Grid, C, X0, X1, Y0, Y1);
-               U.Append (Real (X0 + X1) / 2.0);
-               V.Append (Real (Y0 + Y1) / 2.0);
+               declare
+                  Best_X : Natural := (X0 + X1) / 2;
+                  Best_Y : Natural := (Y0 + Y1) / 2;
+                  Best   : Real := -1.0;
+               begin
+                  --  Only where the whole patch lies in the picture; a cell with no such place keeps its centre.
+                  if Pictured and then W > 2 * Half and then H > 2 * Half then
+                     for Y in Natural'Max (Y0, Half) .. Natural'Min (Y1, H - Half) - 1 loop
+                        for X in Natural'Max (X0, Half) .. Natural'Min (X1, W - Half) - 1 loop
+                           if Energy (X, Y) > Best then
+                              Best := Energy (X, Y);
+                              Best_X := X;
+                              Best_Y := Y;
+                           end if;
+                        end loop;
+                     end loop;
+                  end if;
+                  U.Append (Real (Best_X) + 0.5);
+                  V.Append (Real (Best_Y) + 0.5);
+               end;
             end if;
          end;
       end loop;
+      if Total /= null then
+         Free (Total);
+      end if;
    end Query_Points;
 
    --  The point moves with the view, as far as its keyframes tell (Measure_Shifts: not Arm_Evidence.Still).
@@ -420,7 +489,7 @@ package body Driver.Robot.Kinematics is
                         end;
                         if Fresh then
                            if Natural (R.Frames.Length) = 1 then
-                              Query_Points (M, E, G, R.Query_U, R.Query_V);
+                              Query_Points (M, E, G, R.Frames.Last_Element.Image, R.Query_U, R.Query_V);
                               R.Still.Clear;
                               --  The reference's points into every other eye's view at
                               --  this beat: what links this arm to the others through

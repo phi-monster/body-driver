@@ -2270,6 +2270,9 @@ driver-robot-kinematics.adb	Active (C) := Active (C) and then Moving (C) >= 2;	2
 driver-robot-kinematics.adb	Ada.Strings.Unbounded.Append (Text, "" & Driver.Log.Image (Change (C), 5));	5	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	Ada.Strings.Unbounded.Append (Text, (if F then "" else ""));	"0	format	a channel asked (1) or not (0) in the recording record Q
 driver-robot-kinematics.adb	Ada.Strings.Unbounded.Append (Text, (if F then "" else ""));	"1	format	a channel asked (1) or not (0) in the recording record Q
+driver-robot-kinematics.adb	Best : Real := -1.0;	1.0	structure	below any slope energy, so the first place in the cell is taken
+driver-robot-kinematics.adb	Best_X : Natural := (X0 + X1) / 2;	2	structure	the cell's middle pixel, kept where no patch fits in the picture
+driver-robot-kinematics.adb	Best_Y : Natural := (Y0 + Y1) / 2;	2	structure	the cell's middle pixel, kept where no patch fits in the picture
 driver-robot-kinematics.adb	Cc (P, Q) := C (3 + P, 3 + Q);	3	structure	the three components of a vector, the three terms of a turn
 driver-robot-kinematics.adb	Cc (P, Q) := C (3 + P, 3 + Q);	3	structure	the three components of a vector, the three terms of a turn
 driver-robot-kinematics.adb	Centre (I, J) := C (C.First_Index + 6 * (I + 2) + (J + 2));	2	structure	the centre's block follows the turn's three terms: rows and columns offset by three, counted from one
@@ -2345,9 +2348,9 @@ driver-robot-kinematics.adb	Through_Plane (Plane, U0, V0 + 1.0, P2, Ok2);	1.0	ma
 driver-robot-kinematics.adb	Trips (K + 2) := abs (S.Back_V (I) - R.Query_V (I));	2	structure	two coordinates per round trip
 driver-robot-kinematics.adb	Trips : Real_Access := new Real_Array (1 .. 2 * Count);	2	structure	two coordinates per round trip
 driver-robot-kinematics.adb	Turn (I, J) := C (C.First_Index + 6 * (I - 1) + (J - 1));	6	structure	six terms of a placement a row (its turn and its centre)
-driver-robot-kinematics.adb	U.Append (Real (X0 + X1) / 2.0);	2.0	math	the centre of a cell
+driver-robot-kinematics.adb	U.Append (Real (Best_X) + 0.5);	0.5	structure	the centre of the pixel (a place is a pixel's centre)
 driver-robot-kinematics.adb	Unbounded : constant Real := Real'Last / 4.0;	4.0	numerics	a variance that is unbounded but whose square root and sum with others stay finite
-driver-robot-kinematics.adb	V.Append (Real (Y0 + Y1) / 2.0);	2.0	math	the centre of a cell
+driver-robot-kinematics.adb	V.Append (Real (Best_Y) + 0.5);	0.5	structure	the centre of the pixel (a place is a pixel's centre)
 driver-robot-kinematics.adb	Variance : array (1 .. 3) of Real := [others => 0.0];	3	structure	the covariance of a place has three entries: uu, uv and vv
 driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];	1	structure	the entries of the covariance of a place, by the pixel's two axes
 driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];	1	structure	the entries of the covariance of a place, by the pixel's two axes
@@ -2413,6 +2416,8 @@ driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F
 driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	3	structure	three numbers a track
 driver-robot-kinematics.adb	if Kp >= 1 and then Rows >= Kp then	1	structure	a point is regressed when a channel changed in its keyframes, and only with as many rows as columns can the rows determine them
 driver-robot-kinematics.adb	if Natural (R.Frames.Length) = 1 then	1	structure	the first keyframe is the reference
+driver-robot-kinematics.adb	if Pictured and then W > 2 * Half and then H > 2 * Half then	2	structure	the patch's whole side: half of it either side of the point
+driver-robot-kinematics.adb	if Pictured and then W > 2 * Half and then H > 2 * Half then	2	structure	the patch's whole side: half of it either side of the point
 driver-robot-kinematics.adb	if Rows >= 1 then	1	structure	a point answered in one keyframe is regressed: the rank of each channel's block tells what its rows determine
 driver-robot-kinematics.adb	or else Natural (F.Depth_Gains.Length) /= Q * T or else Natural (F.Tracks.Length) /= 3 * Q	3	structure	three coordinates per point; three terms for the plane's own error
 driver-robot-kinematics.adb	or else Natural (F.Table_Response.Length) /= 3 * T	3	structure	three coordinates per point; three terms for the plane's own error
