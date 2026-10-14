@@ -22,6 +22,7 @@ with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Lockin;
+with Driver.Robot.Steps;
 with Driver.Robot.Regression;
 
 package body Driver.Robot.Kinematics is
@@ -536,6 +537,14 @@ package body Driver.Robot.Kinematics is
       Told   : constant Real := Keyframe_Step (M, A, Channel);
       Seen   : constant Estimate := Visible_Step (M, G, Channel);
       Jitter : constant Real := Channels.Noise (M, G, Channel);
+      --  And no nearer than the least turn the body is known to execute when asked (Steps.Executed_Least): a
+      --  servo lands within its dead band of a target it is sent back to, and a frame that differs from another
+      --  by less than that in a channel is the same asked pose, landed elsewhere, not a turn of the joint. The
+      --  kiwi's returns to its reference landed two or three units off it (R6's sixth start, 10-14), beyond the
+      --  matcher's step of 1.9, and every one was a keyframe of the arm with one joint turned by a landing error.
+      Least  : constant Real := Steps.Executed_Least (M, G, Channel);
+      function Floored (Step : Real) return Real is
+        (if Least < Real'Last then Real'Max (Step, Least) else Step);
    begin
       if Told > 0.0 then
          --  And no nearer than the readings tell apart (Z of the noise of a
@@ -544,11 +553,11 @@ package body Driver.Robot.Kinematics is
          --  readings' own jitter, and an arm at rest gave a keyframe every
          --  thirty-seven beats at one pose (fake body Z9, arm 1: 295 of
          --  them, each aligned for nothing).
-         return (if Jitter < Real'Last
-                 then Real'Max (Told, Driver.Conventions.Z * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Jitter)
-                 else Told);
+         return Floored (if Jitter < Real'Last
+                         then Real'Max (Told, Driver.Conventions.Z * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Jitter)
+                         else Told);
       elsif Known (Seen) then
-         return Seen.Value;
+         return Floored (Seen.Value);
       else
          return 0.0;
       end if;

@@ -1,3 +1,4 @@
+with Ada.Strings.Fixed;
 with Ada.Calendar;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
@@ -2795,6 +2796,20 @@ package body Driver.Robot.Kinematics.Fit is
                   --  squares below needs at least as many rows as unknowns (its precondition; a random body,
                   --  B0aF1 of 10-13, reached it with too few pairs and the estimate died on the assertion
                   --  instead of saying so).
+                  --  What the joints share, for the log: a point seen in two joints' own keyframes, with a depth
+                  --  from each, ties their distances; a pair with none leaves a joint's distance free.
+                  declare
+                     Text : Ada.Strings.Unbounded.Unbounded_String;
+                  begin
+                     for K in 1 .. P_Count loop
+                        Ada.Strings.Unbounded.Append
+                          (Text, " " & Pairs (K).A'Image & "-" & Ada.Strings.Fixed.Trim (Pairs (K).B'Image, Ada.Strings.Left)
+                           & ":" & Pairs (K).Count'Image);
+                     end loop;
+                     Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " stage 3 shares tracks between joints"
+                                      & (if P_Count > 0 then Ada.Strings.Unbounded.To_String (Text) else " none")
+                                      & ", of" & Tracks'Image & " tracks");
+                  end;
                   if N > 1 and then P_Count > 0 and then P_Count + 1 < N then
                      Fail ("the joints share too few tracked points to tell their distances apart");
                      Free_All;

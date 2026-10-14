@@ -492,8 +492,13 @@ package body Driver.Robot.Boot is
 
                --  The push's keyframes for the pass: the joint moved by the push's offset from the held pose and
                --  held still there for the kinematics, then on to twice the offset, and on, until the turn would
-               --  move the view by more than half of it (Half) or the joint meets something, and brought back once
-               --  at the end. The levels used to be taken one a round, every round measured before the next
+               --  move the view by more than half of it (Half) or the joint meets something. The next push's first
+               --  level is asked from the held pose in every other channel, so the joint comes back with it: a return
+               --  to the held pose after every push lands within the servo's dead band of it, and held there for the
+               --  next push the arm gave a keyframe two or three units off the reference in one channel, carrying
+               --  nothing the reference's still twin does not and costing an alignment each (R6's sixth start, 10-14:
+               --  17 of arm_a's 35 keyframes in its first pass, 3.5 s each on the Pi, and the fit's single-joint
+               --  frames confused by them). The levels used to be taken one a round, every round measured before the next
                --  (the aligner follows a level from the one before it): on the Pi an estimate costs a minute and
                --  more, and six rounds of them took longer than the whole boot should (R5, 10-14). The levels of
                --  one pass are aligned in order within one estimate, each predicted from the one before as before;
@@ -531,7 +536,6 @@ package body Driver.Robot.Boot is
                      --  times too small, and the elbow swung 245 degrees before its ladder met the servo's range).
                      exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else Patch);
                   end loop;
-                  Go_To (G, Start, Report, Land => True);
                end Take;
 
                --  Every swept joint at once, in cells whose signs no two share

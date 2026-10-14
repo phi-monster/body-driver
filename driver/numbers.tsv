@@ -1670,6 +1670,7 @@ driver-robot-kinematics-fit.adb	D : constant Real := 1.0 + L.K1 * R2 + L.K2 * R2
 driver-robot-kinematics-fit.adb	Depth_Sigma (T) := (if C (T) > 0.0 then 1.0 / Sqrt (C (T)) else Real'Last);	1.0	math	a standard deviation is the root of the inverse of the information
 driver-robot-kinematics-fit.adb	Directions : constant Natural := 2562;	2562	numerics	the directions the first search scans, as many as an icosahedron split four times; only where the later fits start depends on it
 driver-robot-kinematics-fit.adb	Dp (T) := Dp (T) + H * Real'Max (1.0, abs Depth (T));	1.0	numerics	the scale floor of a finite difference
+driver-robot-kinematics-fit.adb	Driver.Log.Line (Driver.Log.Robot, "" & Who & ""	"3	format	the stage named in a log line
 driver-robot-kinematics-fit.adb	Dy : constant Real := Y - Xv (Xv'First + S_First + 2);	2	structure	the similarity's terms in order: log scale, turn, two shifts
 driver-robot-kinematics-fit.adb	E (P) := 1.0;	1.0	math	a column of the identity: the inverse column by column
 driver-robot-kinematics-fit.adb	E (P) := 1.0;	1.0	math	a unit vector of the identity
