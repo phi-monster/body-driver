@@ -926,7 +926,7 @@ driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first ver
 driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log names
 driver-robot-boot.adb	& "" & Driver.Log.Image (Rests (G, E), 2)	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if Per_Unit (C) > 0.0 then Driver.Log.Image (Per_Unit (C), 4) & "" else "")	4	format	digits printed in a log line or a message
-driver-robot-boot.adb	& (if Unswept.Length > 1 then "" & Unswept.Length'Image & "" else ""));	1	structure	one arm or hand needs no lanes; more than one are measured at once
+driver-robot-boot.adb	& (if Unswept.Length = 1 then ""	1	structure	one arm left to sweep: alone, not a lane
 driver-robot-boot.adb	& Driver.Log.Image (Least (C), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Plan_Text & "" & Driver.Log.Image (Half, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
@@ -994,7 +994,7 @@ driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the pari
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel) then	2.0	structure	the ladder goes down by halving
-driver-robot-boot.adb	if Unswept.Length = 1 then	1	structure	one arm or hand needs no lanes; more than one are measured at once
+driver-robot-boot.adb	if Unswept.Length = 1 or else See_Each_Other then	1	structure	one arm left to sweep: alone, not a lane
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-channels.adb	(Change_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	statistics	a standardized statistic is tested against unit sigma
 driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	the first round takes every change for motion: noise zero
@@ -2268,6 +2268,8 @@ driver-robot-kinematics.adb	/ (2.0 * Sigmas (Term));	2.0	math	a central differen
 driver-robot-kinematics.adb	Active (C) := (if Noise (C) < Real'Last then Driver.Uncertain.Significant (High - Low, Noise (C) * Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
 driver-robot-kinematics.adb	Active (C) := Active (C) and then Moving (C) >= 2;	2	structure	two keyframes that moved a channel before its shift counts: a measurement stands when a second one agrees
 driver-robot-kinematics.adb	Ada.Strings.Unbounded.Append (Text, "" & Driver.Log.Image (Change (C), 5));	5	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	Ada.Strings.Unbounded.Append (Text, (if F then "" else ""));	"0	format	a channel asked (1) or not (0) in the recording record Q
+driver-robot-kinematics.adb	Ada.Strings.Unbounded.Append (Text, (if F then "" else ""));	"1	format	a channel asked (1) or not (0) in the recording record Q
 driver-robot-kinematics.adb	Cc (P, Q) := C (3 + P, 3 + Q);	3	structure	the three components of a vector, the three terms of a turn
 driver-robot-kinematics.adb	Cc (P, Q) := C (3 + P, 3 + Q);	3	structure	the three components of a vector, the three terms of a turn
 driver-robot-kinematics.adb	Centre (I, J) := C (C.First_Index + 6 * (I + 2) + (J + 2));	2	structure	the centre's block follows the turn's three terms: rows and columns offset by three, counted from one
@@ -2605,12 +2607,16 @@ driver-robot.adb	& Driver.Log.Image (Mean_Abs_Difference (S.Previous.all, S.Befo
 driver-robot.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot.adb	& Driver.Log.Image (Real (Now - Mark), 1));	1	format	digits printed in a log line or a message
 driver-robot.adb	& E.Start'Image & "" & Driver.Log.Image (E.Length, 3)	3	format	digits printed in a log line or a message
+driver-robot.adb	A : constant Arm_Id := Arm_Id'Value (Word (2));	2	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
 driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Change (M, G, B, C) / Channels.Noise (M, G, C), 1));	1	format	digits printed in a log line or a message
 driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Reading (M, G, B, C), 6));	6	format	digits printed in a log line or a message
 driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Target (M, G, B, C), 6));	6	format	digits printed in a log line or a message
 driver-robot.adb	Best := (Value => Step, Sigma => Step * Sqrt (Spread) / (2.0 * Gain), Degrees_Of_Freedom => 0);	2.0	math	the sigma of Z / sqrt (G) from that of G: half its relative error
 driver-robot.adb	Best.Value := Real'Max (Best.Value, Driver.Conventions.Z * Noise * Sqrt (2.0));	2.0	math	a change is the difference of two readings, whose variance is twice one reading's
 driver-robot.adb	Centre : constant Vec3 := (1.0 / Scale) * (Rt * Lever);	1.0	math	the reciprocal of the scale
+driver-robot.adb	Flags (K) := Word (K + 3) = "";	"1	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
+driver-robot.adb	Flags (K) := Word (K + 3) = "";	3	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
+driver-robot.adb	Flags : Channel_Flags (1 .. Natural'Max (0, Count - 3));	3	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
 driver-robot.adb	Mean : constant Real := (P.Tilt_11 + P.Tilt_22) / 2.0;	2.0	math	the larger eigenvalue of a symmetric 2 x 2: the mean of the diagonal plus the root of the half difference squared and the off diagonal squared
 driver-robot.adb	Moving_Since : Integer := -1;	1	structure	sentinel: no move began whose settling is still open (beats are never negative)
 driver-robot.adb	Moving_Since := -1;	1	structure	sentinel: the move settled, none open
@@ -2626,6 +2632,8 @@ driver-robot.adb	else "" & Driver.Log.Image (Largest (M.Eyes (E).Rest_Factors), 
 driver-robot.adb	else Driver.Log.Image (Sqrt (S.Luma_Variance.Element (Natural (S.Luma_Variance.Length) / 2)), 2)	2	format	digits printed in a log line or a message
 driver-robot.adb	else Driver.Log.Image (Sqrt (S.Luma_Variance.Element (Natural (S.Luma_Variance.Length) / 2)), 2)	2	structure	the middle cell of the grid, for the log line
 driver-robot.adb	function Up (M : Model) return Direction_Estimate is (Up_In_Arm (M, 1));	1	structure	the world is the first arm's reference frame
+driver-robot.adb	if Count < 2 or else Word (1) /= "" then	1	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
+driver-robot.adb	if Count < 2 or else Word (1) /= "" then	2	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
 driver-robot.adb	if G > M.Groups.Last_Index or else B < 1 or else not Channels.Has_Reading (M, G, B) then	1	structure	a change needs the beat before
 driver-robot.adb	if M.Beats >= 2 * M.Graph_Evidence then	2	numerics	re-estimating when the evidence doubles keeps the number of re-estimates logarithmic in the stream
 driver-robot.adb	return "" & Image_Lag (M, E)'Image & (if Lag_Known (M, E) then "" else "") & "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message

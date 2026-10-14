@@ -951,6 +951,13 @@ package body Driver.Robot.Boot is
 
          function Same_Pair (A, B : Arm_Eye) return Boolean is (A.Group = B.Group and then A.Eye = B.Eye);
 
+         --  Some unswept arm's eye sees another unswept arm move (the lock-in's response of that eye to the other's
+         --  group is anything but nothing): their sweeps go one at a time, since a keyframe needs the eye's picture
+         --  still, and the other arm moving through it keeps it from ever being (R6's eighth start, 10-14: both arms
+         --  swept at once, each in the other's view, pass 2 to 4 of each gave no keyframe at all). In a white room
+         --  the other arm is most of what an eye has to go by, and it must stand still to be that.
+         See_Each_Other : Boolean := False;
+
          procedure Find_Unswept is
          begin
             Unswept.Clear;
@@ -973,6 +980,14 @@ package body Driver.Robot.Boot is
                   end if;
                end;
             end loop;
+            See_Each_Other := False;
+            for P of Unswept loop
+               for Q of Unswept loop
+                  if P.Group /= Q.Group and then Response (M, Q.Group, P.Eye) not in Nothing | Unmeasured then
+                     See_Each_Other := True;
+                  end if;
+               end loop;
+            end loop;
          end Find_Unswept;
 
          procedure Sweep_Lane (Lane : Positive) is
@@ -988,10 +1003,15 @@ package body Driver.Robot.Boot is
                for P of Unswept loop
                   Driver.Log.Line (Driver.Log.Robot, "boot: sweeping arm" & P.Arm'Image & " (group" & P.Group'Image
                                    & ") with eye" & P.Eye'Image
-                                   & (if Unswept.Length > 1 then ", the" & Unswept.Length'Image & " arms at once" else ""));
+                                   & (if Unswept.Length = 1 then ""
+                                      elsif See_Each_Other then ", the" & Unswept.Length'Image
+                                           & " arms one at a time (an eye sees the other arm)"
+                                      else ", the" & Unswept.Length'Image & " arms at once"));
                end loop;
-               if Unswept.Length = 1 then
-                  Sweep (Unswept.First_Element.Arm);
+               if Unswept.Length = 1 or else See_Each_Other then
+                  for P of Unswept loop
+                     Sweep (P.Arm);
+                  end loop;
                else
                   Sweep_At_Once (Positive (Unswept.Length));
                end if;

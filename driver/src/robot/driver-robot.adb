@@ -4,12 +4,10 @@ with Ada.Unchecked_Deallocation;
 with Ada.Directories;
 with Ada.Text_IO;
 with Driver.Beats;
-with Driver.Bytes;
 with Driver.Clock;
 with Driver.Parallel_For;
 with Driver.Conventions;
 with Driver.Log;
-with Driver.Recording;
 with Driver.Robot.Body_File;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
@@ -252,6 +250,54 @@ package body Driver.Robot is
    --  after the beat's observation and before its reply, so a replay
    --  recomputes at the same point; Observe's own recomputations are not
    --  recorded, since a replay makes them itself.
+   procedure Replay_Sweep (M : in out Model; Kind : Driver.Recording.Record_Kind; Data : Driver.Bytes.Byte_Array) is
+      Text  : constant String := Driver.Bytes.To_String (Data);
+      --  The words of the text: "arm", the arm, and for Q "asked" and a 0 or 1 a channel.
+      Words : array (1 .. Text'Length) of Natural := [others => 0];   --  where each word starts
+      Count : Natural := 0;
+      In_Word : Boolean := False;
+      function Word (K : Positive) return String is
+         Stop : Natural := Words (K);
+      begin
+         while Stop <= Text'Last and then Text (Stop) /= ' ' loop
+            Stop := Stop + 1;
+         end loop;
+         return Text (Words (K) .. Stop - 1);
+      end Word;
+   begin
+      for I in Text'Range loop
+         if Text (I) = ' ' then
+            In_Word := False;
+         elsif not In_Word then
+            In_Word := True;
+            Count := Count + 1;
+            Words (Count) := I;
+         end if;
+      end loop;
+      if Count < 2 or else Word (1) /= "arm" then
+         return;
+      end if;
+      declare
+         A : constant Arm_Id := Arm_Id'Value (Word (2));
+      begin
+         case Kind is
+            when Driver.Recording.Sweep_Begun =>
+               Kinematics.Begin_Anew (M, A);
+            when Driver.Recording.Channels_Asked =>
+               declare
+                  Flags : Channel_Flags (1 .. Natural'Max (0, Count - 3));
+               begin
+                  for K in Flags'Range loop
+                     Flags (K) := Word (K + 3) = "1";
+                  end loop;
+                  Kinematics.Asking (M, A, Flags);
+               end;
+            when others =>
+               null;
+         end case;
+      end;
+   end Replay_Sweep;
+
    procedure Estimate_Now (M : in out Model) is
    begin
       Driver.Recording.Write_Shared (Driver.Recording.Estimates_Asked, Driver.Bytes.To_Bytes (""));

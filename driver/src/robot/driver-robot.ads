@@ -44,6 +44,8 @@ private with Driver.Pixels;
 private with Driver.Services;
 with Driver.Uncertain;
 
+with Driver.Bytes;
+with Driver.Recording;
 package Driver.Robot is
 
    use Driver.Numerics;
@@ -84,6 +86,10 @@ package Driver.Robot is
    --  holds included). Estimators only; never sends anything.
 
    procedure Estimate_Now (M : in out Model);
+
+   procedure Replay_Sweep (M : in out Model; Kind : Driver.Recording.Record_Kind; Data : Driver.Bytes.Byte_Array);
+   --  Applies the boot's word to the kinematics as the run said it (a recording's kind G, "arm N", or Q,
+   --  "arm N asked 0 1 ...": Kinematics.Begin_Anew, Kinematics.Asking); anything else is ignored.
    --  Recomputes the heavier estimates from everything observed so far.
    --  Deciders call it between Driver.Beats.Next and Send; it can take
    --  minutes, during which the robot holds. The call goes into the

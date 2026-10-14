@@ -39,6 +39,10 @@
 --  units of their noise, whether it moved and was pushed, and its target.
 --  With --dump DIR EYE EVERY, the eye's picture at every EVERY-th beat is written
 --  to DIR/eyeEYE_BEAT.ppm (a study's way of seeing what the estimators saw).
+--  With --sweeping ARM@BEAT (repeatable), the arm's sweep is said to begin at
+--  that beat: for a recording made before the boot's word to the kinematics
+--  was recorded (kinds G and Q); its keyframes are then taken and aligned,
+--  though nothing is asked of its channels and the fit cannot tell them apart.
 --
 --  The estimators' service calls are answered as Driver.Services describes
 --  for a replay: by the live service when --inst or --eye names one (a
@@ -50,6 +54,7 @@
 with Ada.Command_Line;
 with Ada.Exceptions;
 with Ada.Containers.Indefinite_Ordered_Maps;
+with Ada.Containers.Vectors;
 with Ada.Strings.Fixed;
 with Ada.Streams.Stream_IO;
 with Ada.Text_IO;
@@ -399,6 +404,37 @@ procedure Replay is
 
    package Apart is new Driver.Apart (Input, Robot_Part, Rest, Due, Compute, Never, Lighten);
 
+   --  The boot's word to the kinematics, as the run said it (kinds G and Q).
+   procedure Sweep_Told (Data : Driver.Bytes.Byte_Array) is
+   begin
+      if not Dump_Only then
+         Driver.Robot.Replay_Sweep (Robot, Kind, Data);
+      end if;
+   end Sweep_Told;
+
+   --  --sweeping ARM@BEAT, for a recording made before the boot's word was recorded: the arm's sweep is said to
+   --  begin at that beat (the first keyframe's, read from the run's log), with nothing asked of its channels.
+   type Sweep_Note is record
+      Arm  : Positive := 1;
+      Beat : Natural := 0;
+      Said : Boolean := False;
+   end record;
+   package Sweep_Notes is new Ada.Containers.Vectors (Positive, Sweep_Note);
+   Sweeps : Sweep_Notes.Vector;
+
+   procedure Say_Sweeps is
+   begin
+      for K in Sweeps.First_Index .. Sweeps.Last_Index loop
+         if not Sweeps (K).Said and then Beat >= Sweeps (K).Beat then
+            Apart.Replay_Decider;
+            Driver.Robot.Replay_Sweep (Robot, Driver.Recording.Sweep_Begun,
+                                       Driver.Bytes.To_Bytes ("arm" & Sweeps (K).Arm'Image));
+            Sweeps (K).Said := True;
+            Line (Core, "arm" & Sweeps (K).Arm'Image & " is said to sweep from beat" & Beat'Image & " (--sweeping)");
+         end if;
+      end loop;
+   end Say_Sweeps;
+
    procedure Robot_Message (Data : Driver.Bytes.Byte_Array) is
       Req : Driver.Protocol.Request;
       Ok  : Boolean;
@@ -433,6 +469,9 @@ procedure Replay is
             Driver.Log.Stamp (Beat);
          end if;
          Apart.Replay_Message (M);
+         if Observed and then not Sweeps.Is_Empty then
+            Say_Sweeps;
+         end if;
       end;
    end Robot_Message;
 
@@ -610,6 +649,16 @@ begin
          Dump_Every := Natural'Value (Argument (I + 3));
       elsif Argument (I) = "--readings" then
          Followed := Natural'Value (Argument (I + 1));
+      elsif Argument (I) = "--sweeping" and then I + 1 <= Argument_Count then
+         declare
+            Given : constant String := Argument (I + 1);
+            At_Sign : constant Natural := Ada.Strings.Fixed.Index (Given, "@");
+         begin
+            if At_Sign > Given'First and then At_Sign < Given'Last then
+               Sweeps.Append (Sweep_Note'(Arm  => Positive'Value (Given (Given'First .. At_Sign - 1)),
+                                          Beat => Natural'Value (Given (At_Sign + 1 .. Given'Last)), Said => False));
+            end if;
+         end;
       end if;
    end loop;
 
@@ -636,6 +685,8 @@ begin
          when Driver.Recording.File_Read       => Apart.Replay_Decider; Payload.Query (File_Read'Access);
          when Driver.Recording.Estimates_Asked => Apart.Replay_Decider; Compute;
          when Driver.Recording.World_Written   => Apart.Replay_Decider; Payload.Query (World_Write'Access);
+         when Driver.Recording.Sweep_Begun | Driver.Recording.Channels_Asked =>
+            Apart.Replay_Decider; Payload.Query (Sweep_Told'Access);
          when Driver.Recording.Estimates_Apart => Apart.Replay_Apart;
          when Driver.Recording.Taken_In        => Taken_In;
          when Driver.Recording.Estimates_Back  => Back;

@@ -23,6 +23,8 @@ with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Lockin;
 with Driver.Robot.Steps;
+with Driver.Recording;
+with Driver.Bytes;
 with Driver.Robot.Regression;
 
 package body Driver.Robot.Kinematics is
@@ -578,15 +580,23 @@ package body Driver.Robot.Kinematics is
       end;
    end Twin_Answered;
 
+   --  The boot's word to the kinematics goes into the recording (kinds G and Q) where it was said, so a replay
+   --  says it to its models at the same point (Driver.Robot.Replay_Sweep): a replay runs no boot, and without
+   --  the word no keyframe is taken (R6's seventh start, 10-14: the recording of a sweep replayed into nothing).
    procedure Asking (M : in out Model; A : Arm_Id; Channels : Channel_Flags) is
       K : constant Natural := Index_Of (M, A);
+      Text : Ada.Strings.Unbounded.Unbounded_String :=
+        Ada.Strings.Unbounded.To_Unbounded_String ("arm" & A'Image & " asked");
    begin
       if K > 0 then
          M.Kinematics (K).Asking.Clear;
          for F of Channels loop
             M.Kinematics (K).Asking.Append (F);
+            Ada.Strings.Unbounded.Append (Text, (if F then " 1" else " 0"));
          end loop;
       end if;
+      Driver.Recording.Write_Shared
+        (Driver.Recording.Channels_Asked, Driver.Bytes.To_Bytes (Ada.Strings.Unbounded.To_String (Text)));
    end Asking;
 
    --  The channels the sweep asked a keyframe's joints to turn for, for the log: ", asked c2 c4"; nothing when none.
@@ -605,6 +615,7 @@ package body Driver.Robot.Kinematics is
    procedure Begin_Anew (M : in out Model; A : Arm_Id) is
       K : constant Natural := Index_Of (M, A);
    begin
+      Driver.Recording.Write_Shared (Driver.Recording.Sweep_Begun, Driver.Bytes.To_Bytes ("arm" & A'Image));
       --  An arm met here for the first time (no beat has taken a keyframe of it: none is taken before its sweep)
       --  starts its evidence now, the sweep's.
       if K = 0 then

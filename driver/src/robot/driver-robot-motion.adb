@@ -346,9 +346,16 @@ package body Driver.Robot.Motion is
                         declare
                            Noise : constant Real := Channels.Noise (M, Group_Id (G), C);
                            Error : constant Real := Target (Target'First + C - 1) - Reading (Reading'First + C - 1);
+                           --  An error smaller than the least ask the body is known to execute (Steps.Executed_Least)
+                           --  is not sent again: the body stands still for an ask within its dead band, and sending
+                           --  it bounced the kiwi's joints two or three units either side of their targets, a step
+                           --  sent again two to four times each, 340 times in a boot whose sweep then held still
+                           --  for no keyframe (R6's eighth start, 10-14).
+                           Least : constant Real := Steps.Executed_Least (M, Group_Id (G), C);
                         begin
                            if not Stopped and then Noise < Real'Last and then Noise > 0.0
                              and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))
+                             and then (Least = Real'Last or else abs Error >= Least)
                            then
                               Off := True;
                               Largest := Real'Max (Largest, abs Error / (Noise * Sqrt (2.0)));
