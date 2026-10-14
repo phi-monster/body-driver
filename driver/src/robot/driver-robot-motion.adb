@@ -855,22 +855,16 @@ package body Driver.Robot.Motion is
       --  joint that creeps towards its target for good is not waited for for good), held meanwhile, and the
       --  readings are read then. What an eye sees meanwhile falls in the next look, as any response that shows
       --  later than expected does.
-      --  And until the body is still (Still: every group's readings and every eye's picture, as the recognition
-      --  settles between its pushes): a joint that starts late, after the body's measured delay (a sticky elbow
-      --  overcoming its friction), had not moved when the look ended, read as not having gone anywhere, and the
-      --  probe doubled its ask fifty-six times to 8.8e16 units, each level throwing the joint to an end of its
-      --  range while the joint before it was still on its way, and called it dead (R6's seventh and ninth starts
-      --  on the kiwi, 10-14: arm_a's shoulder, then its elbow). A late start shows in the readings or in an eye
-      --  before the body is still, and the readings are read after it.
-      loop
+      --  A joint that travels slowly, less in a beat than its readings jitter, is under way too: Steps counts a
+      --  push answered once a reading has left where the push started by more than its noise explains, not
+      --  only when it moves from one beat to the next (the kiwi's elbow, read as going nowhere at every level,
+      --  was probed to 8.8e16 units and called dead, R6's seventh and ninth starts, 10-14). Holding until the
+      --  whole body was still instead (the tenth start) caught it too, and cost the recognition two minutes of
+      --  eyes settling after levels nothing had answered.
+      while Still_Pushing loop
          Driver.Beats.Next (B);
          Read_Ends;
-         declare
-            Done : constant Boolean := not Still_Pushing and then Still (M);
-         begin
-            Driver.Beats.Send (Driver.Commands.Hold);
-            exit when Done;
-         end;
+         Driver.Beats.Send (Driver.Commands.Hold);
       end loop;
    end Move_And_Look;
 

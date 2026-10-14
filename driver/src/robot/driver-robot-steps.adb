@@ -305,6 +305,33 @@ package body Driver.Robot.Steps is
       Delay_Beats : Natural;
       Delay_Known : Boolean;
       First_Wait  : constant Natural := First_Push (M);
+
+      --  Some channel of the group has left where its push started, by more than its noise explains: a joint that
+      --  travels slowly, less in a beat than its readings jitter, is never moving from one beat to the next
+      --  (Channels.Moving) yet has gone; read as having gone nowhere at every level, the kiwi's elbow was probed
+      --  to 8.8e16 units and called dead (R6's seventh and ninth starts, 10-14).
+      function Left_Its_Start (G : Group_Id; Beat : Natural) return Boolean is
+         S : Group_Stream renames M.Groups (G);
+      begin
+         if not Channels.Has_Reading (M, G, Beat) then
+            return False;
+         end if;
+         for C in 1 .. S.Size loop
+            if C - 1 < Natural (S.From.Length) then
+               declare
+                  Noise : constant Real := Channels.Noise (M, G, C);
+                  Gone  : constant Real := abs (Channels.Reading (M, G, Beat, C) - S.From (C - 1));
+               begin
+                  if Noise < Real'Last and then Noise > 0.0
+                    and then Driver.Uncertain.Significant (Gone, Noise * Sqrt (2.0), Channels.Noise_Freedom (M, G, C))
+                  then
+                     return True;
+                  end if;
+               end;
+            end if;
+         end loop;
+         return False;
+      end Left_Its_Start;
    begin
       Body_Delay (M, Delay_Beats, Delay_Known);
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -326,7 +353,7 @@ package body Driver.Robot.Steps is
                      Wait : constant Natural := (if Delay_Known then Delay_Beats else First_Wait);
                   begin
                      if not E.Moved then
-                        if Channels.Moving (M, G, Beat) then
+                        if Channels.Moving (M, G, Beat) or else Left_Its_Start (G, Beat) then
                            E.Moved := True;
                            E.Moved_At := Beat;
                            S.Episodes.Replace_Element (S.Episodes.Last_Index, E);

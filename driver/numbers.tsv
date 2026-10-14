@@ -2589,6 +2589,7 @@ driver-robot-steps.adb	(if Ask > 0.0 then 1.0 else -1.0) * (Channels.Reading (M,
 driver-robot-steps.adb	Own (C) := (Unit * Sqrt (2.0) * Sigma) ** 2;	2.0	statistics	a shortfall is the difference of two readings, the one before the push and the one where it stopped: the root of two of the reading noise
 driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
 driver-robot-steps.adb	and then Driver.Uncertain.Significant (Along, Sqrt (2.0) * Sigma)	2.0	math	the difference of two readings has twice the variance of one
+driver-robot-steps.adb	and then Driver.Uncertain.Significant (Gone, Noise * Sqrt (2.0), Channels.Noise_Freedom (M, G, C))	2.0	statistics	the noise of a difference of two readings is sqrt 2 times one reading's
 driver-robot-steps.adb	if Natural (M.Groups (G).Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	if Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	if not (E.Ended and then E.Rested and then E.Blocked) or else E.Length <= 0.0 or else E.Start < 1	1	structure	a push needs the reading before it: it began at the second beat or later
