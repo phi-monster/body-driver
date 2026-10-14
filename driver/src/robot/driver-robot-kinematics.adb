@@ -336,7 +336,12 @@ package body Driver.Robot.Kinematics is
                declare
                   R : Arm_Evidence renames M.Kinematics (Index);
                begin
-                  if Held_Still (M, Arm, Beat)
+                  --  Keyframes from the arm's sweep on (Arm_Evidence.Sweeping, Begin_Anew): the recognition's rounds
+                  --  held the kiwi's arms at 23 to 47 poses an arm, every one a keyframe, and the estimates between
+                  --  the rounds aligned them for 21 to 115 s each (R5's fifth start, R6's second, 10-14), for a
+                  --  measurement of the view's motion per unit that the sweep's first level, searched wide, makes
+                  --  itself; nothing else asks the kinematics anything before the sweep.
+                  if R.Sweeping and then Held_Still (M, Arm, Beat)
                     and then E <= O.Images.Last_Index and then Driver.Observations.Has_Image (O, E)
                   then
                      declare
@@ -564,6 +569,17 @@ package body Driver.Robot.Kinematics is
    procedure Begin_Anew (M : in out Model; A : Arm_Id) is
       K : constant Natural := Index_Of (M, A);
    begin
+      --  An arm met here for the first time (no beat has taken a keyframe of it: none is taken before its sweep)
+      --  starts its evidence now, the sweep's.
+      if K = 0 then
+         if Eye_Of (M, A) > 0 then
+            M.Kinematics.Append (Arm_Evidence'(Arm => A, Group => Arm_Group (M, A), Eye => Eye_Of (M, A),
+                                               Sweeping => True, others => <>));
+            Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & A'Image & " begins at beat" & M.Beats'Image
+                             & ": its sweep's keyframes are its first");
+         end if;
+         return;
+      end if;
       if K > 0 then
          declare
             R : Arm_Evidence renames M.Kinematics (K);
@@ -582,7 +598,8 @@ package body Driver.Robot.Kinematics is
             begin
                M.Kinematics.Replace_Element
                  (K, (Arm => R.Arm, Group => R.Group, Eye => R.Eye, Shifts => Kept, Shift_Sigmas => Sigmas,
-                      Shift_Points => Points, Shift_Seen => Seen, Shift_Told => Told, others => <>));
+                      Shift_Points => Points, Shift_Seen => Seen, Shift_Told => Told, Sweeping => True,
+                      others => <>));
             end;
          end;
       end if;

@@ -322,7 +322,8 @@ package body Driver.Robot.Tests is
       Step (M, R, Target, Target);
    end Step;
 
-   type Push_Kind is (Arm_1, Arm_2, Arm_1_Joint_2, Arm_2_Joint_1, Closer, Part, Idle, Lockstep, Closer_With_Arm_1);
+   type Push_Kind is (Arm_1, Arm_2, Arm_1_Joint_1, Arm_1_Joint_2, Arm_2_Joint_1, Arm_2_Joint_2, Closer, Part, Idle,
+                      Lockstep, Closer_With_Arm_1);
 
    --  Pushes one group away by Amount and back, Times times, holding two
    --  beats after each move; Lockstep moves both arms together. Arm_1 and
@@ -339,8 +340,10 @@ package body Driver.Robot.Tests is
       case Kind is
          when Arm_1    => Away.Arm_1 := [Amount, Amount / 2.0];
          when Arm_2    => Away.Arm_2 := [Amount / 2.0, Amount];
+         when Arm_1_Joint_1 => Away.Arm_1 := [Amount, 0.0];
          when Arm_1_Joint_2 => Away.Arm_1 := [0.0, Amount];
          when Arm_2_Joint_1 => Away.Arm_2 := [Amount, 0.0];
+         when Arm_2_Joint_2 => Away.Arm_2 := [0.0, Amount];
          when Closer   => Away.Closer := Amount;
          when Part     => Away.Part := Amount;
          when Idle     => Away.Idle := Amount;
@@ -413,8 +416,6 @@ package body Driver.Robot.Tests is
       end loop;
       Exercise (M, R, Arm_1, 0.1, 8);
       Exercise (M, R, Arm_2, 0.1, 8);
-      Exercise (M, R, Arm_1_Joint_2, 0.1, 8);
-      Exercise (M, R, Arm_2_Joint_1, 0.1, 8);
       Exercise (M, R, Closer, 0.1, 8);
       Exercise (M, R, Part, 0.1, 8);
       Exercise (M, R, Idle, 0.1, 8);
@@ -422,6 +423,20 @@ package body Driver.Robot.Tests is
          --  Ten pixels and more per beat: far beyond a one-step displacement.
          Exercise (M, R, Lockstep, 3.0, 10);
       end if;
+      Estimate_Now (M);
+      --  The arms recognized, their sweeps begin (the boot's Begin_Anew at the sweep's hold): an arm takes no
+      --  keyframe before. The joints pushed again from here, together and alone, give the keyframes that measure
+      --  how far the view moves per unit of each.
+      Driver.Robot.Kinematics.Begin_Anew (M, 1);
+      Driver.Robot.Kinematics.Begin_Anew (M, 2);
+      Exercise (M, R, Arm_1, 0.1, 8);
+      Exercise (M, R, Arm_2, 0.1, 8);
+      --  A joint alone by a third of the amount: the rig's view moves 7 px per 0.1 of its second joint, beyond
+      --  what the aligner follows in a 64 by 48 picture from a prediction of nothing.
+      Exercise (M, R, Arm_1_Joint_1, 0.03, 8);
+      Exercise (M, R, Arm_1_Joint_2, 0.03, 8);
+      Exercise (M, R, Arm_2_Joint_1, 0.03, 8);
+      Exercise (M, R, Arm_2_Joint_2, 0.03, 8);
       Estimate_Now (M);
    end Exercise_Rig;
 

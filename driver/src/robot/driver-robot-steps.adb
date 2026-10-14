@@ -30,9 +30,12 @@ package body Driver.Robot.Steps is
       E.End_At := Beat;
       E.Settled := Settled;
       E.Rested := Rested;
-      --  What the push executed, channel by channel: a channel that moved along its ask, by a step its readings
-      --  tell (Z of the noise of two readings), executed an ask of that size, and the least such ask of the channel
-      --  is kept (Group_Stream.Executed, Executed_Least).
+      --  What the push executed, channel by channel: a channel that went along its ask by a step its readings tell
+      --  (Z of the noise of two readings), and further than it fell short of the ask, executed an ask of that
+      --  size, and the least such ask of the channel is kept (Group_Stream.Executed, Executed_Least). Moving at all
+      --  is not executing: a sending again by a landing's error asks two or three units, and a servo settling a
+      --  tick or two gave the kiwi's arm_b third joint an executed least of 2.4 units where its dead band stops
+      --  asks below 19 (R6's second start, 10-14: the sweep's first level 2.449, from the readings' noise alone).
       while Natural (S.Executed.Length) < S.Size loop
          S.Executed.Append (Real'Last);
       end loop;
@@ -46,6 +49,7 @@ package body Driver.Robot.Steps is
             begin
                if Ask /= 0.0 and then Sigma < Real'Last and then Along > 0.0
                  and then Driver.Uncertain.Significant (Along, Sqrt (2.0) * Sigma)
+                 and then Along > abs Ask - Along
                then
                   S.Executed.Replace_Element (C - 1, Real'Min (S.Executed (C - 1), abs Ask));
                end if;
@@ -55,17 +59,21 @@ package body Driver.Robot.Steps is
       --  A push that asks for less than the one test of motion sees is not judged by what the group did: whatever
       --  moved it meanwhile (a press let go, an arm relaxing from what it pressed) was not the push, there is no
       --  delivery to fall short of, and nothing says it was answered or not. It is neither blocked nor a free
-      --  push, and what it delivered stays unknown. Nor is one judged that asks, of every channel it asks a step
-      --  of, less than the body is known to execute (Executed_Least): that nothing moved says nothing of a push
-      --  within a servo's dead band (the kiwi's sweep, R5 on 10-14: first levels of 2.4 to 3.8 units, every one
-      --  called blocked where it stood, and no joint had a keyframe of its own). A channel no push has moved yet
-      --  has no such least, and a push of it is judged as any: a joint held against its limit from the start
-      --  answers nothing at any size, and is blocked.
+      --  push, and what it delivered stays unknown. Nor is one judged that nothing answered and that asks, of
+      --  every channel it asks a step of, less than the body is known to execute (Executed_Least): that nothing
+      --  moved says nothing of a push within a servo's dead band (the kiwi's sweep, R5 on 10-14: first levels of
+      --  2.4 to 3.8 units, every one called blocked where it stood, and no joint had a keyframe of its own). A
+      --  push that was answered is judged whatever it asked: a joint that moved was not in its dead band, and one
+      --  stopped half way by an obstacle is blocked. A channel no push has moved yet has no such least, and a
+      --  push of it is judged as any: a joint held against its limit from the start answers nothing at any size,
+      --  and is blocked.
       if Settled and then E.Length > 0.0 and then Channels.Has_Reading (M, G, Beat)
         and then Channels.Visible (M, G, Along_Ask (S, E.Length, E.Length))
-        and then (for some C in 1 .. S.Size =>
-                    S.Asks (C - 1)
-                    and then (S.Executed (C - 1) >= Real'Last or else abs S.Ask (C - 1) >= S.Executed (C - 1)))
+        and then (Answered
+                  or else (for some C in 1 .. S.Size =>
+                             S.Asks (C - 1)
+                             and then (S.Executed (C - 1) >= Real'Last
+                                       or else abs S.Ask (C - 1) >= S.Executed (C - 1))))
       then
          declare
             Along, Spread : Real := 0.0;

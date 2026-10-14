@@ -964,6 +964,7 @@ driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	1.0	mat
 driver-robot-boot.adb	Order (Count + 2) := (Channel => C, Sign => -1.0);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
+driver-robot-boot.adb	Patch := 2.0 * Real (Driver.Alignment.Half_Patch (M.Eyes (Eye_Id (Eye)).Grid.Width,	2.0	math	a patch of view is twice its half (Alignment.Half_Patch)
 driver-robot-boot.adb	Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))));	1	structure	the guessed hold begins at one beat, the unit, while the stream can tell no lag
 driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved,	1.0	structure	the first round pushes by the amounts as recognized, once
 driver-robot-boot.adb	R := R / 2;	2	math	the parity and the next bit of a row and a column

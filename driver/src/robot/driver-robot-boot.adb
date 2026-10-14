@@ -1,4 +1,5 @@
 with Ada.Characters.Handling;
+with Driver.Alignment;
 with Ada.Containers.Vectors;
 with Ada.Strings;
 with Ada.Strings.Fixed;
@@ -365,6 +366,7 @@ package body Driver.Robot.Boot is
             Least  : Real_Array (1 .. Size) := [others => 0.0];   --  per channel: the least turn a keyframe counts
             Moves  : array (1 .. Size) of Boolean := [others => False];   --  per channel: it moves the eye's view (Lockin.Seen)
             Half   : Real := 0.0;
+            Patch  : Real := 0.0;   --  a patch of the eye's view, in px: the farthest the aligner follows by itself
             Eye    : Natural := 0;
             --  How far the view moves per reading unit of each channel, as the keyframes have measured it so far
             --  (Kinematics.Pixels_Per_Unit; 0 until the keyframes determine the channel): read again after every
@@ -395,10 +397,21 @@ package body Driver.Robot.Boot is
                if Eye > 0 then
                   Half := Real (Natural'Min (M.Eyes (Eye_Id (Eye)).Grid.Width, M.Eyes (Eye_Id (Eye)).Grid.Height))
                     / 2.0;
+                  Patch := 2.0 * Real (Driver.Alignment.Half_Patch (M.Eyes (Eye_Id (Eye)).Grid.Width,
+                                                                     M.Eyes (Eye_Id (Eye)).Grid.Height));
                   Read_Shifts;
                   for C in 1 .. Size loop
                      Moves (C) := Lockin.Seen (M, Eye_Id (Eye), G, C);
                      First (C) := Driver.Robot.Motion.Sweep_Start (M, A, C);
+                     --  And no less than the turn at which the recognition's probe saw the eye's view move with the
+                     --  channel, an executed turn the eye saw (Probe_Both_Ways): the first keyframe needs the view to
+                     --  have moved, and before any keyframe the step a keyframe counts from may be none (the rig of
+                     --  robot.boot.short: no visible step from the lock-in, a first level of 0, nothing swept).
+                     for R of Recognized loop
+                        if R.Ref.Group = G and then R.Ref.Channel = C then
+                           First (C) := Real'Max (First (C), R.Amount);
+                        end if;
+                     end loop;
                      Least (C) := Driver.Robot.Motion.Least_Turn (M, A, C);
                   end loop;
                end if;
@@ -505,7 +518,13 @@ package body Driver.Robot.Boot is
                      Levels (I).Append (Mark);
                      exit when Mark.Short or else Per_Unit (P.Channel) = 0.0;
                      Off := 2.0 * Off;
-                     exit when Off * Per_Unit (P.Channel) > Half;
+                     --  Before the arm is fitted, the ladder climbs only as far as the aligner follows by itself: the
+                     --  first level moves the view by half a patch, the next by a patch, and the levels beyond are
+                     --  followed only by a fitted arm's prediction (Motion.Sweep_Start). Taken blind in one pass, they
+                     --  are keyframes nothing finds (R6's second start, 10-14: arm_a's levels at 214, 463, 967 and
+                     --  2792 units of its elbow, 0 of 441 points each, from a view's motion per unit measured ten
+                     --  times too small, and the elbow swung 245 degrees before its ladder met the servo's range).
+                     exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else Patch);
                   end loop;
                   Go_To (G, Start, Report, Land => True);
                end Take;

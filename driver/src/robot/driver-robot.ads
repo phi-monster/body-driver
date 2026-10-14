@@ -731,6 +731,10 @@ private
                                              --  with it are not a patch of those told: Kinematics.Measure_Shifts);
                                              --  False for a channel that moves a part of the body in the view
       Shift_Told   : Count_Vectors.Vector;   --  per channel: how many points were told of it
+      Sweeping : Boolean := False;   --  the arm's sweep has begun (Kinematics.Begin_Anew): its keyframes are taken
+                                     --  from then on, none before (the recognition's holds would give the aligner
+                                     --  a keyframe at every pose, minutes of work, for a measurement the sweep's
+                                     --  first level makes itself)
       Still    : Flag_Vectors.Vector;   --  per query point, once its keyframes tell: it does not move with the view
                                         --  (Kinematics.Measure_Shifts: fixed to the eye, as the hand's jaws in a
                                         --  wrist eye's view are, or answered at its place by false peaks); nothing
