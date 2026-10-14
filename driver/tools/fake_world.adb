@@ -544,8 +544,25 @@ package body Fake_World is
       return (for some P of Corners (A) => Inside (P, B)) or else (for some P of Corners (B) => Inside (P, A));
    end Overlap;
 
-   --  Whether any of arm A's solids goes into the table or into a thing of the world.
+   --  The link arm A hangs from: its first link's parent (the base, a link of no arm). The arm's solids are
+   --  never in contact with the mount's: its first link's box stands on the base's box face to face by
+   --  construction, and a corner on a face is inside it or not by the rounding of one pose product. Seed 3 on
+   --  10-14: arm 2 "penetrated" its own base by a hair at every beat, every step of its joints was cut to the
+   --  Give quirk's share, and a closer asked a step crept to it over 440 beats while arm 1, the same body
+   --  mirrored, answered in five.
+   function Mount_Of (W : World; A : Positive) return Natural is
+   begin
+      for L of W.Links loop
+         if L.Arm = A then
+            return L.Parent;
+         end if;
+      end loop;
+      return 0;
+   end Mount_Of;
+
+   --  Whether any of arm A's solids goes into the table or into a thing of the world (not its own mount).
    function Penetrates (W : World; A : Positive) return Boolean is
+      Mount : constant Natural := Mount_Of (W, A);
    begin
       for S of W.Solids loop
          if S.Arm = A then
@@ -555,7 +572,7 @@ package body Fake_World is
                end if;
             end loop;
             for O of W.Solids loop
-               if O.Arm = 0 and then O.Kind = Box and then Overlap (S, O) then
+               if O.Arm = 0 and then O.Kind = Box and then O.Link /= Mount and then Overlap (S, O) then
                   return True;
                end if;
             end loop;
@@ -567,14 +584,15 @@ package body Fake_World is
    --  How far any of arm A's solids goes into the table or into a thing of the world: the deepest corner, metres;
    --  zero when none does.
    function Deepest (W : World; A : Positive) return Real is
-      D : Real := 0.0;
+      Mount : constant Natural := Mount_Of (W, A);
+      D     : Real := 0.0;
    begin
       for S of W.Solids loop
          if S.Arm = A then
             for P of Corners (S) loop
                D := Real'Max (D, W.Table_Z - P (3));
                for O of W.Solids loop
-                  if O.Arm = 0 and then O.Kind = Box then
+                  if O.Arm = 0 and then O.Kind = Box and then O.Link /= Mount then
                      declare
                         Q : constant Vec3 := Inverse (O.Pose) * P;
                      begin
