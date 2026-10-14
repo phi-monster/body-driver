@@ -1587,7 +1587,10 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Warm_Far * 180.0 / Ada.
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Warm_Far * 180.0 / Ada.Numerics.Pi, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Real'Image (C) & "" & Real'Image (Sqrt (Variance (O + 5)))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Exp (Best_At + Told_Within), 1) & "" & Warm_Tries'Image	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element, 1) & "")	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Sqrt (Sum (F) / Real (Cnt (F))), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	((Fx => Exp (T (T'First)), Fy => Exp (T (T'First + 1)), Cx => T (T'First + 2), Cy => T (T'First + 3),	2	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
@@ -1840,6 +1843,8 @@ driver-robot-kinematics-fit.adb	Sm (P, P) := A (P, P) * (1.0 + Lambda) + Lambda 
 driver-robot-kinematics-fit.adb	Solve (Xf, 1.0);	1.0	statistics	every residual is in units of its own noise
 driver-robot-kinematics-fit.adb	Spread : constant Real := Sqrt (Real'Max (0.0, ((A11 - A22) / 2.0) ** 2 + A12 ** 2));	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	Start : constant Real := (if Side = 1 then Low - Width else High + Width);	1	structure	the first side is the one below
+driver-robot-kinematics-fit.adb	Sum (F) := Sum (F) + All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2;	2	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	Sum (F) := Sum (F) + All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2;	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	Suv := (if Suv > 0.0 then Real (N) / Suv else 1.0);	1.0	numerics	no scaling where the points do not spread
 driver-robot-kinematics-fit.adb	Sxy := (if Sxy > 0.0 then Real (N) / Sxy else 1.0);	1.0	numerics	no scaling where the points do not spread
 driver-robot-kinematics-fit.adb	T : constant Positive := Of_Track ((I + 1) / 2);	2	structure	two residuals per sighting, across and down

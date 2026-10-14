@@ -1459,6 +1459,43 @@ package body Driver.Robot.Kinematics.Fit is
                end loop;
                Report.Sigma_Px := Sigma;
                Report.Used := Kf;
+               --  Once the inliers stand (none changed in this pass), what the model leaves unexplained, by
+               --  keyframe, for the log: the root mean square of the inliers' residuals in pixels. A keyframe
+               --  that stands out is a pose the readings do not describe; a residual that grows with the size
+               --  of the move is a model short of a term (the kiwi, R6's tenth start, 10-14: 1.7 px left at a
+               --  focal length the search could not tell, against an aligner erring 0.12 px).
+               if Now_Changed = 0 and then Kf > 0 then
+                  declare
+                     Sum : Real_Array (1 .. Frames) := [others => 0.0];
+                     Cnt : array (1 .. Frames) of Natural := [others => 0];
+                     Text : Ada.Strings.Unbounded.Unbounded_String;
+                  begin
+                     for I in 1 .. S loop
+                        if Inlier (I) then
+                           declare
+                              F : constant Positive := Sight (Sight'First + I - 1).Frame;
+                           begin
+                              if F <= Frames then
+                                 Sum (F) := Sum (F) + All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2;
+                                 Cnt (F) := Cnt (F) + 1;
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                     for F in 1 .. Frames loop
+                        if Cnt (F) > 0 then
+                           Ada.Strings.Unbounded.Append
+                             (Text, " f" & Ada.Strings.Fixed.Trim (F'Image, Ada.Strings.Left) & " "
+                              & Driver.Log.Image (Sqrt (Sum (F) / Real (Cnt (F))), 2)
+                              & " (" & Ada.Strings.Fixed.Trim (Cnt (F)'Image, Ada.Strings.Left) & ")");
+                        end if;
+                     end loop;
+                     Driver.Log.Line (Driver.Log.Robot, "kinematics: the tracks' fit leaves, by keyframe, px rms over"
+                                      & Kf'Image & " inliers of" & S'Image & " sightings at focal "
+                                      & Driver.Log.Image (L.Fx, 1) & " px (floor " & Driver.Log.Image (Sigma, 2) & "):"
+                                      & Ada.Strings.Unbounded.To_String (Text));
+                  end;
+               end if;
                if Kf > 0 then
                   Fit_Abs := new Real_Array (1 .. Kf);
                   Kf := 0;
