@@ -75,6 +75,9 @@ package Fake_World is
       Tau        : Real := 1.0;              --  beats of the first-order response
       Rate       : Real := 0.0;              --  the most the position changes in a beat, radians or metres; 0 is unlimited
       Droop_Gain : Real := 0.0;              --  radians of sag per metre of horizontal lever, revolute joints
+      Dead       : Real := 0.0;              --  the servo's tolerance, reading units: an ask within it moves nothing, and a
+                                             --  move lands short of its target by up to it (Landing), as a servo bus does
+      Landing    : Real := 0.0;              --  how far short of the target in effect this move lands, drawn with the target
       Mirror     : Natural := 0;             --  a link whose position this one copies (the other finger)
       Pose       : Rigid := Identity;        --  the link's frame in the world, from Forward
       Moved_Beat : Natural := 0;             --  the last beat the position changed
@@ -98,6 +101,7 @@ package Fake_World is
       Values      : Real_Vectors.Vector;
       Commandable : Boolean := False;
       Scalar      : Boolean := False;
+      Integers    : Boolean := False;      --  read in whole units and sent as integers (a servo bus's ticks)
       Echoed      : Real_Vectors.Vector;   --  the last command received, in reading units
       Reported    : Real_Vectors.Vector;   --  this beat's readings, noise and all, drawn once a beat (Step)
    end record;

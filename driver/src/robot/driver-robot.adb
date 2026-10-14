@@ -884,6 +884,9 @@ package body Driver.Robot is
    function Resting_Motion (M : Model; G : Group_Id; E : Eye_Id) return Real is
      (Graph.Effect (M, G, E).Resting);
 
+   function Rest_Pull (M : Model; G : Group_Id; E : Eye_Id) return Real is
+     (Graph.Effect (M, G, E).Rest_Pull);
+
    --  For the watch line: how far two frames' lumas differ on average, in levels a pixel.
    function Mean_Abs_Difference (A, B : Real_Array) return Real is
       Sum : Real := 0.0;

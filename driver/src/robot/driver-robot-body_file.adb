@@ -635,7 +635,8 @@ package body Driver.Robot.Body_File is
                                Fraction   => (Value              => Value (Field (Y, "fraction")),
                                               Sigma              => Value (Field (Y, "sigma")),
                                               Degrees_Of_Freedom => Natural'Max (0, Whole (Y, "freedom"))),
-                               Resting    => 0.0));
+                               Resting    => 0.0,
+                               Rest_Pull  => 0.0));
                         end;
                      end loop;
                   end;

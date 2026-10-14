@@ -116,8 +116,8 @@ procedure Fake_Robot is
 
    function Option (Name : String; Default : String := "") return String;
    function Drawn (Real_Key : String) return String;
-   procedure Draw_Group (Real_Key : String; N : Natural);
-   function Scrambled_Values (Real_Key : String; X : Real_Array) return Real_Array;
+   procedure Draw_Group (Real_Key : String; N : Natural; Integers : Boolean);
+   function Scrambled_Values (Real_Key : String; X : Real_Array; Integers : Boolean) return Real_Array;
    function Unscrambled_Values (Real_Key : String; Y : Real_Array) return Real_Array;
    function Key_Order (Path : String; Keys : String_Vectors.Vector) return String_Vectors.Vector;
    procedure Write_Scramble_Map;
@@ -126,7 +126,8 @@ procedure Fake_Robot is
    procedure Write_Box_Geometry (Store : String; Key : String; S : Solid);
    procedure Write_Geometry_Line;
    procedure Write_Truth_Line;
-   procedure Put_Group (B : in out Driver.Bytes.Buffer; Real_Key : String; Values : Real_Array; Scalar : Boolean);
+   procedure Put_Group
+     (B : in out Driver.Bytes.Buffer; Real_Key : String; Values : Real_Array; Scalar : Boolean; Integers : Boolean);
    procedure Put_Keys (B : in out Driver.Bytes.Buffer; Path : String; Keys : String_Vectors.Vector;
                        Put_Value : not null access procedure (Real_Key : String));
    procedure Encode_Observation (B : in out Driver.Bytes.Buffer);
@@ -179,7 +180,9 @@ procedure Fake_Robot is
       return Names (Real_Key);
    end Drawn;
 
-   procedure Draw_Group (Real_Key : String; N : Natural) is
+   --  Integers says the group's values are whole numbers (a servo bus's ticks) and must stay whole once
+   --  scrambled: the scale is then a whole power of two and the zero a whole number.
+   procedure Draw_Group (Real_Key : String; N : Natural; Integers : Boolean) is
       D : Group_Draw (N);
    begin
       if Draws.Contains (Real_Key) then
@@ -200,7 +203,11 @@ procedure Fake_Robot is
          end loop;
       end if;
       for I in 1 .. N loop
-         if Scrambled then
+         if Scrambled and then Integers then
+            D.Sign (I) := (if Random.Random (Scramble_Rng) < 0.5 then -1.0 else 1.0);
+            D.Scale (I) := 2.0 ** (Integer (Float'Floor (3.0 * Random.Random (Scramble_Rng))) mod 3);
+            D.Zero (I) := Real'Floor (Real (Random.Random (Scramble_Rng)) * 4096.0 - 2048.0);
+         elsif Scrambled then
             D.Sign (I) := (if Random.Random (Scramble_Rng) < 0.5 then -1.0 else 1.0);
             D.Scale (I) := 2.0 ** (Integer (Float'Floor (7.0 * Random.Random (Scramble_Rng))) mod 7 - 3);
             D.Zero (I) := Real (Random.Random (Scramble_Rng)) * 2.0 * Ada.Numerics.Pi - Ada.Numerics.Pi;
@@ -213,10 +220,10 @@ procedure Fake_Robot is
       Draws.Insert (Real_Key, D);
    end Draw_Group;
 
-   function Scrambled_Values (Real_Key : String; X : Real_Array) return Real_Array is
+   function Scrambled_Values (Real_Key : String; X : Real_Array; Integers : Boolean) return Real_Array is
       Y : Real_Array (1 .. X'Length);
    begin
-      Draw_Group (Real_Key, X'Length);
+      Draw_Group (Real_Key, X'Length, Integers);
       declare
          D : constant Group_Draw := Draws (Real_Key);
       begin
@@ -489,15 +496,23 @@ procedure Fake_Robot is
    ---------------------------------------------------------------------------
    --  The observation, scrambled, as msgpack
 
-   procedure Put_Group (B : in out Driver.Bytes.Buffer; Real_Key : String; Values : Real_Array; Scalar : Boolean) is
-      Y : constant Real_Array := Scrambled_Values (Real_Key, Values);
+   --  Integers: the values go as msgpack integers, as a servo bus's bridge sends its ticks (an integer reading
+   --  resolves to one tick in the driver, a float to its last bit).
+   procedure Put_Group
+     (B : in out Driver.Bytes.Buffer; Real_Key : String; Values : Real_Array; Scalar : Boolean; Integers : Boolean)
+   is
+      Y : constant Real_Array := Scrambled_Values (Real_Key, Values, Integers);
    begin
       if Scalar and then Y'Length = 1 then
          Driver.Msgpack.Put_Float (B, Y (Y'First));
       else
          Driver.Msgpack.Put_Array_Header (B, Y'Length);
          for V of Y loop
-            Driver.Msgpack.Put_Float (B, V);
+            if Integers then
+               Driver.Msgpack.Put_Integer (B, Long_Long_Integer (Real'Rounding (V)));
+            else
+               Driver.Msgpack.Put_Float (B, V);
+            end if;
          end loop;
       end if;
    end Put_Group;
@@ -543,7 +558,7 @@ procedure Fake_Robot is
             if Part = "color" then
                Picture (C);
             else
-               Put_Group (B, "shape", [Real (W.Cameras (C).Height), Real (W.Cameras (C).Width), 3.0], False);
+               Put_Group (B, "shape", [Real (W.Cameras (C).Height), Real (W.Cameras (C).Width), 3.0], False, False);
             end if;
          end Part_Value;
       begin
@@ -562,7 +577,7 @@ procedure Fake_Robot is
       begin
          for G in W.Groups.First_Index .. W.Groups.Last_Index loop
             if To_String (W.Groups (G).Name) = Name then
-               Put_Group (B, Name, Readings (W, G), False);
+               Put_Group (B, Name, Readings (W, G), False, W.Groups (G).Integers);
             end if;
          end loop;
       end Group_Value;
@@ -572,7 +587,7 @@ procedure Fake_Robot is
       begin
          for G in W.Groups.First_Index .. W.Groups.Last_Index loop
             if To_String (W.Groups (G).Name) = Name then
-               Put_Group (B, Name, Echo (W, G), False);
+               Put_Group (B, Name, Echo (W, G), False, W.Groups (G).Integers);
             end if;
          end loop;
       end Echo_Value;
@@ -582,7 +597,7 @@ procedure Fake_Robot is
       begin
          for G in W.Groups.First_Index .. W.Groups.Last_Index loop
             if To_String (W.Groups (G).Name) = Name then
-               Put_Group (B, Name, Readings (W, G), W.Groups (G).Scalar);
+               Put_Group (B, Name, Readings (W, G), W.Groups (G).Scalar, False);
             end if;
          end loop;
       end Const_Value;

@@ -1263,16 +1263,35 @@ package body Driver.Robot.Motion is
                   end if;
                end;
                --  Seen only at a level the body executed that way (as Probe_Together: a humming servo shakes
-               --  its camera without moving its reading).
+               --  its camera without moving its reading). A sighting is confirmed by the body's one test of
+               --  motion: the estimates are computed once, and the lock-in's regression on every push so far
+               --  must see this channel move some eye (Lockin.Seen: its gain over the cells that respond stands
+               --  Z of its spread above zero). It used to be confirmed by a run of moves back and forth each seen
+               --  by an eye's per-beat verdict, as many as that verdict's chance of a false alarm asked
+               --  (Confirm): 6 to 22 moves of 8 to 14 beats for every channel of every group, 340 beats a
+               --  channel on the fake robot against 40 on the kiwi, and the "probes with confirmations" of the
+               --  kiwi's recognition (10-14). A channel probed alone has a column of its own in the regression,
+               --  so the lock-in can tell it from the rest (the levels of every channel together cannot be told
+               --  apart that way, and that ladder keeps its runs).
                if Seen and then (Delivered (Way) or else Did (Way)) then
                   declare
-                     Confirmed : Boolean;
+                     Confirmed : Boolean := False;
+                     procedure Read_Seen is
+                     begin
+                        Confirmed := (for some E in 1 .. Eye_Count (M) => Lockin.Seen (M, Eye_Id (E), Ref.Group, Ref.Channel));
+                     end Read_Seen;
                   begin
-                     Confirm (M, Listed, Usable, Base, Offsets, Unlooked, Chance, Confirmed);
+                     Hold_And_Estimate (M);
+                     Driver.Beats.Within_A_Beat (Read_Seen'Access);
                      if Confirmed then
                         Report.Seen := True;
                         Report.Excursion := Offset;
                         Report.Seen_Sense := Way;
+                     else
+                        Driver.Log.Line (Driver.Log.Robot, "probe: group" & Ref.Group'Image & " channel" & Ref.Channel'Image
+                                         & " level" & Report.Levels (Way)'Image & " " & Way'Image & ", " & Scientific (Offset)
+                                         & " units, was seen by an eye (chance of a false alarm "
+                                         & Driver.Log.Image (Chance, 3) & ") but the lock-in sees no eye moved by it");
                      end if;
                   end;
                end if;

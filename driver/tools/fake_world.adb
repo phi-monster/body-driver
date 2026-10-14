@@ -154,27 +154,47 @@ package body Fake_World is
                         With_Eye, Eye_Up : Boolean) is
       Base_X : constant Real := Side * Random (W, 0.25, 0.35);
       Base_Y : constant Real := Random (W, -0.52, -0.42);
-      L0 : constant Real := Random (W, 0.05, 0.08);
-      L1 : constant Real := Random (W, 0.03, 0.06);
-      L2 : constant Real := Random (W, 0.22, 0.30);
-      L3 : constant Real := Random (W, 0.22, 0.30);
-      L4 : constant Real := Random (W, 0.06, 0.10);
-      L5 : constant Real := Random (W, 0.04, 0.07);
-      L6 : constant Real := Random (W, 0.03, 0.06);
-      Finger_Length : constant Real := Random (W, 0.05, 0.07);
-      Open_Width    : constant Real := Random (W, 0.07, 0.10);
+      --  The levers run from a desktop arm's (an upper arm and a forearm of ten centimetres, a wrist of two or
+      --  three, the eye a few centimetres off the wrist's axes: the LeKiwi's SO-101 is of that size) to a
+      --  table-top arm's (thirty): ranges that take in the small arms, never one arm's numbers.
+      L0 : constant Real := Random (W, 0.04, 0.08);
+      L1 : constant Real := Random (W, 0.02, 0.06);
+      L2 : constant Real := Random (W, 0.10, 0.30);
+      L3 : constant Real := Random (W, 0.10, 0.30);
+      L4 : constant Real := Random (W, 0.03, 0.10);
+      L5 : constant Real := Random (W, 0.02, 0.07);
+      L6 : constant Real := Random (W, 0.02, 0.06);
+      Finger_Length : constant Real := Random (W, 0.04, 0.07);
+      Open_Width    : constant Real := Random (W, 0.06, 0.10);
+      --  The reading unit: radians, degrees, milliradians, or a servo bus's ticks (a power of two a turn, 1024
+      --  to 16384), which come in whole numbers and are sent as integers.
       Unit_Draw : constant Real := Random (W);
-      Arm_Unit  : constant Real := (if Unit_Draw < 0.4 then 1.0 elsif Unit_Draw < 0.7 then Pi / 180.0 else 0.001);
+      Ticks     : constant Real := 2.0 ** (10 + Integer (Real'Floor (5.0 * Random (W))));
+      Arm_Unit  : constant Real :=
+        (if Unit_Draw < 0.3 then 1.0 elsif Unit_Draw < 0.5 then Pi / 180.0 elsif Unit_Draw < 0.7 then 0.001
+         else 2.0 * Pi / Ticks);
+      In_Ticks  : constant Boolean := Unit_Draw >= 0.7;
+      --  A servo's tolerance about its target, in radians: an ask within it moves nothing, a move lands short of
+      --  its target by up to it (the kiwi's servos land 2 to 5 ticks off and ignore asks below their dead band,
+      --  R5 and R6 on 10-14). Up to half a degree; one joint in three has none (a controller that reaches its
+      --  target).
+      Dead_Rad  : constant Real := (if Random (W) < 1.0 / 3.0 then 0.0 else Random (W, 0.0, 0.5 * Pi / 180.0));
       Tau       : constant Real := Random (W, 0.8, 1.5);
       --  The wrist eye sits behind the palm and above it, as a wrist camera does, and looks forward and a little
       --  down: the fingertips stand in the lower third of its picture and the table fills the rest. It used to sit
       --  over the finger roots looking steeply down them, and the fingers filled its picture from top to bottom, so
       --  that the closer's sweep moved most of its cells and the body took the closer for the group carrying the eye.
-      Eye_Back  : constant Real := Random (W, 0.03, 0.05);
-      Eye_Above : constant Real := Random (W, 0.10, 0.13);
+      --  A small arm's eye sits a few centimetres from the wrist, and its fingers may fill its view: the driver
+      --  must tell the closer from the arm there too.
+      Eye_Back  : constant Real := Random (W, 0.02, 0.05);
+      Eye_Above : constant Real := Random (W, 0.03, 0.13);
       Tilt      : constant Real := Random (W, 0.55, 0.7);
+      --  The arm's own surfaces have texture: screws, cables, edges and prints at the scale of millimetres to
+      --  centimetres, more or less contrasted; a white table or a white room leaves the arm as the only texture an
+      --  eye on it, or on the other arm, has.
       Grey  : constant Material :=
-        (Kind => Flat, Albedo => [0.26, 0.26, 0.29], Contrast => 0.0, Scale => 1.0, Gloss => 0.2);
+        (Kind => Noise, Albedo => [0.26, 0.26, 0.29], Contrast => Random (W, 0.1, 0.5), Scale => Random (W, 100.0, 400.0),
+         Gloss => 0.2);
       Black : constant Material :=
         (Kind => Flat, Albedo => [0.04, 0.04, 0.04], Contrast => 0.0, Scale => 1.0, Gloss => 0.6);
       Prefix : constant String := "arm" & Trim (A) & "/";
@@ -189,7 +209,11 @@ package body Fake_World is
         (Name => To_Unbounded_String (Prefix & Name), Parent => Parent, Arm => A, Kind => Revolute, Origin => Origin,
          Axis => Axis, Unit => Arm_Unit, Q => Rest (N) / Arm_Unit, Target => Rest (N) / Arm_Unit,
          Lo => Low (N) / Arm_Unit, Hi => High (N) / Arm_Unit, Tau => Tau, Droop_Gain => Sag (N), Rate => Speed (N),
-         others => <>);
+         Dead => Dead_Rad / Arm_Unit, others => <>);
+      --  A servo-driven closer reads its ticks too: a quarter turn of the servo from closed to open.
+      Closer_Hi   : constant Real := (if In_Ticks then Ticks / 4.0 else 1.0);
+      Closer_Unit : constant Real := (Open_Width / 2.0) / Closer_Hi;
+      Closer_Dead : constant Real := (if In_Ticks then Dead_Rad / (2.0 * Pi / Ticks) else 0.0);
       G : Group;
    begin
       for N in Sag'Range loop
@@ -222,6 +246,7 @@ package body Fake_World is
       W.Hand_Reach.Append (Open_Width + Finger_Length);
       G.Name := To_Unbounded_String ("arm" & Trim (A) & "_joints");
       G.Commandable := True;
+      G.Integers := In_Ticks;
       declare
          Arm_Joints : constant array (1 .. 6) of Positive := [J1, J2, J3, J4, J5, J6];
       begin
@@ -238,19 +263,22 @@ package body Fake_World is
             --  thumb, a plate that comes down on them from above on a second
             --  channel of the same group.
             Add_Link (W, (Name => To_Unbounded_String (Prefix & "finger1"), Parent => J6, Arm => A, Kind => Prismatic,
-                          Origin => Moved_To (0.0, L6 + 0.024, 0.0), Axis => [1.0, 0.0, 0.0], Unit => Open_Width / 2.0,
-                          Q => 1.0, Target => 1.0, Lo => 0.0, Hi => 1.0, Tau => Tau, others => <>), F1);
+                          Origin => Moved_To (0.0, L6 + 0.024, 0.0), Axis => [1.0, 0.0, 0.0], Unit => Closer_Unit,
+                          Q => Closer_Hi, Target => Closer_Hi, Lo => 0.0, Hi => Closer_Hi, Tau => Tau, Dead => Closer_Dead,
+                          others => <>), F1);
             Add_Box (W, Prefix & "finger1", [0.005, Finger_Length / 2.0, 0.01],
                      Moved_To (0.005, Finger_Length / 2.0, 0.0), Black, F1, A, Finger => True);
             Add_Link (W, (Name => To_Unbounded_String (Prefix & "finger2"), Parent => J6, Arm => A, Kind => Prismatic,
-                          Origin => Moved_To (0.0, L6 + 0.024, 0.0), Axis => [-1.0, 0.0, 0.0], Unit => Open_Width / 2.0,
-                          Q => 1.0, Target => 1.0, Lo => 0.0, Hi => 1.0, Tau => Tau, Mirror => F1, others => <>), F2);
+                          Origin => Moved_To (0.0, L6 + 0.024, 0.0), Axis => [-1.0, 0.0, 0.0], Unit => Closer_Unit,
+                          Q => Closer_Hi, Target => Closer_Hi, Lo => 0.0, Hi => Closer_Hi, Tau => Tau, Mirror => F1,
+                          others => <>), F2);
             Add_Box (W, Prefix & "finger2", [0.005, Finger_Length / 2.0, 0.01],
                      Moved_To (-0.005, Finger_Length / 2.0, 0.0), Black, F2, A, Finger => True);
             W.Closers.Append (F1);
-            G := (Name => To_Unbounded_String ("arm" & Trim (A) & "_closer"), Commandable => True, others => <>);
+            G := (Name => To_Unbounded_String ("arm" & Trim (A) & "_closer"), Commandable => True, Integers => In_Ticks,
+                  others => <>);
             G.Joints.Append (F1);
-            G.Echoed.Append (1.0);
+            G.Echoed.Append (Closer_Hi);
             if Kind = Pair_And_Thumb then
                Add_Link (W, (Name => To_Unbounded_String (Prefix & "thumb"), Parent => J6, Arm => A, Kind => Prismatic,
                              Origin => Moved_To (0.0, L6 + 0.024, 0.005), Axis => [0.0, 0.0, 1.0], Unit => 0.04,
@@ -387,17 +415,21 @@ package body Fake_World is
    end Add_Things;
 
    procedure Build (W : in out World; Seed : Natural; Width, Height : Positive; T : Template) is
-      Wood : constant Material :=
-        (Kind => Grain, Albedo => [0.62, 0.50, 0.38], Contrast => (if T.Plain_Table then 0.0 else 0.3), Scale => 60.0,
+      Wood : Material :=
+        (Kind => Grain, Albedo => [0.62, 0.50, 0.38], Contrast => 0.0, Scale => 60.0,
          Gloss => 0.05);
-      Wall : constant Material :=
-        (Kind => Noise, Albedo => [0.75, 0.74, 0.70], Contrast => 0.35, Scale => 8.0, Gloss => 0.0);
+      Wall : Material :=
+        (Kind => Noise, Albedo => [0.75, 0.74, 0.70], Contrast => 0.0, Scale => 8.0, Gloss => 0.0);
       Dark : constant Material :=
         (Kind => Flat, Albedo => [0.2, 0.2, 0.2], Contrast => 0.0, Scale => 1.0, Gloss => 0.0);
    begin
       Ada.Numerics.Float_Random.Reset (W.Rng, Integer (Seed));
       W.Seed := Seed;
       W.Table_Z := Random (W, 0.70, 0.84);
+      --  How much texture the table and the walls have is drawn too, down to none: a white table, a white room
+      --  (the owner's: the environment is given, and the arm's own surfaces are then the only texture).
+      Wood.Contrast := (if T.Plain_Table then 0.0 else Random (W, 0.0, 0.3));
+      Wall.Contrast := Random (W, 0.0, 0.35);
       Add_Plane (W, "table", Moved_To (0.0, 0.0, W.Table_Z), Wood);
       Add_Plane (W, "floor", Moved_To (0.0, 0.0, 0.0), Dark);
       Add_Plane (W, "wall", (Rotation => About ([1.0, 0.0, 0.0], Pi / 2.0), Translation => [0.0, 1.3, 0.8]), Wall);
@@ -720,11 +752,15 @@ package body Fake_World is
                   T     : constant Real := L.Target - Sag;
                   Share : constant Real := 1.0 - Exp (-1.0 / L.Tau);
                   From  : constant Real := L.Q - L.Bounce;
+                  --  A servo's tolerance (Dead): within it of its target the joint does not move at all, and a
+                  --  move aims short of the target by its landing, on the side it comes from.
+                  Within : constant Boolean := abs (T - From) <= L.Dead;
+                  Aim   : constant Real := (if Within then From elsif T > From then T - L.Landing else T + L.Landing);
                   --  The first-order step, no faster than the joint turns.
                   Step  : constant Real :=
-                    (if L.Rate > 0.0 and then abs ((T - From) * Share) > L.Rate / L.Unit
-                     then (if T > From then L.Rate / L.Unit else -L.Rate / L.Unit)
-                     else (T - From) * Share);
+                    (if L.Rate > 0.0 and then abs ((Aim - From) * Share) > L.Rate / L.Unit
+                     then (if Aim > From then L.Rate / L.Unit else -L.Rate / L.Unit)
+                     else (Aim - From) * Share);
                   Q     : constant Real := From + Step;
                begin
                   Wanted (I) := Real'Max (L.Lo, Real'Min (L.Hi, Q));
@@ -835,6 +871,8 @@ package body Fake_World is
          for D of W.Pending loop
             if D.Due <= W.Beat then
                W.Links (D.Joint).Target := D.Value;
+               --  Where this move lands short of its target: drawn with the target, as a servo's tolerance has it.
+               W.Links (D.Joint).Landing := Random (W, 0.0, W.Links (D.Joint).Dead);
             else
                Kept.Append (D);
             end if;
@@ -882,6 +920,11 @@ package body Fake_World is
                   begin
                      Q := Q + W.Quirk.Reading_Noise * Draw;
                   end;
+               end if;
+               --  A servo bus reads whole ticks: the jitter and the drift vanish under the rounding, and a resting
+               --  reading repeats exactly.
+               if W.Groups (G).Integers then
+                  Q := Real'Rounding (Q);
                end if;
                W.Groups (G).Reported.Append (Q);
             end;

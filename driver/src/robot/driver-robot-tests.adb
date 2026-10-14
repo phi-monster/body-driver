@@ -617,10 +617,10 @@ package body Driver.Robot.Tests is
       M : Model;
       Undecided_Third : constant Eye_Effect :=
         (Verdict => Undecided, Responding => 24, Textured => 48,
-         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0);
+         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0);
       Nothing_Third : constant Eye_Effect :=
         (Verdict => Nothing, Responding => 0, Textured => 48,
-         Fraction => (Value => 0.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0);
+         Fraction => (Value => 0.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0);
    begin
       Exercise_Rig (M);
       Check (Role (M, 3) = Closer, "the closer is a closer, got " & Role (M, 3)'Image);
@@ -833,7 +833,7 @@ package body Driver.Robot.Tests is
       M.Graph.Effects.Replace_Element
         ((3 - 1) * Eye_Count (M) + 1,
          (Verdict => Patch, Responding => 8, Textured => 48,
-          Fraction => (Value => 8.0 / 48.0, Sigma => 0.05, Degrees_Of_Freedom => 0), Resting => 0.0));
+          Fraction => (Value => 8.0 / 48.0, Sigma => 0.05, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
       Driver.Robot.Graph.Derive (M);
       Check (Role (M, 3) = Unclassified, "the closer pushed only with arm 1 is " & Role (M, 3)'Image);
       Check (Closer_Arm (M, 3) = 0, "the closer pushed only with arm 1 is given arm" & Closer_Arm (M, 3)'Image);
@@ -1339,7 +1339,7 @@ package body Driver.Robot.Tests is
       procedure Credit (M : in out Model; Gain : Real) is
          Effect : constant Eye_Effect :=
            (Verdict => Patch, Responding => 1, Textured => 1,
-            Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0);
+            Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0);
       begin
          M.Eyes (1).Kept_Groups.Append (1);
          M.Eyes (1).Kept_Channels.Append (1);
@@ -1636,7 +1636,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
             end;
          end if;
          if B > 40 then
@@ -1903,7 +1903,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
             end;
          end if;
          if B in 40 | 46 | 52 | 58 then
@@ -1986,7 +1986,7 @@ package body Driver.Robot.Tests is
       end loop;
       M.Graph.Effects.Replace_Element
         (1, (Verdict => Whole, Responding => 1, Textured => 1,
-             Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+             Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
    end Put_Eye;
 
    --  A joint pressed into a table moves about against it (A16's arm 1,
@@ -2265,7 +2265,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
             end;
          end if;
          --  Pushes 1 to 8, then (once an estimate has measured how long the
@@ -2346,7 +2346,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
             end;
          end if;
          if B in 66 .. 110 then
@@ -2438,7 +2438,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
             end;
          end if;
          if B in 66 .. 80 or else B in 130 .. 141 then
@@ -2516,7 +2516,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
             end;
          end if;
          if B in 66 .. 105 then
@@ -2593,7 +2593,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
             end;
          end if;
          if B in 66 .. 110 then
@@ -2673,7 +2673,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
             end;
          end if;
          if B in 66 .. 310 then
@@ -2756,7 +2756,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
             end;
          end if;
          if B in 66 .. 105 then
@@ -2832,7 +2832,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
             end;
          end if;
          if B in 66 .. 105 then
@@ -3358,7 +3358,7 @@ package body Driver.Robot.Tests is
       S : Eye_Stream;
       function Seen (V : Eye_Response) return Eye_Effect is
         ((Verdict => V, Responding => 1, Textured => 1,
-          Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+          Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
    begin
       M.Eyes.Append (S);
       M.Eyes.Append (S);
@@ -3908,13 +3908,18 @@ package body Driver.Robot.Tests is
    --  beats, the estimates are computed apart from the main loop (Driver.Robot.Compute_Apart): the decider that asks for them
    --  waits (Driver.Beats), the model takes in Wait beats of rest, computes them, and the decider goes on in the beat after,
    --  as Driver.Apart has the main loop do. Seen: the probe confirmed the level the eye saw.
+   --  Alone probes arm 1's first channel on its own (Probe_Both_Ways) instead of every listed channel together;
+   --  Pushes counts the pushes of group 1 the probe made.
    procedure Probe_Through_Apart_Estimates
-     (Wait : Natural; Seen : out Boolean; Excursion : out Real; Finished : out Boolean)
+     (Wait : Natural; Alone : Boolean; Seen : out Boolean; Excursion : out Real; Finished : out Boolean;
+      Pushes : out Natural)
    is
       M     : Model;
       Done  : Boolean := False with Atomic;
       Slow  : Boolean := False with Atomic;   --  the estimates the probe asks for take the Wait beats
       Got   : Driver.Robot.Motion.Probe_Report;
+      Two   : Driver.Robot.Motion.Two_Way_Report;
+      Before, After : Natural := 0 with Atomic;
 
       task Decider;
       task body Decider is
@@ -3928,6 +3933,14 @@ package body Driver.Robot.Tests is
             M.Noise.Replace_Element (0, Real'Last);   --  group 1's first channel
             M.Noise_Freedom.Replace_Element (0, 0);
          end Lose_Noise;
+         procedure Read_Before is
+         begin
+            Before := Steps.Episodes (M, 1);
+         end Read_Before;
+         procedure Read_After is
+         begin
+            After := Steps.Episodes (M, 1);
+         end Read_After;
       begin
          Driver.Robot.Motion.Settle (M, W);
          Driver.Robot.Motion.Hold (M, 100);
@@ -3946,7 +3959,15 @@ package body Driver.Robot.Tests is
          Driver.Robot.Motion.Gather_Rest (M, 2);
          Driver.Beats.Within_A_Beat (Lose_Noise'Access);
          Slow := True;
-         Driver.Robot.Motion.Probe_Together (M, [1 => (Group => 1, Channel => 1)], 1.0, 0.2, Got);
+         Driver.Beats.Within_A_Beat (Read_Before'Access);
+         if Alone then
+            Driver.Robot.Motion.Probe_Both_Ways (M, (Group => 1, Channel => 1), 0.2, Two);
+            Got.Seen := Two.Seen;
+            Got.Excursion := Two.Excursion;
+         else
+            Driver.Robot.Motion.Probe_Together (M, [1 => (Group => 1, Channel => 1)], 1.0, 0.2, Got);
+         end if;
+         Driver.Beats.Within_A_Beat (Read_After'Access);
          Done := True;
       exception
          when others =>
@@ -4042,7 +4063,24 @@ package body Driver.Robot.Tests is
       Finished := Done;
       Seen := Got.Seen;
       Excursion := Got.Excursion;
+      Pushes := (if After >= Before then After - Before else 0);
    end Probe_Through_Apart_Estimates;
+
+   --  A channel probed on its own that an eye sees at the first amount is confirmed by the lock-in's regression
+   --  after one estimate, not by a run of moves back and forth: the probe pushes it up once and back once.
+   procedure Probe_Confirms_By_The_Lockin is
+      Seen     : Boolean;
+      Amount   : Real;
+      Finished : Boolean;
+      Pushes   : Natural;
+   begin
+      Probe_Through_Apart_Estimates (0, True, Seen, Amount, Finished, Pushes);
+      Check (Finished, "the probe of the channel alone did not finish");
+      Check (Seen and then Amount = 0.2,
+             "the channel alone, which the eye sees at 0.2, was sure of" & Amount'Image & " (seen:" & Seen'Image & ")");
+      Check (Pushes <= 3, "the probe of the channel alone pushed it" & Pushes'Image
+             & " times: a run of moves back and forth confirmed it instead of the lock-in");
+   end Probe_Confirms_By_The_Lockin;
 
    --  An eye sees the joint of an arm move at the first amount: the probe confirms that amount, whether the estimates it
    --  asks for as it begins come back in the same beat or beats later. Read before the estimates, the first beat no look has
@@ -4053,9 +4091,10 @@ package body Driver.Robot.Tests is
       In_Place, Apart                        : Boolean;
       In_Place_Amount, Apart_Amount          : Real;
       Done_1, Done_2                         : Boolean;
+      Pushes_1, Pushes_2                     : Natural;
    begin
-      Probe_Through_Apart_Estimates (0, In_Place, In_Place_Amount, Done_1);
-      Probe_Through_Apart_Estimates (300, Apart, Apart_Amount, Done_2);
+      Probe_Through_Apart_Estimates (0, False, In_Place, In_Place_Amount, Done_1, Pushes_1);
+      Probe_Through_Apart_Estimates (300, False, Apart, Apart_Amount, Done_2, Pushes_2);
       Check (Done_1 and then Done_2, "a probe through the estimates did not finish");
       Check (In_Place and then In_Place_Amount = 0.2,
              "the probe of an arm's joint, the estimates in place, was sure of" & In_Place_Amount'Image
@@ -4137,7 +4176,7 @@ package body Driver.Robot.Tests is
             M.Graph.Effects.Replace_Element
               ((5 - 1) * Eyes + 1,
                (Verdict => Patch, Responding => 1, Textured => 1,
-                Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0));
+                Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0));
             M.From_File (Stored_Responses) := True;
          end Credit_Step;
       begin
@@ -7867,6 +7906,9 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.probe.lost", "a probe whose channel's noise was lost measures it again before "
                              & "it reads anything and takes its first step from it",
                              Probe_Reads_After_It_Measures'Access);
+      Driver.Tests.Register ("robot.probe.lockin", "a channel probed on its own that an eye sees is confirmed by a "
+                             & "run of moves back and forth instead of by the lock-in's regression after one estimate",
+                             Probe_Confirms_By_The_Lockin'Access);
       Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found",
                              Reach_A_Pose'Access);
       Driver.Tests.Register ("robot.reach.turn", "a reach ends a joint that turns a whole period of its fit from "

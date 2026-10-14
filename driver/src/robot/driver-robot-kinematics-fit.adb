@@ -108,13 +108,22 @@ package body Driver.Robot.Kinematics.Fit is
    --  once its rotation is right, and a wrong focal length that bends the rotation's field moved V along the
    --  line without cost, so the focal search found 27, 57 and 24453 px on the kiwi (R6's starts of 10-14) at
    --  scores below the true lens's. Where parallax is there the two measures agree.
+   --  Two residuals a sighting. Du: the distance to the whole epipolar line, signed by its side (Sampson), which
+   --  is what tells the lens where the eye travels (a long lever: the synthetic arms' searches land at 394 and
+   --  409 px of 400 on it, and on the distance to the half-line alone their curves lay flat from 6 to 450 px,
+   --  10-14). Dv: how far the sighting lies behind the line's vanishing point along it, in pixels, zero where it
+   --  lies at a positive depth: the one-sided penalty that tells the lens where the eye hardly travels (the
+   --  kiwi's wrist on its short lever: the Sampson residual alone let a wrong lens move V along the line at no
+   --  cost, 27 to 24453 px), and that is all a sighting costs there, since with no translation the half-line is
+   --  a point and the distance to V is the reprojection error of the rotation.
    procedure Reprojected (R : Mat3; T : Vec3; H1, H2 : Vec3; F : Real; Du, Dv : out Real) is
       Y  : constant Vec3 := Times (R, H1);
    begin
+      Du := Sampson (R, T, H1, H2, F);
+      Dv := 0.0;
       if Y (3) <= 0.0 or else H2 (3) <= 0.0 then
-         --  A line of sight turned behind eye B: as far off as the lines of sight are long, in both directions.
-         Du := F * Sqrt (Dot (Y, Y) + Dot (H2, H2));
-         Dv := Du;
+         --  A line of sight turned behind eye B: as far off as the lines of sight are long.
+         Dv := F * Sqrt (Dot (Y, Y) + Dot (H2, H2));
          return;
       end if;
       declare
@@ -128,14 +137,18 @@ package body Driver.Robot.Kinematics.Fit is
          Dd  : constant Real := Dx * Dx + Dy * Dy;
          Ex  : constant Real := Hx - Vx;
          Ey  : constant Real := Hy - Vy;
-         Along : constant Real := (if Dd > 0.0 then (Ex * Dx + Ey * Dy) / Dd else 0.0);
       begin
-         if Along <= 0.0 then
-            Du := F * Ex;
-            Dv := F * Ey;
-         else
-            Du := F * (Ex - Along * Dx);
-            Dv := F * (Ey - Along * Dy);
+         --  The penalty for a sighting behind V, F * (-Along) * Sqrt (Dd) where Along < 0, is not charged: at
+         --  the true lens every sighting at no parallax (a far point, Along 0 within the noise) lies behind V
+         --  half the time and pays the noise, while a wrong lens that moves every V back along its line pays
+         --  nothing, so the penalty is biased against the truth wherever far points abound (the head rig's seed
+         --  1 arm, 10-14: 73 px of 400 with it, 377 to 409 without). The no-parallax regime (the kiwi's wrist on
+         --  its short lever, where Dd is nearly zero and the distance to the line says nothing of the lens)
+         --  needs a penalty charged only beyond the noise, to be validated on the fake robot's short levers
+         --  against its truth before it is charged at all. Until then the sighting with no translation costs
+         --  its distance to V, the reprojection error of the rotation.
+         if Dd = 0.0 then
+            Dv := F * Sqrt (Ex * Ex + Ey * Ey);
          end if;
       end;
    end Reprojected;
@@ -147,20 +160,17 @@ package body Driver.Robot.Kinematics.Fit is
       return Sqrt (Du * Du + Dv * Dv);
    end Reprojected;
 
-   --  One keyframe's residuals less what its sightings share: the median of each component over the keyframe.
-   --  A shift of the whole picture, from a small turn the model has no term for or from an error the aligner
-   --  gives every point of a keyframe alike, says nothing of the lens or the axis; what differs between the
-   --  points (the field's bend, the parallax) does (robot.kinematics.shared: every keyframe's points share an
-   --  error, and the search of stage 1 bent the lens to 123 px to meet it).
-   procedure Share_Out (Du, Dv : in out Real_Array) is
+   --  One keyframe's signed distances less what its sightings share: their median over the keyframe. A shift of
+   --  the whole picture, from a small turn the model has no term for or from an error the aligner gives every
+   --  point of a keyframe alike, says nothing of the lens or the axis; what differs between the points (the
+   --  field's bend, the parallax) does (robot.kinematics.shared: every keyframe's points share an error, and the
+   --  search of stage 1 bent the lens to 123 px to meet it). The penalty for a sighting behind its vanishing
+   --  point (Reprojected's Dv) is one-sided and is not shared out.
+   procedure Share_Out (Du : in out Real_Array) is
       Mu : constant Real := Driver.Stats.Median (Du);
-      Mv : constant Real := Driver.Stats.Median (Dv);
    begin
       for I in Du'Range loop
          Du (I) := Du (I) - Mu;
-      end loop;
-      for I in Dv'Range loop
-         Dv (I) := Dv (I) - Mv;
       end loop;
    end Share_Out;
 
@@ -2134,23 +2144,44 @@ package body Driver.Robot.Kinematics.Fit is
                      Sn := Vy / Sqrt (Vx ** 2 + Vy ** 2);
                   end;
                end;
+               --  The axis point P: (C, Sn) is an eigenvector of a 2 by 2 system, its sign arbitrary, and the
+               --  distance to the half-line is odd in the translation P - R P (Planar_About's Signed): both
+               --  signs are tried over every sighting and the one whose residuals sum smaller is kept.
                declare
-                  P : constant Vec3 := C * E1 + Sn * E2;
+                  Other : Real_Array (1 .. K);
+                  Plus, Minus : Real := 0.0;
                begin
-                  Last := 0;
-                  for I in 1 .. K loop
-                     if L (I).Frame /= Last then
-                        Last := L (I).Frame;
-                        R := Rot (W, Scale * L (I).Reading);
-                     end if;
+                  for Sign in 1 .. 2 loop
                      declare
-                        Rr : Mat3;
-                        Tt : Vec3;
+                        P : constant Vec3 := (if Sign = 1 then 1.0 else -1.0) * (C * E1 + Sn * E2);
                      begin
-                        Relative (Identity, (Rotation => R, Translation => P - R * P), Rr, Tt);
-                        Rs (I) := Reprojected (Rr, Tt, L (I).H0, L (I).H, F);
+                        Last := 0;
+                        for I in 1 .. K loop
+                           if L (I).Frame /= Last then
+                              Last := L (I).Frame;
+                              R := Rot (W, Scale * L (I).Reading);
+                           end if;
+                           declare
+                              Rr : Mat3;
+                              Tt : Vec3;
+                           begin
+                              Relative (Identity, (Rotation => R, Translation => P - R * P), Rr, Tt);
+                              if Sign = 1 then
+                                 Rs (I) := Reprojected (Rr, Tt, L (I).H0, L (I).H, F);
+                                 Plus := Plus + Rs (I) ** 2;
+                              else
+                                 Other (I) := Reprojected (Rr, Tt, L (I).H0, L (I).H, F);
+                                 Minus := Minus + Other (I) ** 2;
+                              end if;
+                           end;
+                        end loop;
                      end;
                   end loop;
+                  if Minus < Plus then
+                     Rs := Other;
+                     C := -C;
+                     Sn := -Sn;
+                  end if;
                end;
                if Pass = 1 then
                   declare
@@ -2203,6 +2234,12 @@ package body Driver.Robot.Kinematics.Fit is
             E1, E2 : Vec3;
             Num, Den : Real := 0.0;
             Filled   : Natural := 0;   --  residuals in Fits
+            --  Per way (the turn up, the turn down): whether its frame's motion was told, the frame, its rotation
+            --  and its translation before the sign is chosen.
+            Told_Of  : array (1 .. 2) of Boolean := [others => False];
+            Frame_Of : array (1 .. 2) of Natural := [others => 0];
+            Rr_Of    : array (1 .. 2) of Mat3;
+            T0_Of    : array (1 .. 2) of Vec3;
 
             --  The sighting's row of the constraint: its lines of sight in the frame of W.
             function Row (I : Positive) return Real_Vector is
@@ -2214,6 +2251,28 @@ package body Driver.Robot.Kinematics.Fit is
 
             function Turn_Of (V : Real_Vector) return Real is
               (Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));
+
+            --  The translation's sign: V is an eigenvector, its sign arbitrary; the turn is even in V and the
+            --  translation odd. The Sampson residual is even in the translation (the epipolar line is the same
+            --  either way), the distance to the half-line is not: with the wrong sign the half-line points away
+            --  from the parallax, every sighting falls behind its vanishing point, and the true lens scores
+            --  worst of all (robot.head.noisy seed 5, arm 1, 10-14: the search found 84 px of 400 while arm 2
+            --  of the same rig, whose eigenvector came out the other way, found 390). The sign that puts the
+            --  frame's sightings at positive depth is the one whose half-line residuals sum smaller.
+            function Signed (Rr : Mat3; T0 : Vec3; Frame : Positive) return Vec3 is
+               Plus, Minus : Real := 0.0;
+               Du, Dv      : Real;
+            begin
+               for I in 1 .. K loop
+                  if L (I).Frame = Frame then
+                     Reprojected (Rr, T0, L (I).H0, L (I).H, F, Du, Dv);
+                     Plus := Plus + Du ** 2 + Dv ** 2;
+                     Reprojected (Rr, (-1.0) * T0, L (I).H0, L (I).H, F, Du, Dv);
+                     Minus := Minus + Du ** 2 + Dv ** 2;
+                  end if;
+               end loop;
+               return (if Minus < Plus then (-1.0) * T0 else T0);
+            end Signed;
          begin
             Perp (W, E1, E2);
             for Way in 1 .. 2 loop
@@ -2272,7 +2331,7 @@ package body Driver.Robot.Kinematics.Fit is
                               declare
                                  Turn : constant Real := Turn_Of (V);
                                  Rr   : constant Mat3 := Rot (W, -Turn);
-                                 Tt   : constant Vec3 := (-V (2)) * E1 + V (1) * E2;
+                                 Tt   : constant Vec3 := Signed (Rr, (-V (2)) * E1 + V (1) * E2, Frame);
                                  M    : Natural := 0;
                                  Du, Dv : Real_Array (1 .. K);
                               begin
@@ -2282,7 +2341,7 @@ package body Driver.Robot.Kinematics.Fit is
                                        Reprojected (Rr, Tt, L (I).H0, L (I).H, F, Du (M), Dv (M));
                                     end if;
                                  end loop;
-                                 Share_Out (Du (1 .. M), Dv (1 .. M));
+                                 Share_Out (Du (1 .. M));
                                  for Q in 1 .. M loop
                                     Rs (Q) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
                                  end loop;
@@ -2315,28 +2374,78 @@ package body Driver.Robot.Kinematics.Fit is
                      if Told then
                         Num := Num + Turn_Of (V) * Change_Here;
                         Den := Den + Change_Here ** 2;
-                        declare
-                           Rr : constant Mat3 := Rot (W, -Turn_Of (V));
-                           Tt : constant Vec3 := (-V (2)) * E1 + V (1) * E2;
-                           Du, Dv : Real_Array (1 .. K);
-                           M  : Natural := 0;
-                        begin
-                           for I in 1 .. K loop
-                              if L (I).Frame = Frame then
-                                 M := M + 1;
-                                 Reprojected (Rr, Tt, L (I).H0, L (I).H, F, Du (M), Dv (M));
-                              end if;
-                           end loop;
-                           Share_Out (Du (1 .. M), Dv (1 .. M));
-                           for Q in 1 .. M loop
-                              Filled := Filled + 1;
-                              Fits (Filled) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
-                           end loop;
-                        end;
+                        Told_Of (Way) := True;
+                        Frame_Of (Way) := Frame;
+                        Rr_Of (Way) := Rot (W, -Turn_Of (V));
+                        T0_Of (Way) := (-V (2)) * E1 + V (1) * E2;
                      end if;
                   end;
                end if;
             end loop;
+            --  The translation's sign is one bit a joint, not one a frame: the eye sits on one side of the axis,
+            --  so its translations for the turn up and the turn down are anti-parallel, and the bit is the pair's
+            --  whose residuals sum smaller (a bit a frame at every focal length tried gave the search a freedom
+            --  that favoured the smallest lenses: the synthetic offset arm's search ended at 20.7 px of 400 and
+            --  its fit at 8, 10-14).
+            declare
+               function Sum_For (Way : Positive; T : Vec3) return Real is
+                  Du, Dv : Real_Array (1 .. K);
+                  M      : Natural := 0;
+                  Sum    : Real := 0.0;
+               begin
+                  for I in 1 .. K loop
+                     if L (I).Frame = Frame_Of (Way) then
+                        M := M + 1;
+                        Reprojected (Rr_Of (Way), T, L (I).H0, L (I).H, F, Du (M), Dv (M));
+                     end if;
+                  end loop;
+                  Share_Out (Du (1 .. M));
+                  for Q in 1 .. M loop
+                     Sum := Sum + Du (Q) ** 2 + Dv (Q) ** 2;
+                  end loop;
+                  return Sum;
+               end Sum_For;
+               Sign_Of : array (1 .. 2) of Real := [others => 1.0];
+            begin
+               if Told_Of (1) and then Told_Of (2) then
+                  declare
+                     --  The turn down's translation made anti-parallel to the turn up's, then the pair flipped or not.
+                     Rel   : constant Real := (if Dot (T0_Of (1), T0_Of (2)) > 0.0 then -1.0 else 1.0);
+                     Plus  : constant Real := Sum_For (1, T0_Of (1)) + Sum_For (2, Rel * T0_Of (2));
+                     Minus : constant Real := Sum_For (1, (-1.0) * T0_Of (1)) + Sum_For (2, (-Rel) * T0_Of (2));
+                  begin
+                     Sign_Of (1) := (if Minus < Plus then -1.0 else 1.0);
+                     Sign_Of (2) := Sign_Of (1) * Rel;
+                  end;
+               else
+                  for Way in 1 .. 2 loop
+                     if Told_Of (Way) and then Sum_For (Way, (-1.0) * T0_Of (Way)) < Sum_For (Way, T0_Of (Way)) then
+                        Sign_Of (Way) := -1.0;
+                     end if;
+                  end loop;
+               end if;
+               for Way in 1 .. 2 loop
+                  if Told_Of (Way) then
+                     declare
+                        Tt : constant Vec3 := Sign_Of (Way) * T0_Of (Way);
+                        Du, Dv : Real_Array (1 .. K);
+                        M  : Natural := 0;
+                     begin
+                        for I in 1 .. K loop
+                           if L (I).Frame = Frame_Of (Way) then
+                              M := M + 1;
+                              Reprojected (Rr_Of (Way), Tt, L (I).H0, L (I).H, F, Du (M), Dv (M));
+                           end if;
+                        end loop;
+                        Share_Out (Du (1 .. M));
+                        for Q in 1 .. M loop
+                           Filled := Filled + 1;
+                           Fits (Filled) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+            end;
             Scale := (if Den > 0.0 then Num / Den else 0.0);
             Score := (if Filled > 0 then Driver.Stats.Median (Fits (1 .. Filled)) else Real'Last);
          end Planar_About;
@@ -2402,7 +2511,7 @@ package body Driver.Robot.Kinematics.Fit is
                               Du (I - From + 1) := R (R'First + 2 * (I - L'First));
                               Dv (I - From + 1) := R (R'First + 2 * (I - L'First) + 1);
                            end loop;
-                           Share_Out (Du, Dv);
+                           Share_Out (Du);
                            for I in From .. To loop
                               R (R'First + 2 * (I - L'First)) := Du (I - From + 1);
                               R (R'First + 2 * (I - L'First) + 1) := Dv (I - From + 1);
@@ -2442,6 +2551,7 @@ package body Driver.Robot.Kinematics.Fit is
          Warm_Better     : array (1 .. N) of Boolean := [others => False];
          Warm_Tries, Warm_Wins : Natural := 0;    --  over the searches, for the log
          Warm_Far        : Real := 0.0;           --  the farthest a warm start lay from the scan, radians
+         Trace           : Ada.Strings.Unbounded.Unbounded_String;   --  every focal length tried and its score
 
          procedure Search (F : Real; Best : out Best_Array) is
          begin
@@ -2535,6 +2645,17 @@ package body Driver.Robot.Kinematics.Fit is
                   end if;
                end if;
             end loop;
+            --  The curve the search walked, for the log: every focal length tried and its score (the joints' medians
+            --  summed), so a wrong basin can be read against the true lens where that is known (the synthetic arms:
+            --  115 px of 400 without the sign of the translation chosen, 20.7 with it, 10-14).
+            declare
+               Sum : Real := 0.0;
+            begin
+               for X of Best loop
+                  Sum := Sum + X.Score;
+               end loop;
+               Ada.Strings.Unbounded.Append (Trace, " " & Driver.Log.Image (F, 1) & ":" & Driver.Log.Image (Sum, 3));
+            end;
          end Search;
 
          function Total (B : Best_Array) return Real is
@@ -2738,6 +2859,8 @@ package body Driver.Robot.Kinematics.Fit is
                              & Driver.Log.Image (Exp (Best_At + Told_Within), 1) & "; warm starts" & Warm_Tries'Image
                              & ", farthest " & Driver.Log.Image (Warm_Far * 180.0 / Ada.Numerics.Pi, 2)
                              & " deg from the scan, better" & Warm_Wins'Image & " times");
+            Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " focal search curve, px:score"
+                             & Ada.Strings.Unbounded.To_String (Trace));
             for J in 1 .. N loop
                if Best (J).Scale = 0.0 then
                   for K in 1 .. N loop

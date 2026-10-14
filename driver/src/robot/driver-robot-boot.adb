@@ -1156,7 +1156,10 @@ package body Driver.Robot.Boot is
                      --  stops at the first move an eye sees, so no channel has moved
                      --  more than twice what an eye needs to see it, whatever its
                      --  units; each channel alone then starts from there.
-                     Driver.Robot.Motion.Gather_Rest (M, Total + 1);
+                     --  One probe runs moves back and forth on the eyes' per-beat verdicts: the ladder of every
+                     --  channel together. Each channel's own probe confirms a sighting by the lock-in's regression
+                     --  after one estimate (Probe_Both_Ways), which asks no rest counts of the eyes.
+                     Driver.Robot.Motion.Gather_Rest (M, 1);
                      Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);
                      if not P.Seen then
                         Driver.Beats.Within_A_Beat (Estimate'Access);
@@ -1219,6 +1222,7 @@ package body Driver.Robot.Boot is
                            Shows  : array (1 .. Count, 1 .. Eyes) of Eye_Response;
                            type Rest_Grid is array (1 .. Count, 1 .. Eyes) of Real;
                            Rests      : Rest_Grid;   --  the rest's motion together, in sigmas
+                           Pulls      : Rest_Grid;   --  the rest's pull along the push together, in sigmas (Rest_Pull)
                            Factor : array (1 .. Count) of Real := [others => 1.0];
                            --  The hold after each push (Pause_After_A_Push): the longest measured lag once every eye's
                            --  is measured, until then the longest lag the stream could tell when the round began
@@ -1281,6 +1285,7 @@ package body Driver.Robot.Boot is
                                        Cells (G, E) := Textured_Cells (M, Group_Id (G), Eye_Id (E));
                                        Shows (G, E) := Response (M, Group_Id (G), Eye_Id (E));
                                        Rests (G, E) := Resting_Motion (M, Group_Id (G), Eye_Id (E));
+                                       Pulls (G, E) := Rest_Pull (M, Group_Id (G), Eye_Id (E));
                                        for C in 1 .. Sizes (G) loop
                                           if not Lockin.Seen (M, Eye_Id (E), Group_Id (G), C) then
                                              Needed (G, C) := True;
@@ -1299,9 +1304,19 @@ package body Driver.Robot.Boot is
                                        --  amounts, the arm swinging into the head camera.
                                        --  And only while one more doubling could make the eye something other than
                                        --  a patch: a patch that grows as a jaw opens (Lockin.Still_A_Patch).
+                                       --  Or while the cells that do not respond are pulled along the push together
+                                       --  (Rest_Pull: their signed gains pooled stand Z of their spread from zero): a
+                                       --  far part of the view that moves by less than any one cell can tell, which
+                                       --  the next doublings bring out, however the responding count stood over the
+                                       --  last doubling (robot.boot.patch, 10-14: 12 cells at the amounts, 14 at
+                                       --  twice them, the far part showing at four times; one doubling's growth
+                                       --  alone stopped there, and whether it did depended on which level the ladder
+                                       --  of every channel together was first seen at). A base the push shakes
+                                       --  moves the cells either way and pools to nothing.
                                        --  And not at all for a group an eye rides on (Ridden): its sweep pushes it.
                                        Again (G) := not Spent (G) and then not Ridden (G)
                                          and then (Again (G) or else Last (G, E) < 0
+                                                   or else Pulls (G, E) > Driver.Conventions.Z
                                                    or else (Grew (Last (G, E), Now (G, E), Cells (G, E))
                                                             and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));
                                     end if;
@@ -1322,7 +1337,7 @@ package body Driver.Robot.Boot is
                                           & (if Last (G, E) >= 0 then ", " & Integer'Image (Last (G, E))
                                              & " before" else "")
                                           & ", the rest move together by " & Driver.Log.Image (Rests (G, E), 2)
-                                          & " sigmas");
+                                          & " sigmas and pull along the push by " & Driver.Log.Image (Pulls (G, E), 2));
                                     end if;
                                  end loop;
                               end loop;

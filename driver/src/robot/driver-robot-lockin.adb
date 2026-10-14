@@ -695,6 +695,13 @@ package body Driver.Robot.Lockin is
                         Gain_Of   : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         Spread_Of : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         Shift_Of  : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        --  Every textured cell's signed coefficients for each regressor, and their variances
+                        --  (zero where the cell has none): the cells that do not respond to a group are pooled
+                        --  on them (Rest_Pull).
+                        Beta_U_Of : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        Beta_V_Of : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        Var_U_Of  : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        Var_V_Of  : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         --  One cell: its displacements regressed on the pushes, over
                         --  the beats where the cell resolved one, and for every
                         --  group whether its block responds.
@@ -771,6 +778,14 @@ package body Driver.Robot.Lockin is
                                  Var_V : constant Real_Array := Regression.Coefficient_Variances (Fv);
                               begin
                                  for K in 1 .. Kept loop
+                                    if Var_U (K + 1) > 0.0 and then Var_V (K + 1) > 0.0
+                                      and then Var_U (K + 1) < Real'Last and then Var_V (K + 1) < Real'Last
+                                    then
+                                       Beta_U_Of ((Cell - 1) * Kept + K) := Fu.Beta (K + 1);
+                                       Beta_V_Of ((Cell - 1) * Kept + K) := Fv.Beta (K + 1);
+                                       Var_U_Of ((Cell - 1) * Kept + K) := Var_U (K + 1);
+                                       Var_V_Of ((Cell - 1) * Kept + K) := Var_V (K + 1);
+                                    end if;
                                     if Responding (Cell, Cols (K).Group) and then Fu.Scale > 0.0 and then Fv.Scale > 0.0 then
                                        declare
                                           Bu : constant Real := Fu.Beta (K + 1) / Fu.Scale;
@@ -910,6 +925,42 @@ package body Driver.Robot.Lockin is
                                        Cells_Showing (G, Textured.all, Responding.all, Energy.all, Dof.all, S.Noise,
                                                       Least, Most, Disagree, Resting);
                                        Effect.Resting := Resting;
+                                       --  The cells that did not respond, pulled together along the push: for each
+                                       --  of the group's regressors, their signed coefficients pooled by inverse
+                                       --  variance (a mean gain over its standard error, in each picture direction,
+                                       --  a chi-square of two degrees of freedom), the most significant regressor's.
+                                       --  A far part of the view moved with the push by less than any one cell can
+                                       --  tell shows as a consistent pull (every cell's gain the same sign); a base
+                                       --  shaken by the push moves the cells either way and pools to nothing. Their
+                                       --  pooled ENERGY (Resting) grows with any motion whatever moves them, which is
+                                       --  why it was dropped from the boot's rounds (R5 on the Pi, 10-13: the head
+                                       --  eye on a shaken base was pushed to 128 times the amounts).
+                                       Effect.Rest_Pull := 0.0;
+                                       for K in 1 .. Kept loop
+                                          if Cols (K).Group = G then
+                                             declare
+                                                Pu, Wu, Pv, Wv : Real := 0.0;
+                                             begin
+                                                for Cell in 1 .. N loop
+                                                   if Textured (Cell) and then not Responding (Cell, G)
+                                                     and then Var_U_Of ((Cell - 1) * Kept + K) > 0.0
+                                                     and then Var_V_Of ((Cell - 1) * Kept + K) > 0.0
+                                                   then
+                                                      Pu := Pu + Beta_U_Of ((Cell - 1) * Kept + K) / Var_U_Of ((Cell - 1) * Kept + K);
+                                                      Wu := Wu + 1.0 / Var_U_Of ((Cell - 1) * Kept + K);
+                                                      Pv := Pv + Beta_V_Of ((Cell - 1) * Kept + K) / Var_V_Of ((Cell - 1) * Kept + K);
+                                                      Wv := Wv + 1.0 / Var_V_Of ((Cell - 1) * Kept + K);
+                                                   end if;
+                                                end loop;
+                                                if Wu > 0.0 and then Wv > 0.0 then
+                                                   Effect.Rest_Pull :=
+                                                     Real'Max (Effect.Rest_Pull,
+                                                               Driver.Distributions.Chi_Square_Deviate
+                                                                 (Pu ** 2 / Wu + Pv ** 2 / Wv, 2));
+                                                end if;
+                                             end;
+                                          end if;
+                                       end loop;
                                        Effect.Responding := Count;
                                        Effect.Textured := T;
                                        Effect.Fraction :=
@@ -931,6 +982,10 @@ package body Driver.Robot.Lockin is
                         Free (Energy);
                         Free (Dof);
                         Free (Textured);
+                        Free (Beta_U_Of);
+                        Free (Beta_V_Of);
+                        Free (Var_U_Of);
+                        Free (Var_V_Of);
                      end;
                   end if;
                   Free (Beat_Of);

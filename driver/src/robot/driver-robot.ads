@@ -301,6 +301,9 @@ package Driver.Robot is
    --  the group's push.
 
    function Resting_Motion (M : Model; G : Group_Id; E : Eye_Id) return Real;
+   function Rest_Pull (M : Model; G : Group_Id; E : Eye_Id) return Real;
+   --  How significantly the eye's cells that do not respond to the group are pulled along its pushes together
+   --  (Eye_Effect.Rest_Pull): a far part of the view moved by less than any one cell can tell.
    --  How many sigmas the cells that did not respond to the group's push move together: the inverse-variance sum
    --  of their displacement energies over the root of the sum of their weights. Each cell's energy is an unbiased
    --  estimate of the motion it shows, however little (a cell that moves a tenth of what it takes to respond
@@ -561,6 +564,9 @@ private
       Textured   : Natural := 0;   --  cells that can show a displacement
       Fraction   : Estimate;       --  Responding / Textured, with its binomial sigma
       Resting    : Real := 0.0;    --  the motion of the cells that did not respond, together, in sigmas (Lockin)
+      Rest_Pull  : Real := 0.0;    --  how significantly the cells that did not respond are pulled along the push together:
+                                   --  their signed gains pooled, over the spread of the pool, in sigmas (Lockin); zero
+                                   --  when none
    end record;
 
    package Effect_Vectors is new Ada.Containers.Vectors (Positive, Eye_Effect);
