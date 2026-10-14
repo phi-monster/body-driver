@@ -1184,11 +1184,23 @@ package body Driver.Robot.Boot is
                            Needed : array (1 .. Count, 1 .. Natural'Max (1, Most_Channels)) of Boolean :=
                              [others => [others => False]];
 
+                           --  Per group: some eye sees its whole view move with the group (Whole): an arm, which
+                           --  the sweep pushes next, every joint by levels that double (Sweep). The eyes still open
+                           --  about such a group (a patch, or undecided) are decided by those pushes: the lock-in
+                           --  regresses on every push of the stream, and the body is read again before each round of
+                           --  sweeps and after each estimate (Sweep_Every_Arm), so an eye whose patch grows into
+                           --  the whole view under the sweep is mounted on the arm then. The rounds used to push an
+                           --  arm again at twice the amounts for its other eyes alone: the kiwi's head eye and each
+                           --  arm's eye on the other arm (R6's sixth start, 10-14: 655 of the recognition's 2184
+                           --  beats, 55 s, both arms' own eyes whole after the first round).
+                           Ridden : array (1 .. Count) of Boolean := [others => False];
                            procedure Read_Open is
                            begin
                               Needed := [others => [others => False]];
                               for G in 1 .. Count loop
                                  Again (G) := False;
+                                 Ridden (G) := Commandable (G)
+                                   and then (for some E in 1 .. Eyes => Response (M, Group_Id (G), Eye_Id (E)) = Whole);
                                  Next_Pause (G) :=
                                    Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)));
                                  for E in 1 .. Eyes loop
@@ -1218,7 +1230,8 @@ package body Driver.Robot.Boot is
                                        --  amounts, the arm swinging into the head camera.
                                        --  And only while one more doubling could make the eye something other than
                                        --  a patch: a patch that grows as a jaw opens (Lockin.Still_A_Patch).
-                                       Again (G) := not Spent (G)
+                                       --  And not at all for a group an eye rides on (Ridden): its sweep pushes it.
+                                       Again (G) := not Spent (G) and then not Ridden (G)
                                          and then (Again (G) or else Last (G, E) < 0
                                                    or else (Grew (Last (G, E), Now (G, E), Cells (G, E))
                                                             and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));
@@ -1243,6 +1256,13 @@ package body Driver.Robot.Boot is
                                           & " sigmas");
                                     end if;
                                  end loop;
+                              end loop;
+                              for G in 1 .. Count loop
+                                 if Ridden (G) and then (for some E in 1 .. Eyes => Now (G, E) >= 0) then
+                                    Driver.Log.Line
+                                      (Driver.Log.Robot, "boot: group" & G'Image & " is ridden by an eye; the eyes"
+                                       & " undecided about it or showing a patch are left to its sweep's pushes");
+                                 end if;
                               end loop;
                               exit when (for all G in Again'Range => not Again (G));
                               for G in Again'Range loop
