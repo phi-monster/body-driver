@@ -2549,6 +2549,7 @@ driver-robot-kinematics.adb	then Driver.Log.Image (R.Shifts (C - 1), 4) & "" & D
 driver-robot-kinematics.adb	then Driver.Log.Image (R.Shifts (C - 1), 4) & "" & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	then Driver.Log.Image (R.Shifts (C - 1), 4) & "" & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))	2.0	math	the difference of two readings has twice the variance of one
+driver-robot-kinematics.adb	then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))	2.0	statistics	the difference of two readings: each one's noise, root two times over
 driver-robot-kinematics.adb	then F.Tracks (3 * K + 2) else 0.0),	2	structure	a track's point, three numbers each: its depth along its line of sight is the third
 driver-robot-kinematics.adb	then F.Tracks (3 * K + 2) else 0.0),	3	structure	a track's point, three numbers each: its depth along its line of sight is the third
 driver-robot-kinematics.adb	then Real'Max (Told, Driver.Conventions.Z * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Jitter)	2.0	statistics	the noise of a difference of two readings
@@ -3056,8 +3057,8 @@ driver-world.adb	Bits (Driver.Bytes.Offset ((Y * W + X) / 8 + 1)) or 2 ** ((Y * 
 driver-world.adb	Bits : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset ((W * H + 7) / 8)) := [others => 0];	7	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	Bits : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset ((W * H + 7) / 8)) := [others => 0];	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 2);	2	format	the field count or a field's place in a W record (Replay_Write)
-driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 3);	3	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 3);	3	format	the field count of a W record (Replay_Write): the hold's name, its thing and its hand
+driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 3);	3	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 4);	4	format	a placed point's record: its pixel's two coordinates, its point, its normal
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 4);	4	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 7);	7	format	the adopt record's elements: its name, the eye, the beat, the width, the height, the region, the placed points
@@ -3080,8 +3081,8 @@ driver-world.adb	V => Number (Doc, Element (Doc, P, 2))),	2	format	a placed poin
 driver-world.adb	W : constant Natural := Natural (Whole (4));	4	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	What : constant String := Text (Doc, Element (Doc, R, 1));	1	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	and then Kind_Of (Doc, Element (Doc, R, 1)) = String_Value;	1	format	the field count or a field's place in a W record (Replay_Write)
-driver-world.adb	elsif What = "" and then N = 3 then	3	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	elsif What = "" and then N = 3 then	3	format	the field count of a W record (Replay_Write): the hold's
+driver-world.adb	elsif What = "" and then N = 3 then	3	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	elsif What = "" and then N = 4 then	4	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	elsif What = "" and then N in 6 .. 7 then	6	format	an adopt record has six elements, seven with the placed points
 driver-world.adb	elsif What = "" and then N in 6 .. 7 then	7	format	an adopt record has six elements, seven with the placed points

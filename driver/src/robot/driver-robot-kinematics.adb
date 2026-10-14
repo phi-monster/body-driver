@@ -1214,15 +1214,39 @@ package body Driver.Robot.Kinematics is
             --  silent, the jaws made a patch of every channel of arm_b (R6's third start, 10-14: its first pass
             --  stopped seven of ten pushes as unseen).
             Of_World : Flag_Access := new Flag_Array (0 .. Queries - 1);
+            --  A point testifies whether the view moves with a channel only where the aligner found it, not merely
+            --  answered it, in a keyframe that turned the channel: a keyframe that moved the view past what the
+            --  aligner searches is answered by false peaks, at their places or anywhere (f15a on 10-15: arm 1's
+            --  fourth channel, a 2.46-degree push that moved the wrist eye's view some 60 px past a 35 px reach, 0
+            --  points found and 63 answered, the answers' median 487 px a unit; they made a patch of it, the sweep
+            --  took the joint for one behind the eye, never pushed it again, and the arm was never fitted). Where no
+            --  point was found, the keyframes tell nothing of the view, and the ladder halves the level instead.
+            function Verified (C : Positive; P : Natural) return Boolean is
+            begin
+               for S of R.Matches loop
+                  if S.Eye = 0 and then S.Frame <= Natural (R.Frames.Length) and then P < Natural (S.Found.Length)
+                    and then S.Found (P)
+                    and then (if Noise (C) < Real'Last
+                              then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))
+                              else Change (S.Frame, C) /= 0.0)
+                  then
+                     return True;
+                  end if;
+               end loop;
+               return False;
+            end Verified;
          begin
             Of_World.all := [others => False];
             for P in 0 .. Queries - 1 loop
                for C in 1 .. N loop
-                  if Told (Slot (C, P) - 1) then
+                  if Told (Slot (C, P) - 1) and then Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P)))
+                  then
+                     Of_World (P) := True;
+                  end if;
+                  if Told (Slot (C, P) - 1) and then Verified (C, P) then
                      Told_Of (C) := Told_Of (C) + 1;
                      if Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P))) then
                         Moving_Of (C) := Moving_Of (C) + 1;
-                        Of_World (P) := True;
                      end if;
                   end if;
                end loop;
@@ -1250,7 +1274,7 @@ package body Driver.Robot.Kinematics is
                      Silent : Natural := 0;
                   begin
                      for P in 0 .. Queries - 1 loop
-                        if Told (Slot (C, P) - 1)
+                        if Told (Slot (C, P) - 1) and then Verified (C, P)
                           and then Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P)))
                         then
                            K := K + 1;
@@ -1261,7 +1285,7 @@ package body Driver.Robot.Kinematics is
                         Typical : constant Real := Driver.Stats.Median (Movers);
                      begin
                         for P in 0 .. Queries - 1 loop
-                           if Of_World (P) and then Told (Slot (C, P) - 1)
+                           if Of_World (P) and then Told (Slot (C, P) - 1) and then Verified (C, P)
                              and then not Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P)))
                              and then Driver.Uncertain.Significant
                                         (Typical - Driver.Conventions.Z * Spread (Slot (C, P)), Spread (Slot (C, P)))

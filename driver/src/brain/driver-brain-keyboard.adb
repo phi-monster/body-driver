@@ -130,7 +130,9 @@ package body Driver.Brain.Keyboard is
 
    Line_Break : constant String := "\n";
 
-   Sentence_Rule : constant String := "sent ::= [a-zA-Z] ([a-zA-Z0-9 ,.\'])*";
+   --  An apostrophe in a character class is itself: llama.cpp's grammar parser knows no escape \' and refused every
+   --  grammar that had one with status 400 (f15b on 10-15: no brain call of the episode answered).
+   Sentence_Rule : constant String := "sent ::= [a-zA-Z] ([a-zA-Z0-9 ,.'])*";
    --  No "=" in a free sentence: the look key is the only way to type one.
 
    function Word_Rules (K : Keyboard) return String is
