@@ -1634,9 +1634,18 @@ package body Driver.Robot.Kinematics.Fit is
          return D;
       end Changes_Of;
 
-      --  The keyframe moved joint J by a step its eye can see.
+      --  Where each joint rests through the keyframes: the median of its changes over them. A servo sent back to
+      --  the sweep's start settles a few units off it, within its dead band, and stays there for the pass (R6's
+      --  sixth start on the kiwi, 10-14: arm_b's third and fifth joints 2 to 3 units off the reference in every
+      --  keyframe, so that no keyframe was any other joint's own); most keyframes leave a joint where it rests,
+      --  so its median change is that rest, and a joint has moved in a keyframe when it stands a step away from
+      --  it. The reference's own pose is one keyframe among them. The model below uses the readings as they are.
+      Rest : Real_Array (1 .. N) := [others => 0.0];
+
+      --  The keyframe moved joint J by a step its eye can see, away from where the joint rests.
       function Moved (Frame, J : Positive) return Boolean is
-        (Visible (Visible'First + J - 1) > 0.0 and then abs Change (Frame, J) >= Visible (Visible'First + J - 1));
+        (Visible (Visible'First + J - 1) > 0.0
+         and then abs (Change (Frame, J) - Rest (J)) >= Visible (Visible'First + J - 1));
 
       --  Only joint J moved in the keyframe, as far as its eye can tell.
       function Only (Frame, J : Positive) return Boolean is
@@ -1745,6 +1754,16 @@ package body Driver.Robot.Kinematics.Fit is
          Fail ("no keyframes or no matches");
          return;
       end if;
+      declare
+         Column : Real_Array (1 .. Frames);
+      begin
+         for J in 1 .. N loop
+            for Frame in 1 .. Frames loop
+               Column (Frame) := Change (Frame, J);
+            end loop;
+            Rest (J) := Driver.Stats.Median (Column);
+         end loop;
+      end;
       for X of Sight loop
          if Single (X.Frame) > 0 then
             Counts (Single (X.Frame)) := Counts (Single (X.Frame)) + 1;
