@@ -283,9 +283,28 @@ package body Driver.Robot.Steps is
       end loop;
    end Body_Delay;
 
+   --  The beat the body's first push started at: the stream's age then. Before any push is answered, an
+   --  unanswered push is waited for that long, the same for every push, not for its own start beat: the waits
+   --  used to grow with the stream, each unanswered push waiting as long as the stream had lived, so the
+   --  doublings of the first pushes from below a servo's dead band waited 60, 120, 240 and 480 beats (R6's
+   --  seventh start on the Pi, 10-14: four asks of 0.6 to 4.9 units executed by nothing, 940 of the boot's
+   --  first 1000 beats). A body slower than the first wait answers an earlier push while a later one waits,
+   --  and its readings' motion is seen then.
+   function First_Push (M : Model) return Natural is
+      First : Natural := Natural'Last;
+   begin
+      for S of M.Groups loop
+         if S.Commandable and then not S.Episodes.Is_Empty then
+            First := Natural'Min (First, S.Episodes.First_Element.Start);
+         end if;
+      end loop;
+      return (if First = Natural'Last then 0 else First);
+   end First_Push;
+
    procedure Track (M : in out Model; Beat : Natural) is
       Delay_Beats : Natural;
       Delay_Known : Boolean;
+      First_Wait  : constant Natural := First_Push (M);
    begin
       Body_Delay (M, Delay_Beats, Delay_Known);
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -302,8 +321,9 @@ package body Driver.Robot.Steps is
                elsif Active then
                   declare
                      E : Episode := S.Episodes.Last_Element;
-                     --  How long a push may wait for its first motion.
-                     Wait : constant Natural := (if Delay_Known then Delay_Beats else E.Start);
+                     --  How long a push may wait for its first motion: the body's delay once measured, else as long
+                     --  as the stream had lived when the body was first pushed (First_Push).
+                     Wait : constant Natural := (if Delay_Known then Delay_Beats else First_Wait);
                   begin
                      if not E.Moved then
                         if Channels.Moving (M, G, Beat) then
