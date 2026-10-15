@@ -1039,7 +1039,10 @@ package body Driver.Alignment.Keyframes is
 
    --  The points the prediction did not place (refused for what it said of where to look, or found where the field of
    --  the others does not agree) are asked again from the keyframe's own field, which the answers that agree with
-   --  one another have made: where it puts them, to the uncertainty it has there. So are the points found where
+   --  one another have made: where it puts them, to the uncertainty it has there. So are the points never asked: the rounds
+   --  that make the field stop once it settles, and the points they left are the fit's as much as any (f15q on 10-15:
+   --  2132 of 3570 points of an arm's first fourteen keyframes never asked, its joints sharing too few points from one
+   --  keyframe to the next for their distances to be told apart). So are the points found where
    --  it agrees but from a window wider than a patch at the full size: their answers are not ones to rest a fit on
    --  until something better than the prediction is known of the move (Answer.Narrow), and the field is that (f15h on
    --  10-15: a keyframe predicted stating 19.8 px had 118 answers on its field and none narrow, so not one was found
@@ -1067,6 +1070,7 @@ package body Driver.Alignment.Keyframes is
             begin
                if (not Agree (K) and then (Prediction_Caused (Seen) or else Seen.Verdict = Found))
                  or else (Agree (K) and then Seen.Verdict = Found and then not Seen.Narrow)
+                 or else Seen.Because = Not_Asked
                then
                   Todo (K) := True;
                   Given (K) := Asked_From (C, Field, C.Points (K));
