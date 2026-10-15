@@ -1404,6 +1404,7 @@ package body Driver.Robot.Hand is
       Answered     : out Boolean)
    is
       Offset   : Real := Step;
+      Before   : Real := 0.0;        --  the push before this one (0 before the first)
       Followed : Boolean;
       Shown    : Boolean := False;   --  some push of this way has shown the views something
       Seen     : Showing;
@@ -1440,13 +1441,16 @@ package body Driver.Robot.Hand is
             Shown := True;
          else
             Unseen := Unseen + Boolean'Pos (not Shown);
-            --  Nothing new: past the end once something was shown, stuck when nothing was, and either only once
-            --  a push that moves the view by a pixel shows nothing new: below that a closer still moving shows
-            --  nothing new. f16k's jaw (10-15) "showed" ten pixels at its first push of 0.0007 units, nothing
-            --  new at the next two (a pixel is 0.15 units), and the way ended there, its two ends 0.003 units
-            --  apart; nothing was told apart between them and no hand was made.
-            exit when Offset >= Seen_By;
+            --  Nothing new: stuck when nothing was ever shown and a push that moves the view by a pixel in all shows
+            --  nothing; past the end once something was shown and a push that moves it a pixel beyond the push before
+            --  shows nothing new: below that a closer still moving shows nothing new. f16k's jaw (10-15) "showed" ten
+            --  pixels at its first push of 0.0007 units, nothing new at the next two (a pixel is 0.15 units), and the
+            --  way ended there, its two ends 0.003 units apart; f16w's servo jaw ended at the push of 19.6 units, 9.8
+            --  beyond the one before, where a pixel is 16.6, its ends 16 units apart of its thousand; nothing was told
+            --  apart between them, and no hand was made.
+            exit when (if Shown then Offset - Before else Offset) >= Seen_By;
          end if;
+         Before := Offset;
          Offset := 2.0 * Offset;
       end loop;
    end Sweep_Way;

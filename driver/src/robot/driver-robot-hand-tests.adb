@@ -141,7 +141,8 @@ package body Driver.Robot.Hand.Tests is
       --  f16k's jaw (10-15): its first push, far below a pixel of its view, "showed" a few pixels, and the next two
       --  nothing new; the way ended there, its two ends 0.003 units apart, and no hand was made. Here every push is
       --  followed, the first shows something, every one after it nothing new, and a pixel is four first pushes: the
-      --  way goes on to the push that moves the view by a pixel (the third) and ends there.
+      --  way goes on to the push that moves the view by a pixel beyond the one before (the fourth, 8 beyond 4) and
+      --  ends there (f16w's servo jaw ended at the push whose doubling first reached a pixel in all, half a pixel on).
       Pushed : Natural := 0;
       procedure Push (Offset : Real; Followed : out Boolean) is
          pragma Unreferenced (Offset);
@@ -155,9 +156,9 @@ package body Driver.Robot.Hand.Tests is
       Formed, Answered        : Boolean := False;
    begin
       Sweep_Way (-1.0, 1.0, 4.0, 1, Push'Access, Shows'Access, Pushes, Unseen, Longest, Formed, Answered);
-      Check (Formed and then Answered and then Pushes = 3,
+      Check (Formed and then Answered and then Pushes = 4,
              "a way that showed something at its first push, below a pixel, ended after" & Pushes'Image
-             & " pushes, not at the third, the first to move its view by a pixel");
+             & " pushes, not at the fourth, the first to move its view by a pixel beyond the push before");
    end Way_Goes_On_Below_A_Pixel;
 
    procedure Press_Overshoot is
