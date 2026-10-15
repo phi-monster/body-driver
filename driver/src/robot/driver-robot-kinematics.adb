@@ -63,12 +63,19 @@ package body Driver.Robot.Kinematics is
       return 0;
    end Eye_Of;
 
-   --  The centres of the eye's cells that respond to the group's push: they
-   --  show the world the arm moves its eye through. Every textured cell when
-   --  the lock-in has not told yet.
+   --  The centres of the eye's cells that respond to the group's push: they show the world the arm moves its eye
+   --  through. Every textured cell when the lock-in has not told yet, and every textured cell of an eye the group's
+   --  arm carries: the world fills its view, and a cell the recognition's small pushes did not move beyond its noise
+   --  is moved by a keyframe's (f15h on 10-15: 49 of 242 textured cells responded, 19 to 30 of them were matched
+   --  a keyframe, too few for the keyframe's own field, and no keyframe was followed). Responds says which cells
+   --  the lock-in saw follow the push (all of them when it has not told): the others, the hand's jaws among them,
+   --  are asked but tell nothing of the view's motion until the keyframes tell (Arm_Evidence.Query_Responds).
    procedure Query_Points
-     (M : Model; E : Eye_Id; G : Group_Id; Picture : Driver.Images.Image; U, V : out Real_Vectors.Vector)
+     (M : Model; E : Eye_Id; G : Group_Id; Picture : Driver.Images.Image; U, V : out Real_Vectors.Vector;
+      Responds : out Flag_Vectors.Vector)
    is
+      Carried : constant Boolean :=
+        Eye_Mount (M, E).Kind = Arm_Carried and then Arm_Group (M, Eye_Mount (M, E).Arm) = G;
       S    : Eye_Stream renames M.Eyes (E);
       N    : constant Natural := Cells (S.Grid);
       Kept : constant Natural := Natural (S.Kept_Groups.Length);
@@ -98,6 +105,7 @@ package body Driver.Robot.Kinematics is
    begin
       U.Clear;
       V.Clear;
+      Responds.Clear;
       if Pictured then
          declare
             Luma : Reals_Access := new Real_Array (1 .. W * H);
@@ -123,15 +131,15 @@ package body Driver.Robot.Kinematics is
       end if;
       for C in 1 .. N loop
          declare
-            Responds : Boolean := Kept = 0;
+            Follows : Boolean := Kept = 0;
             X0, X1, Y0, Y1 : Natural;
          begin
             for K in 0 .. Kept - 1 loop
                if S.Kept_Groups (K) = Natural (G) and then S.Shifts ((C - 1) * Kept + K) > 0.0 then
-                  Responds := True;
+                  Follows := True;
                end if;
             end loop;
-            if Responds and then (Natural (S.Textured.Length) < N or else S.Textured (C - 1)) then
+            if (Follows or else Carried) and then (Natural (S.Textured.Length) < N or else S.Textured (C - 1)) then
                Flow.Bounds (S.Grid, C, X0, X1, Y0, Y1);
                declare
                   Best_X : Natural := (X0 + X1) / 2;
@@ -152,6 +160,7 @@ package body Driver.Robot.Kinematics is
                   end if;
                   U.Append (Real (Best_X) + 0.5);
                   V.Append (Real (Best_Y) + 0.5);
+                  Responds.Append (Follows);
                end;
             end if;
          end;
@@ -492,7 +501,8 @@ package body Driver.Robot.Kinematics is
                         end;
                         if Fresh then
                            if Natural (R.Frames.Length) = 1 then
-                              Query_Points (M, E, G, R.Frames.Last_Element.Image, R.Query_U, R.Query_V);
+                              Query_Points
+                                (M, E, G, R.Frames.Last_Element.Image, R.Query_U, R.Query_V, R.Query_Responds);
                               R.Still.Clear;
                               --  The reference's points into every other eye's view at
                               --  this beat: what links this arm to the others through
@@ -1536,12 +1546,15 @@ package body Driver.Robot.Kinematics is
             end if;
             Rss_Before := Driver.Memory.Resident_Kilobytes / 1024;
             declare
-               --  The points that ride with the eye, as the keyframes so far told them (Measure_Shifts): they tell
-               --  nothing of how the view moved.
+               --  The points that tell nothing of how the view moved: those that ride with the eye, as the keyframes so
+               --  far told them (Measure_Shifts), or before they tell, those whose cells the lock-in did not see
+               --  follow the arm (Query_Points: the hand's jaws in a wrist eye's view among them).
                Riding : Keyframes.Flag_Array (1 .. Queries);
             begin
                for I in Riding'Range loop
-                  Riding (I) := not Moving_Point (R, I - 1);
+                  Riding (I) :=
+                    (if I - 1 < Natural (R.Still.Length) then R.Still (I - 1)
+                     else I - 1 < Natural (R.Query_Responds.Length) and then not R.Query_Responds (I - 1));
                end loop;
                Keyframes.Add (R.Chain, R.Frames (F).Image, Change, Given.all, Answers.all, Agree.all, Riding);
             end;

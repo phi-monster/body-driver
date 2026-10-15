@@ -734,6 +734,10 @@ private
       Eye      : Eye_Id'Base := 0;
       Frames   : Keyframe_Vectors.Vector;   --  the first is the reference
       Query_U, Query_V : Real_Vectors.Vector;   --  the reference's query points
+      Query_Responds : Flag_Vectors.Vector;
+      --  Per query point: the lock-in saw its cell follow the arm's pushes when the points were chosen (or had not
+      --  told yet). Before its keyframes tell which points ride with the eye (Still), these are the points that
+      --  tell the view's common motion (Keyframes.Add's Riding).
       Chain    : Driver.Alignment.Keyframes.Chain;   --  the reference's pyramid and what its keyframes showed
       Aligned  : Natural := 0;   --  how many of Frames are aligned into Matches (Kinematics.Align_New)
       Twin_Taken : Boolean := False;   --  a keyframe at the reference's readings was taken after it: its still twin

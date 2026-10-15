@@ -570,6 +570,12 @@ package body Driver.Alignment.Keyframes is
    function Moves_View (Change, Shift : Real_Array; K : Positive; Precision : Real) return Boolean is
      (Driver.Uncertain.Significant (Change (K) * Shift (K), Precision));
 
+   --  Whether every channel but K that the change moved, by more than the noise of its readings tells, has a known
+   --  shift: what the change did besides channel K is then bounded.
+   function Others_Known (Change, Noise, Shift : Real_Array; K : Positive) return Boolean is
+     (for all I in Change'Range =>
+        I = K or else Shift (I) > 0.0 or else not Driver.Uncertain.Significant (Change (I), Noise (I) * Sqrt (2.0)));
+
    function Channels_Moving (Change, Shift : Real_Array; Precision : Real) return Natural is
       Count : Natural := 0;
    begin
@@ -862,7 +868,13 @@ package body Driver.Alignment.Keyframes is
          --  A change of several channels at once is, to first order, the moves of each: the sum of the moves of the
          --  keyframes that changed one channel each, the nearest in amount to this change's (of the same sign when
          --  there is one), scaled to it.
-         if Frames > 0 and then Channels_Moving (Changes, Shifts, Precision) >= 2 then
+         --  Only when every channel the change moved has a known shift: a channel whose shift is not known moves the
+         --  view by no amount known, and was counted as moving it by none (f15h on 10-15: keyframes of six channels
+         --  turned 1 to 8 units each, four of them of no known shift, predicted from two channels' moves stating
+         --  0.1 px, and not one point was found). So for the keyframes the sum is made of.
+         if Frames > 0 and then Shifts_Known (Changes, Noises, Shifts)
+           and then Channels_Moving (Changes, Shifts, Precision) >= 2
+         then
             declare
                Combo : Combination;
                Whole : Boolean := True;
@@ -880,6 +892,7 @@ package body Driver.Alignment.Keyframes is
                            begin
                               if C.Frames (J).Field.Valid and then Moves_View (Past, Shifts, K, Precision)
                                 and then Channels_Moving (Past, Shifts, Precision) = 1
+                                and then Others_Known (Past, Noises, Shifts, K)
                               then
                                  declare
                                     Same  : constant Boolean := Past (K) * Changes (K) > 0.0;
@@ -1026,7 +1039,11 @@ package body Driver.Alignment.Keyframes is
 
    --  The points the prediction did not place (refused for what it said of where to look, or found where the field of
    --  the others does not agree) are asked again from the keyframe's own field, which the answers that agree with
-   --  one another have made: where it puts them, to the uncertainty it has there. The field is then fitted to all
+   --  one another have made: where it puts them, to the uncertainty it has there. So are the points found where
+   --  it agrees but from a window wider than a patch at the full size: their answers are not ones to rest a fit on
+   --  until something better than the prediction is known of the move (Answer.Narrow), and the field is that (f15h on
+   --  10-15: a keyframe predicted stating 19.8 px had 118 answers on its field and none narrow, so not one was found
+   --  and the keyframe was not followed). The field is then fitted to all
    --  the answers, and the asking goes on while more of them agree.
    procedure Settle
      (C       : Chain;
@@ -1048,7 +1065,9 @@ package body Driver.Alignment.Keyframes is
             declare
                Seen : Answer renames Answers (Answers'First + K - 1);
             begin
-               if not Agree (K) and then (Prediction_Caused (Seen) or else Seen.Verdict = Found) then
+               if (not Agree (K) and then (Prediction_Caused (Seen) or else Seen.Verdict = Found))
+                 or else (Agree (K) and then Seen.Verdict = Found and then not Seen.Narrow)
+               then
                   Todo (K) := True;
                   Given (K) := Asked_From (C, Field, C.Points (K));
                end if;
