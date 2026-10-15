@@ -1009,10 +1009,11 @@ driver-robot-boot.adb	& Driver.Log.Image (Least (C), 3) & ""	3	format	digits pri
 driver-robot-boot.adb	& Plan_Text & "" & Driver.Log.Image (Half, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (S) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
+driver-robot-boot.adb	((Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (Channel)	2.0	structure	half the gap: the next halfway level must be a step a keyframe counts
 driver-robot-boot.adb	(Text, "" & C'Image & "" & Driver.Log.Image (First (C), 3) & ""	3	format	digits printed in a log line or a message
-driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
-driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
-driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * Scale * Share (Swept (K));	2	math	the parity of the bits two indices share (Sylvester-Hadamard)
+driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
+driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
+driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	2	math	the parity of the bits two indices share (Sylvester-Hadamard)
 driver-robot-boot.adb	/ 2.0;	2.0	structure	a view keeps half of itself in sight while turning by half
 driver-robot-boot.adb	Ada.Strings.Unbounded.Append (Text, "" & Driver.Log.Image (V, 3));	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	Arm : Arm_Id := 1;	1	structure	the default of a record field, overwritten where a pair is found
@@ -1038,7 +1039,7 @@ driver-robot-boot.adb	Lost_Least : Real_Array (1 .. 2 * Size) := [others => Real
 driver-robot-boot.adb	Needed : array (1 .. Count, 1 .. Natural'Max (1, Most_Channels)) of Boolean :=	1	structure	an array of at least one column: a group of no channels needs none
 driver-robot-boot.adb	Now (G, E) := -1;	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)),	2.0	statistics	the standard error of a scale estimate from Dof degrees of freedom is the scale over the root of twice Dof
-driver-robot-boot.adb	Off := 2.0 * Off;	2.0	structure	the ladder doubles: each level twice the one before
+driver-robot-boot.adb	Off := (if Per_Unit (P.Channel) > 0.0 then Real'Max (2.0 * Off, Patch / Per_Unit (P.Channel))	2.0	structure	the ladder doubles: each level twice the one before
 driver-robot-boot.adb	Offset (Count + 2) := First (C);	2	structure	the second of a channel's two pushes, the other way
 driver-robot-boot.adb	Offset (I) := (Followed_Most (I) + Lost_Least (I)) / 2.0;	2.0	structure	the ladder halves the gap between the widest followed and the least lost level
 driver-robot-boot.adb	Offset (I) := (Followed_Most (I) + Lost_Least (I)) / 2.0;	2.0	structure	the ladder halves the gap between the widest followed and the least lost level
@@ -1061,16 +1062,17 @@ driver-robot-boot.adb	Rows := 2 * Rows;	2	structure	Sylvester orders double
 driver-robot-boot.adb	S : String (1 .. 32);	32	format	wide enough for any Long_Float image
 driver-robot-boot.adb	Scale : Real := 1.0;	1.0	structure	the whole share before any halving
 driver-robot-boot.adb	Scale : constant Real := Real'Max (0.0, (2.0 * Patch - Fixed) / (Motion - Fixed));	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
+driver-robot-boot.adb	Scale := 2.0 * Scale;	2.0	structure	a fitted arm's cell climbs by doubling, as a push's ladder does
 driver-robot-boot.adb	Scale := Scale / 2.0;	2.0	math	halving when a cell meets something
 driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
 driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 else -1.0));	1.0	math	the two directions of a push
 driver-robot-boot.adb	State (Count + 2) := Climbing;	2	structure	the second of a channel's two pushes, the other way
 driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
 driver-robot-boot.adb	State : array (1 .. 2 * Size) of Stop := [others => Blocked];	2	structure	two pushes a channel, one each way
-driver-robot-boot.adb	and then (Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (P.Channel)	2.0	structure	half the gap: the next halfway level must be a step a keyframe counts
-driver-robot-boot.adb	and then (Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (P.Channel)	2.0	structure	half the gap: the next halfway level must be a step a keyframe counts
 driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));	2	structure	one more doubling of the push: the responding cells grew at most as the push did
+driver-robot-boot.adb	else 2.0 * Off);	2.0	structure	the ladder doubles: each level twice the one before
 driver-robot-boot.adb	elsif Per_Unit (P.Channel) > 0.0 and then 2.0 * Last.Offset * Per_Unit (P.Channel) > Half then	2.0	structure	the next level, twice this one, would move the view by more than half of it
+driver-robot-boot.adb	exit when Cell_Motion (2.0 * Scale) > Half;	2.0	structure	the cell's next level, twice its shares
 driver-robot-boot.adb	exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else 2.0 * Patch);	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
 driver-robot-boot.adb	if M.Beats >= 2 * Rest_Beats then	2	structure	the rest is compared with itself at every doubling of its beats, as the estimates are scheduled
 driver-robot-boot.adb	if N > 1 and then Followed_In_Pass > 0 and then Fitted_Now then	1	structure	joints move together only when there are at least two
@@ -1082,6 +1084,7 @@ driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the pari
 driver-robot-boot.adb	if Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel) then	2.0	structure	the ladder goes down by halving
 driver-robot-boot.adb	if Unswept.Length = 1 or else See_Each_Other then	1	structure	one arm left to sweep: alone, not a lane
 driver-robot-boot.adb	if not Fitted_Now and then Motion > 2.0 * Patch and then Motion > Fixed then	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
+driver-robot-boot.adb	or else (Lost_Least (I) - Followed_Most (I)) / 2.0 * Per_Unit (Channel) > Patch));	2.0	structure	half the gap's view motion against a patch
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-channels.adb	(Change_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	statistics	a standardized statistic is tested against unit sigma
 driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	the first round takes every change for motion: noise zero

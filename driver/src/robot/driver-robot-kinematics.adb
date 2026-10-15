@@ -2030,9 +2030,9 @@ package body Driver.Robot.Kinematics is
                      Lens   : Fit.Lens;
                      Report : Fit.Fit_Report;
                      Result : Arm_Fit;
-                     --  Fitted again within the estimate whose fit holds (Again): from that fit, its last stage alone.
-                     Start  : Fit.Fit_Start (if Again and then R.Result.Fitted and then R.Result.Made_At = M.Beats
-                                             and then Natural (R.Result.Joints.Length) = N
+                     --  Begun from the arm's fit when it has one: within the estimate whose fit holds (Again), its last
+                     --  stage alone; in a later estimate, the stages after the search (Fit_Start.Whole).
+                     Start  : Fit.Fit_Start (if R.Result.Fitted and then Natural (R.Result.Joints.Length) = N
                                              and then Natural (R.Result.Chain.Length) = N then N else 0);
                   begin
                      if Start.N > 0 then
@@ -2050,6 +2050,9 @@ package body Driver.Robot.Kinematics is
                         Start.Focal_Within := R.Result.Focal_Within;
                         Start.Searched_Least := R.Result.Searched_Least;
                         Start.Searched_Most := R.Result.Searched_Most;
+                        --  A fit of an estimate before this one is begun from at the stages after the search; within
+                        --  the estimate whose fit holds (Again), at its last stage alone.
+                        Start.Whole := not (Again and then R.Result.Made_At = M.Beats);
                      end if;
                      for S of R.Matches loop
                         for I in 0 .. Queries - 1 loop

@@ -270,6 +270,9 @@ package Driver.Robot.Kinematics.Fit is
       Focal_Within   : Real := 0.0;
       Searched_Least : Real := 0.0;
       Searched_Most  : Real := 0.0;
+      --  A fit of an estimate before this one: the stages after the focal search (2 to 5) run from it, its joints and
+      --  lens taken for the search's result. Otherwise a fit of this estimate: the last stage alone.
+      Whole          : Boolean := False;
    end record;
 
    No_Start : constant Fit_Start := (N => 0, Valid => False, others => <>);

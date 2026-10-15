@@ -484,6 +484,15 @@ package body Driver.Robot.Boot is
                --  ladder halves the gap between them, a level a pass (Take climbs no level as wide as the second).
                Followed_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];
                Lost_Least    : Real_Array (1 .. 2 * Size) := [others => Real'Last];
+               --  Whether the level halfway between them would tell something: half the gap moves the view by more
+               --  than a patch, the most the aligner follows beyond a level by itself (Take's brake), and is a step a
+               --  keyframe counts. Halving to the counted step alone took a pass a level, each an estimate and a set
+               --  of cells, for levels a few pixels apart (f16b on 10-15: arm 1's channel 1 at 3.03, 3.53, 3.78 of a
+               --  gap up to 4.04 units, 3000 beats a pass).
+               function Halving_Tells (I : Positive; Channel : Positive) return Boolean is
+                 ((Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (Channel)
+                  and then (Per_Unit (Channel) = 0.0
+                            or else (Lost_Least (I) - Followed_Most (I)) / 2.0 * Per_Unit (Channel) > Patch));
                --  Per push: the levels taken in the pass, in order: each one's offset and the beats the arm was held
                --  for its keyframe.
                type Level_Mark is record
@@ -539,7 +548,13 @@ package body Driver.Robot.Boot is
                      Mark.Short := Report.Outcome /= Driver.Robot.Motion.Reached;
                      Levels (I).Append (Mark);
                      exit when Mark.Short or else Per_Unit (P.Channel) = 0.0;
-                     Off := 2.0 * Off;
+                     --  Twice the level, or the level that moves the view by a patch once the view's motion per unit is
+                     --  measured, whichever is wider: a patch beyond the followed level is what the aligner follows by
+                     --  itself (the brake below), and doubling from the least turn a keyframe counts took six to eight
+                     --  levels a push to get there, each a keyframe aligned and fitted (f16b on 10-15: pass 2 of arm 1, 69
+                     --  keyframes from 0.03 units to 2 to 8).
+                     Off := (if Per_Unit (P.Channel) > 0.0 then Real'Max (2.0 * Off, Patch / Per_Unit (P.Channel))
+                             else 2.0 * Off);
                      exit when Off >= Lost_Least (I);
                      --  Before the arm is fitted, the ladder climbs only as far as the aligner follows by itself: an
                      --  extrapolation from the levels before to about a patch of displacement beyond them (A22, A23).
@@ -583,34 +598,47 @@ package body Driver.Robot.Boot is
                   for Row in 1 .. Rows - 1 loop
                      declare
                         Scale : Real := 1.0;   --  of the shares: halved where the cell met something
+
+                        --  The view's motion a cell asks at a scale of its shares, at most: every joint's part by how far
+                        --  the view moves per unit of it.
+                        function Cell_Motion (At_Scale : Real) return Real is
+                           Sum : Real := 0.0;
+                        begin
+                           for K in 1 .. N loop
+                              Sum := Sum + At_Scale * Share (Swept (K)) * Per_Unit (Swept (K));
+                           end loop;
+                           return Sum;
+                        end Cell_Motion;
+
+                        procedure Take_Cell (At_Scale : Real) is
+                           Pose : Real_Array := Start;
+                        begin
+                           for K in 1 .. N loop
+                              declare
+                                 Bits : Natural := 0;
+                                 R    : Natural := Row;
+                                 Col  : Natural := K;
+                              begin
+                                 --  H (Row, K) = (-1) ** (the bits Row and K share)
+                                 while R > 0 and then Col > 0 loop
+                                    if R mod 2 = 1 and then Col mod 2 = 1 then
+                                       Bits := Bits + 1;
+                                    end if;
+                                    R := R / 2;
+                                    Col := Col / 2;
+                                 end loop;
+                                 Pose (Swept (K)) := Start (Swept (K))
+                                   + (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));
+                              end;
+                           end loop;
+                           Go_To (G, Pose, Report, Land => True);
+                           if Report.At_Rest then
+                              Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                           end if;
+                        end Take_Cell;
                      begin
                         loop
-                           declare
-                              Pose : Real_Array := Start;
-                           begin
-                              for K in 1 .. N loop
-                                 declare
-                                    Bits : Natural := 0;
-                                    R    : Natural := Row;
-                                    Col  : Natural := K;
-                                 begin
-                                    --  H (Row, K) = (-1) ** (the bits Row and K share)
-                                    while R > 0 and then Col > 0 loop
-                                       if R mod 2 = 1 and then Col mod 2 = 1 then
-                                          Bits := Bits + 1;
-                                       end if;
-                                       R := R / 2;
-                                       Col := Col / 2;
-                                    end loop;
-                                    Pose (Swept (K)) := Start (Swept (K))
-                                      + (if Bits mod 2 = 0 then 1.0 else -1.0) * Scale * Share (Swept (K));
-                                 end;
-                              end loop;
-                              Go_To (G, Pose, Report, Land => True);
-                              if Report.At_Rest then
-                                 Driver.Robot.Motion.Hold_For_Keyframe (M, A);
-                              end if;
-                           end;
+                           Take_Cell (Scale);
                            --  A cell that met something (a keyframe where it stopped, if it
                            --  rested there) is tried again at half its shares, as long as some
                            --  share is still a turn the fit counts: a cell need not move every
@@ -620,6 +648,22 @@ package body Driver.Robot.Boot is
                            Scale := Scale / 2.0;
                            exit when (for all K in 1 .. N => Scale * Share (Swept (K)) < First (Swept (K)));
                         end loop;
+                        --  A fitted arm's cell climbs on in its direction, its shares doubled a level, while the
+                        --  view moves by no more than half of it (Take's brake for a fitted arm), each level
+                        --  predicted from the one before as a push's levels are. The order of the joints along the arm
+                        --  is told by what two joints turned together do that each alone does not, and that grows with
+                        --  the product of their turns: at a sixth of each joint's widest followed offset (the shares),
+                        --  f16b's cells turned every joint about 4 degrees, a pair's difference under a pixel, and its
+                        --  arm 1 was fitted in the wrong order in every pass (4, 1, 5, 2, 6, 3 where it is 5, 4, 1, 2,
+                        --  6, 3), its median residual twice the right order's.
+                        if Fitted_Now and then Report.Outcome = Driver.Robot.Motion.Reached then
+                           loop
+                              exit when Cell_Motion (2.0 * Scale) > Half;
+                              Scale := 2.0 * Scale;
+                              Take_Cell (Scale);
+                              exit when Report.Outcome /= Driver.Robot.Motion.Reached;
+                           end loop;
+                        end if;
                      end;
                   end loop;
                   Asked_Now := [others => False];
@@ -812,7 +856,7 @@ package body Driver.Robot.Boot is
                                        --  83, and no keyframe of it lay between; the fit had one level of that joint).
                                        Lost_Least (I) := Real'Min (Lost_Least (I), Levels (I) (Lost).Offset);
                                        if Followed_Most (I) > 0.0
-                                         and then (Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (P.Channel)
+                                         and then Halving_Tells (I, P.Channel)
                                        then
                                           Offset (I) := (Followed_Most (I) + Lost_Least (I)) / 2.0;
                                        else
@@ -837,7 +881,7 @@ package body Driver.Robot.Boot is
                                     --  servo's dead band) told nothing, and halving the same gap again asked it again
                                     --  for ever (robot.boot, 10-15: 530 passes of one level each, none followed).
                                     if Followed_Here
-                                      and then (Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (P.Channel)
+                                      and then Halving_Tells (I, P.Channel)
                                     then
                                        Offset (I) := (Followed_Most (I) + Lost_Least (I)) / 2.0;
                                     else

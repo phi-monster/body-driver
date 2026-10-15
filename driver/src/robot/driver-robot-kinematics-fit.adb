@@ -2319,7 +2319,7 @@ package body Driver.Robot.Kinematics.Fit is
       --  each time, and every such fit searched the focal length from nothing again and ordered the joints again:
       --  an arm fitted six times in one estimate, 7395 to 7403 sightings, 20 to 28 s of search each (f15w
       --  replayed on 10-15); the search's seconds were nearly half of all the fits'.
-      if From.Valid and then From.N = N then
+      if From.Valid and then From.N = N and then not From.Whole then
          Free (Pairs);
          Joints := From.Joints;
          Order := From.Chain;
@@ -2335,855 +2335,878 @@ package body Driver.Robot.Kinematics.Fit is
       ---------------------------------------------------------------------------
       --  Stage 1: every joint alone.
       Enter (1);
-      declare
-         Moving : Boolean := False;
-
-         --  The directions searched: a Fibonacci lattice on the sphere, as
-         --  dense as an icosahedron split four times (2562 points, about
-         --  four degrees apart), of which the half on one side: a direction
-         --  and its opposite are one axis, and the sign of the turn is
-         --  measured with its size (Planar_About).
-         Directions : constant Natural := 2562;
-         Sphere     : array (1 .. Directions) of Vec3;
-
-         --  A joint's sightings as lines of sight at one focal length, with
-         --  the joint's reading change at their keyframe, grouped by keyframe.
-         type Sight_Line is record
-            Frame   : Positive := 1;
-            Reading : Real := 0.0;
-            H0, H   : Vec3 := [0.0, 0.0, 1.0];
-         end record;
-         type Sight_Line_Array is array (Positive range <>) of Sight_Line;
-         type Sight_Line_Access is access Sight_Line_Array;
-         procedure Free is new Ada.Unchecked_Deallocation (Sight_Line_Array, Sight_Line_Access);
-         Lines : array (1 .. N) of Sight_Line_Access;
-         --  Every keyframe of the joint alone, at one focal length.
-         Every : array (1 .. N) of Sight_Line_Access;
-         --  Per joint, its sightings' pixel offsets from the lens centre, gathered once: a focal length only
-         --  scales them (Ray without distortion is (U - Cx) / F, (V - Cy) / F, 1). Prepare used to scan every
-         --  sighting once per joint, allocate and fill the lines anew and call Ray for each, at every focal
-         --  length the search tried: B0a_2 (x5, 10-13) tried about 190 in one fit and spent 224 s of the
-         --  fit's 194 s stage in Ray and that scan (15.5 million calls, the profile of its replay).
-         type Centred_Sighting is record
-            Frame   : Positive := 1;
-            Reading : Real := 0.0;
-            X0, Y0  : Real := 0.0;   --  the reference pixel less the centre
-            X1, Y1  : Real := 0.0;   --  the keyframe pixel less the centre
-            Wide    : Boolean := False;
-         end record;
-         type Centred_Array is array (Positive range <>) of Centred_Sighting;
-         type Centred_Access is access Centred_Array;
-         procedure Free is new Ada.Unchecked_Deallocation (Centred_Array, Centred_Access);
-         Centred   : array (1 .. N) of Centred_Access := [others => null];
-         Gathered  : Boolean := False;
-
-         --  The grid scores a joint on its widest turn each way: the keyframes
-         --  that tell its axis best. Its refinement, and the score it gives the
-         --  focal length, take every keyframe of the joint alone: turns of
-         --  many sizes, whose sizes trade with the focal length in the small
-         --  ones and not in the large (the image moves by the focal length
-         --  times a turn's tangent, not its angle).
-         Up_Frame, Down_Frame : array (1 .. N) of Natural := [others => 0];
-         Grid_Counts : array (1 .. N) of Natural := [others => 0];
-
-         --  How many sightings each keyframe has: one whose matches have not
-         --  come back yet (the newest, widest keyframe of a boot's refit) has
-         --  none, and is no widest one.
-         Seen_In : array (1 .. Frames) of Natural := [others => 0];
-
-         function Widest (Frame : Positive) return Boolean is
-           (Own_Joint (Frame) > 0
-            and then (Frame = Up_Frame (Own_Joint (Frame)) or else Frame = Down_Frame (Own_Joint (Frame))));
-
-         procedure Prepare (F : Real) is
-         begin
-            if not Gathered then
-               for J in 1 .. N loop
-                  Free (Lines (J));
-                  Free (Every (J));
-                  Lines (J) := new Sight_Line_Array (1 .. Grid_Counts (J));
-                  Every (J) := new Sight_Line_Array (1 .. Counts (J));
-                  Centred (J) := new Centred_Array (1 .. Counts (J));
-               end loop;
-               declare
-                  E : array (1 .. N) of Natural := [others => 0];
-               begin
-                  for X of Pairs.all loop
-                     if Own_Joint (X.Frame) in 1 .. N then
-                        declare
-                           J : constant Positive := Own_Joint (X.Frame);
-                        begin
-                           E (J) := E (J) + 1;
-                           Centred (J) (E (J)) :=
-                             (Frame => X.Frame, Reading => Own_Change (X.Frame, J),
-                              X0 => X.U0 - Lens0.Cx, Y0 => X.V0 - Lens0.Cy,
-                              X1 => X.U - Lens0.Cx, Y1 => X.V - Lens0.Cy, Wide => Widest (X.Frame));
-                        end;
-                     end if;
-                  end loop;
-               end;
-               Gathered := True;
-            end if;
-            for J in 1 .. N loop
-               declare
-                  K : Natural := 0;
-               begin
-                  for E in Centred (J)'Range loop
-                     declare
-                        C : Centred_Sighting renames Centred (J) (E);
-                     begin
-                        Every (J) (E) := (Frame => C.Frame, Reading => C.Reading,
-                                          H0 => [C.X0 / F, C.Y0 / F, 1.0], H => [C.X1 / F, C.Y1 / F, 1.0]);
-                        if C.Wide then
-                           K := K + 1;
-                           Lines (J) (K) := Every (J) (E);
-                        end if;
-                     end;
-                  end loop;
-               end;
-            end loop;
-         end Prepare;
-
-         type Best_Record is record
-            Score : Real := Real'Last;
-            W     : Vec3 := [0.0, 0.0, 1.0];
-            Phi   : Real := 0.0;
-            Scale : Real := 0.0;   --  the turn per reading unit
-         end record;
-         type Best_Array is array (1 .. N) of Best_Record;
-
-         --  The side of the eye the axis W lies on, the joint turning by Scale
-         --  per reading unit, solved in closed form (the epipolar constraint is
-         --  linear in the axis point), the constraints weighted to Sampson
-         --  residuals and by Huber at the noise of a first solution; the median
-         --  residual left.
-         procedure Best_Phi
-           (J : Positive; F : Real; W : Vec3; Scale : Real; Phi : out Real; Median_Px : out Real;
-            Ga, Gb, Wt, Rs : out Real_Array)
-         is
-            L      : Sight_Line_Array renames Lines (J).all;
-            K      : constant Natural := L'Length;
-            E1, E2 : Vec3;
-            C      : Real := 1.0;
-            Sn     : Real := 0.0;
-            R      : Mat3 := Identity3;
-            Last   : Natural := 0;
-         begin
-            Perp (W, E1, E2);
-            for I in 1 .. K loop
-               if L (I).Frame /= Last then
-                  Last := L (I).Frame;
-                  R := Rot (W, Scale * L (I).Reading);
-               end if;
-               declare
-                  Y  : constant Vec3 := Transpose (R) * L (I).H0;
-                  Yh : constant Vec3 := Cross (Y, L (I).H);
-                  Gv : constant Vec3 := Yh - R * Yh;
-               begin
-                  Ga (I) := Dot (Gv, E1);
-                  Gb (I) := Dot (Gv, E2);
-                  Wt (I) := (if Ga (I) ** 2 + Gb (I) ** 2 > 0.0 then 1.0 / (Ga (I) ** 2 + Gb (I) ** 2) else 0.0);
-               end;
-            end loop;
-            for Pass in 1 .. 2 loop
-               declare
-                  A11, A12, A22 : Real := 0.0;
-               begin
-                  for I in 1 .. K loop
-                     A11 := A11 + Wt (I) * Ga (I) * Ga (I);
-                     A12 := A12 + Wt (I) * Ga (I) * Gb (I);
-                     A22 := A22 + Wt (I) * Gb (I) * Gb (I);
-                  end loop;
-                  declare
-                     Spread : constant Real := Sqrt (Real'Max (0.0, ((A11 - A22) / 2.0) ** 2 + A12 ** 2));
-                     Least  : constant Real := (A11 + A22) / 2.0 - Spread;
-                     Vx, Vy : Real;
-                  begin
-                     if A12 /= 0.0 then
-                        Vx := A12;
-                        Vy := Least - A11;
-                     elsif A11 <= A22 then
-                        Vx := 1.0;
-                        Vy := 0.0;
-                     else
-                        Vx := 0.0;
-                        Vy := 1.0;
-                     end if;
-                     C := Vx / Sqrt (Vx ** 2 + Vy ** 2);
-                     Sn := Vy / Sqrt (Vx ** 2 + Vy ** 2);
-                  end;
-               end;
-               --  The axis point P: (C, Sn) is an eigenvector of a 2 by 2 system, its sign arbitrary. Which side
-               --  of the axis the eye is on is not told here: every residual is even in the translation P - R P
-               --  (Reprojected: the Sampson distance changes sign with it, and no penalty is charged behind the
-               --  vanishing point), so the two signs scored alike to the last bit and the first was always kept,
-               --  at twice the time (10-15). The points in front tell the side (after stage 4).
-               declare
-                  P : constant Vec3 := C * E1 + Sn * E2;
-                  --  The keyframe's motion, once a keyframe: its sightings are together.
-                  Rr : Mat3;
-                  Tt : Vec3;
-               begin
-                  Last := 0;
-                  for I in 1 .. K loop
-                     if L (I).Frame /= Last then
-                        Last := L (I).Frame;
-                        R := Rot (W, Scale * L (I).Reading);
-                        Relative (Identity, (Rotation => R, Translation => P - R * P), Rr, Tt);
-                     end if;
-                     Rs (I) := Reprojected (Rr, Tt, L (I).H0, L (I).H, F);
-                  end loop;
-               end;
-               if Pass = 1 then
-                  declare
-                     Sigma : constant Real := Noise_Of (Rs);
-                  begin
-                     for I in 1 .. K loop
-                        declare
-                           Algebraic : constant Real := C * Ga (I) + Sn * Gb (I);
-                        begin
-                           if Algebraic /= 0.0 and then Rs (I) /= 0.0 then
-                              Wt (I) := (Rs (I) / Algebraic) ** 2;
-                           end if;
-                           if Sigma > 0.0 then
-                              Wt (I) := Wt (I) * Huber (Rs (I) / Sigma);
-                           end if;
-                        end;
-                     end loop;
-                  end;
-               end if;
-            end loop;
-            Phi := Arctan (Sn, C);
-            for I in 1 .. K loop
-               Rs (I) := abs Rs (I);
-            end loop;
-            Median_Px := Driver.Stats.Median (Rs);
-         end Best_Phi;
-
-         --  How well joint J's widest keyframes are each a turn about the
-         --  direction W and a shift across it, at focal length F, and how far
-         --  the joint turns per reading unit about W: no reading is taken to be
-         --  in any unit, and the direction is judged before any turn is tied to
-         --  the readings. About W, in a frame whose third axis is W, the
-         --  essential matrix of such a motion has four entries, (A, B) down its
-         --  last column and (E, F) along its last row, (E, F) being (A, B)
-         --  turned by the keyframe's turn and reversed, and the epipolar
-         --  constraint is linear in the four. They are the least squares of the
-         --  keyframe's sightings, weighted to Sampson residuals and by Huber at
-         --  the noise of a first solution, as Best_Phi weights its own; the
-         --  turn is the angle from (A, B) to -(E, F). Score is the median
-         --  Sampson residual of the sightings under their keyframe's motion
-         --  (Real'Last when no keyframe's is told), Scale the least squares of
-         --  the turns over the reading changes: 0 when no keyframe's turn is
-         --  told (fewer sightings than the three a motion about W has, or none
-         --  of the four entries' pairs is nonzero).
-         procedure Planar_About
-           (J : Positive; F : Real; W : Vec3; Wt, Rs, Fits : in out Real_Array; Scale, Score : out Real)
-         is
-            L      : Sight_Line_Array renames Lines (J).all;
-            K      : constant Natural := L'Length;
-            E1, E2 : Vec3;
-            Num, Den : Real := 0.0;
-            Filled   : Natural := 0;   --  residuals in Fits
-            --  Per way (the turn up, the turn down): whether its frame's motion was told, the frame, its rotation
-            --  and its translation before the sign is chosen.
-            Told_Of  : array (1 .. 2) of Boolean := [others => False];
-            Frame_Of : array (1 .. 2) of Natural := [others => 0];
-            Rr_Of    : array (1 .. 2) of Mat3;
-            T0_Of    : array (1 .. 2) of Vec3;
-
-            --  The sighting's row of the constraint: its lines of sight in the frame of W.
-            type Four is array (1 .. 4) of Real;
-            function Row (I : Positive) return Four is
-               H0 : constant Vec3 := [Dot (E1, L (I).H0), Dot (E2, L (I).H0), Dot (W, L (I).H0)];
-               H  : constant Vec3 := [Dot (E1, L (I).H), Dot (E2, L (I).H), Dot (W, L (I).H)];
+      if From.Valid and then From.N = N and then From.Whole then
+         --  Begun from the arm's fit of an estimate before this one: the search's result is that fit's joints, each
+         --  axis with the side of the eye it lies on, and its lens; the stages after the search run on these
+         --  sightings as ever, the order searched again (stage 4) and the focal length's profile walked (stage 5).
+         --  Every estimate searched the focal length from nothing again: f16b's arm 1, 160 keyframes, 131 to 197 s a
+         --  fit under the boot's load, and the sweep held still through 2700 of the 3000 beats of each pass.
+         Lens0 := (Fx | Fy => Sqrt (From.L.Fx * From.L.Fy), Cx => From.L.Cx, Cy => From.L.Cy, others => 0.0);
+         Focal_Within := From.Focal_Within;
+         Searched_Least := From.Searched_Least;
+         Searched_Most := From.Searched_Most;
+         for J in 1 .. N loop
+            declare
+               Was  : Joint renames From.Joints (From.Joints'First + J - 1);
+               Side : constant Vec3 := Was.P - Dot (Was.P, Was.W) * Was.W;
+               E1, E2 : Vec3;
             begin
-               return [H (1) * H0 (3), H (2) * H0 (3), H (3) * H0 (1), H (3) * H0 (2)];
-            end Row;
+               Perp (Was.W, E1, E2);
+               Joints (Joints'First + J - 1) :=
+                 (W => Was.W, P => (if Dot (Side, Side) > 0.0 then Unit (Side) else E1), C => Was.C, Slide => Was.Slide);
+            end;
+         end loop;
+      else
+         declare
+            Moving : Boolean := False;
 
-            function Turn_Of (V : Real_Vector) return Real is
-              (Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));
+            --  The directions searched: a Fibonacci lattice on the sphere, as
+            --  dense as an icosahedron split four times (2562 points, about
+            --  four degrees apart), of which the half on one side: a direction
+            --  and its opposite are one axis, and the sign of the turn is
+            --  measured with its size (Planar_About).
+            Directions : constant Natural := 2562;
+            Sphere     : array (1 .. Directions) of Vec3;
 
-            --  The translation's sign: V is an eigenvector, its sign arbitrary; the turn is even in V and the
-            --  translation odd. No sign is chosen: every residual here is even in the translation (Best_Phi says
-            --  why), and the sums that chose one, a bit a frame and then a bit a joint (10-14), came out equal to
-            --  the last bit and never chose (10-15).
-         begin
-            Perp (W, E1, E2);
-            for Way in 1 .. 2 loop
-               if (if Way = 1 then Up_Frame (J) else Down_Frame (J)) > 0 then
+            --  A joint's sightings as lines of sight at one focal length, with
+            --  the joint's reading change at their keyframe, grouped by keyframe.
+            type Sight_Line is record
+               Frame   : Positive := 1;
+               Reading : Real := 0.0;
+               H0, H   : Vec3 := [0.0, 0.0, 1.0];
+            end record;
+            type Sight_Line_Array is array (Positive range <>) of Sight_Line;
+            type Sight_Line_Access is access Sight_Line_Array;
+            procedure Free is new Ada.Unchecked_Deallocation (Sight_Line_Array, Sight_Line_Access);
+            Lines : array (1 .. N) of Sight_Line_Access;
+            --  Every keyframe of the joint alone, at one focal length.
+            Every : array (1 .. N) of Sight_Line_Access;
+            --  Per joint, its sightings' pixel offsets from the lens centre, gathered once: a focal length only
+            --  scales them (Ray without distortion is (U - Cx) / F, (V - Cy) / F, 1). Prepare used to scan every
+            --  sighting once per joint, allocate and fill the lines anew and call Ray for each, at every focal
+            --  length the search tried: B0a_2 (x5, 10-13) tried about 190 in one fit and spent 224 s of the
+            --  fit's 194 s stage in Ray and that scan (15.5 million calls, the profile of its replay).
+            type Centred_Sighting is record
+               Frame   : Positive := 1;
+               Reading : Real := 0.0;
+               X0, Y0  : Real := 0.0;   --  the reference pixel less the centre
+               X1, Y1  : Real := 0.0;   --  the keyframe pixel less the centre
+               Wide    : Boolean := False;
+            end record;
+            type Centred_Array is array (Positive range <>) of Centred_Sighting;
+            type Centred_Access is access Centred_Array;
+            procedure Free is new Ada.Unchecked_Deallocation (Centred_Array, Centred_Access);
+            Centred   : array (1 .. N) of Centred_Access := [others => null];
+            Gathered  : Boolean := False;
+
+            --  The grid scores a joint on its widest turn each way: the keyframes
+            --  that tell its axis best. Its refinement, and the score it gives the
+            --  focal length, take every keyframe of the joint alone: turns of
+            --  many sizes, whose sizes trade with the focal length in the small
+            --  ones and not in the large (the image moves by the focal length
+            --  times a turn's tangent, not its angle).
+            Up_Frame, Down_Frame : array (1 .. N) of Natural := [others => 0];
+            Grid_Counts : array (1 .. N) of Natural := [others => 0];
+
+            --  How many sightings each keyframe has: one whose matches have not
+            --  come back yet (the newest, widest keyframe of a boot's refit) has
+            --  none, and is no widest one.
+            Seen_In : array (1 .. Frames) of Natural := [others => 0];
+
+            function Widest (Frame : Positive) return Boolean is
+              (Own_Joint (Frame) > 0
+               and then (Frame = Up_Frame (Own_Joint (Frame)) or else Frame = Down_Frame (Own_Joint (Frame))));
+
+            procedure Prepare (F : Real) is
+            begin
+               if not Gathered then
+                  for J in 1 .. N loop
+                     Free (Lines (J));
+                     Free (Every (J));
+                     Lines (J) := new Sight_Line_Array (1 .. Grid_Counts (J));
+                     Every (J) := new Sight_Line_Array (1 .. Counts (J));
+                     Centred (J) := new Centred_Array (1 .. Counts (J));
+                  end loop;
                   declare
-                     Frame : constant Positive := (if Way = 1 then Up_Frame (J) else Down_Frame (J));
-                     V     : Real_Vector (1 .. 4) := [others => 0.0];
-                     Count : Natural := 0;
-                     Told  : Boolean := False;
-                     Change_Here : Real := 0.0;
+                     E : array (1 .. N) of Natural := [others => 0];
                   begin
-                     for I in 1 .. K loop
-                        if L (I).Frame = Frame then
-                           Wt (I) := 1.0;
-                           Count := Count + 1;
-                           Change_Here := L (I).Reading;
+                     for X of Pairs.all loop
+                        if Own_Joint (X.Frame) in 1 .. N then
+                           declare
+                              J : constant Positive := Own_Joint (X.Frame);
+                           begin
+                              E (J) := E (J) + 1;
+                              Centred (J) (E (J)) :=
+                                (Frame => X.Frame, Reading => Own_Change (X.Frame, J),
+                                 X0 => X.U0 - Lens0.Cx, Y0 => X.V0 - Lens0.Cy,
+                                 X1 => X.U - Lens0.Cx, Y1 => X.V - Lens0.Cy, Wide => Widest (X.Frame));
+                           end;
                         end if;
                      end loop;
-                     if Count >= 3 then
-                        for Pass in 1 .. 2 loop
+                  end;
+                  Gathered := True;
+               end if;
+               for J in 1 .. N loop
+                  declare
+                     K : Natural := 0;
+                  begin
+                     for E in Centred (J)'Range loop
+                        declare
+                           C : Centred_Sighting renames Centred (J) (E);
+                        begin
+                           Every (J) (E) := (Frame => C.Frame, Reading => C.Reading,
+                                             H0 => [C.X0 / F, C.Y0 / F, 1.0], H => [C.X1 / F, C.Y1 / F, 1.0]);
+                           if C.Wide then
+                              K := K + 1;
+                              Lines (J) (K) := Every (J) (E);
+                           end if;
+                        end;
+                     end loop;
+                  end;
+               end loop;
+            end Prepare;
+
+            type Best_Record is record
+               Score : Real := Real'Last;
+               W     : Vec3 := [0.0, 0.0, 1.0];
+               Phi   : Real := 0.0;
+               Scale : Real := 0.0;   --  the turn per reading unit
+            end record;
+            type Best_Array is array (1 .. N) of Best_Record;
+
+            --  The side of the eye the axis W lies on, the joint turning by Scale
+            --  per reading unit, solved in closed form (the epipolar constraint is
+            --  linear in the axis point), the constraints weighted to Sampson
+            --  residuals and by Huber at the noise of a first solution; the median
+            --  residual left.
+            procedure Best_Phi
+              (J : Positive; F : Real; W : Vec3; Scale : Real; Phi : out Real; Median_Px : out Real;
+               Ga, Gb, Wt, Rs : out Real_Array)
+            is
+               L      : Sight_Line_Array renames Lines (J).all;
+               K      : constant Natural := L'Length;
+               E1, E2 : Vec3;
+               C      : Real := 1.0;
+               Sn     : Real := 0.0;
+               R      : Mat3 := Identity3;
+               Last   : Natural := 0;
+            begin
+               Perp (W, E1, E2);
+               for I in 1 .. K loop
+                  if L (I).Frame /= Last then
+                     Last := L (I).Frame;
+                     R := Rot (W, Scale * L (I).Reading);
+                  end if;
+                  declare
+                     Y  : constant Vec3 := Transpose (R) * L (I).H0;
+                     Yh : constant Vec3 := Cross (Y, L (I).H);
+                     Gv : constant Vec3 := Yh - R * Yh;
+                  begin
+                     Ga (I) := Dot (Gv, E1);
+                     Gb (I) := Dot (Gv, E2);
+                     Wt (I) := (if Ga (I) ** 2 + Gb (I) ** 2 > 0.0 then 1.0 / (Ga (I) ** 2 + Gb (I) ** 2) else 0.0);
+                  end;
+               end loop;
+               for Pass in 1 .. 2 loop
+                  declare
+                     A11, A12, A22 : Real := 0.0;
+                  begin
+                     for I in 1 .. K loop
+                        A11 := A11 + Wt (I) * Ga (I) * Ga (I);
+                        A12 := A12 + Wt (I) * Ga (I) * Gb (I);
+                        A22 := A22 + Wt (I) * Gb (I) * Gb (I);
+                     end loop;
+                     declare
+                        Spread : constant Real := Sqrt (Real'Max (0.0, ((A11 - A22) / 2.0) ** 2 + A12 ** 2));
+                        Least  : constant Real := (A11 + A22) / 2.0 - Spread;
+                        Vx, Vy : Real;
+                     begin
+                        if A12 /= 0.0 then
+                           Vx := A12;
+                           Vy := Least - A11;
+                        elsif A11 <= A22 then
+                           Vx := 1.0;
+                           Vy := 0.0;
+                        else
+                           Vx := 0.0;
+                           Vy := 1.0;
+                        end if;
+                        C := Vx / Sqrt (Vx ** 2 + Vy ** 2);
+                        Sn := Vy / Sqrt (Vx ** 2 + Vy ** 2);
+                     end;
+                  end;
+                  --  The axis point P: (C, Sn) is an eigenvector of a 2 by 2 system, its sign arbitrary. Which side
+                  --  of the axis the eye is on is not told here: every residual is even in the translation P - R P
+                  --  (Reprojected: the Sampson distance changes sign with it, and no penalty is charged behind the
+                  --  vanishing point), so the two signs scored alike to the last bit and the first was always kept,
+                  --  at twice the time (10-15). The points in front tell the side (after stage 4).
+                  declare
+                     P : constant Vec3 := C * E1 + Sn * E2;
+                     --  The keyframe's motion, once a keyframe: its sightings are together.
+                     Rr : Mat3;
+                     Tt : Vec3;
+                  begin
+                     Last := 0;
+                     for I in 1 .. K loop
+                        if L (I).Frame /= Last then
+                           Last := L (I).Frame;
+                           R := Rot (W, Scale * L (I).Reading);
+                           Relative (Identity, (Rotation => R, Translation => P - R * P), Rr, Tt);
+                        end if;
+                        Rs (I) := Reprojected (Rr, Tt, L (I).H0, L (I).H, F);
+                     end loop;
+                  end;
+                  if Pass = 1 then
+                     declare
+                        Sigma : constant Real := Noise_Of (Rs);
+                     begin
+                        for I in 1 .. K loop
                            declare
-                              A       : Real_Matrix (1 .. 4, 1 .. 4) := [others => [others => 0.0]];
-                              Values  : Real_Vector (1 .. 4);
-                              Vectors : Real_Matrix (1 .. 4, 1 .. 4);
-                              Least   : Positive := 1;
+                              Algebraic : constant Real := C * Ga (I) + Sn * Gb (I);
                            begin
-                              for I in 1 .. K loop
-                                 if L (I).Frame = Frame then
-                                    declare
-                                       G : constant Four := Row (I);
-                                    begin
-                                       for P in 1 .. 4 loop
-                                          for Q in P .. 4 loop
-                                             A (P, Q) := A (P, Q) + Wt (I) * G (P) * G (Q);
-                                          end loop;
-                                       end loop;
-                                    end;
-                                 end if;
-                              end loop;
-                              --  Symmetric to the last bit, as Eigensystem asks: its lower half the upper's.
-                              for P in 2 .. 4 loop
-                                 for Q in 1 .. P - 1 loop
-                                    A (P, Q) := A (Q, P);
-                                 end loop;
-                              end loop;
-                              Eigensystem (A, Values, Vectors);
-                              for P in 2 .. 4 loop
-                                 if Values (P) < Values (Least) then
-                                    Least := P;
-                                 end if;
-                              end loop;
-                              V := [for P in 1 .. 4 => Vectors (P, Least)];
-                              Told := V (1) ** 2 + V (2) ** 2 > 0.0 and then V (3) ** 2 + V (4) ** 2 > 0.0;
-                              exit when not Told or else Pass = 2;
-                              --  The weights for the second solution, from the motion of the first.
+                              if Algebraic /= 0.0 and then Rs (I) /= 0.0 then
+                                 Wt (I) := (Rs (I) / Algebraic) ** 2;
+                              end if;
+                              if Sigma > 0.0 then
+                                 Wt (I) := Wt (I) * Huber (Rs (I) / Sigma);
+                              end if;
+                           end;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+               Phi := Arctan (Sn, C);
+               for I in 1 .. K loop
+                  Rs (I) := abs Rs (I);
+               end loop;
+               Median_Px := Driver.Stats.Median (Rs);
+            end Best_Phi;
+
+            --  How well joint J's widest keyframes are each a turn about the
+            --  direction W and a shift across it, at focal length F, and how far
+            --  the joint turns per reading unit about W: no reading is taken to be
+            --  in any unit, and the direction is judged before any turn is tied to
+            --  the readings. About W, in a frame whose third axis is W, the
+            --  essential matrix of such a motion has four entries, (A, B) down its
+            --  last column and (E, F) along its last row, (E, F) being (A, B)
+            --  turned by the keyframe's turn and reversed, and the epipolar
+            --  constraint is linear in the four. They are the least squares of the
+            --  keyframe's sightings, weighted to Sampson residuals and by Huber at
+            --  the noise of a first solution, as Best_Phi weights its own; the
+            --  turn is the angle from (A, B) to -(E, F). Score is the median
+            --  Sampson residual of the sightings under their keyframe's motion
+            --  (Real'Last when no keyframe's is told), Scale the least squares of
+            --  the turns over the reading changes: 0 when no keyframe's turn is
+            --  told (fewer sightings than the three a motion about W has, or none
+            --  of the four entries' pairs is nonzero).
+            procedure Planar_About
+              (J : Positive; F : Real; W : Vec3; Wt, Rs, Fits : in out Real_Array; Scale, Score : out Real)
+            is
+               L      : Sight_Line_Array renames Lines (J).all;
+               K      : constant Natural := L'Length;
+               E1, E2 : Vec3;
+               Num, Den : Real := 0.0;
+               Filled   : Natural := 0;   --  residuals in Fits
+               --  Per way (the turn up, the turn down): whether its frame's motion was told, the frame, its rotation
+               --  and its translation before the sign is chosen.
+               Told_Of  : array (1 .. 2) of Boolean := [others => False];
+               Frame_Of : array (1 .. 2) of Natural := [others => 0];
+               Rr_Of    : array (1 .. 2) of Mat3;
+               T0_Of    : array (1 .. 2) of Vec3;
+
+               --  The sighting's row of the constraint: its lines of sight in the frame of W.
+               type Four is array (1 .. 4) of Real;
+               function Row (I : Positive) return Four is
+                  H0 : constant Vec3 := [Dot (E1, L (I).H0), Dot (E2, L (I).H0), Dot (W, L (I).H0)];
+                  H  : constant Vec3 := [Dot (E1, L (I).H), Dot (E2, L (I).H), Dot (W, L (I).H)];
+               begin
+                  return [H (1) * H0 (3), H (2) * H0 (3), H (3) * H0 (1), H (3) * H0 (2)];
+               end Row;
+
+               function Turn_Of (V : Real_Vector) return Real is
+                 (Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));
+
+               --  The translation's sign: V is an eigenvector, its sign arbitrary; the turn is even in V and the
+               --  translation odd. No sign is chosen: every residual here is even in the translation (Best_Phi says
+               --  why), and the sums that chose one, a bit a frame and then a bit a joint (10-14), came out equal to
+               --  the last bit and never chose (10-15).
+            begin
+               Perp (W, E1, E2);
+               for Way in 1 .. 2 loop
+                  if (if Way = 1 then Up_Frame (J) else Down_Frame (J)) > 0 then
+                     declare
+                        Frame : constant Positive := (if Way = 1 then Up_Frame (J) else Down_Frame (J));
+                        V     : Real_Vector (1 .. 4) := [others => 0.0];
+                        Count : Natural := 0;
+                        Told  : Boolean := False;
+                        Change_Here : Real := 0.0;
+                     begin
+                        for I in 1 .. K loop
+                           if L (I).Frame = Frame then
+                              Wt (I) := 1.0;
+                              Count := Count + 1;
+                              Change_Here := L (I).Reading;
+                           end if;
+                        end loop;
+                        if Count >= 3 then
+                           for Pass in 1 .. 2 loop
                               declare
-                                 Turn : constant Real := Turn_Of (V);
-                                 Rr   : constant Mat3 := Rot (W, -Turn);
-                                 Tt   : constant Vec3 := (-V (2)) * E1 + V (1) * E2;
-                                 M    : Natural := 0;
-                                 Du, Dv : Real_Array (1 .. K);
+                                 A       : Real_Matrix (1 .. 4, 1 .. 4) := [others => [others => 0.0]];
+                                 Values  : Real_Vector (1 .. 4);
+                                 Vectors : Real_Matrix (1 .. 4, 1 .. 4);
+                                 Least   : Positive := 1;
                               begin
                                  for I in 1 .. K loop
                                     if L (I).Frame = Frame then
-                                       M := M + 1;
-                                       Reprojected (Rr, Tt, L (I).H0, L (I).H, F, Du (M), Dv (M));
+                                       declare
+                                          G : constant Four := Row (I);
+                                       begin
+                                          for P in 1 .. 4 loop
+                                             for Q in P .. 4 loop
+                                                A (P, Q) := A (P, Q) + Wt (I) * G (P) * G (Q);
+                                             end loop;
+                                          end loop;
+                                       end;
                                     end if;
                                  end loop;
-                                 Share_Out (Du (1 .. M));
-                                 for Q in 1 .. M loop
-                                    Rs (Q) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
+                                 --  Symmetric to the last bit, as Eigensystem asks: its lower half the upper's.
+                                 for P in 2 .. 4 loop
+                                    for Q in 1 .. P - 1 loop
+                                       A (P, Q) := A (Q, P);
+                                    end loop;
                                  end loop;
+                                 Eigensystem (A, Values, Vectors);
+                                 for P in 2 .. 4 loop
+                                    if Values (P) < Values (Least) then
+                                       Least := P;
+                                    end if;
+                                 end loop;
+                                 V := [for P in 1 .. 4 => Vectors (P, Least)];
+                                 Told := V (1) ** 2 + V (2) ** 2 > 0.0 and then V (3) ** 2 + V (4) ** 2 > 0.0;
+                                 exit when not Told or else Pass = 2;
+                                 --  The weights for the second solution, from the motion of the first.
                                  declare
-                                    Sigma : constant Real := Noise_Of (Rs (1 .. M));
+                                    Turn : constant Real := Turn_Of (V);
+                                    Rr   : constant Mat3 := Rot (W, -Turn);
+                                    Tt   : constant Vec3 := (-V (2)) * E1 + V (1) * E2;
+                                    M    : Natural := 0;
+                                    Du, Dv : Real_Array (1 .. K);
                                  begin
-                                    M := 0;
                                     for I in 1 .. K loop
                                        if L (I).Frame = Frame then
                                           M := M + 1;
-                                          declare
-                                             G         : constant Four := Row (I);
-                                             Algebraic : constant Real := G (1) * V (1) + G (2) * V (2) + G (3) * V (3)
-                                                                          + G (4) * V (4);
-                                          begin
-                                             if Algebraic /= 0.0 and then Rs (M) /= 0.0 then
-                                                Wt (I) := (Rs (M) / Algebraic) ** 2;
-                                             end if;
-                                             if Sigma > 0.0 then
-                                                Wt (I) := Wt (I) * Huber (Rs (M) / Sigma);
-                                             end if;
-                                          end;
+                                          Reprojected (Rr, Tt, L (I).H0, L (I).H, F, Du (M), Dv (M));
                                        end if;
                                     end loop;
+                                    Share_Out (Du (1 .. M));
+                                    for Q in 1 .. M loop
+                                       Rs (Q) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
+                                    end loop;
+                                    declare
+                                       Sigma : constant Real := Noise_Of (Rs (1 .. M));
+                                    begin
+                                       M := 0;
+                                       for I in 1 .. K loop
+                                          if L (I).Frame = Frame then
+                                             M := M + 1;
+                                             declare
+                                                G         : constant Four := Row (I);
+                                                Algebraic : constant Real := G (1) * V (1) + G (2) * V (2) + G (3) * V (3)
+                                                                             + G (4) * V (4);
+                                             begin
+                                                if Algebraic /= 0.0 and then Rs (M) /= 0.0 then
+                                                   Wt (I) := (Rs (M) / Algebraic) ** 2;
+                                                end if;
+                                                if Sigma > 0.0 then
+                                                   Wt (I) := Wt (I) * Huber (Rs (M) / Sigma);
+                                                end if;
+                                             end;
+                                          end if;
+                                       end loop;
+                                    end;
                                  end;
                               end;
+                           end loop;
+                        end if;
+                        if Told then
+                           Num := Num + Turn_Of (V) * Change_Here;
+                           Den := Den + Change_Here ** 2;
+                           Told_Of (Way) := True;
+                           Frame_Of (Way) := Frame;
+                           Rr_Of (Way) := Rot (W, -Turn_Of (V));
+                           T0_Of (Way) := (-V (2)) * E1 + V (1) * E2;
+                        end if;
+                     end;
+                  end if;
+               end loop;
+               --  Each way's residuals under its translation, shared out, are its frame's fits.
+               for Way in 1 .. 2 loop
+                  if Told_Of (Way) then
+                     declare
+                        Du, Dv : Real_Array (1 .. K);
+                        M      : Natural := 0;
+                     begin
+                        for I in 1 .. K loop
+                           if L (I).Frame = Frame_Of (Way) then
+                              M := M + 1;
+                              Reprojected (Rr_Of (Way), T0_Of (Way), L (I).H0, L (I).H, F, Du (M), Dv (M));
+                           end if;
+                        end loop;
+                        Share_Out (Du (1 .. M));
+                        for Q in 1 .. M loop
+                           Filled := Filled + 1;
+                           Fits (Filled) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+               Scale := (if Den > 0.0 then Num / Den else 0.0);
+               Score := (if Filled > 0 then Driver.Stats.Median (Fits (1 .. Filled)) else Real'Last);
+            end Planar_About;
+
+            --  The best direction of the grid refined, its tilt, its side and the size of its turn per
+            --  reading unit, by robust least squares on every sighting of joint J alone at focal length F,
+            --  whose median residual scores it: the grid is four degrees apart, and with the turn measured
+            --  about each direction its best score jumps from one focal length to the next as much as it
+            --  changes with them, which a search of the focal length cannot follow (A93's left arm, its
+            --  readings drawn: the search ended at a focal length of 118 pixels of 400).
+            --
+            --  A procedure of its own, not a block of the scanner task: the fit's Evaluate reads the
+            --  sightings' count and the start of the search from the frame around it, and built with
+            --  AddressSanitizer a task body's frame had that count poisoned by the time Evaluate read it
+            --  (robot.body.plan, .file, .method: "unknown-crash" at the count's four bytes), which the
+            --  same construct in a plain procedure never showed (the three other instances of Robust_Fit).
+            procedure Refine (J : Positive; F : Real; Result : in out Best_Record) is
+               L      : Sight_Line_Array renames Every (J).all;
+               M      : constant Positive := L'Length;
+               Rm     : Real_Access := new Real_Array (1 .. 2 * M);   --  two residuals a sighting (Reprojected)
+               W0     : constant Vec3 := Result.W;
+               Sign   : constant Real := (if Result.Scale < 0.0 then -1.0 else 1.0);
+               E1, E2 : Vec3;
+
+               function W_Of (X : Real_Array) return Vec3 is (Unit (W0 + X (1) * E1 + X (2) * E2));
+
+               procedure Evaluate (X : Real_Array; R : out Real_Array) is
+                  W      : constant Vec3 := W_Of (X);
+                  C      : constant Real := Sign * Exp (X (4));
+                  F1, F2 : Vec3;
+                  P      : Vec3;
+                  Rj     : Mat3 := Identity3;
+                  Last   : Natural := 0;
+                  Rr     : Mat3;
+                  Tt     : Vec3;
+               begin
+                  Perp (W, F1, F2);
+                  P := Cos (X (3)) * F1 + Sin (X (3)) * F2;
+                  for I in L'Range loop
+                     if L (I).Frame /= Last then
+                        Last := L (I).Frame;
+                        Rj := Rot (W, C * L (I).Reading);
+                     end if;
+                     Relative (Identity, (Rotation => Rj, Translation => P - Rj * P), Rr, Tt);
+                     Reprojected (Rr, Tt, L (I).H0, L (I).H, F,
+                                  R (R'First + 2 * (I - L'First)), R (R'First + 2 * (I - L'First) + 1));
+                  end loop;
+                  --  Less what each keyframe's sightings share (Share_Out); the sightings come grouped by keyframe.
+                  declare
+                     From : Positive := L'First;
+                  begin
+                     while From <= L'Last loop
+                        declare
+                           To : Positive := From;
+                        begin
+                           while To < L'Last and then L (To + 1).Frame = L (From).Frame loop
+                              To := To + 1;
+                           end loop;
+                           declare
+                              Du, Dv : Real_Array (1 .. To - From + 1);
+                           begin
+                              for I in From .. To loop
+                                 Du (I - From + 1) := R (R'First + 2 * (I - L'First));
+                                 Dv (I - From + 1) := R (R'First + 2 * (I - L'First) + 1);
+                              end loop;
+                              Share_Out (Du);
+                              for I in From .. To loop
+                                 R (R'First + 2 * (I - L'First)) := Du (I - From + 1);
+                                 R (R'First + 2 * (I - L'First) + 1) := Dv (I - From + 1);
+                              end loop;
+                           end;
+                           From := To + 1;
+                        end;
+                     end loop;
+                  end;
+               end Evaluate;
+
+               procedure Solve is new Robust_Fit (4, 2 * M, Driver.Conventions.Initial_Damping, Evaluate);
+               X : Real_Array (1 .. 4) := [0.0, 0.0, Result.Phi, Ln (abs Result.Scale)];
+            begin
+               Perp (W0, E1, E2);
+               Evaluate (X, Rm.all);
+               Solve (X, Noise_Of (Rm.all));
+               Evaluate (X, Rm.all);
+               declare
+                  Norms : Real_Array (1 .. M);
+               begin
+                  for I in 1 .. M loop
+                     Norms (I) := Sqrt (Rm (2 * I - 1) ** 2 + Rm (2 * I) ** 2);
+                  end loop;
+                  Result := (Score => Driver.Stats.Median (Norms), W => W_Of (X), Phi => X (3),
+                             Scale => Sign * Exp (X (4)));
+               end;
+               Free (Rm);
+            end Refine;
+
+            --  Every joint's best direction at focal length F, the joints scanned
+            --  at once, one task each: their sightings are their own.
+            Searches        : Natural := 0;          --  focal lengths tried, for the log
+            F_Least, F_Most : Real := 0.0;           --  the least and the most of them, px
+            Warm            : Best_Array;            --  per joint: its axis at the focal length tried before
+            Warm_Angle      : array (1 .. N) of Real := [others => -1.0];   --  per joint, this search: see Scanner
+            Warm_Better     : array (1 .. N) of Boolean := [others => False];
+            Warm_Tries, Warm_Wins : Natural := 0;    --  over the searches, for the log
+            Warm_Far        : Real := 0.0;           --  the farthest a warm start lay from the scan, radians
+            Trace           : Ada.Strings.Unbounded.Unbounded_String;   --  every focal length tried and its score
+
+            procedure Search (F : Real; Best : out Best_Array) is
+            begin
+               Searches := Searches + 1;
+               F_Least := (if Searches = 1 then F else Real'Min (F_Least, F));
+               F_Most := Real'Max (F_Most, F);
+               Prepare (F);
+               declare
+                  task type Scanner is
+                     entry Start (Joint : Positive);
+                  end Scanner;
+
+                  task body Scanner is
+                     J      : Positive := 1;
+                     Result : Best_Record;
+                  begin
+                     accept Start (Joint : Positive) do
+                        J := Joint;
+                     end Start;
+                     declare
+                        K  : constant Natural := Lines (J)'Length;
+                        Ga : Real_Access := new Real_Array (1 .. K);
+                        Gb : Real_Access := new Real_Array (1 .. K);
+                        Wt : Real_Access := new Real_Array (1 .. K);
+                        Rs : Real_Access := new Real_Array (1 .. K);
+                        Fs : Real_Access := new Real_Array (1 .. K);
+                     begin
+                        --  The axis: the direction about which the widest keyframes are each most nearly a turn and a
+                        --  shift across it, their turns free; then its scale, and its side at that scale.
+                        for D of Sphere (1 .. Directions / 2) loop
+                           declare
+                              Sc, Sd : Real;
+                           begin
+                              Planar_About (J, F, D, Wt.all, Rs.all, Fs.all, Sc, Sd);
+                              if Sc /= 0.0 and then Sd < Result.Score then
+                                 Result := (Score => Sd, W => D, Phi => 0.0, Scale => Sc);
+                              end if;
                            end;
                         end loop;
-                     end if;
-                     if Told then
-                        Num := Num + Turn_Of (V) * Change_Here;
-                        Den := Den + Change_Here ** 2;
-                        Told_Of (Way) := True;
-                        Frame_Of (Way) := Frame;
-                        Rr_Of (Way) := Rot (W, -Turn_Of (V));
-                        T0_Of (Way) := (-V (2)) * E1 + V (1) * E2;
-                     end if;
-                  end;
-               end if;
-            end loop;
-            --  Each way's residuals under its translation, shared out, are its frame's fits.
-            for Way in 1 .. 2 loop
-               if Told_Of (Way) then
-                  declare
-                     Du, Dv : Real_Array (1 .. K);
-                     M      : Natural := 0;
-                  begin
-                     for I in 1 .. K loop
-                        if L (I).Frame = Frame_Of (Way) then
-                           M := M + 1;
-                           Reprojected (Rr_Of (Way), T0_Of (Way), L (I).H0, L (I).H, F, Du (M), Dv (M));
+                        if Result.Scale /= 0.0 then
+                           declare
+                              Ph, Md : Real;
+                           begin
+                              Best_Phi (J, F, Result.W, Result.Scale, Ph, Md, Ga.all, Gb.all, Wt.all, Rs.all);
+                              Result.Phi := Ph;
+                              Result.Score := Md;
+                           end;
                         end if;
-                     end loop;
-                     Share_Out (Du (1 .. M));
-                     for Q in 1 .. M loop
-                        Filled := Filled + 1;
-                        Fits (Filled) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
-                     end loop;
-                  end;
-               end if;
-            end loop;
-            Scale := (if Den > 0.0 then Num / Den else 0.0);
-            Score := (if Filled > 0 then Driver.Stats.Median (Fits (1 .. Filled)) else Real'Last);
-         end Planar_About;
-
-         --  The best direction of the grid refined, its tilt, its side and the size of its turn per
-         --  reading unit, by robust least squares on every sighting of joint J alone at focal length F,
-         --  whose median residual scores it: the grid is four degrees apart, and with the turn measured
-         --  about each direction its best score jumps from one focal length to the next as much as it
-         --  changes with them, which a search of the focal length cannot follow (A93's left arm, its
-         --  readings drawn: the search ended at a focal length of 118 pixels of 400).
-         --
-         --  A procedure of its own, not a block of the scanner task: the fit's Evaluate reads the
-         --  sightings' count and the start of the search from the frame around it, and built with
-         --  AddressSanitizer a task body's frame had that count poisoned by the time Evaluate read it
-         --  (robot.body.plan, .file, .method: "unknown-crash" at the count's four bytes), which the
-         --  same construct in a plain procedure never showed (the three other instances of Robust_Fit).
-         procedure Refine (J : Positive; F : Real; Result : in out Best_Record) is
-            L      : Sight_Line_Array renames Every (J).all;
-            M      : constant Positive := L'Length;
-            Rm     : Real_Access := new Real_Array (1 .. 2 * M);   --  two residuals a sighting (Reprojected)
-            W0     : constant Vec3 := Result.W;
-            Sign   : constant Real := (if Result.Scale < 0.0 then -1.0 else 1.0);
-            E1, E2 : Vec3;
-
-            function W_Of (X : Real_Array) return Vec3 is (Unit (W0 + X (1) * E1 + X (2) * E2));
-
-            procedure Evaluate (X : Real_Array; R : out Real_Array) is
-               W      : constant Vec3 := W_Of (X);
-               C      : constant Real := Sign * Exp (X (4));
-               F1, F2 : Vec3;
-               P      : Vec3;
-               Rj     : Mat3 := Identity3;
-               Last   : Natural := 0;
-               Rr     : Mat3;
-               Tt     : Vec3;
-            begin
-               Perp (W, F1, F2);
-               P := Cos (X (3)) * F1 + Sin (X (3)) * F2;
-               for I in L'Range loop
-                  if L (I).Frame /= Last then
-                     Last := L (I).Frame;
-                     Rj := Rot (W, C * L (I).Reading);
-                  end if;
-                  Relative (Identity, (Rotation => Rj, Translation => P - Rj * P), Rr, Tt);
-                  Reprojected (Rr, Tt, L (I).H0, L (I).H, F,
-                               R (R'First + 2 * (I - L'First)), R (R'First + 2 * (I - L'First) + 1));
-               end loop;
-               --  Less what each keyframe's sightings share (Share_Out); the sightings come grouped by keyframe.
-               declare
-                  From : Positive := L'First;
-               begin
-                  while From <= L'Last loop
-                     declare
-                        To : Positive := From;
-                     begin
-                        while To < L'Last and then L (To + 1).Frame = L (From).Frame loop
-                           To := To + 1;
-                        end loop;
-                        declare
-                           Du, Dv : Real_Array (1 .. To - From + 1);
-                        begin
-                           for I in From .. To loop
-                              Du (I - From + 1) := R (R'First + 2 * (I - L'First));
-                              Dv (I - From + 1) := R (R'First + 2 * (I - L'First) + 1);
-                           end loop;
-                           Share_Out (Du);
-                           for I in From .. To loop
-                              R (R'First + 2 * (I - L'First)) := Du (I - From + 1);
-                              R (R'First + 2 * (I - L'First) + 1) := Dv (I - From + 1);
-                           end loop;
-                        end;
-                        From := To + 1;
+                        --  The grid's best direction refined by least squares on every sighting (Refine).
+                        if Result.Scale /= 0.0 and then Every (J)'Length > 4 then
+                           Refine (J, F, Result);
+                        end if;
+                        --  Measured and not yet used: the joint's axis at the focal length tried before, refined at
+                        --  this one, and how far it lies from the scan's (whether the scan could be skipped between the
+                        --  focal lengths of one search). A lattice ladder in place of the scan was tried on 10-13 and
+                        --  put 7 of 16 fit tests red: a refined axis is as stable in a wrong basin as in the right one.
+                        if Result.Scale /= 0.0 and then Warm (J).Scale /= 0.0 and then Every (J)'Length > 4 then
+                           declare
+                              Again : Best_Record := Warm (J);
+                           begin
+                              Refine (J, F, Again);
+                              Warm_Angle (J) := Arccos (Real'Min (1.0, abs Dot (Again.W, Result.W)));
+                              Warm_Better (J) := Again.Score < Result.Score;
+                           end;
+                        else
+                           Warm_Angle (J) := -1.0;
+                           Warm_Better (J) := False;
+                        end if;
+                        Warm (J) := Result;
+                        Free (Ga);
+                        Free (Gb);
+                        Free (Wt);
+                        Free (Rs);
+                        Free (Fs);
                      end;
+                     Best (J) := Result;
+                  end Scanner;
+
+                  Scanners : array (1 .. N) of Scanner;
+               begin
+                  for J in 1 .. N loop
+                     Scanners (J).Start (J);
                   end loop;
                end;
-            end Evaluate;
-
-            procedure Solve is new Robust_Fit (4, 2 * M, Driver.Conventions.Initial_Damping, Evaluate);
-            X : Real_Array (1 .. 4) := [0.0, 0.0, Result.Phi, Ln (abs Result.Scale)];
-         begin
-            Perp (W0, E1, E2);
-            Evaluate (X, Rm.all);
-            Solve (X, Noise_Of (Rm.all));
-            Evaluate (X, Rm.all);
-            declare
-               Norms : Real_Array (1 .. M);
-            begin
-               for I in 1 .. M loop
-                  Norms (I) := Sqrt (Rm (2 * I - 1) ** 2 + Rm (2 * I) ** 2);
-               end loop;
-               Result := (Score => Driver.Stats.Median (Norms), W => W_Of (X), Phi => X (3),
-                          Scale => Sign * Exp (X (4)));
-            end;
-            Free (Rm);
-         end Refine;
-
-         --  Every joint's best direction at focal length F, the joints scanned
-         --  at once, one task each: their sightings are their own.
-         Searches        : Natural := 0;          --  focal lengths tried, for the log
-         F_Least, F_Most : Real := 0.0;           --  the least and the most of them, px
-         Warm            : Best_Array;            --  per joint: its axis at the focal length tried before
-         Warm_Angle      : array (1 .. N) of Real := [others => -1.0];   --  per joint, this search: see Scanner
-         Warm_Better     : array (1 .. N) of Boolean := [others => False];
-         Warm_Tries, Warm_Wins : Natural := 0;    --  over the searches, for the log
-         Warm_Far        : Real := 0.0;           --  the farthest a warm start lay from the scan, radians
-         Trace           : Ada.Strings.Unbounded.Unbounded_String;   --  every focal length tried and its score
-
-         procedure Search (F : Real; Best : out Best_Array) is
-         begin
-            Searches := Searches + 1;
-            F_Least := (if Searches = 1 then F else Real'Min (F_Least, F));
-            F_Most := Real'Max (F_Most, F);
-            Prepare (F);
-            declare
-               task type Scanner is
-                  entry Start (Joint : Positive);
-               end Scanner;
-
-               task body Scanner is
-                  J      : Positive := 1;
-                  Result : Best_Record;
-               begin
-                  accept Start (Joint : Positive) do
-                     J := Joint;
-                  end Start;
-                  declare
-                     K  : constant Natural := Lines (J)'Length;
-                     Ga : Real_Access := new Real_Array (1 .. K);
-                     Gb : Real_Access := new Real_Array (1 .. K);
-                     Wt : Real_Access := new Real_Array (1 .. K);
-                     Rs : Real_Access := new Real_Array (1 .. K);
-                     Fs : Real_Access := new Real_Array (1 .. K);
-                  begin
-                     --  The axis: the direction about which the widest keyframes are each most nearly a turn and a
-                     --  shift across it, their turns free; then its scale, and its side at that scale.
-                     for D of Sphere (1 .. Directions / 2) loop
-                        declare
-                           Sc, Sd : Real;
-                        begin
-                           Planar_About (J, F, D, Wt.all, Rs.all, Fs.all, Sc, Sd);
-                           if Sc /= 0.0 and then Sd < Result.Score then
-                              Result := (Score => Sd, W => D, Phi => 0.0, Scale => Sc);
-                           end if;
-                        end;
-                     end loop;
-                     if Result.Scale /= 0.0 then
-                        declare
-                           Ph, Md : Real;
-                        begin
-                           Best_Phi (J, F, Result.W, Result.Scale, Ph, Md, Ga.all, Gb.all, Wt.all, Rs.all);
-                           Result.Phi := Ph;
-                           Result.Score := Md;
-                        end;
-                     end if;
-                     --  The grid's best direction refined by least squares on every sighting (Refine).
-                     if Result.Scale /= 0.0 and then Every (J)'Length > 4 then
-                        Refine (J, F, Result);
-                     end if;
-                     --  Measured and not yet used: the joint's axis at the focal length tried before, refined at
-                     --  this one, and how far it lies from the scan's (whether the scan could be skipped between the
-                     --  focal lengths of one search). A lattice ladder in place of the scan was tried on 10-13 and
-                     --  put 7 of 16 fit tests red: a refined axis is as stable in a wrong basin as in the right one.
-                     if Result.Scale /= 0.0 and then Warm (J).Scale /= 0.0 and then Every (J)'Length > 4 then
-                        declare
-                           Again : Best_Record := Warm (J);
-                        begin
-                           Refine (J, F, Again);
-                           Warm_Angle (J) := Arccos (Real'Min (1.0, abs Dot (Again.W, Result.W)));
-                           Warm_Better (J) := Again.Score < Result.Score;
-                        end;
-                     else
-                        Warm_Angle (J) := -1.0;
-                        Warm_Better (J) := False;
-                     end if;
-                     Warm (J) := Result;
-                     Free (Ga);
-                     Free (Gb);
-                     Free (Wt);
-                     Free (Rs);
-                     Free (Fs);
-                  end;
-                  Best (J) := Result;
-               end Scanner;
-
-               Scanners : array (1 .. N) of Scanner;
-            begin
                for J in 1 .. N loop
-                  Scanners (J).Start (J);
-               end loop;
-            end;
-            for J in 1 .. N loop
-               if Warm_Angle (J) >= 0.0 then
-                  Warm_Tries := Warm_Tries + 1;
-                  Warm_Far := Real'Max (Warm_Far, Warm_Angle (J));
-                  if Warm_Better (J) then
-                     Warm_Wins := Warm_Wins + 1;
+                  if Warm_Angle (J) >= 0.0 then
+                     Warm_Tries := Warm_Tries + 1;
+                     Warm_Far := Real'Max (Warm_Far, Warm_Angle (J));
+                     if Warm_Better (J) then
+                        Warm_Wins := Warm_Wins + 1;
+                     end if;
                   end if;
-               end if;
-            end loop;
-            --  The curve the search walked, for the log: every focal length tried and its score (the joints' medians
-            --  summed), so a wrong basin can be read against the true lens where that is known (the synthetic arms:
-            --  115 px of 400 without the sign of the translation chosen, 20.7 with it, 10-14).
-            declare
+               end loop;
+               --  The curve the search walked, for the log: every focal length tried and its score (the joints' medians
+               --  summed), so a wrong basin can be read against the true lens where that is known (the synthetic arms:
+               --  115 px of 400 without the sign of the translation chosen, 20.7 with it, 10-14).
+               declare
+                  Sum : Real := 0.0;
+               begin
+                  for X of Best loop
+                     Sum := Sum + X.Score;
+                  end loop;
+                  Ada.Strings.Unbounded.Append (Trace, " " & Driver.Log.Image (F, 1) & ":" & Driver.Log.Image (Sum, 3));
+               end;
+            end Search;
+
+            function Total (B : Best_Array) return Real is
                Sum : Real := 0.0;
             begin
-               for X of Best loop
+               for X of B loop
                   Sum := Sum + X.Score;
                end loop;
-               Ada.Strings.Unbounded.Append (Trace, " " & Driver.Log.Image (F, 1) & ":" & Driver.Log.Image (Sum, 3));
-            end;
-         end Search;
+               return Sum;
+            end Total;
 
-         function Total (B : Best_Array) return Real is
-            Sum : Real := 0.0;
-         begin
-            for X of B loop
-               Sum := Sum + X.Score;
-            end loop;
-            return Sum;
-         end Total;
-
-         --  The standard error of that sum, from each joint's median.
-         function Total_Error (B : Best_Array) return Real is
-            Sum : Real := 0.0;
-         begin
-            for J in 1 .. N loop
-               Sum := Sum + Median_Error (B (J).Score, Counts (J)) ** 2;
-            end loop;
-            return Sqrt (Sum);
-         end Total_Error;
-
-         Golden    : constant Real := (3.0 - Sqrt (5.0)) * Ada.Numerics.Pi;
-         Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;
-      begin
-         for X of Pairs.all loop
-            Seen_In (X.Frame) := Seen_In (X.Frame) + 1;
-         end loop;
-         for Frame in 2 .. Frames loop
-            declare
-               J : constant Natural := Own_Joint (Frame);
+            --  The standard error of that sum, from each joint's median.
+            function Total_Error (B : Best_Array) return Real is
+               Sum : Real := 0.0;
             begin
-               if J > 0 and then Seen_In (Frame) > 0 then
-                  if Own_Change (Frame, J) > 0.0
-                    and then (Up_Frame (J) = 0 or else Own_Change (Frame, J) > Own_Change (Up_Frame (J), J))
-                  then
-                     Up_Frame (J) := Frame;
-                  elsif Own_Change (Frame, J) < 0.0
-                    and then (Down_Frame (J) = 0 or else Own_Change (Frame, J) < Own_Change (Down_Frame (J), J))
-                  then
-                     Down_Frame (J) := Frame;
-                  end if;
-               end if;
-            end;
-         end loop;
-         for X of Pairs.all loop
-            if Widest (X.Frame) then
-               Grid_Counts (Own_Joint (X.Frame)) := Grid_Counts (Own_Joint (X.Frame)) + 1;
-            end if;
-         end loop;
-         for I in 1 .. Directions loop
-            declare
-               Z  : constant Real := 1.0 - 2.0 * (Real (I) - 0.5) / Real (Directions);
-               Rr : constant Real := Sqrt (Real'Max (0.0, 1.0 - Z * Z));
-            begin
-               Sphere (I) := [Rr * Cos (Golden * Real (I)), Rr * Sin (Golden * Real (I)), Z];
-            end;
-         end loop;
-         --  Some keyframe of a joint alone moved its matches, or there is nothing to fit.
-         for Frame in 2 .. Frames loop
-            if Own_Joint (Frame) > 0 then
-               declare
-                  D : Real_Access := new Real_Array (1 .. S);
-                  K : Natural := 0;
-               begin
-                  for X of Pairs.all loop
-                     if X.Frame = Frame then
-                        K := K + 1;
-                        D (K) := Sqrt ((X.U - X.U0) ** 2 + (X.V - X.V0) ** 2);
-                     end if;
-                  end loop;
-                  Moving := Moving or else (K > 0 and then Driver.Stats.Median (D (1 .. K)) > 0.0);
-                  Free (D);
-               end;
-            end if;
-         end loop;
-         if not Moving then
-            Fail ("the matches do not move");
-            return;
-         end if;
-         --  Where to look for the focal length. The image moves by about the
-         --  focal length times the eye's turn, but how far the eye turned is
-         --  not the reading's change in any known unit (the turns are
-         --  measured, Planar_About), so the motion says nothing of it: the
-         --  search starts where the image's half width is seen at a right
-         --  angle's half, and widens (below).
-         --  Golden-section search in the logarithm of the focal length. The
-         --  bracket, an octave about the start, first widens by its own width
-         --  on the side whose end scores best, until an inner point scores
-         --  better than both ends; the search ends when its two inner points
-         --  cannot be told apart.
-         declare
-            --  From a start: the bracket, an octave about it, first widens by
-            --  its own width on the side whose end scores best, until an inner
-            --  point scores better than both ends (Low and High are that
-            --  bracket: the basin the start fell in, as the search found it);
-            --  then the golden section narrows it until its two inner points
-            --  cannot be told apart, and Best_At is the better of them.
-            procedure Settle (Start : Real; Low, High, Best_At, Within : out Real; Found : out Best_Array) is
-               A, B, X1, X2   : Real;
-               BA, BB, B1, B2 : Best_Array;
-            begin
-               A := Start - Ln (2.0) / 2.0;
-               B := Start + Ln (2.0) / 2.0;
-               Search (Exp (A), BA);
-               Search (Exp (B), BB);
-               loop
-                  X1 := B - Inv_Ratio * (B - A);
-                  Search (Exp (X1), B1);
-                  exit when Total (B1) <= Total (BA) and then Total (B1) <= Total (BB);
-                  exit when B - A >= Ln (Real'Last);
-                  if Total (BA) <= Total (BB) then
-                     --  Lower: the inner point becomes the upper end.
-                     B := X1;
-                     BB := B1;
-                     A := A - (B - A);
-                     Search (Exp (A), BA);
-                  else
-                     A := X1;
-                     BA := B1;
-                     B := B + (B - A);
-                     Search (Exp (B), BB);
-                  end if;
+               for J in 1 .. N loop
+                  Sum := Sum + Median_Error (B (J).Score, Counts (J)) ** 2;
                end loop;
-               Low := A;
-               High := B;
-               X2 := A + Inv_Ratio * (B - A);
-               Search (Exp (X2), B2);
-               loop
-                  exit when abs (Total (B1) - Total (B2)) <= Total_Error ((if Total (B1) < Total (B2) then B1 else B2));
-                  exit when B - A <= Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs A);
-                  if Total (B1) < Total (B2) then
-                     B := X2;
-                     X2 := X1;
-                     B2 := B1;
+               return Sqrt (Sum);
+            end Total_Error;
+
+            Golden    : constant Real := (3.0 - Sqrt (5.0)) * Ada.Numerics.Pi;
+            Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;
+         begin
+            for X of Pairs.all loop
+               Seen_In (X.Frame) := Seen_In (X.Frame) + 1;
+            end loop;
+            for Frame in 2 .. Frames loop
+               declare
+                  J : constant Natural := Own_Joint (Frame);
+               begin
+                  if J > 0 and then Seen_In (Frame) > 0 then
+                     if Own_Change (Frame, J) > 0.0
+                       and then (Up_Frame (J) = 0 or else Own_Change (Frame, J) > Own_Change (Up_Frame (J), J))
+                     then
+                        Up_Frame (J) := Frame;
+                     elsif Own_Change (Frame, J) < 0.0
+                       and then (Down_Frame (J) = 0 or else Own_Change (Frame, J) < Own_Change (Down_Frame (J), J))
+                     then
+                        Down_Frame (J) := Frame;
+                     end if;
+                  end if;
+               end;
+            end loop;
+            for X of Pairs.all loop
+               if Widest (X.Frame) then
+                  Grid_Counts (Own_Joint (X.Frame)) := Grid_Counts (Own_Joint (X.Frame)) + 1;
+               end if;
+            end loop;
+            for I in 1 .. Directions loop
+               declare
+                  Z  : constant Real := 1.0 - 2.0 * (Real (I) - 0.5) / Real (Directions);
+                  Rr : constant Real := Sqrt (Real'Max (0.0, 1.0 - Z * Z));
+               begin
+                  Sphere (I) := [Rr * Cos (Golden * Real (I)), Rr * Sin (Golden * Real (I)), Z];
+               end;
+            end loop;
+            --  Some keyframe of a joint alone moved its matches, or there is nothing to fit.
+            for Frame in 2 .. Frames loop
+               if Own_Joint (Frame) > 0 then
+                  declare
+                     D : Real_Access := new Real_Array (1 .. S);
+                     K : Natural := 0;
+                  begin
+                     for X of Pairs.all loop
+                        if X.Frame = Frame then
+                           K := K + 1;
+                           D (K) := Sqrt ((X.U - X.U0) ** 2 + (X.V - X.V0) ** 2);
+                        end if;
+                     end loop;
+                     Moving := Moving or else (K > 0 and then Driver.Stats.Median (D (1 .. K)) > 0.0);
+                     Free (D);
+                  end;
+               end if;
+            end loop;
+            if not Moving then
+               Fail ("the matches do not move");
+               return;
+            end if;
+            --  Where to look for the focal length. The image moves by about the
+            --  focal length times the eye's turn, but how far the eye turned is
+            --  not the reading's change in any known unit (the turns are
+            --  measured, Planar_About), so the motion says nothing of it: the
+            --  search starts where the image's half width is seen at a right
+            --  angle's half, and widens (below).
+            --  Golden-section search in the logarithm of the focal length. The
+            --  bracket, an octave about the start, first widens by its own width
+            --  on the side whose end scores best, until an inner point scores
+            --  better than both ends; the search ends when its two inner points
+            --  cannot be told apart.
+            declare
+               --  From a start: the bracket, an octave about it, first widens by
+               --  its own width on the side whose end scores best, until an inner
+               --  point scores better than both ends (Low and High are that
+               --  bracket: the basin the start fell in, as the search found it);
+               --  then the golden section narrows it until its two inner points
+               --  cannot be told apart, and Best_At is the better of them.
+               procedure Settle (Start : Real; Low, High, Best_At, Within : out Real; Found : out Best_Array) is
+                  A, B, X1, X2   : Real;
+                  BA, BB, B1, B2 : Best_Array;
+               begin
+                  A := Start - Ln (2.0) / 2.0;
+                  B := Start + Ln (2.0) / 2.0;
+                  Search (Exp (A), BA);
+                  Search (Exp (B), BB);
+                  loop
                      X1 := B - Inv_Ratio * (B - A);
                      Search (Exp (X1), B1);
+                     exit when Total (B1) <= Total (BA) and then Total (B1) <= Total (BB);
+                     exit when B - A >= Ln (Real'Last);
+                     if Total (BA) <= Total (BB) then
+                        --  Lower: the inner point becomes the upper end.
+                        B := X1;
+                        BB := B1;
+                        A := A - (B - A);
+                        Search (Exp (A), BA);
+                     else
+                        A := X1;
+                        BA := B1;
+                        B := B + (B - A);
+                        Search (Exp (B), BB);
+                     end if;
+                  end loop;
+                  Low := A;
+                  High := B;
+                  X2 := A + Inv_Ratio * (B - A);
+                  Search (Exp (X2), B2);
+                  loop
+                     exit when abs (Total (B1) - Total (B2)) <= Total_Error ((if Total (B1) < Total (B2) then B1 else B2));
+                     exit when B - A <= Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs A);
+                     if Total (B1) < Total (B2) then
+                        B := X2;
+                        X2 := X1;
+                        B2 := B1;
+                        X1 := B - Inv_Ratio * (B - A);
+                        Search (Exp (X1), B1);
+                     else
+                        A := X1;
+                        X1 := X2;
+                        B1 := B2;
+                        X2 := A + Inv_Ratio * (B - A);
+                        Search (Exp (X2), B2);
+                     end if;
+                  end loop;
+                  --  Half the bracket the search ended in, in the logarithm: the two inner points could not be told
+                  --  apart by the score's error, so the focal length is told to about this.
+                  Within := (B - A) / 2.0;
+                  if Total (B1) < Total (B2) then
+                     Best_At := X1;
+                     Found := B1;
                   else
-                     A := X1;
-                     X1 := X2;
-                     B1 := B2;
-                     X2 := A + Inv_Ratio * (B - A);
-                     Search (Exp (X2), B2);
+                     Best_At := X2;
+                     Found := B2;
+                  end if;
+               end Settle;
+
+               Low, High, Best_At : Real;
+               Told_Within        : Real;
+               Best          : Best_Array;
+            begin
+               Settle (Ln (Lens0.Cx), Low, High, Best_At, Told_Within, Best);
+               --  The search finds the minimum of the basin its start falls in,
+               --  and a start in the wrong basin finds the wrong focal length and,
+               --  from it, the wrong order of the joints (A98's arm 1: starts of
+               --  200 to 566 px were right, 100, 141 and 800 wrong). So the
+               --  neighbouring basins are searched too, one basin's width below
+               --  and above (the width the search itself found), as long as each
+               --  scores better than the last: of all the minima found, the
+               --  best is kept.
+               for Side in 1 .. 2 loop
+                  loop
+                     declare
+                        Width : constant Real := High - Low;
+                        Start : constant Real := (if Side = 1 then Low - Width else High + Width);
+                        L2, H2, A2, W2 : Real;
+                        F2             : Best_Array;
+                     begin
+                        exit when Width <= 0.0 or else abs Start >= Ln (Real'Last) / 2.0;
+                        Settle (Start, L2, H2, A2, W2, F2);
+                        exit when Total (F2) >= Total (Best);
+                        Low := L2;
+                        High := H2;
+                        Best_At := A2;
+                        Told_Within := W2;
+                        Best := F2;
+                     end;
+                  end loop;
+               end loop;
+               Focal_Within := Told_Within;
+               Searched_Least := F_Least;
+               Searched_Most := F_Most;
+               declare
+                  Focal : constant Real := Exp (Best_At);
+               begin
+               --  What the search did, for the log: how many focal lengths it tried and how far they ranged
+               --  (B0a_1's arms ended at 0.002 px: the search had run to the bracket's end).
+               Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " focal search tried" & Searches'Image
+                                & " lengths from " & Driver.Log.Image (F_Least, 3) & " to " & Driver.Log.Image (F_Most, 1)
+                                & " px, best " & Driver.Log.Image (Focal, 1) & " px, score "
+                                & Driver.Log.Image (Total (Best), 4) & " +- " & Driver.Log.Image (Total_Error (Best), 4)
+                                & " px; the basin " & Driver.Log.Image (Exp (Low), 1) & " to " & Driver.Log.Image (Exp (High), 1)
+                                & ", told within " & Driver.Log.Image (Exp (Best_At - Told_Within), 1) & " to "
+                                & Driver.Log.Image (Exp (Best_At + Told_Within), 1) & "; warm starts" & Warm_Tries'Image
+                                & ", farthest " & Driver.Log.Image (Warm_Far * 180.0 / Ada.Numerics.Pi, 2)
+                                & " deg from the scan, better" & Warm_Wins'Image & " times");
+               Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " focal search curve, px:score"
+                                & Ada.Strings.Unbounded.To_String (Trace));
+               for J in 1 .. N loop
+                  if Best (J).Scale = 0.0 then
+                     for K in 1 .. N loop
+                        Free (Lines (K));
+                        Free (Every (K));
+                        Free (Centred (K));
+                     end loop;
+                     Fail ("joint" & J'Image & "'s widest keyframes tell its turn about no direction");
+                     return;
                   end if;
                end loop;
-               --  Half the bracket the search ended in, in the logarithm: the two inner points could not be told
-               --  apart by the score's error, so the focal length is told to about this.
-               Within := (B - A) / 2.0;
-               if Total (B1) < Total (B2) then
-                  Best_At := X1;
-                  Found := B1;
-               else
-                  Best_At := X2;
-                  Found := B2;
-               end if;
-            end Settle;
-
-            Low, High, Best_At : Real;
-            Told_Within        : Real;
-            Best          : Best_Array;
-         begin
-            Settle (Ln (Lens0.Cx), Low, High, Best_At, Told_Within, Best);
-            --  The search finds the minimum of the basin its start falls in,
-            --  and a start in the wrong basin finds the wrong focal length and,
-            --  from it, the wrong order of the joints (A98's arm 1: starts of
-            --  200 to 566 px were right, 100, 141 and 800 wrong). So the
-            --  neighbouring basins are searched too, one basin's width below
-            --  and above (the width the search itself found), as long as each
-            --  scores better than the last: of all the minima found, the
-            --  best is kept.
-            for Side in 1 .. 2 loop
-               loop
+               Lens0.Fx := Focal;
+               Lens0.Fy := Focal;
+               for J in 1 .. N loop
                   declare
-                     Width : constant Real := High - Low;
-                     Start : constant Real := (if Side = 1 then Low - Width else High + Width);
-                     L2, H2, A2, W2 : Real;
-                     F2             : Best_Array;
+                     E1, E2 : Vec3;
                   begin
-                     exit when Width <= 0.0 or else abs Start >= Ln (Real'Last) / 2.0;
-                     Settle (Start, L2, H2, A2, W2, F2);
-                     exit when Total (F2) >= Total (Best);
-                     Low := L2;
-                     High := H2;
-                     Best_At := A2;
-                     Told_Within := W2;
-                     Best := F2;
+                     Perp (Best (J).W, E1, E2);
+                     Joints (Joints'First + J - 1) :=
+                       (W => Best (J).W, P => Cos (Best (J).Phi) * E1 + Sin (Best (J).Phi) * E2, C => Best (J).Scale,
+                        Slide => False);
                   end;
+                  Free (Lines (J));
+                  Free (Every (J));
+                  Free (Centred (J));
                end loop;
-            end loop;
-            Focal_Within := Told_Within;
-            Searched_Least := F_Least;
-            Searched_Most := F_Most;
-            declare
-               Focal : constant Real := Exp (Best_At);
-            begin
-            --  What the search did, for the log: how many focal lengths it tried and how far they ranged
-            --  (B0a_1's arms ended at 0.002 px: the search had run to the bracket's end).
-            Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " focal search tried" & Searches'Image
-                             & " lengths from " & Driver.Log.Image (F_Least, 3) & " to " & Driver.Log.Image (F_Most, 1)
-                             & " px, best " & Driver.Log.Image (Focal, 1) & " px, score "
-                             & Driver.Log.Image (Total (Best), 4) & " +- " & Driver.Log.Image (Total_Error (Best), 4)
-                             & " px; the basin " & Driver.Log.Image (Exp (Low), 1) & " to " & Driver.Log.Image (Exp (High), 1)
-                             & ", told within " & Driver.Log.Image (Exp (Best_At - Told_Within), 1) & " to "
-                             & Driver.Log.Image (Exp (Best_At + Told_Within), 1) & "; warm starts" & Warm_Tries'Image
-                             & ", farthest " & Driver.Log.Image (Warm_Far * 180.0 / Ada.Numerics.Pi, 2)
-                             & " deg from the scan, better" & Warm_Wins'Image & " times");
-            Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " focal search curve, px:score"
-                             & Ada.Strings.Unbounded.To_String (Trace));
-            for J in 1 .. N loop
-               if Best (J).Scale = 0.0 then
-                  for K in 1 .. N loop
-                     Free (Lines (K));
-                     Free (Every (K));
-                     Free (Centred (K));
-                  end loop;
-                  Fail ("joint" & J'Image & "'s widest keyframes tell its turn about no direction");
-                  return;
-               end if;
-            end loop;
-            Lens0.Fx := Focal;
-            Lens0.Fy := Focal;
-            for J in 1 .. N loop
-               declare
-                  E1, E2 : Vec3;
-               begin
-                  Perp (Best (J).W, E1, E2);
-                  Joints (Joints'First + J - 1) :=
-                    (W => Best (J).W, P => Cos (Best (J).Phi) * E1 + Sin (Best (J).Phi) * E2, C => Best (J).Scale,
-                     Slide => False);
                end;
-               Free (Lines (J));
-               Free (Every (J));
-               Free (Centred (J));
-            end loop;
             end;
          end;
-      end;
+      end if;
 
       ---------------------------------------------------------------------------
       --  Stage 2: the joints together with the focal length, on the keyframes

@@ -21,6 +21,8 @@ RUNS=${FAKE_RUNS:-$HOME/fakeruns}
 R=$RUNS/$NAME
 [ -e "$R" ] && { echo "$R already exists; pick another name"; exit 5; }
 mkdir -p "$R/bin"
+# FAKE_BODY: a body file the driver starts from (what an earlier run of the same seed measured), copied in.
+[ -n "${FAKE_BODY:-}" ] && cp "$FAKE_BODY" "$R/body.json"
 # The run keeps its own copies of the tools, so a build during the run changes nothing it runs or scores with.
 cp -p "$BIN/body_driver" "$BIN/fake_robot" "$BIN/replay" "$BIN/score" "$R/bin/"
 PORT=${FAKE_PORT:-$((9500 + SEED % 400))}
