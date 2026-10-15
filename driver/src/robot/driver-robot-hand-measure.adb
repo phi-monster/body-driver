@@ -659,24 +659,25 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   Hold_Beat (Read_Gap'Access);
                end if;
                exit when Ada.Strings.Unbounded.Length (Why) > 0 or else Stops <= Before;
-               --  The gap found again: when the parts cut it into left one of them as wide, less than a step the
-               --  matcher follows taken off it, the tip did not move through the readings between but jumped (its
-               --  farthest pixel left the picture's border for its real tip, a03 on 10-16: 62 pixels between views
-               --  however close their readings), and cutting it finer gives nothing more to follow.
+               --  The gap found again between the same two views: the parts cut into it saw no tip of that lobe
+               --  (Read_Gap passes over a stop without one), so the tip is not seen through the readings between and
+               --  cutting finer gives nothing more to follow (its farthest pixel left the picture's border for its
+               --  real tip, a03 on 10-16: 62 pixels between views however close their readings). Where the parts saw
+               --  the tip and the widest step is now between two of them, the tip moves through those readings
+               --  unevenly, and they are cut again until the channel's noise ends it: a gap left as wide after one cut
+               --  was taken for a jump (a09 on 10-16: 25 pixels between 2.20 and 5.45 cut in two), and the lobe's
+               --  shape was never followed.
                declare
-                  Was_Widest : constant Real := Widest;
-                  Was_From   : constant Real := From;
-                  Was_To     : constant Real := To;
+                  Was_From : constant Real := From;
+                  Was_To   : constant Real := To;
                begin
                   Hold_Beat (Read_Gap'Access);
-                  if Found and then Real'Min (From, To) >= Real'Min (Was_From, Was_To)
-                    and then Real'Max (From, To) <= Real'Max (Was_From, Was_To)
-                    and then Widest > Was_Widest - Limit
-                  then
+                  if Found and then From = Was_From and then To = Was_To then
                      Why := Ada.Strings.Unbounded.To_Unbounded_String
                        ("between " & Driver.Log.Image (From, 6) & " and " & Driver.Log.Image (To, 6) & " a tip moves"
-                        & Natural'Image (Natural (Widest)) & " pixels, as far as it moved over the readings of the gap"
-                        & " cut into" & Parts'Image & " parts: it jumps there, and is not followed across it by cutting");
+                        & Natural'Image (Natural (Widest)) & " pixels, and the" & Parts'Image
+                        & " parts cut into it saw no tip: it is not seen through those readings, and not followed"
+                        & " across them by cutting");
                      exit;
                   end if;
                end;

@@ -197,7 +197,6 @@ package body Fake_World is
       Eye_Back  : constant Real := Random (W, 0.02, 0.05);
       Eye_Above : constant Real := Random (W, 0.03, 0.13);
       Tilt      : constant Real := Random (W, 0.55, 0.7);
-      Jaw_Long  : Real := 0.0;   --  the jaws' length, when the hand is a jaw (set where it is built)
       --  The arm's own surfaces have texture: screws, cables, edges and prints at the scale of millimetres to
       --  centimetres, more or less contrasted; a white table or a white room leaves the arm as the only texture an
       --  eye on it, or on the other arm, has.
@@ -277,8 +276,6 @@ package body Fake_World is
          end loop;
       end;
       W.Groups.Append (G);
-      --  The jaws' length, for the eye that watches them (below); zero for another hand.
-      Jaw_Long := 0.0;
       case Kind is
          when Pair | Pair_And_Thumb =>
             --  Two plates sliding apart along the tool's x, one joint read (the
@@ -375,7 +372,6 @@ package body Fake_World is
                         Moved_To (Jaw_Thick / 2.0, Jaw_Length / 2.0, 0.0), Ribbed, F1, A, Finger => True);
                W.Closers.Append (F1);
                W.Hand_Reach.Replace_Element (A, Jaw_Length * (1.0 + Sin (Swing)));
-               Jaw_Long := Jaw_Length;
                G := (Name => To_Unbounded_String ("arm" & Trim (A) & "_closer"), Commandable => True,
                      Integers => In_Ticks, others => <>);
                G.Joints.Append (F1);
@@ -390,27 +386,21 @@ package body Fake_World is
       --  picture and the table beyond them fills the rest; or ahead at the wall.
       if With_Eye then
          declare
-            --  A desktop gripper's camera sits on the gripper behind the roots of its jaws and above them, and looks
-            --  along them at their middle: both jaws come up from the bottom of its picture, open and closed, their
-            --  tips near its middle (the kiwi's wrist eyes, 10-14). Placed in proportion to the jaws: behind their
-            --  roots by a third to a half of their length, over the palm's top by a half to four fifths of it, so that
-            --  its line to them clears the palm (behind them by their whole length, a04 on 10-16, the palm hid them).
-            --  The fake's eye sat in front of the roots and low, the jaws filled its picture and the open one left it
-            --  (a03 on 10-16: its tip a sliver on the picture's bottom row, 41 mm off the truth). Two draws, as before.
+            --  A desktop gripper's camera sits on the gripper over the roots of its jaws, the palm behind it, and
+            --  looks down along them: they come into the bottom of its picture from its border and fill two fifths of
+            --  it, open and closed (the kiwi's wrist eyes, 10-14; its lens is a wide one, 0.45 of the picture's width
+            --  here, where every other eye has 0.62). Placed there with the narrower lens and the jaw swung 0.7 to 1.1
+            --  rad, the open jaw left the picture (a03 on 10-16: its tip a sliver on the picture's bottom row, 41 mm
+            --  off the truth); placed behind the roots and over the palm, the palm's top filled the picture's bottom
+            --  and the jaws stood on it, not on the border, as they do not on the kiwi (a04 to a07 on 10-16).
             Near  : constant Boolean := Kind = Jaw;
-            Back_Share : constant Real := (if Near then 0.3 + 0.2 * Arm_Random else 0.0);
-            Up_Share   : constant Real := (if Near then 0.5 + 0.3 * Arm_Random else 0.0);
-            Ahead : constant Real := (if Near then 0.024 - Back_Share * Jaw_Long else -Eye_Back);
-            Above : constant Real := (if Near then 0.014 + Up_Share * Jaw_Long else Eye_Above);   --  the palm's top, 0.014
-            Pitch : constant Real := (if Eye_Up then -0.3 else Tilt);
-            --  At the jaws' middle, three fifths of the way along them from their roots.
-            Along : constant Real := 0.024 + 0.6 * Jaw_Long - Ahead;
-            Norm  : constant Real := Sqrt (Along ** 2 + Above ** 2);
-            Forward : constant Vec3 :=
-              (if Near and then not Eye_Up then [0.0, Along / Norm, -Above / Norm] else [0.0, Cos (Pitch), -Sin (Pitch)]);
+            Ahead : constant Real := (if Near then 0.024 + 0.005 else -Eye_Back);
+            Above : constant Real := (if Near then 0.024 + 0.015 * Arm_Random else Eye_Above);
+            Pitch : constant Real := (if Eye_Up then -0.3 elsif Near then 0.6 + 0.3 * Arm_Random else Tilt);
          begin
-            Add_Camera (W, "eye_arm" & Trim (A), J6, A, Look ([0.0, L6 + Ahead, Above], Forward, [0.0, 0.0, 1.0]),
-                        Width, Height, 0.62);
+            Add_Camera (W, "eye_arm" & Trim (A), J6, A,
+                        Look ([0.0, L6 + Ahead, Above], [0.0, Cos (Pitch), -Sin (Pitch)], [0.0, 0.0, 1.0]),
+                        Width, Height, (if Near then 0.45 else 0.62));
          end;
       end if;
    end Build_Arm;

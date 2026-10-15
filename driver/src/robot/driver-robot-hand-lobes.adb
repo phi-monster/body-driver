@@ -1616,12 +1616,17 @@ package body Driver.Robot.Hand.Lobes is
             Result.Here := Count (Here_Set);
             Result.There := Count (There_Set);
             --  What did not change, told by the poses as a seed is and by the brightness the two kinds have where
-            --  it changed (Still): the robot's look and the world's as the pixels were given, each way round.
+            --  it changed (Still): the robot's look and the world's as the pixels were given, each way round, a
+            --  pixel the kind whose look its brightness is the likelier of. The poses have already left only what
+            --  every pose sees alike, the robot and the world's plain stretches; brightness tells those two apart
+            --  as a classification, not as a test of a difference, and asked to be Z squared the likelier (a ratio
+            --  of 90) the robot's still jaw on the kiwi-like fake came out robot in one placing and in none at all
+            --  in the next of the same ends, its 256 levels' counts a few dozen each (a08 replayed, 10-16), and its
+            --  closing was not told.
             declare
                type Bins is array (0 .. 255) of Real;
                Robot_Bins, World_Bins : Bins := [others => 1.0];
                Robot_Sum, World_Sum   : Real := Real (Bins'Length);
-               Z2 : constant Real := Driver.Conventions.Z ** 2;
                function Bin (Level : Real) return Natural is
                  (Natural (Real'Max (0.0, Real'Min (Real (Bins'Last), Real'Rounding (Level)))));
                procedure Add (Robot, World : Real) is
@@ -1651,9 +1656,9 @@ package body Driver.Robot.Hand.Lobes is
                            Ratio : constant Real :=
                              2.0 * (Log (Robot_Bins (Level) / Robot_Sum) - Log (World_Bins (Level) / World_Sum));
                         begin
-                           if Ratio > Z2 then
+                           if Ratio > 0.0 then
                               Include (Robot_Like, C, R);
-                           elsif Ratio < -Z2 then
+                           elsif Ratio < 0.0 then
                               Include (World_Like, C, R);
                            end if;
                         end;
