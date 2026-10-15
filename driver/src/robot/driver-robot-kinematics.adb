@@ -990,6 +990,14 @@ package body Driver.Robot.Kinematics is
       while Natural (R.Shift_Seen.Length) < N loop
          R.Shift_Seen.Append (True);
       end loop;
+      R.Point_Gu.Clear;
+      R.Point_Gv.Clear;
+      R.Point_G_Told.Clear;
+      for Slot_Index in 1 .. N * Queries loop
+         R.Point_Gu.Append (0.0);
+         R.Point_Gv.Append (0.0);
+         R.Point_G_Told.Append (False);
+      end loop;
       while Natural (R.Shift_Told.Length) < N loop
          R.Shift_Told.Append (0);
       end loop;
@@ -1186,6 +1194,9 @@ package body Driver.Robot.Kinematics is
                                              Told (Slot (C, P) - 1) := True;
                                              Slope (Slot (C, P)) := G;
                                              Spread (Slot (C, P)) := Sqrt (Real'Max (0.0, V));
+                                             R.Point_Gu.Replace_Element (Slot (C, P) - 1, Fu.Beta (J));
+                                             R.Point_Gv.Replace_Element (Slot (C, P) - 1, Fv.Beta (J));
+                                             R.Point_G_Told.Replace_Element (Slot (C, P) - 1, True);
                                           end if;
                                        end;
                                     end if;
@@ -1485,17 +1496,18 @@ package body Driver.Robot.Kinematics is
       Start   : constant Duration := Driver.Clock.Seconds;
       First   : constant Natural := R.Aligned + 1;
       Found   : Natural := 0;
-      Because : array (Driver.Alignment.Reason) of Natural := [others => 0];   --  why each point was or was not found
+      type Tally is array (Driver.Alignment.Reason) of Natural;
+      Because : Tally := [others => 0];   --  why each point was or was not found
 
-      --  The tally of the aligner's reasons, for the log: "; because: matched 5358, no_texture 1200, ...".
-      function Reasons_Text return String is
+      --  A tally of the aligner's reasons, for the log: "; because: matched 5358, no_texture 1200, ...".
+      function Reasons_Text (Of_These : Tally) return String is
          Text : Ada.Strings.Unbounded.Unbounded_String;
       begin
-         for Why in Because'Range loop
-            if Because (Why) > 0 then
+         for Why in Of_These'Range loop
+            if Of_These (Why) > 0 then
                Ada.Strings.Unbounded.Append
                  (Text, (if Ada.Strings.Unbounded.Length (Text) = 0 then "; because: " else ", ")
-                  & Ada.Characters.Handling.To_Lower (Why'Image) & Because (Why)'Image);
+                  & Ada.Characters.Handling.To_Lower (Why'Image) & Of_These (Why)'Image);
             end if;
          end loop;
          return Ada.Strings.Unbounded.To_String (Text);
@@ -1566,14 +1578,18 @@ package body Driver.Robot.Kinematics is
             --  slope: the flow had locked on what does not move with the view, the window was a fortieth of the
             --  motion, and its answers stood false in the chain (f15c on 10-15: arm 1's base turned ten degrees,
             --  the view moved 90 px, the slope said 2 px; all 35 answers lay 78 px from the truth).
-            for A of Answers.all loop
-               Because (A.Because) := Because (A.Because) + 1;
-            end loop;
             declare
+               --  This keyframe's own reasons, on its line: the batch's tally cannot say which keyframe found nothing
+               --  and why (f15w on 10-15: arm 2's pushes of channel 4 after the first found 0 of 255, 0 answered).
+               Its_Because : Tally := [others => 0];
                Here    : Natural := 0;
                Replied : Natural := 0;   --  answered from a window of any width (Match_Set.Answered)
                Text    : Ada.Strings.Unbounded.Unbounded_String;
             begin
+               for A of Answers.all loop
+                  Because (A.Because) := Because (A.Because) + 1;
+                  Its_Because (A.Because) := Its_Because (A.Because) + 1;
+               end loop;
                for Seen of Set.Found loop
                   if Seen then
                      Here := Here + 1;
@@ -1595,12 +1611,14 @@ package body Driver.Robot.Kinematics is
                                 & Asked_Image (R.Frames (F))
                                 & ", predicted " & Ada.Characters.Handling.To_Lower (From'Image)
                                 & (if From = Keyframes.New_Direction then Motion_Image (Keyframes.Last_Motion (R.Chain))
-                                   else " stating " & Driver.Log.Image (Stated_By (Given.all), 1) & " px")
+                                   else " stating " & Driver.Log.Image (Stated_By (Given.all), 1) & " px"
+                                        & (if Keyframes.Last_Motion (R.Chain).Searched
+                                           then ", asked" & Motion_Image (Keyframes.Last_Motion (R.Chain)) else ""))
                                 & ":" & Here'Image
                                 & " of" & Queries'Image & " points found," & Replied'Image & " answered; resident"
                                 & Rss_Before'Image & " /"
                                 & Rss_After'Image & " /" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)
-                                & " MB before the alignment, after it, now");
+                                & " MB before the alignment, after it, now" & Reasons_Text (Its_Because));
             end;
             R.Matches.Append (Set);
             R.Aligned := F;
@@ -1622,7 +1640,7 @@ package body Driver.Robot.Kinematics is
          & " points found, the aligner errs by " & Driver.Log.Image (Match_Sigma (R), 3) & " px, in "
          & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s ("
          & Driver.Log.Image (Real (Driver.Clock.Seconds - Start) / Real (Natural'Max (1, R.Aligned - First + 1)), 2)
-         & " s a keyframe)" & Reasons_Text
+         & " s a keyframe)" & Reasons_Text (Because)
          & "; the aligner's work: " & Driver.Alignment.Work_Report & "; resident"
          & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & " MB");
       --  The steps a keyframe of each channel needs, for the log: what the matcher tells apart against what the eye sees.
@@ -2017,7 +2035,6 @@ package body Driver.Robot.Kinematics is
                                              and then Natural (R.Result.Joints.Length) = N
                                              and then Natural (R.Result.Chain.Length) = N then N else 0);
                   begin
-                     for S of R.Matches loop
                      if Start.N > 0 then
                         Start.Valid := True;
                         for J in 1 .. N loop
@@ -2034,6 +2051,7 @@ package body Driver.Robot.Kinematics is
                         Start.Searched_Least := R.Result.Searched_Least;
                         Start.Searched_Most := R.Result.Searched_Most;
                      end if;
+                     for S of R.Matches loop
                         for I in 0 .. Queries - 1 loop
                            if Returns (S, I) then
                               K := K + 1;
@@ -2041,7 +2059,36 @@ package body Driver.Robot.Kinematics is
                                            U0 => R.Query_U (I), V0 => R.Query_V (I),
                                            U => S.To_U (I), V => S.To_V (I),
                                            Own => (if I < Natural (S.Sigma.Length) then S.Sigma (I) else 0.0),
-                                           Own_Freedom => (if I < Natural (S.Freedom.Length) then S.Freedom (I) else 0));
+                                           Own_Freedom => (if I < Natural (S.Freedom.Length) then S.Freedom (I) else 0),
+                                           others => <>);
+                              --  How far the joints the keyframe did not ask moved the point (Fit.Sighting's Off_U,
+                              --  Off_V): each that stands off the reference by more than its noise tells and by enough
+                              --  to move the view beyond what the matcher errs, times the point's motion per unit of
+                              --  it (Measure_Shifts). A servo arm's every keyframe has some (f15w on 10-15, arm 2: the
+                              --  joints not asked stood 1 to 4 units off, moving the view 1 to 6 px against the
+                              --  asked joint's 4 to 50, and its one-joint stages scored every focal length alike).
+                              for C in 1 .. N loop
+                                 declare
+                                    Off   : constant Real := Changes (S.Frame, C);
+                                    Index : constant Natural := (C - 1) * Queries + I;
+                                 begin
+                                    if not Asked (S.Frame, C)
+                                      and then (if Channels.Noise (M, R.Group, C) < Real'Last
+                                                then Driver.Uncertain.Significant
+                                                       (Off, Channels.Noise (M, R.Group, C) * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))
+                                                else Off /= 0.0)
+                                      and then (Sigma = 0.0
+                                                or else Driver.Uncertain.Significant (Off * Pixels_Per_Unit (M, R, C), Sigma))
+                                    then
+                                       if Index < Natural (R.Point_G_Told.Length) and then R.Point_G_Told (Index) then
+                                          Seen (K).Off_U := Seen (K).Off_U + Off * R.Point_Gu (Index);
+                                          Seen (K).Off_V := Seen (K).Off_V + Off * R.Point_Gv (Index);
+                                       else
+                                          Seen (K).Off_Told := False;
+                                       end if;
+                                    end if;
+                                 end;
+                              end loop;
                            end if;
                         end loop;
                      end loop;

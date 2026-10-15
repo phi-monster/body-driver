@@ -2241,9 +2241,13 @@ package body Driver.Robot.Kinematics.Fit is
             --  Where each keyframe saw each track: its sighting's index, 0 for none.
             Where : Grid_Access := new Index_Grid'(others => [others => 0]);
             Count : Natural := 0;
+            --  A pair stands for its keyframe's own joint alone: each place where that joint alone would have put the
+            --  point (Sighting's Off_U, Off_V: the joints the keyframe did not ask taken out), so both must be told.
             function Pairable (X : Sighting) return Boolean is
-              (Own_Joint (X.Frame) > 0
-               and then (Partner (X.Frame) = 1 or else Where (Partner (X.Frame), X.Track) > 0));
+              (Own_Joint (X.Frame) > 0 and then X.Off_Told
+               and then (Partner (X.Frame) = 1
+                         or else (Where (Partner (X.Frame), X.Track) > 0
+                                  and then Sight (Where (Partner (X.Frame), X.Track)).Off_Told)));
          begin
             for I in Sight'Range loop
                Where (Sight (I).Frame, Sight (I).Track) := I;
@@ -2259,14 +2263,15 @@ package body Driver.Robot.Kinematics.Fit is
                if Pairable (X) then
                   Count := Count + 1;
                   if Partner (X.Frame) = 1 then
-                     Pairs (Count) := X;
+                     Pairs (Count) := (X with delta U => X.U - X.Off_U, V => X.V - X.Off_V);
                   else
                      --  The point's place in the partner, and both places' uncertainty.
                      declare
                         P : Sighting renames Sight (Where (Partner (X.Frame), X.Track));
                      begin
                         Pairs (Count) :=
-                          (X with delta U0 => P.U, V0 => P.V, Own => Sqrt (X.Own ** 2 + P.Own ** 2),
+                          (X with delta U0 => P.U - P.Off_U, V0 => P.V - P.Off_V, U => X.U - X.Off_U, V => X.V - X.Off_V,
+                                        Own => Sqrt (X.Own ** 2 + P.Own ** 2),
                                         Own_Freedom =>
                                           (if X.Own_Freedom = 0 or else P.Own_Freedom = 0
                                            then Natural'Max (X.Own_Freedom, P.Own_Freedom)

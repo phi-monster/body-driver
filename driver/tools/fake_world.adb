@@ -910,8 +910,10 @@ package body Fake_World is
                   From  : constant Real := L.Q - L.Bounce;
                   --  A servo's tolerance (Dead): within it of its target the joint does not move at all, and a
                   --  move aims short of the target by its landing, on the side it comes from.
-                  Within : constant Boolean := abs (T - From) <= L.Dead;
-                  Aim   : constant Real := (if Within then From elsif T > From then T - L.Landing else T + L.Landing);
+                  Dead_Here : constant Real := (if W.Quirk.Dead then L.Dead else 0.0);
+                  Landing   : constant Real := (if W.Quirk.Dead then L.Landing else 0.0);
+                  Within : constant Boolean := abs (T - From) <= Dead_Here;
+                  Aim   : constant Real := (if Within then From elsif T > From then T - Landing else T + Landing);
                   --  The first-order step, no faster than the joint turns.
                   Step  : constant Real :=
                     (if L.Rate > 0.0 and then abs ((Aim - From) * Share) > L.Rate / L.Unit

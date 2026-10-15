@@ -1941,28 +1941,58 @@ package body Driver.Alignment.Keyframes is
          Done   : Flag_Array (1 .. Count) := [others => False];
          Stride : Positive := 1;
       begin
-         --  From a new direction whose window is wider than a patch at the full size (where several places may
-         --  fit a patch alike), the view's common motion; none told, no point is asked. A window a patch carries at
-         --  the full size is searched there as given: there is nothing to tell apart.
-         if C.Last = New_Direction and then Count > 0
-           and then Window_Radius (Sqrt (Given (Given'First).Cov.UU)) + 1.0
-                    > Real (Half_Patch (C.Width, C.Height))
-         then
-            declare
-               Common : Motion;
-            begin
-               --  No wider than the aligner searches: a prediction wider than that says only "anywhere" (f15c
-               --  replayed on 10-15: a new direction's window, from a channel's shift measured far beyond the
-               --  view's, was over 40,000 pixels across, and the count of its places overflowed).
-               Common_Motion
-                 (C, Second, Real'Min (Sqrt (Given (Given'First).Cov.UU), Largest_Sigma (C.Pictures, Second)), Riding,
-                  Asked, Common);
-               C.Motion := Common;
-               if not Common.Told then
-                  Done := [others => True];
-               end if;
-            end;
-         end if;
+         --  A prediction whose windows are wider than a patch at the full size (where several places may fit a patch
+         --  alike), from a new direction or from the keyframes before: the view's common motion first, which the
+         --  points must agree on, searched about where they stood as far as the prediction puts them and errs. A
+         --  window a patch carries at the full size is searched there as given: there is nothing to tell apart. None
+         --  told, a new direction asks no point, and a prediction from the keyframes is searched as it was given.
+         --  On a servo arm whose every keyframe stands a few units off the reference in the joints not asked (its
+         --  landings), the keyframes' predictions erred by more than their windows and the points slid along the
+         --  table's grain out of them (f15w on 10-15, arm 2: keyframes 22-25 found 8, 6, 16 and 10 points of 255,
+         --  keyframe 28, whose view moved 4.6 px, found 9 in a window stating 7 px; with the common motion first 126,
+         --  190, 134, 88 and 169; arm 1, whose predictions stated a pixel or two, the same to keyframe 35 and 12 to
+         --  35 more in four of the five after it).
+         declare
+            Sigmas   : Real_Array (1 .. Natural'Max (1, Count)) := [others => 0.0];
+            Farthest : Real := 0.0;   --  the farthest the prediction puts a point from where it stood
+            Typical  : Real := 0.0;   --  the median of what the prediction states of its points
+         begin
+            for K in 1 .. Count loop
+               declare
+                  G : Prediction renames Given (Given'First + K - 1);
+               begin
+                  Sigmas (K) := Sqrt (Real'Max (G.Cov.UU, G.Cov.VV));
+                  Farthest := Real'Max (Farthest, Sqrt ((G.To.U - G.From.U) ** 2 + (G.To.V - G.From.V) ** 2));
+               end;
+            end loop;
+            if Count > 0 then
+               Typical := Driver.Stats.Median (Sigmas (1 .. Count));
+            end if;
+            if Count > 0 and then Window_Radius (Typical) + 1.0 > Real (Half_Patch (C.Width, C.Height)) then
+               declare
+                  Common : Motion;
+                  --  The search is about where the points stood: its window reaches the farthest place the
+                  --  prediction puts one, and the prediction's own window beyond it. No wider than the aligner searches:
+                  --  a prediction wider than that says only "anywhere" (f15c replayed on 10-15: a new direction's
+                  --  window, from a channel's shift measured far beyond the view's, was over 40,000 pixels across, and
+                  --  the count of its places overflowed).
+                  Spread : constant Real :=
+                    (if C.Last = New_Direction then Sqrt (Given (Given'First).Cov.UU)
+                     else Farthest / Window_Multiple + Typical);
+               begin
+                  Common_Motion (C, Second, Real'Min (Spread, Largest_Sigma (C.Pictures, Second)), Riding, Asked, Common);
+                  Common.Searched := True;
+                  C.Motion := Common;
+                  if not Common.Told then
+                     if C.Last = New_Direction then
+                        Done := [others => True];
+                     else
+                        Asked := Given;
+                     end if;
+                  end if;
+               end;
+            end if;
+         end;
          while Count / (2 * Stride) >= Least_Points loop
             Stride := 2 * Stride;
          end loop;

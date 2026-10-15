@@ -196,6 +196,14 @@ package Driver.Robot.Kinematics.Fit is
       --  How many degrees of freedom that standard deviation rests on (the matcher estimated it from so many other
       --  fits of the point): a residual over it follows Student's t with that many, not the Gaussian; zero when it is
       --  known.
+      Off_U, Off_V : Real := 0.0;
+      --  How far the joints its keyframe did not ask moved the point, in pixels: where they stand off the reference
+      --  (a servo's landing within its dead band, its sag under a load that changed) times how far the point moves
+      --  per unit of each (first order). The stages that fit one joint at a time take the point at U - Off_U,
+      --  V - Off_V, where the keyframe's own joint alone would have put it.
+      Off_Told : Boolean := True;
+      --  Every such joint's motion of the point per unit is told; when not, the one-joint stages leave the sighting
+      --  out.
    end record;
 
    type Sighting_Array is array (Positive range <>) of Sighting;

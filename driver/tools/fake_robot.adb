@@ -852,6 +852,8 @@ procedure Fake_Robot is
          W.Quirk.Delay_Beats := Natural'Value (Value);
       elsif Name = "droop" then
          W.Quirk.Droop := On;
+      elsif Name = "dead" then
+         W.Quirk.Dead := On;
       elsif Name = "creep" then
          W.Quirk.Creep := On;
       elsif Name = "give" then

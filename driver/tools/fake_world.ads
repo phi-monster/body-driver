@@ -140,6 +140,7 @@ package Fake_World is
       Drift         : Boolean := True;   --  readings creep without a command, far below anything visible
       Delay_Beats   : Natural := 1;      --  beats before a command takes effect
       Droop         : Boolean := True;   --  a joint under load settles short of its target
+      Dead          : Boolean := True;   --  a servo ignores an ask within its tolerance and lands short by up to it
       Creep         : Boolean := True;   --  a hand on the table never quite stands still
       Give          : Boolean := True;   --  an arm pushed against a surface goes a little way in
       Soft_Closer   : Boolean := True;   --  an open closer pressed on a surface is pressed shut

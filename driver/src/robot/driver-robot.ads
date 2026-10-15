@@ -775,6 +775,12 @@ private
                                         --  (Kinematics.Measure_Shifts: fixed to the eye, as the hand's jaws in a
                                         --  wrist eye's view are, or answered at its place by false peaks); nothing
                                         --  is known of a point beyond its length
+      --  Per channel and query point (the channel's block of the query points, Kinematics.Measure_Shifts' lines): how
+      --  far the point moves across and down the picture per unit of the channel, and whether its keyframes tell it.
+      --  The fit's one-joint stages take a keyframe's points to where its own joint alone would have put them
+      --  (Refit: Fit.Sighting's Off_U, Off_V).
+      Point_Gu, Point_Gv : Real_Vectors.Vector;
+      Point_G_Told       : Flag_Vectors.Vector;
       Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
       --  The first arm's reference view matched into this arm's, its query
       --  points into this arm's reference image (Kinematics.Observe), and of

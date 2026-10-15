@@ -124,8 +124,10 @@ package Driver.Alignment.Keyframes is
       Sigma      : Real := 0.0;        --  how far the places of the points on it lie from it, in pixels
       Draws      : Natural := 0;       --  the pairs of places the fields were drawn from, over the sizes tried
       Unmoved    : Natural := 0;       --  the points whose best place was where they stood, which drew no field
+      Searched   : Boolean := False;   --  it was searched: the keyframe's prediction had windows wider than a patch
    end record;
-   --  The view's common motion a keyframe from a new direction was predicted from (Add).
+   --  The view's common motion a keyframe was asked from (Add): every keyframe whose prediction's windows are wider
+   --  than a patch, a new direction's among them.
 
    No_Riding : constant Flag_Array (1 .. 0) := [];
 

@@ -4633,7 +4633,8 @@ package body Driver.Robot.Tests is
                         V := V + Noise * Gaussian (Rng) + Shared_V + Track_V (K) + Local_V (K);
                         if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 and then Kept_Point (K) then
                            Seen := Seen + 1;
-                           All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V, Own => 0.0, Own_Freedom => 0);
+                           All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V, Own => 0.0, Own_Freedom => 0,
+                                               others => <>);
                         end if;
                      end;
                   end loop;
