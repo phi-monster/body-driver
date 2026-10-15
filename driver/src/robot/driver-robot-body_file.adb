@@ -61,6 +61,16 @@ package body Driver.Robot.Body_File is
       return V;
    end Shifts_Known_Of;
 
+   --  Every channel's creep (Model.Drift), one for each noise: 0 where it was not measured.
+   function Drift_Of (M : Model) return Real_Vectors.Vector is
+      V : Real_Vectors.Vector;
+   begin
+      for K in 0 .. Natural (M.Noise.Length) - 1 loop
+         V.Append (if K < Natural (M.Drift.Length) then M.Drift (K) else 0.0);
+      end loop;
+      return V;
+   end Drift_Of;
+
    --  Per channel of a group, the least ask a push moved it for (Group_Stream.Executed), 0 where none did yet,
    --  and which did.
    function Executed_Of (S : Group_Stream) return Real_Vectors.Vector is
@@ -142,7 +152,7 @@ package body Driver.Robot.Body_File is
 
       --  The readings' noise, every channel of every group in group order.
       Add (" ""noise"": {""method"": " & Int (Noise_Method) & ", ""sigma"": " & Reals (M.Noise)
-           & ", ""freedom"": " & Counts (M.Noise_Freedom) & "}," & LF);
+           & ", ""freedom"": " & Counts (M.Noise_Freedom) & ", ""drift"": " & Reals (Drift_Of (M)) & "}," & LF);
 
       --  The readings every channel has moved through.
       Add (" ""travel"": {""method"": " & Int (Travel_Method) & ", ""groups"": [");
@@ -226,7 +236,8 @@ package body Driver.Robot.Body_File is
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          Add (Separator (G = M.Groups.First_Index) & "{""role"": " & Word (Group_Role'Image (Role (M, G)))
               & ", ""arm"": " & Int (if G <= M.Graph.Arm_Of.Last_Index then Integer (M.Graph.Arm_Of (G)) else 0)
-              & ", ""breach"": " & Int (Contract_Breach (M, G)) & "}");
+              & ", ""breach"": " & Int (Contract_Breach (M, G))
+              & ", ""seen_at"": " & Reals (M.Groups (G).Seen_At) & "}");
       end loop;
       Add ("], ""arms"": [");
       for A in M.Graph.Arms.First_Index .. M.Graph.Arms.Last_Index loop
@@ -453,10 +464,11 @@ package body Driver.Robot.Body_File is
             N : constant Node := Field (Top, "noise");
          begin
             if Method_Is (N, Noise_Method) and then Size (Field (N, "sigma")) = Channels
-              and then Size (Field (N, "freedom")) = Channels
+              and then Size (Field (N, "freedom")) = Channels and then Size (Field (N, "drift")) = Channels
             then
                M.Noise := Reals_Of (Field (N, "sigma"));
                M.Noise_Freedom := Counts_Of (Field (N, "freedom"));
+               M.Drift := Reals_Of (Field (N, "drift"));
                Restored (Stored_Noise) := True;
             end if;
          end;
@@ -665,6 +677,7 @@ package body Driver.Robot.Body_File is
                   M.Graph.Roles.Append (Group_Role'Value (Driver.Json.Text (Doc, Field (Item (Gs, I), "role"))));
                   M.Graph.Arm_Of.Append (Arm_Id'Base (Natural'Max (0, Whole (Item (Gs, I), "arm"))));
                   M.Graph.Breach.Append (Natural'Max (0, Whole (Item (Gs, I), "breach")));
+                  M.Groups (Group_Id (I)).Seen_At := Reals_Of (Field (Item (Gs, I), "seen_at"));
                end loop;
                M.Graph.Arms.Clear;
                for I in 1 .. Size (As) loop

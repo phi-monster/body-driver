@@ -45,6 +45,13 @@ private package Driver.Robot.Channels is
    function Noise (M : Model; G : Group_Id; Channel : Positive) return Real;
    --  Unknown (Real'Last) until measured.
 
+   function Drift (M : Model; G : Group_Id; Channel : Positive) return Real;
+   --  The channel's steady change a beat at rest, in reading units: the median change of the rest its noise is
+   --  measured on, where it stands out of zero by its standard error, else 0 (and 0 until measured). A reading that
+   --  creeps at one rate for good (a simulator's readings, 1e-12 radians a beat; the fake robot's drift) keeps the
+   --  creep in its noise beat to beat, and over many beats leaves where it was by many times that noise, all of it
+   --  the creep's: whatever compares readings beats apart takes the creep of the beats between out.
+
    function Noise_Measured (M : Model; G : Group_Id) return Boolean;
 
    function Noise_Freedom (M : Model; G : Group_Id; Channel : Positive) return Natural;

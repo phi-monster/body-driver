@@ -418,12 +418,14 @@ package body Driver.Robot.Boot is
                      --  regressors: the estimate before R6's third sweep (10-14) kept 9 columns of 12, its rows after
                      --  the rounds' pushes mostly in settling tails of 274 beats, and arm_a's second, third and fourth
                      --  joints were left unswept though the probe had seen each at 9.8 to 157 units.
-                     for R of Recognized loop
-                        if R.Ref.Group = G and then R.Ref.Channel = C then
-                           First (C) := Real'Max (First (C), R.Amount);
-                           Moves (C) := Moves (C) or else R.Amount > 0.0;
-                        end if;
-                     end loop;
+                     --  Read from the model (Group_Stream.Seen_At), which the body file keeps: a boot begun from the
+                     --  body file kept after recognizing the groups had no probe's turn here, swept from the least turn
+                     --  a keyframe counts (0.001 to 0.015 units where the probe had seen 0.016 to 0.126), and the
+                     --  joints whose first pushes moved no view were left as not moving the eye (f16e on 10-15).
+                     if C - 1 <= M.Groups (G).Seen_At.Last_Index then
+                        First (C) := Real'Max (First (C), M.Groups (G).Seen_At (C - 1));
+                        Moves (C) := Moves (C) or else M.Groups (G).Seen_At (C - 1) > 0.0;
+                     end if;
                      Least (C) := Driver.Robot.Motion.Least_Turn (M, A, C);
                   end loop;
                end if;
@@ -1021,6 +1023,17 @@ package body Driver.Robot.Boot is
 
       procedure Read_Body is
       begin
+         --  The turn at which the recognition's probes saw each channel move an eye goes to the model
+         --  (Group_Stream.Seen_At), where the sweeps' first levels and the body file read it; a boot begun from a
+         --  body file recognized nothing and keeps the file's. In the beat the body is read in: a beat of its own
+         --  after every probe moved every lock-in row after it (robot.boot.reread's lagging eye then saw nothing).
+         for R of Recognized loop
+            while M.Groups (R.Ref.Group).Seen_At.Last_Index < R.Ref.Channel - 1 loop
+               M.Groups (R.Ref.Group).Seen_At.Append (0.0);
+            end loop;
+            M.Groups (R.Ref.Group).Seen_At (R.Ref.Channel - 1) :=
+              Real'Max (M.Groups (R.Ref.Group).Seen_At (R.Ref.Channel - 1), R.Amount);
+         end loop;
          Driver.Log.Line (Driver.Log.Robot, "boot: the groups as recognized:" & ASCII.LF & Describe (M));
          for G in 1 .. Group_Count (M) loop
             if Is_Commandable (M, Group_Id (G)) and then Contract_Breach (M, Group_Id (G)) > 0 then
@@ -1475,6 +1488,18 @@ package body Driver.Robot.Boot is
          procedure Store is
          begin
             Save (M, H, Body_File);
+            --  The porting contract is judged on the body as measured at the end, not as first recognized: f16f's
+            --  jaw (10-15), whose pushes no eye's lock-in told apart while the groups were recognized, broke clause 1
+            --  then and was arm 1's closer at the end, and the boot failed on the first verdict; the brain was never
+            --  asked.
+            Breach := False;
+            for G in 1 .. Group_Count (M) loop
+               if Is_Commandable (M, Group_Id (G)) and then Contract_Breach (M, Group_Id (G)) > 0 then
+                  Breach := True;
+                  Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " breaks clause"
+                                   & Contract_Breach (M, Group_Id (G))'Image & " of the porting contract as measured");
+               end if;
+            end loop;
          end Store;
       begin
          Driver.Beats.Within_A_Beat (Store'Access);

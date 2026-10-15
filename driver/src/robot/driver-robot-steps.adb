@@ -327,7 +327,14 @@ package body Driver.Robot.Steps is
             if C - 1 < Natural (S.From.Length) then
                declare
                   Noise : constant Real := Channels.Noise (M, G, C);
-                  Gone  : constant Real := abs (Channels.Reading (M, G, Beat, C) - S.From (C - 1));
+                  --  Less the creep of the beats since the readings it started from (Channels.Drift): a creeping
+                  --  reading left every start by more than its noise within a few beats, and every push of a closer
+                  --  held open at its end was answered (f16f on 10-15: the jaw asked open to 7e13 units).
+                  Since : constant Natural :=
+                    (if S.Episodes.Is_Empty then 0
+                     else Beat - Natural'Min (Beat, Natural'Max (1, S.Episodes.Last_Element.Start) - 1));
+                  Gone  : constant Real :=
+                    abs (Channels.Reading (M, G, Beat, C) - S.From (C - 1) - Channels.Drift (M, G, C) * Real (Since));
                begin
                   if Noise < Real'Last and then Noise > 0.0
                     and then Driver.Uncertain.Significant (Gone, Noise * Sqrt (2.0), Channels.Noise_Freedom (M, G, C))

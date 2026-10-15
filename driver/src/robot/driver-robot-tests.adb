@@ -1764,6 +1764,62 @@ package body Driver.Robot.Tests is
       end if;
    end Unanswered_Push_Of_An_Unanswered_Group;
 
+   --  The closer of the test above, its reading creeping up 1e-11 a beat and otherwise exact (a simulator's readings
+   --  creep for good: the fake robot's jaw, 10-15), measured at rest before it is pushed beyond its limit; the body
+   --  answers eight beats after a command. The creep is measured, and the push nothing answers is not taken as
+   --  answered by the creep since it began: the jaw, asked open at its open end, was answered at every level, went
+   --  "further" each time, and was asked open to 7e13 units, the way shut never asked (f16f).
+   procedure Unanswered_Push_Of_A_Creeping_Group is
+      M      : Model;
+      O      : Observation;
+      Sent   : Driver.Commands.Command;
+      Limit  : constant Real := 1.0;
+      Creep  : constant Real := 1.0e-11;
+      Arm, Arm_Target : Real := 0.0;
+      Closer_Target   : Real := Limit;
+   begin
+      for B in 0 .. 140 loop
+         if B = 20 then
+            Arm_Target := 0.01;
+         elsif B = 50 then
+            Arm_Target := 0.0;
+         elsif B in 28 | 58 then
+            Arm := Arm_Target;
+         elsif B = 100 then
+            Closer_Target := Limit + 2.44e-4;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Arm));
+         O.Readings.Append (Real_Array'(1 => Limit + Creep * Real (B)));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Arm_Target]);
+         Driver.Commands.Set_Target (Sent, 2, [Closer_Target]);
+         Observe (M, O, Sent);
+         if B = 90 then
+            Driver.Robot.Channels.Measure (M);
+         end if;
+      end loop;
+      Check (abs (Driver.Robot.Channels.Drift (M, 2, 1) - Creep) <= 0.01 * Creep,
+             "the closer's creep of" & Creep'Image & " a beat is measured as" & Driver.Robot.Channels.Drift (M, 2, 1)'Image);
+      Check (M.Groups (1).Delay_Known and then M.Groups (1).Delay_Beats >= 7,
+             "the body's delay of eight beats is not measured: " & M.Groups (1).Delay_Beats'Image);
+      Check (Steps.Episodes (M, 2) = 1, "group 2 is pushed once, got" & Steps.Episodes (M, 2)'Image);
+      if Steps.Episodes (M, 2) = 1 then
+         declare
+            E : constant Episode := M.Groups (2).Episodes (1);
+         begin
+            Check (not E.Moved, "the push nothing answered is answered" & Natural'Image (E.Moved_At - E.Start)
+                   & " beats after it began, by the creep of the beats since");
+            Check (E.Ended, "the push nothing answered never ends");
+         end;
+      end if;
+   end Unanswered_Push_Of_A_Creeping_Group;
+
    --  A push sent while its group is still on its way from the push before is answered at its own start beat by
    --  that motion. Measured from such pushes the body's delay was 0 (seed 2 of the fake robot, 10-14: each probe
    --  level sent a beat after the one before), and every look thereafter read the body a beat before it had
@@ -3696,6 +3752,22 @@ package body Driver.Robot.Tests is
                 & Role (Back, 2)'Image & ", " & Role (Back, 4)'Image);
          Check (Eye_Mount (Back, 1) = Eye_Mount (M, 1) and then Eye_Mount (Back, 2) = Eye_Mount (M, 2),
                 "the reloaded body mounts its eyes elsewhere");
+         --  And the turns at which the recognition saw each channel move an eye, from which the sweeps begin: a boot
+         --  begun from the file without them swept from the least turn a keyframe counts, which moved no view, and
+         --  left those joints as not moving the eye (f16e on 10-15).
+         Check ((for some G in 1 .. Group_Count (M) => (for some X of M.Groups (Group_Id (G)).Seen_At => X > 0.0)),
+                "the boot recognized no channel an eye saw move");
+         for G in 1 .. Group_Count (M) loop
+            declare
+               Was : Real_Vectors.Vector renames M.Groups (Group_Id (G)).Seen_At;
+               Now : Real_Vectors.Vector renames Back.Groups (Group_Id (G)).Seen_At;
+            begin
+               Check (Natural (Now.Length) = Natural (Was.Length)
+                      and then (for all C in Was.First_Index .. Was.Last_Index =>
+                                  abs (Now (C) - Was (C)) <= 1.0E-9 * abs Was (C)),
+                      "group" & G'Image & "'s turns its recognition saw it move an eye at were not reloaded");
+            end;
+         end loop;
          GNAT.OS_Lib.Delete_File (Name.all, Gone);
       end if;
       Check (not GNAT.OS_Lib.Is_Regular_File (Name.all & ".part"), "a write left its half behind");
@@ -8181,6 +8253,9 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.steps.unanswered", "a push of a group that never answered yet, which nothing "
                              & "answers, is waited for longer than any push of the body took to answer",
                              Unanswered_Push_Of_An_Unanswered_Group'Access);
+      Driver.Tests.Register ("robot.steps.creeping", "a push of a closer at its limit whose reading creeps, which "
+                             & "nothing answers, is taken as answered by the creep since it began",
+                             Unanswered_Push_Of_A_Creeping_Group'Access);
       Driver.Tests.Register ("robot.steps.born", "a push sent while its group is still on its way from the push "
                              & "before is answered at its own start, and the body's delay is measured as nothing "
                              & "from it", Push_Born_Moving_Gives_No_Delay'Access);

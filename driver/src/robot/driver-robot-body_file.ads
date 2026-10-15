@@ -15,13 +15,13 @@ with Ada.Strings.Unbounded;
 private package Driver.Robot.Body_File is
 
    --  Method versions; each goes up when the code that measures it changes.
-   Noise_Method      : constant := 1;
+   Noise_Method      : constant := 2;
    Travel_Method     : constant := 1;
    Ends_Method       : constant := 2;
    Steps_Method      : constant := 3;
    Lag_Method        : constant := 2;
    Lockin_Method     : constant := 5;
-   Graph_Method      : constant := 1;
+   Graph_Method      : constant := 2;
    Kinematics_Method : constant := 9;
 
    function Text (M : Model) return String;

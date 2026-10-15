@@ -251,6 +251,21 @@ package body Driver.Robot.Channels is
             Moved (Rest + K) := -All_Changes (I);
          end if;
       end loop;
+      --  The creep (Drift): the median change of this rest, where it stands Z of a median's standard error (the
+      --  changes' scatter about it over the root of their count) out of zero. A resting reading's changes have none;
+      --  a creeping one's are all its creep. The noise below is measured about zero, the creep in it, as before.
+      if Count >= Start then
+         declare
+            N      : constant Positive := Count - Start + 1;
+            Median : constant Real := Driver.Stats.Median (All_Changes (Start .. Count));
+            Spread : constant Real := Driver.Stats.Robust_Sigma (All_Changes (Start .. Count));
+         begin
+            M.Drift.Replace_Element
+              (Index, (if Driver.Uncertain.Significant (Median, Driver.Stats.Median_Sigma (Spread, N),
+                                                         Mad_Degrees_Of_Freedom (N))
+                       then Median else 0.0));
+         end;
+      end if;
       Free (All_Changes);
       if K = 0 then
          M.Noise.Replace_Element (Index, 0.0);
@@ -294,6 +309,8 @@ package body Driver.Robot.Channels is
       M.Noise.Append (Real'Last, Ada.Containers.Count_Type (Total));
       M.Noise_Freedom.Clear;
       M.Noise_Freedom.Append (0, Ada.Containers.Count_Type (Total));
+      M.Drift.Clear;
+      M.Drift.Append (0.0, Ada.Containers.Count_Type (Total));
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          declare
             Rest : Natural := 0;
@@ -317,6 +334,12 @@ package body Driver.Robot.Channels is
    begin
       return (if K < Natural (M.Noise.Length) then M.Noise (K) else Real'Last);
    end Noise;
+
+   function Drift (M : Model; G : Group_Id; Channel : Positive) return Real is
+      K : constant Natural := First_Channel (M, G) + Channel - 1;
+   begin
+      return (if K < Natural (M.Drift.Length) then M.Drift (K) else 0.0);
+   end Drift;
 
    function Noise_Measured (M : Model; G : Group_Id) return Boolean is
      (First_Channel (M, G) + M.Groups (G).Size <= Natural (M.Noise.Length));
@@ -564,6 +587,8 @@ package body Driver.Robot.Channels is
          M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));
          M.Noise_Freedom.Clear;
          M.Noise_Freedom.Append (0, Ada.Containers.Count_Type (Total));
+         M.Drift.Clear;
+         M.Drift.Append (0.0, Ada.Containers.Count_Type (Total));
       end;
       declare
          --  The marks of the round before.

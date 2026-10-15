@@ -469,6 +469,8 @@ private
                                            --  the body executes asks that large; a servo stands still for one within
                                            --  its dead band), Real'Last until one did; empty before any push
       Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
+      Seen_At     : Real_Vectors.Vector;   --  per channel: the turn at which the recognition's probe saw an eye move
+                                           --  with it (Boot), 0 where none did; empty before the groups are recognized
       Stopped_Low, Stopped_High : Real_Vectors.Vector;   --  per channel, the ends: where the body stopped a push of the
                                                          --  channel at the same reading from two poses, the furthest
                                                          --  down and up (End_Of); valid where the flags are
@@ -810,6 +812,8 @@ private
       Noise          : Real_Vectors.Vector;        --  per channel of every group, in group order
       Measure_Rounds : Natural := 0;               --  the rounds of noise and pushes the last measurement took (Channels.Measure)
       Noise_Freedom  : Count_Vectors.Vector;       --  the degrees of freedom each noise rests on
+      Drift          : Real_Vectors.Vector;        --  per channel, as Noise: the readings' steady change a beat at
+                                                   --  rest (Channels.Drift), 0 where none stands out
       Lags           : Lag_Vectors.Vector;
       Lag_Known      : Eye_Flag_Vectors.Vector;    --  per eye: its lag stood out of every shift tried
       Began_Moving   : Flag_Vectors.Vector;        --  per beat: some commandable group began to move
