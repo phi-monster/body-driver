@@ -572,6 +572,7 @@ driver-distributions.adb	return Incomplete_Beta (Degrees_Of_Freedom, 1, Nu / (Nu
 driver-distributions.adb	return Log (W) * U / (W - 1.0);	1.0	math	ln (1 + u) through w = 1 + u with its rounding divided out
 driver-distributions.ads	with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;	1.0	math	a probability is at most one
 driver-distributions.ads	with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;	1.0	math	a probability is at most one
+driver-distributions.ads	with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;	1.0	math	a probability is at most one
 driver-distributions.ads	with Pre => Upper_Tail > 0.0 and then Upper_Tail <= 1.0;	1.0	math	a probability is at most one
 driver-distributions.ads	with Pre => Upper_Tail > 0.0 and then Upper_Tail <= 1.0;	1.0	math	a probability is at most one
 driver-geometry.adb	Axis (Smallest) := 1.0;	1.0	math	component of a unit coordinate axis
@@ -2101,9 +2102,9 @@ driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two resi
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals to a sighting
-driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 2 * Answer - 1 .. 2 * Answer loop	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	for I in 2 * Answer - 1 .. 2 * Answer loop	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	for I in 2 * Link.Used + 1 .. Rows loop	2	structure	two residuals per answer, across and down; two sides' holds
