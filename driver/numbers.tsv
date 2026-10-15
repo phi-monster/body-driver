@@ -401,6 +401,7 @@ driver-alignment.adb	for K in reverse 0 .. Count - 2 loop	2	structure	the backwa
 driver-alignment.adb	for Row in 0 .. 3 loop	3	math	the cubic B-spline reads four coefficients along an axis: one before the cell and two after
 driver-alignment.adb	function Cell_U (Index : Positive) return Real is (Real (Cell_X (Index)) + 0.5);	0.5	math	a pixel's centre lies half a pixel in from its corner
 driver-alignment.adb	function Cell_V (Index : Positive) return Real is (Real (Cell_Y (Index)) + 0.5);	0.5	math	a pixel's centre lies half a pixel in from its corner
+driver-alignment.adb	function Finest_Radius (Width, Height : Natural) return Real is (Real (Half_Patch (Width, Height)) - 1.0);	1.0	numerics	the pixel a place on the grid is rounded to: Align's own narrow test (Radius / 2 ** Level + 1.0 <= Half_Patch)
 driver-alignment.adb	function Side_Of (Half : Natural) return Positive is (2 * Half + 1);	2	math	a patch is its half-width either side of the point, and the point
 driver-alignment.adb	if 2 * Count >= N then	2	math	at least half the patch: twice the count reaches the patch's size
 driver-alignment.adb	if 2 * Fitted.Count < Side_Of (Grow * Top_Half) ** 2 then	2	math	at least half the patch: twice the count reaches the patch's size
@@ -1138,6 +1139,20 @@ driver-robot-hand-aims.adb	Next := 2.0 * Tilt;	2.0	numerics	a search for an unkn
 driver-robot-hand-aims.adb	Next := Tilt / 2.0;	2.0	numerics	a search for the size an arm makes shrinks geometrically, halving
 driver-robot-hand-aims.adb	then Sqrt (2.0 * Sqrt (2.0) * Push / Distance.Value)	2.0	math	the hits of a tip and of a stop of the eye differ by s T^2 / 2: the tilt is the root of 2 over s times what must be told
 driver-robot-hand-aims.adb	then Sqrt (2.0 * Sqrt (2.0) * Push / Distance.Value)	2.0	statistics	the difference of two hits has the root of two of the tool place's noise
+driver-robot-hand-follow.adb	(Gate, Sqrt (Real'Max (0.0, (C * Du * Du - 2.0 * B * Du * Dv + A * Dv * Dv) / Det)), 1.0);	1.0	math	the Mahalanobis length is already in sigmas: its sigma is one
+driver-robot-hand-follow.adb	(Gate, Sqrt (Real'Max (0.0, (C * Du * Du - 2.0 * B * Du * Dv + A * Dv * Dv) / Det)), 1.0);	2.0	math	the cross term of a two-by-two quadratic form
+driver-robot-hand-follow.adb	Column : Natural := Half / 2;	2	structure	the grid of points asked is centred in its cells of the half patch
+driver-robot-hand-follow.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	math	a place in a picture has two dimensions
+driver-robot-hand-follow.adb	Half : constant Natural := Natural'Max (1, Driver.Alignment.Half_Patch (Width, Height));	1	structure	a grid step of at least one pixel
+driver-robot-hand-follow.adb	P : constant Driver.Images.Pixel := (U => Real (Column) + 0.5, V => Real (Row) + 0.5);	0.5	math	a pixel's centre (Driver.Images: pixel C covers [C, C + 1))
+driver-robot-hand-follow.adb	P : constant Driver.Images.Pixel := (U => Real (Column) + 0.5, V => Real (Row) + 0.5);	0.5	math	a pixel's centre (Driver.Images: pixel C covers [C, C + 1))
+driver-robot-hand-follow.adb	Result.Sigma := Sqrt ((Vars ((Vars'First + Vars'Last) / 2) + Vars ((Vars'First + Vars'Last + 1) / 2)) / 2.0);	2	math	the middle of the sorted variances: the median
+driver-robot-hand-follow.adb	Result.Sigma := Sqrt ((Vars ((Vars'First + Vars'Last) / 2) + Vars ((Vars'First + Vars'Last + 1) / 2)) / 2.0);	2	math	the middle of the sorted variances: the median
+driver-robot-hand-follow.adb	Result.Sigma := Sqrt ((Vars ((Vars'First + Vars'Last) / 2) + Vars ((Vars'First + Vars'Last + 1) / 2)) / 2.0);	2.0	math	the median of an even count: the mean of the two middle ones
+driver-robot-hand-follow.adb	Row : Natural := Half / 2;	2	structure	the grid of points asked is centred in its cells of the half patch
+driver-robot-hand-follow.adb	Var => P.Var + (Forth.Cov.UU + Forth.Cov.VV) / 2.0));	2.0	math	one coordinate's variance: the mean of the two axes'
+driver-robot-hand-follow.adb	if 2 * Ours > All_Of then	2	math	more the lobe's than not: a majority of the patch
+driver-robot-hand-follow.ads	with Pre => Views'Length >= 2 and then Tips'First = Views'First and then Tips'Last = Views'Last;	2	structure	a step goes from one view to the next: two at least
 driver-robot-hand-frames.adb	Across : constant Real := (Turn (1, 1) + Turn (2, 2) + Turn (3, 3) - U * (Turn * U)) / 2.0;	2.0	math	the mean of the turn's variance about the two axes across the line
 driver-robot-hand-lobes.adb	(((Real (C) + 0.5 - Tip.U) * Reach_U + (Real (R) + 0.5 - Tip.V) * Reach_V) / Length);	0.5	math	the centre of a pixel is half a pixel from its corner
 driver-robot-hand-lobes.adb	(((Real (C) + 0.5 - Tip.U) * Reach_U + (Real (R) + 0.5 - Tip.V) * Reach_V) / Length);	0.5	math	the centre of a pixel is half a pixel from its corner
@@ -1284,6 +1299,7 @@ driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Least, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Limit, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Place, 5) & ""	5	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Turn_Sigma, 5)	5	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Yaw, 4) & "");	4	format	digits printed in a log line or a message
@@ -1306,6 +1322,12 @@ driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Im
 driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (Bound, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	("" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6) & ""	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	("" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6) & ""	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	("" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6) & ""	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	("" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6) & ""	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	("" & Driver.Log.Image (Part, 6) & "" & Wait_At_Most'Image	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	("" & Driver.Log.Image (Part, 6));	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	(Off, "" & C'Image & "" & Driver.Log.Image (Now (Now'First + C - 1) - Goal (Goal'First + C - 1), 4));	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	(Off, "" & Driver.Log.Image (Cl (Cl'First + C - 1) - Was (Was'First + C - 1), 6));	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
@@ -1326,6 +1348,7 @@ driver-robot-hand-measure.adb	elsif Steps.Stalled then "" & Driver.Log.Image (By
 driver-robot-hand-measure.adb	elsif not Lined then Ada.Numerics.Pi / 2.0	2.0	math	a right angle: the whole quarter turn of tilts a lobe without a line of its own is pressed through, since a tip anywhere needs presses from three directions
 driver-robot-hand-measure.adb	if Bound < Ada.Numerics.Pi / 2.0 and then not Checked and then Tilt = 0.0 then	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
 driver-robot-hand-measure.adb	if Natural (Keys.Length) = 1 then	1	structure	one hand is pressed alone, several at once
+driver-robot-hand-measure.adb	if not Significant (Part - Last, Sqrt (2.0) * Sigma) then	2.0	statistics	the difference of two readings carries the channel's sigma twice over
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Eye.Value, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
@@ -1540,6 +1563,7 @@ driver-robot-hand.adb	& "" & Driver.Log.Image (G.Value, 4)	4	format	digits print
 driver-robot-hand.adb	& "" & Driver.Log.Image (Reach.Value * R.Lobes (L).Sights (Which).Spread, 3)	3	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (Said.Asked, 4) & "" & Driver.Log.Image (Said.Went, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (Said.Asked, 4) & "" & Driver.Log.Image (Said.Went, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand.adb	& (if F.Count > 0 then "" & Driver.Log.Image (F.Sigma, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (100.0 * Said.Joint_Free, 3) & "");	100.0	format	a share printed as a percentage
 driver-robot-hand.adb	& Driver.Log.Image (100.0 * Said.Joint_Free, 3) & "");	3	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (100.0 * Said.Joint_Share, 1) & "" & Pushes	1	format	digits printed in a log line or a message
@@ -1548,6 +1572,8 @@ driver-robot-hand.adb	& Driver.Log.Image (Driver.Robot.Hand.Shape.Scatter (R.Lob
 driver-robot-hand.adb	& Driver.Log.Image (Lobe.Way.Reach, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Reach.Value, 4) & "" & Driver.Log.Image (Reach.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Reach.Value, 4) & "" & Driver.Log.Image (Reach.Sigma, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand.adb	& Driver.Log.Image (Readings (Wide + 1), 6) & ""	6	format	digits printed in a log line or a message
+driver-robot-hand.adb	& Driver.Log.Image (Readings (Wide), 6) & "" & Image (Tips (Wide + 1)) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Shift.Still, 1) & "" & Driver.Log.Image (Shift.Typical, 1)	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Shift.Still, 1) & "" & Driver.Log.Image (Shift.Typical, 1)	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message
@@ -1575,11 +1601,14 @@ driver-robot-hand.adb	I : Positive := 1;	1	structure	the first pair
 driver-robot-hand.adb	Last : constant Positive := 2 + Natural (L.Stops.Length);	2	structure	the two openings beside the stops between them
 driver-robot-hand.adb	Next : constant Ray_Estimate := Eye_Ray (M, P.Eye, (U => Px.U + 1.0, V => Px.V));	1.0	math	the next pixel along the row: the angle one pixel spans at the tip
 driver-robot-hand.adb	Offset := 2.0 * Offset;	2.0	math	the sweep doubles its step
+driver-robot-hand.adb	Order : array (1 .. N + 2) of Natural := [others => 0];	2	structure	the closer's two ends besides its stops
 driver-robot-hand.adb	P.Motion_U.Append (0.0, Ada.Containers.Count_Type (Size * N));	0.0	math	a tally begins at nothing
 driver-robot-hand.adb	P.Motion_V.Append (0.0, Ada.Containers.Count_Type (Size * N));	0.0	math	a tally begins at nothing
 driver-robot-hand.adb	Past := Real'Max (2.0 * Past, Real'Max (G.Sigma, Least));	2.0	numerics	doubling steps past the band
+driver-robot-hand.adb	Readings : Real_Array (1 .. N + 2);	2	structure	the closer's two ends besides its stops
 driver-robot-hand.adb	Result (C) := Real'Max (Result (C), Step.Value / (Driver.Conventions.Z * Sqrt (2.0)));	2.0	statistics	the difference of two readings carries the sigma of each: the step is Z times the square root of two of it
 driver-robot-hand.adb	Sqrt (2.0) * Sigma (C)));	2.0	statistics	the difference of two readings carries the sigma of each: the square root of two times one
+driver-robot-hand.adb	Tips : Follow.Pixel_Array (1 .. N + 2);	2	structure	the closer's two ends besides its stops
 driver-robot-hand.adb	Upper_F : Real := 1.0;	1.0	structure	the closed end of the closing as a fraction
 driver-robot-hand.adb	Which : Positive := 1;	1	structure	channels are numbered from one; the first stands until the one that moved is found
 driver-robot-hand.adb	Which : constant Opening := (if S = 1 then Open else Closed_Empty);	1	structure	the first setting is the open end
@@ -1593,6 +1622,7 @@ driver-robot-hand.adb	if Pushes = 1 then	1	structure	the first push says whether
 driver-robot-hand.adb	if S = 1 or else S = Last then	1	structure	the first setting is the open end
 driver-robot-hand.adb	return In_World (H, M, Id, O, (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	return In_World (H, M, Id, O, (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
+driver-robot-hand.adb	return Shapes.Fit (Mount.Pose.Translation, Seen, 1, Seen'Last, Bordered);	1	structure	the tip's sighting, put first for the shape's open anchor
 driver-robot-hand.adb	return Tip_Along (H, Id, Lobe, 0.0);	0.0	structure	a lobe no channel moves stands at the open end of a closing it does not have
 driver-robot-hand.ads	(Positive'Max (1, (if Longest_Formed > 0 or else Longest_Settling > 0	1	structure	a view is waited for one beat at least: the asking after the push
 driver-robot-hand.ads	Mad_Efficiency : constant := 0.367_5;	0.367_5	statistics	asymptotic efficiency of the median absolute deviation for Gaussian data

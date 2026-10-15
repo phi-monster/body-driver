@@ -197,6 +197,7 @@ package body Fake_World is
       Eye_Back  : constant Real := Random (W, 0.02, 0.05);
       Eye_Above : constant Real := Random (W, 0.03, 0.13);
       Tilt      : constant Real := Random (W, 0.55, 0.7);
+      Jaw_Long  : Real := 0.0;   --  the jaws' length, when the hand is a jaw (set where it is built)
       --  The arm's own surfaces have texture: screws, cables, edges and prints at the scale of millimetres to
       --  centimetres, more or less contrasted; a white table or a white room leaves the arm as the only texture an
       --  eye on it, or on the other arm, has.
@@ -276,6 +277,8 @@ package body Fake_World is
          end loop;
       end;
       W.Groups.Append (G);
+      --  The jaws' length, for the eye that watches them (below); zero for another hand.
+      Jaw_Long := 0.0;
       case Kind is
          when Pair | Pair_And_Thumb =>
             --  Two plates sliding apart along the tool's x, one joint read (the
@@ -349,9 +352,13 @@ package body Fake_World is
                Jaw_Length : constant Real := 0.05 + 0.03 * Arm_Random;
                Jaw_Thick  : constant Real := 0.008 + 0.006 * Arm_Random;
                Jaw_Height : constant Real := 0.012 + 0.010 * Arm_Random;
-               Swing      : constant Real := 0.7 + 0.4 * Arm_Random;   --  radians from closed to open
+               --  Radians from closed to open: the kiwi's moving jaw opens about a third of a radian to half of one
+               --  (its wrist frames, 10-14); the fake's jaw opened 0.7 to 1.1 and swung out of its eye's picture.
+               Swing      : constant Real := 0.35 + 0.35 * Arm_Random;
+               --  Dark grey with its ribs showing, as the kiwi's show in its wrist frames (10-14); at 0.05 and a third to
+               --  seven tenths of contrast the jaws rendered black, nothing on them for a matcher to follow (a05).
                Ribbed     : constant Material :=
-                 (Kind => Stripes, Albedo => [0.05, 0.05, 0.05], Contrast => 0.3 + 0.4 * Arm_Random,
+                 (Kind => Stripes, Albedo => [0.10, 0.10, 0.10], Contrast => 0.6 + 0.35 * Arm_Random,
                   Scale => 200.0 + 200.0 * Arm_Random, Gloss => 0.4);
                Jaw_Hi     : constant Real := (if In_Ticks then Swing / (2.0 * Pi / Ticks) else 1.0);
                Fixed_Jaw  : Positive;
@@ -368,6 +375,7 @@ package body Fake_World is
                         Moved_To (Jaw_Thick / 2.0, Jaw_Length / 2.0, 0.0), Ribbed, F1, A, Finger => True);
                W.Closers.Append (F1);
                W.Hand_Reach.Replace_Element (A, Jaw_Length * (1.0 + Sin (Swing)));
+               Jaw_Long := Jaw_Length;
                G := (Name => To_Unbounded_String ("arm" & Trim (A) & "_closer"), Commandable => True,
                      Integers => In_Ticks, others => <>);
                G.Joints.Append (F1);
@@ -382,16 +390,26 @@ package body Fake_World is
       --  picture and the table beyond them fills the rest; or ahead at the wall.
       if With_Eye then
          declare
-            --  A desktop gripper's camera sits on the gripper over the roots of its jaws, the palm behind it, and
-            --  looks down along them: they come into the bottom of its picture and fill two fifths of it (the kiwi's
-            --  wrist eyes, 10-14).
+            --  A desktop gripper's camera sits on the gripper behind the roots of its jaws and above them, and looks
+            --  along them at their middle: both jaws come up from the bottom of its picture, open and closed, their
+            --  tips near its middle (the kiwi's wrist eyes, 10-14). Placed in proportion to the jaws: behind their
+            --  roots by a third to a half of their length, over the palm's top by a half to four fifths of it, so that
+            --  its line to them clears the palm (behind them by their whole length, a04 on 10-16, the palm hid them).
+            --  The fake's eye sat in front of the roots and low, the jaws filled its picture and the open one left it
+            --  (a03 on 10-16: its tip a sliver on the picture's bottom row, 41 mm off the truth). Two draws, as before.
             Near  : constant Boolean := Kind = Jaw;
-            Ahead : constant Real := (if Near then 0.024 + 0.005 else -Eye_Back);
-            Above : constant Real := (if Near then 0.024 + 0.015 * Arm_Random else Eye_Above);
-            Pitch : constant Real := (if Eye_Up then -0.3 elsif Near then 0.6 + 0.3 * Arm_Random else Tilt);
+            Back_Share : constant Real := (if Near then 0.3 + 0.2 * Arm_Random else 0.0);
+            Up_Share   : constant Real := (if Near then 0.5 + 0.3 * Arm_Random else 0.0);
+            Ahead : constant Real := (if Near then 0.024 - Back_Share * Jaw_Long else -Eye_Back);
+            Above : constant Real := (if Near then 0.014 + Up_Share * Jaw_Long else Eye_Above);   --  the palm's top, 0.014
+            Pitch : constant Real := (if Eye_Up then -0.3 else Tilt);
+            --  At the jaws' middle, three fifths of the way along them from their roots.
+            Along : constant Real := 0.024 + 0.6 * Jaw_Long - Ahead;
+            Norm  : constant Real := Sqrt (Along ** 2 + Above ** 2);
+            Forward : constant Vec3 :=
+              (if Near and then not Eye_Up then [0.0, Along / Norm, -Above / Norm] else [0.0, Cos (Pitch), -Sin (Pitch)]);
          begin
-            Add_Camera (W, "eye_arm" & Trim (A), J6, A,
-                        Look ([0.0, L6 + Ahead, Above], [0.0, Cos (Pitch), -Sin (Pitch)], [0.0, 0.0, 1.0]),
+            Add_Camera (W, "eye_arm" & Trim (A), J6, A, Look ([0.0, L6 + Ahead, Above], Forward, [0.0, 0.0, 1.0]),
                         Width, Height, 0.62);
          end;
       end if;

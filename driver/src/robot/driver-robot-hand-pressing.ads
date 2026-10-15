@@ -85,10 +85,14 @@ package Driver.Robot.Hand.Pressing is
       Unmeasured : out Boolean;
       Why     : out Ada.Strings.Unbounded.Unbounded_String;
       Footprint : Real := 0.0);
-   --  The first aim of Along that the arm can be taken to, and from which it can be taken down to the contact the
-   --  presses so far predict (Tip in the tool frame, Surface in the arm's: nothing is asked of the descent when they
-   --  do not predict it): the least rotation first, then the hand turned about the way down by a quarter either way,
-   --  by half a turn, by three quarters, and by the whole of one (eight poses of the circle). A path past an end a
+   --  The aim of Along that the arm can be taken to, and from which it can be taken down to the contact the presses
+   --  so far predict (Tip in the tool frame, Surface in the arm's: nothing is asked of the descent when they do not
+   --  predict it), of the least rotation and the hand turned about the way down by an eighth of a turn either way, a
+   --  quarter, three eighths, and half a turn (eight poses of the circle), where the arm's fit places the tool most
+   --  surely (Least_Push there; the least rotation of those as sure): the fit is surest where its sweep moved the arm,
+   --  and a joint turned far past what the sweep saw is placed by axes it never pinned (f16u's press aims turned a
+   --  joint 273 units from its reference, the sweep 47 at most, and the tool there stood 49 mm uncertain for the
+   --  0.19 mm its truth was off at the poses it saw: the presses halved spans of that). A path past an end a
    --  channel showed is not planned (Driver.Robot.Motion.Plan_Reach); Yaw is the turn that was taken. Reaches is
    --  False when none is planned, Result then the last tried, and Why says why the least rotation was not, with the
    --  descent when it is that; Unmeasured is True when that was for want of a measured arm. An aim whose tip would

@@ -6,6 +6,9 @@ with Driver.Conventions;
 with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Kinematics;
+with Driver.Alignment;
+with Driver.Pixels;
+with Driver.Robot.Hand.Follow;
 with Driver.Robot.Hand.Frames;
 with Driver.Robot.Hand.Lobes;
 with Driver.Robot.Hand.Lowering;
@@ -42,6 +45,9 @@ package body Driver.Robot.Hand is
       --  channel, the eye's cells in order): each cell's displacement at the beats only that channel moved, times
       --  the channel's step there, summed (Accumulate).
       Motion_U, Motion_V : Real_Vectors.Vector;
+      --  How many stops its measured channels had when the hand was last made of them: a stop the decider adds
+      --  between two views too far apart to follow makes the hand again, its lobes followed along the stops.
+      Stops_Made : Natural := 0;
    end record;
 
    package Pair_Vectors is new Ada.Containers.Vectors (Positive, Pair);
@@ -105,6 +111,10 @@ package body Driver.Robot.Hand is
    end record;
 
    procedure Free is new Ada.Unchecked_Deallocation (Hand_Data, Hand_Data_Access);
+
+   --  A picture's luma, off the stack.
+   type Luma_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Luma_Access);
 
    overriding procedure Finalize (H : in out Hands) is
    begin
@@ -639,6 +649,134 @@ package body Driver.Robot.Hand is
          end;
       end Seen_Tip;
 
+      --  The lobe's shape (Driver.Robot.Hand.Shape) from its pixels followed along the closer's still views, from
+      --  the open end through the stops between to the closed end (Driver.Robot.Hand.Follow): each followed point
+      --  with where it is at the closed end, and the tip, the point the presses measure, from where the placing put
+      --  it at the open end to where it put it at the closed one; their lines of sight taken into the tool frame
+      --  through the eye's mount as it was when the open end was seen. A stop where the lobe's tip was not found is
+      --  passed over.
+      function Followed_Shape
+        (C : Positive; Lobe_No : Positive; L : Driver.Robot.Hand.Lobes.Lobe;
+         Low, High : Driver.Robot.Hand.Views.View; Closed_High : Boolean) return Driver.Robot.Hand.Shape.Lobe_Shape
+      is
+         package Shapes renames Driver.Robot.Hand.Shape;
+         package Follow renames Driver.Robot.Hand.Follow;
+         Mount_Then : constant Pose_Estimate := Eye_In_Tool (M, P.Eye, (if Closed_High then Low.Seen else High.Seen));
+         Open_Tip   : constant Driver.Images.Pixel := (if Closed_High then L.Tip_Here else L.Tip_There);
+         Closed_Tip : constant Driver.Images.Pixel := (if Closed_High then L.Tip_There else L.Tip_Here);
+         Open_Mask  : constant Driver.Images.Mask := (if Closed_High then L.Here else L.There);
+         Bordered   : constant Boolean := (if Closed_High then L.Bordered_Here else L.Bordered_There);
+         Mount      : Pose_Estimate renames Mount_Then;
+         Width      : constant Natural := Driver.Images.Width (Open_Mask);
+         Height     : constant Natural := Driver.Images.Height (Open_Mask);
+         --  The views where the lobe's tip is known, from the open end to the closed one: the ends, and the stops
+         --  between them in the order of their readings, turned round when the open end is the high one.
+         N          : constant Natural := Sweeps.Stops (P.Sweep, C);
+         Order      : array (1 .. N + 2) of Natural := [others => 0];   --  0, the low end; N + 1, the high; else a stop
+         Tips       : Follow.Pixel_Array (1 .. N + 2);
+         Readings   : Real_Array (1 .. N + 2);   --  the channel's reading at each view kept
+         Count      : Natural := 0;
+
+         function Line (Px : Driver.Images.Pixel) return Vec3 is
+           (Mount.Pose.Rotation * Eye_Ray (M, P.Eye, Px).Direction.Unit_Vector);
+
+         procedure Take (K : Natural) is
+         begin
+            if K = 0 then
+               Count := Count + 1;
+               Order (Count) := 0;
+               Tips (Count) := L.Tip_Here;
+               Readings (Count) := Driver.Robot.Hand.Views.Reading (Low, C);
+            elsif K = N + 1 then
+               Count := Count + 1;
+               Order (Count) := N + 1;
+               Tips (Count) := L.Tip_There;
+               Readings (Count) := Driver.Robot.Hand.Views.Reading (High, C);
+            else
+               declare
+                  At_Stop : constant Sweeps.Stop_Tips := Sweeps.Tips_At_Stop (P.Sweep, C, K);
+               begin
+                  if Lobe_No in At_Stop'Range and then At_Stop (Lobe_No).Known then
+                     Count := Count + 1;
+                     Order (Count) := K;
+                     Tips (Count) := At_Stop (Lobe_No).Tip;
+                     Readings (Count) := Sweeps.Stop_Reading (P.Sweep, C, K);
+                  end if;
+               end;
+            end if;
+         end Take;
+      begin
+         if not (L.Tip_Known_Here and then L.Tip_Known_There) then
+            return Shapes.Unfitted ("its tip is not seen at both ends");
+         elsif Mount.Position_Covariance (1, 1) = Real'Last then
+            return Shapes.Unfitted ("its eye's mount was not measured when it was swept");
+         elsif Eye_Ray (M, P.Eye, Open_Tip).Direction.Sigma = Real'Last then
+            return Shapes.Unfitted ("its eye's lens was not measured when it was swept");
+         end if;
+         for J in 0 .. N + 1 loop
+            Take (if Closed_High then J else N + 1 - J);
+         end loop;
+         declare
+            Wide : constant Natural := Follow.Widest_Step (Tips (1 .. Count), Width, Height);
+         begin
+            if Wide > 0 then
+               return Shapes.Unfitted
+                 ("its pixels are not followed from the open end to the closed one: its tip moves"
+                  & Natural'Image (Natural (Follow.Tip_Step (Tips (1 .. Count), Wide))) & " pixels between two of the"
+                  & Count'Image & " views where it is seen, from " & Image (Tips (Wide)) & " at "
+                  & Driver.Log.Image (Readings (Wide), 6) & " to " & Image (Tips (Wide + 1)) & " at "
+                  & Driver.Log.Image (Readings (Wide + 1), 6) & ", farther than the matcher searches at its finest ("
+                  & Natural'Image (Natural (Driver.Alignment.Finest_Radius (Width, Height))) & " pixels)");
+            end if;
+         end;
+         declare
+            Views : Follow.Pyramid_Array (1 .. Count);
+            Luma  : Luma_Access := new Real_Array (1 .. Width * Height);
+         begin
+            for I in 1 .. Count loop
+               declare
+                  V : constant Driver.Robot.Hand.Views.View :=
+                    (if Order (I) = 0 then Low elsif Order (I) = N + 1 then High
+                     else Sweeps.Stop_View (P.Sweep, C, Order (I)));
+               begin
+                  Driver.Pixels.Means (V.Frames, Luma.all);
+                  Views (I) := Driver.Alignment.Pyramid_Of (Width, Height, Luma.all);
+               end;
+            end loop;
+            Free (Luma);
+            declare
+               F : constant Follow.Followed := Follow.Run (Views, Tips (1 .. Count), Open_Mask);
+            begin
+               Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & P.Group'Image & " channel" & C'Image & " lobe"
+                                & Lobe_No'Image & ": followed" & F.Count'Image & " of its" & F.Asked'Image
+                                & " points through" & Count'Image & " views from the open end to the closed one"
+                                & (if F.Count > 0 then ", the matcher's noise " & Driver.Log.Image (F.Sigma, 3) & " pixels"
+                                   else ": " & Ada.Strings.Unbounded.To_String (F.Why))
+                                & (if F.Worst > 0 then "; most lost at the step from view" & F.Worst'Image & ":"
+                                        & Ada.Strings.Unbounded.To_String (F.Lost)
+                                   else ""));
+               if F.Count = 0 then
+                  return Shapes.Unfitted ("its pixels are not followed from the open end to the closed one: "
+                                          & Ada.Strings.Unbounded.To_String (F.Why));
+               end if;
+               declare
+                  Followed_Moves : Driver.Robot.Hand.Lobes.Move_Array renames F.Moves.Constant_Reference.Element.all;
+                  Moves : Driver.Robot.Hand.Lobes.Move_Array (1 .. F.Count + 1);
+               begin
+                  --  The tip first: the point the presses measure at each end, the shape's anchors.
+                  Moves (1) := (From => Open_Tip, To => Closed_Tip);
+                  Moves (2 .. F.Count + 1) := Followed_Moves;
+                  declare
+                     Seen : constant Shapes.Sighting_Array :=
+                       Shapes.From_Moves (Moves, (From => Closed_Tip, To => Open_Tip), Line'Access, F.Sigma);
+                  begin
+                     return Shapes.Fit (Mount.Pose.Translation, Seen, 1, Seen'Last, Bordered);
+                  end;
+               end;
+            end;
+         end;
+      end Followed_Shape;
+
       --  The way the finger closes in the picture: from its open tip to its closed one.
       function Closing_Way_Of (From, To : Driver.Images.Pixel) return Closing_Way is
          Reach : constant Real := Sqrt ((To.U - From.U) ** 2 + (To.V - From.V) ** 2);
@@ -726,8 +864,7 @@ package body Driver.Robot.Hand is
                                                                         Way)
                                                          else Driver.Robot.Hand.Slide.Empty)],
                                      Way     => Way,
-                                     Shape   => Driver.Robot.Hand.Shape.Unfitted
-                                       ("its pixels are not matched between the ends: the hand asks no instrument"),
+                                     Shape   => Followed_Shape (C, Lobe_No, L, Low, High, Closed_High),
                                      Size    => <>));
                   end;
                end loop;
@@ -823,9 +960,19 @@ package body Driver.Robot.Hand is
             Said := True;
          end if;
       end loop;
-      if Said then
-         Rebuild (D, P, M);
-      end if;
+      declare
+         Stops_Now : Natural := 0;
+      begin
+         for C in 1 .. Sweeps.Channels (P.Sweep) loop
+            if Sweeps.Status (P.Sweep, C) = Sweeps.Measured then
+               Stops_Now := Stops_Now + Sweeps.Stops (P.Sweep, C);
+            end if;
+         end loop;
+         if Said or else Stops_Now /= P.Stops_Made then
+            P.Stops_Made := Stops_Now;
+            Rebuild (D, P, M);
+         end if;
+      end;
    end Report;
 
    function Opening_Of (R : Hand_Record; M : Model; Readings : Real_Array; Which : out Opening) return Boolean;

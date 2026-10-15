@@ -106,6 +106,10 @@ package Driver.Robot.Hand.Views is
    function High_Closer (T : Tracker; Channel : Positive) return Real_Array
      with Pre => Has_Ends (T, Channel);
    --  The closer's readings while each end's view was taken, without copying the view.
+   function Low_Rest (T : Tracker; Channel : Positive) return Real_Array
+     with Pre => Has_Ends (T, Channel);
+   --  Every other group's readings while the low end's view was taken (the high end's are the same, or the two
+   --  would not be the channel's ends), without copying the view.
 
    function Stops (T : Tracker; Channel : Positive) return Natural;
    --  How many views the tracker keeps between the channel's ends: one at
