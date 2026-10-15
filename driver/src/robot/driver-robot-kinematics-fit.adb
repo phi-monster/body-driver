@@ -1205,24 +1205,58 @@ package body Driver.Robot.Kinematics.Fit is
                         Improved, Lowered : Boolean := False;
                      begin
                         Bm.all := [others => [others => 0.0]];
-                        for I in 1 .. 2 * Used loop
-                           declare
-                              W : constant Real := Huber (R0 (I) / Scales (I)) / Scales (I) ** 2;
-                              T : constant Positive := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;
+                        --  The normal equations, each parameter's row of them at once (Driver.Parallel_For), and the
+                        --  depths' own sums as one more: every sum runs over the residuals in their order whichever
+                        --  task makes it, so that it is the sum one task made, to the last bit (the fit's path turns
+                        --  on its last bits: summed track by track, robot.kinematics.desktop ended at 0.0014 px). One
+                        --  task summed every residual into every row, the most of a tracks' fit's time (s02's fit
+                        --  replayed from its dump and sampled, 10-16: 7.8 s of 18 in stage 5 in Refine_Tracks itself,
+                        --  the workers waiting).
+                        declare
+                           Weights  : Real_Access := new Real_Array (1 .. 2 * Used);
+                           Track_Of : Natural_Access := new Natural_Array (1 .. 2 * Used);
+                           procedure Row (P : Positive) is
                            begin
-                              for P in 1 .. Count loop
-                                 if Jp (I, P) /= 0.0 then
-                                    Gp (P) := Gp (P) - W * Jp (I, P) * R0 (I);
-                                    Bm (P, T) := Bm (P, T) + W * Jp (I, P) * Jd (I);
-                                    for Q in P .. Count loop
-                                       A (P, Q) := A (P, Q) + W * Jp (I, P) * Jp (I, Q);
+                              if P > Count then
+                                 for I in 1 .. 2 * Used loop
+                                    C (Track_Of (I)) := C (Track_Of (I)) + Weights (I) * Jd (I) ** 2;
+                                    Gd (Track_Of (I)) := Gd (Track_Of (I)) - Weights (I) * Jd (I) * R0 (I);
+                                 end loop;
+                              else
+                                 declare
+                                    Sum_G : Real := 0.0;
+                                    Sum_A : Real_Array (P .. Count) := [others => 0.0];
+                                 begin
+                                    for I in 1 .. 2 * Used loop
+                                       if Jp (I, P) /= 0.0 then
+                                          declare
+                                             W : constant Real := Weights (I);
+                                          begin
+                                             Sum_G := Sum_G - W * Jp (I, P) * R0 (I);
+                                             Bm (P, Track_Of (I)) := Bm (P, Track_Of (I)) + W * Jp (I, P) * Jd (I);
+                                             for Q in P .. Count loop
+                                                Sum_A (Q) := Sum_A (Q) + W * Jp (I, P) * Jp (I, Q);
+                                             end loop;
+                                          end;
+                                       end if;
                                     end loop;
-                                 end if;
-                              end loop;
-                              C (T) := C (T) + W * Jd (I) ** 2;
-                              Gd (T) := Gd (T) - W * Jd (I) * R0 (I);
-                           end;
-                        end loop;
+                                    Gp (P) := Sum_G;
+                                    for Q in P .. Count loop
+                                       A (P, Q) := Sum_A (Q);
+                                    end loop;
+                                 end;
+                              end if;
+                           end Row;
+                           procedure Rows is new Driver.Parallel_For (Row);
+                        begin
+                           for I in 1 .. 2 * Used loop
+                              Weights (I) := Huber (R0 (I) / Scales (I)) / Scales (I) ** 2;
+                              Track_Of (I) := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;
+                           end loop;
+                           Rows (1, Count + 1);
+                           Free (Weights);
+                           Free (Track_Of);
+                        end;
                         --  The focal search's measurement of the two focal lengths (Prior_W, the header).
                         if Prior_W > 0.0 then
                            A (1, 1) := A (1, 1) + Prior_W;

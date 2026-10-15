@@ -1944,6 +1944,7 @@ driver-robot-kinematics-fit.adb	Rm : Real_Access := new Real_Array (1 .. 2 * M);
 driver-robot-kinematics-fit.adb	Rn : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Rows (1, Count + 1);	1	structure	the parameters' rows from the first, and one more for the depths' own sums
 driver-robot-kinematics-fit.adb	Rows : constant Positive := 2 * Link.Used + 2 * Side_Terms;	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	Rows : constant Positive := 2 * Link.Used + 2 * Side_Terms;	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	Rp : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals a sighting, across and down
@@ -1983,7 +1984,6 @@ driver-robot-kinematics-fit.adb	Suv := (if Suv > 0.0 then Real (N) / Suv else 1.
 driver-robot-kinematics-fit.adb	Sxy := (if Sxy > 0.0 then Real (N) / Sxy else 1.0);	1.0	numerics	no scaling where the points do not spread
 driver-robot-kinematics-fit.adb	T : constant Positive := Of_Track ((I + 1) / 2);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	T : constant Positive := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-fit.adb	T : constant Positive := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	T0_Of (Way) := (-V (2)) * E1 + V (1) * E2;	1	math	the eigenvector's entries that are the translation in the plane of W (Row: t2 = V1, t1 = -V2)driver-robot-kinematics-fit.adb
 driver-robot-kinematics-fit.adb	T0_Of (Way) := (-V (2)) * E1 + V (1) * E2;	2	math	the eigenvector's entries that are the translation in the plane of W (Row: t2 = V1, t1 = -V2)
 driver-robot-kinematics-fit.adb	T0_Of : array (1 .. 2) of Vec3;	2	structure	the two ways of a joint's probe: the turn up and the turn down
@@ -2005,6 +2005,8 @@ driver-robot-kinematics-fit.adb	Told := V (1) ** 2 + V (2) ** 2 > 0.0 and then V
 driver-robot-kinematics-fit.adb	Told := V (1) ** 2 + V (2) ** 2 > 0.0 and then V (3) ** 2 + V (4) ** 2 > 0.0;	3	math	the two pairs of entries, each told when its squared length is not zero
 driver-robot-kinematics-fit.adb	Told := V (1) ** 2 + V (2) ** 2 > 0.0 and then V (3) ** 2 + V (4) ** 2 > 0.0;	4	math	the two pairs of entries, each told when its squared length is not zero
 driver-robot-kinematics-fit.adb	Told_Of : array (1 .. 2) of Boolean := [others => False];	2	structure	the two ways of a joint's probe: the turn up and the turn downdriver-robot-kinematics-fit.adb
+driver-robot-kinematics-fit.adb	Track_Of (I) := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	Track_Of : Natural_Access := new Natural_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Translation => Xv (S_First + 2) * A1 + Xv (S_First + 3) * B1	2	structure	the similarity's terms in order: log scale, turn, two shifts
 driver-robot-kinematics-fit.adb	Translation => Xv (S_First + 2) * A1 + Xv (S_First + 3) * B1	3	structure	the similarity's terms in order: log scale, turn, two shifts
 driver-robot-kinematics-fit.adb	Tt : constant Vec3 := (-V (2)) * E1 + V (1) * E2;	1	math	the eigenvector's entries that are the translation in the plane of W (Row: t2 = V1, t1 = -V2)
@@ -2033,6 +2035,7 @@ driver-robot-kinematics-fit.adb	Warm_Angle (J) := -1.0;	1.0	format	no angle meas
 driver-robot-kinematics-fit.adb	Warm_Angle (J) := Arccos (Real'Min (1.0, abs Dot (Again.W, Result.W)));	1.0	numerics	the dot product of unit vectors clamped to 1 before Arccos
 driver-robot-kinematics-fit.adb	Warm_Angle : array (1 .. N) of Real := [others => -1.0];	1.0	format	no angle measured this search: an angle is never negative
 driver-robot-kinematics-fit.adb	Weight (I) := 1.0;	1.0	math	a sighting that fits begins at full weight
+driver-robot-kinematics-fit.adb	Weights : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Width : constant Real := Sigma + Sigma;	2xSigma	math	a central difference: one standard deviation either way spans two
 driver-robot-kinematics-fit.adb	Within := (B - A) / 2.0;	2.0	math	half the ended bracket: the focal length is told to about this either way
 driver-robot-kinematics-fit.adb	Wt (I) := (if Ga (I) ** 2 + Gb (I) ** 2 > 0.0 then 1.0 / (Ga (I) ** 2 + Gb (I) ** 2) else 0.0);	1.0	math	the algebraic residual normalized
@@ -2099,6 +2102,8 @@ driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two resi
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals to a sighting
+driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 2 * Answer - 1 .. 2 * Answer loop	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	for I in 2 * Answer - 1 .. 2 * Answer loop	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	for I in 2 * Link.Used + 1 .. Rows loop	2	structure	two residuals per answer, across and down; two sides' holds
