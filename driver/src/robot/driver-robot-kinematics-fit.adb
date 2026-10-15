@@ -2191,6 +2191,7 @@ package body Driver.Robot.Kinematics.Fit is
          Report.Focal_Within := Focal_Within;
          Report.Searched_Least := Searched_Least;
          Report.Searched_Most := Searched_Most;
+         Report.Profiled_Over := (if Profiled then Sightings'Length elsif From.Valid then From.Profiled_Over else 0);
          Chain := Order;
          Report.Fitted := Report.Determined;
          Close_Stage;
@@ -3926,7 +3927,11 @@ package body Driver.Robot.Kinematics.Fit is
          Free (Inlier);
       end;
 
-      Finish (Profiled => True);
+      --  The focal length's profile is walked by a fit that searched it, and by one begun from an earlier estimate's
+      --  once the sightings have doubled since the profile was last walked: until then its basin stands, and walked
+      --  at every estimate it cost the boot a hundred beats a step, fourteen steps an estimate, held still (f16h on
+      --  10-15, two runs and the self tests sharing the machine).
+      Finish (Profiled => not From.Valid or else Sightings'Length >= 2 * From.Profiled_Over);
    end Fit;
 
    function Depth_Known (Depth, Sigma : Real) return Boolean is

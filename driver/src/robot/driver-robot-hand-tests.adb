@@ -137,6 +137,29 @@ package body Driver.Robot.Hand.Tests is
          Check (False, "a push whose view never forms is waited for without end, as A12's was for an hour");
    end Views_Never_Form;
 
+   procedure Way_Goes_On_Below_A_Pixel is
+      --  f16k's jaw (10-15): its first push, far below a pixel of its view, "showed" a few pixels, and the next two
+      --  nothing new; the way ended there, its two ends 0.003 units apart, and no hand was made. Here every push is
+      --  followed, the first shows something, every one after it nothing new, and a pixel is four first pushes: the
+      --  way goes on to the push that moves the view by a pixel (the third) and ends there.
+      Pushed : Natural := 0;
+      procedure Push (Offset : Real; Followed : out Boolean) is
+         pragma Unreferenced (Offset);
+      begin
+         Pushed := Pushed + 1;
+         Followed := True;
+      end Push;
+      function Shows return Showing is
+        (if Pushed = 1 then Something_New else Nothing_New);
+      Pushes, Unseen, Longest : Natural := 0;
+      Formed, Answered        : Boolean := False;
+   begin
+      Sweep_Way (-1.0, 1.0, 4.0, 1, Push'Access, Shows'Access, Pushes, Unseen, Longest, Formed, Answered);
+      Check (Formed and then Answered and then Pushes = 3,
+             "a way that showed something at its first push, below a pixel, ended after" & Pushes'Image
+             & " pushes, not at the third, the first to move its view by a pixel");
+   end Way_Goes_On_Below_A_Pixel;
+
    procedure Press_Overshoot is
       --  A tip pressed onto a stiff surface by a stiff position controller,
       --  the surface ten times as stiff: a step that would end below the
@@ -805,6 +828,9 @@ package body Driver.Robot.Hand.Tests is
                              & "beat and was left unswept", Wait_For_A_View_Is_The_Longest_Known'Access);
       Driver.Tests.Register ("hand.measure.unformed", "a push whose view never forms is waited for without end (A12)",
                              Views_Never_Form'Access);
+      Driver.Tests.Register ("hand.measure.subpixel", "a closer's way ends on a push that shows nothing new below a "
+                             & "pixel of its view, after a first push that showed something (f16k's jaw)",
+                             Way_Goes_On_Below_A_Pixel'Access);
       Driver.Tests.Register ("hand.measure.press", "a press overshoots the surface by more than the least push, or is "
                              & "not made from where its descent began", Press_Overshoot'Access);
       Driver.Tests.Register ("hand.measure.room", "a step lowers the eye below the table its arm's own eye saw",

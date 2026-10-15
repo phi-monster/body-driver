@@ -191,7 +191,8 @@ package body Driver.Robot.Body_File is
       Add (" ""lags"": {""method"": " & Int (Lag_Method) & ", ""eyes"": [");
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          Add (Separator (E = M.Eyes.First_Index) & "{""value"": " & Int (Image_Lag (M, E))
-              & ", ""known"": " & Flag (Lag_Known (M, E)) & "}");
+              & ", ""known"": " & Flag (Lag_Known (M, E))
+              & ", ""settling"": " & Int (Longest_Settling (M, E)) & "}");
       end loop;
       Add ("]}," & LF);
 
@@ -600,9 +601,11 @@ package body Driver.Robot.Body_File is
             if Restored (Stored_Noise) and then Method_Is (N, Lag_Method) and then Size (Es) = Eye_Count then
                M.Lags.Clear;
                M.Lag_Known.Clear;
+               M.Settling_Kept.Clear;
                for I in 1 .. Eye_Count loop
                   M.Lags.Append (Whole (Item (Es, I), "value"));
                   M.Lag_Known.Append (Truth (Item (Es, I), "known"));
+                  M.Settling_Kept.Append (Natural'Max (0, Whole (Item (Es, I), "settling")));
                end loop;
                Restored (Stored_Lags) := True;
             end if;

@@ -250,6 +250,9 @@ package Driver.Robot.Kinematics.Fit is
       --  The focal search's width (half, in the logarithm) and range, least and most, which a fit begun from this one
       --  takes up (Fit_Start); 0 where there was no search.
       Focal_Within, Searched_Least, Searched_Most : Real := 0.0;
+      --  The sightings of the last fit that walked the focal length's profile, this one or one it was begun from; 0
+      --  where none did.
+      Profiled_Over : Natural := 0;
    end record;
 
    function Depth_Known (Depth, Sigma : Real) return Boolean;
@@ -273,6 +276,7 @@ package Driver.Robot.Kinematics.Fit is
       --  A fit of an estimate before this one: the stages after the focal search (2 to 5) run from it, its joints and
       --  lens taken for the search's result. Otherwise a fit of this estimate: the last stage alone.
       Whole          : Boolean := False;
+      Profiled_Over  : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
    end record;
 
    No_Start : constant Fit_Start := (N => 0, Valid => False, others => <>);

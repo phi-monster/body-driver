@@ -30,6 +30,20 @@ procedure Measure (H : in out Hands; M : in out Model) is
    use type Driver.Robot.Motion.Step_Outcome;
    use type Driver.Robot.Hand.Lobes.Placing;
 
+   --  The most beats the eye has taken to settle after a move (Longest_Settling), and no fewer than a push takes to
+   --  show in it at all: the body's delay and the eye's lag, both kept in the body file. A boot begun from one has
+   --  seen few moves of its own: its closer's sweep waited one beat for a view, had none, and no hand was made of
+   --  the closer (f16j on 10-15, from f16h's body kept after its sweeps).
+   function Settling_Of (E : Eye_Id) return Natural is
+      Delay_Beats : Natural;
+      Delay_Known : Boolean;
+   begin
+      Driver.Robot.Steps.Body_Delay (M, Delay_Beats, Delay_Known);
+      return Natural'Max (Longest_Settling (M, E),
+                          (if Delay_Known then Delay_Beats else 0)
+                          + (if Lag_Known (M, E) then Natural'Max (0, Image_Lag (M, E)) else 0));
+   end Settling_Of;
+
    procedure Hold_Beat (Read : access procedure (O : Observation)) is
       procedure During is
       begin
@@ -296,7 +310,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          begin
             Began := Natural (O.Beat);
             Placed := P > 0;
-            Settles := (if Placed then Longest_Settling (M, H.Data.Pairs (P).Eye) else 0);
+            Settles := (if Placed then Settling_Of (H.Data.Pairs (P).Eye) else 0);
             Have := 0;
             if Placed then
                Arm := H.Data.Pairs (P).Arm;
@@ -380,6 +394,11 @@ procedure Measure (H : in out Hands; M : in out Model) is
                              & (if Is_First then ", the least that its readings show" else ", twice the raise before"));
             Driver.Robot.Motion.Follow (M, Plan, Report);
             Raised := Report.Outcome = Driver.Robot.Motion.Reached;
+            if not Raised then
+               Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & ": the raise of its eye ended "
+                                & Report.Outcome'Image & " after" & Report.Beats'Image & " beats: "
+                                & Ada.Strings.Unbounded.To_String (Report.Detail));
+            end if;
          end Raise_Eye;
       begin
          Hold_Beat (Read_Poses'Access);
@@ -464,7 +483,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
             P : constant Natural := Own_Pair (G);
          begin
             Began := Natural (O.Beat);
-            Settles := (if P > 0 then Longest_Settling (M, H.Data.Pairs (P).Eye) else 0);
+            Settles := (if P > 0 then Settling_Of (H.Data.Pairs (P).Eye) else 0);
             Start := R (R'First + C - 1);
             Step := Visible_Step (M, G, C);
             Pixel := (if P > 0 then Seen_By (Driver.Robot.Lockin.Shift (M, H.Data.Pairs (P).Eye, G, C)) else 0.0);

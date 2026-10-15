@@ -674,6 +674,7 @@ private
       --  The focal search's width and range of the fit that holds (Fit.Fit_Report), and the beat of the estimate it was
       --  made in: a fit made again within that estimate begins from it (Kinematics.Refit's Again).
       Focal_Within, Searched_Least, Searched_Most : Real := 0.0;
+      Profiled_Over : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
       Made_At : Natural := 0;
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
@@ -816,6 +817,8 @@ private
                                                    --  rest (Channels.Drift), 0 where none stands out
       Lags           : Lag_Vectors.Vector;
       Lag_Known      : Eye_Flag_Vectors.Vector;    --  per eye: its lag stood out of every shift tried
+      Settling_Kept  : Lag_Vectors.Vector;         --  per eye: the longest it took to settle after a move, as the
+                                                   --  body file kept it (Longest_Settling); empty when none was
       Began_Moving   : Flag_Vectors.Vector;        --  per beat: some commandable group began to move
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph

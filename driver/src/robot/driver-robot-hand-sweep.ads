@@ -169,6 +169,7 @@ private
       Analysed    : Boolean := False;
       Poses_Low   : Natural := 0;             --  the poses of the arm the eye saw each end's readings from
       Poses_High  : Natural := 0;
+      Low_At, High_At : Real := 0.0;          --  the channel's reading at each end, for the log
       Changed     : Natural := 0;             --  the pixels that changed between the ends
       Spread      : Real := 0.0;              --  and the spread of the difference at one that did not
       Beyond      : Real := 0.0;

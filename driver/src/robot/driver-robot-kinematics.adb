@@ -2050,6 +2050,7 @@ package body Driver.Robot.Kinematics is
                         Start.Focal_Within := R.Result.Focal_Within;
                         Start.Searched_Least := R.Result.Searched_Least;
                         Start.Searched_Most := R.Result.Searched_Most;
+                        Start.Profiled_Over := R.Result.Profiled_Over;
                         --  A fit of an estimate before this one is begun from at the stages after the search; within
                         --  the estimate whose fit holds (Again), at its last stage alone.
                         Start.Whole := not (Again and then R.Result.Made_At = M.Beats);
@@ -2172,6 +2173,7 @@ package body Driver.Robot.Kinematics is
                      Result.Focal_Within := Report.Focal_Within;
                      Result.Searched_Least := Report.Searched_Least;
                      Result.Searched_Most := Report.Searched_Most;
+                     Result.Profiled_Over := Report.Profiled_Over;
                      Result.Made_At := M.Beats;
                      Result.Unit_Frames :=
                        (if R.Result.Unit_Frames > 0 then R.Result.Unit_Frames elsif Report.Fitted then Frames else 0);

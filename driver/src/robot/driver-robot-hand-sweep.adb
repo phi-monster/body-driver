@@ -86,6 +86,8 @@ package body Driver.Robot.Hand.Sweep is
       Now.Announced := False;
       Now.Poses_Low := Driver.Robot.Hand.Selfsight.Poses (S.Memory, Low.Closer.Element);
       Now.Poses_High := Driver.Robot.Hand.Selfsight.Poses (S.Memory, High.Closer.Element);
+      Now.Low_At := Driver.Robot.Hand.Views.Reading (Low, Channel);
+      Now.High_At := Driver.Robot.Hand.Views.Reading (High, Channel);
       Now.Changed := Count (Compared.Changed);
       Now.Spread := Compared.Spread;
       Now.Beyond := Compared.Beyond;
@@ -336,8 +338,9 @@ package body Driver.Robot.Hand.Sweep is
             return "half of this eye's picture or more changes between its ends, so what moved cannot be told from what did not";
          when Unlocated =>
             return "the arm has not moved the eye against its surroundings at either end's readings (seen from"
-              & Here.Poses_Low'Image & " poses at the low reading,"
-              & Here.Poses_High'Image & " at the high one; two are needed): " & Pixels_Text;
+              & Here.Poses_Low'Image & " poses at the low reading, " & Driver.Log.Image (Here.Low_At, 6) & ","
+              & Here.Poses_High'Image & " at the high one, " & Driver.Log.Image (Here.High_At, 6)
+              & "; two are needed): " & Pixels_Text;
          when Unplaced =>
             return (case Here.Located.How is
                        when Driver.Robot.Hand.Lobes.Unseparated =>

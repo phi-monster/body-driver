@@ -1016,6 +1016,12 @@ package body Driver.Robot is
             Moving_Since := -1;
          end if;
       end loop;
+      --  And no less than the body file kept: a boot begun from one has seen few moves of its own, and every wait
+      --  for its eye's views was as long as the longest of those (f16k and f16l on 10-15, begun from f16h's file:
+      --  three beats where f16h's own sweep had needed more, and its closer's views never formed).
+      if E <= M.Settling_Kept.Last_Index then
+         Longest := Natural'Max (Longest, Natural'Max (0, M.Settling_Kept (E)));
+      end if;
       return Longest;
    end Longest_Settling;
 

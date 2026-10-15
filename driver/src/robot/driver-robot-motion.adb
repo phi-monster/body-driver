@@ -1562,8 +1562,10 @@ package body Driver.Robot.Motion is
                Position_Off, Turn_Off : Real;
             begin
                Result.Solves := Result.Solves + 1;
-               Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only and then B_Of = 1.0,
-                                      Next, Position_Off, Turn_Off);
+               --  A goal whose turn is free leaves it free along the way too: held at the start's on every segment
+               --  but the last, a raise of the hand's own eye near the wrist's singularity (conditioning 1e-6) was
+               --  refused for a turn 2.26e-3 rad off at a third of the way, and no hand was made (f16f on 10-15).
+               Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only, Next, Position_Off, Turn_Off);
                if not Driver.Uncertain.Significant (Position_Off, Sigma)
                  and then not Driver.Uncertain.Significant (Turn_Off, Sqrt (Sigma ** 2 + Goal_Turn_Sigma ** 2))
                then
