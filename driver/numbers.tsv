@@ -1804,6 +1804,7 @@ driver-robot-kinematics-fit.adb	E (P) := 1.0;	1.0	math	a column of the identity:
 driver-robot-kinematics-fit.adb	E (P) := 1.0;	1.0	math	a unit vector of the identity
 driver-robot-kinematics-fit.adb	Eigensystem (0.5 * (K + Transpose (K)), Values, Vectors);	0.5	math	the symmetric part of a matrix is half the matrix and its transpose
 driver-robot-kinematics-fit.adb	Eigensystem (0.5 * (Whitened + Transpose (Whitened)), Values, Vectors);	0.5	math	the symmetric part of a matrix
+driver-robot-kinematics-fit.adb	Eliminate_All (1, Count);	1	structure	the parameters' rows from the first
 driver-robot-kinematics-fit.adb	Ends : array (1 .. 2) of Real_Vector (1 .. Outputs);	2	math	a central difference: one standard deviation either way
 driver-robot-kinematics-fit.adb	Enter (1);	1	structure	the stages' numbers
 driver-robot-kinematics-fit.adb	Enter (2);	2	structure	the stages' numbers
@@ -2032,6 +2033,7 @@ driver-robot-kinematics-fit.adb	Vy := 1.0;	1.0	math	a coordinate axis, a cosine,
 driver-robot-kinematics-fit.adb	W : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;	1.0	statistics	weights are inverse variances
 driver-robot-kinematics-fit.adb	W : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;	1.0	statistics	weights are inverse variances
 driver-robot-kinematics-fit.adb	W : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;	1.0	statistics	weights are inverse variances
+driver-robot-kinematics-fit.adb	Walks (1, Sign_Way'Pos (Sign_Way'Last) + 1);	1	structure	the two ways from the first (an enumeration counts its positions from nought)
 driver-robot-kinematics-fit.adb	Warm_Angle (J) := -1.0;	1.0	format	no angle measured this search: an angle is never negative
 driver-robot-kinematics-fit.adb	Warm_Angle (J) := Arccos (Real'Min (1.0, abs Dot (Again.W, Result.W)));	1.0	numerics	the dot product of unit vectors clamped to 1 before Arccos
 driver-robot-kinematics-fit.adb	Warm_Angle : array (1 .. N) of Real := [others => -1.0];	1.0	format	no angle measured this search: an angle is never negative
@@ -2077,6 +2079,7 @@ driver-robot-kinematics-fit.adb	else "" & Ada.Strings.Fixed.Trim (Positive'Image
 driver-robot-kinematics-fit.adb	else "" & Ada.Strings.Fixed.Trim (Positive'Image ((P - 7) / 5 + 1), Ada.Strings.Left)	7	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	else "") & "" & Driver.Log.Image (L.Fx, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	else Driver.Conventions.Z * (abs Z_Value - 0.5 * Driver.Conventions.Z));	0.5	math	the Huber function
+driver-robot-kinematics-fit.adb	elsif At_Most /= N / 2 then	2	statistics	half an even count lie at or below its median's lower middle value
 driver-robot-kinematics-fit.adb	elsif N > 1 then	1	structure	cells move several joints
 driver-robot-kinematics-fit.adb	exit when 2 * Used <= Count + Tracks;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	exit when B - A <= Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs A);	1.0	numerics	the scale floor of a finite difference and of a bracket width
@@ -2139,17 +2142,19 @@ driver-robot-kinematics-fit.adb	if All_In >= 1.0 then	1.0	math	a probability of 
 driver-robot-kinematics-fit.adb	if Count <= 3 or else Determinant (M) = 0.0 then	3	statistics	more points than the plane's three parameters, or their spread is not measured
 driver-robot-kinematics-fit.adb	if Count >= 3 then	3	math	a turn and a shift about a known axis have three degrees of freedom: the four entries up to their scale
 driver-robot-kinematics-fit.adb	if I <= 2 * Link.Used then	2	structure	two residuals per answer, across and down; two sides' holds
-driver-robot-kinematics-fit.adb	if Median_Ratio (0.0) <= Typical then	0.0	math	no floor at all
 driver-robot-kinematics-fit.adb	if N < 2 then	2	math	two points fix a similarity of the plane
 driver-robot-kinematics-fit.adb	if N = 0 or else S = 0 or else Frames < 2 then	2	structure	the keyframes and joints after the first
 driver-robot-kinematics-fit.adb	if N > 1 and then (for all X of Sight => not Several (X.Frame)) then	1	structure	an arm of one joint has no order to find
 driver-robot-kinematics-fit.adb	if N > 1 and then P_Count > 0 and then P_Count + 1 < N then	1	structure	the anchor adds one row to the pairs; joints beyond one need it
 driver-robot-kinematics-fit.adb	if N > 1 and then P_Count > 0 then	1	structure	cells move several joints
 driver-robot-kinematics-fit.adb	if N > 1 then	1	structure	an arm of one joint has no order to find
+driver-robot-kinematics-fit.adb	if N mod 2 = 1 then	1	statistics	an odd count's median is one of its values
+driver-robot-kinematics-fit.adb	if N mod 2 = 1 then	2	statistics	an odd count's median is one of its values
 driver-robot-kinematics-fit.adb	if Partner (X.Frame) = 1 then	1	structure	keyframe 1 is the reference
 driver-robot-kinematics-fit.adb	if Pass = 1 then	1	structure	the side solved once unweighted, once weighted to Sampson residuals
 driver-robot-kinematics-fit.adb	if Result.Scale /= 0.0 and then Every (J)'Length > 4 then	4	structure	the refinement's four terms; more sightings than terms
 driver-robot-kinematics-fit.adb	if Result.Scale /= 0.0 and then Warm (J).Scale /= 0.0 and then Every (J)'Length > 4 then	4	statistics	Refine fits four parameters (axis tilt 2, side, scale): more sightings than parameters, as the line above it
+driver-robot-kinematics-fit.adb	if not Above_Typical (0.0) then	0.0	structure	no floor: the residuals over what their sightings state alone
 driver-robot-kinematics-fit.adb	or else Driver.Distributions.F_Upper_Tail (Link.F, 4, 2 * Link.Used - Apart_Terms)	2	structure	two residuals per answer, across and down
 driver-robot-kinematics-fit.adb	or else Driver.Distributions.F_Upper_Tail (Link.F, 4, 2 * Link.Used - Apart_Terms)	4	statistics	the four constraints one homography for both sides adds: the F statistic's numerator degrees of freedom
 driver-robot-kinematics-fit.adb	or else not Driver.Uncertain.Significant (C, Sqrt (Variance (O + 5))))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
@@ -2157,6 +2162,7 @@ driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (4, 2 * M, Dri
 driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (4, 2 * M, Driver.Conventions.Initial_Damping, Evaluate);	4	structure	the four terms the refinement moves: two of the axis, the point's angle, the scale's logarithm
 driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate, At_Once => True);	2	structure	two residuals a point, across and down
 driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate, At_Once => True);	8	math	a homography has eight free terms
+driver-robot-kinematics-fit.adb	return (Lower + Upper) / 2.0 > Typical;	2.0	statistics	an even count's median, the mean of its two middle values
 driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);	2	structure	two residuals per answer, across and down
 driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);	2	structure	two residuals per answer, across and down
 driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);	8	statistics	a homography's eight free entries: its residuals' degrees of freedom
@@ -2166,6 +2172,8 @@ driver-robot-kinematics-fit.adb	return (if N >= Real (Positive'Last) then Positi
 driver-robot-kinematics-fit.adb	return (if Q > 0.0 then (1.0 / Q) * H else [0.0, 0.0, 0.0]);	1.0	math	depth is the inverse of inverse depth
 driver-robot-kinematics-fit.adb	return 1;	1	math	one sample when every point agrees
 driver-robot-kinematics-fit.adb	return 2 * Inside > Total;	2	math	a majority: more than half of the plane's points lie inside the other's box
+driver-robot-kinematics-fit.adb	return At_Most < (N + 1) / 2;	2	statistics	the rank of an odd count's median
+driver-robot-kinematics-fit.adb	return At_Most < N / 2;	2	statistics	half an even count
 driver-robot-kinematics-fit.adb	return C + 0.5 * Prior_W * ((Xv (Xv'First) - Ln_Fx0) ** 2 + (Xv (Xv'First + 1) - Ln_Fy0) ** 2);	0.5	math	the quadratic cost of a unit-scale residual, as Huber_Cost within Z
 driver-robot-kinematics-fit.adb	return Real_Matrix'(1 .. 3 => [1 .. Terms => 0.0]);	3	math	three coordinates of the plane's A
 driver-robot-kinematics-fit.adb	return Sigma / (2.0 * Sqrt (Real (Count)) * F);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
