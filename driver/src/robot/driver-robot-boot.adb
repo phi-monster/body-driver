@@ -480,8 +480,6 @@ package body Driver.Robot.Boot is
                State   : array (1 .. 2 * Size) of Stop := [others => Blocked];
                --  Per push: its ladder is going down from a first level the aligner could not follow.
                Descending : array (1 .. 2 * Size) of Boolean := [others => False];
-               --  Per channel: how far the view moved per unit as known when the round's pushes were made.
-               Shift_Before : Real_Array (1 .. Size) := [others => 0.0];
                --  Per push: the levels taken in the pass, in order: each one's offset and the beats the arm was held
                --  for its keyframe.
                type Level_Mark is record
@@ -720,7 +718,6 @@ package body Driver.Robot.Boot is
                   begin
                      if (for some I in 1 .. Count => State (I) = Climbing) then
                         Rounds := Rounds + 1;
-                        Shift_Before := Per_Unit;
                         for I in 1 .. Count loop
                            if State (I) = Climbing then
                               Take (I);
@@ -752,12 +749,6 @@ package body Driver.Robot.Boot is
                            if State (I) = Climbing then
                               declare
                                  P : Push renames Order (I);
-                                 --  The pass's first level measured how far the view moves per unit of the joint,
-                                 --  which nothing had before: predicted from nothing, from a window as wide as the
-                                 --  aligner searches, it is not followed in the aligner's sense; the levels after it
-                                 --  were predicted from it.
-                                 Measured_Now : constant Boolean :=
-                                   Shift_Before (P.Channel) = 0.0 and then Per_Unit (P.Channel) > 0.0;
                                  Lost  : Natural := 0;   --  the first level the aligner did not follow; 0 when none
                                  Last  : Level_Mark;
                               begin
@@ -766,10 +757,15 @@ package body Driver.Robot.Boot is
                                     Ask_From := Last.From;
                                     Ask_To := Last.To;
                                     Driver.Beats.Within_A_Beat (Read_Followed'Access);
-                                    if Followed_Now or else (K = 1 and then Measured_Now) then
-                                       if Followed_Now then
-                                          Followed_In_Pass := Followed_In_Pass + 1;
-                                       end if;
+                                    --  Followed as the aligner says, the first level too: a keyframe of a new direction is
+                                    --  asked from the view's common motion and its answers on the keyframe's own field
+                                    --  again narrowly (Keyframes.Add). The first level used to count as followed whenever
+                                    --  the pass measured how far the view moves per unit of the joint, from any keyframe:
+                                    --  f15i's fifth joint had its shift from the cells of the pass, its first level
+                                    --  (310 units) found 0 of 242 points, and the ladder climbed on from it to 2508
+                                    --  instead of halving to a level the aligner follows (10-15).
+                                    if Followed_Now then
+                                       Followed_In_Pass := Followed_In_Pass + 1;
                                        Reached (P.Channel) := Real'Max (Reached (P.Channel), Last.Offset);
                                        Descending (I) := False;
                                     elsif Framed_Now then
