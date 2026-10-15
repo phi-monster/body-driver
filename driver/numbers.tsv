@@ -1163,6 +1163,7 @@ driver-robot-hand-lobes.adb	Dist.Replace_Element (Index (W, C, R), 0.0);	0.0	mat
 driver-robot-hand-lobes.adb	Dof : constant Natural := Natural (Real'Floor (Mad_Efficiency * Real (2 * Count)));	2	structure	two coordinates per correspondence
 driver-robot-hand-lobes.adb	Family : constant Gate := Vector_Gate (2, Noise.Displacement.Degrees_Of_Freedom, Tests => Tests);	2	structure	an image displacement has two components
 driver-robot-hand-lobes.adb	Flips := Flips + Boolean'Pos ((Next (J) > 0.5) /= Label (J));	0.5	math	a pixel is of the kind it is likelier to be of: a share above a half
+driver-robot-hand-lobes.adb	Gaps : Reals_Access := new Reals (1 .. Natural'Max (1, W * H));	1	structure	one entry at the least, whatever the picture
 driver-robot-hand-lobes.adb	Kind_A : Real := 1.0;	1.0	statistics	one pseudo-pixel counted in the kind, as in every histogram
 driver-robot-hand-lobes.adb	Label (J) := Next (J) > 0.5;	0.5	math	a pixel is of the kind it is likelier to be of: a share above a half
 driver-robot-hand-lobes.adb	Levels : constant := 256;	256	format	a pixel's brightness in whole levels of eight bits

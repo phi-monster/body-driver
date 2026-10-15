@@ -1786,7 +1786,11 @@ package body Driver.Robot.Hand.Lobes is
          --  compare when it closes at neither. Only what lies ahead counts. The lobe's own still pixels (where it
          --  overlaps itself between the ends, at its root) and what lies beside it are as near it at both ends: a jaw
          --  swung on a pivot onto a fixed one (the kiwi's SO-101, 10-15) overlaps itself near the pivot, and its
-         --  centre was as near that at both ends as to the fixed jaw at the closed one. A gap is one pixel's place
+         --  centre was as near that at both ends as to the fixed jaw at the closed one. The lead's gap is its side's:
+         --  the median over the pixels that lead of how far each goes on before it meets one, not the nearest pixel's:
+         --  a speck of two still pixels inside the open jaw's place met its lead at once, the gap was nought at both
+         --  ends, and the jaw's closing was not told (f16o and f16p on 10-15; 185 of the closed jaw's 194 leading
+         --  pixels lay against the fixed jaw, 1 of the open one's 143 against the speck). A gap is one pixel's place
          --  at each end.
          declare
             L     : constant Lobe := Lobes (Lobes.First_Index);
@@ -1796,9 +1800,14 @@ package body Driver.Robot.Hand.Lobes is
             Dv    : constant Real := L.Centre_There.V - L.Centre_Here.V;
             Size  : constant Real := Sqrt (Du * Du + Dv * Dv);
             Never : constant Real := Sqrt (Real (W * W + H * H));
-            --  The fewest pixels between a pixel of M that leads along (Su, Sv), a unit step, and a still pixel
-            --  straight ahead of it; Never when none is.
+            --  Over the pixels of M that lead along (Su, Sv), a unit step, the median of how many pixels lie between
+            --  each and a still pixel straight ahead of it, Never for one with none ahead; Never when none leads.
             function Gap (M : Mask; Su, Sv : Real) return Real is
+               type Reals is array (Positive range <>) of Real;
+               type Reals_Access is access Reals;
+               procedure Free is new Ada.Unchecked_Deallocation (Reals, Reals_Access);
+               Gaps  : Reals_Access := new Reals (1 .. Natural'Max (1, W * H));
+               Led   : Natural := 0;
                Least : Real := Never;
                function Ahead (C, R, K : Natural; Column, Row : out Integer) return Boolean is
                begin
@@ -1814,19 +1823,28 @@ package body Driver.Robot.Hand.Lobes is
                            Nc, Nr : Integer;
                         begin
                            if not (Ahead (C, R, 1, Nc, Nr) and then Contains (M, Nc, Nr)) then
+                              Least := Never;
                               for K in 1 .. Natural (Real'Ceiling (Never)) loop
-                                 exit when Real (K - 1) >= Least or else not Ahead (C, R, K, Nc, Nr);
+                                 exit when not Ahead (C, R, K, Nc, Nr);
                                  if Contains (Attached, Nc, Nr) then
                                     Least := Real (K - 1);
                                     exit;
                                  end if;
                               end loop;
+                              Led := Led + 1;
+                              Gaps (Led) := Least;
                            end if;
                         end;
                      end if;
                   end loop;
                end loop;
-               return Least;
+               declare
+                  Side : constant Real :=
+                    (if Led = 0 then Never else Driver.Stats.Median (Real_Array (Gaps (1 .. Led))));
+               begin
+                  Free (Gaps);
+                  return Side;
+               end;
             end Gap;
          begin
             if Size = 0.0 then

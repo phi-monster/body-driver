@@ -641,6 +641,29 @@ package body Driver.Robot.Hand.Lobes.Tests is
       end loop;
    end Block;
 
+   procedure Speck_Ahead_Of_The_Open_Jaw is
+      --  One lobe, closed at the first view against a fixed jaw (a block of still pixels beside it), open in the other,
+      --  thirty columns on; and a still speck of one pixel against the open lobe's leading side, on one of its forty
+      --  rows (f16o and f16p, 10-15: a speck of two still pixels inside the open jaw's place met its lead at once, the
+      --  gap was nought at both ends, the jaw's closing was not told, and no hand was made). Its side as a whole meets
+      --  nothing: the lobe closed at the first view.
+      Closed : Mask := Create (W, H);
+      Open   : Mask := Create (W, H);
+      Still  : Mask := Create (W, H);
+      Lobes  : Lobe_Vectors.Vector;
+   begin
+      Block (Closed, 40, 49, 10, 49);
+      Block (Open, 70, 79, 10, 49);
+      Block (Still, 30, 39, 10, 49);
+      Include (Still, 80, 30);
+      Lobes.Append (Lobe'(Here => Closed, There => Open, Count_Here => 400, Count_There => 400,
+                          Centre_Here => (U => 45.0, V => 30.0), Centre_There => (U => 75.0, V => 30.0),
+                          others => <>));
+      Check (Direction (Lobes, Still) = Towards_Here,
+             "a lobe closed against a fixed jaw, a still speck against its open side, was judged "
+             & Closing'Image (Direction (Lobes, Still)) & ", not closed at the first view");
+   end Speck_Ahead_Of_The_Open_Jaw;
+
    procedure Fragments_Are_Not_Lobes is
       --  The pixels given to each end by the mixture: two fingers at each,
       --  and at each end a small block on the bottom border, which the
@@ -1198,6 +1221,8 @@ package body Driver.Robot.Hand.Lobes.Tests is
                              & "towards it, or one swung onto nothing is seen closing against its own pixels "
                              & "where it overlaps itself",
                              Swing_Onto_A_Fixed_Jaw'Access);
+      Driver.Tests.Register ("hand.lobes.speck", "a lobe closed against a fixed jaw is not seen closing when a still "
+                             & "speck lies against its open side", Speck_Ahead_Of_The_Open_Jaw'Access);
       Driver.Tests.Register ("hand.lobes.one", "a finger closing against a still one is not seen closing",
                              One_Finger_Against_A_Still_One'Access);
       Driver.Tests.Register ("hand.lobes.floating", "a moving patch attached to nothing is given a tip",
