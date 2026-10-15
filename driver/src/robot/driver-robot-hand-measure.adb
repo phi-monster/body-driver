@@ -776,18 +776,86 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   Stalls := H.Data.Found (Id).Stalls;
                end if;
             end Read_Stalls;
+            Goal : constant Real_Array := (if To_Start then Aim_At.Element else Step_From.Element);
+            --  Every channel of the arm where it rests within its noise of Goal, or nearer than a step an eye can see.
+            procedure Read_Arrival (O : Observation) is
+               Now : constant Real_Array := O.Readings.Element (Arm_Is);
+            begin
+               Reached := Now'Length = Goal'Length
+                 and then (for all C in 1 .. Now'Length =>
+                             not Significant (Now (Now'First + C - 1) - Goal (Goal'First + C - 1),
+                                              Sqrt (2.0) * Reading_Noise (M, Arm_Is, C))
+                             or else (Known (Visible_Step (M, Arm_Is, C))
+                                      and then abs (Now (Now'First + C - 1) - Goal (Goal'First + C - 1))
+                                               < Visible_Step (M, Arm_Is, C).Value));
+            end Read_Arrival;
+            Waited : Natural;
          begin
-            Move_Group (Arm_Is, (if To_Start then Aim_At.Element else Step_From.Element), Reached);
+            Move_Group (Arm_Is, Goal, Reached);
+            --  A way back judged blocked can still get there: let go of what it pressed, the arm bounces, its first
+            --  beats swing against the ask, and the step was given up as blocked while the arm went on to stand where
+            --  it was sent (f16q on 10-15: the jaw's press at open, sent back to where its last step began, was given
+            --  up blocked at its third beat and stood at its target by its tenth; "the arm did not get back", and
+            --  nothing was pressed). Where the arm comes to rest is what tells.
+            if not Reached then
+               Driver.Robot.Motion.Settle (M, Waited);
+               Hold_Beat (Read_Arrival'Access);
+            end if;
             if To_Start then
                Descended := 0.0;
             elsif Step_Reached then
                Descended := Descended - By;
             end if;
             Hold_Beat (Read_Stalls'Access);
-            if Reached and then not Lost and then not Closer_At (R, Which) then
-               Move_Group (R.Group, R.Readings (Which).Element);
-               Reached := Closer_At (R, Which);
+            --  The closer is judged where it rests: let go of what it pressed, it shakes for a while about its place
+            --  (f16t on 10-15: 0.0016 units off its opening at the beat it was read, back on it between shakes).
+            if Reached then
+               Driver.Robot.Motion.Settle (M, Waited);
             end if;
+            declare
+               Arm_Back : constant Boolean := Reached;
+            begin
+               if Reached and then not Lost and then not Closer_At (R, Which) then
+                  --  Landed where it was sent (Motion.Step's Land: a servo's steady error under its load sent again): a
+                  --  closer let go of a press stood 0.001 units short of its opening, nothing its eye sees and more than
+                  --  its readings' noise, and the press was refused (f16s on 10-15).
+                  declare
+                     Command : Driver.Commands.Command;
+                     Report  : Driver.Robot.Motion.Step_Report;
+                  begin
+                     Driver.Commands.Set_Target (Command, R.Group, R.Readings (Which).Element);
+                     Driver.Robot.Motion.Step (M, Command, Report, Land => True);
+                     Driver.Robot.Motion.Settle (M, Waited);
+                  end;
+                  Reached := Closer_At (R, Which);
+               end if;
+               if not Reached and then not Lost then
+                  declare
+                     Off : Ada.Strings.Unbounded.Unbounded_String;
+                     procedure Read_Off (O : Observation) is
+                        Now : constant Real_Array := O.Readings.Element (Arm_Is);
+                        Cl  : constant Real_Array := O.Readings.Element (R.Group);
+                        Was : constant Real_Array := R.Readings (Which).Element;
+                     begin
+                        for C in 1 .. Natural'Min (Now'Length, Goal'Length) loop
+                           Ada.Strings.Unbounded.Append
+                             (Off, " c" & C'Image & " " & Driver.Log.Image (Now (Now'First + C - 1) - Goal (Goal'First + C - 1), 4));
+                        end loop;
+                        Ada.Strings.Unbounded.Append (Off, "; the closer off its opening by");
+                        for C in 1 .. Natural'Min (Cl'Length, Was'Length) loop
+                           Ada.Strings.Unbounded.Append
+                             (Off, " " & Driver.Log.Image (Cl (Cl'First + C - 1) - Was (Was'First + C - 1), 6));
+                        end loop;
+                     end Read_Off;
+                  begin
+                     Hold_Beat (Read_Off'Access);
+                     Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the way back "
+                                      & (if Arm_Back then "took the arm there and not the closer"
+                                         else "did not take the arm there")
+                                      & "; the arm off where it was sent by" & Ada.Strings.Unbounded.To_String (Off));
+                  end;
+               end if;
+            end;
             Reached := Reached and then not Lost;
             Felt := False;
          end Back;
