@@ -2012,8 +2012,11 @@ package body Driver.Robot.Kinematics.Fit is
 
       --  The last of the fit, from the joints, their order and the lens the stages before it left: every
       --  translation's sign, the tracks (stage 5), the focal length's profile, the lengths in model units; and
-      --  what a fit begun from this one takes up (From: the focal search's width and range).
-      procedure Finish is
+      --  what a fit begun from this one takes up (From: the focal search's width and range). Profiled: whether the
+      --  focal length's profile is walked. It belongs to the fit that searched: a fit begun from it within the
+      --  same estimate (From) starts in the basin that profile chose, on a few more sightings, and walked it again
+      --  at most of its time (the profile is most of the last stage: ten refinements of the tracks to its one).
+      procedure Finish (Profiled : Boolean) is
       begin
          --  The sign of every translation at once, which the epipolar constraint
          --  cannot tell: the matched points lie in front of both eyes.
@@ -2079,7 +2082,8 @@ package body Driver.Robot.Kinematics.Fit is
          begin
             --  Only a solution that would be reported fitted is profiled: one the sightings leave undetermined is refitted
             --  when the evidence grows, and its profile would cost the boot that time for nothing.
-            while Moved and then Report.Determined and then Report.All_Count > 0 and then Report.Focal_Sigma < Real'Last
+            while Profiled and then Moved and then Report.Determined and then Report.All_Count > 0
+              and then Report.Focal_Sigma < Real'Last
               and then Report.Focal_Sigma > 0.0 and then Searched_Least > 0.0
             loop
                Moved := False;
@@ -2319,7 +2323,7 @@ package body Driver.Robot.Kinematics.Fit is
          Focal_Within := From.Focal_Within;
          Searched_Least := From.Searched_Least;
          Searched_Most := From.Searched_Most;
-         Finish;
+         Finish (Profiled => False);
          return;
       end if;
 
@@ -3894,7 +3898,7 @@ package body Driver.Robot.Kinematics.Fit is
          Free (Inlier);
       end;
 
-      Finish;
+      Finish (Profiled => True);
    end Fit;
 
    function Depth_Known (Depth, Sigma : Real) return Boolean is
