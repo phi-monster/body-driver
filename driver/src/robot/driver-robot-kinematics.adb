@@ -1896,7 +1896,7 @@ package body Driver.Robot.Kinematics is
       end;
    end Table_Estimate;
 
-   procedure Refit (M : in out Model) is
+   procedure Refit (M : in out Model; Again : Boolean := False) is
       Start : constant Duration := Driver.Clock.Seconds;
       Fitted, Placed : Duration;
 
@@ -2012,8 +2012,28 @@ package body Driver.Robot.Kinematics is
                      Lens   : Fit.Lens;
                      Report : Fit.Fit_Report;
                      Result : Arm_Fit;
+                     --  Fitted again within the estimate whose fit holds (Again): from that fit, its last stage alone.
+                     Start  : Fit.Fit_Start (if Again and then R.Result.Fitted and then R.Result.Made_At = M.Beats
+                                             and then Natural (R.Result.Joints.Length) = N
+                                             and then Natural (R.Result.Chain.Length) = N then N else 0);
                   begin
                      for S of R.Matches loop
+                     if Start.N > 0 then
+                        Start.Valid := True;
+                        for J in 1 .. N loop
+                           declare
+                              F : constant Joint_Fit := R.Result.Joints (R.Result.Joints.First_Index + J - 1);
+                           begin
+                              Start.Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
+                              Start.Chain (J) := R.Result.Chain (R.Result.Chain.First_Index + J - 1);
+                           end;
+                        end loop;
+                        Start.L := (Fx => R.Result.Lens.Fx, Fy => R.Result.Lens.Fy, Cx => R.Result.Lens.Cx,
+                                    Cy => R.Result.Lens.Cy, K1 => R.Result.Lens.K1, K2 => R.Result.Lens.K2);
+                        Start.Focal_Within := R.Result.Focal_Within;
+                        Start.Searched_Least := R.Result.Searched_Least;
+                        Start.Searched_Most := R.Result.Searched_Most;
+                     end if;
                         for I in 0 .. Queries - 1 loop
                            if Returns (S, I) then
                               K := K + 1;
@@ -2029,7 +2049,7 @@ package body Driver.Robot.Kinematics is
                      --  keyframe taken after it refines every term, and moves none of
                      --  the lengths the world was measured in.
                      Fit.Fit (Changes.all, Asked.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width, M.Eyes (R.Eye).Grid.Height,
-                              R.Result.Unit_Frames, Joints, Chain, Lens, Report, Who => "arm" & R.Arm'Image);
+                              R.Result.Unit_Frames, Joints, Chain, Lens, Report, Who => "arm" & R.Arm'Image, From => Start);
                      --  The table its eye sees, away from it towards the eye,
                      --  and its tracks' points: Up is the first arm's (the world
                      --  is that eye's reference frame), and the points place the
@@ -2099,6 +2119,10 @@ package body Driver.Robot.Kinematics is
                      end if;
                      Free (Seen);
                      Result.Fitted := Report.Fitted;
+                     Result.Focal_Within := Report.Focal_Within;
+                     Result.Searched_Least := Report.Searched_Least;
+                     Result.Searched_Most := Report.Searched_Most;
+                     Result.Made_At := M.Beats;
                      Result.Unit_Frames :=
                        (if R.Result.Unit_Frames > 0 then R.Result.Unit_Frames elsif Report.Fitted then Frames else 0);
                      Result.Matches := Natural (R.Matches.Length) + R.Revision;

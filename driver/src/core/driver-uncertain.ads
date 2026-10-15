@@ -19,7 +19,7 @@
 
 with Driver.Numerics;
 
-package Driver.Uncertain with Pure is
+package Driver.Uncertain with Preelaborate is
 
    use Driver.Numerics;
 

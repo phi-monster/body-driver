@@ -2,6 +2,7 @@ with Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Distributions;
 with Ada.Unchecked_Conversion;
+with Ada.Unchecked_Deallocation;
 with Interfaces;
 
 package body Driver.Stats is
@@ -37,11 +38,16 @@ package body Driver.Stats is
 
    --  Order statistics by the values' bits. Setting the sign bit of a
    --  non-negative IEEE double, and inverting every bit of a negative one,
-   --  gives keys that order as the values do. The K-th smallest value is found
-   --  one digit of its key at a time, most significant first, by counting the
-   --  values whose keys share the digits found so far: eight passes, nothing
-   --  copied, the sample untouched. Samples run to millions (a ratio for every
-   --  still cell of every beat), more than a stack holds.
+   --  gives keys that order as the values do, a total order (-0 below +0,
+   --  NaNs at the ends). The K-th smallest value is the K-th smallest key,
+   --  found by selection on a copy of the keys: three-way partitions about
+   --  the median of three keys, each keeping only the part that holds rank K.
+   --  The copy is on the heap: samples run to millions (a ratio for every
+   --  still cell of every beat), more than a stack holds. The sample itself
+   --  is untouched. (A radix selection without a copy, eight passes over the
+   --  sample and 256 counters each, cost more than the values for the
+   --  hundreds a fit's keyframe medians take: 13% of the arm fit's time in
+   --  its profile of 10-15.)
 
    subtype Key is Interfaces.Unsigned_64;
    use type Key;
@@ -51,14 +57,65 @@ package body Driver.Stats is
 
    Sign : constant Key := 2 ** (Key'Size - 1);
 
-   Digit_Bits : constant := 8;   --  a byte of the key per pass; any width gives the same result
-   Radix      : constant := 2 ** Digit_Bits;
-
    function Ordered (V : Real) return Key is
      (if (Bits (V) and Sign) = 0 then Bits (V) or Sign else not Bits (V));
 
    function Unordered (K : Key) return Real is
      (Value_Of (if (K and Sign) /= 0 then K and not Sign else not K));
+
+   type Key_Array is array (Positive range <>) of Key;
+   type Key_Access is access Key_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Key_Array, Key_Access);
+
+   --  The Rank-th smallest of Keys, which it reorders.
+   function Select_Rank (Keys : in out Key_Array; Rank : Positive) return Key is
+      Lo : Integer := Keys'First;
+      Hi : Integer := Keys'Last;
+   begin
+      loop
+         if Lo >= Hi then
+            return Keys (Rank);
+         end if;
+         declare
+            Mid   : constant Integer := Lo + (Hi - Lo) / 2;
+            A     : constant Key := Keys (Lo);
+            B     : constant Key := Keys (Mid);
+            C     : constant Key := Keys (Hi);
+            Pivot : constant Key :=
+              (if A < B then (if B < C then B elsif A < C then C else A)
+               else (if A < C then A elsif B < C then C else B));
+            Lt    : Integer := Lo;   --  Keys (Lo .. Lt - 1) < Pivot
+            I     : Integer := Lo;   --  Keys (Lt .. I - 1) = Pivot
+            Gt    : Integer := Hi;   --  Keys (Gt + 1 .. Hi) > Pivot
+         begin
+            while I <= Gt loop
+               declare
+                  K : constant Key := Keys (I);
+               begin
+                  if K < Pivot then
+                     Keys (I) := Keys (Lt);
+                     Keys (Lt) := K;
+                     Lt := Lt + 1;
+                     I := I + 1;
+                  elsif K > Pivot then
+                     Keys (I) := Keys (Gt);
+                     Keys (Gt) := K;
+                     Gt := Gt - 1;
+                  else
+                     I := I + 1;
+                  end if;
+               end;
+            end loop;
+            if Rank < Lt then
+               Hi := Lt - 1;
+            elsif Rank > Gt then
+               Lo := Gt + 1;
+            else
+               return Pivot;
+            end if;
+         end;
+      end loop;
+   end Select_Rank;
 
    generic
       with function Value (V : Real) return Real;
@@ -67,37 +124,16 @@ package body Driver.Stats is
 
    function Median_Of (X : Real_Array) return Real is
       N       : constant Positive := X'Length;
-      Rank    : Positive := (N + 1) / 2;   --  the rank sought among the values that share Prefix
-      Prefix  : Key := 0;                  --  the key's digits found so far, in place
-      Found   : Key := 0;                  --  which bits of Prefix are found
+      Keys    : Key_Access := new Key_Array (1 .. N);
       Lower   : Real;
       At_Most : Natural := 0;
       Above   : Real := Real'Last;
    begin
-      for Place in reverse 0 .. Key'Size / Digit_Bits - 1 loop
-         declare
-            Unit   : constant Key := Radix ** Place;
-            Counts : array (Key range 0 .. Radix - 1) of Natural := [others => 0];
-            Digit  : Key := 0;
-         begin
-            for V of X loop
-               declare
-                  K : constant Key := Ordered (Value (V));
-               begin
-                  if (K and Found) = Prefix then
-                     Counts (K / Unit mod Radix) := Counts (K / Unit mod Radix) + 1;
-                  end if;
-               end;
-            end loop;
-            while Counts (Digit) < Rank loop
-               Rank := Rank - Counts (Digit);
-               Digit := Digit + 1;
-            end loop;
-            Prefix := Prefix or Digit * Unit;
-            Found := Found or (Radix - 1) * Unit;
-         end;
+      for I in 0 .. N - 1 loop
+         Keys (I + 1) := Ordered (Value (X (X'First + I)));
       end loop;
-      Lower := Unordered (Prefix);
+      Lower := Unordered (Select_Rank (Keys.all, (N + 1) / 2));
+      Free (Keys);
       if N mod 2 = 1 then
          return Lower;
       end if;

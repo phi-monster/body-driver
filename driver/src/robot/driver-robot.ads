@@ -665,6 +665,10 @@ private
       --  keyframe taken later refines every term and moves no length. 0 until
       --  the arm is fitted.
       Unit_Frames : Natural := 0;
+      --  The focal search's width and range of the fit that holds (Fit.Fit_Report), and the beat of the estimate it was
+      --  made in: a fit made again within that estimate begins from it (Kinematics.Refit's Again).
+      Focal_Within, Searched_Least, Searched_Most : Real := 0.0;
+      Made_At : Natural := 0;
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
       --  The table its eye saw, in its reference frame (Table_In_Arm): the

@@ -239,6 +239,9 @@ package Driver.Robot.Kinematics.Fit is
                                           --  with each term of Covariance (the others' depths at their
                                           --  best): the share of its uncertainty every depth has in common
       Seconds      : Real_Lists.Vector;   --  per stage reached, from the first, how long the fit spent in it
+      --  The focal search's width (half, in the logarithm) and range, least and most, which a fit begun from this one
+      --  takes up (Fit_Start); 0 where there was no search.
+      Focal_Within, Searched_Least, Searched_Most : Real := 0.0;
    end record;
 
    function Depth_Known (Depth, Sigma : Real) return Boolean;
@@ -248,6 +251,20 @@ package Driver.Robot.Kinematics.Fit is
    --  known; it is not a point of little weight.
 
    type Flag_Matrix is array (Positive range <>, Positive range <>) of Boolean;
+
+   --  Where a fit may begin from (Fit's From): a fit of the same arm just made, on nearly the same sightings, its joints,
+   --  their order along the arm, its lens, and its focal search's width and range (Fit_Report); none unless Valid.
+   type Fit_Start (N : Natural) is record
+      Valid          : Boolean := False;
+      Joints         : Joint_Array (1 .. N);
+      Chain          : Chain_Order (1 .. N);
+      L              : Lens;
+      Focal_Within   : Real := 0.0;
+      Searched_Least : Real := 0.0;
+      Searched_Most  : Real := 0.0;
+   end record;
+
+   No_Start : constant Fit_Start := (N => 0, Valid => False, others => <>);
 
    procedure Fit
      (Changes    : Driver.Numerics.Arrays.Real_Matrix;   --  per keyframe (row), every joint's reading change from the reference
@@ -260,7 +277,8 @@ package Driver.Robot.Kinematics.Fit is
       Chain      : out Chain_Order;
       L          : out Lens;
       Report     : out Fit_Report;
-      Who        : String := "")   --  what is fitted, for a line at every stage it enters; none when empty
+      Who        : String := "";   --  what is fitted, for a line at every stage it enters; none when empty
+      From       : Fit_Start := No_Start)   --  a fit just made to begin from: the last stage alone (Fit_Start)
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length
                  and then Asked'Length (1) = Changes'Length (1) and then Asked'Length (2) = Visible'Length
                  and then Chain'Length = Visible'Length and then Unit_Frames <= Changes'Length (1);

@@ -1705,7 +1705,6 @@ driver-robot-kinematics-fit.adb	(Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) 
 driver-robot-kinematics-fit.adb	(Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));	4	structure	the four entries of a turn and a shift about an axis: (A, B) the last column, (E, F) the last row
 driver-robot-kinematics-fit.adb	(Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));	4	structure	the four entries of a turn and a shift about an axis: (A, B) the last column, (E, F) the last row
 driver-robot-kinematics-fit.adb	(Depth > 0.0 and then Sigma < Real'Last and then Driver.Uncertain.Significant (1.0, Sigma));	1.0	statistics	the depth against its own relative uncertainty: a depth of one unit is significant when its sigma is under 1 / Z of it
-driver-robot-kinematics-fit.adb	(Median_Abs (R) / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5));	0.5	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	(Sqrt (Real'Max (0.0, E (Errors.Both_Across) + E (Errors.Both_Down)) / 2.0));	2.0	math	the mean of the two components' variances
 driver-robot-kinematics-fit.adb	(V (2 * J - 1) * E_1 (J) + V (2 * J) * E_2 (J));	2	structure	a joint's two numbers across its axis: the entries 2J - 1 and 2J of the vector
 driver-robot-kinematics-fit.adb	(V (2 * J - 1) * E_1 (J) + V (2 * J) * E_2 (J));	2	structure	a joint's two numbers across its axis: the entries 2J - 1 and 2J of the vector
@@ -1802,6 +1801,7 @@ driver-robot-kinematics-fit.adb	Fit_Abs (I) := Sqrt (All_R (2 * I - 1) ** 2 + Al
 driver-robot-kinematics-fit.adb	Fit_Abs (Kf) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Fit_Abs (Kf) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Focal : constant Real := (L.Fx + L.Fy) / 2.0;	2.0	math	the focal length: the mean of the two
+driver-robot-kinematics-fit.adb	Focal_Here : constant Real := (Lx.Fx + Lx.Fy) / 2.0;	2.0	math	the mean of the two focal lengths
 driver-robot-kinematics-fit.adb	Foot : constant Vec3 := (1.0 / Length ** 2) * P.A;	1.0	math	the plane A * X = 1: its point nearest the eye is A over its length squared
 driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	default: the reference frame, the first
 driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	indexes start at one
@@ -1864,9 +1864,6 @@ driver-robot-kinematics-fit.adb	M_A (P_Count + 1, Anchor) := 1.0;	1.0	structure	
 driver-robot-kinematics-fit.adb	Middle : constant Real := (Low + Top) / 2.0;	2.0	math	the middle of an interval
 driver-robot-kinematics-fit.adb	Minimal : constant := 3;	3	math	three points fix a plane
 driver-robot-kinematics-fit.adb	Minimal : constant := 4;	4	math	four points fix a homography of a plane
-driver-robot-kinematics-fit.adb	Minus : constant Real := Sum_For (1, (-1.0) * T0_Of (1)) + Sum_For (2, (-Rel) * T0_Of (2));	1	structure	the way: 1 the turn up, 2 the turn downdriver-robot-kinematics-fit.adb
-driver-robot-kinematics-fit.adb	Minus : constant Real := Sum_For (1, (-1.0) * T0_Of (1)) + Sum_For (2, (-Rel) * T0_Of (2));	1.0	math	the unit sign: the translation flipped
-driver-robot-kinematics-fit.adb	Minus : constant Real := Sum_For (1, (-1.0) * T0_Of (1)) + Sum_For (2, (-Rel) * T0_Of (2));	2	math	the unit sign: the translation flipped
 driver-robot-kinematics-fit.adb	N : constant Vec3 := (1.0 / Length) * P.A;	1.0	math	the unit direction of the inverse-depth vector
 driver-robot-kinematics-fit.adb	N : constant Vec3 := (1.0 / Length) * P.A;	1.0	math	the unit direction of the inverse-depth vector
 driver-robot-kinematics-fit.adb	Norms (I) := Sqrt (Rm (2 * I - 1) ** 2 + Rm (2 * I) ** 2);	2	structure	two residuals a sighting, one along each image axis
@@ -1894,17 +1891,11 @@ driver-robot-kinematics-fit.adb	Outputs : constant := 7;	7	structure	the placeme
 driver-robot-kinematics-fit.adb	Owns (2 * K - 1) := Sight (Sight'First + I - 1).Own;	2	structure	a sighting's two residuals, the horizontal and the vertical
 driver-robot-kinematics-fit.adb	Owns (2 * K) := Sight (Sight'First + I - 1).Own;	2	structure	a sighting's two residuals, the horizontal and the vertical
 driver-robot-kinematics-fit.adb	Owns : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals to a sighting
-driver-robot-kinematics-fit.adb	P : constant Vec3 := (if Sign = 1 then 1.0 else -1.0) * (C * E1 + Sn * E2);	1	structure	the first of the two signs trieddriver-robot-kinematics-fit.adb
-driver-robot-kinematics-fit.adb	P : constant Vec3 := (if Sign = 1 then 1.0 else -1.0) * (C * E1 + Sn * E2);	1.0	structure	the first of the two signs tried
-driver-robot-kinematics-fit.adb	P : constant Vec3 := (if Sign = 1 then 1.0 else -1.0) * (C * E1 + Sn * E2);	1.0	structure	the first of the two signs tried
 driver-robot-kinematics-fit.adb	Partner (B) := 1;	1	structure	keyframe 1 is the reference
 driver-robot-kinematics-fit.adb	Per_Joint : constant := 6;	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Per_Joint : constant := 6;	6	structure	the positions of the parameters in the vector
-driver-robot-kinematics-fit.adb	Plus : constant Real := Sum_For (1, T0_Of (1)) + Sum_For (2, Rel * T0_Of (2));	1	structure	the way: 1 the turn up, 2 the turn downdriver-robot-kinematics-fit.adb
-driver-robot-kinematics-fit.adb	Plus : constant Real := Sum_For (1, T0_Of (1)) + Sum_For (2, Rel * T0_Of (2));	2	structure	the way: 1 the turn up, 2 the turn down
 driver-robot-kinematics-fit.adb	Prior_W : constant Real := (if Focal_Within > 0.0 then 1.0 / Focal_Within ** 2 else 0.0);	1.0	math	the information of a measurement is the inverse of its width squared
 driver-robot-kinematics-fit.adb	Project (Lens_Of_Terms (Terms_Of (Xv, 2)),	2	structure	the first side, then the second
-driver-robot-kinematics-fit.adb	Q : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5);	0.5	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	R (2 * K - 1) := U - Sg.U;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	R (2 * K) := V - Sg.V;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	R (K + 2) := (if Ahead then (V - Obs_V) / Sigma else Real'Last);	2	structure	two residuals per answer, across and down; two sides' holds
@@ -1923,14 +1914,10 @@ driver-robot-kinematics-fit.adb	R1 : constant Real_Vector (1 .. 9) := [X, Y, 1.0
 driver-robot-kinematics-fit.adb	R1 : constant Real_Vector (1 .. 9) := [X, Y, 1.0, 0.0, 0.0, 0.0, -U * X, -U * Y, -U];	9	structure	a homography's nine entries: the direct linear transform's unknowns
 driver-robot-kinematics-fit.adb	R2 : constant Real_Vector (1 .. 9) := [0.0, 0.0, 0.0, X, Y, 1.0, -V * X, -V * Y, -V];	1.0	math	homogeneous coordinates in the direct linear transform's rows
 driver-robot-kinematics-fit.adb	R2 : constant Real_Vector (1 .. 9) := [0.0, 0.0, 0.0, X, Y, 1.0, -V * X, -V * Y, -V];	9	structure	a homography's nine entries: the direct linear transform's unknowns
-driver-robot-kinematics-fit.adb	Ray (Lx, Kept (I).U, Kept (I).V), (Lx.Fx + Lx.Fy) / 2.0);	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	Ray (Lx, Sight (I).U, Sight (I).V), (Lx.Fx + Lx.Fy) / 2.0);	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 2 * N;	2	structure	two numbers across each joint's axis
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
-driver-robot-kinematics-fit.adb	Rel : constant Real := (if Dot (T0_Of (1), T0_Of (2)) > 0.0 then -1.0 else 1.0);	1.0	math	the unit sign: the turn down's translation made anti-parallel to the turn up's
-driver-robot-kinematics-fit.adb	Rel : constant Real := (if Dot (T0_Of (1), T0_Of (2)) > 0.0 then -1.0 else 1.0);	1.0	math	the unit sign: the turn down's translation made anti-parallel to the turn up'sdriver-robot-kinematics-fit.adb
-driver-robot-kinematics-fit.adb	Reprojected (Rr, (-1.0) * T0, L (I).H0, L (I).H, F, Du, Dv);	1.0	math	the unit sign: the translation flipped
 driver-robot-kinematics-fit.adb	Rho : Real_Array (1 .. N) := [others => 1.0];	1.0	structure	distances before they are measured
 driver-robot-kinematics-fit.adb	Rm : Real_Access := new Real_Array (1 .. 2 * M);	2	structure	two residuals a sighting, one along each image axis
 driver-robot-kinematics-fit.adb	Rn : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
@@ -1962,11 +1949,6 @@ driver-robot-kinematics-fit.adb	Side_State (D2.all, Terms_Of (Xv, 2), Move_Of (X
 driver-robot-kinematics-fit.adb	Side_State (D2.all, Terms_Of (Xv, 2), Move_Of (Xv, 2), P2, A2, B2);	2	structure	the first side, then the second
 driver-robot-kinematics-fit.adb	Sign : constant Real := (if Result.Scale < 0.0 then -1.0 else 1.0);	1.0	math	the sign of the turn per reading unit, kept as the refinement moves its size
 driver-robot-kinematics-fit.adb	Sign : constant Real := (if Result.Scale < 0.0 then -1.0 else 1.0);	1.0	math	the sign of the turn per reading unit, kept as the refinement moves its size
-driver-robot-kinematics-fit.adb	Sign_Of (1) := (if Minus < Plus then -1.0 else 1.0);	1.0	math	the unit sign of a way's translation
-driver-robot-kinematics-fit.adb	Sign_Of (1) := (if Minus < Plus then -1.0 else 1.0);	1.0	math	the unit sign of a way's translationdriver-robot-kinematics-fit.adb
-driver-robot-kinematics-fit.adb	Sign_Of (Way) := -1.0;	1.0	math	the unit sign of a way's translation
-driver-robot-kinematics-fit.adb	Sign_Of : array (1 .. 2) of Real := [others => 1.0];	1.0	structure	the two ways of a joint's probe: the turn up and the turn down
-driver-robot-kinematics-fit.adb	Sign_Of : array (1 .. 2) of Real := [others => 1.0];	2	structure	the two ways of a joint's probe: the turn up and the turn down
 driver-robot-kinematics-fit.adb	Size : constant Real := (if Now > 0.0 and then Old > 0.0 then Sqrt (Old / Now) else 1.0);	1.0	math	no change of size when there is none to compare
 driver-robot-kinematics-fit.adb	Slope : constant Real := D + R * (2.0 * L.K1 * R + 4.0 * L.K2 * R2 * R);	2.0	math	the derivative of r (1 + K1 r^2 + K2 r^4): 1 + 3 K1 r^2 + 5 K2 r^4, written as D + r (2 K1 r + 4 K2 r^3)
 driver-robot-kinematics-fit.adb	Slope : constant Real := D + R * (2.0 * L.K1 * R + 4.0 * L.K2 * R2 * R);	4.0	math	the derivative of r (1 + K1 r^2 + K2 r^4): 1 + 3 K1 r^2 + 5 K2 r^4, written as D + r (2 K1 r + 4 K2 r^3)
@@ -2004,13 +1986,13 @@ driver-robot-kinematics-fit.adb	Told := V (1) ** 2 + V (2) ** 2 > 0.0 and then V
 driver-robot-kinematics-fit.adb	Told_Of : array (1 .. 2) of Boolean := [others => False];	2	structure	the two ways of a joint's probe: the turn up and the turn downdriver-robot-kinematics-fit.adb
 driver-robot-kinematics-fit.adb	Translation => Xv (S_First + 2) * A1 + Xv (S_First + 3) * B1	2	structure	the similarity's terms in order: log scale, turn, two shifts
 driver-robot-kinematics-fit.adb	Translation => Xv (S_First + 2) * A1 + Xv (S_First + 3) * B1	3	structure	the similarity's terms in order: log scale, turn, two shifts
-driver-robot-kinematics-fit.adb	Tt : constant Vec3 := Signed (Rr, (-V (2)) * E1 + V (1) * E2, Frame);	1	math	the eigenvector's entries that are the translation in the plane of W (Row: t2 = V1, t1 = -V2)
-driver-robot-kinematics-fit.adb	Tt : constant Vec3 := Signed (Rr, (-V (2)) * E1 + V (1) * E2, Frame);	2	math	the eigenvector's entries that are the translation in the plane of W (Row: t2 = V1, t1 = -V2)
+driver-robot-kinematics-fit.adb	Tt : constant Vec3 := (-V (2)) * E1 + V (1) * E2;	1	math	the eigenvector's entries that are the translation in the plane of W (Row: t2 = V1, t1 = -V2)
+driver-robot-kinematics-fit.adb	Tt : constant Vec3 := (-V (2)) * E1 + V (1) * E2;	2	math	the eigenvector's entries that are the translation in the plane of W (Row: t2 = V1, t1 = -V2)
 driver-robot-kinematics-fit.adb	Tuv_Inv : constant Mat3 := [[1.0 / Suv, 0.0, Cu], [0.0, 1.0 / Suv, Cv], [0.0, 0.0, 1.0]];	1.0	math	the conditioning and its inverse: a scaling and a shift in homogeneous coordinates
 driver-robot-kinematics-fit.adb	Tuv_Inv : constant Mat3 := [[1.0 / Suv, 0.0, Cu], [0.0, 1.0 / Suv, Cv], [0.0, 0.0, 1.0]];	1.0	math	the conditioning and its inverse: a scaling and a shift in homogeneous coordinates
 driver-robot-kinematics-fit.adb	Tuv_Inv : constant Mat3 := [[1.0 / Suv, 0.0, Cu], [0.0, 1.0 / Suv, Cv], [0.0, 0.0, 1.0]];	1.0	math	the conditioning and its inverse: a scaling and a shift in homogeneous coordinates
 driver-robot-kinematics-fit.adb	Txy : constant Mat3 := [[Sxy, 0.0, -Cx * Sxy], [0.0, Sxy, -Cy * Sxy], [0.0, 0.0, 1.0]];	1.0	math	the conditioning and its inverse: a scaling and a shift in homogeneous coordinates
-driver-robot-kinematics-fit.adb	Typical : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5);	0.5	statistics	the median of a residual over its scale for a Gaussian: the normal's upper quartile
+driver-robot-kinematics-fit.adb	Upper_Quartile : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5);	0.5	math	the normal quartile: half the two-sided tail
 driver-robot-kinematics-fit.adb	V : Real_Vector (1 .. 4) := [others => 0.0];	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	V := [for P in 1 .. 4 => Vectors (P, Least)];	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	Values : Real_Vector (1 .. 4);	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
@@ -2118,10 +2100,8 @@ driver-robot-kinematics-fit.adb	for Q in P .. 4 loop	4	structure	the four entrie
 driver-robot-kinematics-fit.adb	for R in 1 .. 3 loop	3	structure	the projection matrix (3 x 4, twelve unknowns), its conditioning and factors, the parameter positions, two residuals per point
 driver-robot-kinematics-fit.adb	for Sample in 1 .. Consensus_Samples (Minimal, 0.5) loop	0.5	statistics	the least median's breakdown point: half the points may be anything
 driver-robot-kinematics-fit.adb	for Side in 1 .. 2 loop	2	structure	both sides of the first basin
-driver-robot-kinematics-fit.adb	for Sign in 1 .. 2 loop	2	structure	the two signs of the axis point tried
 driver-robot-kinematics-fit.adb	for Way in 1 .. 2 loop	2	structure	the two ways of a joint's probe: the turn up and the turn down
 driver-robot-kinematics-fit.adb	for Way in 1 .. 2 loop	2	structure	the two ways of a joint's probe: the turn up and the turn down
-driver-robot-kinematics-fit.adb	for Way in 1 .. 2 loop	2	structure	the two widest keyframes of a joint, one each way
 driver-robot-kinematics-fit.adb	function Distance (P : Sight_Plane) return Real is (1.0 / Sqrt (P.A * P.A));	1.0	math	a plane A * X = 1 is 1 / |A| from the origin
 driver-robot-kinematics-fit.adb	function Inverse_Depth (P : Sight_Point) return Real is (1.0 / P.Depth);	1.0	math	inverse depth
 driver-robot-kinematics-fit.adb	function Rayleigh_Median return Real is (Sqrt (2.0 * Ln (2.0)));	2.0	math	the median of a Rayleigh variate (the length of two Gaussian components) is sqrt (2 ln 2) times their scale
@@ -2143,8 +2123,6 @@ driver-robot-kinematics-fit.adb	if Partner (X.Frame) = 1 then	1	structure	keyfra
 driver-robot-kinematics-fit.adb	if Pass = 1 then	1	structure	the side solved once unweighted, once weighted to Sampson residuals
 driver-robot-kinematics-fit.adb	if Result.Scale /= 0.0 and then Every (J)'Length > 4 then	4	structure	the refinement's four terms; more sightings than terms
 driver-robot-kinematics-fit.adb	if Result.Scale /= 0.0 and then Warm (J).Scale /= 0.0 and then Every (J)'Length > 4 then	4	statistics	Refine fits four parameters (axis tilt 2, side, scale): more sightings than parameters, as the line above it
-driver-robot-kinematics-fit.adb	if Sign = 1 then	1	structure	the first of the two signs tried
-driver-robot-kinematics-fit.adb	if Told_Of (Way) and then Sum_For (Way, (-1.0) * T0_Of (Way)) < Sum_For (Way, T0_Of (Way)) then	1.0	math	the unit sign: the translation flipped
 driver-robot-kinematics-fit.adb	or else Driver.Distributions.F_Upper_Tail (Link.F, 4, 2 * Link.Used - Apart_Terms)	2	structure	two residuals per answer, across and down
 driver-robot-kinematics-fit.adb	or else Driver.Distributions.F_Upper_Tail (Link.F, 4, 2 * Link.Used - Apart_Terms)	4	statistics	the four constraints one homography for both sides adds: the F statistic's numerator degrees of freedom
 driver-robot-kinematics-fit.adb	or else not Driver.Uncertain.Significant (C, Sqrt (Variance (O + 5))))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
@@ -2157,7 +2135,6 @@ driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then 
 driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);	8	statistics	a homography's eight free entries: its residuals' degrees of freedom
 driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);	8	statistics	a homography's eight free entries: its residuals' degrees of freedom
 driver-robot-kinematics-fit.adb	return (if H (3, 3) /= 0.0 then (1.0 / H (3, 3)) * H else H);	1.0	math	a homography is fixed up to scale: its last entry made one
-driver-robot-kinematics-fit.adb	return (if Minus < Plus then (-1.0) * T0 else T0);	1.0	math	the unit sign: the translation flipped
 driver-robot-kinematics-fit.adb	return (if N >= Real (Positive'Last) then Positive'Last else Positive (Real'Max (1.0, N)));	1.0	numerics	at least one sample
 driver-robot-kinematics-fit.adb	return (if Q > 0.0 then (1.0 / Q) * H else [0.0, 0.0, 0.0]);	1.0	math	depth is the inverse of inverse depth
 driver-robot-kinematics-fit.adb	return 1;	1	math	one sample when every point agrees
@@ -2166,11 +2143,8 @@ driver-robot-kinematics-fit.adb	return C + 0.5 * Prior_W * ((Xv (Xv'First) - Ln_
 driver-robot-kinematics-fit.adb	return Real_Matrix'(1 .. 3 => [1 .. Terms => 0.0]);	3	math	three coordinates of the plane's A
 driver-robot-kinematics-fit.adb	return Sigma / (2.0 * Sqrt (Real (Count)) * F);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	return Sqrt (Sum / Real (Natural'Max (1, Changes'Length (1))));	1	numerics	a count that divides is at least one
-driver-robot-kinematics-fit.adb	return [1 => H (1) * H0 (3), 2 => H (2) * H0 (3), 3 => H (3) * H0 (1), 4 => H (3) * H0 (2)];	1	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
-driver-robot-kinematics-fit.adb	return [1 => H (1) * H0 (3), 2 => H (2) * H0 (3), 3 => H (3) * H0 (1), 4 => H (3) * H0 (2)];	2	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
-driver-robot-kinematics-fit.adb	return [1 => H (1) * H0 (3), 2 => H (2) * H0 (3), 3 => H (3) * H0 (1), 4 => H (3) * H0 (2)];	3	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
-driver-robot-kinematics-fit.adb	return [1 => H (1) * H0 (3), 2 => H (2) * H0 (3), 3 => H (3) * H0 (1), 4 => H (3) * H0 (2)];	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	return [X, Y, 1.0];	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
+driver-robot-kinematics-fit.adb	type Four is array (1 .. 4) of Real;	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	when 0 => "", when 1 => "", when 2 => "",	1	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	when 0 => "", when 1 => "", when 2 => "",	2	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	when 1 => "", when 2 => "", when 3 => "",	1	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
@@ -2880,13 +2854,12 @@ driver-robot.ads	Scale : Real := 1.0;	1.0	math	the identity's scale: the first a
 driver-shared_for.adb	Shares (1, Natural'Min (Last - First + 1, Natural (System.Multiprocessors.Number_Of_CPUs)));	1	structure	the tasks are numbered from one, and a range counts both its ends
 driver-stats.adb	/ Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the standard Gaussian density
 driver-stats.adb	Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
-driver-stats.adb	Digit_Bits : constant := 8;	8	structure	a byte of the key per pass: the order statistic is exact for any digit width
 driver-stats.adb	Gaussian_MAD_To_Sigma : constant := 1.482_602_218_505_602;	1.482_602_218_505_602	statistics	1 / Phi^-1 (3/4): MAD to sigma for Gaussian data
 driver-stats.adb	Half : constant Real := 0.5;	0.5	math	the median of the absolute value of a unit Gaussian is its two-sided quantile at one half
+driver-stats.adb	Lower := Unordered (Select_Rank (Keys.all, (N + 1) / 2));	2	math	the median's rank: the middle of N values, the lower middle when N is even
+driver-stats.adb	Mid : constant Integer := Lo + (Hi - Lo) / 2;	2	numerics	the selection's pivot candidate from the middle of the range (any pivot gives the same order statistic)
 driver-stats.adb	N_Old : constant Natural := N / 2;	2	structure	the samples split into an older and a newer half, compared with each other
 driver-stats.adb	Phi : constant Real := Ada.Numerics.Long_Elementary_Functions.Exp (-C * C / 2.0)	2.0	math	the standard Gaussian density
-driver-stats.adb	Radix : constant := 2 ** Digit_Bits;	2	math	a digit of Digit_Bits bits takes 2 ** Digit_Bits values
-driver-stats.adb	Rank : Positive := (N + 1) / 2;	2	math	the median's rank: the middle of N values
 driver-stats.adb	S2 : constant Real := Sse / (N - 2.0);	2.0	statistics	two degrees of freedom used by slope and intercept
 driver-stats.adb	Sigma => Sqrt (S2 * (1.0 / N + Mean (Mx) ** 2 / Sxx)),	1.0	math	standard error of the intercept, 1/n term
 driver-stats.adb	Sign : constant Key := 2 ** (Key'Size - 1);	2	format	an IEEE double's sign is its top bit
@@ -2906,6 +2879,7 @@ driver-stats.ads	with Pre => Count (A) > 1;	1	statistics	a variance or a correla
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 2;	2	statistics	a line fit with a residual spread needs three points
 driver-uncertain.adb	(if Count >= Real (Natural'Last) then 0 else Natural'Max (1, Natural (Real'Floor (Count))));	1	statistics	a degrees-of-freedom count is at least one when the sigma is estimated
+driver-uncertain.adb	Key : constant Gate_Key := (Vector => False, Dimensions => 1, Freedom => Degrees_Of_Freedom, Tests => Tests);	1	structure	a scalar gate is a test in one dimension, in the cache's key
 driver-uncertain.adb	elsif Tests = 1 then Driver.Conventions.Z	1	statistics	a family of one test is a single test: the plain threshold
 driver-uncertain.adb	for I in 1 .. 3 loop	3	structure	three dimensions
 driver-uncertain.adb	function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate is	1	statistics	a family of one test is a single test: the plain threshold

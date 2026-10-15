@@ -56,7 +56,7 @@ package body Driver.Robot.Kinematics.Fit is
 
    function Rot (W : Vec3; Theta : Real) return Mat3 is (Driver.Numerics.Exp (Theta * W));
 
-   function Dot (A, B : Vec3) return Real is (A * B);
+   function Dot (A, B : Vec3) return Real renames Driver.Numerics.Dot;
 
    function Eye_At (J : Joint_Array; Chain : Chain_Order; Change : Real_Array) return Rigid is
       T : Rigid := Identity;
@@ -253,18 +253,22 @@ package body Driver.Robot.Kinematics.Fit is
       end;
    end Median_Abs;
 
+   --  The normal's upper quartile, the median of a unit Gaussian's absolute value: computed once (the search of
+   --  stage 1 asked for it twice for every direction it scanned, 6% of the fit's time in its profile of 10-15).
+   Upper_Quartile : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5);
+
    --  The noise of residuals that have no sign of their own: the robust scale
    --  about zero, the median absolute residual over the normal's upper
    --  quartile (what Robust_Sigma gives the residuals with their negations).
    function Noise_Of (R : Real_Array) return Real is
-     (Median_Abs (R) / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5));
+     (Median_Abs (R) / Upper_Quartile);
 
    --  The standard error of the median of N absolute residuals of Gaussian
    --  noise whose median is Median: the median of |r| is q sigma with q the
    --  normal's upper quartile, and a sample median varies by
    --  1 / (2 sqrt (N) f) with f the density there, 2 phi (q) / sigma.
    function Median_Error (Median : Real; Count : Positive) return Real is
-      Q     : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5);
+      Q     : constant Real := Upper_Quartile;
       Sigma : constant Real := Median / Q;
       F     : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);
    begin
@@ -288,7 +292,7 @@ package body Driver.Robot.Kinematics.Fit is
    --  residual of the size typical of its sighting is typical. With none stated it is Noise_Of; a floor of zero
    --  when what the sightings state accounts for the residuals by itself.
    function Floor_Of (R, Own : Real_Array) return Real is
-      Typical : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5);
+      Typical : constant Real := Upper_Quartile;
       High    : constant Real := Noise_Of (R);
       Low     : Real := 0.0;
       Top     : Real := High;
@@ -584,6 +588,11 @@ package body Driver.Robot.Kinematics.Fit is
    type Rigid_Access is access Rigid_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Rigid_Array, Rigid_Access);
 
+   --  Spread: whether the estimate's covariance is wanted (Report.Covariance, Errors, Determined). A caller that
+   --  takes only the median residual or the depths (the focal length's profile, the depths of stage 3) is spared
+   --  it: measuring how the sightings' errors depend on each other cost a third of every refinement's time, made
+   --  for the profile's every step and never read (the fit's profile, 10-15). Without it the estimate is reported
+   --  not determined.
    procedure Refine_Tracks
      (Changes      : Driver.Numerics.Arrays.Real_Matrix;
       Sight        : Sighting_Array;
@@ -591,7 +600,8 @@ package body Driver.Robot.Kinematics.Fit is
       Chain        : Chain_Order;
       L            : in out Lens;
       Report       : in out Fit_Report;
-      Focal_Within : Real := 0.0)
+      Focal_Within : Real := 0.0;
+      Spread       : Boolean := True)
    is
       N         : constant Natural := Joints'Length;
       --  The focal lengths the fit is given are the focal search's (stage 1), told within Focal_Within in the
@@ -719,6 +729,17 @@ package body Driver.Robot.Kinematics.Fit is
             Lx    : constant Lens := Lens_Of (Xv);
             Jx    : constant Joint_Array := Joints_Of (Xv);
             Views : Rigid_Access := new Rigid_Array (1 .. Frames);
+            --  Per track, its point at its depth along the line of sight of a reference pixel, and that pixel: the
+            --  sightings of a track share its reference pixel, and its line of sight (Ray, Newton's method through
+            --  the lens's distortion) and depth were made again for every sighting, a third of the time of every
+            --  residual (the fit's profile, 10-15). A sighting whose reference pixel is another makes its own.
+            type Point_Array is array (1 .. Tracks) of Vec3;
+            type Point_Access is access Point_Array;
+            procedure Free is new Ada.Unchecked_Deallocation (Point_Array, Point_Access);
+            Points : Point_Access := new Point_Array;
+            Made   : Flags_Access := new Flags'(1 .. Tracks => False);
+            Made_U : Real_Access := new Real_Array (1 .. Tracks);
+            Made_V : Real_Access := new Real_Array (1 .. Tracks);
          begin
             for F in 1 .. Frames loop
                Views (F) := Inverse (Eye_At (Jx, Chain, Changes_Of (F)));
@@ -726,18 +747,30 @@ package body Driver.Robot.Kinematics.Fit is
             for K in 1 .. Index'Length loop
                declare
                   Sg : Sighting renames Sight (Sight'First + Natural (Index (K)) - 1);
-                  D0 : constant Real := Exp (Dv (Sg.Track));
-                  H0 : constant Vec3 := Ray (Lx, Sg.U0, Sg.V0);
-                  Pw : constant Vec3 := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
                   U, V : Real;
                   Ahead : Boolean;
                begin
-                  Project (Lx, Views (Sg.Frame) * Pw, U, V, Ahead);
+                  if not Made (Sg.Track) or else Made_U (Sg.Track) /= Sg.U0 or else Made_V (Sg.Track) /= Sg.V0 then
+                     declare
+                        D0 : constant Real := Exp (Dv (Sg.Track));
+                        H0 : constant Vec3 := Ray (Lx, Sg.U0, Sg.V0);
+                     begin
+                        Points (Sg.Track) := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
+                        Made (Sg.Track) := True;
+                        Made_U (Sg.Track) := Sg.U0;
+                        Made_V (Sg.Track) := Sg.V0;
+                     end;
+                  end if;
+                  Project (Lx, Views (Sg.Frame) * Points (Sg.Track), U, V, Ahead);
                   R (2 * K - 1) := U - Sg.U;
                   R (2 * K) := V - Sg.V;
                end;
             end loop;
             Free (Views);
+            Free (Points);
+            Free (Made);
+            Free (Made_U);
+            Free (Made_V);
          end Residuals;
 
          --  What the rotations leave of the sightings, found in one linear solve: a depth along every track's reference
@@ -1455,7 +1488,11 @@ package body Driver.Robot.Kinematics.Fit is
                                  --  is kept, and the passes end before it is made.
                                  Release (Last_Pass);
                                  Report.Covariance.Clear;
-                                 if Pd then
+                                 if Pd and then not Spread then
+                                    Determined := False;
+                                    Why_Not := Ada.Strings.Unbounded.To_Unbounded_String
+                                      ("the estimate's covariance was not asked for");
+                                 elsif Pd then
                                     Last_Pass.Ready := True;
                                     Last_Pass.Inv := new Real_Matrix (1 .. Reduced, 1 .. Reduced);
                                     Last_Pass.Rows := new Real_Matrix'[1 .. 2 * Used => [1 .. Reduced => 0.0]];
@@ -1797,7 +1834,8 @@ package body Driver.Robot.Kinematics.Fit is
       Chain      : out Chain_Order;
       L          : out Lens;
       Report     : out Fit_Report;
-      Who        : String := "")
+      Who        : String := "";
+      From       : Fit_Start := No_Start)
    is
       N      : constant Natural := Visible'Length;
       Frames : constant Natural := Changes'Length (1);
@@ -1972,6 +2010,188 @@ package body Driver.Robot.Kinematics.Fit is
          end if;
       end Normalize;
 
+      --  The last of the fit, from the joints, their order and the lens the stages before it left: every
+      --  translation's sign, the tracks (stage 5), the focal length's profile, the lengths in model units; and
+      --  what a fit begun from this one takes up (From: the focal search's width and range).
+      procedure Finish is
+      begin
+         --  The sign of every translation at once, which the epipolar constraint
+         --  cannot tell: the matched points lie in front of both eyes.
+         declare
+            Front, Back : Natural := 0;
+         begin
+            for X of Sight loop
+               declare
+                  T   : constant Rigid := Eye_At (Joints, Order, Changes_Of (X.Frame));
+                  A   : constant Vec3 := Ray (L, X.U0, X.V0);
+                  Bv  : constant Vec3 := T.Rotation * Ray (L, X.U, X.V);
+                  --  Lambda1 A = T.Translation + Lambda2 Bv, least squares.
+                  Aa  : constant Real := A * A;
+                  Ab  : constant Real := A * Bv;
+                  Bb  : constant Real := Bv * Bv;
+                  Ra  : constant Real := A * T.Translation;
+                  Rb  : constant Real := Bv * T.Translation;
+                  Det : constant Real := Aa * Bb - Ab * Ab;
+               begin
+                  if Det > 0.0 then
+                     declare
+                        L1 : constant Real := (Ra * Bb - Ab * Rb) / Det;
+                        L2 : constant Real := (Ab * Ra - Aa * Rb) / Det;
+                     begin
+                        if L1 > 0.0 and then L2 > 0.0 then
+                           Front := Front + 1;
+                        elsif L1 < 0.0 and then L2 < 0.0 then
+                           Back := Back + 1;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end loop;
+            if Back > Front then
+               for J of Joints loop
+                  if J.Slide then
+                     J.C := -J.C;
+                  else
+                     J.P := -J.P;
+                  end if;
+               end loop;
+               Report.Flipped := True;
+            end if;
+         end;
+
+         --  Stage 5: the tracks.
+         Enter (5);
+         Refine_Tracks (Changes, Sight, Joints, Order, L, Report, Focal_Within);
+         --  The focal length's profile. The covariance at the solution says how far the focal length can move within
+         --  the basin the solution lies in, nothing of another basin along the direction the sightings tell worst:
+         --  with a wide lens's barrel distortion free, the focal length, the distortion and the joints' turns per unit
+         --  trade along a valley, and a desktop arm swept to 11.5 degrees settled at 330 px of 400, its sigma 4.5 px
+         --  (robot.kinematics.desktop, 10-15). Each way from the solution, the focal length is held at steps
+         --  doubling from Z of its own sigma (held within that sigma, the search's measurement of it), everything
+         --  else refitted; a step whose sightings' median residual, over every sighting, lies below the solution's
+         --  by more than Z of the two medians' standard errors is a better basin, refitted from there and profiled
+         --  again; a step above by as much ends that way, as does the range the focal search ranged over.
+         declare
+            type Sign_Way is (Up, Down);
+            pragma Unreferenced (Down);
+            Moved : Boolean := True;
+            Base  : Real;
+         begin
+            --  Only a solution that would be reported fitted is profiled: one the sightings leave undetermined is refitted
+            --  when the evidence grows, and its profile would cost the boot that time for nothing.
+            while Moved and then Report.Determined and then Report.All_Count > 0 and then Report.Focal_Sigma < Real'Last
+              and then Report.Focal_Sigma > 0.0 and then Searched_Least > 0.0
+            loop
+               Moved := False;
+               Base := Report.All_Median_Px;
+               declare
+                  Held     : constant Real := Report.Focal_Sigma / L.Fx;   --  the focal length's own sigma, in the logarithm
+                  Base_Err : constant Real := Median_Error (Base, Report.All_Count);
+               begin
+                  for Way in Sign_Way loop
+                     declare
+                        Offset : Real := Driver.Conventions.Z * Held;
+                     begin
+                        loop
+                           declare
+                              Factor : constant Real := Exp ((if Way = Up then Offset else -Offset));
+                              Lp     : Lens := L;
+                              Jp     : Joint_Array := Joints;
+                              Rp     : Fit_Report;
+                           begin
+                              exit when L.Fx * Factor < Searched_Least or else L.Fx * Factor > Searched_Most;
+                              Lp.Fx := L.Fx * Factor;
+                              Lp.Fy := L.Fy * Factor;
+                              Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Held, Spread => False);
+                              exit when Rp.All_Count = 0;
+                              declare
+                                 Err : constant Real :=
+                                   Sqrt (Median_Error (Rp.All_Median_Px, Rp.All_Count) ** 2 + Base_Err ** 2);
+                              begin
+                                 Driver.Log.Line (Driver.Log.Robot, "kinematics: the focal length's profile at "
+                                                  & Driver.Log.Image (Lp.Fx, 1) & " px leaves a median "
+                                                  & Driver.Log.Image (Rp.All_Median_Px, 3) & " px over every sighting, "
+                                                  & "against " & Driver.Log.Image (Base, 3) & " px at "
+                                                  & Driver.Log.Image (L.Fx, 1) & " (+- " & Driver.Log.Image (Err, 3) & ")");
+                                 if Rp.All_Median_Px + Driver.Conventions.Z * Err < Base then
+                                    --  A better basin: refitted from there, the focal length free within the search's width.
+                                    Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Focal_Within);
+                                    if Rp.All_Count > 0 and then Rp.All_Median_Px < Base then
+                                       L := Lp;
+                                       Joints := Jp;
+                                       Report := Rp;
+                                       Moved := True;
+                                    end if;
+                                    exit;
+                                 end if;
+                                 exit when Rp.All_Median_Px > Base + Driver.Conventions.Z * Err;
+                              end;
+                              Offset := 2.0 * Offset;
+                           end;
+                        end loop;
+                     end;
+                     exit when Moved;
+                  end loop;
+               end;
+            end loop;
+         end;
+         declare
+            Sum : Real := 0.0;
+         begin
+            for Frame in 1 .. Unit_Count loop
+               declare
+                  T : constant Vec3 := Eye_At (Joints, Order, Changes_Of (Frame)).Translation;
+               begin
+                  Sum := Sum + T * T;
+               end;
+            end loop;
+            Normalize (Joints);
+            --  The depths follow the lengths into model units.
+            if Sum > 0.0 then
+               for D of Report.Depths loop
+                  D := D / Sqrt (Sum / Real (Unit_Count));
+               end loop;
+            end if;
+            --  The covariance follows the lengths into model units.
+            if Sum > 0.0 and then not Report.Covariance.Is_Empty then
+               declare
+                  F       : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));
+                  Reduced : constant Natural := Terms (N);
+                  --  The terms that are lengths: the points, and a slide's scale.
+                  Length  : array (1 .. Reduced) of Boolean := [others => False];
+               begin
+                  for J in 1 .. N loop
+                     Length (Term_Of (J, Point_1)) := True;
+                     Length (Term_Of (J, Point_2)) := True;
+                     Length (Term_Of (J, Scale)) := Joints (Joints'First + J - 1).Slide;
+                  end loop;
+                  for P in 1 .. Reduced loop
+                     for Q in 1 .. Reduced loop
+                        declare
+                           K : constant Positive := Report.Covariance.First_Index + (P - 1) * Reduced + Q - 1;
+                           X : Real := Report.Covariance (K);
+                        begin
+                           if Length (P) then
+                              X := F * X;
+                           end if;
+                           if Length (Q) then
+                              X := F * X;
+                           end if;
+                           Report.Covariance.Replace_Element (K, X);
+                        end;
+                     end loop;
+                  end loop;
+               end;
+            end if;
+         end;
+         Report.Focal_Within := Focal_Within;
+         Report.Searched_Least := Searched_Least;
+         Report.Searched_Most := Searched_Most;
+         Chain := Order;
+         Report.Fitted := Report.Determined;
+         Close_Stage;
+      end Finish;
+
    begin
       Report := (others => <>);
       Joints := [others => <>];
@@ -2081,6 +2301,25 @@ package body Driver.Robot.Kinematics.Fit is
       --  drawn: two replays on the box sat in it for more than half an hour).
       if N > 1 and then (for all X of Sight => not Several (X.Frame)) then
          Fail ("no keyframe moved two joints at once: the order of the joints along the arm is not told");
+         return;
+      end if;
+
+      --  A fit begun from one of the same arm just made (From): its joints, their order along the arm and its lens,
+      --  with its focal search's width and range, refined by the last stage alone on these sightings. Within one
+      --  estimate the arm is fitted again each time keyframes are aligned again from its fit, a few sightings more
+      --  each time, and every such fit searched the focal length from nothing again and ordered the joints again:
+      --  an arm fitted six times in one estimate, 7395 to 7403 sightings, 20 to 28 s of search each (f15w
+      --  replayed on 10-15); the search's seconds were nearly half of all the fits'.
+      if From.Valid and then From.N = N then
+         Free (Pairs);
+         Joints := From.Joints;
+         Order := From.Chain;
+         L := From.L;
+         Lens0 := From.L;
+         Focal_Within := From.Focal_Within;
+         Searched_Least := From.Searched_Least;
+         Searched_Most := From.Searched_Most;
+         Finish;
          return;
       end if;
 
@@ -2265,44 +2504,26 @@ package body Driver.Robot.Kinematics.Fit is
                      Sn := Vy / Sqrt (Vx ** 2 + Vy ** 2);
                   end;
                end;
-               --  The axis point P: (C, Sn) is an eigenvector of a 2 by 2 system, its sign arbitrary, and the
-               --  distance to the half-line is odd in the translation P - R P (Planar_About's Signed): both
-               --  signs are tried over every sighting and the one whose residuals sum smaller is kept.
+               --  The axis point P: (C, Sn) is an eigenvector of a 2 by 2 system, its sign arbitrary. Which side
+               --  of the axis the eye is on is not told here: every residual is even in the translation P - R P
+               --  (Reprojected: the Sampson distance changes sign with it, and no penalty is charged behind the
+               --  vanishing point), so the two signs scored alike to the last bit and the first was always kept,
+               --  at twice the time (10-15). The points in front tell the side (after stage 4).
                declare
-                  Other : Real_Array (1 .. K);
-                  Plus, Minus : Real := 0.0;
+                  P : constant Vec3 := C * E1 + Sn * E2;
+                  --  The keyframe's motion, once a keyframe: its sightings are together.
+                  Rr : Mat3;
+                  Tt : Vec3;
                begin
-                  for Sign in 1 .. 2 loop
-                     declare
-                        P : constant Vec3 := (if Sign = 1 then 1.0 else -1.0) * (C * E1 + Sn * E2);
-                     begin
-                        Last := 0;
-                        for I in 1 .. K loop
-                           if L (I).Frame /= Last then
-                              Last := L (I).Frame;
-                              R := Rot (W, Scale * L (I).Reading);
-                           end if;
-                           declare
-                              Rr : Mat3;
-                              Tt : Vec3;
-                           begin
-                              Relative (Identity, (Rotation => R, Translation => P - R * P), Rr, Tt);
-                              if Sign = 1 then
-                                 Rs (I) := Reprojected (Rr, Tt, L (I).H0, L (I).H, F);
-                                 Plus := Plus + Rs (I) ** 2;
-                              else
-                                 Other (I) := Reprojected (Rr, Tt, L (I).H0, L (I).H, F);
-                                 Minus := Minus + Other (I) ** 2;
-                              end if;
-                           end;
-                        end loop;
-                     end;
+                  Last := 0;
+                  for I in 1 .. K loop
+                     if L (I).Frame /= Last then
+                        Last := L (I).Frame;
+                        R := Rot (W, Scale * L (I).Reading);
+                        Relative (Identity, (Rotation => R, Translation => P - R * P), Rr, Tt);
+                     end if;
+                     Rs (I) := Reprojected (Rr, Tt, L (I).H0, L (I).H, F);
                   end loop;
-                  if Minus < Plus then
-                     Rs := Other;
-                     C := -C;
-                     Sn := -Sn;
-                  end if;
                end;
                if Pass = 1 then
                   declare
@@ -2363,37 +2584,21 @@ package body Driver.Robot.Kinematics.Fit is
             T0_Of    : array (1 .. 2) of Vec3;
 
             --  The sighting's row of the constraint: its lines of sight in the frame of W.
-            function Row (I : Positive) return Real_Vector is
+            type Four is array (1 .. 4) of Real;
+            function Row (I : Positive) return Four is
                H0 : constant Vec3 := [Dot (E1, L (I).H0), Dot (E2, L (I).H0), Dot (W, L (I).H0)];
                H  : constant Vec3 := [Dot (E1, L (I).H), Dot (E2, L (I).H), Dot (W, L (I).H)];
             begin
-               return [1 => H (1) * H0 (3), 2 => H (2) * H0 (3), 3 => H (3) * H0 (1), 4 => H (3) * H0 (2)];
+               return [H (1) * H0 (3), H (2) * H0 (3), H (3) * H0 (1), H (3) * H0 (2)];
             end Row;
 
             function Turn_Of (V : Real_Vector) return Real is
               (Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));
 
             --  The translation's sign: V is an eigenvector, its sign arbitrary; the turn is even in V and the
-            --  translation odd. The Sampson residual is even in the translation (the epipolar line is the same
-            --  either way), the distance to the half-line is not: with the wrong sign the half-line points away
-            --  from the parallax, every sighting falls behind its vanishing point, and the true lens scores
-            --  worst of all (robot.head.noisy seed 5, arm 1, 10-14: the search found 84 px of 400 while arm 2
-            --  of the same rig, whose eigenvector came out the other way, found 390). The sign that puts the
-            --  frame's sightings at positive depth is the one whose half-line residuals sum smaller.
-            function Signed (Rr : Mat3; T0 : Vec3; Frame : Positive) return Vec3 is
-               Plus, Minus : Real := 0.0;
-               Du, Dv      : Real;
-            begin
-               for I in 1 .. K loop
-                  if L (I).Frame = Frame then
-                     Reprojected (Rr, T0, L (I).H0, L (I).H, F, Du, Dv);
-                     Plus := Plus + Du ** 2 + Dv ** 2;
-                     Reprojected (Rr, (-1.0) * T0, L (I).H0, L (I).H, F, Du, Dv);
-                     Minus := Minus + Du ** 2 + Dv ** 2;
-                  end if;
-               end loop;
-               return (if Minus < Plus then (-1.0) * T0 else T0);
-            end Signed;
+            --  translation odd. No sign is chosen: every residual here is even in the translation (Best_Phi says
+            --  why), and the sums that chose one, a bit a frame and then a bit a joint (10-14), came out equal to
+            --  the last bit and never chose (10-15).
          begin
             Perp (W, E1, E2);
             for Way in 1 .. 2 loop
@@ -2423,7 +2628,7 @@ package body Driver.Robot.Kinematics.Fit is
                               for I in 1 .. K loop
                                  if L (I).Frame = Frame then
                                     declare
-                                       G : constant Real_Vector := Row (I);
+                                       G : constant Four := Row (I);
                                     begin
                                        for P in 1 .. 4 loop
                                           for Q in P .. 4 loop
@@ -2452,7 +2657,7 @@ package body Driver.Robot.Kinematics.Fit is
                               declare
                                  Turn : constant Real := Turn_Of (V);
                                  Rr   : constant Mat3 := Rot (W, -Turn);
-                                 Tt   : constant Vec3 := Signed (Rr, (-V (2)) * E1 + V (1) * E2, Frame);
+                                 Tt   : constant Vec3 := (-V (2)) * E1 + V (1) * E2;
                                  M    : Natural := 0;
                                  Du, Dv : Real_Array (1 .. K);
                               begin
@@ -2474,7 +2679,7 @@ package body Driver.Robot.Kinematics.Fit is
                                        if L (I).Frame = Frame then
                                           M := M + 1;
                                           declare
-                                             G         : constant Real_Vector := Row (I);
+                                             G         : constant Four := Row (I);
                                              Algebraic : constant Real := G (1) * V (1) + G (2) * V (2) + G (3) * V (3)
                                                                           + G (4) * V (4);
                                           begin
@@ -2503,70 +2708,27 @@ package body Driver.Robot.Kinematics.Fit is
                   end;
                end if;
             end loop;
-            --  The translation's sign is one bit a joint, not one a frame: the eye sits on one side of the axis,
-            --  so its translations for the turn up and the turn down are anti-parallel, and the bit is the pair's
-            --  whose residuals sum smaller (a bit a frame at every focal length tried gave the search a freedom
-            --  that favoured the smallest lenses: the synthetic offset arm's search ended at 20.7 px of 400 and
-            --  its fit at 8, 10-14).
-            declare
-               function Sum_For (Way : Positive; T : Vec3) return Real is
-                  Du, Dv : Real_Array (1 .. K);
-                  M      : Natural := 0;
-                  Sum    : Real := 0.0;
-               begin
-                  for I in 1 .. K loop
-                     if L (I).Frame = Frame_Of (Way) then
-                        M := M + 1;
-                        Reprojected (Rr_Of (Way), T, L (I).H0, L (I).H, F, Du (M), Dv (M));
-                     end if;
-                  end loop;
-                  Share_Out (Du (1 .. M));
-                  for Q in 1 .. M loop
-                     Sum := Sum + Du (Q) ** 2 + Dv (Q) ** 2;
-                  end loop;
-                  return Sum;
-               end Sum_For;
-               Sign_Of : array (1 .. 2) of Real := [others => 1.0];
-            begin
-               if Told_Of (1) and then Told_Of (2) then
+            --  Each way's residuals under its translation, shared out, are its frame's fits.
+            for Way in 1 .. 2 loop
+               if Told_Of (Way) then
                   declare
-                     --  The turn down's translation made anti-parallel to the turn up's, then the pair flipped or not.
-                     Rel   : constant Real := (if Dot (T0_Of (1), T0_Of (2)) > 0.0 then -1.0 else 1.0);
-                     Plus  : constant Real := Sum_For (1, T0_Of (1)) + Sum_For (2, Rel * T0_Of (2));
-                     Minus : constant Real := Sum_For (1, (-1.0) * T0_Of (1)) + Sum_For (2, (-Rel) * T0_Of (2));
+                     Du, Dv : Real_Array (1 .. K);
+                     M      : Natural := 0;
                   begin
-                     Sign_Of (1) := (if Minus < Plus then -1.0 else 1.0);
-                     Sign_Of (2) := Sign_Of (1) * Rel;
+                     for I in 1 .. K loop
+                        if L (I).Frame = Frame_Of (Way) then
+                           M := M + 1;
+                           Reprojected (Rr_Of (Way), T0_Of (Way), L (I).H0, L (I).H, F, Du (M), Dv (M));
+                        end if;
+                     end loop;
+                     Share_Out (Du (1 .. M));
+                     for Q in 1 .. M loop
+                        Filled := Filled + 1;
+                        Fits (Filled) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
+                     end loop;
                   end;
-               else
-                  for Way in 1 .. 2 loop
-                     if Told_Of (Way) and then Sum_For (Way, (-1.0) * T0_Of (Way)) < Sum_For (Way, T0_Of (Way)) then
-                        Sign_Of (Way) := -1.0;
-                     end if;
-                  end loop;
                end if;
-               for Way in 1 .. 2 loop
-                  if Told_Of (Way) then
-                     declare
-                        Tt : constant Vec3 := Sign_Of (Way) * T0_Of (Way);
-                        Du, Dv : Real_Array (1 .. K);
-                        M  : Natural := 0;
-                     begin
-                        for I in 1 .. K loop
-                           if L (I).Frame = Frame_Of (Way) then
-                              M := M + 1;
-                              Reprojected (Rr_Of (Way), Tt, L (I).H0, L (I).H, F, Du (M), Dv (M));
-                           end if;
-                        end loop;
-                        Share_Out (Du (1 .. M));
-                        for Q in 1 .. M loop
-                           Filled := Filled + 1;
-                           Fits (Filled) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
-                        end loop;
-                     end;
-                  end if;
-               end loop;
-            end;
+            end loop;
             Scale := (if Den > 0.0 then Num / Den else 0.0);
             Score := (if Filled > 0 then Driver.Stats.Median (Fits (1 .. Filled)) else Real'Last);
          end Planar_About;
@@ -3339,7 +3501,7 @@ package body Driver.Robot.Kinematics.Fit is
                   Alone (K) := X;
                end if;
             end loop;
-            Refine_Tracks (Changes, Alone.all, Joints, Order, Lx, Rep, Focal_Within);
+            Refine_Tracks (Changes, Alone.all, Joints, Order, Lx, Rep, Focal_Within, Spread => False);
             Lens0 := Lx;
             Track_Depths := Rep.Depths;
             Free (Alone);
@@ -3619,20 +3781,58 @@ package body Driver.Robot.Kinematics.Fit is
                   K    : Natural := 0;
 
                   procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
-                     Lx    : constant Lens := Lens_Of (Xv);
-                     Poses : Rigid_Access := new Pose_Array;
+                     Lx         : constant Lens := Lens_Of (Xv);
+                     Focal_Here : constant Real := (Lx.Fx + Lx.Fy) / 2.0;
+                     Poses      : Rigid_Access := new Pose_Array;
+                     --  Per keyframe, its motion from the reference eye; per track, the line of sight of its reference
+                     --  pixel, and the pixel: made once, not once a sighting (Refine_Tracks' Residuals says why).
+                     type Motion is record
+                        Rr : Mat3;
+                        Tt : Vec3;
+                     end record;
+                     type Motion_Array is array (1 .. Frames) of Motion;
+                     type Motion_Access is access Motion_Array;
+                     procedure Free is new Ada.Unchecked_Deallocation (Motion_Array, Motion_Access);
+                     Motions     : Motion_Access := new Motion_Array;
+                     Track_Count : Natural := 0;
                   begin
                      Poses_Of (Joints_Of (Xv), Poses.all);
-                     for I in 1 .. Used loop
-                        declare
-                           Rr : Mat3;
-                           Tt : Vec3;
-                        begin
-                           Relative (Poses (1), Poses (Kept (I).Frame), Rr, Tt);
-                           R (R'First + I - 1) := Sampson (Rr, Tt, Ray (Lx, Kept (I).U0, Kept (I).V0),
-                                                           Ray (Lx, Kept (I).U, Kept (I).V), (Lx.Fx + Lx.Fy) / 2.0);
-                        end;
+                     for Frame in 1 .. Frames loop
+                        Relative (Poses (1), Poses (Frame), Motions (Frame).Rr, Motions (Frame).Tt);
                      end loop;
+                     for I in 1 .. Used loop
+                        Track_Count := Natural'Max (Track_Count, Kept (I).Track);
+                     end loop;
+                     declare
+                        type Ray_Array is array (1 .. Track_Count) of Vec3;
+                        type Ray_Access is access Ray_Array;
+                        procedure Free is new Ada.Unchecked_Deallocation (Ray_Array, Ray_Access);
+                        Rays   : Ray_Access := new Ray_Array;
+                        Made   : Flags_Access := new Flags'(1 .. Track_Count => False);
+                        Made_U : Real_Access := new Real_Array (1 .. Track_Count);
+                        Made_V : Real_Access := new Real_Array (1 .. Track_Count);
+                     begin
+                        for I in 1 .. Used loop
+                           declare
+                              X : Sighting renames Kept (I);
+                           begin
+                              if not Made (X.Track) or else Made_U (X.Track) /= X.U0 or else Made_V (X.Track) /= X.V0
+                              then
+                                 Rays (X.Track) := Ray (Lx, X.U0, X.V0);
+                                 Made (X.Track) := True;
+                                 Made_U (X.Track) := X.U0;
+                                 Made_V (X.Track) := X.V0;
+                              end if;
+                              R (R'First + I - 1) := Sampson (Motions (X.Frame).Rr, Motions (X.Frame).Tt, Rays (X.Track),
+                                                              Ray (Lx, X.U, X.V), Focal_Here);
+                           end;
+                        end loop;
+                        Free (Rays);
+                        Free (Made);
+                        Free (Made_U);
+                        Free (Made_V);
+                     end;
+                     Free (Motions);
                      Free (Poses);
                   end Evaluate;
 
@@ -3694,178 +3894,7 @@ package body Driver.Robot.Kinematics.Fit is
          Free (Inlier);
       end;
 
-      --  The sign of every translation at once, which the epipolar constraint
-      --  cannot tell: the matched points lie in front of both eyes.
-      declare
-         Front, Back : Natural := 0;
-      begin
-         for X of Sight loop
-            declare
-               T   : constant Rigid := Eye_At (Joints, Order, Changes_Of (X.Frame));
-               A   : constant Vec3 := Ray (L, X.U0, X.V0);
-               Bv  : constant Vec3 := T.Rotation * Ray (L, X.U, X.V);
-               --  Lambda1 A = T.Translation + Lambda2 Bv, least squares.
-               Aa  : constant Real := A * A;
-               Ab  : constant Real := A * Bv;
-               Bb  : constant Real := Bv * Bv;
-               Ra  : constant Real := A * T.Translation;
-               Rb  : constant Real := Bv * T.Translation;
-               Det : constant Real := Aa * Bb - Ab * Ab;
-            begin
-               if Det > 0.0 then
-                  declare
-                     L1 : constant Real := (Ra * Bb - Ab * Rb) / Det;
-                     L2 : constant Real := (Ab * Ra - Aa * Rb) / Det;
-                  begin
-                     if L1 > 0.0 and then L2 > 0.0 then
-                        Front := Front + 1;
-                     elsif L1 < 0.0 and then L2 < 0.0 then
-                        Back := Back + 1;
-                     end if;
-                  end;
-               end if;
-            end;
-         end loop;
-         if Back > Front then
-            for J of Joints loop
-               if J.Slide then
-                  J.C := -J.C;
-               else
-                  J.P := -J.P;
-               end if;
-            end loop;
-            Report.Flipped := True;
-         end if;
-      end;
-
-      --  Stage 5: the tracks.
-      Enter (5);
-      Refine_Tracks (Changes, Sight, Joints, Order, L, Report, Focal_Within);
-      --  The focal length's profile. The covariance at the solution says how far the focal length can move within
-      --  the basin the solution lies in, nothing of another basin along the direction the sightings tell worst:
-      --  with a wide lens's barrel distortion free, the focal length, the distortion and the joints' turns per unit
-      --  trade along a valley, and a desktop arm swept to 11.5 degrees settled at 330 px of 400, its sigma 4.5 px
-      --  (robot.kinematics.desktop, 10-15). Each way from the solution, the focal length is held at steps
-      --  doubling from Z of its own sigma (held within that sigma, the search's measurement of it), everything
-      --  else refitted; a step whose sightings' median residual, over every sighting, lies below the solution's
-      --  by more than Z of the two medians' standard errors is a better basin, refitted from there and profiled
-      --  again; a step above by as much ends that way, as does the range the focal search ranged over.
-      declare
-         type Sign_Way is (Up, Down);
-         pragma Unreferenced (Down);
-         Moved : Boolean := True;
-         Base  : Real;
-      begin
-         --  Only a solution that would be reported fitted is profiled: one the sightings leave undetermined is refitted
-         --  when the evidence grows, and its profile would cost the boot that time for nothing.
-         while Moved and then Report.Determined and then Report.All_Count > 0 and then Report.Focal_Sigma < Real'Last
-           and then Report.Focal_Sigma > 0.0 and then Searched_Least > 0.0
-         loop
-            Moved := False;
-            Base := Report.All_Median_Px;
-            declare
-               Held     : constant Real := Report.Focal_Sigma / L.Fx;   --  the focal length's own sigma, in the logarithm
-               Base_Err : constant Real := Median_Error (Base, Report.All_Count);
-            begin
-               for Way in Sign_Way loop
-                  declare
-                     Offset : Real := Driver.Conventions.Z * Held;
-                  begin
-                     loop
-                        declare
-                           Factor : constant Real := Exp ((if Way = Up then Offset else -Offset));
-                           Lp     : Lens := L;
-                           Jp     : Joint_Array := Joints;
-                           Rp     : Fit_Report;
-                        begin
-                           exit when L.Fx * Factor < Searched_Least or else L.Fx * Factor > Searched_Most;
-                           Lp.Fx := L.Fx * Factor;
-                           Lp.Fy := L.Fy * Factor;
-                           Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Held);
-                           exit when Rp.All_Count = 0;
-                           declare
-                              Err : constant Real :=
-                                Sqrt (Median_Error (Rp.All_Median_Px, Rp.All_Count) ** 2 + Base_Err ** 2);
-                           begin
-                              Driver.Log.Line (Driver.Log.Robot, "kinematics: the focal length's profile at "
-                                               & Driver.Log.Image (Lp.Fx, 1) & " px leaves a median "
-                                               & Driver.Log.Image (Rp.All_Median_Px, 3) & " px over every sighting, "
-                                               & "against " & Driver.Log.Image (Base, 3) & " px at "
-                                               & Driver.Log.Image (L.Fx, 1) & " (+- " & Driver.Log.Image (Err, 3) & ")");
-                              if Rp.All_Median_Px + Driver.Conventions.Z * Err < Base then
-                                 --  A better basin: refitted from there, the focal length free within the search's width.
-                                 Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Focal_Within);
-                                 if Rp.All_Count > 0 and then Rp.All_Median_Px < Base then
-                                    L := Lp;
-                                    Joints := Jp;
-                                    Report := Rp;
-                                    Moved := True;
-                                 end if;
-                                 exit;
-                              end if;
-                              exit when Rp.All_Median_Px > Base + Driver.Conventions.Z * Err;
-                           end;
-                           Offset := 2.0 * Offset;
-                        end;
-                     end loop;
-                  end;
-                  exit when Moved;
-               end loop;
-            end;
-         end loop;
-      end;
-      declare
-         Sum : Real := 0.0;
-      begin
-         for Frame in 1 .. Unit_Count loop
-            declare
-               T : constant Vec3 := Eye_At (Joints, Order, Changes_Of (Frame)).Translation;
-            begin
-               Sum := Sum + T * T;
-            end;
-         end loop;
-         Normalize (Joints);
-         --  The depths follow the lengths into model units.
-         if Sum > 0.0 then
-            for D of Report.Depths loop
-               D := D / Sqrt (Sum / Real (Unit_Count));
-            end loop;
-         end if;
-         --  The covariance follows the lengths into model units.
-         if Sum > 0.0 and then not Report.Covariance.Is_Empty then
-            declare
-               F       : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));
-               Reduced : constant Natural := Terms (N);
-               --  The terms that are lengths: the points, and a slide's scale.
-               Length  : array (1 .. Reduced) of Boolean := [others => False];
-            begin
-               for J in 1 .. N loop
-                  Length (Term_Of (J, Point_1)) := True;
-                  Length (Term_Of (J, Point_2)) := True;
-                  Length (Term_Of (J, Scale)) := Joints (Joints'First + J - 1).Slide;
-               end loop;
-               for P in 1 .. Reduced loop
-                  for Q in 1 .. Reduced loop
-                     declare
-                        K : constant Positive := Report.Covariance.First_Index + (P - 1) * Reduced + Q - 1;
-                        X : Real := Report.Covariance (K);
-                     begin
-                        if Length (P) then
-                           X := F * X;
-                        end if;
-                        if Length (Q) then
-                           X := F * X;
-                        end if;
-                        Report.Covariance.Replace_Element (K, X);
-                     end;
-                  end loop;
-               end loop;
-            end;
-         end if;
-      end;
-      Chain := Order;
-      Report.Fitted := Report.Determined;
-      Close_Stage;
+      Finish;
    end Fit;
 
    function Depth_Known (Depth, Sigma : Real) return Boolean is

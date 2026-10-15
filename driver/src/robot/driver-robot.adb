@@ -236,7 +236,7 @@ package body Driver.Robot is
          --  to what the aligner can rest a fit on or by a size of the pictures (so a keyframe is aligned again only
          --  so many times): a better fit may narrow the next.
          while Kinematics.Realign (M) loop
-            Kinematics.Refit (M);
+            Kinematics.Refit (M, Again => True);
          end loop;
       end if;
       Took ("kinematics");

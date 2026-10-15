@@ -128,11 +128,14 @@ private package Driver.Robot.Kinematics is
    function Pending (M : Model) return Natural;
    --  Match requests of every arm not answered yet.
 
-   procedure Refit (M : in out Model);
+   procedure Refit (M : in out Model; Again : Boolean := False);
    --  Fits every arm whose answers changed since its last fit
    --  (Driver.Robot.Kinematics.Fit). Its sightings are the answers of
    --  keyframes the points moved in by more than the aligner errs, whose
    --  uncertainty is not more than Z times the keyframe's typical one.
+   --  Again: the keyframes were just aligned again from the fits of this
+   --  estimate, and an arm fitted in it is fitted again from that fit (Fit's
+   --  From: its last stage alone).
 
    function Eye_In_Reference (M : Model; A : Arm_Id; Readings : Real_Array) return Rigid;
    --  The arm's eye at those readings, in the frame of its eye at the

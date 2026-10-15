@@ -3,7 +3,7 @@
 
 with Driver.Uncertain;
 
-package Driver.Stats with Pure is
+package Driver.Stats with Preelaborate is
 
    type Accumulator is private;
    --  Running mean and variance (Welford), numerically stable in one pass.
@@ -22,7 +22,7 @@ package Driver.Stats with Pure is
 
    function Median (X : Real_Array) return Real
      with Pre => X'Length > 0;
-   --  Exact, and without copying X: a sample of any size.
+   --  Exact, X untouched: a sample of any size (its keys are copied to the heap).
 
    function Robust_Sigma (X : Real_Array) return Real
      with Pre => X'Length > 0;

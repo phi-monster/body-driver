@@ -1,3 +1,4 @@
+with Ada.Containers.Ordered_Maps;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -10,24 +11,91 @@ package body Driver.Uncertain is
    function Tail return Real is (Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z));
    --  How rarely a Gaussian difference exceeds Z of its sigmas: every gate's false-alarm rate.
 
+   --  Every gate worked out once: a gate is a pure function of what it is asked for, and the fit and the lock-in ask
+   --  the same few of them for every sighting and every cell. The Student quantile behind the test of each sighting of
+   --  a fit's tracks, its root found anew every time, was six tenths of the fit's last stage, and that stage took 53
+   --  to 304 s a fit while the body held still (f15w on 10-15, sampled).
+   type Gate_Key is record
+      Vector     : Boolean;    --  a vector gate (Vector_Gate), or a scalar one
+      Dimensions : Positive;
+      Freedom    : Natural;
+      Tests      : Positive;
+   end record;
+
+   function "<" (A, B : Gate_Key) return Boolean is
+     (A.Vector < B.Vector
+      or else (A.Vector = B.Vector
+               and then (A.Dimensions < B.Dimensions
+                         or else (A.Dimensions = B.Dimensions
+                                  and then (A.Freedom < B.Freedom
+                                            or else (A.Freedom = B.Freedom and then A.Tests < B.Tests))))));
+
+   package Gate_Maps is new Ada.Containers.Ordered_Maps (Gate_Key, Real);
+
+   type Known_Gate is record
+      Found    : Boolean := False;
+      Multiple : Real := 0.0;
+   end record;
+
+   protected Gates_Known is
+      function Get (Key : Gate_Key) return Known_Gate;
+      procedure Keep (Key : Gate_Key; Multiple : Real);
+   private
+      Map : Gate_Maps.Map;
+   end Gates_Known;
+
+   protected body Gates_Known is
+      function Get (Key : Gate_Key) return Known_Gate is
+         C : constant Gate_Maps.Cursor := Map.Find (Key);
+      begin
+         return (if Gate_Maps.Has_Element (C) then (Found => True, Multiple => Gate_Maps.Element (C)) else (others => <>));
+      end Get;
+
+      procedure Keep (Key : Gate_Key; Multiple : Real) is
+      begin
+         Map.Include (Key, Multiple);
+      end Keep;
+   end Gates_Known;
+
    function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate is
+      Key   : constant Gate_Key := (Vector => False, Dimensions => 1, Freedom => Degrees_Of_Freedom, Tests => Tests);
+      Known : constant Known_Gate := Gates_Known.Get (Key);
       Alpha : constant Real := Tail / Real (Tests);
    begin
-      --  A single test with a known sigma is Z itself, not its round trip
-      --  through the quantile.
-      return (Multiple => (if Degrees_Of_Freedom > 0 then Driver.Distributions.Student_T_Quantile (Alpha, Degrees_Of_Freedom)
+      if Known.Found then
+         return (Multiple => Known.Multiple);
+      end if;
+      declare
+         --  A single test with a known sigma is Z itself, not its round trip
+         --  through the quantile.
+         Multiple : constant Real := (if Degrees_Of_Freedom > 0 then Driver.Distributions.Student_T_Quantile (Alpha, Degrees_Of_Freedom)
                            elsif Tests = 1 then Driver.Conventions.Z
-                           else Driver.Distributions.Gaussian_Two_Sided_Quantile (Alpha)));
+                           else Driver.Distributions.Gaussian_Two_Sided_Quantile (Alpha));
+      begin
+         Gates_Known.Keep (Key, Multiple);
+         return (Multiple => Multiple);
+      end;
    end Scalar_Gate;
 
    function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1)
      return Gate
    is
+      Key   : constant Gate_Key :=
+        (Vector => True, Dimensions => Dimensions, Freedom => Degrees_Of_Freedom, Tests => Tests);
+      Known : constant Known_Gate := Gates_Known.Get (Key);
       Alpha : constant Real := Tail / Real (Tests);
    begin
-      return (Multiple => (if Degrees_Of_Freedom = 0 then Sqrt (Driver.Distributions.Chi_Square_Quantile (Alpha, Dimensions))
+      if Known.Found then
+         return (Multiple => Known.Multiple);
+      end if;
+      declare
+         Multiple : constant Real := (if Degrees_Of_Freedom = 0 then Sqrt (Driver.Distributions.Chi_Square_Quantile (Alpha, Dimensions))
                            else Sqrt (Real (Dimensions)
-                                      * Driver.Distributions.F_Quantile (Alpha, Dimensions, Degrees_Of_Freedom))));
+                                      * Driver.Distributions.F_Quantile (Alpha, Dimensions, Degrees_Of_Freedom)));
+      begin
+         Gates_Known.Keep (Key, Multiple);
+         return (Multiple => Multiple);
+      end;
    end Vector_Gate;
 
    function Threshold (G : Gate) return Real is (G.Multiple);
