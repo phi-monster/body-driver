@@ -169,6 +169,8 @@ package Fake_World is
       Plain_Table : Boolean := False;    --  a table with no texture at all
       White_Room  : Boolean := False;    --  a white table and white walls, faint broad veins their only texture
       Dead_Arm    : Natural := 0;        --  the arm whose servos never answer (it stands at rest, seen); 0 for none
+      Ticks       : Natural := 0;        --  the ticks a turn of every arm whose unit is a servo bus's; 0: drawn (1024 to 16384)
+      Servo       : Boolean := False;    --  every arm reads in a servo bus's ticks, whatever its unit was drawn
    end record;
 
    type Due_Target is record

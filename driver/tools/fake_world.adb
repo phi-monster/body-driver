@@ -63,7 +63,7 @@ package body Fake_World is
    procedure Add_Camera (W : in out World; Name : String; Link_Index, Arm : Natural; Mount : Rigid;
                          Width, Height : Positive; Focal_Share : Real);
    procedure Build_Arm (W : in out World; A : Positive; Side : Real; Width, Height : Positive; Kind : Hand_Kind;
-                        With_Eye, Eye_Up : Boolean);
+                        With_Eye, Eye_Up : Boolean; Ticks_Forced : Natural := 0; Servo : Boolean := False);
    procedure Add_Things (W : in out World);
    function Motion (L : Link; Q : Real) return Rigid;
    function Corners (S : Solid) return Corner_Array;
@@ -159,7 +159,7 @@ package body Fake_World is
    end Add_Camera;
 
    procedure Build_Arm (W : in out World; A : Positive; Side : Real; Width, Height : Positive; Kind : Hand_Kind;
-                        With_Eye, Eye_Up : Boolean) is
+                        With_Eye, Eye_Up : Boolean; Ticks_Forced : Natural := 0; Servo : Boolean := False) is
       Base_X : constant Real := Side * Random (W, 0.25, 0.35);
       Base_Y : constant Real := Random (W, -0.52, -0.42);
       --  The levers run from a desktop arm's (an upper arm and a forearm of ten centimetres, a wrist of two or
@@ -177,11 +177,13 @@ package body Fake_World is
       --  The reading unit: radians, degrees, milliradians, or a servo bus's ticks (a power of two a turn, 1024
       --  to 16384), which come in whole numbers and are sent as integers.
       Unit_Draw : constant Real := Random (W);
-      Ticks     : constant Real := 2.0 ** (10 + Integer (Real'Floor (5.0 * Random (W))));
+      --  Drawn whether forced or not, so that the seed's other draws stay as they were.
+      Drawn_Ticks : constant Real := 2.0 ** (10 + Integer (Real'Floor (5.0 * Random (W))));
+      Ticks     : constant Real := (if Ticks_Forced > 0 then Real (Ticks_Forced) else Drawn_Ticks);
       Arm_Unit  : constant Real :=
-        (if Unit_Draw < 0.3 then 1.0 elsif Unit_Draw < 0.5 then Pi / 180.0 elsif Unit_Draw < 0.7 then 0.001
-         else 2.0 * Pi / Ticks);
-      In_Ticks  : constant Boolean := Unit_Draw >= 0.7;
+        (if Servo or else Unit_Draw >= 0.7 then 2.0 * Pi / Ticks elsif Unit_Draw < 0.3 then 1.0
+         elsif Unit_Draw < 0.5 then Pi / 180.0 else 0.001);
+      In_Ticks  : constant Boolean := Servo or else Unit_Draw >= 0.7;
       --  A servo's tolerance about its target, in radians: an ask within it moves nothing, a move lands short of
       --  its target by up to it (the kiwi's servos land 2 to 5 ticks off and ignore asks below their dead band,
       --  R5 and R6 on 10-14). Up to half a degree; one joint in three has none (a controller that reaches its
@@ -557,8 +559,8 @@ package body Fake_World is
                end if;
             end;
          end loop;
-         Build_Arm (W, 1, -1.0, Width, Height, Kinds (1), T.Eyeless /= 1, T.Eye_Up = 1);
-         Build_Arm (W, 2, 1.0, Width, Height, Kinds (2), T.Eyeless /= 2, T.Eye_Up = 2);
+         Build_Arm (W, 1, -1.0, Width, Height, Kinds (1), T.Eyeless /= 1, T.Eye_Up = 1, T.Ticks, T.Servo);
+         Build_Arm (W, 2, 1.0, Width, Height, Kinds (2), T.Eyeless /= 2, T.Eye_Up = 2, T.Ticks, T.Servo);
       end;
       --  An arm whose bus is dead stands at rest where it was built, seen and never heard from.
       if T.Dead_Arm > 0 then

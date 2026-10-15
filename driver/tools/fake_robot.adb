@@ -918,6 +918,8 @@ begin
       Shape.Plain_Table := Option ("--table", "grain") = "plain";
       Shape.White_Room := Option ("--room", "drawn") = "white";
       Shape.Dead_Arm := Natural'Value (Option ("--dead-arm", "0"));
+      Shape.Ticks := Natural'Value (Option ("--ticks", "0"));
+      Shape.Servo := Option ("--servo", "no") = "yes";
       if Option ("--instruction") /= "" then
          Instruction := To_Unbounded_String (Option ("--instruction"));
       end if;
