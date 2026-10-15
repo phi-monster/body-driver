@@ -65,6 +65,7 @@ package body Driver.Robot.Hand.Presses is
                --  to no lobe, and no tip was fitted).
                W.Stood := True;
                W.Last_Still := Tool;
+               W.Closer_Still := Reading_Holders.To_Holder (Closer);
             end if;
          when Driven =>
             --  The verdict stands until another push begins: that is the let-go. Or until another command takes
@@ -104,6 +105,7 @@ package body Driver.Robot.Hand.Presses is
                          Arm      => Reading_Holders.To_Holder (Arm),
                          Approach => W.Approach,
                          Closer   => Reading_Holders.To_Holder (Closer),
+                         Before   => (if W.Stood then W.Closer_Still else Reading_Holders.Empty_Holder),
                          Beat     => Beat);
                W.State := Settling;
             end if;
@@ -113,6 +115,7 @@ package body Driver.Robot.Hand.Presses is
                W.State := Free;
                W.Stood := True;
                W.Last_Still := Tool;
+               W.Closer_Still := Reading_Holders.To_Holder (Closer);
             end if;
          when Free | Driven =>
             null;

@@ -1134,6 +1134,7 @@ package body Driver.Robot.Hand is
       Moved : Boolean;
       Press : Driver.Robot.Hand.Presses.Event;
       Which : Opening;
+      Pushed_Off : Boolean;   --  what the press met pushed the closer off the opening it stood at
 
       --  The arm's latest push is one judged stalled.
       function Stalled_Now return Boolean is
@@ -1188,10 +1189,17 @@ package body Driver.Robot.Hand is
          return;
       end if;
       R.Rests := R.Rests + 1;
-      if Opening_Of (R, M, Press.Closer.Element, Which) then
+      --  The press is the opening's the closer stood at as it began, also where what it met pushed the closer off it:
+      --  the finger was loaded, as one that gives without its reading changing is, and the eye tells where it stood
+      --  under the press (Measured_Slides), which the fit of the presses takes, as the finger stood loaded and as it
+      --  stands free at the opening's reading (Tips). A jaw held open whose tip met the table was pressed 2 % of its
+      --  travel shut (Presses.Event's Before), and every press of it at open was refused (f16u, f16y on 10-15/16).
+      Pushed_Off := not Opening_Of (R, M, Press.Closer.Element, Which);
+      if not Pushed_Off or else (not Press.Before.Is_Empty and then Opening_Of (R, M, Press.Before.Element, Which)) then
          Driver.Robot.Hand.Tips.Add (R.Book, Press, Which, Measured_Slides (R, Id, M, O, Which));
          Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": a press at the " & Opening'Image (Which)
-                          & " opening, at beat" & Press.Beat'Image & "," & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image
+                          & " opening," & (if Pushed_Off then " what it met pushing the closer off it," else "")
+                          & " at beat" & Press.Beat'Image & "," & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image
                           & " kept; "
                           & (if Driver.Robot.Hand.Tips.Latest_Agrees (R.Book)
                              then "a tip rests on it"

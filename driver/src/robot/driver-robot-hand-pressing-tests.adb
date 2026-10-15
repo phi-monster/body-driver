@@ -236,9 +236,11 @@ package body Driver.Robot.Hand.Pressing.Tests is
    --  Presses of every lobe at both openings, fed to the hand beat by beat as
    --  the body would judge them: still above the table, blocked, still on it.
    --  Made is how many were made, First_Tip how many had been when the first
-   --  lobe's tip at the open opening was first known (0: never).
+   --  lobe's tip at the open opening was first known (0: never). Pushed is the
+   --  share of its travel the closer stands off its opening on the table, as
+   --  the press's load pushed it towards the other.
    procedure Press_Everything
-     (H : in out Hands; M : Model; A : Positive; Made : out Natural; First_Tip : out Natural)
+     (H : in out Hands; M : Model; A : Positive; Made : out Natural; First_Tip : out Natural; Pushed : Real := 0.0)
    is
       Beat : Natural := 0;
       Id   : constant Hand_Id := 1;
@@ -260,18 +262,19 @@ package body Driver.Robot.Hand.Pressing.Tests is
                   Start, Rest : Real_Array (1 .. Joint_Count);
                   Leads  : Boolean;
                   Closer : constant Real := (if W = Open then 1.0 else 0.0);
+                  Loaded : constant Real := (if W = Open then Closer - Pushed else Closer + Pushed);
                   Idle   : constant Real_Array (1 .. Joint_Count) := [others => 0.0];
-                  function At_Beat (Q : Real_Array) return Observation is
-                    (if A = 1 then Observed (Beat, Q, Idle, Closer) else Observed (Beat, Idle, Q, Closer));
+                  function At_Beat (Q : Real_Array; C : Real := Closer) return Observation is
+                    (if A = 1 then Observed (Beat, Q, Idle, C) else Observed (Beat, Idle, Q, C));
                begin
                   Contact (A, P, Pushed_Back, Start, Rest, Leads);
                   if Leads then
                      Beat := Beat + 1;
                      Press_Beat (H, Id, M, At_Beat (Start), Is_Blocked => False, Is_Still => True);
                      Beat := Beat + 1;
-                     Press_Beat (H, Id, M, At_Beat (Rest), Is_Blocked => True, Is_Still => False);
+                     Press_Beat (H, Id, M, At_Beat (Rest, Loaded), Is_Blocked => True, Is_Still => False);
                      Beat := Beat + 1;
-                     Press_Beat (H, Id, M, At_Beat (Rest), Is_Blocked => False, Is_Still => True);
+                     Press_Beat (H, Id, M, At_Beat (Rest, Loaded), Is_Blocked => False, Is_Still => True);
                      Made := Made + 1;
                      if First_Tip = 0 and then Known (Tip_In_Tool (H, Id, 1, Open)) then
                         First_Tip := Made;
@@ -359,6 +362,39 @@ package body Driver.Robot.Hand.Pressing.Tests is
          end;
       end loop;
    end Tips_Free_Of_Placement;
+
+   --  Every press pushes the closer off the opening it is made at by three per cent of its travel, thirty times its
+   --  readings' noise, as a jaw held open is pressed shut by the table its tip meets (f16y on 10-16, two per cent):
+   --  the presses are the openings' all the same, and fix every tip as presses that leave the closer where it stood
+   --  do. Judged by the closer's reading at the press alone, none was at either opening, and no tip was known.
+   procedure Pushed_Closer_Presses_At_Its_Opening is
+      Z     : constant Real := Threshold (Vector_Gate (3));
+      M     : Model;
+      H     : Hands;
+      Made  : Natural;
+      Early : Natural;
+   begin
+      Build (M, Placed);
+      Give_Hand (H, 2);
+      Press_Everything (H, M, 2, Made, Early, Pushed => 30.0 * Closer_Noise);
+      Check (Made >= 40, "the second arm's hand was pressed only" & Made'Image & " times");
+      Check (Early in 1 .. 4, "the first lobe's tip was known after" & Early'Image & " presses, not after its first few");
+      for L in 1 .. 2 loop
+         for W in Opening loop
+            declare
+               T    : constant Point_Estimate := Tip_In_Tool (H, 1, L, W);
+               What : constant String := "lobe" & L'Image & " at " & W'Image;
+            begin
+               Check (Known (T), What & ": no tip of presses that pushed the closer off its opening");
+               if Known (T) then
+                  Check (Mahalanobis (T, Tips_True (L, W)) <= Z,
+                         What & ": off by" & Real'Image (abs (T.Mean - Tips_True (L, W))) & ", which is"
+                         & Real'Image (Mahalanobis (T, Tips_True (L, W))) & " of its sigma");
+               end if;
+            end;
+         end loop;
+      end loop;
+   end Pushed_Closer_Presses_At_Its_Opening;
 
    --  Aimed and lowered in the arm's own frame: the way down is into the table
    --  its own eye saw (not the first arm's), the plans exist with the arm not
@@ -987,6 +1023,9 @@ package body Driver.Robot.Hand.Pressing.Tests is
       Driver.Tests.Register ("hand.pressing.tips",
                              "a hand's presses measure its tips in the world's frame, which the arm's placement "
                              & "moves, or not at all with the arm not placed", Tips_Free_Of_Placement'Access);
+      Driver.Tests.Register ("hand.pressing.pushed",
+                             "a press that pushed the closer off the opening it was made at is refused, and no tip is "
+                             & "known", Pushed_Closer_Presses_At_Its_Opening'Access);
       Driver.Tests.Register ("hand.pressing.plan",
                              "a press is aimed down into another arm's table, or planned in the world where an arm "
                              & "not placed in it cannot", Press_Planned_In_The_Arms_Frame'Access);

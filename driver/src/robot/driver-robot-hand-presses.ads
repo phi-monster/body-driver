@@ -61,8 +61,13 @@ package Driver.Robot.Hand.Presses is
       Arm      : Reading_Holders.Holder;     --  the arm's readings then
       Approach : Direction_Estimate;         --  tool frame; unknown when the tool had not moved
       Closer   : Reading_Holders.Holder;     --  the closer group's readings then
+      Before   : Reading_Holders.Holder;     --  and where the tool last stood still before the push; empty when it had not
       Beat     : Driver.Clock.Beat := 0;
    end record;
+   --  What the press met can push the closer off where it stood: a jaw held open by its servo, its tip on the table,
+   --  is pressed shut by the descent the table stops (f16y on 10-16: the jaw, held open, stood 3.6 % of its
+   --  travel shut at the beat its tip met the table, and 2 % at the rest of the press, held there by the arm's weight
+   --  on it). Before is where it stood as the press began.
 
    type Watcher is private;
 
@@ -98,6 +103,7 @@ private
       State      : Phase := Free;
       Stood      : Boolean := False;   --  a still pose is known
       Last_Still : Pose_Estimate;      --  where the tool last stood still while free
+      Closer_Still : Reading_Holders.Holder;   --  the closer group's readings there
       Approach   : Direction_Estimate; --  measured at the first blocked beat
       Commands   : Natural := 0;       --  the new commands that took effect since the block
       Block_At   : Pose_Estimate;      --  the tool at the first blocked beat

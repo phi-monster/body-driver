@@ -90,6 +90,7 @@ package body Driver.Robot.Hand.Tips.Tests is
                 Arm      => <>,
                 Approach => (Unit_Vector => Transpose (R) * Down, Sigma => Turn_Sigma),
                 Closer   => Driver.Robot.Hand.Presses.Reading_Holders.To_Holder ([1 => (if O = Open then 1.0 else 0.0)]),
+                Before   => <>,
                 Beat     => 0);
    end Press_At;
 
