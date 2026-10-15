@@ -279,6 +279,13 @@ package body Driver.Robot.Hand.Sweep is
    function High_End (S : State; Channel : Positive) return Driver.Robot.Hand.Views.View is
      (Driver.Robot.Hand.Views.High_End (S.Views, Channel));
 
+   function End_Rest (S : State; Channel : Positive) return Real_Array is
+     (Driver.Robot.Hand.Views.Low_Rest (S.Views, Channel));
+
+   function End_Reading (S : State; Channel : Positive; High : Boolean) return Real is
+     (if High then S.Per_Channel.Constant_Reference.Element (Channel).High_At
+      else S.Per_Channel.Constant_Reference.Element (Channel).Low_At);
+
    function Lobes_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector is
      (S.Per_Channel.Constant_Reference.Element (Channel).Located.Lobes);
 

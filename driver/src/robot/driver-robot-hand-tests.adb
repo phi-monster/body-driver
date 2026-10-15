@@ -15,6 +15,7 @@ with Driver.Robot.Hand.Presses.Tests;
 with Driver.Robot.Hand.Pressing.Tests;
 with Driver.Robot.Hand.Selfsight.Tests;
 with Driver.Robot.Hand.Shape.Tests;
+with Driver.Robot.Hand.Follow.Tests;
 with Driver.Robot.Hand.Slide.Tests;
 with Driver.Robot.Hand.Tips.Tests;
 with Driver.Robot.Hand.Sweep.Tests;
@@ -855,6 +856,7 @@ package body Driver.Robot.Hand.Tests is
       Driver.Robot.Hand.Presses.Tests.Register;
       Driver.Robot.Hand.Pressing.Tests.Register;
       Driver.Robot.Hand.Slide.Tests.Register;
+      Driver.Robot.Hand.Follow.Tests.Register;
       Driver.Robot.Hand.Touch.Tests.Register;
       Driver.Robot.Hand.Tips.Tests.Register;
       Driver.Robot.Hand.Shape.Tests.Register;

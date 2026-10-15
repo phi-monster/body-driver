@@ -351,9 +351,13 @@ package body Fake_World is
                Jaw_Length : constant Real := 0.05 + 0.03 * Arm_Random;
                Jaw_Thick  : constant Real := 0.008 + 0.006 * Arm_Random;
                Jaw_Height : constant Real := 0.012 + 0.010 * Arm_Random;
-               Swing      : constant Real := 0.7 + 0.4 * Arm_Random;   --  radians from closed to open
+               --  Radians from closed to open: the kiwi's moving jaw opens about a third of a radian to half of one
+               --  (its wrist frames, 10-14); the fake's jaw opened 0.7 to 1.1 and swung out of its eye's picture.
+               Swing      : constant Real := 0.35 + 0.35 * Arm_Random;
+               --  Dark grey with its ribs showing, as the kiwi's show in its wrist frames (10-14); at 0.05 and a third to
+               --  seven tenths of contrast the jaws rendered black, nothing on them for a matcher to follow (a05).
                Ribbed     : constant Material :=
-                 (Kind => Stripes, Albedo => [0.05, 0.05, 0.05], Contrast => 0.3 + 0.4 * Arm_Random,
+                 (Kind => Stripes, Albedo => [0.10, 0.10, 0.10], Contrast => 0.6 + 0.35 * Arm_Random,
                   Scale => 200.0 + 200.0 * Arm_Random, Gloss => 0.4);
                Jaw_Hi     : constant Real := (if In_Ticks then Swing / (2.0 * Pi / Ticks) else 1.0);
                Fixed_Jaw  : Positive;
@@ -385,8 +389,12 @@ package body Fake_World is
       if With_Eye then
          declare
             --  A desktop gripper's camera sits on the gripper over the roots of its jaws, the palm behind it, and
-            --  looks down along them: they come into the bottom of its picture and fill two fifths of it (the kiwi's
-            --  wrist eyes, 10-14).
+            --  looks down along them: they come into the bottom of its picture from its border and fill two fifths of
+            --  it, open and closed (the kiwi's wrist eyes, 10-14; its lens is a wide one, 0.45 of the picture's width
+            --  here, where every other eye has 0.62). Placed there with the narrower lens and the jaw swung 0.7 to 1.1
+            --  rad, the open jaw left the picture (a03 on 10-16: its tip a sliver on the picture's bottom row, 41 mm
+            --  off the truth); placed behind the roots and over the palm, the palm's top filled the picture's bottom
+            --  and the jaws stood on it, not on the border, as they do not on the kiwi (a04 to a07 on 10-16).
             Near  : constant Boolean := Kind = Jaw;
             Ahead : constant Real := (if Near then 0.024 + 0.005 else -Eye_Back);
             Above : constant Real := (if Near then 0.024 + 0.015 * Arm_Random else Eye_Above);
@@ -394,7 +402,7 @@ package body Fake_World is
          begin
             Add_Camera (W, "eye_arm" & Trim (A), J6, A,
                         Look ([0.0, L6 + Ahead, Above], [0.0, Cos (Pitch), -Sin (Pitch)], [0.0, 0.0, 1.0]),
-                        Width, Height, 0.62);
+                        Width, Height, (if Near then 0.45 else 0.62));
          end;
       end if;
    end Build_Arm;

@@ -162,29 +162,46 @@ package body Driver.Alignment is
    end Halve;
 
    function Pyramid_Of (I : Driver.Images.Image) return Pyramid is
+      Width  : constant Natural := Driver.Images.Width (I);
+      Height : constant Natural := Driver.Images.Height (I);
+   begin
+      if Width = 0 or else Height = 0 then
+         return Result : Pyramid;
+      end if;
+      declare
+         Luma : Real_Access := new Real_Array (1 .. Width * Height);
+      begin
+         Driver.Images.Luma (I, Luma.all);
+         return Result : constant Pyramid := Pyramid_Of (Width, Height, Luma.all) do
+            Free (Luma);
+         end return;
+      end;
+   end Pyramid_Of;
+
+   function Pyramid_Of (Width, Height : Natural; Luma : Real_Array) return Pyramid is
       Result  : Pyramid;
-      Width   : Natural := Driver.Images.Width (I);
-      Height  : Natural := Driver.Images.Height (I);
+      Width_Now  : Natural := Width;
+      Height_Now : Natural := Height;
       Current : Real_Access;
    begin
       if Width = 0 or else Height = 0 then
          return Result;
       end if;
       Current := new Real_Array (1 .. Width * Height);
-      Driver.Images.Luma (I, Current.all);
+      Current.all := Luma;
       loop
-         Result.Sizes.Append (Make_Level (Current.all, Width, Height));
-         exit when Half_Patch (Width / Halving, Height / Halving) < Least_Half
-           or else Width / Halving < Least_Side or else Height / Halving < Least_Side;
+         Result.Sizes.Append (Make_Level (Current.all, Width_Now, Height_Now));
+         exit when Half_Patch (Width_Now / Halving, Height_Now / Halving) < Least_Half
+           or else Width_Now / Halving < Least_Side or else Height_Now / Halving < Least_Side;
          declare
             Next : Real_Access;
             Next_Width, Next_Height : Natural;
          begin
-            Halve (Current.all, Width, Height, Next, Next_Width, Next_Height);
+            Halve (Current.all, Width_Now, Height_Now, Next, Next_Width, Next_Height);
             Free (Current);
             Current := Next;
-            Width := Next_Width;
-            Height := Next_Height;
+            Width_Now := Next_Width;
+            Height_Now := Next_Height;
          end;
       end loop;
       Free (Current);
@@ -1760,6 +1777,11 @@ package body Driver.Alignment is
      (Real'Min (Real (Second.Sizes (0).Width), Real (Second.Sizes (0).Height)) / 2.0);
 
    function Window_Radius (Sigma : Real) return Real is (Window_Multiple * Sqrt (Sigma * Sigma + Quantization));
+
+   function Sigma_Of_Window (Radius : Real) return Real is
+     (Sqrt (Real'Max (0.0, (Radius / Window_Multiple) ** 2 - Quantization)));
+
+   function Finest_Radius (Width, Height : Natural) return Real is (Real (Half_Patch (Width, Height)) - 1.0);
 
    function Largest_Sigma (First, Second : Pyramid) return Real is
       Widest : constant Real := Largest_Window (First, Second);

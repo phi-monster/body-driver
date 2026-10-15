@@ -81,6 +81,11 @@ package Driver.Alignment is
 
    function Pyramid_Of (I : Driver.Images.Image) return Pyramid;
 
+   function Pyramid_Of (Width, Height : Natural; Luma : Real_Array) return Pyramid
+     with Pre => Luma'Length = Width * Height;
+   --  The pyramid of a picture given by its luma, row after row as Driver.Images.Luma lays it out: a mean of
+   --  several frames (Driver.Pixels.Means) is compared as finely as it was averaged.
+
    function Levels (P : Pyramid) return Natural;
    --  The number of sizes, the full one included.
 
@@ -199,6 +204,14 @@ package Driver.Alignment is
    --  the least wider than its patch.
 
    function Window_Radius (Sigma : Real) return Real;
+
+   function Sigma_Of_Window (Radius : Real) return Real;
+   --  The standard deviation, along both axes alike, of a prediction whose window has this radius (Window_Radius
+   --  turned round); zero for a radius no wider than the rounding of a place on a grid of pixels makes a window.
+
+   function Finest_Radius (Width, Height : Natural) return Real;
+   --  The widest radius of a window Align searches where pictures of this size are finest, and so answers Narrow:
+   --  the half patch, less the pixel a place on the grid is rounded to.
    --  The radius, in pixels, of the window of a prediction whose standard deviation is Sigma along both axes: as far
    --  as a vector of two dimensions is significant, and a place on a grid of pixels cannot be known to beyond.
 

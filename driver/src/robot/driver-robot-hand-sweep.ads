@@ -132,6 +132,16 @@ package Driver.Robot.Hand.Sweep is
    function Closed_End_Is_High (S : State; Channel : Positive) return Boolean
      with Pre => Status (S, Channel) = Measured;
 
+   function End_Rest (S : State; Channel : Positive) return Real_Array
+     with Pre => Has_Ends (S, Channel);
+   --  Every other group's readings while the channel's ends were seen (Views.Low_Rest): a view of a setting
+   --  between them is a stop only when taken with the rest of the body there.
+
+   function End_Reading (S : State; Channel : Positive; High : Boolean) return Real
+     with Pre => Status (S, Channel) = Measured;
+   --  The channel's reading at the low end its lobes were placed from, or at the high end, without copying the
+   --  view taken there.
+
    function Closing_Known (S : State; Channel : Positive) return Boolean
      with Pre => Status (S, Channel) = Measured;
    --  The lobes come significantly closer at one end than at the other.

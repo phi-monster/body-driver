@@ -117,6 +117,11 @@ package body Driver.Robot.Hand.Pressing is
       Footprint : Real := 0.0)
    is
       Group : constant Group_Id := Arm_Group (M, Arm);
+      Best       : Aimed;               --  the surest aim that reaches, so far
+      Best_Yaw   : Real := 0.0;
+      Best_Push  : Real := Real'Last;   --  its least push: how surely the fit places the tool there
+      Any        : Boolean := False;
+      Tried_Yaw  : Real;
    begin
       Reaches := False;
       Unmeasured := False;
@@ -124,7 +129,7 @@ package body Driver.Robot.Hand.Pressing is
       Why := Ada.Strings.Unbounded.Null_Unbounded_String;
       Result := (others => <>);
       for K in 0 .. 7 loop
-         --  0, a quarter turn one way, the other, half a turn each way, three quarters each way, a whole one.
+         --  0, an eighth of a turn one way, the other, a quarter each way, three eighths each way, half a turn.
          Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);
          Aim (M, Arm, Eye, O, Along, Result, Yaw);
          exit when not Result.Ok;
@@ -180,8 +185,33 @@ package body Driver.Robot.Hand.Pressing is
                end if;
             end;
          end if;
-         exit when Reaches;
+         if Reaches then
+            declare
+               There : Observation := O;
+            begin
+               There.Readings.Replace_Element (Group, Driver.Robot.Motion.Last_Readings (Result.Plan));
+               declare
+                  Push : constant Real := Least_Push (M, Arm, There);
+               begin
+                  if not Any or else Push < Best_Push then
+                     Any := True;
+                     Best := Result;
+                     Best_Yaw := Yaw;
+                     Best_Push := Push;
+                  end if;
+               end;
+            end;
+         end if;
       end loop;
+      Tried_Yaw := Yaw;
+      if Any then
+         Result := Best;
+         Yaw := Best_Yaw;
+         Reaches := True;
+      else
+         Yaw := Tried_Yaw;
+         Reaches := False;
+      end if;
    end Aim_Reaching;
 
    function Lowered
