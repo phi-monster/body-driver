@@ -49,6 +49,9 @@ package body Driver.Robot.Lockin is
    --  moves (Cells_Shown).
    Half : constant Real := 0.5;
 
+   Whole_Rounding : constant Real := 1.0 / 12.0;
+   --  The variance of a uniform rounding to a whole number: of a count of cells.
+
    --  A regressor: one channel of one commandable group.
    type Column is record
       Group   : Group_Id;
@@ -1099,7 +1102,12 @@ package body Driver.Robot.Lockin is
                         end if;
                      end loop;
                      declare
-                        Start : constant Positive := Driver.Stats.Latest_Regime (Counts (1 .. K));
+                        --  A count is a whole number: no scatter finer than the rounding to one. Counts mostly zero
+                        --  left both halves' median absolute deviations at zero, any difference of their means
+                        --  was significant, and the stretch was halved down to its last 4 and 7 beats (f15q_play on
+                        --  10-15).
+                        Start : constant Positive :=
+                          Driver.Stats.Latest_Regime (Counts (1 .. K), Floor => Sqrt (Whole_Rounding));
                         Most  : Natural := 0;
                      begin
                         for I in Start .. K loop
@@ -1112,10 +1120,24 @@ package body Driver.Robot.Lockin is
                         --  plus Z of their robust scatter. The most of them is one beat's: a frame that flickered
                         --  once among 116 at rest put it at 273 of 525 cells for the kiwi's wrist eye, and a jaw
                         --  opening 1250 units moved 130 to 156 cells, unseen (R6, 10-14).
+                        --  And no scatter below the root of the counts' mean: a count of cells each moved at rest by
+                        --  chance is a sum of rare independent alarms, whose variance is its mean at the least.
+                        --  Counts mostly zero leave their median absolute deviation at zero and the level at the
+                        --  median, and a count of one or two at rest was motion (the fake's eyes looking at little
+                        --  texture, f15q_play on 10-15: the boot's probe saw a push of 1.9e-7 units).
                         if S.Rest_Counts_Known then
-                           S.Rest_Count_Level :=
-                             Driver.Stats.Median (Counts (Start .. K))
-                             + Driver.Conventions.Z * Driver.Stats.Robust_Sigma (Counts (Start .. K));
+                           declare
+                              Sum : Real := 0.0;
+                           begin
+                              for I in Start .. K loop
+                                 Sum := Sum + Counts (I);
+                              end loop;
+                              S.Rest_Count_Level :=
+                                Driver.Stats.Median (Counts (Start .. K))
+                                + Driver.Conventions.Z
+                                  * Real'Max (Driver.Stats.Robust_Sigma (Counts (Start .. K)),
+                                              Sqrt (Sum / Real (K - Start + 1)));
+                           end;
                         end if;
                      end;
                   end;

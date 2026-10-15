@@ -210,7 +210,7 @@ package body Driver.Stats is
       return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));
    end Mad_Degrees_Of_Freedom;
 
-   function Latest_Regime (X : Real_Array) return Positive is
+   function Latest_Regime (X : Real_Array; Floor : Real := 0.0) return Positive is
       Start : Positive := X'First;
    begin
       loop
@@ -231,8 +231,8 @@ package body Driver.Stats is
             end loop;
             Mean_Old := Mean_Old / Real (N_Old);
             Mean_New := Mean_New / Real (N_New);
-            S_Old := Robust_Sigma (X (Start .. Mid - 1));
-            S_New := Robust_Sigma (X (Mid .. X'Last));
+            S_Old := Real'Max (Robust_Sigma (X (Start .. Mid - 1)), Floor);
+            S_New := Real'Max (Robust_Sigma (X (Mid .. X'Last)), Floor);
             exit when not Driver.Uncertain.Significant
               (Mean_New - Mean_Old,
                Ada.Numerics.Long_Elementary_Functions.Sqrt (S_Old ** 2 / Real (N_Old) + S_New ** 2 / Real (N_New)),

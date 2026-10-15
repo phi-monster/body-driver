@@ -40,13 +40,14 @@ package Driver.Stats with Pure is
    --  sample standard deviation); 0 below two samples, and never rounded
    --  down to none above.
 
-   function Latest_Regime (X : Real_Array) return Positive
-     with Pre => X'Length > 0, Post => Latest_Regime'Result in X'Range;
+   function Latest_Regime (X : Real_Array; Floor : Real := 0.0) return Positive
+     with Pre => X'Length > 0 and then Floor >= 0.0, Post => Latest_Regime'Result in X'Range;
    --  The first index of the latest stationary stretch of the samples, in
    --  their order: the older half of the stretch and the newer have the same
    --  mean within their scatter (Robust_Sigma, with the degrees of freedom of
-   --  a median absolute deviation); while they differ, the older half is
-   --  dropped. A stretch too short to split (fewer than two samples in its
+   --  a median absolute deviation), and no finer than Floor, a scatter the caller knows
+   --  its samples cannot show less of: the rounding of counts to whole ones);
+   --  while they differ, the older half is dropped. A stretch too short to split (fewer than two samples in its
    --  older half) is taken as it is. The readings' rest is measured on such a
    --  stretch (Driver.Robot.Channels), and so is an eye's (Driver.Robot.Lockin).
 
