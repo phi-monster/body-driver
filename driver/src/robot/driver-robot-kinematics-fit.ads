@@ -234,6 +234,8 @@ package Driver.Robot.Kinematics.Fit is
       All_Count  : Natural := 0;       --  the sightings that median is over
       Sigma_Px   : Real := 0.0;        --  the noise measured from them
       Flipped    : Boolean := False;   --  every translation changed sign to put the points in front
+      Order_Told : Boolean := False;   --  the sightings tell the joints' order along the arm, not only that it is
+                                       --  the best of the orders (stage 4; a fit begun from another, that one's)
       Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
       Focal_Sigma : Real := Real'Last; --  the uncertainty of the focal length across
       Covariance : Real_Lists.Vector;  --  of the parameters above, row by row, from the errors the residuals
@@ -277,6 +279,7 @@ package Driver.Robot.Kinematics.Fit is
       --  lens taken for the search's result. Otherwise a fit of this estimate: the last stage alone.
       Whole          : Boolean := False;
       Profiled_Over  : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
+      Order_Told     : Boolean := False;   --  its joints' order was told (Fit_Report)
    end record;
 
    No_Start : constant Fit_Start := (N => 0, Valid => False, others => <>);
@@ -353,6 +356,31 @@ package Driver.Robot.Kinematics.Fit is
    procedure Pick (S : in out Sampler; N : Positive; Into : out Count_Array)
      with Pre => Into'Length <= N;
    --  Into'Length distinct numbers of 1 .. N, the next of the generator's.
+
+   type Vec3_Array is array (Positive range <>) of Vec3;
+
+   procedure Turn_On_Plane
+     (Before, After : Vec3_Array;
+      Weight        : Real_Array;
+      W             : Vec3;
+      Turn          : out Real;
+      Shift         : out Vec3;
+      Normal        : out Vec3;
+      Found         : out Boolean)
+     with Pre => Before'First = After'First and then Before'Last = After'Last
+                 and then Weight'First = Before'First and then Weight'Last = Before'Last;
+   --  A plane's points seen before and after a turn of the eye about W and a shift across it, by their lines of
+   --  sight in the eye's frame: X' = R X + T, R = Rot (W, -Turn), T across W, and the plane N . X = 1 in the first
+   --  frame, so that a point's line of sight after is (R + T N^T) times its line before. In the frame of W the
+   --  homography's last row is (0, 0, 1) and its first two rows are six unknowns, linear in the lines of sight (the
+   --  line after crossed with the homography's image of the line before is nought): weighted least squares. The
+   --  turn is the one of the two that leave the first two rows less the turn's of rank one (T N^T) whose other
+   --  minors the fit leaves the least; Shift and Normal are that rank-one part's factors, Normal of unit length
+   --  (the plane's distance is in Shift). A plane's points give the turn where a turn's epipolar lines do not:
+   --  they are one plane, and the motion that maps them is told by the plane, not left a family (the desktop
+   --  regime's synthetic arm, 10-16: a 0.6 rad sweep's first stage chose 69 px of 400 by its epipolar lines on a
+   --  plane of points, 421 when the points' depths were off the plane). Not Found when the points do not determine
+   --  the six unknowns.
 
    function Rayleigh_Median return Real;
    --  The median of the length of a vector of two components that are Gaussian with the same sigma, over that

@@ -1,3 +1,4 @@
+with Ada.Containers.Generic_Array_Sort;
 with Ada.Strings.Fixed;
 with Ada.Calendar;
 with Ada.Numerics.Long_Elementary_Functions;
@@ -2016,6 +2017,9 @@ package body Driver.Robot.Kinematics.Fit is
       --  focal length's profile is walked. It belongs to the fit that searched: a fit begun from it within the
       --  same estimate (From) starts in the basin that profile chose, on a few more sightings, and walked it again
       --  at most of its time (the profile is most of the last stage: ten refinements of the tracks to its one).
+      --  Whether the sightings tell the joints' order (stage 4), or the fit begun from tells it (From).
+      Order_Is_Told : Boolean := False;
+
       procedure Finish (Profiled : Boolean) is
       begin
          --  The sign of every translation at once, which the epipolar constraint
@@ -2192,6 +2196,7 @@ package body Driver.Robot.Kinematics.Fit is
          Report.Searched_Least := Searched_Least;
          Report.Searched_Most := Searched_Most;
          Report.Profiled_Over := (if Profiled then Sightings'Length elsif From.Valid then From.Profiled_Over else 0);
+         Report.Order_Told := Order_Is_Told;
          Chain := Order;
          Report.Fitted := Report.Determined;
          Close_Stage;
@@ -2329,6 +2334,7 @@ package body Driver.Robot.Kinematics.Fit is
          Focal_Within := From.Focal_Within;
          Searched_Least := From.Searched_Least;
          Searched_Most := From.Searched_Most;
+         Order_Is_Told := From.Order_Told;
          Finish (Profiled => False);
          return;
       end if;
@@ -2418,6 +2424,217 @@ package body Driver.Robot.Kinematics.Fit is
               (Own_Joint (Frame) > 0
                and then (Frame = Up_Frame (Own_Joint (Frame)) or else Frame = Down_Frame (Own_Joint (Frame))));
 
+            --  Whether a keyframe's sightings are a homography of the reference's: a plane's points (the table under a
+            --  wrist), or an eye that turns without travelling (a wrist on a short lever), whatever the scene. There
+            --  the epipolar line of every sighting holds under a family of motions, not one: the turn about a direction
+            --  and the focal length that the residuals below score are not told by it (the desktop regime's synthetic
+            --  arm on a plane of points, 10-16: the search chose 69 px of 400; R6's kiwi wrist, 10-14: 27 to 24453 px),
+            --  and the plane's homography tells them (Turn_On_Plane). Judged on the pixels alone, so the same at every
+            --  focal length and direction the search tries: the least squares homography and fundamental matrix of the
+            --  keyframe (each in coordinates centred on its points' mean and scaled to unit spread per axis, solved
+            --  again with each sighting weighted to its distance in pixels and by Huber at the noise of the first),
+            --  and the noise each leaves: a homography's transfer of the reference pixel, two axes, its median over
+            --  the Rayleigh median; the fundamental matrix's distance of the keyframe pixel from its line, one axis,
+            --  its median over the normal's upper quartile. Both are the sightings' noise where the keyframe is a
+            --  homography (the fundamental matrix fits a homography's pairs as well as any other's), and the
+            --  homography's is the larger by the parallax where it is not: homographic unless its noise is
+            --  significantly the larger, the two medians' standard errors combined.
+            Homographic : array (1 .. Frames) of Boolean := [others => False];
+
+            procedure Judge_Homography (C : Centred_Array) is
+               M       : constant Natural := C'Length;
+               Entries : constant := 9;   --  a 3 by 3 matrix's
+               type Pixel_Array is array (1 .. M) of Real;
+               X0, Y0, X1, Y1 : Pixel_Array;
+               S0, S1  : Real := 0.0;
+               Mx0, My0, Mx1, My1 : Real := 0.0;
+               Wh, Wf  : Pixel_Array := [others => 1.0];
+               Eh, Ef  : Pixel_Array := [others => 0.0];   --  the residuals in pixels
+               Hm, Fm  : Real_Matrix (1 .. 3, 1 .. 3);
+
+               --  The unit vector the weighted rows' normal matrix has least.
+               type Row is array (1 .. Entries) of Real;
+               function Least (Rows : access function (I : Positive; Second : Boolean) return Row;
+                               Weight : Pixel_Array; Two : Boolean) return Real_Matrix
+               is
+                  A       : Real_Matrix (1 .. Entries, 1 .. Entries) := [others => [others => 0.0]];
+                  Values  : Real_Vector (1 .. Entries);
+                  Vectors : Real_Matrix (1 .. Entries, 1 .. Entries);
+                  Low     : Positive := 1;
+                  Result  : Real_Matrix (1 .. 3, 1 .. 3);
+               begin
+                  for I in 1 .. M loop
+                     for Second in Boolean loop
+                        if Second <= Two then
+                           declare
+                              G : constant Row := Rows (I, Second);
+                           begin
+                              for P in 1 .. Entries loop
+                                 for Q in P .. Entries loop
+                                    A (P, Q) := A (P, Q) + Weight (I) * G (P) * G (Q);
+                                 end loop;
+                              end loop;
+                           end;
+                        end if;
+                     end loop;
+                  end loop;
+                  for P in 2 .. Entries loop
+                     for Q in 1 .. P - 1 loop
+                        A (P, Q) := A (Q, P);
+                     end loop;
+                  end loop;
+                  Eigensystem (A, Values, Vectors);
+                  for P in 2 .. Entries loop
+                     if Values (P) < Values (Low) then
+                        Low := P;
+                     end if;
+                  end loop;
+                  for P in 1 .. 3 loop
+                     for Q in 1 .. 3 loop
+                        Result (P, Q) := Vectors (3 * (P - 1) + Q, Low);
+                     end loop;
+                  end loop;
+                  return Result;
+               end Least;
+
+               --  A homography: two rows a sighting, the keyframe pixel's two coordinates.
+               function H_Row (I : Positive; Second : Boolean) return Row is
+                 (if not Second then [-X0 (I), -Y0 (I), -1.0, 0.0, 0.0, 0.0, X1 (I) * X0 (I), X1 (I) * Y0 (I), X1 (I)]
+                  else [0.0, 0.0, 0.0, -X0 (I), -Y0 (I), -1.0, Y1 (I) * X0 (I), Y1 (I) * Y0 (I), Y1 (I)]);
+               --  A fundamental matrix: one row a sighting, X1' F X0 = 0.
+               function F_Row (I : Positive; Second : Boolean) return Row is
+                  pragma Unreferenced (Second);
+               begin
+                  return [X1 (I) * X0 (I), X1 (I) * Y0 (I), X1 (I), Y1 (I) * X0 (I), Y1 (I) * Y0 (I), Y1 (I), X0 (I), Y0 (I), 1.0];
+               end F_Row;
+
+               --  Each sighting's residual in pixels under Hm and Fm, and the weight that makes the next least squares
+               --  of each that of those residuals.
+               procedure Residuals is
+               begin
+                  for I in 1 .. M loop
+                     declare
+                        Px : constant Real := Hm (1, 1) * X0 (I) + Hm (1, 2) * Y0 (I) + Hm (1, 3);
+                        Py : constant Real := Hm (2, 1) * X0 (I) + Hm (2, 2) * Y0 (I) + Hm (2, 3);
+                        Pz : constant Real := Hm (3, 1) * X0 (I) + Hm (3, 2) * Y0 (I) + Hm (3, 3);
+                        Lx : constant Real := Fm (1, 1) * X0 (I) + Fm (1, 2) * Y0 (I) + Fm (1, 3);
+                        Ly : constant Real := Fm (2, 1) * X0 (I) + Fm (2, 2) * Y0 (I) + Fm (2, 3);
+                        Lz : constant Real := Fm (3, 1) * X0 (I) + Fm (3, 2) * Y0 (I) + Fm (3, 3);
+                        Ll : constant Real := Sqrt (Lx * Lx + Ly * Ly);
+                     begin
+                        if Pz /= 0.0 then
+                           Eh (I) := S1 * Sqrt ((Px / Pz - X1 (I)) ** 2 + (Py / Pz - Y1 (I)) ** 2);
+                           Wh (I) := 1.0 / Pz ** 2;
+                        else
+                           Eh (I) := Real'Last;
+                           Wh (I) := 0.0;
+                        end if;
+                        if Ll > 0.0 then
+                           Ef (I) := S1 * abs (X1 (I) * Lx + Y1 (I) * Ly + Lz) / Ll;
+                           Wf (I) := 1.0 / Ll ** 2;
+                        else
+                           Ef (I) := Real'Last;
+                           Wf (I) := 0.0;
+                        end if;
+                     end;
+                  end loop;
+               end Residuals;
+
+               --  The fundamental matrix of rank two: its least singular direction taken out.
+               procedure Rank_Two is
+                  Ftf     : Real_Matrix (1 .. 3, 1 .. 3) := Transpose (Fm) * Fm;
+                  Values  : Real_Vector (1 .. 3);
+                  Vectors : Real_Matrix (1 .. 3, 1 .. 3);
+                  Low     : Positive := 1;
+               begin
+                  for P in 2 .. 3 loop
+                     for Q in 1 .. P - 1 loop
+                        Ftf (P, Q) := Ftf (Q, P);
+                     end loop;
+                  end loop;
+                  Eigensystem (Ftf, Values, Vectors);
+                  for P in 2 .. 3 loop
+                     if Values (P) < Values (Low) then
+                        Low := P;
+                     end if;
+                  end loop;
+                  declare
+                     V : constant Real_Vector (1 .. 3) := [for P in 1 .. 3 => Vectors (P, Low)];
+                     Fv : constant Real_Vector (1 .. 3) := Fm * V;
+                  begin
+                     for P in 1 .. 3 loop
+                        for Q in 1 .. 3 loop
+                           Fm (P, Q) := Fm (P, Q) - Fv (P) * V (Q);
+                        end loop;
+                     end loop;
+                  end;
+               end Rank_Two;
+            begin
+               if M < Entries then
+                  return;
+               end if;
+               for I in 1 .. M loop
+                  Mx0 := Mx0 + C (C'First + I - 1).X0;
+                  My0 := My0 + C (C'First + I - 1).Y0;
+                  Mx1 := Mx1 + C (C'First + I - 1).X1;
+                  My1 := My1 + C (C'First + I - 1).Y1;
+               end loop;
+               Mx0 := Mx0 / Real (M);
+               My0 := My0 / Real (M);
+               Mx1 := Mx1 / Real (M);
+               My1 := My1 / Real (M);
+               for I in 1 .. M loop
+                  S0 := S0 + (C (C'First + I - 1).X0 - Mx0) ** 2 + (C (C'First + I - 1).Y0 - My0) ** 2;
+                  S1 := S1 + (C (C'First + I - 1).X1 - Mx1) ** 2 + (C (C'First + I - 1).Y1 - My1) ** 2;
+               end loop;
+               S0 := Sqrt (S0 / Real (2 * M));
+               S1 := Sqrt (S1 / Real (2 * M));
+               if S0 <= 0.0 or else S1 <= 0.0 then
+                  return;
+               end if;
+               for I in 1 .. M loop
+                  X0 (I) := (C (C'First + I - 1).X0 - Mx0) / S0;
+                  Y0 (I) := (C (C'First + I - 1).Y0 - My0) / S0;
+                  X1 (I) := (C (C'First + I - 1).X1 - Mx1) / S1;
+                  Y1 (I) := (C (C'First + I - 1).Y1 - My1) / S1;
+               end loop;
+               for Pass in 1 .. 2 loop
+                  Hm := Least (H_Row'Access, Wh, Two => True);
+                  Fm := Least (F_Row'Access, Wf, Two => False);
+                  Rank_Two;
+                  Residuals;
+                  if Pass = 1 then
+                     declare
+                        Sh : constant Real := Driver.Stats.Median (Real_Array (Eh)) / Rayleigh_Median;
+                        Sf : constant Real := Driver.Stats.Median (Real_Array (Ef)) / Upper_Quartile;
+                     begin
+                        for I in 1 .. M loop
+                           if Sh > 0.0 and then Eh (I) < Real'Last then
+                              Wh (I) := Wh (I) * Huber (Eh (I) / Sh);
+                           end if;
+                           if Sf > 0.0 and then Ef (I) < Real'Last then
+                              Wf (I) := Wf (I) * Huber (Ef (I) / Sf);
+                           end if;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+               declare
+                  Mh : constant Real := Driver.Stats.Median (Real_Array (Eh));
+                  Mf : constant Real := Driver.Stats.Median (Real_Array (Ef));
+                  --  A median's standard error over the median, of the Rayleigh's (1 / (2 ln 2 sqrt M)) and of the
+                  --  normal's absolute value (Median_Error).
+                  Rh : constant Real := 1.0 / (Rayleigh_Median ** 2 * Sqrt (Real (M)));
+                  Rf : constant Real := (if Mf > 0.0 then Median_Error (Mf, M) / Mf else 0.0);
+               begin
+                  Homographic (C (C'First).Frame) :=
+                    Mh = 0.0
+                    or else (Mf > 0.0 and then Mh < Real'Last
+                             and then Ln ((Mh / Rayleigh_Median) / (Mf / Upper_Quartile))
+                                      <= Driver.Conventions.Z * Sqrt (Rh ** 2 + Rf ** 2));
+               end;
+            end Judge_Homography;
+
             procedure Prepare (F : Real) is
             begin
                if not Gathered then
@@ -2445,6 +2662,40 @@ package body Driver.Robot.Kinematics.Fit is
                         end if;
                      end loop;
                   end;
+                  for J in 1 .. N loop
+                     declare
+                        From : Positive := Centred (J)'First;
+                     begin
+                        while From <= Centred (J)'Last loop
+                           declare
+                              To : Positive := From;
+                           begin
+                              while To < Centred (J)'Last and then Centred (J) (To + 1).Frame = Centred (J) (From).Frame loop
+                                 To := To + 1;
+                              end loop;
+                              Judge_Homography (Centred (J) (From .. To));
+                              From := To + 1;
+                           end;
+                        end loop;
+                     end;
+                     declare
+                        Keyframes, Homographies : Natural := 0;
+                        Last : Natural := 0;
+                     begin
+                        for C of Centred (J).all loop
+                           if C.Frame /= Last then
+                              Last := C.Frame;
+                              Keyframes := Keyframes + 1;
+                              if Homographic (C.Frame) then
+                                 Homographies := Homographies + 1;
+                              end if;
+                           end if;
+                        end loop;
+                        Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " joint" & J'Image & ":"
+                                         & Homographies'Image & " of" & Keyframes'Image
+                                         & " keyframes a homography of the reference's (a plane, or no travel)");
+                     end;
+                  end loop;
                   Gathered := True;
                end if;
                for J in 1 .. N loop
@@ -2614,6 +2865,9 @@ package body Driver.Robot.Kinematics.Fit is
                Frame_Of : array (1 .. 2) of Natural := [others => 0];
                Rr_Of    : array (1 .. 2) of Mat3;
                T0_Of    : array (1 .. 2) of Vec3;
+               --  A homography's keyframe (Homographic): its plane, as Turn_On_Plane gives it, and that it has one.
+               Plane_Of  : array (1 .. 2) of Vec3 := [others => Zero3];
+               Plane_Way : array (1 .. 2) of Boolean := [others => False];
 
                --  The sighting's row of the constraint: its lines of sight in the frame of W.
                type Four is array (1 .. 4) of Real;
@@ -2649,7 +2903,7 @@ package body Driver.Robot.Kinematics.Fit is
                               Change_Here := L (I).Reading;
                            end if;
                         end loop;
-                        if Count >= 3 then
+                        if Count >= 3 and then not Homographic (Frame) then
                            for Pass in 1 .. 2 loop
                               declare
                                  A       : Real_Matrix (1 .. 4, 1 .. 4) := [others => [others => 0.0]];
@@ -2729,7 +2983,77 @@ package body Driver.Robot.Kinematics.Fit is
                               end;
                            end loop;
                         end if;
-                        if Told then
+                        if Count >= 3 and then Homographic (Frame) then
+                           --  The plane's homography (Turn_On_Plane), weighted for its second solution as the epipolar
+                           --  one is: each sighting to its transfer in pixels over its algebraic residual, and by Huber
+                           --  at the noise of the first (the Rayleigh's: the transfer has two axes).
+                           declare
+                              Before, After : Vec3_Array (1 .. Count);
+                              Wp     : Real_Array (1 .. Count) := [others => 1.0];
+                              Turn_H : Real := 0.0;
+                              Sh, Nm : Vec3 := Zero3;
+                              Found  : Boolean := False;
+                              M      : Natural := 0;
+                           begin
+                              for I in 1 .. K loop
+                                 if L (I).Frame = Frame then
+                                    M := M + 1;
+                                    Before (M) := L (I).H0;
+                                    After (M) := L (I).H;
+                                 end if;
+                              end loop;
+                              for Pass in 1 .. 2 loop
+                                 Turn_On_Plane (Before, After, Wp, W, Turn_H, Sh, Nm, Found);
+                                 exit when not Found or else Pass = 2;
+                                 declare
+                                    Rr  : constant Mat3 := Rot (W, -Turn_H);
+                                    Ep  : Real_Array (1 .. M);
+                                    Alg : Real_Array (1 .. M);
+                                 begin
+                                    for Q in 1 .. M loop
+                                       declare
+                                          Y  : constant Vec3 := Rr * Before (Q) + Dot (Nm, Before (Q)) * Sh;
+                                          Hb : constant Vec3 := After (Q);
+                                          A1 : constant Real := Dot (W, Hb) * Dot (E1, Y) - Dot (E1, Hb) * Dot (W, Y);
+                                          A2 : constant Real := Dot (W, Hb) * Dot (E2, Y) - Dot (E2, Hb) * Dot (W, Y);
+                                       begin
+                                          Alg (Q) := Sqrt (A1 ** 2 + A2 ** 2);
+                                          Ep (Q) := (if Y (3) > 0.0 and then Hb (3) > 0.0
+                                                     then F * Sqrt ((Y (1) / Y (3) - Hb (1) / Hb (3)) ** 2
+                                                                    + (Y (2) / Y (3) - Hb (2) / Hb (3)) ** 2)
+                                                     else Real'Last);
+                                       end;
+                                    end loop;
+                                    declare
+                                       Sigma : constant Real := Driver.Stats.Median (Ep) / Rayleigh_Median;
+                                    begin
+                                       for Q in 1 .. M loop
+                                          if Ep (Q) = Real'Last then
+                                             Wp (Q) := 0.0;
+                                          else
+                                             if Alg (Q) > 0.0 and then Ep (Q) > 0.0 then
+                                                Wp (Q) := (Ep (Q) / Alg (Q)) ** 2;
+                                             end if;
+                                             if Sigma > 0.0 then
+                                                Wp (Q) := Wp (Q) * Huber (Ep (Q) / Sigma);
+                                             end if;
+                                          end if;
+                                       end loop;
+                                    end;
+                                 end;
+                              end loop;
+                              if Found then
+                                 Num := Num + Turn_H * Change_Here;
+                                 Den := Den + Change_Here ** 2;
+                                 Told_Of (Way) := True;
+                                 Plane_Way (Way) := True;
+                                 Frame_Of (Way) := Frame;
+                                 Rr_Of (Way) := Rot (W, -Turn_H);
+                                 T0_Of (Way) := Sh;
+                                 Plane_Of (Way) := Nm;
+                              end if;
+                           end;
+                        elsif Told then
                            Num := Num + Turn_Of (V) * Change_Here;
                            Den := Den + Change_Here ** 2;
                            Told_Of (Way) := True;
@@ -2750,13 +3074,36 @@ package body Driver.Robot.Kinematics.Fit is
                         for I in 1 .. K loop
                            if L (I).Frame = Frame_Of (Way) then
                               M := M + 1;
-                              Reprojected (Rr_Of (Way), T0_Of (Way), L (I).H0, L (I).H, F, Du (M), Dv (M));
+                              if Plane_Way (Way) then
+                                 --  The homography's transfer, two axes; behind either eye as far off as the lines of
+                                 --  sight are long, as Reprojected has it.
+                                 declare
+                                    Y : constant Vec3 :=
+                                      Rr_Of (Way) * L (I).H0 + Dot (Plane_Of (Way), L (I).H0) * T0_Of (Way);
+                                 begin
+                                    if Y (3) > 0.0 and then L (I).H (3) > 0.0 then
+                                       Du (M) := F * (Y (1) / Y (3) - L (I).H (1) / L (I).H (3));
+                                       Dv (M) := F * (Y (2) / Y (3) - L (I).H (2) / L (I).H (3));
+                                    else
+                                       Du (M) := F * Sqrt (Dot (Y, Y) + Dot (L (I).H, L (I).H));
+                                       Dv (M) := 0.0;
+                                    end if;
+                                 end;
+                              else
+                                 Reprojected (Rr_Of (Way), T0_Of (Way), L (I).H0, L (I).H, F, Du (M), Dv (M));
+                              end if;
                            end if;
                         end loop;
                         Share_Out (Du (1 .. M));
+                        if Plane_Way (Way) then
+                           Share_Out (Dv (1 .. M));
+                        end if;
+                        --  A transfer's two axes on the scale of the epipolar distance's one: its median over the
+                        --  Rayleigh's, times the normal's upper quartile, where both are the sightings' noise.
                         for Q in 1 .. M loop
                            Filled := Filled + 1;
-                           Fits (Filled) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
+                           Fits (Filled) := (if Plane_Way (Way) then Upper_Quartile / Rayleigh_Median else 1.0)
+                                            * Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
                         end loop;
                      end;
                   end if;
@@ -3551,6 +3898,7 @@ package body Driver.Robot.Kinematics.Fit is
       --  land does: every point the reference eye saw, at the depth the
       --  keyframes of one joint each gave it, reprojected into those keyframes,
       --  scores the order. Lengths in any unit: the depths are in the joints'.
+      Order_Is_Told := N <= 1;
       if N > 1 then
          declare
             Multi, Tracks : Natural := 0;
@@ -3568,6 +3916,7 @@ package body Driver.Robot.Kinematics.Fit is
             declare
                Depth  : Real_Access := new Real_Array'(1 .. Tracks => 0.0);   --  0: not placed
                R      : Real_Access := new Real_Array (1 .. 2 * Multi);
+               Here_R : Real_Access := new Real_Array (1 .. 2 * Multi);   --  the residuals of the order found
                Poses  : Rigid_Access := new Pose_Array;
                Placed : Natural := 0;   --  sightings of placed points in those keyframes
 
@@ -3604,27 +3953,78 @@ package body Driver.Robot.Kinematics.Fit is
                   end if;
                end Score;
 
-               --  C with the joint at place From moved to place To, the joints between shifted over.
-               function Moved (C : Chain_Order; From, To : Positive) return Chain_Order is
-                  Result : Chain_Order := C;
+               --  Whether the residuals A are significantly the smaller than B, residual by residual (the same
+               --  sightings, in the same order): Wilcoxon's signed ranks of |A| - |B|, at Z of their normal
+               --  approximation. Two orders' medians are each as uncertain as their residuals are few, but they are
+               --  read off the same sightings, and what tells one order from another is how each sighting moves:
+               --  compared by the standard error of one median, the true order was no move from a wrong one
+               --  (robot.kinematics.desktop with stage 1's plane, 10-16: 0.647 against 0.660 +- 0.030 px), and taken
+               --  wherever a median was lower, the search wandered to wrong orders whose medians the noise put lower
+               --  still (all three of its sweeps).
+               function Smaller (A, B : Real_Array) return Boolean is
+                  type Signed is record
+                     Size     : Real := 0.0;
+                     Negative : Boolean := False;
+                  end record;
+                  type Signed_Array is array (Positive range <>) of Signed;
+                  function "<" (L, R : Signed) return Boolean is (L.Size < R.Size);
+                  procedure Sort is new Ada.Containers.Generic_Array_Sort (Positive, Signed, Signed_Array);
+                  D : Signed_Array (1 .. A'Length);
+                  M : Natural := 0;
                begin
-                  if From < To then
-                     Result (From .. To - 1) := C (From + 1 .. To);
-                  else
-                     Result (To + 1 .. From) := C (To .. From - 1);
+                  for I in A'Range loop
+                     declare
+                        X : constant Real := abs A (I);
+                        Y : constant Real := abs B (B'First + I - A'First);
+                     begin
+                        if X /= Y then
+                           M := M + 1;
+                           D (M) := (Size     => (if X >= Real'Last or else Y >= Real'Last then Real'Last
+                                                  else abs (X - Y)),
+                                     Negative => X < Y);
+                        end if;
+                     end;
+                  end loop;
+                  if M = 0 then
+                     return False;
                   end if;
-                  Result (To) := C (From);
-                  return Result;
-               end Moved;
+                  Sort (D (1 .. M));
+                  declare
+                     Smaller_Ranks : Real := 0.0;   --  the ranks of the differences where A is the smaller
+                     From          : Positive := 1;
+                     Mm            : constant Real := Real (M);
+                  begin
+                     --  Ties share the mean of their ranks.
+                     while From <= M loop
+                        declare
+                           To : Positive := From;
+                        begin
+                           while To < M and then D (To + 1).Size = D (From).Size loop
+                              To := To + 1;
+                           end loop;
+                           for I in From .. To loop
+                              if D (I).Negative then
+                                 Smaller_Ranks := Smaller_Ranks + Real (From + To) / 2.0;
+                              end if;
+                           end loop;
+                           From := To + 1;
+                        end;
+                     end loop;
+                     return (Smaller_Ranks - Mm * (Mm + 1.0) / 4.0)
+                       > Driver.Conventions.Z * Sqrt (Mm * (Mm + 1.0) * (2.0 * Mm + 1.0) / 24.0);
+                  end;
+               end Smaller;
+
 
                procedure Free_All is
                begin
                   Free (Depth);
                   Free (R);
+                  Free (Here_R);
                   Free (Poses);
                end Free_All;
 
-               Here, Here_Error : Real;
+               Here : Real;
             begin
                for I in 1 .. Natural'Min (Tracks, Natural (Track_Depths.Length)) loop
                   Depth (I) := Real'Max (0.0, Track_Depths (Track_Depths.First_Index + I - 1));
@@ -3640,59 +4040,96 @@ package body Driver.Robot.Kinematics.Fit is
                         & "order of the joints along the arm is not told");
                   return;
                end if;
-               --  The start: the axes farthest from the eye first, as they most
-               --  often are on an arm that carries its eye at the end; the
-               --  search does not rest on it.
-               for K in 2 .. N loop
-                  declare
-                     Item : constant Positive := Order (K);
-                     I    : Natural := K - 1;
+               --  Every order of the joints, scored (Score): the search moved one joint at a time from a start ordered
+               --  by the axes' distances from the eye and stopped where no move lowered the median by more than its
+               --  standard error, and f16b's arm 1 came out in the wrong order in every pass at twice the right order's
+               --  median (10-15), the desktop's arm at 11.5 degrees in two wrong orders once stage 1 told its lens
+               --  (10-16). N! orders of one reprojection each: 720 for six joints. The order is the one of the least
+               --  median, the first of equals in the orders' lexicographic sequence.
+               declare
+                  C     : Chain_Order (1 .. N);
+                  M, E  : Real;
+                  Found : Boolean := False;
+
+                  --  C made the next order in lexicographic sequence; False after the last.
+                  function Next return Boolean is
+                     I : Natural := N - 1;
                   begin
-                     while I >= 1
-                       and then abs Joints (Joints'First + Order (I) - 1).P < abs Joints (Joints'First + Item - 1).P
-                     loop
-                        Order (I + 1) := Order (I);
+                     while I >= 1 and then C (I) > C (I + 1) loop
                         I := I - 1;
                      end loop;
-                     Order (I + 1) := Item;
-                  end;
-               end loop;
-               Score (Order, Here, Here_Error);
-               --  A joint moved to the place that lowers the residual most, while
-               --  that lowers it by more than its standard error.
-               loop
-                  declare
-                     Best_Order : Chain_Order (1 .. N) := Order;
-                     Best       : Real := Here;
-                     Best_Error : Real := Here_Error;
-                  begin
-                     for From in 1 .. N loop
-                        for To in 1 .. N loop
-                           if To /= From then
-                              declare
-                                 C    : constant Chain_Order := Moved (Order, From, To);
-                                 M, E : Real;
-                              begin
-                                 Score (C, M, E);
-                                 if M < Best then
-                                    Best := M;
-                                    Best_Error := E;
-                                    Best_Order := C;
-                                 end if;
-                              end;
-                           end if;
+                     if I = 0 then
+                        return False;
+                     end if;
+                     declare
+                        J  : Positive := N;
+                        T  : Positive;
+                        Lo : Positive := I + 1;
+                        Hi : Positive := N;
+                     begin
+                        while C (J) < C (I) loop
+                           J := J - 1;
                         end loop;
+                        T := C (I);
+                        C (I) := C (J);
+                        C (J) := T;
+                        while Lo < Hi loop
+                           T := C (Lo);
+                           C (Lo) := C (Hi);
+                           C (Hi) := T;
+                           Lo := Lo + 1;
+                           Hi := Hi - 1;
+                        end loop;
+                     end;
+                     return True;
+                  end Next;
+
+                  function Image (O : Chain_Order) return String is
+                     Text : Ada.Strings.Unbounded.Unbounded_String;
+                  begin
+                     for K of O loop
+                        Ada.Strings.Unbounded.Append (Text, K'Image);
                      end loop;
-                     --  Written so that it ends on a score that is no number: the median of residuals of which half
-                     --  or more lay behind the eye was the mean of the two largest reals, infinite, and the
-                     --  difference of two of them none, which no comparison stopped (f15c replayed on 10-15: the
-                     --  search went on for ten minutes at one order).
-                     exit when not (Best < Here - Here_Error);
-                     Order := Best_Order;
-                     Here := Best;
-                     Here_Error := Best_Error;
-                  end;
-               end loop;
+                     return Ada.Strings.Unbounded.To_String (Text);
+                  end Image;
+               begin
+                  Here := Real'Last;
+                  C := [for K in 1 .. N => K];
+                  loop
+                     Score (C, M, E);
+                     if not Found or else M < Here then
+                        Found := True;
+                        Order := C;
+                        Here := M;
+                        Here_R.all := R.all;
+                     end if;
+                     exit when not Next;
+                  end loop;
+                  --  Told where every other order leaves residuals significantly the larger (Smaller): an order the
+                  --  sightings cannot tell from it leaves the joints' order to chance (the desktop's sweep of 3.4
+                  --  degrees, 10-16: no other order's residuals significantly the larger, and a wrong one reported
+                  --  fitted once stage 1 found the lens; s02's arm, 4157 sightings: the fit ordered its joints 1 5 4 2
+                  --  3 6 where they are 1 5 4 3 6 2, by the fake robot's scramble of their channels). An order not told
+                  --  is still the arm's: its residuals are the least, and it predicts the views the keyframes took;
+                  --  Order_Told says that it is not told, and the cells that move several joints, taken larger once
+                  --  the arm is fitted (Boot), are what tell it.
+                  Order_Is_Told := Here < Real'Last;
+                  C := [for K in 1 .. N => K];
+                  while Order_Is_Told loop
+                     if C /= Order then
+                        Score (C, M, E);
+                        if not Smaller (Here_R (1 .. 2 * Placed), R (1 .. 2 * Placed)) then
+                           Order_Is_Told := False;
+                           Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along the arm,"
+                                            & Image (Order) & ", is not told: the order" & Image (C)
+                                            & " leaves residuals of median " & Driver.Log.Image (M, 3) & " px against "
+                                            & Driver.Log.Image (Here, 3)
+                                            & " px, not significantly the larger by their signed ranks");
+                        end if;
+                     end if;
+                     exit when not Next;
+                  end loop;
+               end;
                if Here >= Real'Last then
                   Free_All;
                   Fail ("no order of the joints puts the points the keyframes of one joint placed before the eye in "
@@ -4613,6 +5050,117 @@ package body Driver.Robot.Kinematics.Fit is
 
    --  The median of the lengths of two-coordinate residuals of Gaussian noise
    --  is sigma times the root of 2 ln 2.
+   procedure Turn_On_Plane
+     (Before, After : Vec3_Array;
+      Weight        : Real_Array;
+      W             : Vec3;
+      Turn          : out Real;
+      Shift         : out Vec3;
+      Normal        : out Vec3;
+      Found         : out Boolean)
+   is
+      E1, E2 : Vec3;
+      A      : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];
+      B1, B2 : Real_Vector (1 .. 3) := [others => 0.0];
+      L      : Real_Matrix (1 .. 3, 1 .. 3);
+      Pd     : Boolean;
+   begin
+      Turn := 0.0;
+      Shift := [0.0, 0.0, 0.0];
+      Normal := [0.0, 0.0, 0.0];
+      Found := False;
+      Perp (W, E1, E2);
+      for I in Before'Range loop
+         if Weight (I) > 0.0 then
+            declare
+               H0 : constant Vec3 := [Dot (E1, Before (I)), Dot (E2, Before (I)), Dot (W, Before (I))];
+               H  : constant Vec3 := [Dot (E1, After (I)), Dot (E2, After (I)), Dot (W, After (I))];
+               G  : constant Vec3 := [H (3) * H0 (1), H (3) * H0 (2), H (3) * H0 (3)];
+            begin
+               for P in 1 .. 3 loop
+                  for Q in 1 .. 3 loop
+                     A (P, Q) := A (P, Q) + Weight (I) * G (P) * G (Q);
+                  end loop;
+                  B1 (P) := B1 (P) + Weight (I) * G (P) * H (1) * H0 (3);
+                  B2 (P) := B2 (P) + Weight (I) * G (P) * H (2) * H0 (3);
+               end loop;
+            end;
+         end if;
+      end loop;
+      Driver.Numerics.Dense.Cholesky (A, L, Pd);
+      if not Pd then
+         return;
+      end if;
+      declare
+         X1 : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (L, B1);   --  a, b, e
+         X2 : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (L, B2);   --  c, d, f
+         Pp : constant Real := X1 (1) + X2 (2);
+         Qq : constant Real := X2 (1) - X1 (2);
+         Gg : constant Real := X1 (1) * X2 (2) - X1 (2) * X2 (1) + 1.0;
+         Rr : constant Real := Sqrt (Pp * Pp + Qq * Qq);
+         Best_Phi    : Real := 0.0;
+         Best_Minors : Real := Real'Last;
+         Best_M      : Real_Matrix (1 .. 2, 1 .. 3) := [others => [others => 0.0]];
+      begin
+         if Rr = 0.0 then
+            return;
+         end if;
+         declare
+            Psi    : constant Real := Arctan (Qq, Pp);
+            Spread : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Gg / Rr)));
+         begin
+            for Sign of Real_Array'[-1.0, 1.0] loop
+               declare
+                  Phi : constant Real := Psi + Sign * Spread;
+                  C   : constant Real := Cos (Phi);
+                  S   : constant Real := Sin (Phi);
+                  M   : constant Real_Matrix (1 .. 2, 1 .. 3) :=
+                    [[X1 (1) - C, X1 (2) + S, X1 (3)], [X2 (1) - S, X2 (2) - C, X2 (3)]];
+                  --  Of rank one: every minor nought; their squares summed, what is left of it.
+                  Minors : constant Real :=
+                    (M (1, 1) * M (2, 2) - M (1, 2) * M (2, 1)) ** 2 + (M (1, 1) * M (2, 3) - M (1, 3) * M (2, 1)) ** 2
+                    + (M (1, 2) * M (2, 3) - M (1, 3) * M (2, 2)) ** 2;
+               begin
+                  if Minors < Best_Minors then
+                     Best_Minors := Minors;
+                     Best_Phi := Phi;
+                     Best_M := M;
+                  end if;
+               end;
+            end loop;
+         end;
+         --  The rank-one part's factors: its row space's direction (the plane's normal) and the column that gives it.
+         declare
+            Mt_M : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];
+            Values  : Real_Vector (1 .. 3);
+            Vectors : Real_Matrix (1 .. 3, 1 .. 3);
+            Most    : Positive := 1;
+         begin
+            for P in 1 .. 3 loop
+               for Q in 1 .. 3 loop
+                  Mt_M (P, Q) := Best_M (1, P) * Best_M (1, Q) + Best_M (2, P) * Best_M (2, Q);
+               end loop;
+            end loop;
+            Eigensystem (Mt_M, Values, Vectors);
+            for P in 2 .. 3 loop
+               if Values (P) > Values (Most) then
+                  Most := P;
+               end if;
+            end loop;
+            declare
+               V  : constant Vec3 := [Vectors (1, Most), Vectors (2, Most), Vectors (3, Most)];
+               U1 : constant Real := Best_M (1, 1) * V (1) + Best_M (1, 2) * V (2) + Best_M (1, 3) * V (3);
+               U2 : constant Real := Best_M (2, 1) * V (1) + Best_M (2, 2) * V (2) + Best_M (2, 3) * V (3);
+            begin
+               Normal := V (1) * E1 + V (2) * E2 + V (3) * W;
+               Shift := U1 * E1 + U2 * E2;
+            end;
+         end;
+         Turn := -Best_Phi;
+         Found := True;
+      end;
+   end Turn_On_Plane;
+
    function Rayleigh_Median return Real is (Sqrt (2.0 * Ln (2.0)));
 
    --  H applied to a plane point; Ahead is False on the line at infinity.
@@ -4930,7 +5478,6 @@ package body Driver.Robot.Kinematics.Fit is
       return W;
    end Whitening;
 
-   type Vec3_Array is array (Positive range <>) of Vec3;
 
    --  One side as the joint fit uses it: its tracks and kept answers, its
    --  estimates (lens terms, plane) and how they are held.

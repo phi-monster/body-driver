@@ -4589,7 +4589,8 @@ package body Driver.Robot.Tests is
    procedure Synthetic_Sweep
      (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0; Track_Error : Real := 0.0;
       Local_Error : Real := 0.0; Pending : Boolean := False; Drawn : Boolean := False;
-      Matcher_Noise : Real := 0.2; Kept_Share : Real := 1.0; Either : Boolean := False; Distortion : Real := 0.0)
+      Matcher_Noise : Real := 0.2; Kept_Share : Real := 1.0; Either : Boolean := False; Distortion : Real := 0.0;
+      Quantum : Real := 0.0; Relief : Real := 0.0; Order_Told_Needed : Boolean := True)
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N       : constant := 6;
@@ -4695,7 +4696,10 @@ package body Driver.Robot.Tests is
                         V0 : constant Real := (Real (Gy) - 0.5) * 480.0 / Real (Rows);
                         --  The table: the plane one unit from the eye along its normal.
                         H     : constant Vec3 := Fit.Ray (Lens, U0, V0);
-                        Depth : constant Real := -1.0 / Real'(Unit (Table) * H);
+                        --  Relief: the scene no plane, each point's depth off the table's by up to that share, by the
+                        --  golden angle from one point to the next (no two alike).
+                        Plane_Depth : constant Real := -1.0 / Real'(Unit (Table) * H);
+                        Depth : constant Real := Plane_Depth * (1.0 + Relief * Sin (Real (K) * Ada.Numerics.Pi * (3.0 - Sqrt (5.0))));
                         X  : constant Vec3 := Depth * H;
                         U, V : Real;
                         Ahead : Boolean;
@@ -4754,7 +4758,9 @@ package body Driver.Robot.Tests is
       begin
          for F in 1 .. Frames loop
             for I in 1 .. N loop
-               Given (F, I) := Gain (I) * Changes (F, Order_Of (I));
+               --  A servo reads its turn to the nearest tick (Quantum, 0 for none): the fit is given that.
+               Given (F, I) := Gain (I) * (if Quantum > 0.0 then Quantum * Real'Rounding (Changes (F, Order_Of (I)) / Quantum)
+                                           else Changes (F, Order_Of (I)));
                Asked (F, I) := Changes (F, Order_Of (I)) /= 0.0;
             end loop;
          end loop;
@@ -4817,6 +4823,14 @@ package body Driver.Robot.Tests is
                end;
             end loop;
          end if;
+         --  The order where the sightings tell it (Order_Told), and the eye where it rests on the order: a fit that
+         --  says the order is not told gives the best of the orders, no more, and a pose no keyframe had is told as
+         --  well as that. Order_Told_Needed: the sweep's keyframes tell the order.
+         if Order_Told_Needed then
+            Check (Report.Order_Told, "the order of the joints along the arm is not told (" & Chain_Text (Chain)
+                   & " the best of them)");
+         end if;
+         if Report.Order_Told then
          Check (Fit."=" (Chain, Want_Chain), "the joints along the arm, by their readings, came out as " & Chain_Text (Chain)
                 & ", not " & Chain_Text (Want_Chain));
          --  The eye at a pose no keyframe had, lengths in the fit's units.
@@ -4871,7 +4885,9 @@ package body Driver.Robot.Tests is
                                 & " sigma" & Real'Image (Sqrt (Turn (1, 1) + Turn (2, 2) + Turn (3, 3))));
             end;
          end;
-         if Frame_Error = 0.0 then
+         end if;
+         --  The table, where the scene is one (no relief).
+         if Frame_Error = 0.0 and then Relief = 0.0 then
          declare
             Normal : Vec3;
             Offset, Offset_Sigma : Real;
@@ -7412,12 +7428,96 @@ package body Driver.Robot.Tests is
    --  fit may or may not tell the arm, but what it reports it must report right: a wrong lens taken for fitted
    --  (the kiwi's 27, 57 and 24453 px) puts every later measurement off. Swept to 11.5 degrees, as the passes'
    --  ladder climbs to, it must tell it.
+   --  A plane's points seen before and after a turn about an axis and a shift across it: the turn, and the plane
+   --  times the shift, come back from their lines of sight alone, whatever way the axis points against the eye's
+   --  (along its sight, across it, and between).
+   procedure Turn_On_A_Plane is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      type Case_Record is record
+         W     : Vec3;
+         Turn  : Real;
+         Point : Vec3;   --  on the axis
+      end record;
+      Cases : constant array (1 .. 4) of Case_Record :=
+        [(Unit ([0.0, 0.0, 1.0]), 0.3, [0.05, -0.02, 0.0]),
+         (Unit ([1.0, 0.0, 0.1]), -0.6, [0.0, 0.2, -0.1]),
+         (Unit ([0.3, -0.8, 0.4]), 0.15, [0.1, 0.1, 0.3]),
+         (Unit ([0.0, 1.0, 0.0]), 0.6, [0.0, 0.0, -0.4])];
+      --  The plane N . X = 1, below and ahead of the eye.
+      N : constant Vec3 := [0.0, -0.6, -0.8] / 0.9;   --  its normal over its distance
+   begin
+      for C of Cases loop
+         declare
+            R : constant Mat3 := Driver.Numerics.Exp (-C.Turn * C.W);
+            T : constant Vec3 := C.Point - R * C.Point;
+            Before, After : Fit.Vec3_Array (1 .. 48);
+            Weight : constant Real_Array (1 .. 48) := [others => 1.0];
+            K      : Natural := 0;
+         begin
+            for Gy in 1 .. 6 loop
+               for Gx in 1 .. 8 loop
+                  declare
+                     H0 : constant Vec3 := [(Real (Gx) - 4.5) * 0.12, (Real (Gy) - 3.5) * 0.12, 1.0];
+                     X  : constant Vec3 := (1.0 / Dot (N, H0)) * H0;
+                     Y  : constant Vec3 := R * X + T;
+                  begin
+                     K := K + 1;
+                     Before (K) := H0;
+                     After (K) := (1.0 / Y (3)) * Y;
+                  end;
+               end loop;
+            end loop;
+            declare
+               Turn  : Real;
+               Shift, Normal : Vec3;
+               Found : Boolean;
+               Want  : constant Mat3 := Driver.Numerics.Outer (T, N);
+               Got   : Mat3;
+               Off   : Real := 0.0;
+            begin
+               Fit.Turn_On_Plane (Before, After, Weight, C.W, Turn, Shift, Normal, Found);
+               Check (Found, "the turn on a plane was not found about" & C.W (1)'Image & C.W (2)'Image & C.W (3)'Image);
+               if Found then
+                  Got := Driver.Numerics.Outer (Shift, Normal);
+                  for P in 1 .. 3 loop
+                     for Q in 1 .. 3 loop
+                        Off := Real'Max (Off, abs (Got (P, Q) - Want (P, Q)));
+                     end loop;
+                  end loop;
+                  Check (abs (Turn - C.Turn) < 1.0e-9, "the turn came out" & Turn'Image & " for" & C.Turn'Image);
+                  Check (Off < 1.0e-9, "the shift times the plane is off by" & Off'Image);
+               end if;
+            end;
+         end;
+      end loop;
+   end Turn_On_A_Plane;
+
+   --  The desktop arm swept to 34 degrees, its readings a servo's ticks (4096 a turn), its eye on a plane of points
+   --  (the table under a wrist): every keyframe's sightings a homography of the reference's, whose epipolar lines hold
+   --  under a family of motions, and stage 1 chose 69 px of 400 by them, the fit ending at 777 +- 57 px (10-16); and
+   --  the same scene given relief, whose keyframes are no homography where the eye travels.
+   procedure Kinematics_On_A_Plane_In_Ticks is
+      Tick : constant Real := 2.0 * Ada.Numerics.Pi / 4096.0;
+   begin
+      Synthetic_Sweep (3.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Quantum => Tick);
+      Synthetic_Sweep (3.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Quantum => Tick,
+                       Relief => 0.3);
+   end Kinematics_On_A_Plane_In_Ticks;
+
+   --  The order of the joints is not asked of the sweep to 11.5 degrees: its keyframes that move several joints turn
+   --  each by 0.05 units, 2.9 degrees, and what the order changes grows with the product of two joints' turns. Every
+   --  order of its six joints scored (10-16), joints 2 and 3 exchanged left residuals of median 0.966 and 0.945 px
+   --  against 0.960 and 0.955 px in their true order, not significantly the larger by their signed ranks; the search
+   --  that ended at the true order had started there (the axes' distances from the eye) and found no move it could
+   --  tell from it.
    procedure Kinematics_In_A_Desktop_Regime is
    begin
-      Synthetic_Sweep (0.3, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Either => True);
-      Synthetic_Sweep (1.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25);
+      Synthetic_Sweep (0.3, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Either => True,
+                       Order_Told_Needed => False);
+      Synthetic_Sweep (1.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Order_Told_Needed => False);
       --  The same with a wide-angle wrist camera's barrel distortion.
-      Synthetic_Sweep (1.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Distortion => -0.2);
+      Synthetic_Sweep (1.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Distortion => -0.2,
+                       Order_Told_Needed => False);
    end Kinematics_In_A_Desktop_Regime;
 
    --  The same arm, every keyframe's points sharing an error of 0.3 pixels
@@ -8196,6 +8296,11 @@ package body Driver.Robot.Tests is
                              & "less than a keyframe's match can tell is not fitted", Kinematics_With_An_Offset_Reference'Access);
       Driver.Tests.Register ("robot.kinematics.small", "a sweep too small to determine the lens and the joints is "
                              & "reported fitted", Kinematics_Of_A_Small_Sweep'Access);
+      Driver.Tests.Register ("robot.kinematics.plane", "a desktop arm swept to 34 degrees in a servo's ticks, its eye on "
+                             & "a plane of points or on the same with relief, is not fitted right",
+                             Kinematics_On_A_Plane_In_Ticks'Access);
+      Driver.Tests.Register ("robot.kinematics.plane_turn", "a plane's points seen before and after a turn about an "
+                             & "axis do not give back the turn, or the plane and the shift", Turn_On_A_Plane'Access);
       Driver.Tests.Register ("robot.kinematics.desktop", "a desktop servo arm swept by 1.5 to 3.4 degrees, its sightings "
                              & "erring by a pixel, a quarter of the points left, is reported fitted with a lens off by "
                              & "more than Z of its sigma, or swept to 11.5 degrees is not fitted right",

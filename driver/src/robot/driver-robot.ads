@@ -675,6 +675,7 @@ private
       --  made in: a fit made again within that estimate begins from it (Kinematics.Refit's Again).
       Focal_Within, Searched_Least, Searched_Most : Real := 0.0;
       Profiled_Over : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
+      Order_Told    : Boolean := False;   --  its joints' order is told by the sightings, not only the best (Fit_Report)
       Made_At : Natural := 0;
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
