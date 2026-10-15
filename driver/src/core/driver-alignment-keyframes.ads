@@ -123,6 +123,7 @@ package Driver.Alignment.Keyframes is
       Shift_U, Shift_V : Real := 0.0;  --  how far it moves the picture's centre, in pixels
       Sigma      : Real := 0.0;        --  how far the places of the points on it lie from it, in pixels
       Draws      : Natural := 0;       --  the pairs of places the fields were drawn from, over the sizes tried
+      Unmoved    : Natural := 0;       --  the points whose best place was where they stood, which drew no field
    end record;
    --  The view's common motion a keyframe from a new direction was predicted from (Add).
 

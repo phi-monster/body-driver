@@ -198,6 +198,7 @@ driver-alignment-keyframes.adb	Max_Degree : constant := 2;	2	structure	the quadr
 driver-alignment-keyframes.adb	Mid : constant Positive := (Lo + Hi) / 2;	2	math	halving the range a binary search has left
 driver-alignment-keyframes.adb	Pieces : constant Natural := Natural'Max (1, Natural'Min (Count, Natural (System.Multiprocessors.Number_Of_CPUs)));	1	structure	one piece at the least, whatever the machine or the points
 driver-alignment-keyframes.adb	Plane : Real_Array (1 .. 6) := [others => 0.0];	6	structure	an affine field's six numbers: per axis the constant and the two coordinates
+driver-alignment-keyframes.adb	Prior_Scale : Real := 1.0;	1.0	structure	no field is told yet: the scale is read only once one is (Have_Prior)
 driver-alignment-keyframes.adb	R := R + 2;	2	math	two residuals a point, one per axis
 driver-alignment-keyframes.adb	Residuals (R + 2) := Iv;	2	math	two residuals a point, one per axis
 driver-alignment-keyframes.adb	Residuals : Real_Array (1 .. 2 * Count);	2	math	two residuals a point, one per axis
@@ -234,13 +235,13 @@ driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess
 driver-alignment-keyframes.adb	VV => 1.0 + Guess.W1 * (Slope_1.VV - 1.0) + Guess.W2 * (Slope_2.VV - 1.0)),	1.0	math	the weights of the fields are weights of the change from the identity: the one stays
 driver-alignment-keyframes.adb	X : constant Real := (P.U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	X : constant Real := (P.U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
-driver-alignment-keyframes.adb	X0 : constant Integer := Integer (Real'Floor (Pu - Reach - 0.5));	0.5	math	a pixel's centre lies half a pixel from its corner
-driver-alignment-keyframes.adb	X1 : constant Integer := Integer (Real'Ceiling (Pu + Reach - 0.5));	0.5	math	a pixel's centre lies half a pixel from its corner
+driver-alignment-keyframes.adb	X0 : constant Integer := Integer (Real'Floor (Cu - Reach - 0.5));	0.5	math	a pixel's centre lies half a pixel from its corner
+driver-alignment-keyframes.adb	X1 : constant Integer := Integer (Real'Ceiling (Cu + Reach - 0.5));	0.5	math	a pixel's centre lies half a pixel from its corner
 driver-alignment-keyframes.adb	Xu, Xv : Real_Vector (1 .. 3);	3	structure	the three terms of an affine field of the place
 driver-alignment-keyframes.adb	Y : constant Real := (P.V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	Y : constant Real := (P.V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0);	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
-driver-alignment-keyframes.adb	Y0 : constant Integer := Integer (Real'Floor (Pv - Reach - 0.5));	0.5	math	a pixel's centre lies half a pixel from its corner
-driver-alignment-keyframes.adb	Y1 : constant Integer := Integer (Real'Ceiling (Pv + Reach - 0.5));	0.5	math	a pixel's centre lies half a pixel from its corner
+driver-alignment-keyframes.adb	Y0 : constant Integer := Integer (Real'Floor (Cv - Reach - 0.5));	0.5	math	a pixel's centre lies half a pixel from its corner
+driver-alignment-keyframes.adb	Y1 : constant Integer := Integer (Real'Ceiling (Cv + Reach - 0.5));	0.5	math	a pixel's centre lies half a pixel from its corner
 driver-alignment-keyframes.adb	abs (Own - Amounts (First)) * (if Second = 0 then 1.0 else abs (Own - Amounts (Second)));	1.0	math	an order-one extrapolation has one distance: the second factor is the empty product
 driver-alignment-keyframes.adb	and then Channels_Moving (Changes, Shifts, Precision) >= 2	2	structure	a change of several channels at once: two at the least
 driver-alignment-keyframes.adb	and then Channels_Moving (Past, Shifts, Precision) = 1	1	structure	a keyframe that changed one channel alone: one channel moves the view
@@ -259,8 +260,8 @@ driver-alignment-keyframes.adb	for S in 1 .. 3 loop	3	math	an affine map along o
 driver-alignment-keyframes.adb	function Order_Of (Second : Natural) return Positive is (if Second = 0 then 1 else Orders);	1	structure	one earlier keyframe gives an extrapolation of order one
 driver-alignment-keyframes.adb	function Terms_Of (Degree : Natural) return Positive is ((Degree + 1) * (Degree + 2) / 2);	2	math	the terms of a polynomial of that degree in two coordinates: (degree + 1) (degree + 2) over two
 driver-alignment-keyframes.adb	function Terms_Of (Degree : Natural) return Positive is ((Degree + 1) * (Degree + 2) / 2);	2	math	the terms of a polynomial of that degree in two coordinates: (degree + 1) (degree + 2) over two
-driver-alignment-keyframes.adb	if (Real (X) + 0.5 - Pu) ** 2 + (Real (Y) + 0.5 - Pv) ** 2 <= Reach ** 2 then	0.5	math	a pixel's centre lies half a pixel from its corner
-driver-alignment-keyframes.adb	if (Real (X) + 0.5 - Pu) ** 2 + (Real (Y) + 0.5 - Pv) ** 2 <= Reach ** 2 then	0.5	math	a pixel's centre lies half a pixel from its corner
+driver-alignment-keyframes.adb	if (Real (X) + 0.5 - Cu) ** 2 + (Real (Y) + 0.5 - Cv) ** 2 <= Reach ** 2 then	0.5	math	a pixel's centre lies half a pixel from its corner
+driver-alignment-keyframes.adb	if (Real (X) + 0.5 - Cu) ** 2 + (Real (Y) + 0.5 - Cv) ** 2 <= Reach ** 2 then	0.5	math	a pixel's centre lies half a pixel from its corner
 driver-alignment-keyframes.adb	if 2 * N >= Side * Side then	2	math	at least half the patch: twice the count reaches the patch's size (Align_At)
 driver-alignment-keyframes.adb	if 2 * Present < Side * Side then	2	math	at least half the patch: twice the count reaches the patch's size (Align_At)
 driver-alignment-keyframes.adb	if Drawable < 2 then	2	math	a turn, a scale and a shift are drawn from two places

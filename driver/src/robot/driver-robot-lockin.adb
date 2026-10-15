@@ -391,13 +391,16 @@ package body Driver.Robot.Lockin is
 
             --  How long the eye's picture goes on settling after the body stops moving: from the last beat any
             --  commandable group moved or was pushed to the first beat after it at which the picture had settled
-            --  (the stillness watch), the longest such stretch in the stream. The picture of a renderer that
-            --  accumulates its frames drifts for beats after the readings stop, and carries the tail of a motion
-            --  into the beats after it.
+            --  (the stillness watch), each such stretch of the stream, and of them the bound Z robust deviations above
+            --  their median. The picture of a renderer that accumulates its frames drifts for beats after the
+            --  readings stop, and carries the tail of a motion into the beats after it. Not the longest stretch: one
+            --  stretch where the picture never settled (a hand resting on the table, creeping) made it 1317 beats,
+            --  every push of the hand's closer was then within it of another group's, its column left the regression,
+            --  and the closer lost its role and the arm its hand (f15t on 10-15; f15f's was 1893).
             function Settling_Tail return Natural is
-               Longest : Natural := 0;
-               Last    : Natural := 0;   --  the last beat a group moved or was pushed
-               Waiting : Boolean := False;
+               Stretches : Real_Vectors.Vector;
+               Last      : Natural := 0;   --  the last beat a group moved or was pushed
+               Waiting   : Boolean := False;
             begin
                for B in 0 .. Natural'Min (M.Beats, Natural (S.Settled_At.Length)) - 1 loop
                   if (for some G in M.Groups.First_Index .. M.Groups.Last_Index =>
@@ -406,11 +409,22 @@ package body Driver.Robot.Lockin is
                      Last := B;
                      Waiting := True;
                   elsif Waiting and then S.Settled_At (B) then
-                     Longest := Natural'Max (Longest, B - Last);
+                     Stretches.Append (Real (B - Last));
                      Waiting := False;
                   end if;
                end loop;
-               return Longest;
+               if Stretches.Is_Empty then
+                  return 0;
+               end if;
+               declare
+                  Values : Real_Array (1 .. Natural (Stretches.Length));
+               begin
+                  for I in Values'Range loop
+                     Values (I) := Stretches (Stretches.First_Index + I - 1);
+                  end loop;
+                  return Natural (Real'Ceiling (Driver.Stats.Median (Values)
+                                                 + Driver.Conventions.Z * Driver.Stats.Robust_Sigma (Values)));
+               end;
             end Settling_Tail;
             Tail : constant Natural := Settling_Tail;
 

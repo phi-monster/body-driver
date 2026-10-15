@@ -910,10 +910,10 @@ package body Driver.Robot.Kinematics is
            & Driver.Log.Image (Common.Shift_U, 1) & " " & Driver.Log.Image (Common.Shift_V, 1) & " px +- "
            & Driver.Log.Image (Common.Sigma, 2) & ";" & Common.Agree'Image & " of" & Common.Points'Image
            & " points on it," & Common.Own'Image & " on it alone against" & Common.Other'Image & " on the next best;"
-           & Common.Draws'Image & " draws"
+           & Common.Draws'Image & " draws" & ";" & Common.Unmoved'Image & " where they stood"
       else ", no common motion of the view told (at size" & Common.Level'Image & "," & Common.Own'Image
            & " points on the best field alone against" & Common.Other'Image & " on the next, of"
-           & Common.Points'Image & ";" & Common.Draws'Image & " draws)");
+           & Common.Points'Image & ";" & Common.Draws'Image & " draws;" & Common.Unmoved'Image & " where they stood)");
 
    function Stated_By (Given : Keyframes.Prediction_Array) return Real is
       Sigmas : Real_Access := new Real_Array (1 .. Given'Length);

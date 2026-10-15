@@ -1084,7 +1084,13 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Sight      : Vec3 := (if Lined then R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector else Zero3);
          Down_Known : Boolean := Lined;
          procedure Read_Down (O : Observation) is
-            Surface : constant Driver.Geometry.Plane_Estimate := Driver.Robot.Hand.Tips.Surface (H.Data.Found (Id).Book);
+            Fitted  : constant Driver.Geometry.Plane_Estimate := Driver.Robot.Hand.Tips.Surface (H.Data.Found (Id).Book);
+            --  Before any press has fitted it, the table the arm's eye saw (Table_In_Arm), in the arm's frame as the
+            --  presses are, which they then correct (Watch). The book's own surface alone comes from presses, and a
+            --  tool that is pressed only along the way down never had a first one (f15t on 10-15: arm 1 fitted, its
+            --  table seen, its tool "not pressed: no surface is known to press it on", the hand never measured).
+            Surface : constant Driver.Geometry.Plane_Estimate :=
+              (if Driver.Geometry.Known (Fitted) then Fitted else Table_In_Arm (M, R.Arm));
          begin
             Down_Known := Present (Id, R) and then Driver.Geometry.Known (Surface) and then abs Surface.Normal > 0.0;
             if Down_Known then
