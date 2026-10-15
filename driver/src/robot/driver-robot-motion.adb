@@ -422,6 +422,28 @@ package body Driver.Robot.Motion is
                --  A sending again that meets something changes nothing of what the step reached: the joint stands
                --  where what stops it leaves it.
                exit when Again.Outcome /= Reached;
+               --  Nor does one the body did not execute: no group it asked delivered a significant share of the ask.
+               --  Each landing came nearer than the one before by four of 1.7e9 deviations, the arm creeping on what
+               --  held it, and the step was sent again every six beats for 1700 beats, delivering 0.000 of 2.02 units
+               --  each time (f15m on 10-15, readings exact to 1e-9 units).
+               declare
+                  Executed : Boolean := False;
+               begin
+                  for G in 1 .. Groups loop
+                     if Driver.Commands.Has_Target (Nudged, Group_Id (G)) and then Steps.Episodes (M, Group_Id (G)) > 0 then
+                        declare
+                           D : constant Estimate := Steps.Latest (M, Group_Id (G)).Delivered;
+                        begin
+                           if Known (D) and then D.Value > 0.0
+                             and then Driver.Uncertain.Significant (D.Value, D.Sigma, D.Degrees_Of_Freedom)
+                           then
+                              Executed := True;
+                           end if;
+                        end;
+                     end if;
+                  end loop;
+                  exit when not Executed;
+               end;
             end;
          end;
       end loop;

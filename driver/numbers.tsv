@@ -1063,7 +1063,6 @@ driver-robot-boot.adb	State : array (1 .. 2 * Size) of Stop := [others => Blocke
 driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));	2	structure	one more doubling of the push: the responding cells grew at most as the push did
 driver-robot-boot.adb	elsif Per_Unit (P.Channel) > 0.0 and then 2.0 * Last.Offset * Per_Unit (P.Channel) > Half then	2.0	structure	the next level, twice this one, would move the view by more than half of it
 driver-robot-boot.adb	exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else 2.0 * Patch);	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
-driver-robot-boot.adb	if Followed_Now or else (K = 1 and then Measured_Now) then	1	structure	the first level of the pass is the one that measured the shift
 driver-robot-boot.adb	if M.Beats >= 2 * Rest_Beats then	2	structure	the rest is compared with itself at every doubling of its beats, as the estimates are scheduled
 driver-robot-boot.adb	if N > 1 and then Followed_In_Pass > 0 and then Fitted_Now then	1	structure	joints move together only when there are at least two
 driver-robot-boot.adb	if N > 1 and then not Fitted_Now	1	structure	a zero start of a sum

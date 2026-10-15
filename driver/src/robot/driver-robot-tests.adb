@@ -43,6 +43,7 @@ package body Driver.Robot.Tests is
    use Driver.Numerics.Arrays;
    use Driver.Tests;
    use type Driver.Observations.Group_Id;
+   use type Driver.Observations.Camera_Id;
 
    --  The joints of a synthetic arm along it: the tests build their arms in the order of their readings.
    function Along (J : Driver.Robot.Kinematics.Fit.Joint_Array) return Driver.Robot.Kinematics.Fit.Chain_Order is
@@ -632,6 +633,47 @@ package body Driver.Robot.Tests is
       Driver.Robot.Graph.Derive (M);
       Check (Role (M, 3) = Closer, "once the eye decided nothing moved, the group is " & Role (M, 3)'Image);
    end Undecided_Eye_Leaves_Group_Unclassified;
+
+   --  An arm whose own eye the lock-in calls undecided keeps that eye while its keyframes tell that the eye's view
+   --  moves with it (Arm_Evidence.Shift_Seen): the aligner measures over the whole picture what the lock-in's flow
+   --  measures a beat at a time (f15o on 10-15: the lock-in, regressing the sweep's and the hand's beats again,
+   --  read arm 1's eye as undecided, the graph took the eye off the arm, and the hand measured in it was dropped).
+   --  Where no keyframe told, the lock-in alone decides, and the arm no longer carries the eye.
+   procedure Keyframes_Hold_An_Eye_On_Its_Arm is
+      M : Model;
+      Undecided_Own : constant Eye_Effect :=
+        (Verdict => Undecided, Responding => 24, Textured => 48,
+         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0);
+      G : Group_Id;
+      E : Eye_Id'Base := 0;
+      K : Natural := 0;   --  arm 1's evidence
+   begin
+      Exercise_Rig (M);
+      G := Arm_Group (M, 1);
+      for I in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+         if M.Kinematics (I).Group = G then
+            K := I;
+            E := M.Kinematics (I).Eye;
+         end if;
+      end loop;
+      Check (K > 0 and then E > 0, "arm 1 has no evidence with an eye after its sweep");
+      if K = 0 or else E = 0 then
+         return;
+      end if;
+      Check ((for some S of M.Kinematics (K).Shift_Seen => S),
+             "no keyframe of arm 1 told that its eye's view moves with a joint");
+      M.Graph.Effects.Replace_Element ((Natural (G) - 1) * Eye_Count (M) + Natural (E), Undecided_Own);
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, G) = Arm, "arm 1, its own eye undecided and its keyframes telling, is " & Role (M, G)'Image);
+      Check (Eye_Mount (M, E).Kind = Arm_Carried and then Eye_Mount (M, E).Arm = M.Graph.Arm_Of (G),
+             "arm 1's eye, undecided in the lock-in while the keyframes tell, is " & Eye_Mount (M, E).Kind'Image);
+      for C in 0 .. Natural (M.Kinematics (K).Shift_Seen.Length) - 1 loop
+         M.Kinematics (K).Shift_Seen.Replace_Element (C, False);
+      end loop;
+      Driver.Robot.Graph.Derive (M);
+      Check (not (Eye_Mount (M, E).Kind = Arm_Carried and then Eye_Mount (M, E).Arm = M.Graph.Arm_Of (G)),
+             "with no keyframe telling, an eye the lock-in is undecided about still rides arm 1");
+   end Keyframes_Hold_An_Eye_On_Its_Arm;
 
    --  A group that carries an eye moves the whole of its picture, though much
    --  of the picture is so faintly textured that its cells cannot tell pushes
@@ -8205,6 +8247,8 @@ package body Driver.Robot.Tests is
                              & "own eye is called an arm after enough presses", Presses_Leave_A_Closer_A_Closer'Access);
       Driver.Tests.Register ("robot.roles.undecided", "a group some eye is still undecided about is called a closer or a "
                              & "part, though that eye may ride on it", Undecided_Eye_Leaves_Group_Unclassified'Access);
+      Driver.Tests.Register ("robot.roles.keyframes", "an arm loses the eye its keyframes tell moves with it when the "
+                             & "lock-in is undecided about it, or keeps one no keyframe tells of", Keyframes_Hold_An_Eye_On_Its_Arm'Access);
       Driver.Tests.Register ("robot.roles.noisy", "an eye that a group carries is called a patch of it because part of its "
                              & "picture is too faintly textured for its cells to tell the group's push, or a patch "
                              & "among well-textured cells is called the whole picture",

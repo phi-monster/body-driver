@@ -612,7 +612,13 @@ package body Driver.Robot.Lockin is
                      return True;
                   end;
                end if;
-               return True;
+               --  A beat that no group pushes is at rest only once the eye's picture has settled since the body last
+               --  moved (the stillness watch): the picture goes on changing after the readings stop, and a row of
+               --  motion with no push is noise in the regression. The sweep's pushes left the arm's own eye settling
+               --  for up to 31 beats after each, the cells' noise grew with it, and the eye read as showing a patch
+               --  (f15j on 10-15). Asked beat by beat, not as the stream's longest settling: one stretch of a hand
+               --  creeping on the table made that 1893 beats (f15f), and would have left out every rest after it.
+               return B < Natural (S.Settled_At.Length) and then S.Settled_At (B);
             end Usable;
          begin
             S.Settling_Tail := Tail;

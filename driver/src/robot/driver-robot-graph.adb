@@ -4,6 +4,7 @@ with Driver.Robot.Lag;
 package body Driver.Robot.Graph is
 
    use type Driver.Observations.Group_Id;
+   use type Driver.Observations.Camera_Id;
 
    function Effect (M : Model; G : Group_Id; E : Eye_Id) return Eye_Effect is
       K : constant Natural := (Natural (G) - 1) * Natural (M.Eyes.Length) + Natural (E);
@@ -44,6 +45,37 @@ package body Driver.Robot.Graph is
          end loop;
          return False;
       end Pushed_Alone;
+
+      --  The eye whose view the keyframes of a group's arm tell moves with one of its channels (Arm_Evidence.Shift_Seen:
+      --  the aligner found the points of the picture moving with the channel, not a patch of them), the one told of
+      --  by the most points; zero where no keyframe told. The aligner measures over the whole picture, its windows
+      --  reaching half of it, what the lock-in's flow measures a beat at a time, and its verdict stands: the lock-in,
+      --  regressing every beat of the stream again at each estimate, read the arm's own eye as undecided or showing
+      --  a patch during the arm's sweep and the measuring of its hand, the graph took the eye off the arm, and its
+      --  keyframes and its hand went with it (f15f, f15j and f15o on 10-15).
+      function Told_Eye (G : Group_Id) return Eye_Id'Base is
+         Best : Eye_Id'Base := 0;
+         Most : Natural := 0;
+      begin
+         for R of M.Kinematics loop
+            if R.Group = G and then R.Eye in M.Eyes.First_Index .. M.Eyes.Last_Index then
+               declare
+                  Told : Natural := 0;
+               begin
+                  for C in 0 .. Natural'Min (Natural (R.Shift_Seen.Length), Natural (R.Shift_Told.Length)) - 1 loop
+                     if R.Shift_Seen (C) then
+                        Told := Told + R.Shift_Told (C);
+                     end if;
+                  end loop;
+                  if Told > Most then
+                     Most := Told;
+                     Best := R.Eye;
+                  end if;
+               end;
+            end if;
+         end loop;
+         return Best;
+      end Told_Eye;
 
       Own : array (M.Groups.First_Index .. M.Groups.Last_Index) of Boolean := [others => False];
    begin
@@ -96,7 +128,7 @@ package body Driver.Robot.Graph is
                      Gr.Carrier := G;
                      Gr.Roles.Replace_Element (G, Carrier);
                   end if;
-               elsif Whole_Eyes > 0 then
+               elsif Whole_Eyes > 0 or else Told_Eye (G) > 0 then
                   Gr.Arms.Append (G);
                   Gr.Roles.Replace_Element (G, Arm);
                   Gr.Arm_Of.Replace_Element (G, Gr.Arms.Last_Index);
@@ -105,14 +137,21 @@ package body Driver.Robot.Graph is
          end if;
       end loop;
 
-      --  Mounts: an eye rides on the arm whose push moves the largest share
-      --  of it; on the carrier when only the carrier moves it whole; fixed
-      --  in the world when no group does.
+      --  Mounts: an eye rides on the arm whose keyframes tell its view moves
+      --  with the arm (Told_Eye); else on the arm whose push moves the
+      --  largest share of it; on the carrier when only the carrier moves it
+      --  whole; fixed in the world when no group does.
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
             Best_Arm   : Arm_Id'Base := 0;
             Best_Share : Real := 0.0;
+            Keyed      : Arm_Id'Base := 0;
          begin
+            for A in Gr.Arms.First_Index .. Gr.Arms.Last_Index loop
+               if Told_Eye (Gr.Arms (A)) = E then
+                  Keyed := A;
+               end if;
+            end loop;
             for A in Gr.Arms.First_Index .. Gr.Arms.Last_Index loop
                declare
                   F : constant Eye_Effect := Effect (M, Gr.Arms (A), E);
@@ -123,7 +162,9 @@ package body Driver.Robot.Graph is
                   end if;
                end;
             end loop;
-            if Best_Arm > 0 then
+            if Keyed > 0 then
+               Gr.Mounts.Replace_Element (E, (Kind => Arm_Carried, Arm => Keyed));
+            elsif Best_Arm > 0 then
                Gr.Mounts.Replace_Element (E, (Kind => Arm_Carried, Arm => Best_Arm));
             elsif Gr.Carrier > 0 and then Effect (M, Gr.Carrier, E).Verdict = Whole then
                Gr.Mounts.Replace_Element (E, (Kind => Carrier_Carried));
