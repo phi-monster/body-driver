@@ -348,6 +348,18 @@ package body Driver.Robot.Motion is
                      Farthest : Real := Real'Last;
                      Stopped  : Boolean := False;   --  the last sending ended against something: no sending again
                      Errors : Ada.Strings.Unbounded.Unbounded_String;
+                     --  A landing the body cannot tell from its target is where it was sent: its error as a change
+                     --  of the readings is no motion by the body's one test (Channels.Visible), an eye seeing none
+                     --  of it. Judged against the readings' noise alone, a simulator's arm that repeats its readings
+                     --  to the last digit was off by millions of deviations at every landing, 0.00001 units no eye
+                     --  saw, and 309 steps of b01's boot (10-16) were sent again, seven beats each: two fifths of
+                     --  its sweep.
+                     Seen : constant Boolean :=
+                       Target'Length /= Group_Size (M, Group_Id (G)) or else Reading'Length /= Target'Length
+                       or else Channels.Visible
+                                 (M, Group_Id (G),
+                                  [for C in 1 .. Target'Length =>
+                                     Target (Target'First + C - 1) - Reading (Reading'First + C - 1)]);
                   begin
                      if Steps.Episodes (M, Group_Id (G)) > 0 then
                         declare
@@ -363,7 +375,7 @@ package body Driver.Robot.Motion is
                            end if;
                         end;
                      end if;
-                     for C in 1 .. Natural'Min (Target'Length, Reading'Length) loop
+                     for C in 1 .. (if Seen then Natural'Min (Target'Length, Reading'Length) else 0) loop
                         declare
                            Noise : constant Real := Channels.Noise (M, Group_Id (G), C);
                            Error : constant Real := Target (Target'First + C - 1) - Reading (Reading'First + C - 1);

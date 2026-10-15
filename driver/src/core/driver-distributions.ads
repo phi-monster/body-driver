@@ -28,6 +28,11 @@ package Driver.Distributions with Pure is
      with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;
    --  The T >= 0 with Student_T_Two_Sided_Tail (T, Degrees_Of_Freedom) = Two_Sided_Tail.
 
+   function Student_T_Quantile (Two_Sided_Tail : Real; Degrees_Of_Freedom : Positive; Gaussian : Real) return Real
+     with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;
+   --  The same, given Gaussian_Two_Sided_Quantile (Two_Sided_Tail), which it starts from: a caller that asks for many
+   --  numbers of degrees of freedom at one tail works that out once.
+
    function Chi_Square_Upper_Tail (X : Real; Degrees_Of_Freedom : Positive) return Real
      with Pre => X >= 0.0;
    --  P (Q > X) for Q chi-square with that many degrees of freedom.

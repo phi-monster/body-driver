@@ -298,17 +298,37 @@ package body Driver.Robot.Kinematics.Fit is
       Low     : Real := 0.0;
       Top     : Real := High;
 
-      function Median_Ratio (Floor : Real) return Real is
-         Ratios : Real_Access := new Real_Array (1 .. R'Length);
-         Result : Real;
+      --  Whether the median of the residuals over their scales at that floor is above the Gaussian's, told by
+      --  counting them as Driver.Stats.Median would take it, without selecting it: of an odd count it is above
+      --  when fewer than its rank lie at or below; of an even count, when fewer than half do, or when exactly half
+      --  do and the mean of the greatest of them and the least of the rest is above. Each step of the bisection took
+      --  a median of every residual: 1.1 s of the fit's thread of 19 s (s02's dump replayed and sampled, 10-16).
+      function Above_Typical (Floor : Real) return Boolean is
+         N       : constant Natural := R'Length;
+         At_Most : Natural := 0;
+         Lower   : Real := -Real'Last;   --  the greatest ratio at or below Typical
+         Upper   : Real := Real'Last;    --  the least above it
       begin
-         for I in 1 .. R'Length loop
-            Ratios (I) := abs R (R'First + I - 1) / Scale_Of (Floor, Own (Own'First + I - 1));
+         for I in 1 .. N loop
+            declare
+               X : constant Real := abs R (R'First + I - 1) / Scale_Of (Floor, Own (Own'First + I - 1));
+            begin
+               if X <= Typical then
+                  At_Most := At_Most + 1;
+                  Lower := Real'Max (Lower, X);
+               else
+                  Upper := Real'Min (Upper, X);
+               end if;
+            end;
          end loop;
-         Result := Driver.Stats.Median (Ratios.all);
-         Free (Ratios);
-         return Result;
-      end Median_Ratio;
+         if N mod 2 = 1 then
+            return At_Most < (N + 1) / 2;
+         elsif At_Most /= N / 2 then
+            return At_Most < N / 2;
+         else
+            return (Lower + Upper) / 2.0 > Typical;
+         end if;
+      end Above_Typical;
    begin
       if R'Length = 0 or else High <= 0.0 then
          return 0.0;
@@ -316,7 +336,7 @@ package body Driver.Robot.Kinematics.Fit is
       if (for all O of Own => O = 0.0) then
          return High;
       end if;
-      if Median_Ratio (0.0) <= Typical then
+      if not Above_Typical (0.0) then
          return 0.0;
       end if;
       --  The ratio falls as the floor rises, from above the Gaussian's at none to below it at High.
@@ -325,7 +345,7 @@ package body Driver.Robot.Kinematics.Fit is
             Middle : constant Real := (Low + Top) / 2.0;
          begin
             exit when Middle <= Low or else Middle >= Top;
-            if Median_Ratio (Middle) > Typical then
+            if Above_Typical (Middle) then
                Low := Middle;
             else
                Top := Middle;
@@ -1206,24 +1226,58 @@ package body Driver.Robot.Kinematics.Fit is
                         Improved, Lowered : Boolean := False;
                      begin
                         Bm.all := [others => [others => 0.0]];
-                        for I in 1 .. 2 * Used loop
-                           declare
-                              W : constant Real := Huber (R0 (I) / Scales (I)) / Scales (I) ** 2;
-                              T : constant Positive := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;
+                        --  The normal equations, each parameter's row of them at once (Driver.Parallel_For), and the
+                        --  depths' own sums as one more: every sum runs over the residuals in their order whichever
+                        --  task makes it, so that it is the sum one task made, to the last bit (the fit's path turns
+                        --  on its last bits: summed track by track, robot.kinematics.desktop ended at 0.0014 px). One
+                        --  task summed every residual into every row, the most of a tracks' fit's time (s02's fit
+                        --  replayed from its dump and sampled, 10-16: 7.8 s of 18 in stage 5 in Refine_Tracks itself,
+                        --  the workers waiting).
+                        declare
+                           Weights  : Real_Access := new Real_Array (1 .. 2 * Used);
+                           Track_Of : Natural_Access := new Natural_Array (1 .. 2 * Used);
+                           procedure Row (P : Positive) is
                            begin
-                              for P in 1 .. Count loop
-                                 if Jp (I, P) /= 0.0 then
-                                    Gp (P) := Gp (P) - W * Jp (I, P) * R0 (I);
-                                    Bm (P, T) := Bm (P, T) + W * Jp (I, P) * Jd (I);
-                                    for Q in P .. Count loop
-                                       A (P, Q) := A (P, Q) + W * Jp (I, P) * Jp (I, Q);
+                              if P > Count then
+                                 for I in 1 .. 2 * Used loop
+                                    C (Track_Of (I)) := C (Track_Of (I)) + Weights (I) * Jd (I) ** 2;
+                                    Gd (Track_Of (I)) := Gd (Track_Of (I)) - Weights (I) * Jd (I) * R0 (I);
+                                 end loop;
+                              else
+                                 declare
+                                    Sum_G : Real := 0.0;
+                                    Sum_A : Real_Array (P .. Count) := [others => 0.0];
+                                 begin
+                                    for I in 1 .. 2 * Used loop
+                                       if Jp (I, P) /= 0.0 then
+                                          declare
+                                             W : constant Real := Weights (I);
+                                          begin
+                                             Sum_G := Sum_G - W * Jp (I, P) * R0 (I);
+                                             Bm (P, Track_Of (I)) := Bm (P, Track_Of (I)) + W * Jp (I, P) * Jd (I);
+                                             for Q in P .. Count loop
+                                                Sum_A (Q) := Sum_A (Q) + W * Jp (I, P) * Jp (I, Q);
+                                             end loop;
+                                          end;
+                                       end if;
                                     end loop;
-                                 end if;
-                              end loop;
-                              C (T) := C (T) + W * Jd (I) ** 2;
-                              Gd (T) := Gd (T) - W * Jd (I) * R0 (I);
-                           end;
-                        end loop;
+                                    Gp (P) := Sum_G;
+                                    for Q in P .. Count loop
+                                       A (P, Q) := Sum_A (Q);
+                                    end loop;
+                                 end;
+                              end if;
+                           end Row;
+                           procedure Rows is new Driver.Parallel_For (Row);
+                        begin
+                           for I in 1 .. 2 * Used loop
+                              Weights (I) := Huber (R0 (I) / Scales (I)) / Scales (I) ** 2;
+                              Track_Of (I) := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;
+                           end loop;
+                           Rows (1, Count + 1);
+                           Free (Weights);
+                           Free (Track_Of);
+                        end;
                         --  The focal search's measurement of the two focal lengths (Prior_W, the header).
                         if Prior_W > 0.0 then
                            A (1, 1) := A (1, 1) + Prior_W;
@@ -1250,17 +1304,25 @@ package body Driver.Robot.Kinematics.Fit is
                               end loop;
                               for T in 1 .. Tracks loop
                                  Cl (T) := C (T) * (1.0 + Lambda) + Lambda * Real'Model_Small;
-                                 if Cl (T) > 0.0 then
-                                    for P in 1 .. Count loop
-                                       if Bm (P, T) /= 0.0 then
+                              end loop;
+                              --  The depths eliminated, each parameter's row at once (Driver.Parallel_For), every row's
+                              --  sums over the tracks in their order, as the normal equations' are (above).
+                              declare
+                                 procedure Eliminate (P : Positive) is
+                                 begin
+                                    for T in 1 .. Tracks loop
+                                       if Cl (T) > 0.0 and then Bm (P, T) /= 0.0 then
                                           Rhs (P) := Rhs (P) - Bm (P, T) * Gd (T) / Cl (T);
                                           for Q in 1 .. Count loop
                                              Sm (P, Q) := Sm (P, Q) - Bm (P, T) * Bm (Q, T) / Cl (T);
                                           end loop;
                                        end if;
                                     end loop;
-                                 end if;
-                              end loop;
+                                 end Eliminate;
+                                 procedure Eliminate_All is new Driver.Parallel_For (Eliminate);
+                              begin
+                                 Eliminate_All (1, Count);
+                              end;
                               Driver.Numerics.Dense.Cholesky (Sm, Lf, Pd);
                               if Pd then
                                  declare
@@ -2096,8 +2158,22 @@ package body Driver.Robot.Kinematics.Fit is
                   Held     : constant Real := Report.Focal_Sigma / L.Fx;   --  the focal length's own sigma, in the logarithm
                   Base_Err : constant Real := Median_Error (Base, Report.All_Count);
                begin
-                  for Way in Sign_Way loop
-                     declare
+                  --  The two ways at once (Driver.Parallel_For), each from the solution, writing only its own result;
+                  --  the way up's better basin is taken before the way down's, as when the way down was walked only
+                  --  where the way up found none. Walked one after the other, the two took most of the last stage
+                  --  (s02's fit replayed from its dump, 10-16: eleven steps of 63 to 456 rounds each, five up and six
+                  --  down), and each step's own sums use the processors only part of the time.
+                  declare
+                     type Walk_Result is record
+                        Moved  : Boolean := False;
+                        L      : Lens;
+                        Report : Fit_Report;
+                     end record;
+                     Walked        : array (Sign_Way) of Walk_Result;
+                     Walked_Joints : array (Sign_Way) of Joint_Array (Joints'Range);
+
+                     procedure Walk (Index : Positive) is
+                        Way    : constant Sign_Way := Sign_Way'Val (Index - 1);
                         Offset : Real := Driver.Conventions.Z * Held;
                      begin
                         loop
@@ -2125,10 +2201,8 @@ package body Driver.Robot.Kinematics.Fit is
                                     --  A better basin: refitted from there, the focal length free within the search's width.
                                     Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Focal_Within);
                                     if Rp.All_Count > 0 and then Rp.All_Median_Px < Base then
-                                       L := Lp;
-                                       Joints := Jp;
-                                       Report := Rp;
-                                       Moved := True;
+                                       Walked (Way) := (Moved => True, L => Lp, Report => Rp);
+                                       Walked_Joints (Way) := Jp;
                                     end if;
                                     exit;
                                  end if;
@@ -2137,9 +2211,20 @@ package body Driver.Robot.Kinematics.Fit is
                               Offset := 2.0 * Offset;
                            end;
                         end loop;
-                     end;
-                     exit when Moved;
-                  end loop;
+                     end Walk;
+                     procedure Walks is new Driver.Parallel_For (Walk);
+                  begin
+                     Walks (1, Sign_Way'Pos (Sign_Way'Last) + 1);
+                     for Way in Sign_Way loop
+                        if Walked (Way).Moved then
+                           L := Walked (Way).L;
+                           Joints := Walked_Joints (Way);
+                           Report := Walked (Way).Report;
+                           Moved := True;
+                           exit;
+                        end if;
+                     end loop;
+                  end;
                end;
             end loop;
          end;

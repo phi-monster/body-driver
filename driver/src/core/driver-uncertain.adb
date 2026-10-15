@@ -57,6 +57,46 @@ package body Driver.Uncertain is
       end Keep;
    end Gates_Known;
 
+   --  The Gaussian quantile of the gates' tail over so many tests, worked out once: the Student quantile of every new
+   --  number of degrees of freedom starts from it, and worked it out anew (a fit's sightings ask for a new number at
+   --  nearly every one: 0.7 s of the fit's thread of 19 s in it, s02's dump replayed and sampled on 10-16).
+   package Quantile_Maps is new Ada.Containers.Ordered_Maps (Positive, Real);
+
+   protected Gaussians_Known is
+      function Get (Tests : Positive) return Known_Gate;
+      procedure Keep (Tests : Positive; Quantile : Real);
+   private
+      Map : Quantile_Maps.Map;
+   end Gaussians_Known;
+
+   protected body Gaussians_Known is
+      function Get (Tests : Positive) return Known_Gate is
+         C : constant Quantile_Maps.Cursor := Map.Find (Tests);
+      begin
+         return (if Quantile_Maps.Has_Element (C) then (Found => True, Multiple => Quantile_Maps.Element (C))
+                 else (others => <>));
+      end Get;
+
+      procedure Keep (Tests : Positive; Quantile : Real) is
+      begin
+         Map.Include (Tests, Quantile);
+      end Keep;
+   end Gaussians_Known;
+
+   function Gaussian_Of (Tests : Positive) return Real is
+      Known : constant Known_Gate := Gaussians_Known.Get (Tests);
+   begin
+      if Known.Found then
+         return Known.Multiple;
+      end if;
+      declare
+         Quantile : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (Tail / Real (Tests));
+      begin
+         Gaussians_Known.Keep (Tests, Quantile);
+         return Quantile;
+      end;
+   end Gaussian_Of;
+
    function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate is
       Key   : constant Gate_Key := (Vector => False, Dimensions => 1, Freedom => Degrees_Of_Freedom, Tests => Tests);
       Known : constant Known_Gate := Gates_Known.Get (Key);
@@ -68,7 +108,7 @@ package body Driver.Uncertain is
       declare
          --  A single test with a known sigma is Z itself, not its round trip
          --  through the quantile.
-         Multiple : constant Real := (if Degrees_Of_Freedom > 0 then Driver.Distributions.Student_T_Quantile (Alpha, Degrees_Of_Freedom)
+         Multiple : constant Real := (if Degrees_Of_Freedom > 0 then Driver.Distributions.Student_T_Quantile (Alpha, Degrees_Of_Freedom, Gaussian_Of (Tests))
                            elsif Tests = 1 then Driver.Conventions.Z
                            else Driver.Distributions.Gaussian_Two_Sided_Quantile (Alpha));
       begin
