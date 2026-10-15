@@ -212,7 +212,8 @@ package body Driver.Robot.Body_File is
                   Add (Separator (G = M.Groups.First_Index) & "{""verdict"": " & Word (Eye_Response'Image (F.Verdict))
                        & ", ""responding"": " & Int (F.Responding) & ", ""textured"": " & Int (F.Textured)
                        & ", ""fraction"": " & Num (F.Fraction.Value) & ", ""sigma"": " & Num (F.Fraction.Sigma)
-                       & ", ""freedom"": " & Int (F.Fraction.Degrees_Of_Freedom) & "}");
+                       & ", ""freedom"": " & Int (F.Fraction.Degrees_Of_Freedom)
+                       & ", ""could_be_whole"": " & Int ((if F.Could_Be_Whole then 1 else 0)) & "}");
                end;
             end loop;
             Add ("]}");
@@ -636,7 +637,9 @@ package body Driver.Robot.Body_File is
                                               Sigma              => Value (Field (Y, "sigma")),
                                               Degrees_Of_Freedom => Natural'Max (0, Whole (Y, "freedom"))),
                                Resting    => 0.0,
-                               Rest_Pull  => 0.0));
+                               Rest_Pull  => 0.0,
+                               --  Absent from a file written before it: as then, the eye may ride on the group.
+                               Could_Be_Whole => Whole (Y, "could_be_whole") /= 0));
                         end;
                      end loop;
                   end;

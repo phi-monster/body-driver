@@ -989,6 +989,7 @@ package body Driver.Robot.Lockin is
                                        Effect.Fraction :=
                                          (Value => F, Sigma => Sqrt (F * (1.0 - F) / Real (T)), Degrees_Of_Freedom => 0);
                                        Effect.Verdict := Judge (Count, T, Least, Most, Disagree);
+                                       Effect.Could_Be_Whole := Regression.Count_Significant (Most, T, Half);
                                        Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & " group" & G'Image & ":"
                                                         & Count'Image & " of" & T'Image & " textured cells respond, "
                                                         & Least'Image & " to" & Most'Image & " show the motion"

@@ -207,7 +207,7 @@ package body Driver.Robot.Graph is
                            end if;
                         when Undecided =>
                            Unsure := True;
-                           Undecided_Eye := True;
+                           Undecided_Eye := Undecided_Eye or else F.Could_Be_Whole;
                         when Unmeasured =>
                            Unsure := True;
                         when Nothing | Whole =>
@@ -217,7 +217,13 @@ package body Driver.Robot.Graph is
                end loop;
                --  An eye that is undecided may ride on the group: whether it is
                --  an arm is still open, so it is neither a closer nor a part
-               --  until every eye that saw it has decided.
+               --  until every eye that saw it has decided. Not an eye whose most
+               --  cells that may show the motion could not make its view whole
+               --  (Eye_Effect.Could_Be_Whole): it cannot ride on the group, and
+               --  held a jaw from its arm for good (f15s on 10-15: arm 2's jaw a
+               --  patch of 11 cells in its own eye, the other arm's eye undecided
+               --  between 19 and 133 cells of 255; no closer, no hand, the brain
+               --  given only speech).
                if Undecided_Eye then
                   null;
                elsif Best_Arm > 0 then

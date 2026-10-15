@@ -3400,11 +3400,20 @@ package body Driver.Robot.Kinematics is
       return (Fx => L.Fx, Fy => L.Fy, Cx => L.Cx, Cy => L.Cy, K1 => L.K1, K2 => L.K2);
    end Lens_Of;
 
+   --  A sighting's error as an angle: the typical sighting's error over the focal length. That error is the larger of
+   --  the noise the fit leaves beside what the sightings state (Sigma_Px, the floor) and what the median residual says of
+   --  the whole, a standard deviation a direction (the median of a two-dimensional Gaussian's radius is its sigma
+   --  times the root of 2 ln 2). The floor alone is zero whenever what the matcher states accounts for the residuals,
+   --  and every plan judged a miss of 1e-16 significant against it (f15w on 10-15: the fitted hook arm's every press
+   --  unplanned, no tip measured, no part of the body a role, the brain given only speech).
    function Angle_Sigma (M : Model; A : Arm_Id) return Real is
       R : constant Arm_Fit := Result_Of (M, A);
+      Typical : constant Real :=
+        Real'Max (R.Sigma_Px, R.Median_Px / Ada.Numerics.Long_Elementary_Functions.Sqrt
+                                              (2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0)));
    begin
       return (if R.Fitted and then R.Lens.Fx > 0.0 and then R.Lens.Fy > 0.0
-              then R.Sigma_Px / Real'Min (R.Lens.Fx, R.Lens.Fy) else Real'Last);
+              then Typical / Real'Min (R.Lens.Fx, R.Lens.Fy) else Real'Last);
    end Angle_Sigma;
 
    function Ray_In_Eye (M : Model; A : Arm_Id; U, V : Real) return Vec3 is

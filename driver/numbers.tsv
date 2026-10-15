@@ -973,6 +973,7 @@ driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .
 driver-recording.adb	V := Shift_Left (V, 8) or Unsigned_64 (Data (I));	8	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	for I in 0 .. 3 loop	3	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	for I in 0 .. 7 loop	7	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-robot-body_file.adb	& "" & Int ((if F.Could_Be_Whole then 1 else 0)) & "");	1	format	a flag as 1 or 0 in the body file
 driver-robot-body_file.adb	([Value (Item (N, 1)), Value (Item (N, 2)), Value (Item (N, 3))]);	1	structure	the three components of a vector, as the file lists them
 driver-robot-body_file.adb	([Value (Item (N, 1)), Value (Item (N, 2)), Value (Item (N, 3))]);	2	structure	the three components of a vector, as the file lists them
 driver-robot-body_file.adb	([Value (Item (N, 1)), Value (Item (N, 2)), Value (Item (N, 3))]);	3	structure	the three components of a vector, as the file lists them
@@ -1024,6 +1025,7 @@ driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);
 driver-robot-boot.adb	Eye : Eye_Id := 1;	1	structure	a placeholder, set before it is read
 driver-robot-boot.adb	Factor (G) := 2.0 * Factor (G);	2.0	numerics	doubling search: each round pushes twice as far as the one before, so the evidence any eye needs is reached in a number of rounds logarithmic in it
 driver-robot-boot.adb	Factor : array (1 .. Count) of Real := [others => 1.0];	1.0	structure	the first round pushes by the amounts the probes found
+driver-robot-boot.adb	Followed_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];	2	structure	two pushes a channel: one each way
 driver-robot-boot.adb	G : Group_Id := 1;	1	structure	a group number before the arm's is read
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	2_147_483_647	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-boot.adb	G.State := (G.State * 48_271) mod 2_147_483_647;	48_271	math	Park and Miller's minimal standard generator: the multiplier
@@ -1032,11 +1034,14 @@ driver-robot-boot.adb	Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver
 driver-robot-boot.adb	Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)))];	1	structure	the guessed hold begins at one beat, the unit, while the stream can tell no lag; the doubling goes on from it
 driver-robot-boot.adb	Last : Count_Grid := [others => [others => -1]];	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Levels : array (1 .. 2 * Size) of Level_Vectors.Vector;	2	structure	two pushes a channel: one each way
+driver-robot-boot.adb	Lost_Least : Real_Array (1 .. 2 * Size) := [others => Real'Last];	2	structure	two pushes a channel: one each way
 driver-robot-boot.adb	Needed : array (1 .. Count, 1 .. Natural'Max (1, Most_Channels)) of Boolean :=	1	structure	an array of at least one column: a group of no channels needs none
 driver-robot-boot.adb	Now (G, E) := -1;	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)),	2.0	statistics	the standard error of a scale estimate from Dof degrees of freedom is the scale over the root of twice Dof
 driver-robot-boot.adb	Off := 2.0 * Off;	2.0	structure	the ladder doubles: each level twice the one before
 driver-robot-boot.adb	Offset (Count + 2) := First (C);	2	structure	the second of a channel's two pushes, the other way
+driver-robot-boot.adb	Offset (I) := (Followed_Most (I) + Lost_Least (I)) / 2.0;	2.0	structure	the ladder halves the gap between the widest followed and the least lost level
+driver-robot-boot.adb	Offset (I) := (Followed_Most (I) + Lost_Least (I)) / 2.0;	2.0	structure	the ladder halves the gap between the widest followed and the least lost level
 driver-robot-boot.adb	Offset (I) := 2.0 * Last.Offset;	2.0	structure	the next pass climbs on from twice the last level
 driver-robot-boot.adb	Offset (I) := Offset (I) / 2.0;	2.0	structure	the ladder goes down by the same doubling it climbs by
 driver-robot-boot.adb	Offset : Real_Array (1 .. 2 * Size) := [others => 0.0];	2	structure	two pushes a channel, one each way
@@ -1062,6 +1067,8 @@ driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 el
 driver-robot-boot.adb	State (Count + 2) := Climbing;	2	structure	the second of a channel's two pushes, the other way
 driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
 driver-robot-boot.adb	State : array (1 .. 2 * Size) of Stop := [others => Blocked];	2	structure	two pushes a channel, one each way
+driver-robot-boot.adb	and then (Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (P.Channel)	2.0	structure	half the gap: the next halfway level must be a step a keyframe counts
+driver-robot-boot.adb	and then (Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (P.Channel)	2.0	structure	half the gap: the next halfway level must be a step a keyframe counts
 driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));	2	structure	one more doubling of the push: the responding cells grew at most as the push did
 driver-robot-boot.adb	elsif Per_Unit (P.Channel) > 0.0 and then 2.0 * Last.Offset * Per_Unit (P.Channel) > Half then	2.0	structure	the next level, twice this one, would move the view by more than half of it
 driver-robot-boot.adb	exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else 2.0 * Patch);	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
@@ -2392,6 +2399,8 @@ driver-robot-kinematics.adb	& Pm (Turn (1), Sd (7), 4) & "" & Pm (Turn (2), Sd (
 driver-robot-kinematics.adb	& Pm (Turn (1), Sd (7), 4) & "" & Pm (Turn (2), Sd (8), 4) & "" & Pm (Turn (3), Sd (9), 4);	9	structure	the index of a term of the covariance
 driver-robot-kinematics.adb	& Report.Used'Image & "" & Driver.Log.Image (Report.Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Rss_After'Image & "" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)	1024	format	kilobytes in a megabyte, for the log
+driver-robot-kinematics.adb	(2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0)));	2.0	math	the median of a two-dimensional Gaussian's radius is its sigma times the root of 2 ln 2
+driver-robot-kinematics.adb	(2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0)));	2.0	math	the median of a two-dimensional Gaussian's radius is its sigma times the root of 2 ln 2
 driver-robot-kinematics.adb	(Covariance (1, 1) + Covariance (2, 2) + Covariance (3, 3)), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	(Covariance (4, 4) + Covariance (5, 5) + Covariance (6, 6)), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	(Off, Channels.Noise (M, R.Group, C) * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings

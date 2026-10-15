@@ -480,6 +480,10 @@ package body Driver.Robot.Boot is
                State   : array (1 .. 2 * Size) of Stop := [others => Blocked];
                --  Per push: its ladder is going down from a first level the aligner could not follow.
                Descending : array (1 .. 2 * Size) of Boolean := [others => False];
+               --  Per push: the widest level the aligner followed, and the least it could not after one it did. The
+               --  ladder halves the gap between them, a level a pass (Take climbs no level as wide as the second).
+               Followed_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];
+               Lost_Least    : Real_Array (1 .. 2 * Size) := [others => Real'Last];
                --  Per push: the levels taken in the pass, in order: each one's offset and the beats the arm was held
                --  for its keyframe.
                type Level_Mark is record
@@ -536,6 +540,7 @@ package body Driver.Robot.Boot is
                      Levels (I).Append (Mark);
                      exit when Mark.Short or else Per_Unit (P.Channel) = 0.0;
                      Off := 2.0 * Off;
+                     exit when Off >= Lost_Least (I);
                      --  Before the arm is fitted, the ladder climbs only as far as the aligner follows by itself: an
                      --  extrapolation from the levels before to about a patch of displacement beyond them (A22, A23).
                      --  A doubled level's increment is the level before it, so a level whose whole motion is two
@@ -751,6 +756,7 @@ package body Driver.Robot.Boot is
                                  P : Push renames Order (I);
                                  Lost  : Natural := 0;   --  the first level the aligner did not follow; 0 when none
                                  Last  : Level_Mark;
+                                 Followed_Here : Boolean := False;   --  a level of the push was followed in this pass
                               begin
                                  for K in 1 .. Natural (Levels (I).Length) loop
                                     Last := Levels (I) (K);
@@ -767,6 +773,8 @@ package body Driver.Robot.Boot is
                                     if Followed_Now then
                                        Followed_In_Pass := Followed_In_Pass + 1;
                                        Reached (P.Channel) := Real'Max (Reached (P.Channel), Last.Offset);
+                                       Followed_Most (I) := Real'Max (Followed_Most (I), Last.Offset);
+                                       Followed_Here := True;
                                        Descending (I) := False;
                                     elsif Framed_Now then
                                        --  A keyframe the aligner could not follow, too large: the ladder stops at
@@ -796,8 +804,21 @@ package body Driver.Robot.Boot is
                                        Offset (I) := Offset (I) / 2.0;
                                        Descending (I) := True;
                                     else
-                                       Offset (I) := Levels (I) (Lost).Offset;
-                                       State (I) := Not_Followed;
+                                       --  Followed below and lost here: the next pass takes the level halfway between,
+                                       --  while half the gap is a step a keyframe counts. A level the aligner could not
+                                       --  follow used to end the push until a fitted arm predicted it, and an arm whose
+                                       --  wider levels the aligner never followed was never fitted (f15w on 10-15, arm 2,
+                                       --  a servo arm over an oblique table: its channel 4 followed at 41.6 units, lost at
+                                       --  83, and no keyframe of it lay between; the fit had one level of that joint).
+                                       Lost_Least (I) := Real'Min (Lost_Least (I), Levels (I) (Lost).Offset);
+                                       if Followed_Most (I) > 0.0
+                                         and then (Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (P.Channel)
+                                       then
+                                          Offset (I) := (Followed_Most (I) + Lost_Least (I)) / 2.0;
+                                       else
+                                          Offset (I) := Levels (I) (Lost).Offset;
+                                          State (I) := Not_Followed;
+                                       end if;
                                     end if;
                                  elsif Levels (I).Is_Empty then
                                     State (I) := Blocked;
@@ -809,6 +830,20 @@ package body Driver.Robot.Boot is
                                     --  A ladder going down that reaches a level too small to count has no level the
                                     --  aligner follows.
                                     State (I) := Not_Followed;
+                                 elsif Lost_Least (I) < Real'Last then
+                                    --  A level halfway to one lost before, followed: halfway again, while half the gap
+                                    --  is a step a keyframe counts. A halfway level that gave no keyframe (the joint did
+                                    --  not move off the keyframes before it by a step the fit counts, or not at all: a
+                                    --  servo's dead band) told nothing, and halving the same gap again asked it again
+                                    --  for ever (robot.boot, 10-15: 530 passes of one level each, none followed).
+                                    if Followed_Here
+                                      and then (Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (P.Channel)
+                                    then
+                                       Offset (I) := (Followed_Most (I) + Lost_Least (I)) / 2.0;
+                                    else
+                                       Offset (I) := Lost_Least (I);
+                                       State (I) := Not_Followed;
+                                    end if;
                                  else
                                     --  Every level followed and the pass stopped short of the widest (the view's
                                     --  motion per unit was not measured when the pass began, or every level was

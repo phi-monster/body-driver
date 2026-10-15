@@ -571,6 +571,10 @@ private
       Rest_Pull  : Real := 0.0;    --  how significantly the cells that did not respond are pulled along the push together:
                                    --  their signed gains pooled, over the spread of the pool, in sigmas (Lockin); zero
                                    --  when none
+      Could_Be_Whole : Boolean := True;
+      --  The most cells that may show the motion are significantly more than half the textured ones: the eye's view
+      --  may yet move whole with the group, so the eye may ride on it (Lockin.Judge's test of a whole view, at the
+      --  most); false when even the most could not make it whole
    end record;
 
    package Effect_Vectors is new Ada.Containers.Vectors (Positive, Eye_Effect);
