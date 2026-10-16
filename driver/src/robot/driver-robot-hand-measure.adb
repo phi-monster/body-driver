@@ -1362,8 +1362,13 @@ procedure Measure (H : in out Hands; M : in out Model) is
             --  Nothing was met and no more steps are made, or the next step is one the arm cannot be taken through (an
             --  end a channel showed is on the way down, with nothing predicting the contact to have told so before): the
             --  hand goes back to where the descent began, as after a press, for the presses after it begin there. A
-            --  tilt that cannot be lowered is one that cannot be made, and half of it is tried.
-            Aim_Short := Unplanned;
+            --  tilt that cannot be lowered is one that cannot be made, and half of it is tried: one the arm cannot be
+            --  taken through (Unplanned), and one whose eye came within the least push of the table with nothing met
+            --  (Spent), a lesser tilt keeping the eye higher over the tip. Spent was not one: a17's tilted presses of
+            --  lobe 1 at open (10-16), its sight 1.287 rad from straight down and its tip 12.5 above the surface, were
+            --  lowered 8.2 and 9.5 until the eye had no room left, each side gave up there, and the tip at open was
+            --  never confirmed, the hand's depth never measured.
+            Aim_Short := Unplanned or else Steps.Spent;
             Hold_Beat (Read_Arm'Access);
             Move_Group (Arm_Is, Aim_At.Element);
             return False;
