@@ -1076,6 +1076,7 @@ driver-robot-boot.adb	elsif Per_Unit (P.Channel) > 0.0 and then 2.0 * Last.Offse
 driver-robot-boot.adb	exit when Cell_Motion (2.0 * Scale) > Half;	2.0	structure	the cell's next level, twice its shares
 driver-robot-boot.adb	exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else 2.0 * Patch);	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
 driver-robot-boot.adb	if M.Beats >= 2 * Rest_Beats then	2	structure	the rest is compared with itself at every doubling of its beats, as the estimates are scheduled
+driver-robot-boot.adb	if N > 1 and then Fitted_Now and then not Told_Now then	1	structure	more than one joint: an order to tell
 driver-robot-boot.adb	if N > 1 and then Followed_In_Pass > 0 and then Fitted_Now then	1	structure	joints move together only when there are at least two
 driver-robot-boot.adb	if N > 1 and then not Fitted_Now	1	structure	a zero start of a sum
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the parity and the next bit of a row and a column
@@ -1840,9 +1841,9 @@ driver-robot-kinematics-fit.adb	Fits (Filled) := (if Plane_Way (Way) then Upper_
 driver-robot-kinematics-fit.adb	Focal : constant Real := (L.Fx + L.Fy) / 2.0;	2.0	math	the focal length: the mean of the two
 driver-robot-kinematics-fit.adb	Focal_Here : constant Real := (Lx.Fx + Lx.Fy) / 2.0;	2.0	math	the mean of the two focal lengths
 driver-robot-kinematics-fit.adb	Foot : constant Vec3 := (1.0 / Length ** 2) * P.A;	1.0	math	the plane A * X = 1: its point nearest the eye is A over its length squared
+driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	a placed sighting's keyframe, from the first
 driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	default: the reference frame, the first
 driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	indexes start at one
-driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	a placed sighting's keyframe, from the first
 driver-robot-kinematics-fit.adb	Frame : constant Positive := (if Way = 1 then Up_Frame (J) else Down_Frame (J));	1	structure	the two widest keyframes of a joint, one each way
 driver-robot-kinematics-fit.adb	Frame_Of : array (1 .. 2) of Natural := [others => 0];	2	structure	the two ways of a joint's probe: the turn up and the turn downdriver-robot-kinematics-fit.adb
 driver-robot-kinematics-fit.adb	Free_First : constant Positive := (if Second_Eye then S_First else 1);	1	structure	the homography's entries come first, and are terms only when the eye's lens is unknown

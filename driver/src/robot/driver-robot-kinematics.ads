@@ -143,6 +143,10 @@ private package Driver.Robot.Kinematics is
 
    function Fitted (M : Model; A : Arm_Id) return Boolean;
 
+   function Order_Told (M : Model; A : Arm_Id) return Boolean;
+   --  The arm is fitted and its sightings tell its joints' order, not only that it is the best of the orders
+   --  (Fit.Fit_Report's Order_Told).
+
    function Framed (M : Model; A : Arm_Id; From, To : Natural) return Boolean;
    --  A keyframe of the arm was taken at a beat in From .. To at all. A pose
    --  held after a push gives none when it is not fresh: not apart from every
