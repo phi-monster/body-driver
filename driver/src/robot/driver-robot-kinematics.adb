@@ -2101,8 +2101,159 @@ package body Driver.Robot.Kinematics is
                      --  The unit of length is the first fit's (Fit's Unit_Frames): a
                      --  keyframe taken after it refines every term, and moves none of
                      --  the lengths the world was measured in.
-                     Fit.Fit (Changes.all, Asked.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width, M.Eyes (R.Eye).Grid.Height,
-                              R.Result.Unit_Frames, Joints, Chain, Lens, Report, Who => "arm" & R.Arm'Image, From => Start);
+                     --  A joint the keyframes never turned by what the fit counts as a turn (Counted_Turn) tells the fit
+                     --  nothing of itself: it is held at its reference, rigid, out of the fit and out of the order of the
+                     --  joints, and the arm is fitted by the joints that turned; its own terms stand at nought, as its
+                     --  turn does while its reading stays where the keyframes had it. s19 (servo seed 4, 10-17): the wrist
+                     --  (channel 3) moved nothing any eye saw up to where it stopped following, the sweep left it, and
+                     --  every fit ended at its stage 0 ("a joint has no keyframe of its own"): the arm was never fitted.
+                     declare
+                        Turned : array (1 .. N) of Boolean := [others => False];
+                        Count  : Natural := 0;
+                     begin
+                        for C in 1 .. N loop
+                           for F in 1 .. Frames loop
+                              if abs Changes (F, C) >= Visible (C) then
+                                 Turned (C) := True;
+                              end if;
+                           end loop;
+                           if Turned (C) then
+                              Count := Count + 1;
+                           end if;
+                        end loop;
+                        if Count = N or else Count = 0 then
+                           Fit.Fit (Changes.all, Asked.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width,
+                                    M.Eyes (R.Eye).Grid.Height, R.Result.Unit_Frames, Joints, Chain, Lens, Report,
+                                    Who => "arm" & R.Arm'Image, From => Start);
+                        else
+                           declare
+                              Index     : array (1 .. Count) of Positive;   --  the channel of each joint fitted
+                              Into      : array (1 .. N) of Natural := [others => 0];   --  and back, 0 for one held
+                              K         : Natural := 0;
+                              Changes_R : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. Count);
+                              Asked_R   : Flags_Access := new Fit.Flag_Matrix'(1 .. Frames => [1 .. Count => False]);
+                              Visible_R : Real_Array (1 .. Count);
+                              Joints_R  : Fit.Joint_Array (1 .. Count);
+                              Chain_R   : Fit.Chain_Order (1 .. Count);
+                              Start_R   : Fit.Fit_Start (if Start.N > 0 then Count else 0);
+                              Held      : Ada.Strings.Unbounded.Unbounded_String;
+                           begin
+                              for C in 1 .. N loop
+                                 if Turned (C) then
+                                    K := K + 1;
+                                    Index (K) := C;
+                                    Into (C) := K;
+                                 else
+                                    Ada.Strings.Unbounded.Append (Held, " c" & C'Image);
+                                 end if;
+                              end loop;
+                              for F in 1 .. Frames loop
+                                 for J in 1 .. Count loop
+                                    Changes_R (F, J) := Changes (F, Index (J));
+                                    Asked_R (F, J) := Asked (F, Index (J));
+                                 end loop;
+                              end loop;
+                              for J in 1 .. Count loop
+                                 Visible_R (J) := Visible (Index (J));
+                              end loop;
+                              if Start.N > 0 then
+                                 Start_R.Valid := Start.Valid;
+                                 for J in 1 .. Count loop
+                                    Start_R.Joints (J) := Start.Joints (Index (J));
+                                 end loop;
+                                 K := 0;
+                                 for P of Start.Chain loop
+                                    if Into (P) > 0 then
+                                       K := K + 1;
+                                       Start_R.Chain (K) := Into (P);
+                                    end if;
+                                 end loop;
+                                 Start_R.L := Start.L;
+                                 Start_R.Focal_Within := Start.Focal_Within;
+                                 Start_R.Searched_Least := Start.Searched_Least;
+                                 Start_R.Searched_Most := Start.Searched_Most;
+                                 Start_R.Whole := Start.Whole;
+                                 Start_R.Profiled_Over := Start.Profiled_Over;
+                                 Start_R.Order_Told := Start.Order_Told;
+                              end if;
+                              Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " holds"
+                                               & Ada.Strings.Unbounded.To_String (Held) & " at the reference: no keyframe"
+                                               & " turned it by what the fit counts as a turn; the arm is fitted by the"
+                                               & Count'Image & " that turned");
+                              Fit.Fit (Changes_R.all, Asked_R.all, Visible_R, Seen.all, M.Eyes (R.Eye).Grid.Width,
+                                       M.Eyes (R.Eye).Grid.Height, R.Result.Unit_Frames, Joints_R, Chain_R, Lens, Report,
+                                       Who => "arm" & R.Arm'Image, From => Start_R);
+                              --  Back to every channel: the joints fitted where they are, the held ones rigid at the end
+                              --  of the chain, their terms nought.
+                              for C in 1 .. N loop
+                                 Joints (C) := (if Into (C) > 0 then Joints_R (Into (C))
+                                                else (W => [0.0, 0.0, 1.0], P => Zero3, C => 0.0, Slide => False));
+                              end loop;
+                              K := 0;
+                              for P of Chain_R loop
+                                 K := K + 1;
+                                 Chain (K) := Index (P);
+                              end loop;
+                              for C in 1 .. N loop
+                                 if Into (C) = 0 then
+                                    K := K + 1;
+                                    Chain (K) := C;
+                                 end if;
+                              end loop;
+                              declare
+                                 Small : constant Natural := Fit.Terms (Count);
+                                 Whole : constant Natural := Fit.Terms (N);
+                                 --  The term of the whole arm a term of the fitted joints is.
+                                 function Term_Of (T : Positive) return Positive is
+                                   (if T <= Fit.Lens_Terms then T
+                                    else Fit.Lens_Terms + Fit.Joint_Terms * (Index ((T - Fit.Lens_Terms - 1) / Fit.Joint_Terms + 1) - 1)
+                                         + (T - Fit.Lens_Terms - 1) mod Fit.Joint_Terms + 1);
+                                 Was : constant Fit.Real_Lists.Vector := Report.Covariance;
+                                 Gains : constant Fit.Real_Lists.Vector := Report.Depth_Gains;
+                                 Grid : array (1 .. Whole, 1 .. Whole) of Real := [others => [others => 0.0]];
+                              begin
+                                 if Natural (Was.Length) = Small * Small then
+                                    for I in 1 .. Small loop
+                                       for J in 1 .. Small loop
+                                          Grid (Term_Of (I), Term_Of (J)) := Was (Was.First_Index + (I - 1) * Small + J - 1);
+                                       end loop;
+                                    end loop;
+                                    Report.Covariance.Clear;
+                                    for I in 1 .. Whole loop
+                                       for J in 1 .. Whole loop
+                                          Report.Covariance.Append (Grid (I, J));
+                                       end loop;
+                                    end loop;
+                                 end if;
+                                 if Small > 0 and then Natural (Gains.Length) mod Small = 0 then
+                                    Report.Depth_Gains.Clear;
+                                    for Track in 1 .. Natural (Gains.Length) / Small loop
+                                       declare
+                                          Row : array (1 .. Whole) of Real := [others => 0.0];
+                                       begin
+                                          for T in 1 .. Small loop
+                                             Row (Term_Of (T)) := Gains (Gains.First_Index + (Track - 1) * Small + T - 1);
+                                          end loop;
+                                          for X of Row loop
+                                             Report.Depth_Gains.Append (X);
+                                          end loop;
+                                       end;
+                                    end loop;
+                                 end if;
+                              end;
+                              declare
+                                 Pairs : constant Joint_Pair_Lists.Vector := Report.Untold;
+                              begin
+                                 Report.Untold.Clear;
+                                 for P of Pairs loop
+                                    Report.Untold.Append (Joint_Pair'(Earlier => Index (P.Earlier), Later => Index (P.Later)));
+                                 end loop;
+                              end;
+                              Free (Changes_R);
+                              Free (Asked_R);
+                           end;
+                        end if;
+                     end;
                      --  The table its eye sees, away from it towards the eye,
                      --  and its tracks' points: Up is the first arm's (the world
                      --  is that eye's reference frame), and the points place the
