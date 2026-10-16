@@ -1301,6 +1301,8 @@ driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6)	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6)	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6)	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6)	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Least, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Limit, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Place, 5) & ""	5	format	digits printed in a log line or a message
@@ -1325,8 +1327,6 @@ driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Im
 driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (Bound, 4)	4	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	("" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6) & ""	6	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	("" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (Part, 6) & "" & Wait_At_Most'Image	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (Part, 6));	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	(Off, "" & C'Image & "" & Driver.Log.Image (Now (Now'First + C - 1) - Goal (Goal'First + C - 1), 4));	4	format	digits printed in a log line or a message
