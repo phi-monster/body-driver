@@ -260,7 +260,6 @@ package body Driver.Robot.Motion is
    is
       Groups : constant Natural := Group_Count (M);
       Worst  : Real := Real'Last;   --  the largest error of the last landing, in deviations of what the readings tell
-      Met    : Boolean := False;    --  a sending again met something
 
       --  The first sending: every targeted channel's target plus the servo's steady error where the group last
       --  landed on a target (Group_Stream.Landing), so that it lands on this one at the first sending where the
@@ -434,8 +433,7 @@ package body Driver.Robot.Motion is
                        & " deviations): " & To_String (Again.Detail));
                --  A sending again that meets something changes nothing of what the step reached: the joint stands
                --  where what stops it leaves it.
-               Met := Again.Outcome /= Reached;
-               exit when Met;
+               exit when Again.Outcome /= Reached;
                --  Nor does one the body did not execute: no group it asked delivered a significant share of the ask.
                --  Each landing came nearer than the one before by four of 1.7e9 deviations, the arm creeping on what
                --  held it, and the step was sent again every six beats for 1700 beats, delivering 0.000 of 2.02 units
@@ -461,35 +459,6 @@ package body Driver.Robot.Motion is
             end;
          end;
       end loop;
-      --  Where the positioning came to rest, its sendings again done, each targeted channel stands off its target
-      --  by what two landings of one asked pose can differ by half of (Group_Stream.Landed_Off, the most of it,
-      --  Kinematics.Counted_Turn); a step or a sending again that met something stands where that left it, and is
-      --  no landing.
-      if Report.Outcome = Reached and then not Report.Stopped and then not Met then
-         declare
-            O : constant Driver.Beats.Observation_View := Driver.Beats.Latest;
-         begin
-            for G in 1 .. Groups loop
-               if Is_Commandable (M, Group_Id (G)) and then Driver.Commands.Has_Target (Targets, Group_Id (G))
-                 and then Driver.Observations.Has_Reading (O.all, Group_Id (G))
-               then
-                  declare
-                     Target  : constant Real_Array := Driver.Commands.Target (Targets, Group_Id (G));
-                     Reading : constant Real_Array := O.Readings.Element (Group_Id (G));
-                     Off     : Real_Vectors.Vector renames M.Groups (Group_Id (G)).Landed_Off;
-                  begin
-                     while Natural (Off.Length) < M.Groups (Group_Id (G)).Size loop
-                        Off.Append (0.0);
-                     end loop;
-                     for C in 1 .. Natural'Min (Natural (Off.Length), Natural'Min (Target'Length, Reading'Length)) loop
-                        Off.Replace_Element
-                          (C - 1, Real'Max (Off (C - 1), abs (Target (Target'First + C - 1) - Reading (Reading'First + C - 1))));
-                     end loop;
-                  end;
-               end if;
-            end loop;
-         end;
-      end if;
    end Step;
 
    procedure Note_Stopped (M : in out Model; G : Group_Id; Noted : out Boolean) is

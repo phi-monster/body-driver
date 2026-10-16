@@ -653,12 +653,10 @@ package body Driver.Robot.Kinematics is
    --  f15c on 10-15, arm 2: the joints not asked stood 4 and 8 units off the reference at a dead band of 4,
    --  against a step of 4.
    function Counted_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real is
-      Step   : constant Real := Step_Of (M, A, Channel);
-      Least  : constant Real := Steps.Executed_Least (M, Arm_Group (M, A), Channel);
-      Landed : constant Real := Steps.Landed_Off (M, Arm_Group (M, A), Channel);
-      Band   : constant Real := Real'Max (Landed, (if Least < Real'Last then Least else 0.0));
+      Step : constant Real := Step_Of (M, A, Channel);
+      Band : constant Real := Steps.Executed_Least (M, Arm_Group (M, A), Channel);
    begin
-      return Real'Max (Step, 2.0 * Band);
+      return (if Band < Real'Last then Real'Max (Step, 2.0 * Band) else Step);
    end Counted_Turn;
 
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean is

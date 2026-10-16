@@ -91,13 +91,9 @@ private package Driver.Robot.Kinematics is
    function Counted_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real;
    --  The change of the arm's channel from the reference from which the fit counts the joint as turned in a
    --  keyframe (Fit.Fit's Visible): the step a keyframe counts from (Step_Of), and no nearer than two landings of
-   --  one asked pose can differ: twice the most a positioning has stood off its target (Steps.Landed_Off), or
-   --  twice the least turn the body is known to execute (Steps.Executed_Least) where that is more. A servo lands
-   --  within its dead band of where it is sent, every time it is sent there, and the reference is a landing too.
-   --  The least turn executed alone stands for the band only while every push starts from a landing on its
-   --  target: a sending again of a landing 28 units off, asked 3.2, moves the joint, and s11 (servo seed 3,
-   --  10-16) counted joint 2 turned from 6.43 units, under its landings of 8 and 12 off the reference in joint
-   --  5's keyframes, which then were no keyframes of joint 5's own, and the fit stopped at stage 0.
+   --  one asked pose can differ, twice the least turn the body is known to execute (Steps.Executed_Least): a
+   --  servo lands within its dead band of where it is sent, every time it is sent there, and the reference is
+   --  a landing too.
 
    function Follow_Step (M : Model; A : Arm_Id; Channel : Positive) return Real;
    --  The change of the arm's channel that moves the view of the eye it
