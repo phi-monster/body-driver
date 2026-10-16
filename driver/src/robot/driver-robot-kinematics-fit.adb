@@ -3319,6 +3319,7 @@ package body Driver.Robot.Kinematics.Fit is
             Warm_Tries, Warm_Wins : Natural := 0;    --  over the searches, for the log
             Warm_Far        : Real := 0.0;           --  the farthest a warm start lay from the scan, radians
             Trace           : Ada.Strings.Unbounded.Unbounded_String;   --  every focal length tried and its score
+            Tried_Ln, Tried_Total, Tried_Error : Real_Lists.Vector;   --  every focal length tried (its logarithm), its score and the score's error
 
             procedure Search (F : Real; Best : out Best_Array) is
             begin
@@ -3417,11 +3418,18 @@ package body Driver.Robot.Kinematics.Fit is
                --  115 px of 400 without the sign of the translation chosen, 20.7 with it, 10-14).
                declare
                   Sum : Real := 0.0;
+                  Var : Real := 0.0;
                begin
                   for X of Best loop
                      Sum := Sum + X.Score;
                   end loop;
+                  for J in 1 .. N loop
+                     Var := Var + Median_Error (Best (J).Score, Counts (J)) ** 2;
+                  end loop;
                   Ada.Strings.Unbounded.Append (Trace, " " & Driver.Log.Image (F, 1) & ":" & Driver.Log.Image (Sum, 3));
+                  Tried_Ln.Append (Ln (F));
+                  Tried_Total.Append (Sum);
+                  Tried_Error.Append (Sqrt (Var));
                end;
             end Search;
 
@@ -3611,6 +3619,25 @@ package body Driver.Robot.Kinematics.Fit is
                      end;
                   end loop;
                end loop;
+               --  The focal lengths the score cannot tell from the best: every one tried whose score is not
+               --  significantly the larger, at Z of the two scores' errors together. The golden section ends when its
+               --  two inner points cannot be told apart, but each step that narrowed it to them compared two scores by
+               --  which was lower, however little: on b05 (seed 7, 10-17) it ended at 111.5 px "told within 100.8 to
+               --  123.3" where every focal length from 86.8 to 147.4 scored within the error of the best, the true
+               --  135.3 among them, and the fit after it, held to that width by its prior (Refine_Tracks), ordered the
+               --  joints wrong at the wrong focal length and was not fitted. The width given on is what the curve tells.
+               declare
+                  Best_Total : constant Real := Total (Best);
+                  Best_Error : constant Real := Total_Error (Best);
+               begin
+                  for I in Tried_Ln.First_Index .. Tried_Ln.Last_Index loop
+                     if not Driver.Uncertain.Significant
+                              (Tried_Total (I) - Best_Total, Sqrt (Tried_Error (I) ** 2 + Best_Error ** 2))
+                     then
+                        Told_Within := Real'Max (Told_Within, abs (Tried_Ln (I) - Best_At));
+                     end if;
+                  end loop;
+               end;
                Focal_Within := Told_Within;
                Searched_Least := F_Least;
                Searched_Most := F_Most;
