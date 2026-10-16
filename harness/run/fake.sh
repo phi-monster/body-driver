@@ -61,6 +61,8 @@ wait "$ZST" 2>/dev/null
 rm -f "$R/run.rec.fifo" "$R/stop"
 { echo "end $(date +%FT%T)"; echo "stop $why"; } >> "$R/meta.txt"
 echo "$NAME: $why ($(grep -c "" "$R/truth.jsonl") truth lines)"
+# FAKE_REPLAY=0: no replay and no score after the run (a run stopped once its log told what it was for).
+[ "${FAKE_REPLAY:-1}" = 0 ] && exit 0
 zstd -q -dc "$R/run.rec.zst" | "$R/bin/replay" /dev/stdin --estimates "$R/estimates.jsonl" > "$R/replay.log" 2>&1
 tail -2 "$R/replay.log"
 SCR=(); [ -f "$R/scramble.json" ] && SCR=(--scramble "$R/scramble.json")
