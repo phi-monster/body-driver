@@ -1170,8 +1170,57 @@ package body Driver.Robot.Hand.Lobes.Tests is
              "a lobe with no way to its tip has a region");
    end Tip_Region_Spread;
 
+   --  A jaw that enters from the picture's bottom border, a step of a few pixels from where it was: what changed
+   --  between the two views is two crescents, and the jaw's pixels at the second view, and its tip, are what was
+   --  there less what changed and the changed ones it did not hold (a15 on 10-16: placed between such views the
+   --  lobe was the crescents, which reach no border, and no tip was found at the 19 stops nearest the open end).
+   procedure Moved_Jaw is
+      W : constant := 80;
+      H : constant := 60;
+      --  A bar from the bottom row up to row Top, columns Left .. Left + 9.
+      function Bar (Left, Top : Natural) return Mask is
+         M : Mask := Create (W, H);
+      begin
+         for R in Top .. H - 1 loop
+            for C in Left .. Left + 9 loop
+               Include (M, C, R);
+            end loop;
+         end loop;
+         return M;
+      end Bar;
+      Before  : constant Mask := Bar (30, 20);
+      After   : constant Mask := Bar (34, 22);   --  four columns over, two rows shorter
+      Changed : Mask := Create (W, H);
+      Region  : Mask;
+      Centre, Tip : Pixel;
+      Known   : Boolean;
+      Off     : Natural := 0;
+   begin
+      for R in 0 .. H - 1 loop
+         for C in 0 .. W - 1 loop
+            if Contains (Before, C, R) /= Contains (After, C, R) then
+               Include (Changed, C, R);
+            end if;
+         end loop;
+      end loop;
+      Moved_Lobe (Before, Changed, Region, Centre, Tip, Known);
+      Check (Known, "the moved jaw has no tip");
+      for R in 0 .. H - 1 loop
+         for C in 0 .. W - 1 loop
+            if Contains (Region, C, R) /= Contains (After, C, R) then
+               Off := Off + 1;
+            end if;
+         end loop;
+      end loop;
+      Check (Off = 0, "the moved jaw's pixels are off its true ones at" & Off'Image & " pixels");
+      Check (Known and then Tip.V < 23.0 and then Tip.U >= 34.0 and then Tip.U <= 44.0,
+             "the moved jaw's tip is at" & Tip.U'Image & "," & Tip.V'Image & ", not on its top row (22) over 34 .. 43");
+   end Moved_Jaw;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.lobes.moved", "a jaw a few pixels from where it was is not rebuilt from what "
+                             & "changed, or has no tip on its top row", Moved_Jaw'Access);
       Driver.Tests.Register ("hand.lobes.cap", "the region at a lobe's tip, its spread from the tip pixel, is not the "
                              & "lobe's own width and reach", Tip_Region_Spread'Access);
       Driver.Tests.Register ("hand.lobes.lit", "a closed finger's lit face, whose brightness the table's at the other "

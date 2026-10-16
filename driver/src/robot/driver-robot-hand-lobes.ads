@@ -99,12 +99,33 @@ package Driver.Robot.Hand.Lobes is
 
    package Lobe_Vectors is new Ada.Containers.Vectors (Positive, Lobe);
 
+   procedure Moved_Lobe
+     (Before  : Mask;
+      Changed : Mask;
+      Region  : out Mask;
+      Centre  : out Pixel;
+      Tip     : out Pixel;
+      Known   : out Boolean);
+   --  A lobe a small move from where it was (Before) in a view whose pixels that changed from Before's view are
+   --  Changed: what it left changed and what it came to changed, so its pixels there are Before's less what
+   --  changed and the changed ones it did not hold (their exclusive or), of which the part that holds most of
+   --  Before's; its tip as a stop's is, from the picture's border. Placed between two views it barely moved
+   --  between, a lobe is two crescents, neither reaching the border its root holds, and has no tip (a15 on 10-16:
+   --  none at the 19 stops nearest the open end, the anchored one, 24 to 3753 pixels changed).
+
    function Tip_Cap (Lobe_Mask : Mask; Centre, Tip : Pixel) return Mask;
    --  A lobe's tip region: its pixels within one mean width of the tip, along
    --  the way the tip lies from the lobe's centre; the mean width is the
    --  lobe's pixels over its length along that way. The point of a lobe that
    --  touches is somewhere in the region, not on the line through the tip
    --  pixel. Empty for a lobe whose tip is its centre.
+
+   function Tip_Track (Lobe_Mask : Mask; Centre, Tip : Pixel) return Pixel;
+   --  Where the lobe's tip region is (Tip_Cap): its pixels' mean; the tip pixel itself when the region is empty. The
+   --  tip pixel is the lobe's farthest from its root, and of a lobe whose end is a flat edge across its length either
+   --  corner of it is: from one view to the next the tip pixel crossed the edge, 24 pixels on the kiwi-like fake's jaw
+   --  (a15 on 10-16, stops at 8.68 to 8.69: 242.5 and 218.5 across in turn), and the steps between views measured
+   --  by it were jumps the closer's motion did not make. The region's mean moves as the lobe does.
 
    function Tip_Spread (Cap : Mask; Tip : Pixel) return Real;
    --  How far the pixels of a tip region lie from the tip pixel, per axis, in

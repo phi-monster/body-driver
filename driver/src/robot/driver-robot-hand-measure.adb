@@ -542,20 +542,24 @@ procedure Measure (H : in out Hands; M : in out Model) is
                         --  The view at place K of the travel from the low end: 0 the low end, Stops + 1 the high.
                         procedure View (K : Natural; Seen : out Boolean; Tip : out Driver.Images.Pixel; R : out Real) is
                         begin
+                           --  Where its tip region is (Lobes.Tip_Track), as Hand.Followed_Shape measures the steps.
                            if K = 0 then
                               Seen := L.Tip_Known_Here;
-                              Tip := L.Tip_Here;
+                              Tip := Driver.Robot.Hand.Lobes.Tip_Track (L.Here, L.Centre_Here, L.Tip_Here);
                               R := Low_R;
                            elsif K > Stops then
                               Seen := L.Tip_Known_There;
-                              Tip := L.Tip_There;
+                              Tip := Driver.Robot.Hand.Lobes.Tip_Track (L.There, L.Centre_There, L.Tip_There);
                               R := High_R;
                            else
                               declare
                                  At_Stop : constant Sweeps.Stop_Tips := Sweeps.Tips_At_Stop (S, C, K);
                               begin
                                  Seen := Lobe_No in At_Stop'Range and then At_Stop (Lobe_No).Known;
-                                 Tip := (if Seen then At_Stop (Lobe_No).Tip else (0.0, 0.0));
+                                 Tip := (if Seen
+                                         then Driver.Robot.Hand.Lobes.Tip_Track
+                                                (At_Stop (Lobe_No).Region, At_Stop (Lobe_No).Centre, At_Stop (Lobe_No).Tip)
+                                         else (0.0, 0.0));
                                  R := Sweeps.Stop_Reading (S, C, K);
                               end;
                            end if;

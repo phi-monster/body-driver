@@ -159,6 +159,69 @@ package body Driver.Robot.Hand.Lobes is
       return L;
    end Components;
 
+   procedure Tip_Of (Lobe_Mask, Seeds, Attached : Mask; Tip : out Pixel; Known : out Boolean);
+
+   procedure Moved_Lobe
+     (Before  : Mask;
+      Changed : Mask;
+      Region  : out Mask;
+      Centre  : out Pixel;
+      Tip     : out Pixel;
+      Known   : out Boolean)
+   is
+      W     : constant Natural := Width (Before);
+      H     : constant Natural := Height (Before);
+      Moved : Mask := Create (W, H);
+   begin
+      Region := Create (W, H);
+      Centre := (U => 0.0, V => 0.0);
+      Tip := (U => 0.0, V => 0.0);
+      Known := False;
+      if W = 0 or else H = 0 or else Width (Changed) /= W or else Height (Changed) /= H then
+         return;
+      end if;
+      for R in 0 .. H - 1 loop
+         for C in 0 .. W - 1 loop
+            if Contains (Before, C, R) /= Contains (Changed, C, R) then
+               Include (Moved, C, R);
+            end if;
+         end loop;
+      end loop;
+      declare
+         L      : constant Labels := Components (Moved);
+         Shared : array (1 .. L.Count) of Natural := [others => 0];
+         Best   : Natural := 0;
+         Most   : Natural := 0;
+         Su, Sv : Real := 0.0;
+         N      : Natural := 0;
+      begin
+         for P in 0 .. W * H - 1 loop
+            if L.Of_Pixel (P) > 0 and then Contains (Before, P mod W, P / W) then
+               Shared (L.Of_Pixel (P)) := Shared (L.Of_Pixel (P)) + 1;
+            end if;
+         end loop;
+         for K in Shared'Range loop
+            if Shared (K) > Most then
+               Most := Shared (K);
+               Best := K;
+            end if;
+         end loop;
+         if Best = 0 then
+            return;
+         end if;
+         for P in 0 .. W * H - 1 loop
+            if L.Of_Pixel (P) = Best then
+               Include (Region, P mod W, P / W);
+               Su := Su + Real (P mod W) + 0.5;
+               Sv := Sv + Real (P / W) + 0.5;
+               N := N + 1;
+            end if;
+         end loop;
+         Centre := (U => Su / Real (N), V => Sv / Real (N));
+         Tip_Of (Region, Region, Create (0, 0), Tip, Known);
+      end;
+   end Moved_Lobe;
+
    function Label_At (L : Labels; P : Pixel) return Natural is
       Column, Row : Natural;
    begin
@@ -168,7 +231,6 @@ package body Driver.Robot.Hand.Lobes is
       return L.Of_Pixel (Index (L.Width, Column, Row));
    end Label_At;
 
-   procedure Tip_Of (Lobe_Mask, Seeds, Attached : Mask; Tip : out Pixel; Known : out Boolean);
    --  The seed of the lobe farthest along the lobe from where it is attached
    --  (shortest paths through the lobe, steps of 1 and sqrt 2): a pixel that
    --  passed only the single test may be a still one next to the lobe.
@@ -1256,6 +1318,23 @@ package body Driver.Robot.Hand.Lobes is
          end loop;
       end;
    end Reach_Tip;
+
+   function Tip_Track (Lobe_Mask : Mask; Centre, Tip : Pixel) return Pixel is
+      Cap    : constant Mask := Tip_Cap (Lobe_Mask, Centre, Tip);
+      Su, Sv : Real := 0.0;
+      N      : Natural := 0;
+   begin
+      for R in 0 .. Height (Cap) - 1 loop
+         for C in 0 .. Width (Cap) - 1 loop
+            if Contains (Cap, C, R) then
+               Su := Su + Real (C) + 0.5;
+               Sv := Sv + Real (R) + 0.5;
+               N := N + 1;
+            end if;
+         end loop;
+      end loop;
+      return (if N = 0 then Tip else (U => Su / Real (N), V => Sv / Real (N)));
+   end Tip_Track;
 
    function Tip_Cap (Lobe_Mask : Mask; Centre, Tip : Pixel) return Mask is
       W       : constant Natural := Width (Lobe_Mask);

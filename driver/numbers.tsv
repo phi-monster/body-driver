@@ -1213,11 +1213,15 @@ driver-robot-hand-lobes.adb	Share (J) := (if Label (J) then 1.0 else 0.0);	1.0	m
 driver-robot-hand-lobes.adb	Share (P) := (if Now_A then 1.0 else 0.0);	1.0	math	a pixel turned is wholly of its new kind
 driver-robot-hand-lobes.adb	Step : constant Real := (if Dr /= 0 and then Dc /= 0 then Diagonal else 1.0);	1.0	math	a step between side neighbours is one pixel
 driver-robot-hand-lobes.adb	Su := Su + Real (C) + 0.5;	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-lobes.adb	Su := Su + Real (C) + 0.5;	0.5	math	the centre of a pixel is half a pixel from its corner
+driver-robot-hand-lobes.adb	Su := Su + Real (P mod W) + 0.5;	0.5	math	the centre of a pixel is half a pixel from its corner
 driver-robot-hand-lobes.adb	Sum := Sum + (Real (C) + 0.5 - Tip.U) ** 2 + (Real (R) + 0.5 - Tip.V) ** 2;	0.5	math	the centre of a pixel is half a pixel from its corner
 driver-robot-hand-lobes.adb	Sum := Sum + (Real (C) + 0.5 - Tip.U) ** 2 + (Real (R) + 0.5 - Tip.V) ** 2;	0.5	math	the centre of a pixel is half a pixel from its corner
 driver-robot-hand-lobes.adb	Sum := Sum + (if Label (Neighbour) then 1 else -1);	1	math	a neighbour of the one kind counts one, of the other minus one
 driver-robot-hand-lobes.adb	Sum := Sum + (if Label (Neighbour) then 1 else -1);	1	math	a neighbour of the one kind counts one, of the other minus one
+driver-robot-hand-lobes.adb	Sv := Sv + Real (P / W) + 0.5;	0.5	math	the centre of a pixel is half a pixel from its corner
 driver-robot-hand-lobes.adb	Sv := Sv + Real (R) + 0.5;	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-robot-hand-lobes.adb	Sv := Sv + Real (R) + 0.5;	0.5	math	the centre of a pixel is half a pixel from its corner
 driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	math	a pixel is at its centre, half a pixel in
@@ -1574,7 +1578,7 @@ driver-robot-hand.adb	& Driver.Log.Image (Lobe.Way.Reach, 1) & "");	1	format	dig
 driver-robot-hand.adb	& Driver.Log.Image (Reach.Value, 4) & "" & Driver.Log.Image (Reach.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Reach.Value, 4) & "" & Driver.Log.Image (Reach.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Readings (Wide + 1), 6) & ""	6	format	digits printed in a log line or a message
-driver-robot-hand.adb	& Driver.Log.Image (Readings (Wide), 6) & "" & Image (Tips (Wide + 1)) & ""	6	format	digits printed in a log line or a message
+driver-robot-hand.adb	& Driver.Log.Image (Readings (Wide), 6) & "" & Image (Track (Wide + 1)) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Shift.Still, 1) & "" & Driver.Log.Image (Shift.Typical, 1)	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Shift.Still, 1) & "" & Driver.Log.Image (Shift.Typical, 1)	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Lobe_No'Image & "" & Driver.Log.Image (Readings (Wide), 6)	6	format	digits printed in a log line or a message
@@ -1611,6 +1615,7 @@ driver-robot-hand.adb	Readings : Real_Array (1 .. N + 2);	2	structure	the closer
 driver-robot-hand.adb	Result (C) := Real'Max (Result (C), Step.Value / (Driver.Conventions.Z * Sqrt (2.0)));	2.0	statistics	the difference of two readings carries the sigma of each: the step is Z times the square root of two of it
 driver-robot-hand.adb	Sqrt (2.0) * Sigma (C)));	2.0	statistics	the difference of two readings carries the sigma of each: the square root of two times one
 driver-robot-hand.adb	Tips : Follow.Pixel_Array (1 .. N + 2);	2	structure	the closer's two ends besides its stops
+driver-robot-hand.adb	Track : Follow.Pixel_Array (1 .. N + 2);	2	structure	the closer's two ends besides its stops
 driver-robot-hand.adb	Upper_F : Real := 1.0;	1.0	structure	the closed end of the closing as a fraction
 driver-robot-hand.adb	Which : Positive := 1;	1	structure	channels are numbered from one; the first stands until the one that moved is found
 driver-robot-hand.adb	Which : constant Opening := (if S = 1 then Open else Closed_Empty);	1	structure	the first setting is the open end

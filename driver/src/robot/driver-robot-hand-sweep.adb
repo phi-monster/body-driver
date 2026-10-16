@@ -211,6 +211,26 @@ package body Driver.Robot.Hand.Sweep is
                   end if;
                end;
             end if;
+            --  A lobe the placing gave no tip at this stop: its pixels from the anchored end's and what changed
+            --  (Lobes.Moved_Lobe), where it barely moved between the two.
+            if Compared.Trusted then
+               for L in 1 .. N loop
+                  if not Tips (L).Known then
+                     declare
+                        Mine   : constant Mask :=
+                          (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
+                        Region : Mask;
+                        Centre, Tip : Pixel;
+                        Known  : Boolean;
+                     begin
+                        Driver.Robot.Hand.Lobes.Moved_Lobe (Mine, Compared.Changed, Region, Centre, Tip, Known);
+                        if Known then
+                           Tips (L) := (Known => True, Tip => Tip, Centre => Centre, Region => Region);
+                        end if;
+                     end;
+                  end if;
+               end loop;
+            end if;
             Now.Stops.Append
               (Stop_State'(Reading => Driver.Robot.Hand.Views.Reading (V, Channel), From => V.From,
                            Tips    => Tip_Holders.To_Holder (Tips)));
