@@ -1151,36 +1151,125 @@ package body Driver.Robot.Tests is
       end loop;
    end Sweep_Starts_Where_A_Cell_Tells;
 
-   --  The pairs two orders of an arm's joints give each the other way (Kinematics.Contested), in the first's
-   --  order: s08's fitted order and the one nearest it that the fit could not tell from it (10-16), 5 1 4 3 2 6
-   --  and 1 5 4 3 6 2, are 5 with 1 and 2 with 6; an order and itself give none, nor two of different joints.
-   procedure Contested_Of_Two_Orders is
-      use type Driver.Robot.Kinematics.Joint_Pair;
-      Chain, Contender, Shorter : Count_Vectors.Vector;
-   begin
-      for J of Natural_Array'[5, 1, 4, 3, 2, 6] loop
-         Chain.Append (J);
-      end loop;
-      for J of Natural_Array'[1, 5, 4, 3, 6, 2] loop
-         Contender.Append (J);
-      end loop;
-      for J of Natural_Array'[1, 5, 4] loop
-         Shorter.Append (J);
-      end loop;
-      declare
-         Pairs : constant Driver.Robot.Kinematics.Joint_Pair_Lists.Vector :=
-           Driver.Robot.Kinematics.Contested (Chain, Contender);
+   --  The joints next to each other along an arm whose swap the fit cannot tell (Fit_Report's Untold). Two joints
+   --  never turned together are exactly that: one of them at its reference in every keyframe, the two orders give
+   --  every keyframe the same pose (they differ in the product of the two turns alone). A fit of every joint alone
+   --  and of every pair together but 2 with 3 names 2 with 3 and no other pair; with 2 and 3 turned together too,
+   --  the order is told and it names none. The pairs were taken from the order nearest the best's in residuals
+   --  before: s08's was the true order, two swaps away, s10's another, three pairs off the true ones (10-16).
+   procedure Untold_Neighbours is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      N       : constant := 6;
+      Levels  : constant Real_Array := [0.05, -0.05, 0.1, -0.1, 0.2, -0.2];
+      Widest  : constant Real := 0.2;
+      Columns : constant := 16;
+      Rows    : constant := 12;
+      Noise   : constant Real := 0.2;
+      Table   : constant Vec3 := [0.0, -0.6, -0.8];   --  its normal, towards the eye
+      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Truth   : Fit.Joint_Array (1 .. N);
+      type Sighting_Access is access Fit.Sighting_Array;
+
+      procedure Fit_Of (Both : Boolean; Report : out Fit.Fit_Report) is
+         Pairs   : constant Natural := N * (N - 1) / 2 - (if Both then 0 else 1);
+         Frames  : constant Positive := 1 + N * Levels'Length + Pairs;
+         Changes : Real_Matrix (1 .. Frames, 1 .. N) := [others => [others => 0.0]];
+         Asked   : Fit.Flag_Matrix (1 .. Frames, 1 .. N);
+         All_Seen : constant Sighting_Access := new Fit.Sighting_Array (1 .. (Frames - 1) * Columns * Rows);
+         Seen    : Natural := 0;
+         Row     : Positive := 1 + N * Levels'Length;
+         Rng     : Generator;
+         Joints  : Fit.Joint_Array (1 .. N);
+         Chain   : Fit.Chain_Order (1 .. N);
+         Found   : Fit.Lens;
       begin
-         Check (Natural (Pairs.Length) = 2
-                and then Pairs (Pairs.First_Index) = (Earlier => 5, Later => 1)
-                and then Pairs (Pairs.First_Index + 1) = (Earlier => 2, Later => 6),
-                "5 1 4 3 2 6 and 1 5 4 3 6 2 give" & Pairs.Length'Image & " pairs each the other way, not 5 with 1 and"
-                & " 2 with 6");
+         for J in 1 .. N loop
+            for L in Levels'Range loop
+               Changes (1 + (J - 1) * Levels'Length + (L - Levels'First + 1), J) := Levels (L);
+            end loop;
+         end loop;
+         for I in 1 .. N loop
+            for J in I + 1 .. N loop
+               if Both or else not (I = 2 and then J = 3) then
+                  Row := Row + 1;
+                  Changes (Row, I) := Widest;
+                  Changes (Row, J) := Widest;
+               end if;
+            end loop;
+         end loop;
+         for F in 1 .. Frames loop
+            for J in 1 .. N loop
+               Asked (F, J) := Changes (F, J) /= 0.0;
+            end loop;
+         end loop;
+         for F in 2 .. Frames loop
+            declare
+               D : Real_Array (1 .. N);
+               T : Rigid;
+            begin
+               for J in 1 .. N loop
+                  D (J) := Changes (F, J);
+               end loop;
+               T := Inverse (Fit.Eye_At (Truth, Along (Truth), D));
+               for Gy in 1 .. Rows loop
+                  for Gx in 1 .. Columns loop
+                     declare
+                        K  : constant Positive := (Gy - 1) * Columns + Gx;
+                        U0 : constant Real := (Real (Gx) - 0.5) * 640.0 / Real (Columns);
+                        V0 : constant Real := (Real (Gy) - 0.5) * 480.0 / Real (Rows);
+                        H  : constant Vec3 := Fit.Ray (Lens, U0, V0);
+                        X  : constant Vec3 := (-1.0 / Real'(Unit (Table) * H)) * H;
+                        U, V : Real;
+                        Ahead : Boolean;
+                     begin
+                        Fit.Project (Lens, T * X, U, V, Ahead);
+                        U := U + Noise * Gaussian (Rng);
+                        V := V + Noise * Gaussian (Rng);
+                        if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
+                           Seen := Seen + 1;
+                           All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V, Own => 0.0,
+                                               Own_Freedom => 0, others => <>);
+                        end if;
+                     end;
+                  end loop;
+               end loop;
+            end;
+         end loop;
+         Fit.Fit (Changes, Asked, [for J in 1 .. N => 0.01], All_Seen (1 .. Seen), 640, 480, 0, Joints, Chain, Found,
+                  Report);
+      end Fit_Of;
+   begin
+      declare
+         --  Synthetic_Sweep's arm: no two axes alike, none through another's point.
+         Axes   : constant array (1 .. N) of Vec3 :=
+           [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
+         Points : constant array (1 .. N) of Vec3 :=
+           [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
+      begin
+         for J in 1 .. N loop
+            declare
+               W : constant Vec3 := Unit (Axes (J));
+            begin
+               Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => 1.0, Slide => False);
+            end;
+         end loop;
       end;
-      Check (Driver.Robot.Kinematics.Contested (Chain, Chain).Is_Empty, "an order and itself give a pair the other way");
-      Check (Driver.Robot.Kinematics.Contested (Chain, Shorter).Is_Empty,
-             "orders of different joints give a pair the other way");
-   end Contested_Of_Two_Orders;
+      declare
+         Report : Fit.Fit_Report;
+      begin
+         Fit_Of (Both => False, Report => Report);
+         Check (Report.Fitted, "the arm turned a joint and a pair at a time, but 2 with 3, was not fitted: "
+                & Ada.Strings.Unbounded.To_String (Report.Why));
+         Check (not Report.Order_Told, "the order is told where 2 and 3 never turned together");
+         Check (Natural (Report.Untold.Length) = 1
+                and then (for some P of Report.Untold => (P.Earlier = 2 and then P.Later = 3)
+                                                         or else (P.Earlier = 3 and then P.Later = 2)),
+                "the pairs whose swap is not told are" & Report.Untold.Length'Image & ", not 2 with 3 alone");
+         Fit_Of (Both => True, Report => Report);
+         Check (Report.Fitted and then Report.Order_Told and then Report.Untold.Is_Empty,
+                "every pair turned together leaves the order untold, or names a pair:" & Report.Untold.Length'Image);
+      end;
+   end Untold_Neighbours;
 
    --  An arm's match was asked, then the graph stopped listing the arm (an
    --  estimate told its eye or group otherwise): its answer must still be
@@ -8377,8 +8466,8 @@ package body Driver.Robot.Tests is
                              & "the arm stopped gives no keyframe", Boot_With_Settling_Views'Access);
       Driver.Tests.Register ("robot.boot.keeps", "a boot that fails after recognizing the body leaves no body file to "
                              & "reload it from", Boot_Keeps_What_It_Measured'Access);
-      Driver.Tests.Register ("robot.sweep.contested", "the pairs two orders of an arm's joints give each the "
-                             & "other way are not the ones they swap", Contested_Of_Two_Orders'Access);
+      Driver.Tests.Register ("robot.sweep.untold", "the fit names joints next to each other whose swap it tells, or "
+                             & "misses two never turned together", Untold_Neighbours'Access);
       Driver.Tests.Register ("robot.sweep.twin", "an arm at rest takes no still twin of its reference, or its sweep "
                              & "starts where the view moves less than the matcher errs", Twin_Before_The_Sweep'Access);
       Driver.Tests.Register ("robot.sweep.start", "a joint's sweep starts at the turn that moves its eye's view by half "

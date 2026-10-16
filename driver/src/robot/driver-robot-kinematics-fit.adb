@@ -2019,7 +2019,7 @@ package body Driver.Robot.Kinematics.Fit is
       --  at most of its time (the profile is most of the last stage: ten refinements of the tracks to its one).
       --  Whether the sightings tell the joints' order (stage 4), or the fit begun from tells it (From).
       Order_Is_Told : Boolean := False;
-      Contender     : Joint_Lists.Vector;   --  the order nearest the best's that stage 4 could not tell from it
+      Untold        : Joint_Pair_Lists.Vector;   --  the joints next to each other in it whose swap stage 4 did not tell
 
       procedure Finish (Profiled : Boolean) is
       begin
@@ -2198,7 +2198,7 @@ package body Driver.Robot.Kinematics.Fit is
          Report.Searched_Most := Searched_Most;
          Report.Profiled_Over := (if Profiled then Sightings'Length elsif From.Valid then From.Profiled_Over else 0);
          Report.Order_Told := Order_Is_Told;
-         Report.Contender := Contender;
+         Report.Untold := Untold;
          Chain := Order;
          Report.Fitted := Report.Determined;
          Close_Stage;
@@ -4269,25 +4269,6 @@ package body Driver.Robot.Kinematics.Fit is
                   Order_Is_Told := Here < Real'Last;
                   if Order_Is_Told then
                      Tell_All (1, Ways);
-                     --  Of the orders not significantly the larger, the one whose residuals lie nearest the best's: the
-                     --  joints whose places along the arm it swaps with the best's are the ones the order lacks the
-                     --  evidence of (Boot turns them together, a pair at a time).
-                     declare
-                        Nearest : Natural := 0;
-                     begin
-                        for J in 1 .. Ways loop
-                           if Results (J).Fails
-                             and then (Nearest = 0 or else Results (J).Fail_Median < Results (Nearest).Fail_Median)
-                           then
-                              Nearest := J;
-                           end if;
-                        end loop;
-                        if Nearest > 0 then
-                           for X of Results (Nearest).Fail_Order.all loop
-                              Contender.Append (X);
-                           end loop;
-                        end if;
-                     end;
                      for J in 1 .. Ways loop
                         if Results (J).Fails then
                            Order_Is_Told := False;
@@ -4300,6 +4281,41 @@ package body Driver.Robot.Kinematics.Fit is
                            exit;
                         end if;
                      end loop;
+                     --  An order not told: the joints next to each other along it whose swap leaves residuals not
+                     --  significantly the larger (Smaller) are the ones it lacks the evidence of, and Boot turns them
+                     --  together, a pair at a time. Two joints apart by a swap are told only by what they do turned
+                     --  together: the orders differ in the product of the two turns, not in either alone. The order
+                     --  nearest in residuals was taken for the pairs: s08's was the true order, two swaps away (5 with 1,
+                     --  2 with 6), s10's another (5 4 3 1 2 6 for 5 1 4 3 2 6, where the true order was 1 5 4 3 6 2),
+                     --  and s10 turned c1 with c4 and c1 with c3, its order still not told.
+                     if not Order_Is_Told then
+                        declare
+                           Own     : Rigid_Access := new Pose_Array;
+                           Into    : Real_Access := new Real_Array (1 .. 2 * Multi);
+                           M, E    : Real;
+                           Swapped : Chain_Order (1 .. N);
+                           Said    : Ada.Strings.Unbounded.Unbounded_String;
+                        begin
+                           for K in 1 .. N - 1 loop
+                              Swapped := Order;
+                              Swapped (K) := Order (K + 1);
+                              Swapped (K + 1) := Order (K);
+                              Score_Into (Swapped, Own.all, Into.all, M, E);
+                              if not Smaller (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed)) then
+                                 Untold.Append (Joint_Pair'(Earlier => Order (K), Later => Order (K + 1)));
+                                 Ada.Strings.Unbounded.Append
+                                   (Said, " " & Driver.Log.Image (Order (K)) & " with " & Driver.Log.Image (Order (K + 1))
+                                          & " (" & Driver.Log.Image (M, 3) & " px)");
+                              end if;
+                           end loop;
+                           Free (Own);
+                           Free (Into);
+                           Driver.Log.Line (Driver.Log.Robot, "kinematics: the joints next to each other along"
+                                            & Image (Order) & " whose swap is not told:"
+                                            & (if Untold.Is_Empty then " none"
+                                               else Ada.Strings.Unbounded.To_String (Said)));
+                        end;
+                     end if;
                   end if;
                   for J in 1 .. Ways loop
                      Free (Results (J).Order);

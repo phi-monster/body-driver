@@ -14,8 +14,6 @@
 --  is submitted and its reply read on a later beat (Driver.Services), so the
 --  same evidence follows from a recording.
 
-with Ada.Containers.Vectors;
-
 private package Driver.Robot.Kinematics is
 
    procedure Observe (M : in out Model; O : Observation);
@@ -152,19 +150,10 @@ private package Driver.Robot.Kinematics is
 
    function Fitted (M : Model; A : Arm_Id) return Boolean;
 
-   type Joint_Pair is record
-      Earlier, Later : Positive;   --  two joints by their readings, Earlier before Later along the arm as fitted
-   end record;
-   package Joint_Pair_Lists is new Ada.Containers.Vectors (Positive, Joint_Pair);
-
-   function Contested (Chain, Contender : Count_Vectors.Vector) return Joint_Pair_Lists.Vector;
-   --  The pairs of joints that Chain and Contender, two orders of the same joints along an arm (by their readings,
-   --  from the base), give each the other way, in Chain's order; none when they are not orders of the same joints.
-
    function Contested_Pairs (M : Model; A : Arm_Id) return Joint_Pair_Lists.Vector;
-   --  The joints whose order along the arm the fitted order and its contender (Fit_Report's Contender) give
-   --  each the other way (Contested): what the order lacks the evidence of. None when the order is told, or
-   --  there is no contender.
+   --  The joints next to each other along the fitted order whose swap leaves residuals not significantly the
+   --  larger (Fit_Report's Untold): what the order lacks the evidence of. None when the order is told, or every
+   --  such swap is told.
 
    function Order_Told (M : Model; A : Arm_Id) return Boolean;
    --  The arm is fitted and its sightings tell its joints' order, not only that it is the best of the orders

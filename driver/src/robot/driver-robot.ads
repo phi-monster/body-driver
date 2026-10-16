@@ -385,6 +385,11 @@ private
    --  every beat, never on a stack.
    package Count_Vectors is new Ada.Containers.Vectors (Natural, Natural);
 
+   type Joint_Pair is record
+      Earlier, Later : Positive;   --  two joints by their readings, Earlier before Later along the arm as fitted
+   end record;
+   package Joint_Pair_Lists is new Ada.Containers.Vectors (Positive, Joint_Pair);
+
    --  The extreme a quantity of a push has reached (Driver.Robot.Steps.Follow), and the quantity at the beats since,
    --  that one included: their count, mean and the sum of the squares of their deviations from it (Welford's).
    type Extreme is record
@@ -676,7 +681,8 @@ private
       Focal_Within, Searched_Least, Searched_Most : Real := 0.0;
       Profiled_Over : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
       Order_Told    : Boolean := False;   --  its joints' order is told by the sightings, not only the best (Fit_Report)
-      Contender     : Count_Vectors.Vector;   --  when not: the order nearest the best's not told from it (Fit_Report)
+      Untold        : Joint_Pair_Lists.Vector;   --  when not: the joints next to each other along it whose swap is not
+                                                 --  told (Fit_Report)
       Made_At : Natural := 0;
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
