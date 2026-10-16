@@ -21,6 +21,7 @@ package Driver.Brain.Round is
    type Eye_Facts is record
       Eye   : Driver.Brain.Names.Eye_Id;
       Mount : Driver.Robot.Mount;
+      Arms  : Natural := 0;   --  the body's arms whose motion the eye sees (Robot.Response: a patch or the whole of it)
    end record;
 
    package Eye_Fact_Vectors is new Ada.Containers.Vectors (Positive, Eye_Facts);

@@ -52,8 +52,20 @@ package body Driver.Brain.Live is
          Now.Images := O.Images;
          Now.Instruction := To_Unbounded_String (Driver.Beats.Latest_Words);
          for E in O.Images.First_Index .. O.Images.Last_Index loop
-            Now.Eyes.Append (Driver.Brain.Round.Eye_Facts'(Eye   => E,
-                                                           Mount => Driver.Robot.Eye_Mount (B.C.Robot.all, E)));
+            declare
+               Arms : Natural := 0;
+            begin
+               for A in 1 .. Driver.Robot.Arm_Count (B.C.Robot.all) loop
+                  if Driver.Robot.Response (B.C.Robot.all, Driver.Robot.Arm_Group (B.C.Robot.all, Driver.Robot.Arm_Id (A)), E)
+                    in Driver.Robot.Patch | Driver.Robot.Whole
+                  then
+                     Arms := Arms + 1;
+                  end if;
+               end loop;
+               Now.Eyes.Append (Driver.Brain.Round.Eye_Facts'(Eye   => E,
+                                                              Mount => Driver.Robot.Eye_Mount (B.C.Robot.all, E),
+                                                              Arms  => Arms));
+            end;
          end loop;
          for I in 1 .. Named.Named_Count loop
             declare

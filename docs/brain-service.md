@@ -83,8 +83,10 @@ Either way the first question logs once what happened:
   ([`language.md`](language.md), section 2). A service that ignores the
   grammar still works, but its programs may contain lines the driver refuses.
 - The picture is one 24-bit BMP, base64 in a data URL. On top, at full size,
-  the eye the brain looks through this round (the first round: the first eye
-  fixed in the scene). Below it, one strip with every other eye that has a
+  the eye the brain looks through this round (the first round: of the eyes
+  fixed in the scene, the one that saw the most of the body's arms move when
+  the body was measured, the first of equals; with no eye fixed in the scene,
+  the first eye with a picture). Below it, one strip with every other eye that has a
   picture this beat, left to right in camera order, each scaled to an equal
   share of the width and keeping its own proportions. Nothing is drawn on
   any picture: drawn marks were measured to hurt the model's sight.
