@@ -2815,14 +2815,18 @@ driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and 
 driver-robot-steps.adb	(X.Followed < 2	2	structure	a scatter needs two beats; with fewer there is no chatter to tell a gain from
 driver-robot-steps.adb	(if Ask > 0.0 then 1.0 else -1.0) * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));	1.0	math	the sign of the ask: motion along it counts positive
 driver-robot-steps.adb	(if Ask > 0.0 then 1.0 else -1.0) * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));	1.0	math	the sign of the ask: motion along it counts positive
+driver-robot-steps.adb	Before := Before + Unit * (Channels.Reading (M, G, Beat - 1, C) - Channels.Reading (M, G, Beat - 2, C));	2	structure	the last two beats of a push: three readings tell two steps and their ratio, the fewest that tell a run of shrinking steps
 driver-robot-steps.adb	Own (C) := (Unit * Sqrt (2.0) * Sigma) ** 2;	2.0	statistics	a shortfall is the difference of two readings, the one before the push and the one where it stopped: the root of two of the reading noise
 driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
+driver-robot-steps.adb	and then Channels.Has_Reading (M, G, Beat - 2))	2	structure	the last two beats of a push: three readings tell two steps and their ratio, the fewest that tell a run of shrinking steps
 driver-robot-steps.adb	and then Driver.Uncertain.Significant (Along, Sqrt (2.0) * Sigma)	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-steps.adb	and then Driver.Uncertain.Significant (Gone, Noise * Sqrt (2.0), Channels.Noise_Freedom (M, G, C))	2.0	statistics	the noise of a difference of two readings is sqrt 2 times one reading's
 driver-robot-steps.adb	else Beat - Natural'Min (Beat, Natural'Max (1, S.Episodes.Last_Element.Start) - 1));	1	structure	the beat before the push's start, where its readings were read
+driver-robot-steps.adb	if E.Length <= 0.0 or else Beat < E.Start + 2	2	structure	the last two beats of a push: three readings tell two steps and their ratio, the fewest that tell a run of shrinking steps
 driver-robot-steps.adb	if Natural (M.Groups (G).Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	if Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	if not (E.Ended and then E.Rested and then E.Blocked) or else E.Length <= 0.0 or else E.Start < 1	1	structure	a push needs the reading before it: it began at the second beat or later
+driver-robot-steps.adb	if not (Last > 0.0 and then Last < Before and then Driver.Uncertain.Significant (Last, Sqrt (2.0 * Spread))) then	2.0	math	the variance of the difference of two readings is the sum of theirs
 driver-robot-steps.adb	or else Driver.Uncertain.Significant (Gain, Sqrt (2.0 * X.Spread / Real (X.Followed - 1)), X.Followed - 1));	2.0	math	a gain is the difference of two beats' values of the quantity, whose variance is twice one beat's
 driver-robot-stillness.adb	Adds_Up : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0);	2.0	math	changes that do not push the same way add as roots of squares: over two beats a picture that only makes noise changes by the square root of two times what it changes over one, a drift by twice
 driver-robot-stillness.adb	S.Change_1 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare

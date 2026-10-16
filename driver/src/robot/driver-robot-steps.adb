@@ -346,6 +346,49 @@ package body Driver.Robot.Steps is
          end loop;
          return False;
       end Left_Its_Start;
+
+      --  The push is still closing on its target where the eyes cannot tell it from one beat to the next: its last
+      --  two beats went along the ask by shrinking steps, and the run of them, carried on, still goes a step an eye
+      --  can see (Channels.Visible). Called at rest there, a push was judged short by the approach it had left: a21 on
+      --  10-16, arm 1's free pushes of 24 to 105 units ended 0.12 to 0.46 short and, as their last beats' ratio runs
+      --  on, within 0.003 of their targets; a press's first push ended 0.0996 short of 1.69, and 0.02 so. The largest
+      --  of those, taken for what the group's free pushes fall short by, let the table's pushes go free (0.31 under Z
+      --  of 0.119, and so on up to pushes 1.44, 3.06 and 3.70 short), and the press never met the table. A push that
+      --  creeps on by steps that do not shrink (a hand giving into what it presses) is closing on nothing, and is
+      --  followed as before.
+      function Closing (G : Group_Id; Beat : Natural) return Boolean is
+         S : Group_Stream renames M.Groups (G);
+         E : constant Episode := S.Episodes.Last_Element;
+         Last, Before, Spread : Real := 0.0;
+      begin
+         if E.Length <= 0.0 or else Beat < E.Start + 2
+           or else not (Channels.Has_Reading (M, G, Beat) and then Channels.Has_Reading (M, G, Beat - 1)
+                        and then Channels.Has_Reading (M, G, Beat - 2))
+         then
+            return False;
+         end if;
+         for C in 1 .. S.Size loop
+            declare
+               Unit  : constant Real := S.Ask (C - 1) / E.Length;
+               Sigma : constant Real := Channels.Noise (M, G, C);
+            begin
+               if Sigma = Real'Last then
+                  return False;
+               end if;
+               Last := Last + Unit * (Channels.Reading (M, G, Beat, C) - Channels.Reading (M, G, Beat - 1, C));
+               Before := Before + Unit * (Channels.Reading (M, G, Beat - 1, C) - Channels.Reading (M, G, Beat - 2, C));
+               Spread := Spread + (Unit * Sigma) ** 2;
+            end;
+         end loop;
+         if not (Last > 0.0 and then Last < Before and then Driver.Uncertain.Significant (Last, Sqrt (2.0 * Spread))) then
+            return False;
+         end if;
+         declare
+            Ratio : constant Real := Last / Before;
+         begin
+            return Channels.Visible (M, G, Along_Ask (S, E.Length, Last * Ratio / (1.0 - Ratio)));
+         end;
+      end Closing;
    begin
       Body_Delay (M, Delay_Beats, Delay_Known);
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -375,7 +418,7 @@ package body Driver.Robot.Steps is
                         elsif Beat - E.Start > Wait then
                            Finish (M, G, Beat, Answered => False, Settled => True, Rested => True);
                         end if;
-                     elsif not Channels.Moving (M, G, Beat) then
+                     elsif not Channels.Moving (M, G, Beat) and then not Closing (G, Beat) then
                         Finish (M, G, Beat, Answered => True, Settled => True, Rested => True);
                      else
                         --  An answered push is given up by its own progress; the least it is followed for is the
