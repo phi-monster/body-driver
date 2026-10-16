@@ -88,6 +88,13 @@ private package Driver.Robot.Kinematics is
    --  see at all (Channels.Visible_Step), which the lock-in tells over many
    --  beats; 0 while neither is measured.
 
+   function Counted_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real;
+   --  The change of the arm's channel from the reference from which the fit counts the joint as turned in a
+   --  keyframe (Fit.Fit's Visible): the step a keyframe counts from (Step_Of), and no nearer than two landings of
+   --  one asked pose can differ, twice the least turn the body is known to execute (Steps.Executed_Least): a
+   --  servo lands within its dead band of where it is sent, every time it is sent there, and the reference is
+   --  a landing too.
+
    function Follow_Step (M : Model; A : Arm_Id; Channel : Positive) return Real;
    --  The change of the arm's channel that moves the view of the eye it
    --  carries by half the aligner's patch at the full size: the largest turn
