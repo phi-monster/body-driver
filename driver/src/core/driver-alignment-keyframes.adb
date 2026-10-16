@@ -988,10 +988,12 @@ package body Driver.Alignment.Keyframes is
       return Count;
    end Agreeing_Of;
 
-   --  The points of the reference that Only marks, into the second picture from their predictions, in as many pieces
-   --  at once as the machine has processors (a point's alignment reads the two pyramids and writes only its own
-   --  answer and mark); where an answer was found, its mark has the place it says, as the field of displacements is
-   --  fitted to the marks.
+   --  The points of the reference that Only marks, into the second picture from their predictions, each point an
+   --  index of its own handed to whichever worker is idle (a point's alignment reads the two pyramids and writes only
+   --  its own answer and mark); where an answer was found, its mark has the place it says, as the field of
+   --  displacements is fitted to the marks. The points were cut into one run of them a processor: a point's
+   --  alignment takes from one pass to dozens, and the task that waits for the round waited for the slowest run
+   --  (s07's estimate at beat 2842, replayed on 10-16: 1171 of its 6756 samples aligning).
    procedure Align_Some
      (C       : Chain;
       Second  : Pyramid;
@@ -1002,30 +1004,29 @@ package body Driver.Alignment.Keyframes is
       Widen   : Boolean := True)
    is
       Count  : constant Natural := Given'Length;
-      Pieces : constant Natural := Natural'Max (1, Natural'Min (Count, Natural (System.Multiprocessors.Number_Of_CPUs)));
+      Asked  : array (1 .. Count) of Positive;   --  the points Only marks, in their order
+      Number : Natural := 0;
 
-      procedure Piece (Index : Positive) is
-         First : constant Positive := (Index - 1) * Count / Pieces + 1;
-         Last  : constant Natural := Index * Count / Pieces;
+      procedure One (Index : Positive) is
+         K      : constant Positive := Asked (Index);
+         Result : Answer renames Answers (Answers'First + K - 1);
       begin
-         for K in First .. Last loop
-            if Only (Only'First + K - 1) then
-               declare
-                  Result : Answer renames Answers (Answers'First + K - 1);
-               begin
-                  Result := Align (C.Pictures, Second, Given (Given'First + K - 1), Widen);
-                  Marks (K) :=
-                    (if Result.Verdict = Found
-                     then (Found => True, Place => Result.To, Sigma => Sqrt (Real'Max (Result.Cov.UU, Result.Cov.VV)))
-                     else (others => <>));
-               end;
-            end if;
-         end loop;
-      end Piece;
+         Result := Align (C.Pictures, Second, Given (Given'First + K - 1), Widen);
+         Marks (K) :=
+           (if Result.Verdict = Found
+            then (Found => True, Place => Result.To, Sigma => Sqrt (Real'Max (Result.Cov.UU, Result.Cov.VV)))
+            else (others => <>));
+      end One;
 
-      procedure Run is new Driver.Parallel_For (Piece);
+      procedure Run is new Driver.Parallel_For (One);
    begin
-      Run (1, Pieces);
+      for K in 1 .. Count loop
+         if Only (Only'First + K - 1) then
+            Number := Number + 1;
+            Asked (Number) := K;
+         end if;
+      end loop;
+      Run (1, Number);
    end Align_Some;
 
    --  Where a keyframe's own field puts a point, to the uncertainty the field has there.
