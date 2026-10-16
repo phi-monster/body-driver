@@ -4226,6 +4226,28 @@ package body Driver.Robot.Kinematics.Fit is
                         Here_R.all := Results (J).Residuals.all;
                      end if;
                   end loop;
+                  --  An arm fitted before keeps the order it had (From.Chain) unless the least here leaves residuals
+                  --  significantly the smaller (Smaller, the test that tells an order): a later estimate's orders can
+                  --  all score alike, and the least of equals, the first of the sequence, then took the place of the
+                  --  order the fits before had found (a19 on 10-16, at beat 7568: every order's median about 0.52 px
+                  --  where the right one had left 0.17, the order 1 2 3 4 5 6 taken, and the arm's fit fell to focal
+                  --  lengths of 130 and 145 px; s08's best order went back and forth between two, fit after fit).
+                  if Found and then From.Valid and then From.N = N and then From.Chain /= Order then
+                     declare
+                        Own    : Rigid_Access := new Pose_Array;
+                        Before : Real_Access := new Real_Array (1 .. 2 * Multi);
+                        M, E   : Real;
+                     begin
+                        Score_Into (From.Chain, Own.all, Before.all, M, E);
+                        if not Smaller (Here_R (1 .. 2 * Placed), Before (1 .. 2 * Placed)) then
+                           Order := From.Chain;
+                           Here := M;
+                           Here_R.all := Before.all;
+                        end if;
+                        Free (Own);
+                        Free (Before);
+                     end;
+                  end if;
                   Order_Is_Told := Here < Real'Last;
                   if Order_Is_Told then
                      Tell_All (1, N);
