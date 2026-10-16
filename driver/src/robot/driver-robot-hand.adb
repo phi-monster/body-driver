@@ -679,6 +679,9 @@ package body Driver.Robot.Hand is
          N          : constant Natural := Sweeps.Stops (P.Sweep, C);
          Order      : array (1 .. N + 2) of Natural := [others => 0];   --  0, the low end; N + 1, the high; else a stop
          Tips       : Follow.Pixel_Array (1 .. N + 2);
+         --  Where its tip region is in each (Lobes.Tip_Track): what the steps between views are measured by, and
+         --  the follow's windows; the tip pixel, a corner of a flat end, crosses it from view to view.
+         Track      : Follow.Pixel_Array (1 .. N + 2);
          Readings   : Real_Array (1 .. N + 2);   --  the channel's reading at each view kept
          Count      : Natural := 0;
          All_Views  : Natural := 0;   --  every view where the tip is seen; Count, those followed
@@ -693,11 +696,13 @@ package body Driver.Robot.Hand is
                Count := Count + 1;
                Order (Count) := 0;
                Tips (Count) := L.Tip_Here;
+               Track (Count) := Driver.Robot.Hand.Lobes.Tip_Track (L.Here, L.Centre_Here, L.Tip_Here);
                Readings (Count) := Driver.Robot.Hand.Views.Reading (Low, C);
             elsif K = N + 1 then
                Count := Count + 1;
                Order (Count) := N + 1;
                Tips (Count) := L.Tip_There;
+               Track (Count) := Driver.Robot.Hand.Lobes.Tip_Track (L.There, L.Centre_There, L.Tip_There);
                Readings (Count) := Driver.Robot.Hand.Views.Reading (High, C);
             else
                declare
@@ -707,6 +712,8 @@ package body Driver.Robot.Hand is
                      Count := Count + 1;
                      Order (Count) := K;
                      Tips (Count) := At_Stop (Lobe_No).Tip;
+                     Track (Count) := Driver.Robot.Hand.Lobes.Tip_Track
+                       (At_Stop (Lobe_No).Region, At_Stop (Lobe_No).Centre, At_Stop (Lobe_No).Tip);
                      Readings (Count) := Sweeps.Stop_Reading (P.Sweep, C, K);
                   end if;
                end;
@@ -725,20 +732,20 @@ package body Driver.Robot.Hand is
          end loop;
          All_Views := Count;
          declare
-            Wide : constant Natural := Follow.Widest_Step (Tips (1 .. Count), Width, Height);
+            Wide : constant Natural := Follow.Widest_Step (Track (1 .. Count), Width, Height);
          begin
             if Wide = 1 then
                return Shapes.Unfitted
                  ("its pixels are not followed from the open end: its tip moves"
-                  & Natural'Image (Natural (Follow.Tip_Step (Tips (1 .. Count), Wide))) & " pixels between the first two"
-                  & " of the" & Count'Image & " views where it is seen, from " & Image (Tips (Wide)) & " at "
-                  & Driver.Log.Image (Readings (Wide), 6) & " to " & Image (Tips (Wide + 1)) & " at "
+                  & Natural'Image (Natural (Follow.Tip_Step (Track (1 .. Count), Wide))) & " pixels between the first two"
+                  & " of the" & Count'Image & " views where it is seen, from " & Image (Track (Wide)) & " at "
+                  & Driver.Log.Image (Readings (Wide), 6) & " to " & Image (Track (Wide + 1)) & " at "
                   & Driver.Log.Image (Readings (Wide + 1), 6) & ", farther than the matcher searches at its finest ("
                   & Natural'Image (Natural (Driver.Alignment.Finest_Radius (Width, Height))) & " pixels)");
             elsif Wide > 1 then
                Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & P.Group'Image & " channel" & C'Image & " lobe"
                                 & Lobe_No'Image & ": followed from the open end to " & Driver.Log.Image (Readings (Wide), 6)
-                                & ", where its tip moves" & Natural'Image (Natural (Follow.Tip_Step (Tips (1 .. Count), Wide)))
+                                & ", where its tip moves" & Natural'Image (Natural (Follow.Tip_Step (Track (1 .. Count), Wide)))
                                 & " pixels to the next view, at " & Driver.Log.Image (Readings (Wide + 1), 6)
                                 & ": part of its travel");
                Count := Wide;
@@ -760,7 +767,7 @@ package body Driver.Robot.Hand is
             end loop;
             Free (Luma);
             declare
-               F : constant Follow.Followed := Follow.Run (Views, Tips (1 .. Count), Open_Mask);
+               F : constant Follow.Followed := Follow.Run (Views, Track (1 .. Count), Open_Mask);
             begin
                Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & P.Group'Image & " channel" & C'Image & " lobe"
                                 & Lobe_No'Image & ": followed" & F.Count'Image & " of its" & F.Asked'Image
