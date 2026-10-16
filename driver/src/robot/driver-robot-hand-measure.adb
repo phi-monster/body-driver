@@ -286,10 +286,13 @@ procedure Measure (H : in out Hands; M : in out Model) is
       --  the rest of the body, which a deviation of the robot from its surroundings is taken over (Selfsight). A hand
       --  is measured from its own arm's motion and not from what the boot did before it: the boot's sweeps gave A22's
       --  closers dozens of poses at their start readings, and a reloaded body file gives none (A25h logged "0 poses,
-      --  two are needed" at every round). The eye is raised along the way up the body measured (Up_In_Arm), heights
-      --  above the table: first by the least move that moves its picture by what its cells tell (a plan's last
-      --  readings, tried by Lockin.Shows_Step before anything moves), then by twice that, and so on, until the eye has
-      --  the poses or cannot be raised further.
+      --  two are needed" at every round). The eye is moved along the way the fitted model moves it furthest for a turn of
+      --  the joints (Kinematics.Easiest_Way), on the side of it that does not lower it (Up_In_Arm): first by the least
+      --  move that moves its picture by what its cells tell (a plan's last readings, tried by Lockin.Shows_Step before
+      --  anything moves), then by twice that, and so on, until the eye has the poses or cannot be moved further. Not
+      --  straight up: an arm that rests stretched up has no way up, and b04 and h03 (10-17) planned their raise up into
+      --  the edge of the arm's reach, gave up a fifth of the way there at a conditioning of 1e-5, and never saw the
+      --  closer's ends from two poses; no hand was made.
       procedure Gather_Own_Poses (G : Group_Id; Wanted : Positive; Reached : out Boolean) is
          Placed : Boolean := False;   --  the closer is one an eye on an arm watches
          Arm    : Arm_Id := 1;
@@ -340,10 +343,18 @@ procedure Measure (H : in out Hands; M : in out Model) is
                Up    : constant Direction_Estimate := Up_In_Arm (M, Arm);
                Group : constant Group_Id := Arm_Group (M, Arm);
                Now   : constant Real_Array := O.Readings.Element (Group);
+               Way   : Vec3 := Driver.Robot.Kinematics.Easiest_Way (M, Arm, Now);
             begin
                Why := Ada.Strings.Unbounded.To_Unbounded_String ("where up is, in the arm's frame, is not measured");
                if Up.Sigma = Real'Last then
                   return;
+               end if;
+               Why := Ada.Strings.Unbounded.To_Unbounded_String ("the arm's model moves its eye no way at these readings");
+               if Way * Way = 0.0 then
+                  return;
+               end if;
+               if Way * Up.Unit_Vector < 0.0 then
+                  Way := -Way;
                end if;
                By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);
                Why := Ada.Strings.Unbounded.To_Unbounded_String
@@ -354,7 +365,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   --  with the turn held were refused for a turn the model left 8.4e-4 rad
                   --  off, the closer had no second pose at its low reading, and no hand was
                   --  made of it).
-                  Plan := Driver.Robot.Hand.Pressing.Lowered (M, Arm, O, Up.Unit_Vector, By, Turn_Free => True);
+                  Plan := Driver.Robot.Hand.Pressing.Lowered (M, Arm, O, Way, By, Turn_Free => True);
                   if Driver.Robot.Motion.Status (Plan) /= Driver.Robot.Motion.Planned then
                      Why := Ada.Strings.Unbounded.To_Unbounded_String (Driver.Robot.Motion.Why (Plan));
                      exit;
@@ -390,7 +401,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & ": its eye" & Eye'Image & " on arm" & Arm'Image
                              & " has seen its readings from" & Have'Image & " poses of the rest of the body, and"
                              & Natural'Image (Driver.Robot.Hand.Selfsight.Needed) & " are needed to tell the robot from its surroundings;"
-                             & " the arm raises the eye by " & Driver.Log.Image (By, 4)
+                             & " the arm moves the eye by " & Driver.Log.Image (By, 4) & " the way it moves it furthest"
                              & (if Is_First then ", the least that its readings show" else ", twice the raise before"));
             Driver.Robot.Motion.Follow (M, Plan, Report);
             Raised := Report.Outcome = Driver.Robot.Motion.Reached;
@@ -463,7 +474,37 @@ procedure Measure (H : in out Hands; M : in out Model) is
             end if;
             Last_Share := Share;
             Last_Doubt := Doubt;
-            Gather_Own_Poses (G, Positive'Max (Driver.Robot.Hand.Selfsight.Needed, 2 * Have), Reached);
+            --  The poses are gathered with the closer at each end in turn: the deviation is taken over the poses the
+            --  eye saw an end's readings from, and the sweep left the closer where it started. h05 (10-17) gathered six
+            --  poses at the readings its closer started from, 0.0002 short of its low end, none at either end, and no
+            --  hand was made; a setting left after one pose is forgotten (Selfsight), so the sweep's own view of an end
+            --  gives none.
+            for High in Boolean loop
+               declare
+                  End_At    : Real := 0.0;
+                  Known_End : Boolean := False;
+                  procedure Read_End (O : Observation) is
+                     pragma Unreferenced (O);
+                     P : constant Natural := Own_Pair (G);
+                  begin
+                     Known_End := P > 0 and then C <= Sweeps.Channels (H.Data.Pairs (P).Sweep)
+                       and then Sweeps.Has_Ends (H.Data.Pairs (P).Sweep, C);
+                     if Known_End then
+                        End_At := Driver.Robot.Hand.Views.Reading
+                          ((if High then Sweeps.High_End (H.Data.Pairs (P).Sweep, C)
+                            else Sweeps.Low_End (H.Data.Pairs (P).Sweep, C)), C);
+                     end if;
+                  end Read_End;
+               begin
+                  Hold_Beat (Read_End'Access);
+                  if Known_End then
+                     Return_Channel (G, C, End_At);
+                  end if;
+                  Hold_Beat (Read_Status'Access);
+                  Gather_Own_Poses (G, Positive'Max (Driver.Robot.Hand.Selfsight.Needed, 2 * Have), Reached);
+               end;
+               exit when not Reached;
+            end loop;
             exit when not Reached;
             --  The estimators place again at the next beat that sees the poses doubled; one more beat to read it.
             Hold_Beat (null);
@@ -493,6 +534,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Stops    : Natural := 0;
          Open_At  : Real := 0.0;
          Sigma    : Real := 0.0;        --  the channel's noise (Closer_Sigma)
+         Seeable  : Real := 0.0;        --  the least step the eyes see the channel make (Visible_Step)
          Began    : Natural := 0;
          Settles  : Natural := 0;
          --  The gaps whose parts saw no tip: passed over when the gaps are looked for again, so that the others are
@@ -524,6 +566,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                Measured := True;
                Stops := Sweeps.Stops (S, C);
                Sigma := Closer_Sigma (M, G) (C);
+               Seeable := (if Known (Visible_Step (M, G, C)) then Visible_Step (M, G, C).Value else 0.0);
                declare
                   Lobes  : constant Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector := Sweeps.Lobes_Of (S, C);
                   Low_R  : constant Real := Sweeps.End_Reading (S, C, High => False);
@@ -578,9 +621,13 @@ procedure Measure (H : in out Hands; M : in out Model) is
                            begin
                               View ((if Open_Low then Step else Stops + 1 - Step), Seen, Tip, R);
                               if Seen then
+                                 --  Two views whose readings are nearer than the least step the eyes see the channel
+                                 --  make show no move of it between them: a tip that moved there jumped between two
+                                 --  places it is found at, and no stop between them would follow it.
                                  if Last_Seen
                                    and then Sqrt ((Tip.U - Last_Tip.U) ** 2 + (Tip.V - Last_Tip.V) ** 2) > Limit
                                    and then not Unseen (Last_R, R)
+                                   and then abs (R - Last_R) >= Seeable
                                  then
                                     Found := True;
                                     From := Last_R;
@@ -656,15 +703,19 @@ procedure Measure (H : in out Hands; M : in out Model) is
                      Part   : constant Real := From + (To - From) * Real (K) / Real (Parts);
                      Waited : Natural := 0;
                   begin
-                     --  Readings no further apart than the channel's noise: the tip jumps there however finely the
-                     --  closer stops, and the gap is passed over as one no stop sees through, the others cut (a14 on
-                     --  10-16: 84 pixels between 6.559 and 6.562 ended the cutting with 13 pixels left uncut at the
-                     --  open end).
-                     if not Significant (Part - Last, Sqrt (2.0) * Sigma) then
+                     --  Readings no further apart than the channel's noise, or than the least step the eyes see it
+                     --  make: the tip jumps there however finely the closer stops, and the gap is passed over as one no
+                     --  stop sees through, the others cut (a14 on 10-16: 84 pixels between 6.559 and 6.562 ended the
+                     --  cutting with 13 pixels left uncut at the open end). The eyes' least step bounds it where the
+                     --  readings have no noise: a24 and a28 (10-16, 10-17) cut a tip that jumped 123 pixels between two
+                     --  places of it, over readings 0.0005 apart and the eyes' least step 0.0004, down to parts of
+                     --  3e-5, and spent 959 and more than 1000 beats on it before any press.
+                     if not Significant (Part - Last, Sqrt (2.0) * Sigma) or else abs (Part - Last) < Seeable then
                         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
                                          & ": between " & Driver.Log.Image (From, 6) & " and " & Driver.Log.Image (To, 6)
                                          & ", where a tip moves" & Natural'Image (Natural (Widest)) & " pixels, a part of"
-                                         & Parts'Image & " is no further from the one before than the channel's noise:"
+                                         & Parts'Image & " is no further from the one before than the channel's noise"
+                                         & " or the least step the eyes see it make:"
                                          & " the tip jumps there, and the other gaps are cut");
                         Unseen_From.Append (From);
                         Unseen_To.Append (To);

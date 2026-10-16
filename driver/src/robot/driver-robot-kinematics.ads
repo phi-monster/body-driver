@@ -250,6 +250,12 @@ private package Driver.Robot.Kinematics is
    --  of the fitted model's Jacobian of the eye's place (model units) and turn (radians) by the readings, over the
    --  greatest; 0 where some way of the eye is lost, 1 where every way is as easy. Zero for a model not fitted.
 
+   function Easiest_Way (M : Model; A : Arm_Id; Q : Real_Array) return Vec3;
+   --  The unit direction, in the arm's reference frame, in which the fitted model at readings Q moves the eye's place
+   --  the furthest for a turn of its joints of a given size: the leading eigenvector of J J', J the Jacobian of the
+   --  place by each joint's own turn (its reading's change times the joint's radians, or units of slide, per reading
+   --  unit), so the readings' units do not weigh the ways. Its sign is the eigenvector's; zero for a model not fitted.
+
    function Nearest_Readings (M : Model; A : Arm_Id; Near, Readings : Real_Array) return Real_Array
      with Pre => Near'Length = Readings'Length,
           Post => Nearest_Readings'Result'Length = Readings'Length;

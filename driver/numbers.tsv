@@ -1232,7 +1232,7 @@ driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0
 driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Trips : Real_Access := new Real_Array (1 .. 2 * Count);	2	structure	two coordinates per correspondence
 driver-robot-hand-lobes.adb	Turn : constant Real := Driver.Conventions.Z ** 2 / 2.0;	2.0	math	twice the log of the likelihood ratio is above Z squared when two kinds are told apart (Wilks)
-driver-robot-hand-lobes.adb	Variance := 2.0 * Pixel_Variance;	2.0	statistics	two places, one at each end, each known to one pixel's variance
+driver-robot-hand-lobes.adb	Variance := Variance + 2.0 * Pixel_Variance;	2.0	math	a gap is the difference of two places, each one pixel's variance
 driver-robot-hand-lobes.adb	World (A_Bin (J)) := World (A_Bin (J)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
 driver-robot-hand-lobes.adb	World (A_Bin (P)) := World (A_Bin (P)) + 1.0;	1.0	statistics	a pixel counted once in a histogram
 driver-robot-hand-lobes.adb	World (A_Bin (P)) := World (A_Bin (P)) - 1.0;	1.0	statistics	a pixel counted once in a histogram
@@ -1246,7 +1246,6 @@ driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0
 driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0.5, Real (R) + 0.5)	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0.5, Real (R) + 0.5)	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	elsif Joined < Lobes then Nearest_Lobe (Real (C) + 0.5, Real (R) + 0.5)	0.5	math	a pixel is at its centre, half a pixel in
-driver-robot-hand-lobes.adb	elsif Natural (Lobes.Length) = 1 and then Count (Attached) > 0	1	structure	a single lobe closes against the robot's still pixels
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
@@ -1292,7 +1291,6 @@ driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 
 driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 1 => (for all Dc in -1 .. 1 => Inside (C + Dc, R + Dr)))	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	if N < 3 then	3	statistics	a spread within two groups needs a third value
 driver-robot-hand-lobes.adb	if N >= 2 then	2	statistics	a spread needs two values
-driver-robot-hand-lobes.adb	if Natural (Lobes.Length) >= 2 then	2	structure	lobes close towards one another when there are two or more
 driver-robot-hand-lobes.adb	if not (Ahead (C, R, 1, Nc, Nr) and then Contains (M, Nc, Nr)) then	1	structure	the next pixel along the way: one step
 driver-robot-hand-lobes.adb	or else (Last >= Doubts.First_Index + 3 and then Still (Last, Last - 2) and then Still (Last - 1, Last - 3));	2	structure	a round and the one two before it
 driver-robot-hand-lobes.adb	or else (Last >= Doubts.First_Index + 3 and then Still (Last, Last - 2) and then Still (Last - 1, Last - 3));	3	structure	four doubts compared, two rounds apart twice: the last four
@@ -1306,7 +1304,7 @@ driver-robot-hand-lobes.ads	and then Driver.Pixels.Frames (Anchor) >= 2;	2	stati
 driver-robot-hand-lowering.adb	Enough : constant Boolean := T.Count > 2;	2	statistics	a scatter of shares needs more than two pushes before it, as a shortfall's does in the step tracker
 driver-robot-hand-lowering.adb	Lowering := Lowering / Real (Natural'Max (1, Where'Length));	1	structure	a hand has a point at the least (the tool's origin), so a mean never divides by nothing
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Aimed.Turn, 4) & ""	4	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
@@ -1360,7 +1358,7 @@ driver-robot-hand-measure.adb	elsif Steps.Stalled then "" & Driver.Log.Image (By
 driver-robot-hand-measure.adb	elsif not Lined then Ada.Numerics.Pi / 2.0	2.0	math	a right angle: the whole quarter turn of tilts a lobe without a line of its own is pressed through, since a tip anywhere needs presses from three directions
 driver-robot-hand-measure.adb	if Bound < Ada.Numerics.Pi / 2.0 and then not Checked and then Tilt = 0.0 then	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
 driver-robot-hand-measure.adb	if Natural (Keys.Length) = 1 then	1	structure	one hand is pressed alone, several at once
-driver-robot-hand-measure.adb	if not Significant (Part - Last, Sqrt (2.0) * Sigma) then	2.0	statistics	the difference of two readings carries the channel's sigma twice over
+driver-robot-hand-measure.adb	if not Significant (Part - Last, Sqrt (2.0) * Sigma) or else abs (Part - Last) < Seeable then	2.0	statistics	the difference of two readings has twice the variance of one
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Eye.Value, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
@@ -2632,6 +2630,8 @@ driver-robot-kinematics.adb	Covariance (3 + P, 3 + Q) := Covariance (3 + P, 3 + 
 driver-robot-kinematics.adb	Covariance (3 + P, 3 + Q) := Covariance (3 + P, 3 + Q) + Rel_1 ** 2 * C (P) * C (Q);	3	structure	the centre's three terms follow the turn's three
 driver-robot-kinematics.adb	Covariance (3 + P, 3 + Q) := Covariance (3 + P, 3 + Q) + Rel_1 ** 2 * C (P) * C (Q);	3	structure	the centre's three terms follow the turn's three
 driver-robot-kinematics.adb	D (P, P) := JtJ (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
+driver-robot-kinematics.adb	D := (1.0 / (H * (if C = 0.0 then 1.0 else C))) * (Eye_In_Reference (M, A, Xp).Translation - T0.Translation);	1.0	math	the derivative of the place: one over the step
+driver-robot-kinematics.adb	D := (1.0 / (H * (if C = 0.0 then 1.0 else C))) * (Eye_In_Reference (M, A, Xp).Translation - T0.Translation);	1.0	math	a joint the fit gives no turn per reading is weighed by its reading
 driver-robot-kinematics.adb	Depth : constant Real := F.Tracks (3 * I + 2);	2	structure	a track's point, three numbers each: its depth along its line of sight is the third
 driver-robot-kinematics.adb	Depth : constant Real := F.Tracks (3 * I + 2);	3	structure	a track's point, three numbers each: its depth along its line of sight is the third
 driver-robot-kinematics.adb	Depth_On : constant Real := (if On then 1.0 / (F.Table_A * H) else 0.0);	1.0	math	the line of sight H meets the plane A * X = 1 at depth 1 over A * H
@@ -2642,6 +2642,7 @@ driver-robot-kinematics.adb	Free_Terms : constant Natural := Fit.Lens_Terms + (i
 driver-robot-kinematics.adb	Fu : constant Regression.Fit := Regression.Solve (X, Yu, 1.0);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
 driver-robot-kinematics.adb	Fv : constant Regression.Fit := Regression.Solve (X, Yv, 1.0);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
 driver-robot-kinematics.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Q (Q'First + K - 1));	1.0	numerics	a finite-difference step scales with the reading, and with one where the reading is smaller than one, so that it stays above the reading's own rounding
+driver-robot-kinematics.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Q (Q'First + K - 1));	1.0	numerics	forward differences at the square root of the float's resolution relative to each reading's size
 driver-robot-kinematics.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (K));	1.0	numerics	the scale floor of a finite difference
 driver-robot-kinematics.adb	J (3 + A) := [(Up.U - Down.U) / (2.0 * Step * Scale),	2.0	math	a central difference over a step each way is the difference over twice the step
 driver-robot-kinematics.adb	J (3 + A) := [(Up.U - Down.U) / (2.0 * Step * Scale),	3	structure	the three derivatives by the eye's turn come before those by its place
@@ -2759,6 +2760,8 @@ driver-robot-kinematics.adb	for Q in 1 .. 3 loop	3	structure	the three component
 driver-robot-kinematics.adb	for Q in 1 .. 3 loop	3	structure	the three components of a vector, the three terms of a turn
 driver-robot-kinematics.adb	for Q in 1 .. 3 loop	3	structure	three coordinates
 driver-robot-kinematics.adb	for Q in 1 .. 6 loop	6	structure	the six terms of a pose: its turn (three) and its centre (three)
+driver-robot-kinematics.adb	for R in 1 .. 3 loop	3	structure	the three coordinates of a place
+driver-robot-kinematics.adb	for S in 1 .. 3 loop	3	structure	the three coordinates of a place
 driver-robot-kinematics.adb	function C (P, Q : Positive) return Real is (R.Placement_Covariance ((P - 1) * 6 + Q - 1));	6	structure	the six terms of a pose: its turn (three) and its centre (three)
 driver-robot-kinematics.adb	if At_Reference and then Natural (R.Frames.Length) > 1 then	1	structure	the twin is a frame after the first: there must be more than one
 driver-robot-kinematics.adb	if Current (M, R) and then R.Result.Fitted and then R.Aligned >= 2 and then Queries > 0 then	2	structure	a keyframe after the reference is the second or later

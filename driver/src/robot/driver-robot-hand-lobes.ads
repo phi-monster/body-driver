@@ -360,18 +360,19 @@ package Driver.Robot.Hand.Lobes is
 
    function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Estimate;
    --  How far apart the lobes are in the other view less how far apart they
-   --  are in the first, in pixels, summed over their pairs; with a single
-   --  lobe, how far ahead of its leading side the robot's still pixels it
+   --  are in the first, in pixels, summed over their pairs, and to it, for
+   --  each lobe, how far ahead of its leading side the robot's still pixels it
    --  closes against lie in the other view less in the first, each end
    --  leading the way it came there from the other (a gap that never closes
-   --  is the picture's diagonal).
+   --  is the picture's diagonal; a lobe whose lead meets them at neither end
+   --  adds nothing).
    --  Its sigma is that of the lobes' centres, from the matcher's noise and
    --  the pixel grid. Unknown when there is nothing to compare.
 
    function Direction (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Closing;
-   --  Which view has the lobes closer to each other; with a single lobe, the
-   --  one where its leading side is nearer the robot's still pixels: the
-   --  sign of Closing_Change when it is significant.
+   --  Which view has the lobes closer to each other and their leading sides
+   --  nearer the robot's still pixels: the sign of Closing_Change when it is
+   --  significant.
 
    function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask) return Estimate;
    function Direction (Lobes : Lobe_Vectors.Vector; Attached : Mask) return Closing;

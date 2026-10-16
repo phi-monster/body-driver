@@ -3452,6 +3452,45 @@ package body Driver.Robot.Kinematics is
       end;
    end Conditioning;
 
+   function Easiest_Way (M : Model; A : Arm_Id; Q : Real_Array) return Vec3 is
+      use Driver.Numerics.Arrays;
+      use Ada.Numerics.Long_Elementary_Functions;
+      N : constant Natural := Q'Length;
+      I : constant Natural := Index_Of (M, A);
+   begin
+      if N = 0 or else I = 0 or else not M.Kinematics (I).Result.Fitted
+        or else Natural (M.Kinematics (I).Result.Joints.Length) /= N
+      then
+         return Zero3;
+      end if;
+      declare
+         T0     : constant Rigid := Eye_In_Reference (M, A, Q);
+         Spread : Mat3 := [others => [others => 0.0]];   --  J J'
+         Values : Vec3;
+         Ways   : Mat3;
+      begin
+         for K in 1 .. N loop
+            declare
+               Xp : Real_Array := Q;
+               H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Q (Q'First + K - 1));
+               C  : constant Real := M.Kinematics (I).Result.Joints (M.Kinematics (I).Result.Joints.First_Index + K - 1).C;
+               D  : Vec3;
+            begin
+               Xp (Xp'First + K - 1) := Xp (Xp'First + K - 1) + H;
+               --  The place's change for a turn of the joint, not for a change of its reading.
+               D := (1.0 / (H * (if C = 0.0 then 1.0 else C))) * (Eye_In_Reference (M, A, Xp).Translation - T0.Translation);
+               for R in 1 .. 3 loop
+                  for S in 1 .. 3 loop
+                     Spread (R, S) := Spread (R, S) + D (R) * D (S);
+                  end loop;
+               end loop;
+            end;
+         end loop;
+         Driver.Numerics.Symmetric_Eigensystem (Spread, Values, Ways);
+         return [Ways (1, 1), Ways (2, 1), Ways (3, 1)];
+      end;
+   end Easiest_Way;
+
    function Nearest_Readings (M : Model; A : Arm_Id; Near, Readings : Real_Array) return Real_Array is
       Result : Real_Array (Readings'Range) := Readings;
       I      : constant Natural := Index_Of (M, A);
