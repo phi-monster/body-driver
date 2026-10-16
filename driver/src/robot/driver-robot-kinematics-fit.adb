@@ -4005,30 +4005,44 @@ package body Driver.Robot.Kinematics.Fit is
                Poses  : Rigid_Access := new Pose_Array;
                Placed : Natural := 0;   --  sightings of placed points in those keyframes
 
+               --  The placed sightings, each with its point where its track's depth puts it along its reference line
+               --  of sight: no order changes them, and the line of sight (Ray, through the lens's distortion) was found
+               --  again for every sighting of every order, 1440 orders a fit of six joints (a13 on 10-16: stage 4 took
+               --  7.8 to 9.9 s a fit against 1.4 to 2.1 before every order was scored).
+               type Placed_Sighting is record
+                  Frame : Positive := 1;
+                  Point : Vec3 := Zero3;
+                  U, V  : Real := 0.0;
+               end record;
+               type Placed_Array is array (Positive range <>) of Placed_Sighting;
+               type Placed_Access is access Placed_Array;
+               procedure Free is new Ada.Unchecked_Deallocation (Placed_Array, Placed_Access);
+               Placed_At : Placed_Access;
+
                --  The median across and down of the reprojections of those sightings with the joints in order C,
-               --  in pixels, and its standard error. A point the order puts behind the eye lands nowhere.
-               procedure Score (C : Chain_Order; Median, Error : out Real) is
+               --  in pixels, and its standard error, the residuals into Into, the eye's poses into At_Poses. A point
+               --  the order puts behind the eye lands nowhere.
+               procedure Score_Into
+                 (C : Chain_Order; At_Poses : in out Rigid_Array; Into : in out Real_Array; Median, Error : out Real)
+               is
                   K : Natural := 0;
                begin
                   for Frame in 1 .. Frames loop
-                     Poses (Frame) := Eye_At (Joints, C, Changes_Of (Frame));
+                     At_Poses (Frame) := Eye_At (Joints, C, Changes_Of (Frame));
                   end loop;
-                  for X of Sight loop
-                     if Several (X.Frame) and then Depth (X.Track) > 0.0 then
-                        declare
-                           T     : Rigid renames Poses (X.Frame);
-                           Point : constant Vec3 := Depth (X.Track) * Ray (Lens0, X.U0, X.V0);
-                           U, V  : Real;
-                           Ahead : Boolean;
-                        begin
-                           Project (Lens0, Transpose (T.Rotation) * (Point - T.Translation), U, V, Ahead);
-                           R (K + 1) := (if Ahead then U - X.U else Real'Last);
-                           R (K + 2) := (if Ahead then V - X.V else Real'Last);
-                           K := K + 2;
-                        end;
-                     end if;
+                  for P of Placed_At.all loop
+                     declare
+                        T     : Rigid renames At_Poses (P.Frame);
+                        U, V  : Real;
+                        Ahead : Boolean;
+                     begin
+                        Project (Lens0, Transpose (T.Rotation) * (P.Point - T.Translation), U, V, Ahead);
+                        Into (K + 1) := (if Ahead then U - P.U else Real'Last);
+                        Into (K + 2) := (if Ahead then V - P.V else Real'Last);
+                        K := K + 2;
+                     end;
                   end loop;
-                  Median := Median_Abs (R (1 .. K));
+                  Median := Median_Abs (Into (1 .. K));
                   --  The median point lands behind the eye: no residual, and none to lower by a standard error.
                   if Median >= Real'Last then
                      Median := Real'Last;
@@ -4036,7 +4050,7 @@ package body Driver.Robot.Kinematics.Fit is
                   else
                      Error := Median_Error (Median, K);
                   end if;
-               end Score;
+               end Score_Into;
 
                --  Whether the residuals A are significantly the smaller than B, residual by residual (the same
                --  sightings, in the same order): Wilcoxon's signed ranks of |A| - |B|, at Z of their normal
@@ -4054,8 +4068,12 @@ package body Driver.Robot.Kinematics.Fit is
                   type Signed_Array is array (Positive range <>) of Signed;
                   function "<" (L, R : Signed) return Boolean is (L.Size < R.Size);
                   procedure Sort is new Ada.Containers.Generic_Array_Sort (Positive, Signed, Signed_Array);
-                  D : Signed_Array (1 .. A'Length);
-                  M : Natural := 0;
+                  type Signed_Access is access Signed_Array;
+                  procedure Free is new Ada.Unchecked_Deallocation (Signed_Array, Signed_Access);
+                  --  On the heap: a worker task's stack does not hold 2 a placed sighting.
+                  D_Of : Signed_Access := new Signed_Array (1 .. A'Length);
+                  D    : Signed_Array renames D_Of.all;
+                  M    : Natural := 0;
                begin
                   for I in A'Range loop
                      declare
@@ -4071,6 +4089,7 @@ package body Driver.Robot.Kinematics.Fit is
                      end;
                   end loop;
                   if M = 0 then
+                     Free (D_Of);
                      return False;
                   end if;
                   Sort (D (1 .. M));
@@ -4095,8 +4114,12 @@ package body Driver.Robot.Kinematics.Fit is
                            From := To + 1;
                         end;
                      end loop;
-                     return (Smaller_Ranks - Mm * (Mm + 1.0) / 4.0)
-                       > Driver.Conventions.Z * Sqrt (Mm * (Mm + 1.0) * (2.0 * Mm + 1.0) / 24.0);
+                     return Is_Smaller : constant Boolean :=
+                       (Smaller_Ranks - Mm * (Mm + 1.0) / 4.0)
+                       > Driver.Conventions.Z * Sqrt (Mm * (Mm + 1.0) * (2.0 * Mm + 1.0) / 24.0)
+                     do
+                        Free (D_Of);
+                     end return;
                   end;
                end Smaller;
 
@@ -4107,6 +4130,7 @@ package body Driver.Robot.Kinematics.Fit is
                   Free (R);
                   Free (Here_R);
                   Free (Poses);
+                  Free (Placed_At);
                end Free_All;
 
                Here : Real;
@@ -4125,25 +4149,63 @@ package body Driver.Robot.Kinematics.Fit is
                         & "order of the joints along the arm is not told");
                   return;
                end if;
+               Placed_At := new Placed_Array (1 .. Placed);
+               declare
+                  K : Natural := 0;
+               begin
+                  for X of Sight loop
+                     if Several (X.Frame) and then Depth (X.Track) > 0.0 then
+                        K := K + 1;
+                        Placed_At (K) := (Frame => X.Frame, Point => Depth (X.Track) * Ray (Lens0, X.U0, X.V0),
+                                          U => X.U, V => X.V);
+                     end if;
+                  end loop;
+               end;
                --  Every order of the joints, scored (Score): the search moved one joint at a time from a start ordered
                --  by the axes' distances from the eye and stopped where no move lowered the median by more than its
                --  standard error, and f16b's arm 1 came out in the wrong order in every pass at twice the right order's
                --  median (10-15), the desktop's arm at 11.5 degrees in two wrong orders once stage 1 told its lens
                --  (10-16). N! orders of one reprojection each: 720 for six joints. The order is the one of the least
                --  median, the first of equals in the orders' lexicographic sequence.
+               --  Every first joint at once (Driver.Parallel_For), each its own orders in their lexicographic
+               --  sequence with buffers of its own; the least median over them taken in the first joints' order, so
+               --  that it is the first of equals in the whole sequence, as one search of it in turn finds.
                declare
-                  C     : Chain_Order (1 .. N);
-                  M, E  : Real;
-                  Found : Boolean := False;
+                  type Chain_Access is access Chain_Order;
+                  procedure Free is new Ada.Unchecked_Deallocation (Chain_Order, Chain_Access);
+                  type Way_Result is record
+                     Found       : Boolean := False;
+                     Median      : Real := Real'Last;
+                     Order       : Chain_Access;
+                     Residuals   : Real_Access;
+                     Fails       : Boolean := False;   --  some order of its own is not significantly the larger
+                     Fail_Order  : Chain_Access;
+                     Fail_Median : Real := 0.0;
+                  end record;
+                  Results : array (1 .. N) of Way_Result;
+                  Found   : Boolean := False;
 
-                  --  C made the next order in lexicographic sequence; False after the last.
-                  function Next return Boolean is
+                  --  The first order whose first joint is J: the rest in their own order.
+                  procedure First_Of (J : Positive; C : out Chain_Order) is
+                     K : Positive := 2;
+                  begin
+                     C (1) := J;
+                     for Other in 1 .. N loop
+                        if Other /= J then
+                           C (K) := Other;
+                           K := K + 1;
+                        end if;
+                     end loop;
+                  end First_Of;
+
+                  --  C made the next order in lexicographic sequence with its first joint kept; False after the last.
+                  function Next (C : in out Chain_Order) return Boolean is
                      I : Natural := N - 1;
                   begin
-                     while I >= 1 and then C (I) > C (I + 1) loop
+                     while I >= 2 and then C (I) > C (I + 1) loop
                         I := I - 1;
                      end loop;
-                     if I = 0 then
+                     if I < 2 then
                         return False;
                      end if;
                      declare
@@ -4177,19 +4239,32 @@ package body Driver.Robot.Kinematics.Fit is
                      end loop;
                      return Ada.Strings.Unbounded.To_String (Text);
                   end Image;
-               begin
-                  Here := Real'Last;
-                  C := [for K in 1 .. N => K];
-                  loop
-                     Score (C, M, E);
-                     if not Found or else M < Here then
-                        Found := True;
-                        Order := C;
-                        Here := M;
-                        Here_R.all := R.all;
-                     end if;
-                     exit when not Next;
-                  end loop;
+
+                  procedure Search_From (J : Positive) is
+                     C      : Chain_Order (1 .. N);
+                     Own    : Rigid_Access := new Pose_Array;
+                     Into   : Real_Access := new Real_Array (1 .. 2 * Multi);
+                     M, E   : Real;
+                     Result : Way_Result renames Results (J);
+                  begin
+                     Result.Order := new Chain_Order (1 .. N);
+                     Result.Residuals := new Real_Array (1 .. 2 * Multi);
+                     First_Of (J, C);
+                     loop
+                        Score_Into (C, Own.all, Into.all, M, E);
+                        if not Result.Found or else M < Result.Median then
+                           Result.Found := True;
+                           Result.Median := M;
+                           Result.Order.all := C;
+                           Result.Residuals.all := Into.all;
+                        end if;
+                        exit when not Next (C);
+                     end loop;
+                     Free (Own);
+                     Free (Into);
+                  end Search_From;
+                  procedure Search_All is new Driver.Parallel_For (Search_From);
+
                   --  Told where every other order leaves residuals significantly the larger (Smaller): an order the
                   --  sightings cannot tell from it leaves the joints' order to chance (the desktop's sweep of 3.4
                   --  degrees, 10-16: no other order's residuals significantly the larger, and a wrong one reported
@@ -4197,22 +4272,63 @@ package body Driver.Robot.Kinematics.Fit is
                   --  3 6 where they are 1 5 4 3 6 2, by the fake robot's scramble of their channels). An order not told
                   --  is still the arm's: its residuals are the least, and it predicts the views the keyframes took;
                   --  Order_Told says that it is not told, and the cells that move several joints, taken larger once
-                  --  the arm is fitted (Boot), are what tell it.
+                  --  the arm is fitted (Boot), are what tell it. Every first joint at once, each its own orders until
+                  --  the first that is not significantly the larger; the first such in the whole sequence is said.
+                  procedure Tell_From (J : Positive) is
+                     C      : Chain_Order (1 .. N);
+                     Own    : Rigid_Access := new Pose_Array;
+                     Into   : Real_Access := new Real_Array (1 .. 2 * Multi);
+                     M, E   : Real;
+                     Result : Way_Result renames Results (J);
+                  begin
+                     First_Of (J, C);
+                     loop
+                        if C /= Order then
+                           Score_Into (C, Own.all, Into.all, M, E);
+                           if not Smaller (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed)) then
+                              Result.Fails := True;
+                              Result.Fail_Order := new Chain_Order'(C);
+                              Result.Fail_Median := M;
+                              exit;
+                           end if;
+                        end if;
+                        exit when not Next (C);
+                     end loop;
+                     Free (Own);
+                     Free (Into);
+                  end Tell_From;
+                  procedure Tell_All is new Driver.Parallel_For (Tell_From);
+               begin
+                  Here := Real'Last;
+                  Search_All (1, N);
+                  for J in 1 .. N loop
+                     if Results (J).Found and then (not Found or else Results (J).Median < Here) then
+                        Found := True;
+                        Order := Results (J).Order.all;
+                        Here := Results (J).Median;
+                        Here_R.all := Results (J).Residuals.all;
+                     end if;
+                  end loop;
                   Order_Is_Told := Here < Real'Last;
-                  C := [for K in 1 .. N => K];
-                  while Order_Is_Told loop
-                     if C /= Order then
-                        Score (C, M, E);
-                        if not Smaller (Here_R (1 .. 2 * Placed), R (1 .. 2 * Placed)) then
+                  if Order_Is_Told then
+                     Tell_All (1, N);
+                     for J in 1 .. N loop
+                        if Results (J).Fails then
                            Order_Is_Told := False;
                            Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along the arm,"
-                                            & Image (Order) & ", is not told: the order" & Image (C)
-                                            & " leaves residuals of median " & Driver.Log.Image (M, 3) & " px against "
+                                            & Image (Order) & ", is not told: the order"
+                                            & Image (Results (J).Fail_Order.all) & " leaves residuals of median "
+                                            & Driver.Log.Image (Results (J).Fail_Median, 3) & " px against "
                                             & Driver.Log.Image (Here, 3)
                                             & " px, not significantly the larger by their signed ranks");
+                           exit;
                         end if;
-                     end if;
-                     exit when not Next;
+                     end loop;
+                  end if;
+                  for J in 1 .. N loop
+                     Free (Results (J).Order);
+                     Free (Results (J).Residuals);
+                     Free (Results (J).Fail_Order);
                   end loop;
                end;
                if Here >= Real'Last then
