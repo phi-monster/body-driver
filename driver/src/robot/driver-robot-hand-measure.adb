@@ -1390,6 +1390,16 @@ procedure Measure (H : in out Hands; M : in out Model) is
                end if;
             end Mark_Met;
          begin
+            --  The presses found before this one is told or let go: told what it met, the watcher takes a felt press
+            --  at once where the hand already rests, and a count read after that was one press too many, waited for
+            --  to the stream's length (a22 on 10-16: the press at open kept at beat 10175, and the decider waited on
+            --  past beat 18600 for another).
+            Hold_Beat (Read_Rests'Access);
+            if Lost then
+               End_Lost (Moved => True);
+               return False;
+            end if;
+            Rests_Before := Rests_Now;
             if Felt then
                Hold_Beat (Mark_Met'Access);
                if Lost then
@@ -1397,12 +1407,6 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   return False;
                end if;
             end if;
-            Hold_Beat (Read_Rests'Access);
-            if Lost then
-               End_Lost (Moved => True);
-               return False;
-            end if;
-            Rests_Before := Rests_Now;
             --  The stream's length at the let-go: read again at every beat of the wait, it grew with the wait and never
             --  bounded it (A86's hand 2 waited 5,600 beats, to the end of the run).
             Longest := Allowed;
