@@ -1151,6 +1151,37 @@ package body Driver.Robot.Tests is
       end loop;
    end Sweep_Starts_Where_A_Cell_Tells;
 
+   --  The pairs two orders of an arm's joints give each the other way (Kinematics.Contested), in the first's
+   --  order: s08's fitted order and the one nearest it that the fit could not tell from it (10-16), 5 1 4 3 2 6
+   --  and 1 5 4 3 6 2, are 5 with 1 and 2 with 6; an order and itself give none, nor two of different joints.
+   procedure Contested_Of_Two_Orders is
+      use type Driver.Robot.Kinematics.Joint_Pair;
+      Chain, Contender, Shorter : Count_Vectors.Vector;
+   begin
+      for J of Natural_Array'[5, 1, 4, 3, 2, 6] loop
+         Chain.Append (J);
+      end loop;
+      for J of Natural_Array'[1, 5, 4, 3, 6, 2] loop
+         Contender.Append (J);
+      end loop;
+      for J of Natural_Array'[1, 5, 4] loop
+         Shorter.Append (J);
+      end loop;
+      declare
+         Pairs : constant Driver.Robot.Kinematics.Joint_Pair_Lists.Vector :=
+           Driver.Robot.Kinematics.Contested (Chain, Contender);
+      begin
+         Check (Natural (Pairs.Length) = 2
+                and then Pairs (Pairs.First_Index) = (Earlier => 5, Later => 1)
+                and then Pairs (Pairs.First_Index + 1) = (Earlier => 2, Later => 6),
+                "5 1 4 3 2 6 and 1 5 4 3 6 2 give" & Pairs.Length'Image & " pairs each the other way, not 5 with 1 and"
+                & " 2 with 6");
+      end;
+      Check (Driver.Robot.Kinematics.Contested (Chain, Chain).Is_Empty, "an order and itself give a pair the other way");
+      Check (Driver.Robot.Kinematics.Contested (Chain, Shorter).Is_Empty,
+             "orders of different joints give a pair the other way");
+   end Contested_Of_Two_Orders;
+
    --  An arm's match was asked, then the graph stopped listing the arm (an
    --  estimate told its eye or group otherwise): its answer must still be
    --  read, or the boot's wait for every answer never ends.
@@ -8346,6 +8377,8 @@ package body Driver.Robot.Tests is
                              & "the arm stopped gives no keyframe", Boot_With_Settling_Views'Access);
       Driver.Tests.Register ("robot.boot.keeps", "a boot that fails after recognizing the body leaves no body file to "
                              & "reload it from", Boot_Keeps_What_It_Measured'Access);
+      Driver.Tests.Register ("robot.sweep.contested", "the pairs two orders of an arm's joints give each the "
+                             & "other way are not the ones they swap", Contested_Of_Two_Orders'Access);
       Driver.Tests.Register ("robot.sweep.twin", "an arm at rest takes no still twin of its reference, or its sweep "
                              & "starts where the view moves less than the matcher errs", Twin_Before_The_Sweep'Access);
       Driver.Tests.Register ("robot.sweep.start", "a joint's sweep starts at the turn that moves its eye's view by half "

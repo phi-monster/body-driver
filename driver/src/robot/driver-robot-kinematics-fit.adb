@@ -2019,6 +2019,7 @@ package body Driver.Robot.Kinematics.Fit is
       --  at most of its time (the profile is most of the last stage: ten refinements of the tracks to its one).
       --  Whether the sightings tell the joints' order (stage 4), or the fit begun from tells it (From).
       Order_Is_Told : Boolean := False;
+      Contender     : Joint_Lists.Vector;   --  the order nearest the best's that stage 4 could not tell from it
 
       procedure Finish (Profiled : Boolean) is
       begin
@@ -2197,6 +2198,7 @@ package body Driver.Robot.Kinematics.Fit is
          Report.Searched_Most := Searched_Most;
          Report.Profiled_Over := (if Profiled then Sightings'Length elsif From.Valid then From.Profiled_Over else 0);
          Report.Order_Told := Order_Is_Told;
+         Report.Contender := Contender;
          Chain := Order;
          Report.Fitted := Report.Determined;
          Close_Stage;
@@ -4227,6 +4229,25 @@ package body Driver.Robot.Kinematics.Fit is
                   Order_Is_Told := Here < Real'Last;
                   if Order_Is_Told then
                      Tell_All (1, N);
+                     --  Of the orders not significantly the larger, the one whose residuals lie nearest the best's: the
+                     --  joints whose places along the arm it swaps with the best's are the ones the order lacks the
+                     --  evidence of (Boot turns them together, a pair at a time).
+                     declare
+                        Nearest : Natural := 0;
+                     begin
+                        for J in 1 .. N loop
+                           if Results (J).Fails
+                             and then (Nearest = 0 or else Results (J).Fail_Median < Results (Nearest).Fail_Median)
+                           then
+                              Nearest := J;
+                           end if;
+                        end loop;
+                        if Nearest > 0 then
+                           for X of Results (Nearest).Fail_Order.all loop
+                              Contender.Append (X);
+                           end loop;
+                        end if;
+                     end;
                      for J in 1 .. N loop
                         if Results (J).Fails then
                            Order_Is_Told := False;

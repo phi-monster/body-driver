@@ -447,12 +447,14 @@ package body Driver.Robot.Boot is
             Framed_Now   : Boolean := False;   --  a keyframe was taken in the span at all
             Fitted_Now   : Boolean := False;
             Told_Now     : Boolean := False;   --  and its joints' order told (Kinematics.Order_Told)
+            Contested    : Driver.Robot.Kinematics.Joint_Pair_Lists.Vector;   --  if not, the pairs it lacks
             procedure Read_Followed is
             begin
                Followed_Now := Driver.Robot.Kinematics.Followed (M, A, Ask_From, Ask_To);
                Framed_Now := Driver.Robot.Kinematics.Framed (M, A, Ask_From, Ask_To);
                Fitted_Now := Driver.Robot.Kinematics.Fitted (M, A);
                Told_Now := Driver.Robot.Kinematics.Order_Told (M, A);
+               Contested := Driver.Robot.Kinematics.Contested_Pairs (M, A);
             end Read_Followed;
             --  The beats the body has seen, read in a held beat.
             Beat_Now : Natural := 0;
@@ -588,15 +590,24 @@ package body Driver.Robot.Boot is
                --  than the keyframe step, the smallest turn the fit counts as a
                --  joint having moved (a sixth of three steps is none, and a cell
                --  of such parts moves no two joints the fit can see).
+               --  The joints with no share stand at the start, and the matrix's columns are the ones of those with one.
                procedure Together (Share : Real_Array) is
-                  Rows : Positive := 1;
+                  Rows   : Positive := 1;
+                  Turned : array (1 .. N) of Positive;   --  the swept joints with a share, by their place in Swept
+                  Count  : Natural := 0;
                begin
-                  while Rows < N + 1 loop
+                  for K in 1 .. N loop
+                     if Share (Swept (K)) > 0.0 then
+                        Count := Count + 1;
+                        Turned (Count) := K;
+                     end if;
+                  end loop;
+                  while Rows < Count + 1 loop
                      Rows := 2 * Rows;
                   end loop;
                   Asked_Now := [others => False];
-                  for K in 1 .. N loop
-                     Asked_Now (Swept (K)) := True;
+                  for J in 1 .. Count loop
+                     Asked_Now (Swept (Turned (J))) := True;
                   end loop;
                   Driver.Beats.Within_A_Beat (Tell_Asking'Access);
                   for Row in 1 .. Rows - 1 loop
@@ -617,11 +628,12 @@ package body Driver.Robot.Boot is
                         procedure Take_Cell (At_Scale : Real) is
                            Pose : Real_Array := Start;
                         begin
-                           for K in 1 .. N loop
+                           for J in 1 .. Count loop
                               declare
+                                 K    : constant Positive := Turned (J);
                                  Bits : Natural := 0;
                                  R    : Natural := Row;
-                                 Col  : Natural := K;
+                                 Col  : Natural := J;
                               begin
                                  --  H (Row, K) = (-1) ** (the bits Row and K share)
                                  while R > 0 and then Col > 0 loop
@@ -702,6 +714,21 @@ package body Driver.Robot.Boot is
                   end if;
                   return Share;
                end Shares;
+
+               --  The shares of a cell that turns two joints alone: their own shares (Shares), none of the others'. A
+               --  pair's cells climb, as a fitted arm's do, until the view moves by half of it, a budget that a cell of
+               --  every joint spends on all of them: what two joints turned together do that each alone does not grows
+               --  with the product of their turns (s08 on 10-16: the cells of every joint at the end of its passes
+               --  turned each by about 0.08 rad, and the orders 5 1 4 3 2 6 and 1 5 4 3 6 2 left residuals of median
+               --  0.361 and 0.363 px).
+               function Pair_Shares (P : Driver.Robot.Kinematics.Joint_Pair) return Real_Array is
+                  Every : constant Real_Array := Shares;
+                  Share : Real_Array (Every'Range) := [others => 0.0];
+               begin
+                  Share (P.Earlier) := Every (P.Earlier);
+                  Share (P.Later) := Every (P.Later);
+                  return Share;
+               end Pair_Shares;
 
                function Image (X : Real_Array) return String is
                   Text : Ada.Strings.Unbounded.Unbounded_String;
@@ -941,8 +968,27 @@ package body Driver.Robot.Boot is
                --  together do that each alone does not, and a pass that followed nothing new took no cells at all
                --  (s06 on 10-16: fitted, its order not told, its last pass followed nothing, and its cells never
                --  climbed). Once: climbed as far as the view lets them, the cells give no more than they gave.
+               --  When the fit names the order nearest its own that it cannot tell from it, the cells turn the joints the
+               --  two orders give each the other way, a pair at a time (Pair_Shares), in place of every joint at once.
                if N > 1 and then Fitted_Now and then not Told_Now then
-                  Together (Shares);
+                  if Contested.Is_Empty then
+                     Together (Shares);
+                  else
+                     declare
+                        Said : Ada.Strings.Unbounded.Unbounded_String;
+                     begin
+                        for P of Contested loop
+                           Ada.Strings.Unbounded.Append (Said, " c" & Driver.Log.Image (P.Earlier) & " with c"
+                                                         & Driver.Log.Image (P.Later));
+                        end loop;
+                        Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & "'s joints' order is not told; its cells"
+                                         & " turn the joints the order nearest it gives the other way, a pair at a time:"
+                                         & Ada.Strings.Unbounded.To_String (Said));
+                     end;
+                     for P of Contested loop
+                        Together (Pair_Shares (P));
+                     end loop;
+                  end if;
                   Measure_The_Round;
                   Driver.Beats.Within_A_Beat (Read_Followed'Access);
                end if;

@@ -83,6 +83,7 @@ with Driver.Numerics;
 package Driver.Robot.Kinematics.Fit is
 
    package Real_Lists is new Ada.Containers.Vectors (Positive, Real);
+   package Joint_Lists is new Ada.Containers.Vectors (Positive, Positive);
 
 
 
@@ -236,6 +237,9 @@ package Driver.Robot.Kinematics.Fit is
       Flipped    : Boolean := False;   --  every translation changed sign to put the points in front
       Order_Told : Boolean := False;   --  the sightings tell the joints' order along the arm, not only that it is
                                        --  the best of the orders (stage 4; a fit begun from another, that one's)
+      Contender  : Joint_Lists.Vector;  --  when stage 4 did not tell the order: the order not significantly the larger
+                                        --  that leaves residuals nearest the best's, the joints by their readings from
+                                        --  the base; empty when told, or when no stage 4 was run
       Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
       Focal_Sigma : Real := Real'Last; --  the uncertainty of the focal length across
       Covariance : Real_Lists.Vector;  --  of the parameters above, row by row, from the errors the residuals

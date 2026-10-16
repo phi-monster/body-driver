@@ -2177,6 +2177,16 @@ package body Driver.Robot.Kinematics is
                      Result.Searched_Most := Report.Searched_Most;
                      Result.Profiled_Over := Report.Profiled_Over;
                      Result.Order_Told := Report.Order_Told;
+                     --  The contender of the fit that searched the orders; a fit begun from another keeps the one before.
+                     if Report.Order_Told then
+                        Result.Contender.Clear;
+                     elsif not Report.Contender.Is_Empty then
+                        for X of Report.Contender loop
+                           Result.Contender.Append (X);
+                        end loop;
+                     else
+                        Result.Contender := R.Result.Contender;
+                     end if;
                      Result.Made_At := M.Beats;
                      Result.Unit_Frames :=
                        (if R.Result.Unit_Frames > 0 then R.Result.Unit_Frames elsif Report.Fitted then Frames else 0);
@@ -3172,6 +3182,47 @@ package body Driver.Robot.Kinematics is
 
    function Fitted (M : Model; A : Arm_Id) return Boolean is
      (Index_Of (M, A) > 0 and then M.Kinematics (Index_Of (M, A)).Result.Fitted);
+
+   function Contested (Chain, Contender : Count_Vectors.Vector) return Joint_Pair_Lists.Vector is
+      Pairs : Joint_Pair_Lists.Vector;
+      N     : constant Natural := Natural (Chain.Length);
+   begin
+      if Natural (Contender.Length) /= N then
+         return Pairs;
+      end if;
+      for I in 0 .. N - 1 loop
+         for J in I + 1 .. N - 1 loop
+            declare
+               First  : constant Natural := Chain (Chain.First_Index + I);
+               Second : constant Natural := Chain (Chain.First_Index + J);
+               At_First, At_Second : Natural := 0;
+            begin
+               for K in Contender.First_Index .. Contender.Last_Index loop
+                  if Contender (K) = First then
+                     At_First := K + 1;
+                  elsif Contender (K) = Second then
+                     At_Second := K + 1;
+                  end if;
+               end loop;
+               if First > 0 and then Second > 0 and then At_First > 0 and then At_Second > 0
+                 and then At_Second < At_First
+               then
+                  Pairs.Append (Joint_Pair'(Earlier => First, Later => Second));
+               end if;
+            end;
+         end loop;
+      end loop;
+      return Pairs;
+   end Contested;
+
+   function Contested_Pairs (M : Model; A : Arm_Id) return Joint_Pair_Lists.Vector is
+      None : Joint_Pair_Lists.Vector;
+   begin
+      if not Fitted (M, A) or else M.Kinematics (Index_Of (M, A)).Result.Order_Told then
+         return None;
+      end if;
+      return Contested (M.Kinematics (Index_Of (M, A)).Result.Chain, M.Kinematics (Index_Of (M, A)).Result.Contender);
+   end Contested_Pairs;
 
    function Order_Told (M : Model; A : Arm_Id) return Boolean is
      (Fitted (M, A) and then M.Kinematics (Index_Of (M, A)).Result.Order_Told);
