@@ -151,6 +151,7 @@ package body Driver.Robot.Boot is
       type Recognized_Channel is record
          Ref    : Driver.Robot.Motion.Channel_Ref;
          Amount : Real := 0.0;
+         First  : Real := 0.0;   --  the least amount an eye saw it move at (Two_Way_Report.First_Seen)
          Ended  : Driver.Robot.Motion.Sense_Flags := [others => False];
       end record;
       package Recognized_Vectors is new Ada.Containers.Vectors (Positive, Recognized_Channel);
@@ -277,7 +278,8 @@ package body Driver.Robot.Boot is
                if P.Seen then
                   Amount (C) := P.Excursion;
                end if;
-               Recognized.Append (Recognized_Channel'(Ref => Ref, Amount => Amount (C), Ended => P.At_End));
+               Recognized.Append
+                 (Recognized_Channel'(Ref => Ref, Amount => Amount (C), First => P.First_Seen, Ended => P.At_End));
                for S in Driver.Robot.Motion.Sense loop
                   if P.At_End (S) then
                      Driver.Log.Line
@@ -1087,12 +1089,18 @@ package body Driver.Robot.Boot is
          --  (Group_Stream.Seen_At), where the sweeps' first levels and the body file read it; a boot begun from a
          --  body file recognized nothing and keeps the file's. In the beat the body is read in: a beat of its own
          --  after every probe moved every lock-in row after it (robot.boot.reread's lagging eye then saw nothing).
+         --  The least turn an eye saw it move at, the lock-in's confirmation or not: a sweep's first level needs
+         --  the view to move, and the ladder doubles from there if it does not; the confirmed turn floored it at
+         --  1254 units of a joint an eye had seen at 39 (s09 on 10-16, a servo's elbow: its arm's own eye had no
+         --  row of the push the lock-in could use, every level up to the eighth unconfirmed), and the sweep's first
+         --  push of it turned it 1.9 rad, farther than any keyframe was followed.
          for R of Recognized loop
             while M.Groups (R.Ref.Group).Seen_At.Last_Index < R.Ref.Channel - 1 loop
                M.Groups (R.Ref.Group).Seen_At.Append (0.0);
             end loop;
             M.Groups (R.Ref.Group).Seen_At (R.Ref.Channel - 1) :=
-              Real'Max (M.Groups (R.Ref.Group).Seen_At (R.Ref.Channel - 1), R.Amount);
+              Real'Max (M.Groups (R.Ref.Group).Seen_At (R.Ref.Channel - 1),
+                        (if R.First > 0.0 then R.First else R.Amount));
          end loop;
          Driver.Log.Line (Driver.Log.Robot, "boot: the groups as recognized:" & ASCII.LF & Describe (M));
          for G in 1 .. Group_Count (M) loop
