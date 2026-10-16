@@ -1013,14 +1013,24 @@ package body Driver.Robot.Motion is
      (Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom));
 
    --  A level some eye saw, confirmed by moves back and forth by the same
-   --  offsets, each of them seen, as many as the chance of one false alarm
-   --  asks.
+   --  offsets, each of them seen and each executed by the body, as many as
+   --  the chance of one false alarm asks. Executed as the level's own look
+   --  asks (Probe_Together): some listed reading went the way the move asked,
+   --  from where the move before left it, significantly against its own
+   --  noise (Executed). A move the body did not make is no evidence however
+   --  its look went: on the servo fake the level of 4.9 units took one
+   --  channel out of its dead band once and none again, the eye "saw" each
+   --  move after it with a chance of a false alarm near one, and the run that
+   --  chance asks was some 270 moves, 10800 beats (s02 and s04 on 10-16).
    procedure Confirm
      (M         : in out Model;
       Listed    : Channel_Refs;
       Usable    : Flag_Array;
       Base      : Driver.Commands.Command;
       Offsets   : Real_Array;
+      Noise     : Real_Array;
+      Freedom   : Count_Array;
+      After     : Real_Array;   --  the readings the level's own move left
       Unlooked  : in out Natural;
       Chance    : Real;
       Confirmed : out Boolean)
@@ -1031,8 +1041,10 @@ package body Driver.Robot.Motion is
       Seen      : Boolean;
       Again     : Real;
       Now       : Real_Array (1 .. Listed'Length);
+      Before    : Real_Array (1 .. Listed'Length) := After;
       Moving    : Flag_Array (1 .. Listed'Length);
       Read_At   : Natural;
+      Made      : Boolean;
    begin
       while Needed /= Natural'Last and then Run < Needed loop
          At_Amount := not At_Amount;
@@ -1045,6 +1057,21 @@ package body Driver.Robot.Motion is
             Move_And_Look (M, Listed, Usable, Base, Back, Unlooked, Seen, Again, Now, Moving, Read_At);
          end;
          exit when not Seen;
+         Made := False;
+         for I in 1 .. Listed'Length loop
+            if Usable (I) and then Offsets (Offsets'First + I - 1) /= 0.0 then
+               declare
+                  --  The way this move asked the reading to go: along the offset when out to it, against it
+                  --  when back.
+                  Way : constant Real := (if Offsets (Offsets'First + I - 1) > 0.0 then 1.0 else -1.0)
+                                         * (if At_Amount then 1.0 else -1.0);
+               begin
+                  Made := Made or else Executed (Way * (Now (I) - Before (I)), Noise (I), Freedom (I));
+               end;
+            end if;
+         end loop;
+         exit when not Made;
+         Before := Now;
          Run := Run + 1;
       end loop;
       Confirmed := Needed /= Natural'Last and then Run >= Needed;
@@ -1219,7 +1246,7 @@ package body Driver.Robot.Motion is
                declare
                   Confirmed : Boolean;
                begin
-                  Confirm (M, Listed, Usable, Base, Offsets, Unlooked, Chance, Confirmed);
+                  Confirm (M, Listed, Usable, Base, Offsets, Noise, Freedom, Now, Unlooked, Chance, Confirmed);
                   if Confirmed then
                      Report.Seen := True;
                      Report.Excursion := Amount;
