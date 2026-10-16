@@ -1004,9 +1004,15 @@ package body Fake_World is
             end if;
          end loop;
       end if;
-      --  Let go of a press: the arm eases back past where it was asked, then shakes a while.
+      --  Let go of a press: the arm eases back past where it was asked, then shakes a while. A let-go is the arm
+      --  leaving what it pressed by its own step up, its tool asked higher than it stood: a hand still pushed into
+      --  the table whose touch broke for a beat (an open closer pressed shut lifts its tip off) lets nothing go. Thrown
+      --  at every such beat along each joint's way, toward the table, the arm went in and out of it every three
+      --  beats for good (a25 on 10-16, the press at open from beat 8049: the joints a degree or two either way, the
+      --  closer past its end at 1.04, and the driver waiting for the arm to settle 6000 beats on).
       declare
          Now_Touching : constant Boolean := (for some L of W.Links => L.Arm = A and then L.Touching);
+         Lifted       : constant Boolean := Z_Wanted > Tool_Before (3);
       begin
          for I in Old'Range loop
             if W.Links (I).Arm = A and then W.Links (I).Kind = Revolute then
@@ -1015,7 +1021,7 @@ package body Fake_World is
                   Way   : constant Real := (if Wanted (I) >= Old (I) then 1.0 else -1.0);
                   Age   : Natural := W.Links (I).Bounce_Age;
                begin
-                  if W.Quirk.Bounce and then Was_Touching and then not Now_Touching then
+                  if W.Quirk.Bounce and then Was_Touching and then not Now_Touching and then Lifted then
                      Age := 0;
                   end if;
                   if Age < Bounce_Beats then
