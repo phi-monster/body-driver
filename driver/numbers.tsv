@@ -1646,37 +1646,39 @@ driver-robot-hand.ads	Mad_Efficiency : constant := 0.367_5;	0.367_5	statistics	a
 driver-robot-hand.ads	function Seen_By (Shift : Real) return Real is (if Shift /= 0.0 then 1.0 / abs Shift else 0.0);	1.0	math	one pixel, the image's own sampling step: a whole pixel's displacement of a textured patch changes its pixels by its own contrast
 driver-robot-kinematics-errors.adb	+ C (Across_Down) * Held (2 * S, Q);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	+ C (Both_Down) * Held (2 * S, Q);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	+ Rows (2 * A, Q) * Local (2, R);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	+ Rows (2 * S, A) * Locals (2 * X, R);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	+ Rows (2 * S, A) * Locals (2 * X, R);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	A : constant Real := Error (2 * I - 1);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Held.all, Carried.all, 2 * T - 1, 2 * T - 1, 1.0);	1.0	math	a unit coefficient: the outer product as it is
-driver-robot-kinematics-errors.adb	Add_Outer (Held.all, Carried.all, 2 * T - 1, 2 * T - 1, 1.0);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Held.all, Carried.all, 2 * T - 1, 2 * T - 1, 1.0);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Held.all, Carried.all, 2 * T, 2 * T, 1.0);	1.0	math	a unit coefficient: the outer product as it is
-driver-robot-kinematics-errors.adb	Add_Outer (Held.all, Carried.all, 2 * T, 2 * T, 1.0);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Held.all, Carried.all, 2 * T, 2 * T, 1.0);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Rows, Rows, 2 * I - 1, 2 * I - 1, Own (Both_Across));	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Rows, Rows, 2 * I - 1, 2 * I - 1, Own (Both_Across));	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Rows, Rows, 2 * I - 1, 2 * I, Own (Across_Down));	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Rows, Rows, 2 * I - 1, 2 * I, Own (Across_Down));	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Rows, Rows, 2 * I, 2 * I - 1, Own (Across_Down));	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Rows, Rows, 2 * I, 2 * I - 1, Own (Across_Down));	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Rows, Rows, 2 * I, 2 * I, Own (Both_Down));	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Rows, Rows, 2 * I, 2 * I, Own (Both_Down));	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Sum, Sum, 1, 1, Level (Both_Across));	1	structure	indexes start at one
-driver-robot-kinematics-errors.adb	Add_Outer (Sum, Sum, 1, 1, Level (Both_Across));	1	structure	indexes start at one
-driver-robot-kinematics-errors.adb	Add_Outer (Sum, Sum, 1, 2, Level (Across_Down));	1	structure	indexes start at one
-driver-robot-kinematics-errors.adb	Add_Outer (Sum, Sum, 1, 2, Level (Across_Down));	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Sum, Sum, 2, 1, Level (Across_Down));	1	structure	indexes start at one
-driver-robot-kinematics-errors.adb	Add_Outer (Sum, Sum, 2, 1, Level (Across_Down));	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Sum, Sum, 2, 2, Level (Both_Down));	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Add_Outer (Sum, Sum, 2, 2, Level (Both_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Held.all, Carried.all, 2 * T - 1, 2 * T - 1, 1.0);	1.0	math	a unit coefficient: the outer product as it is
+driver-robot-kinematics-errors.adb	Add (Held.all, Carried.all, 2 * T - 1, 2 * T - 1, 1.0);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Held.all, Carried.all, 2 * T - 1, 2 * T - 1, 1.0);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Held.all, Carried.all, 2 * T, 2 * T, 1.0);	1.0	math	a unit coefficient: the outer product as it is
+driver-robot-kinematics-errors.adb	Add (Held.all, Carried.all, 2 * T, 2 * T, 1.0);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Held.all, Carried.all, 2 * T, 2 * T, 1.0);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Rows, Rows, 2 * I - 1, 2 * I - 1, Own (Both_Across));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Rows, Rows, 2 * I - 1, 2 * I - 1, Own (Both_Across));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Rows, Rows, 2 * I - 1, 2 * I, Own (Across_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Rows, Rows, 2 * I - 1, 2 * I, Own (Across_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Rows, Rows, 2 * I, 2 * I - 1, Own (Across_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Rows, Rows, 2 * I, 2 * I - 1, Own (Across_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Rows, Rows, 2 * I, 2 * I, Own (Both_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Rows, Rows, 2 * I, 2 * I, Own (Both_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Sums.all, Sums.all, 2 * F - 1, 2 * F - 1, Level (Both_Across));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Sums.all, Sums.all, 2 * F - 1, 2 * F - 1, Level (Both_Across));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Sums.all, Sums.all, 2 * F - 1, 2 * F, Level (Across_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Sums.all, Sums.all, 2 * F - 1, 2 * F, Level (Across_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Sums.all, Sums.all, 2 * F, 2 * F - 1, Level (Across_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Sums.all, Sums.all, 2 * F, 2 * F - 1, Level (Across_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Sums.all, Sums.all, 2 * F, 2 * F, Level (Both_Down));	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Add (Sums.all, Sums.all, 2 * F, 2 * F, Level (Both_Down));	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	Carried (2 * T - 1, Q) := Carried (2 * T - 1, Q) + C (Both_Across) * Held (2 * S - 1, Q)	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	Carried (2 * T - 1, Q) := Carried (2 * T - 1, Q) + C (Both_Across) * Held (2 * S - 1, Q)	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	Carried (2 * T - 1, Q) := Carried (2 * T - 1, Q) + C (Both_Across) * Held (2 * S - 1, Q)	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	Carried (2 * T, Q) := Carried (2 * T, Q) + C (Across_Down) * Held (2 * S - 1, Q)	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	Carried (2 * T, Q) := Carried (2 * T, Q) + C (Across_Down) * Held (2 * S - 1, Q)	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	Carried (2 * T, Q) := Carried (2 * T, Q) + C (Across_Down) * Held (2 * S - 1, Q)	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Carried : constant Matrix_Access := new Real_Matrix'[1 .. 2 * Tracks => [1 .. P => 0.0]];	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Carried : Matrix_Access := new Real_Matrix'[1 .. 2 * Tracks => [1 .. P => 0.0]];	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Carry_All (1, Tracks);	1	structure	indexes start at one
 driver-robot-kinematics-errors.adb	Count_Row : constant := Pair_Kind'Pos (Pair_Kind'Last) + 2;	2	structure	the row of pair counts follows the three products: the kinds of pair, one past the last, plus one for indexes from one
 driver-robot-kinematics-errors.adb	D : constant Real := Error (2 * I);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	Error (2 * A - 1), Error (2 * A), Error (2 * B - 1), Error (2 * B), 1.0);	1.0	math	one pair of sightings counted once
@@ -1692,22 +1694,34 @@ driver-robot-kinematics-errors.adb	Held (2 * T - 1, Q) := Held (2 * T - 1, Q) + 
 driver-robot-kinematics-errors.adb	Held (2 * T, Q) := Held (2 * T, Q) + Rows (2 * I, Q);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	Held (2 * T, Q) := Held (2 * T, Q) + Rows (2 * I, Q);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	Held (2 * T, Q) := Held (2 * T, Q) + Rows (2 * I, Q);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Held : constant Matrix_Access := new Real_Matrix'[1 .. 2 * Tracks => [1 .. P => 0.0]];	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Local (1, Q) := Local (1, Q) + Caa * Rows (2 * B - 1, Q) + Cad * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Local (1, Q) := Local (1, Q) + Caa * Rows (2 * B - 1, Q) + Cad * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Local (2, Q) := Local (2, Q) + Cad * Rows (2 * B - 1, Q) + Cdd * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Local (2, Q) := Local (2, Q) + Cad * Rows (2 * B - 1, Q) + Cdd * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Local : Real_Matrix (1 .. 2, 1 .. P);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Held : Matrix_Access := new Real_Matrix'[1 .. 2 * Tracks => [1 .. P => 0.0]];	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Local_All (1, K);	1	structure	indexes start at one
+driver-robot-kinematics-errors.adb	Locals (2 * X - 1, Q) := Locals (2 * X - 1, Q) + Caa * Rows (2 * B - 1, Q) + Cad * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Locals (2 * X - 1, Q) := Locals (2 * X - 1, Q) + Caa * Rows (2 * B - 1, Q) + Cad * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Locals (2 * X - 1, Q) := Locals (2 * X - 1, Q) + Caa * Rows (2 * B - 1, Q) + Cad * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Locals (2 * X - 1, Q) := Locals (2 * X - 1, Q) + Caa * Rows (2 * B - 1, Q) + Cad * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Locals (2 * X, Q) := Locals (2 * X, Q) + Cad * Rows (2 * B - 1, Q) + Cdd * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Locals (2 * X, Q) := Locals (2 * X, Q) + Cad * Rows (2 * B - 1, Q) + Cdd * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Locals (2 * X, Q) := Locals (2 * X, Q) + Cad * Rows (2 * B - 1, Q) + Cdd * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Locals (2 * X, Q) := Locals (2 * X, Q) + Cad * Rows (2 * B - 1, Q) + Cdd * Rows (2 * B, Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Locals := new Real_Matrix'[1 .. 2 * K => [1 .. P => 0.0]];	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	N : constant Natural := Natural (Real'Min (D, Real (M.Bins) + 1.0));	1.0	structure	one past the last bin: a distance beyond it falls in the last, and the conversion cannot overflow
 driver-robot-kinematics-errors.adb	Own : Real_Matrix (1 .. 3, 1 .. 1) := [others => [others => 0.0]];	1	structure	indexes start at one
 driver-robot-kinematics-errors.adb	Own : Real_Matrix (1 .. 3, 1 .. 1) := [others => [others => 0.0]];	3	structure	three entries of the covariance of two sightings' errors: across with across, down with down, across with down
 driver-robot-kinematics-errors.adb	Own : constant Real := 0.5 * (M.Same_Track (Both_Across) + M.Same_Track (Both_Down));	0.5	math	the mean of the across and down variances
-driver-robot-kinematics-errors.adb	Result (Q, R) := Result (Q, R) + Rows (2 * A - 1, Q) * Local (1, R)	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Result (A, R) := Result (A, R) + Rows (2 * S - 1, A) * Locals (2 * X - 1, R)	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Result (A, R) := Result (A, R) + Rows (2 * S - 1, A) * Locals (2 * X - 1, R)	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Row_All (1, P);	1	structure	indexes start at one
 driver-robot-kinematics-errors.adb	Same_Tr : Real_Matrix (1 .. 3, 1 .. 1) := [others => [others => 0.0]];	1	structure	indexes start at one
 driver-robot-kinematics-errors.adb	Same_Tr : Real_Matrix (1 .. 3, 1 .. 1) := [others => [others => 0.0]];	3	structure	three entries of the covariance of two sightings' errors: across with across, down with down, across with down
 driver-robot-kinematics-errors.adb	Start (1) := 1;	1	structure	indexes start at one
-driver-robot-kinematics-errors.adb	Sum (1, Q) := Sum (1, Q) + Rows (2 * Frame_Order (X) - 1, Q);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Sum (2, Q) := Sum (2, Q) + Rows (2 * Frame_Order (X), Q);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-errors.adb	Sum : Real_Matrix (1 .. 2, 1 .. P) := [others => [others => 0.0]];	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Sums (2 * F - 1, Q) := Sums (2 * F - 1, Q) + Rows (2 * Frame_Order (X) - 1, Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Sums (2 * F - 1, Q) := Sums (2 * F - 1, Q) + Rows (2 * Frame_Order (X) - 1, Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Sums (2 * F - 1, Q) := Sums (2 * F - 1, Q) + Rows (2 * Frame_Order (X) - 1, Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Sums (2 * F, Q) := Sums (2 * F, Q) + Rows (2 * Frame_Order (X), Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Sums (2 * F, Q) := Sums (2 * F, Q) + Rows (2 * Frame_Order (X), Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Sums (2 * F, Q) := Sums (2 * F, Q) + Rows (2 * Frame_Order (X), Q);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-errors.adb	Sums := new Real_Matrix'[1 .. 2 * Frames => [1 .. P => 0.0]];	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	T (Row_Of (Across_Down), Bin) := T (Row_Of (Across_Down), Bin) + 0.5 * (Au * Bv + Av * Bu);	0.5	math	the mean of the two orders of across with down
 driver-robot-kinematics-errors.adb	and then 0.5 * (M.Persistent (Row_Of (Both_Across), B) + M.Persistent (Row_Of (Both_Down), B)) <= 0.5 * Own	0.5	math	half: the distance at which the covariance has fallen to half of a point's own
 driver-robot-kinematics-errors.adb	and then 0.5 * (M.Persistent (Row_Of (Both_Across), B) + M.Persistent (Row_Of (Both_Down), B)) <= 0.5 * Own	0.5	math	half: the distance at which the covariance has fallen to half of a point's own
