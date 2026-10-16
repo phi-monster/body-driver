@@ -25,7 +25,28 @@ package body Driver.Robot.Hand.Pressing is
       if Tool.Position_Covariance (1, 1) = Real'Last then
          return Real'Last;   --  the tool's place is not measured
       end if;
-      return Threshold (Vector_Gate (Vec3'Length)) * Sqrt (Widest (Tool.Position_Covariance));
+      --  The tool's place in the arm's own unit (Kinematics.Place_Covariance_In_Unit): every length a press compares
+      --  is in it, and what the fit leaves uncertain of the arm's lengths against its depths, which moves every place
+      --  with the unit, is none of a move's noise there. Taken from Tool_In_Arm's covariance, a18's least push was
+      --  3.6 units (10-16, a14's body: the eye 6.5 units below the reference, uncertain by 0.82 there, 12 per cent,
+      --  where the truth puts the arm's tool within 0.16 mm, a seventieth of a unit, with its scale taken out), the
+      --  least tilt that tells a tip from a stop 1.29 rad, which no press at the open opening could be lowered at.
+      declare
+         use type Driver.Observations.Group_Id;
+         G : constant Group_Id := Arm_Group (M, Arm);
+      begin
+         if G > O.Readings.Last_Index or else O.Readings.Element (G)'Length /= Group_Size (M, G) then
+            return Real'Last;
+         end if;
+         declare
+            In_Unit : constant Mat3 := Kinematics.Place_Covariance_In_Unit (M, Arm, O.Readings.Element (G));
+         begin
+            if In_Unit (1, 1) = Real'Last then
+               return Real'Last;
+            end if;
+            return Threshold (Vector_Gate (Vec3'Length)) * Sqrt (Widest (In_Unit));
+         end;
+      end;
    end Least_Push;
 
    procedure Aim

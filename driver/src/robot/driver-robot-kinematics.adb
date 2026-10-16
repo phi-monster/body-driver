@@ -2180,6 +2180,16 @@ package body Driver.Robot.Kinematics is
                      Result.Made_At := M.Beats;
                      Result.Unit_Frames :=
                        (if R.Result.Unit_Frames > 0 then R.Result.Unit_Frames elsif Report.Fitted then Frames else 0);
+                     if R.Result.Unit_Frames > 0 and then not R.Result.Unit_Changes.Is_Empty then
+                        Result.Unit_Changes := R.Result.Unit_Changes;
+                     else
+                        Result.Unit_Changes.Clear;
+                        for F in 1 .. Result.Unit_Frames loop
+                           for C in 1 .. N loop
+                              Result.Unit_Changes.Append (R.Frames (F).Readings (C - 1) - R.Frames (1).Readings (C - 1));
+                           end loop;
+                        end loop;
+                     end if;
                      Result.Matches := Natural (R.Matches.Length) + R.Revision;
                      Result.Used := Report.Used;
                      Result.Median_Px := Report.Median_Px;
@@ -2252,7 +2262,7 @@ package body Driver.Robot.Kinematics is
       --  the unit's keyframes, the first fit's.
       function Unit_Sigma_Of (R : Arm_Evidence) return Real is
          N      : constant Natural := Natural (R.Result.Joints.Length);
-         Frames : constant Natural := R.Result.Unit_Frames;
+         Frames : constant Natural := (if N = 0 then 0 else Natural (R.Result.Unit_Changes.Length) / N);
       begin
          if N = 0 or else Frames = 0 or else Natural (R.Result.Reference.Length) /= N
            or else Natural (R.Result.Chain.Length) /= N
@@ -2273,7 +2283,7 @@ package body Driver.Robot.Kinematics is
             end loop;
             for F in 1 .. Frames loop
                for C in 1 .. N loop
-                  Changes (F, C) := R.Frames (F).Readings (C - 1) - R.Result.Reference (C - 1);
+                  Changes (F, C) := R.Result.Unit_Changes ((F - 1) * N + C - 1);
                end loop;
             end loop;
             for X of R.Result.Covariance loop
@@ -3140,6 +3150,53 @@ package body Driver.Robot.Kinematics is
          end;
       end if;
    end Pose_Covariance;
+
+   function Place_Covariance_In_Unit (M : Model; A : Arm_Id; Readings : Real_Array) return Mat3 is
+      Unknown : constant Mat3 := [[Real'Last, 0.0, 0.0], [0.0, Real'Last, 0.0], [0.0, 0.0, Real'Last]];
+      K       : constant Natural := Index_Of (M, A);
+   begin
+      if K = 0 then
+         return Unknown;
+      end if;
+      declare
+         E      : Arm_Evidence renames M.Kinematics (K);
+         R      : Arm_Fit renames E.Result;
+         N      : constant Natural := Readings'Length;
+         Frames : constant Natural := (if N = 0 then 0 else Natural (R.Unit_Changes.Length) / N);
+      begin
+         if not R.Fitted or else Natural (R.Joints.Length) /= N or else Natural (R.Chain.Length) /= N
+           or else Natural (R.Reference.Length) /= N or else Frames = 0
+         then
+            return Unknown;
+         end if;
+         declare
+            Joints  : Fit.Joint_Array (1 .. N);
+            Change  : Real_Array (1 .. N);
+            Changes : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. N);
+            Cov     : Fit.Real_Lists.Vector;
+         begin
+            for J in 1 .. N loop
+               declare
+                  F : constant Joint_Fit := R.Joints (J);
+               begin
+                  Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
+                  Change (J) := Readings (Readings'First + J - 1) - R.Reference (J - 1);
+               end;
+            end loop;
+            for F in 1 .. Frames loop
+               for C in 1 .. N loop
+                  Changes (F, C) := R.Unit_Changes ((F - 1) * N + C - 1);
+               end loop;
+            end loop;
+            for X of R.Covariance loop
+               Cov.Append (X);
+            end loop;
+            return Result : constant Mat3 := Fit.Place_Covariance_In_Unit (Joints, Chain_Of (R), Change, Changes.all, Cov) do
+               Free (Changes);
+            end return;
+         end;
+      end;
+   end Place_Covariance_In_Unit;
 
    function Framed (M : Model; A : Arm_Id; From, To : Natural) return Boolean is
       K : constant Natural := Index_Of (M, A);

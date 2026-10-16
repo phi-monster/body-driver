@@ -671,6 +671,10 @@ private
       --  keyframe taken later refines every term and moves no length. 0 until
       --  the arm is fitted.
       Unit_Frames : Natural := 0;
+      --  Those keyframes' readings less the reference's, a row of the arm's channels each: the unit kept with the
+      --  fit, so that a body begun from its file, which keeps no keyframes, still has it (Kinematics.Unit_Sigma_Of,
+      --  Place_Covariance_In_Unit).
+      Unit_Changes : Real_Vectors.Vector;
       --  The focal search's width and range of the fit that holds (Fit.Fit_Report), and the beat of the estimate it was
       --  made in: a fit made again within that estimate begins from it (Kinematics.Refit's Again).
       Focal_Within, Searched_Least, Searched_Most : Real := 0.0;

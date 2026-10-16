@@ -4593,6 +4593,28 @@ package body Driver.Robot.Kinematics.Fit is
    function Depth_Known (Depth, Sigma : Real) return Boolean is
      (Depth > 0.0 and then Sigma < Real'Last and then Driver.Uncertain.Significant (1.0, Sigma));
 
+   --  The root mean square of the eye positions over the keyframes (one a row of Changes) the joints make.
+   function Unit_Of (Jx : Joint_Array; Chain : Chain_Order; Changes : Driver.Numerics.Arrays.Real_Matrix) return Real is
+      N   : constant Natural := Jx'Length;
+      Sum : Real := 0.0;
+   begin
+      for F in Changes'Range (1) loop
+         declare
+            D : Real_Array (1 .. N);
+         begin
+            for J in 1 .. N loop
+               D (J) := Changes (F, Changes'First (2) + J - 1);
+            end loop;
+            declare
+               T : constant Vec3 := Eye_At (Jx, Chain, D).Translation;
+            begin
+               Sum := Sum + Dot (T, T);
+            end;
+         end;
+      end loop;
+      return Sqrt (Sum / Real (Natural'Max (1, Changes'Length (1))));
+   end Unit_Of;
+
    function Unit_Sigma
      (Joints     : Joint_Array;
       Chain      : Chain_Order;
@@ -4602,26 +4624,7 @@ package body Driver.Robot.Kinematics.Fit is
       N       : constant Natural := Joints'Length;
       Reduced : constant Natural := Terms (N);
       function V (P, Q : Positive) return Real is (Covariance (Covariance.First_Index + (P - 1) * Reduced + Q - 1));
-      --  The root mean square of the eye positions over the keyframes.
-      function Unit_Of (Jx : Joint_Array) return Real is
-         Sum : Real := 0.0;
-      begin
-         for F in Changes'Range (1) loop
-            declare
-               D : Real_Array (1 .. N);
-            begin
-               for J in 1 .. N loop
-                  D (J) := Changes (F, Changes'First (2) + J - 1);
-               end loop;
-               declare
-                  T : constant Vec3 := Eye_At (Jx, Chain, D).Translation;
-               begin
-                  Sum := Sum + Dot (T, T);
-               end;
-            end;
-         end loop;
-         return Sqrt (Sum / Real (Natural'Max (1, Changes'Length (1))));
-      end Unit_Of;
+      function Unit_Of (Jx : Joint_Array) return Real is (Unit_Of (Jx, Chain, Changes));
       D : array (1 .. N, Joint_Term) of Real := [others => [others => 0.0]];
       Variance : Real := 0.0;
       Here     : constant Real := Unit_Of (Joints);
@@ -4670,6 +4673,72 @@ package body Driver.Robot.Kinematics.Fit is
       end loop;
       return Sqrt (Real'Max (0.0, Variance)) / Here;
    end Unit_Sigma;
+
+   function Place_Covariance_In_Unit
+     (Joints       : Joint_Array;
+      Chain        : Chain_Order;
+      Change       : Real_Array;
+      Unit_Changes : Driver.Numerics.Arrays.Real_Matrix;
+      Covariance   : Real_Lists.Vector) return Mat3
+   is
+      N       : constant Natural := Joints'Length;
+      Reduced : constant Natural := Terms (N);
+      Unknown : constant Mat3 := [[Real'Last, 0.0, 0.0], [0.0, Real'Last, 0.0], [0.0, 0.0, Real'Last]];
+      function V (P, Q : Positive) return Real is (Covariance (Covariance.First_Index + (P - 1) * Reduced + Q - 1));
+      Here    : constant Real := Unit_Of (Joints, Chain, Unit_Changes);
+      D       : array (1 .. N, Joint_Term) of Vec3 := [others => [others => [0.0, 0.0, 0.0]]];
+      Place   : Mat3 := [others => [others => 0.0]];
+   begin
+      if Natural (Covariance.Length) /= Reduced * Reduced or else Here <= 0.0 then
+         return Unknown;
+      end if;
+      for J in 1 .. N loop
+         for T in Joint_Term loop
+            declare
+               P     : constant Positive := Term_Of (J, T);
+               Sigma : constant Real := (if V (P, P) > 0.0 then Sqrt (V (P, P)) else 0.0);
+            begin
+               if Sigma > 0.0 then
+                  declare
+                     --  The place the joints moved by H make, in the unit they make.
+                     function Moved (H : Real) return Vec3 is
+                        Jx     : Joint_Array := Joints;
+                        A      : Joint renames Jx (Jx'First + J - 1);
+                        E1, E2 : Vec3;
+                     begin
+                        Perp (A.W, E1, E2);
+                        case T is
+                           when Tilt_1  => A.W := Unit (A.W + H * E1);
+                           when Tilt_2  => A.W := Unit (A.W + H * E2);
+                           when Point_1 => A.P := A.P + H * E1;
+                           when Point_2 => A.P := A.P + H * E2;
+                           when Scale   => A.C := A.C + H;
+                        end case;
+                        declare
+                           Unit_There : constant Real := Unit_Of (Jx, Chain, Unit_Changes);
+                        begin
+                           return (if Unit_There > 0.0 then (Here / Unit_There) * Eye_At (Jx, Chain, Change).Translation
+                                   else Eye_At (Jx, Chain, Change).Translation);
+                        end;
+                     end Moved;
+                  begin
+                     D (J, T) := (1.0 / (Sigma + Sigma)) * (Moved (Sigma) - Moved (-Sigma));
+                  end;
+               end if;
+            end;
+         end loop;
+      end loop;
+      for J in 1 .. N loop
+         for T in Joint_Term loop
+            for K in 1 .. N loop
+               for U in Joint_Term loop
+                  Place := Place + V (Term_Of (J, T), Term_Of (K, U)) * Driver.Numerics.Outer (D (J, T), D (K, U));
+               end loop;
+            end loop;
+         end loop;
+      end loop;
+      return Place;
+   end Place_Covariance_In_Unit;
 
    procedure Pose_Covariance
      (Joints      : Joint_Array;

@@ -218,6 +218,10 @@ private package Driver.Robot.Kinematics is
    --  the covariance of its turn (a rotation vector) and of its place
    --  (model units); Real'Last on the diagonal until the arm is fitted.
 
+   function Place_Covariance_In_Unit (M : Model; A : Arm_Id; Readings : Real_Array) return Mat3;
+   --  The covariance of the arm's eye's place at those readings in the arm's own unit (Fit.Place_Covariance_In_Unit:
+   --  the part every place shares with the unit taken out); Real'Last on the diagonal until the arm is fitted.
+
    procedure Solve_Pose
      (M             : Model;
       A             : Arm_Id;
