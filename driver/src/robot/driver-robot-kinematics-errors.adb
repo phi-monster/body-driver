@@ -1,5 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
+with Driver.Parallel_For;
 
 package body Driver.Robot.Kinematics.Errors is
 
@@ -159,7 +160,14 @@ package body Driver.Robot.Kinematics.Errors is
    ---------------------------------------------------------------------------
    --  The model
 
-   function Bin_Of (M : Model; D : Real) return Natural is (Natural'Min (M.Bins, Natural (Real'Floor (D))));
+   --  The whole part of a distance by the conversion to an integer, which rounds to the nearest, the whole part or one
+   --  above it: Real'Floor calls the run-time's software attribute, and Meat asks it of every pair of a keyframe's
+   --  sightings.
+   function Bin_Of (M : Model; D : Real) return Natural is
+      N : constant Natural := Natural (Real'Min (D, Real (M.Bins) + 1.0));
+   begin
+      return Natural'Min (M.Bins, (if Real (N) > D then N - 1 else N));
+   end Bin_Of;
 
    procedure Add (T : in out Real_Matrix; Bin : Natural; Au, Av, Bu, Bv, Pairs : Real) is
    begin
@@ -385,24 +393,6 @@ package body Driver.Robot.Kinematics.Errors is
       K      : constant Natural := Frame'Length;
       Frames : Natural := 0;
       Tracks : Natural := 0;
-
-      --  Result += Coefficient * X Y', for the rows X and Y of a matrix.
-      procedure Add_Outer (X, Y : Real_Matrix; Rx, Ry : Positive; Coefficient : Real) is
-      begin
-         if Coefficient /= 0.0 then
-            for A in 1 .. P loop
-               declare
-                  Xa : constant Real := Coefficient * X (Rx, A);
-               begin
-                  if Xa /= 0.0 then
-                     for B in 1 .. P loop
-                        Result (A, B) := Result (A, B) + Xa * Y (Ry, B);
-                     end loop;
-                  end if;
-               end;
-            end loop;
-         end if;
-      end Add_Outer;
    begin
       Result := [others => [others => 0.0]];
       if not M.Is_Measured or else K = 0 or else P = 0 then
@@ -423,9 +413,127 @@ package body Driver.Robot.Kinematics.Errors is
          Pixel_V   : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
          --  What each track's sightings hold of the gradient, across and down,
          --  and what the covariance carries of all the tracks' to it.
-         Held      : constant Matrix_Access := new Real_Matrix'[1 .. 2 * Tracks => [1 .. P => 0.0]];
-         Carried   : constant Matrix_Access := new Real_Matrix'[1 .. 2 * Tracks => [1 .. P => 0.0]];
+         Held      : Matrix_Access := new Real_Matrix'[1 .. 2 * Tracks => [1 .. P => 0.0]];
+         Carried   : Matrix_Access := new Real_Matrix'[1 .. 2 * Tracks => [1 .. P => 0.0]];
          Frame_Start, Frame_Order : Natural_Access;
+         --  Each keyframe's sum of its sightings' gradient rows (rows 2F - 1 and 2F), and each sighting's part between
+         --  the pairs within Near pixels (rows 2X - 1 and 2X, X its place in the keyframes' order).
+         Sums      : Matrix_Access;
+         Locals    : Matrix_Access;
+
+         --  Two sightings' errors, whoever they are of, are as alike as the
+         --  tracks they are of: a point's own errors in two keyframes, those
+         --  of two points in two keyframes at the distance of their pixels.
+         procedure Carry (T : Positive) is
+         begin
+            if Seen (T) > 0 then
+               for S in 1 .. Tracks loop
+                  if Seen (S) > 0 then
+                     declare
+                        C : constant Entries :=
+                          (if S = T then M.Same_Track
+                           else Persistent (M, Distance (Pixel_U (T), Pixel_V (T), Pixel_U (S), Pixel_V (S))));
+                     begin
+                        for Q in 1 .. P loop
+                           Carried (2 * T - 1, Q) := Carried (2 * T - 1, Q) + C (Both_Across) * Held (2 * S - 1, Q)
+                             + C (Across_Down) * Held (2 * S, Q);
+                           Carried (2 * T, Q) := Carried (2 * T, Q) + C (Across_Down) * Held (2 * S - 1, Q)
+                             + C (Both_Down) * Held (2 * S, Q);
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+            end if;
+         end Carry;
+         procedure Carry_All is new Driver.Parallel_For (Carry);
+
+         --  The pairs of one keyframe within Near pixels: the part of the excess above its far level.
+         procedure Local (X : Positive) is
+            F : constant Positive := Frame (Frame_Order (X));
+            A : constant Positive := Frame_Order (X);
+         begin
+            for Y in Frame_Start (F) .. Frame_Start (F + 1) - 1 loop
+               declare
+                  B   : constant Positive := Frame_Order (Y);
+                  Bin : constant Natural := Bin_Of (M, Distance (U0 (A), V0 (A), U0 (B), V0 (B)));
+               begin
+                  if Y /= X and then Bin < Near then
+                     declare
+                        Caa : constant Real := Excess (Row_Of (Both_Across), Bin) - Level (Both_Across);
+                        Cdd : constant Real := Excess (Row_Of (Both_Down), Bin) - Level (Both_Down);
+                        Cad : constant Real := Excess (Row_Of (Across_Down), Bin) - Level (Across_Down);
+                     begin
+                        for Q in 1 .. P loop
+                           Locals (2 * X - 1, Q) := Locals (2 * X - 1, Q) + Caa * Rows (2 * B - 1, Q) + Cad * Rows (2 * B, Q);
+                           Locals (2 * X, Q) := Locals (2 * X, Q) + Cad * Rows (2 * B - 1, Q) + Cdd * Rows (2 * B, Q);
+                        end loop;
+                     end;
+                  end if;
+               end;
+            end loop;
+         end Local;
+         procedure Local_All is new Driver.Parallel_For (Local);
+
+         --  One row of the sandwich's middle, its sums taken in the order the whole matrix was once summed in, term
+         --  by term, so that each is the sum one task made, to the last bit, whichever task makes it.
+         procedure Row (A : Positive) is
+            --  Result (A, B) += Coefficient * X (Rx, A) * Y (Ry, B), for every B.
+            procedure Add (X, Y : Real_Matrix; Rx, Ry : Positive; Coefficient : Real) is
+            begin
+               if Coefficient /= 0.0 then
+                  declare
+                     Xa : constant Real := Coefficient * X (Rx, A);
+                  begin
+                     if Xa /= 0.0 then
+                        for B in 1 .. P loop
+                           Result (A, B) := Result (A, B) + Xa * Y (Ry, B);
+                        end loop;
+                     end if;
+                  end;
+               end if;
+            end Add;
+            --  Each sighting with itself: its own errors' covariance, less what
+            --  the sums counted for it (its point's own in two keyframes, and
+            --  the far level of its keyframe).
+            Own : constant Entries := [for Kind in Pair_Kind => M.Alone (Kind) - M.Same_Track (Kind) - Level (Kind)];
+         begin
+            for T in 1 .. Tracks loop
+               if Seen (T) > 0 then
+                  Add (Held.all, Carried.all, 2 * T - 1, 2 * T - 1, 1.0);
+                  Add (Held.all, Carried.all, 2 * T, 2 * T, 1.0);
+               end if;
+            end loop;
+            --  The pairs of one keyframe have more: the excess of Shared over
+            --  Persistent. Its far level is a share of every pair of the keyframe
+            --  (the sum of the keyframe's gradient rows, outer to itself, less
+            --  each sighting alone); the part above it is between the pairs
+            --  within Near pixels.
+            for F in 1 .. Frames loop
+               Add (Sums.all, Sums.all, 2 * F - 1, 2 * F - 1, Level (Both_Across));
+               Add (Sums.all, Sums.all, 2 * F, 2 * F, Level (Both_Down));
+               Add (Sums.all, Sums.all, 2 * F - 1, 2 * F, Level (Across_Down));
+               Add (Sums.all, Sums.all, 2 * F, 2 * F - 1, Level (Across_Down));
+               if Near > 0 then
+                  for X in Frame_Start (F) .. Frame_Start (F + 1) - 1 loop
+                     declare
+                        S : constant Positive := Frame_Order (X);
+                     begin
+                        for R in 1 .. P loop
+                           Result (A, R) := Result (A, R) + Rows (2 * S - 1, A) * Locals (2 * X - 1, R)
+                             + Rows (2 * S, A) * Locals (2 * X, R);
+                        end loop;
+                     end;
+                  end loop;
+               end if;
+            end loop;
+            for I in 1 .. K loop
+               Add (Rows, Rows, 2 * I - 1, 2 * I - 1, Own (Both_Across));
+               Add (Rows, Rows, 2 * I, 2 * I, Own (Both_Down));
+               Add (Rows, Rows, 2 * I - 1, 2 * I, Own (Across_Down));
+               Add (Rows, Rows, 2 * I, 2 * I - 1, Own (Across_Down));
+            end loop;
+         end Row;
+         procedure Row_All is new Driver.Parallel_For (Row);
       begin
          for B in 0 .. M.Bins loop
             for E in 1 .. 3 loop
@@ -449,118 +557,29 @@ package body Driver.Robot.Kinematics.Errors is
                end loop;
             end;
          end loop;
-
-         --  Two sightings' errors, whoever they are of, are as alike as the
-         --  tracks they are of: a point's own errors in two keyframes, those
-         --  of two points in two keyframes at the distance of their pixels.
-         for T in 1 .. Tracks loop
-            if Seen (T) > 0 then
-               for S in 1 .. Tracks loop
-                  if Seen (S) > 0 then
-                     declare
-                        C : constant Entries :=
-                          (if S = T then M.Same_Track
-                           else Persistent (M, Distance (Pixel_U (T), Pixel_V (T), Pixel_U (S), Pixel_V (S))));
-                     begin
-                        for Q in 1 .. P loop
-                           Carried (2 * T - 1, Q) := Carried (2 * T - 1, Q) + C (Both_Across) * Held (2 * S - 1, Q)
-                             + C (Across_Down) * Held (2 * S, Q);
-                           Carried (2 * T, Q) := Carried (2 * T, Q) + C (Across_Down) * Held (2 * S - 1, Q)
-                             + C (Both_Down) * Held (2 * S, Q);
-                        end loop;
-                     end;
-                  end if;
-               end loop;
-               Add_Outer (Held.all, Carried.all, 2 * T - 1, 2 * T - 1, 1.0);
-               Add_Outer (Held.all, Carried.all, 2 * T, 2 * T, 1.0);
-            end if;
-         end loop;
-
-         --  The pairs of one keyframe have more: the excess of Shared over
-         --  Persistent. Its far level is a share of every pair of the keyframe
-         --  (the sum of the keyframe's gradient rows, outer to itself, less
-         --  each sighting alone); the part above it is between the pairs
-         --  within Near pixels.
+         Carry_All (1, Tracks);
          Group_By (Frame, Frames, Frame_Start, Frame_Order);
+         Sums := new Real_Matrix'[1 .. 2 * Frames => [1 .. P => 0.0]];
          for F in 1 .. Frames loop
-            declare
-               First : constant Natural := Frame_Start (F);
-               After : constant Natural := Frame_Start (F + 1);
-               Sum   : Real_Matrix (1 .. 2, 1 .. P) := [others => [others => 0.0]];
-               Local : Real_Matrix (1 .. 2, 1 .. P);
-            begin
-               for X in First .. After - 1 loop
-                  for Q in 1 .. P loop
-                     Sum (1, Q) := Sum (1, Q) + Rows (2 * Frame_Order (X) - 1, Q);
-                     Sum (2, Q) := Sum (2, Q) + Rows (2 * Frame_Order (X), Q);
-                  end loop;
+            for X in Frame_Start (F) .. Frame_Start (F + 1) - 1 loop
+               for Q in 1 .. P loop
+                  Sums (2 * F - 1, Q) := Sums (2 * F - 1, Q) + Rows (2 * Frame_Order (X) - 1, Q);
+                  Sums (2 * F, Q) := Sums (2 * F, Q) + Rows (2 * Frame_Order (X), Q);
                end loop;
-               Add_Outer (Sum, Sum, 1, 1, Level (Both_Across));
-               Add_Outer (Sum, Sum, 2, 2, Level (Both_Down));
-               Add_Outer (Sum, Sum, 1, 2, Level (Across_Down));
-               Add_Outer (Sum, Sum, 2, 1, Level (Across_Down));
-               if Near > 0 then
-                  for X in First .. After - 1 loop
-                     declare
-                        A : constant Positive := Frame_Order (X);
-                     begin
-                        Local := [others => [others => 0.0]];
-                        for Y in First .. After - 1 loop
-                           declare
-                              B : constant Positive := Frame_Order (Y);
-                              Bin : constant Natural :=
-                                Bin_Of (M, Distance (U0 (A), V0 (A), U0 (B), V0 (B)));
-                           begin
-                              if Y /= X and then Bin < Near then
-                                 declare
-                                    Caa : constant Real := Excess (Row_Of (Both_Across), Bin) - Level (Both_Across);
-                                    Cdd : constant Real := Excess (Row_Of (Both_Down), Bin) - Level (Both_Down);
-                                    Cad : constant Real := Excess (Row_Of (Across_Down), Bin) - Level (Across_Down);
-                                 begin
-                                    for Q in 1 .. P loop
-                                       Local (1, Q) := Local (1, Q) + Caa * Rows (2 * B - 1, Q) + Cad * Rows (2 * B, Q);
-                                       Local (2, Q) := Local (2, Q) + Cad * Rows (2 * B - 1, Q) + Cdd * Rows (2 * B, Q);
-                                    end loop;
-                                 end;
-                              end if;
-                           end;
-                        end loop;
-                        for Q in 1 .. P loop
-                           for R in 1 .. P loop
-                              Result (Q, R) := Result (Q, R) + Rows (2 * A - 1, Q) * Local (1, R)
-                                + Rows (2 * A, Q) * Local (2, R);
-                           end loop;
-                        end loop;
-                     end;
-                  end loop;
-               end if;
-            end;
+            end loop;
          end loop;
-
-         --  Each sighting with itself: its own errors' covariance, less what
-         --  the sums above counted for it (its point's own in two keyframes,
-         --  and the far level of its keyframe).
-         for I in 1 .. K loop
-            declare
-               Own : constant Entries :=
-                 [for Kind in Pair_Kind => M.Alone (Kind) - M.Same_Track (Kind) - Level (Kind)];
-            begin
-               Add_Outer (Rows, Rows, 2 * I - 1, 2 * I - 1, Own (Both_Across));
-               Add_Outer (Rows, Rows, 2 * I, 2 * I, Own (Both_Down));
-               Add_Outer (Rows, Rows, 2 * I - 1, 2 * I, Own (Across_Down));
-               Add_Outer (Rows, Rows, 2 * I, 2 * I - 1, Own (Across_Down));
-            end;
-         end loop;
+         Locals := new Real_Matrix'[1 .. 2 * K => [1 .. P => 0.0]];
+         if Near > 0 then
+            Local_All (1, K);
+         end if;
+         Row_All (1, P);
          Free (Seen);
          Free (Pixel_U);
          Free (Pixel_V);
-         declare
-            Spent : Matrix_Access := Held;
-            Used  : Matrix_Access := Carried;
-         begin
-            Free (Spent);
-            Free (Used);
-         end;
+         Free (Held);
+         Free (Carried);
+         Free (Sums);
+         Free (Locals);
          Free (Frame_Start);
          Free (Frame_Order);
          Free (Excess);
