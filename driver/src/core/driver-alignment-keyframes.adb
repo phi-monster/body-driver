@@ -1387,8 +1387,13 @@ package body Driver.Alignment.Keyframes is
             Open  : Flag_Lists := [others => null];
             Usable : Natural := 0;
 
-            function U_Of (K : Positive) return Real is (C.Points (K).U / Scale);
-            function V_Of (K : Positive) return Real is (C.Points (K).V / Scale);
+            --  The points at the size, kept as plain numbers: the draws read them on several tasks at once (Draw),
+            --  and a vector's element is read through a reference that counts its readers.
+            Point_U : constant Real_Array (1 .. Count) := [for K in 1 .. Count => C.Points (K).U / Scale];
+            Point_V : constant Real_Array (1 .. Count) := [for K in 1 .. Count => C.Points (K).V / Scale];
+
+            function U_Of (K : Positive) return Real is (Point_U (K));
+            function V_Of (K : Positive) return Real is (Point_V (K));
 
             --  The open peak of point K nearest the field's displacement there, and its squared distance from it.
             --  Of the open peaks within the tolerance down the window, the nearest (none farther is ever on a field). The
@@ -1550,6 +1555,75 @@ package body Driver.Alignment.Keyframes is
                Cap    : Natural;
                Enough : Natural;
                Drawn  : Natural := 0;
+
+               --  The draws go in batches of one a processor, as Align_Some splits its points: a batch's fields drawn
+               --  from the generator in order, as the draws one after another draw them, the points agreeing with
+               --  each counted at once (Driver.Parallel_For: Agreeing reads only the places and the points), and the
+               --  batch taken in order, each draw only while the draws one at a time would still go on, the generator
+               --  set back to where it stood after the last draw taken. The best field, its count, the draws needed
+               --  and the generator are those of the draws one at a time, to the bit. One at a time, the draws were
+               --  most of the aligner's time on the task that waits for it: s07's estimate at beat 2842, replayed
+               --  (10-16), aligned for 9.9 s on that task, 5.4 of them drawing, with nine workers idle.
+               Batch : constant Positive := Positive'Max (1, Natural (System.Multiprocessors.Number_Of_CPUs));
+               type Field_Draw is record
+                  Valid : Boolean := False;   --  two points apart, a view the aligner compares
+                  G     : Affine := (others => 0.0);
+                  N     : Natural := 0;       --  the points agreeing with G
+               end record;
+               Draws : array (1 .. Batch) of Field_Draw;
+               After : array (1 .. Batch) of Ada.Numerics.Float_Random.State;
+
+               procedure Count_Agreeing (J : Positive) is
+               begin
+                  if Draws (J).Valid then
+                     Draws (J).N := Agreeing (Draws (J).G);
+                  end if;
+               end Count_Agreeing;
+               procedure Count_All is new Driver.Parallel_For (Count_Agreeing);
+
+               --  A draw's field: two points, and a place of each when they are not the same point.
+               function Drawn_Field return Field_Draw is
+                  K1 : constant Positive := Pick_Point;
+                  K2 : constant Positive := Pick_Point;
+               begin
+                  if K1 /= K2 then
+                     declare
+                        P1 : constant Peak := Peaks (K1) (Pick_Place (K1));
+                        P2 : constant Peak := Peaks (K2) (Pick_Place (K2));
+                        Dpu : constant Real := U_Of (K2) - U_Of (K1);
+                        Dpv : constant Real := V_Of (K2) - V_Of (K1);
+                        Dqu : constant Real := Dpu + P2.Du - P1.Du;
+                        Dqv : constant Real := Dpv + P2.Dv - P1.Dv;
+                        Den : constant Real := Dpu ** 2 + Dpv ** 2;
+                     begin
+                        --  Two points closer than the tolerance tell no turn.
+                        if Den > Tolerance ** 2 then
+                           declare
+                              A  : constant Real := (Dpu * Dqu + Dpv * Dqv) / Den;
+                              B  : constant Real := (Dpu * Dqv - Dpv * Dqu) / Den;
+                              Sq : constant Real := A ** 2 + B ** 2;
+                           begin
+                              --  A view the aligner can compare: no scale beyond a halving either way (Align).
+                              if Sq >= 1.0 / Real (Halving) ** 2 and then Sq <= Real (Halving) ** 2 then
+                                 declare
+                                    Q1u : constant Real := U_Of (K1) + P1.Du;
+                                    Q1v : constant Real := V_Of (K1) + P1.Dv;
+                                 begin
+                                    --  The view turned and scaled by (A, B) and shifted: q = (A, B) p + T at both
+                                    --  points, so d (p) = q - p = ((A, B) - I) p + T.
+                                    return (Valid => True,
+                                            G     => (M11 => A - 1.0, M12 => -B, M21 => B, M22 => A - 1.0,
+                                                      Tu => Q1u - (A * U_Of (K1) - B * V_Of (K1)),
+                                                      Tv => Q1v - (B * U_Of (K1) + A * V_Of (K1))),
+                                            N     => 0);
+                                 end;
+                              end if;
+                           end;
+                        end if;
+                     end;
+                  end if;
+                  return (others => <>);
+               end Drawn_Field;
             begin
                Best := (others => 0.0);
                Best_N := 0;
@@ -1570,68 +1644,48 @@ package body Driver.Alignment.Keyframes is
                Cap := Needed (0.5 * Real (Drawable) / Real (Total));
                Enough := Cap;
                while Drawn < Natural'Min (Cap, Enough) loop
-                  Drawn := Drawn + 1;
                   declare
-                     K1 : constant Positive := Pick_Point;
-                     K2 : constant Positive := Pick_Point;
+                     Asked : constant Positive := Natural'Min (Batch, Natural'Min (Cap, Enough) - Drawn);
+                     Taken : Natural := 0;
                   begin
-                     if K1 /= K2 then
-                        declare
-                           P1 : constant Peak := Peaks (K1) (Pick_Place (K1));
-                           P2 : constant Peak := Peaks (K2) (Pick_Place (K2));
-                           Dpu : constant Real := U_Of (K2) - U_Of (K1);
-                           Dpv : constant Real := V_Of (K2) - V_Of (K1);
-                           Dqu : constant Real := Dpu + P2.Du - P1.Du;
-                           Dqv : constant Real := Dpv + P2.Dv - P1.Dv;
-                           Den : constant Real := Dpu ** 2 + Dpv ** 2;
-                        begin
-                           --  Two points closer than the tolerance tell no turn.
-                           if Den > Tolerance ** 2 then
+                     for J in 1 .. Asked loop
+                        Draws (J) := Drawn_Field;
+                        Ada.Numerics.Float_Random.Save (Gen, After (J));
+                     end loop;
+                     Count_All (1, Asked);
+                     for J in 1 .. Asked loop
+                        exit when Drawn >= Natural'Min (Cap, Enough);
+                        Drawn := Drawn + 1;
+                        Taken := J;
+                        if Draws (J).Valid and then Draws (J).N > Best_N then
+                           declare
+                              G : constant Affine := Draws (J).G;
+                           begin
+                              Best := G;
+                              Best_N := Draws (J).N;
+                              --  How often a draw is of two places on this field: the share of the points on it,
+                              --  times the chance their place on it is the one drawn.
                               declare
-                                 A  : constant Real := (Dpu * Dqu + Dpv * Dqv) / Den;
-                                 B  : constant Real := (Dpu * Dqv - Dpv * Dqu) / Den;
-                                 Sq : constant Real := A ** 2 + B ** 2;
+                                 Chance : Real := 0.0;
                               begin
-                                 --  A view the aligner can compare: no scale beyond a halving either way (Align).
-                                 if Sq >= 1.0 / Real (Halving) ** 2 and then Sq <= Real (Halving) ** 2 then
+                                 for K in 1 .. Count loop
                                     declare
-                                       Q1u : constant Real := U_Of (K1) + P1.Du;
-                                       Q1v : constant Real := V_Of (K1) + P1.Dv;
-                                       --  The view turned and scaled by (A, B) and shifted: q = (A, B) p + T at both points,
-                                       --  so d (p) = q - p = ((A, B) - I) p + T.
-                                       G   : constant Affine :=
-                                         (M11 => A - 1.0, M12 => -B, M21 => B, M22 => A - 1.0,
-                                          Tu => Q1u - (A * U_Of (K1) - B * V_Of (K1)),
-                                          Tv => Q1v - (B * U_Of (K1) + A * V_Of (K1)));
-                                       N   : constant Natural := Agreeing (G);
+                                       I   : Natural;
+                                       Gap : Real;
                                     begin
-                                       if N > Best_N then
-                                          Best := G;
-                                          Best_N := N;
-                                          --  How often a draw is of two places on this field: the share of the
-                                          --  points on it, times the chance their place on it is the one drawn.
-                                          declare
-                                             Chance : Real := 0.0;
-                                          begin
-                                             for K in 1 .. Count loop
-                                                declare
-                                                   I   : Natural;
-                                                   Gap : Real;
-                                                begin
-                                                   Nearest (G, K, I, Gap);
-                                                   if I > 0 and then Gap <= Tolerance ** 2 then
-                                                      Chance := Chance + Peaks (K) (I).Rho / Weight (K);
-                                                   end if;
-                                                end;
-                                             end loop;
-                                             Enough := Needed (Chance / Real (Drawable));
-                                          end;
+                                       Nearest (G, K, I, Gap);
+                                       if I > 0 and then Gap <= Tolerance ** 2 then
+                                          Chance := Chance + Peaks (K) (I).Rho / Weight (K);
                                        end if;
                                     end;
-                                 end if;
+                                 end loop;
+                                 Enough := Needed (Chance / Real (Drawable));
                               end;
-                           end if;
-                        end;
+                           end;
+                        end if;
+                     end loop;
+                     if Taken < Asked then
+                        Ada.Numerics.Float_Random.Reset (Gen, After (Taken));
                      end if;
                   end;
                end loop;
