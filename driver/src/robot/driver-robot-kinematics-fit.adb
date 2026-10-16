@@ -4084,9 +4084,11 @@ package body Driver.Robot.Kinematics.Fit is
                --  median (10-15), the desktop's arm at 11.5 degrees in two wrong orders once stage 1 told its lens
                --  (10-16). N! orders of one reprojection each: 720 for six joints. The order is the one of the least
                --  median, the first of equals in the orders' lexicographic sequence.
-               --  Every first joint at once (Driver.Parallel_For), each its own orders in their lexicographic
-               --  sequence with buffers of its own; the least median over them taken in the first joints' order, so
-               --  that it is the first of equals in the whole sequence, as one search of it in turn finds.
+               --  Every first two joints at once (Driver.Parallel_For), each pair its own orders in their lexicographic
+               --  sequence with buffers of its own; the least median over them taken in the pairs' order, so that it is
+               --  the first of equals in the whole sequence, as one search of it in turn finds. A way a first joint
+               --  left six of them to ten processors and the Pi's four two rounds (a19 on 10-16: 3.8 to 17.2 s a fit);
+               --  a way a pair, 30.
                declare
                   type Chain_Access is access Chain_Order;
                   procedure Free is new Ada.Unchecked_Deallocation (Chain_Order, Chain_Access);
@@ -4099,30 +4101,46 @@ package body Driver.Robot.Kinematics.Fit is
                      Fail_Order  : Chain_Access;
                      Fail_Median : Real := 0.0;
                   end record;
-                  Results : array (1 .. N) of Way_Result;
+                  --  The ways: every first joint, and when there are two or more joints, every second one after it.
+                  Kept    : constant Positive := Natural'Min (2, N);
+                  Ways    : constant Positive := (if N >= 2 then N * (N - 1) else N);
+                  Results : array (1 .. Ways) of Way_Result;
                   Found   : Boolean := False;
 
-                  --  The first order whose first joint is J: the rest in their own order.
-                  procedure First_Of (J : Positive; C : out Chain_Order) is
-                     K : Positive := 2;
+                  --  The first order of way W: its first joints (the W-th pair of them in lexicographic order), the
+                  --  rest in their own order.
+                  procedure First_Of (W : Positive; C : out Chain_Order) is
+                     J : constant Positive := (if Kept = 2 then (W - 1) / (N - 1) + 1 else W);
+                     S : constant Natural := (if Kept = 2 then (W - 1) mod (N - 1) + 1 else 0);   --  of the others
+                     K : Positive := Kept + 1;
+                     Seen : Natural := 0;
                   begin
                      C (1) := J;
                      for Other in 1 .. N loop
                         if Other /= J then
+                           Seen := Seen + 1;
+                           if Seen = S then
+                              C (2) := Other;
+                           end if;
+                        end if;
+                     end loop;
+                     for Other in 1 .. N loop
+                        if Other /= J and then (Kept = 1 or else Other /= C (2)) then
                            C (K) := Other;
                            K := K + 1;
                         end if;
                      end loop;
                   end First_Of;
 
-                  --  C made the next order in lexicographic sequence with its first joint kept; False after the last.
+                  --  C made the next order in lexicographic sequence with its first Kept joints kept; False after the
+                  --  last.
                   function Next (C : in out Chain_Order) return Boolean is
                      I : Natural := N - 1;
                   begin
-                     while I >= 2 and then C (I) > C (I + 1) loop
+                     while I >= Kept + 1 and then C (I) > C (I + 1) loop
                         I := I - 1;
                      end loop;
-                     if I < 2 then
+                     if I < Kept + 1 then
                         return False;
                      end if;
                      declare
@@ -4157,16 +4175,16 @@ package body Driver.Robot.Kinematics.Fit is
                      return Ada.Strings.Unbounded.To_String (Text);
                   end Image;
 
-                  procedure Search_From (J : Positive) is
+                  procedure Search_From (W : Positive) is
                      C      : Chain_Order (1 .. N);
                      Own    : Rigid_Access := new Pose_Array;
                      Into   : Real_Access := new Real_Array (1 .. 2 * Multi);
                      M, E   : Real;
-                     Result : Way_Result renames Results (J);
+                     Result : Way_Result renames Results (W);
                   begin
                      Result.Order := new Chain_Order (1 .. N);
                      Result.Residuals := new Real_Array (1 .. 2 * Multi);
-                     First_Of (J, C);
+                     First_Of (W, C);
                      loop
                         Score_Into (C, Own.all, Into.all, M, E);
                         if not Result.Found or else M < Result.Median then
@@ -4191,14 +4209,14 @@ package body Driver.Robot.Kinematics.Fit is
                   --  Order_Told says that it is not told, and the cells that move several joints, taken larger once
                   --  the arm is fitted (Boot), are what tell it. Every first joint at once, each its own orders until
                   --  the first that is not significantly the larger; the first such in the whole sequence is said.
-                  procedure Tell_From (J : Positive) is
+                  procedure Tell_From (W : Positive) is
                      C      : Chain_Order (1 .. N);
                      Own    : Rigid_Access := new Pose_Array;
                      Into   : Real_Access := new Real_Array (1 .. 2 * Multi);
                      M, E   : Real;
-                     Result : Way_Result renames Results (J);
+                     Result : Way_Result renames Results (W);
                   begin
-                     First_Of (J, C);
+                     First_Of (W, C);
                      loop
                         if C /= Order then
                            Score_Into (C, Own.all, Into.all, M, E);
@@ -4217,8 +4235,8 @@ package body Driver.Robot.Kinematics.Fit is
                   procedure Tell_All is new Driver.Parallel_For (Tell_From);
                begin
                   Here := Real'Last;
-                  Search_All (1, N);
-                  for J in 1 .. N loop
+                  Search_All (1, Ways);
+                  for J in 1 .. Ways loop
                      if Results (J).Found and then (not Found or else Results (J).Median < Here) then
                         Found := True;
                         Order := Results (J).Order.all;
@@ -4250,14 +4268,14 @@ package body Driver.Robot.Kinematics.Fit is
                   end if;
                   Order_Is_Told := Here < Real'Last;
                   if Order_Is_Told then
-                     Tell_All (1, N);
+                     Tell_All (1, Ways);
                      --  Of the orders not significantly the larger, the one whose residuals lie nearest the best's: the
                      --  joints whose places along the arm it swaps with the best's are the ones the order lacks the
                      --  evidence of (Boot turns them together, a pair at a time).
                      declare
                         Nearest : Natural := 0;
                      begin
-                        for J in 1 .. N loop
+                        for J in 1 .. Ways loop
                            if Results (J).Fails
                              and then (Nearest = 0 or else Results (J).Fail_Median < Results (Nearest).Fail_Median)
                            then
@@ -4270,7 +4288,7 @@ package body Driver.Robot.Kinematics.Fit is
                            end loop;
                         end if;
                      end;
-                     for J in 1 .. N loop
+                     for J in 1 .. Ways loop
                         if Results (J).Fails then
                            Order_Is_Told := False;
                            Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along the arm,"
@@ -4283,7 +4301,7 @@ package body Driver.Robot.Kinematics.Fit is
                         end if;
                      end loop;
                   end if;
-                  for J in 1 .. N loop
+                  for J in 1 .. Ways loop
                      Free (Results (J).Order);
                      Free (Results (J).Residuals);
                      Free (Results (J).Fail_Order);

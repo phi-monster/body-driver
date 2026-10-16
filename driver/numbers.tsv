@@ -1877,10 +1877,10 @@ driver-robot-kinematics-fit.adb	Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) 
 driver-robot-kinematics-fit.adb	Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;	5.0	math	the golden angle and the golden ratio
 driver-robot-kinematics-fit.adb	J (O, P) := (Ends (2) (O) - Ends (1) (O)) / (2.0 * Step);	2.0	math	a central difference: one standard deviation either way spans two
 driver-robot-kinematics-fit.adb	J : Positive := 1;	1	structure	indexes start at one
+driver-robot-kinematics-fit.adb	J : constant Positive := (if Kept = 2 then (W - 1) / (N - 1) + 1 else W);	2	structure	a way of the first two joints
 driver-robot-kinematics-fit.adb	Jd (I) := (Rn (I) - R0 (I)) / (H * Real'Max (1.0, abs Depth (T)));	1.0	numerics	the scale floor of a finite difference
 driver-robot-kinematics-fit.adb	Jd : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Jp : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 2 * Used, 1 .. Count);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-fit.adb	K : Positive := 2;	2	structure	the joints after the first, from the second place
 driver-robot-kinematics-fit.adb	K : Real_Matrix (1 .. 3, 1 .. Terms) := [others => [others => 0.0]];	3	math	three coordinates
 driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	a reprojection has two residuals, across and down
 driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	two residuals per answer, across and down; two sides' holds
@@ -1890,6 +1890,7 @@ driver-robot-kinematics-fit.adb	K1 => X (X'First + 4), K2 => X (X'First + 5)));	
 driver-robot-kinematics-fit.adb	K1 => X (X'First + 4), K2 => X (X'First + 5)));	4	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	K1 => X (X'First + 4), K2 => X (X'First + 5)));	5	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	K1 => X (X'First + 4), K2 => X (X'First + 5)));	5	structure	the positions of the parameters in the vector
+driver-robot-kinematics-fit.adb	Kept : constant Positive := Natural'Min (2, N);	2	structure	the orders are searched in ways of their first two joints, N (N - 1) of them, 30 for six joints against the ten processors and the Pi's four (a way a first joint: six, a19 on 10-16)
 driver-robot-kinematics-fit.adb	L : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	L : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	Lambda := 2.0 * Lambda;	2.0	numerics	the damping doubles after a step that did not help
@@ -2000,6 +2001,7 @@ driver-robot-kinematics-fit.adb	Rp : Real_Access := new Real_Array (1 .. 2 * Use
 driver-robot-kinematics-fit.adb	Rr_Of : array (1 .. 2) of Mat3;	2	structure	the two ways of a joint's probe: the turn up and the turn downdriver-robot-kinematics-fit.adb
 driver-robot-kinematics-fit.adb	Rz : constant Mat3 := [[Cos (Th), -Sin (Th), 0.0], [Sin (Th), Cos (Th), 0.0], [0.0, 0.0, 1.0]];	1.0	math	a turn about the plane's normal: its axis is unmoved
 driver-robot-kinematics-fit.adb	S : Real := (if R = K then 1.0 else 0.0);	1.0	math	a column of the identity: the inverse column by column
+driver-robot-kinematics-fit.adb	S : constant Natural := (if Kept = 2 then (W - 1) mod (N - 1) + 1 else 0);	2	structure	a way of the first two joints
 driver-robot-kinematics-fit.adb	S.State := (S.State * 48_271) mod 2_147_483_647;	2_147_483_647	math	the minimal standard generator's modulus, the prime 2^31 - 1 (Park and Miller)
 driver-robot-kinematics-fit.adb	S.State := (S.State * 48_271) mod 2_147_483_647;	48_271	math	the minimal standard generator's multiplier (Park, Miller and Stockmeyer, 1993)
 driver-robot-kinematics-fit.adb	S0 := Sqrt (S0 / Real (2 * M));	2	statistics	the spread per axis: two axes a point
@@ -2011,7 +2013,7 @@ driver-robot-kinematics-fit.adb	Scale := 1.0;	1.0	structure	the identity's scale
 driver-robot-kinematics-fit.adb	Scale_Freedom (Sigma, All_Own (2 * I), Sight (Sight'First + I - 1).Own_Freedom);	2	structure	a sighting's two residuals, the horizontal and the vertical
 driver-robot-kinematics-fit.adb	Scales : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals to a sighting
 driver-robot-kinematics-fit.adb	Scatter => Squares / Real (Count - 3));	3	statistics	a plane's three terms: its residuals' degrees of freedom
-driver-robot-kinematics-fit.adb	Search_All (1, N);	1	structure	every joint first, from the first
+driver-robot-kinematics-fit.adb	Search_All (1, Ways);	1	structure	every way, from the first
 driver-robot-kinematics-fit.adb	Side_First : constant array (1 .. 2) of Positive := [S_First + Similarity_Terms,	2	structure	two sides
 driver-robot-kinematics-fit.adb	Side_State (D1, Terms_Of (Xv, 1), Move_Of (Xv, 1), P1, A1, B1);	1	structure	the first side, then the second
 driver-robot-kinematics-fit.adb	Side_State (D1, Terms_Of (Xv, 1), Move_Of (Xv, 1), P1, A1, B1);	1	structure	the first side, then the second
@@ -2043,7 +2045,7 @@ driver-robot-kinematics-fit.adb	T : constant Positive := Sight (Sight'First + Na
 driver-robot-kinematics-fit.adb	T0_Of (Way) := (-V (2)) * E1 + V (1) * E2;	1	math	the eigenvector's entries that are the translation in the plane of W (Row: t2 = V1, t1 = -V2)driver-robot-kinematics-fit.adb
 driver-robot-kinematics-fit.adb	T0_Of (Way) := (-V (2)) * E1 + V (1) * E2;	2	math	the eigenvector's entries that are the translation in the plane of W (Row: t2 = V1, t1 = -V2)
 driver-robot-kinematics-fit.adb	T0_Of : array (1 .. 2) of Vec3;	2	structure	the two ways of a joint's probe: the turn up and the turn down
-driver-robot-kinematics-fit.adb	Tell_All (1, N);	1	structure	every joint first, from the first
+driver-robot-kinematics-fit.adb	Tell_All (1, Ways);	1	structure	every way, from the first
 driver-robot-kinematics-fit.adb	Tilt : constant Real := Sqrt (Variance (O + 1) + Variance (O + 2));	2	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Tm (O + 1, Ro + 1) := 1.0;	1.0	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Tm (O + 2 + D, Ro + 3) := E1 (D);	2	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
@@ -2103,6 +2105,7 @@ driver-robot-kinematics-fit.adb	W : constant Real := 1.0 / Inverse_Sigma (Points
 driver-robot-kinematics-fit.adb	Warm_Angle (J) := -1.0;	1.0	format	no angle measured this search: an angle is never negative
 driver-robot-kinematics-fit.adb	Warm_Angle (J) := Arccos (Real'Min (1.0, abs Dot (Again.W, Result.W)));	1.0	numerics	the dot product of unit vectors clamped to 1 before Arccos
 driver-robot-kinematics-fit.adb	Warm_Angle : array (1 .. N) of Real := [others => -1.0];	1.0	format	no angle measured this search: an angle is never negative
+driver-robot-kinematics-fit.adb	Ways : constant Positive := (if N >= 2 then N * (N - 1) else N);	2	structure	two joints or more have a second joint to split by
 driver-robot-kinematics-fit.adb	Weight (I) := 1.0;	1.0	math	a sighting that fits begins at full weight
 driver-robot-kinematics-fit.adb	Wf (I) := 1.0 / Ll ** 2;	1.0	math	the weight that makes the algebraic residual the geometric one
 driver-robot-kinematics-fit.adb	Wh (I) := 1.0 / Pz ** 2;	1.0	math	the weight that makes the algebraic residual the geometric one
@@ -2227,7 +2230,6 @@ driver-robot-kinematics-fit.adb	if All_In >= 1.0 then	1.0	math	a probability of 
 driver-robot-kinematics-fit.adb	if Count <= 3 or else Determinant (M) = 0.0 then	3	statistics	more points than the plane's three parameters, or their spread is not measured
 driver-robot-kinematics-fit.adb	if Count >= 3 and then Homographic (Frame) then	3	structure	the plane's homography: six unknowns, two equations a sighting
 driver-robot-kinematics-fit.adb	if Count >= 3 and then not Homographic (Frame) then	3	structure	the epipolar one: four unknowns less their scale, one equation a sighting
-driver-robot-kinematics-fit.adb	if I < 2 then	2	structure	the first joint kept: the order's rest from the second place
 driver-robot-kinematics-fit.adb	if I <= 2 * Link.Used then	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	if Median_Ratio (0.0) <= Typical then	0.0	math	no floor at all
 driver-robot-kinematics-fit.adb	if N < 2 then	2	math	two points fix a similarity of the plane
@@ -2236,6 +2238,7 @@ driver-robot-kinematics-fit.adb	if N > 1 and then (for all X of Sight => not Sev
 driver-robot-kinematics-fit.adb	if N > 1 and then P_Count > 0 and then P_Count + 1 < N then	1	structure	the anchor adds one row to the pairs; joints beyond one need it
 driver-robot-kinematics-fit.adb	if N > 1 and then P_Count > 0 then	1	structure	cells move several joints
 driver-robot-kinematics-fit.adb	if N > 1 then	1	structure	an arm of one joint has no order to find
+driver-robot-kinematics-fit.adb	if Other /= J and then (Kept = 1 or else Other /= C (2)) then	1	structure	a way of the first joint alone, when the arm has one
 driver-robot-kinematics-fit.adb	if Partner (X.Frame) = 1 then	1	structure	keyframe 1 is the reference
 driver-robot-kinematics-fit.adb	if Pass = 1 then	1	structure	the side solved once unweighted, once weighted to Sampson residuals
 driver-robot-kinematics-fit.adb	if Pass = 1 then	1	structure	two solutions: the first weights every sighting alike, the second by the first's residuals, as the epipolar one
@@ -2272,7 +2275,6 @@ driver-robot-kinematics-fit.adb	when 1 => "", when 2 => "", when 3 => "",	3	stru
 driver-robot-kinematics-fit.adb	when 3 => "", when others => ""));	3	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	when 4 => "", when 5 => "", when others => "")	4	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	when 4 => "", when 5 => "", when others => "")	5	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
-driver-robot-kinematics-fit.adb	while I >= 2 and then C (I) > C (I + 1) loop	2	structure	the first joint kept: the order's rest from the second place
 driver-robot-kinematics-fit.ads	(Decrease > 0.5 * Driver.Conventions.Unchanged_Fraction ** 2);	0.5	statistics	a step of m standard errors along an axis of the information lowers the cost, half the chi square, by m squared over two at most
 driver-robot-kinematics-fit.ads	C : Real := 1.0;	1.0	structure	a joint turns one radian per reading unit until fitted
 driver-robot-kinematics-fit.ads	Chain_Terms : constant := 8 + Link_Terms;	8	structure	a homography's eight free entries
