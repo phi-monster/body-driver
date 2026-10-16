@@ -108,9 +108,11 @@ package Driver.Robot.Motion is
    --  no eye is not held.
 
    function Least_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real;
-   --  The least turn of a joint of the arm a keyframe counts: the step a
-   --  keyframe counts from (Kinematics.Step_Of), and what the readings' noise
-   --  can take off a turn asked of exactly it. Zero while the arm has no step.
+   --  The least turn of a joint of the arm the fit counts: the turn it counts
+   --  from the reference (Kinematics.Counted_Turn), what the readings' noise
+   --  can take off a turn asked of exactly it, and what the landing and the
+   --  reference's own landing can lose, the dead band each. Zero while the arm
+   --  has no step (Kinematics.Step_Of).
 
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real;
    --  The first level of the sweep's ladder for a joint of the arm: the

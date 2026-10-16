@@ -604,25 +604,33 @@ package body Driver.Robot.Motion is
 
    function Least_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real is
       Step     : constant Real := Kinematics.Step_Of (M, A, Channel);
+      Turn     : constant Real := Kinematics.Counted_Turn (M, A, Channel);
       Noise    : constant Real := Channels.Noise (M, Arm_Group (M, A), Channel);
       Executed : constant Real := Steps.Executed_Least (M, Arm_Group (M, A), Channel);
-      --  The step a keyframe counts from, and what the readings' noise can
-      --  take off a turn asked of exactly it (a keyframe counts as a joint's
-      --  own, and is kept at all, from the step on, and a turn of the step
-      --  itself lands below it half the time: fake body V6, arm 1, the first
-      --  joint's turns of its step, 38 units, left no keyframe through eleven
-      --  rounds, and the fit said the joint had none of its own).
+      --  The turn the fit counts, and what the readings' noise can take off
+      --  a turn asked of exactly it (a keyframe counts as a joint's own, and
+      --  is kept at all, from the step on, and a turn of the step itself
+      --  lands below it half the time: fake body V6, arm 1, the first joint's
+      --  turns of its step, 38 units, left no keyframe through eleven rounds,
+      --  and the fit said the joint had none of its own).
       Counted  : constant Real :=
-        (if Step > 0.0 and then Noise < Real'Last then Step + Driver.Conventions.Z * Sqrt (2.0) * Noise else Step);
+        (if Noise < Real'Last then Turn + Driver.Conventions.Z * Sqrt (2.0) * Noise else Turn);
    begin
+      if Step <= 0.0 then
+         return 0.0;
+      end if;
       --  And the least ask the body is known to execute (Steps.Executed_Least) on top: a turn asked within a
       --  servo's dead band moves nothing, and a keyframe needs the joint to have turned (the kiwi's sweep, R5
       --  on 10-14: first levels of 2.4 units, every one called blocked where it stood); and a turn that does
       --  execute lands short by up to that dead band, so a level of the counted step alone lands within the
       --  step of the pose it left as often as not and leaves no keyframe (R6's eleventh start, 10-14: first
       --  levels of 4.9 units at a dead band of 4.9, the first pass of arm_a without one keyframe, its pushes
-      --  blocked or too small to count). The level is the counted step plus the dead band it can lose.
-      return (if Step > 0.0 and then Executed < Real'Last then Counted + Executed else Counted);
+      --  blocked or too small to count). And the fit counts a turn from the reference, itself a landing within
+      --  the dead band of where it was sent: the level is the counted turn plus what the two landings can lose,
+      --  the dead band each. s07's cells (10-16), from levels of the counted step plus one band, landed 16 units
+      --  from the reference where the fit counted from 19.6 (a band of 9.8), five joints of six counted none,
+      --  no keyframe moved two joints at once, and the arm was not fitted.
+      return (if Executed < Real'Last then Counted + 2.0 * Executed else Counted);
    end Least_Turn;
 
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
