@@ -1,3 +1,4 @@
+with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Log;
 with Driver.Pixels;
 
@@ -211,24 +212,36 @@ package body Driver.Robot.Hand.Sweep is
                   end if;
                end;
             end if;
-            --  A lobe the placing gave no tip at this stop: its pixels from the anchored end's and what changed
-            --  (Lobes.Moved_Lobe), where it barely moved between the two.
+            --  The lobe also as one moved a little from the anchored end (Lobes.Moved_Lobe): where it moved less than
+            --  its width, the placing's lobe is the part of it that was not there before, a crescent (a16 on 10-16: at
+            --  6.998, 1126 pixels of a jaw of 6234, its tip 30 pixels down the jaw's edge), and where it moved
+            --  farther, Moved_Lobe has nothing or a scrap of it. Of the two, the one whose pixels number nearest the
+            --  anchored end's, by their ratio: the lobe is one rigid part, as large at the stop as at the end.
             if Compared.Trusted then
                for L in 1 .. N loop
-                  if not Tips (L).Known then
-                     declare
-                        Mine   : constant Mask :=
-                          (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
-                        Region : Mask;
-                        Centre, Tip : Pixel;
-                        Known  : Boolean;
-                     begin
-                        Driver.Robot.Hand.Lobes.Moved_Lobe (Mine, Compared.Changed, Region, Centre, Tip, Known);
-                        if Known then
+                  declare
+                     Mine   : constant Mask :=
+                       (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
+                     Region : Mask;
+                     Centre, Tip : Pixel;
+                     Known  : Boolean;
+
+                     --  How far a region's size is from the anchored lobe's, as the logarithm of their ratio.
+                     function Apart (M : Mask) return Real is
+                       (abs Ada.Numerics.Long_Elementary_Functions.Log
+                          (Real (Driver.Images.Count (M)) / Real (Driver.Images.Count (Mine))));
+                  begin
+                     if Driver.Images.Count (Mine) > 0 then
+                        Driver.Robot.Hand.Lobes.Moved_Lobe
+                          (Mine, Compared.Changed, Anchored.Frames, V.Frames, Region, Centre, Tip, Known);
+                        if Known and then Driver.Images.Count (Region) > 0
+                          and then (not Tips (L).Known or else Driver.Images.Count (Tips (L).Region) = 0
+                                    or else Apart (Region) < Apart (Tips (L).Region))
+                        then
                            Tips (L) := (Known => True, Tip => Tip, Centre => Centre, Region => Region);
                         end if;
-                     end;
-                  end if;
+                     end if;
+                  end;
                end loop;
             end if;
             Now.Stops.Append

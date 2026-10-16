@@ -100,18 +100,26 @@ package Driver.Robot.Hand.Lobes is
    package Lobe_Vectors is new Ada.Containers.Vectors (Positive, Lobe);
 
    procedure Moved_Lobe
-     (Before  : Mask;
-      Changed : Mask;
-      Region  : out Mask;
-      Centre  : out Pixel;
-      Tip     : out Pixel;
-      Known   : out Boolean);
-   --  A lobe a small move from where it was (Before) in a view whose pixels that changed from Before's view are
-   --  Changed: what it left changed and what it came to changed, so its pixels there are Before's less what
-   --  changed and the changed ones it did not hold (their exclusive or), of which the part that holds most of
-   --  Before's; its tip as a stop's is, from the picture's border. Placed between two views it barely moved
-   --  between, a lobe is two crescents, neither reaching the border its root holds, and has no tip (a15 on 10-16:
-   --  none at the 19 stops nearest the open end, the anchored one, 24 to 3753 pixels changed).
+     (Before   : Mask;
+      Changed  : Mask;
+      Anchored : Driver.Pixels.View;
+      Now      : Driver.Pixels.View;
+      Region   : out Mask;
+      Centre   : out Pixel;
+      Tip      : out Pixel;
+      Known    : out Boolean);
+   --  A lobe a small move from where it was (Before, in the view Anchored) in the view Now, whose pixels that
+   --  changed from Anchored are Changed. A pixel the lobe left or came to changes by about the lobe's contrast
+   --  with what lies behind it; one inside it, whose shading moved as the lobe turned, by a few levels. The pixels
+   --  it left or came to are the changed ones whose mean moved by more than half the contrast between the lobe
+   --  and what lies just outside it in Anchored (the medians of its pixels and of those touching it from
+   --  outside), so its pixels in Now are Before's less those and those of them it did not hold (their exclusive
+   --  or), of which the part that holds most of Before's; its tip as a stop's is, from the picture's border.
+   --  Placed between two views it barely moved between, a lobe is two crescents, neither reaching the border its
+   --  root holds, and has no tip (a15 on 10-16: none at the 19 stops nearest the open end, the anchored one). And
+   --  every changed pixel taken for one it left or came to, the kiwi-like fake's jaw, its shading moved by a few
+   --  levels, was 'changed' through and through, and the exclusive or left stripes of it, their tips anywhere
+   --  (a16 on 10-16: the tip of the stops at 7.85 to 8.25 now at the jaw's top, now 90 pixels below it).
 
    function Tip_Cap (Lobe_Mask : Mask; Centre, Tip : Pixel) return Mask;
    --  A lobe's tip region: its pixels within one mean width of the tip, along
