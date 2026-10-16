@@ -1947,6 +1947,7 @@ driver-robot-kinematics-fit.adb	Rn : Real_Access := new Real_Array (1 .. 2 * Use
 driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Rows (1, Count + 1);	1	structure	the parameters' rows from the first, and one more for the depths' own sums
+driver-robot-kinematics-fit.adb	Rows (1, Parameters);	1	structure	the parameters' rows from the first
 driver-robot-kinematics-fit.adb	Rows : constant Positive := 2 * Link.Used + 2 * Side_Terms;	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	Rows : constant Positive := 2 * Link.Used + 2 * Side_Terms;	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	Rp : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals a sighting, across and down
