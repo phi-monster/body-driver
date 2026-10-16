@@ -1095,18 +1095,25 @@ procedure Measure (H : in out Hands; M : in out Model) is
                      Off : Ada.Strings.Unbounded.Unbounded_String;
                      procedure Read_Off (O : Observation) is
                         Now : constant Real_Array := O.Readings.Element (Arm_Is);
-                        Cl  : constant Real_Array := O.Readings.Element (R.Group);
-                        Was : constant Real_Array := R.Readings (Which).Element;
                      begin
                         for C in 1 .. Natural'Min (Now'Length, Goal'Length) loop
                            Ada.Strings.Unbounded.Append
                              (Off, " c" & C'Image & " " & Driver.Log.Image (Now (Now'First + C - 1) - Goal (Goal'First + C - 1), 4));
                         end loop;
-                        Ada.Strings.Unbounded.Append (Off, "; the closer off its opening by");
-                        for C in 1 .. Natural'Min (Cl'Length, Was'Length) loop
-                           Ada.Strings.Unbounded.Append
-                             (Off, " " & Driver.Log.Image (Cl (Cl'First + C - 1) - Was (Was'First + C - 1), 6));
-                        end loop;
+                        --  A tool no closer moves has no opening to be off (s15 on 10-17, the hand's closer not its own:
+                        --  the closer's readings read from group 0 stopped the boot at the first press's way back).
+                        if R.Group > 0 and then not R.Readings (Which).Is_Empty then
+                           declare
+                              Cl  : constant Real_Array := O.Readings.Element (R.Group);
+                              Was : constant Real_Array := R.Readings (Which).Element;
+                           begin
+                              Ada.Strings.Unbounded.Append (Off, "; the closer off its opening by");
+                              for C in 1 .. Natural'Min (Cl'Length, Was'Length) loop
+                                 Ada.Strings.Unbounded.Append
+                                   (Off, " " & Driver.Log.Image (Cl (Cl'First + C - 1) - Was (Was'First + C - 1), 6));
+                              end loop;
+                           end;
+                        end if;
                      end Read_Off;
                   begin
                      Hold_Beat (Read_Off'Access);
