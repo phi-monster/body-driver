@@ -1373,6 +1373,9 @@ package body Driver.Robot.Motion is
                --  so the lock-in can tell it from the rest (the levels of every channel together cannot be told
                --  apart that way, and that ladder keeps its runs).
                if Seen and then (Delivered (Way) or else Did (Way)) then
+                  if Report.First_Seen = 0.0 or else Offset < Report.First_Seen then
+                     Report.First_Seen := Offset;
+                  end if;
                   declare
                      Confirmed : Boolean := False;
                      procedure Read_Seen is

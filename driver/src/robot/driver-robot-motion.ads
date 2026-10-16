@@ -205,6 +205,8 @@ package Driver.Robot.Motion is
       Seen       : Boolean := False;   --  some eye saw the channel move
       Excursion  : Real := 0.0;        --  how far it was taken, in reading units, when seen
       Seen_Sense : Sense := Increasing;   --  which way, when seen
+      First_Seen : Real := 0.0;        --  the least amount an eye saw it move at, confirmed by the lock-in or not; 0
+                                       --  when none did
       Answered   : Real := 0.0;        --  the smallest amount at which its reading first followed, either way; 0 when never
       Levels     : Sense_Counts := [others => 0];    --  how many levels each way was asked
       At_End     : Sense_Flags := [others => False];  --  the way stopped because the other one answered while it delivered nothing
