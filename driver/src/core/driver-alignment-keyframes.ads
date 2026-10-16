@@ -100,6 +100,14 @@ package Driver.Alignment.Keyframes is
    --  chain is not changed. For a keyframe aligned before from a prediction too uncertain to search, and now offered
    --  a better one. Agree is as Add's.
 
+   procedure Offer_From_Answers
+     (C : Chain; Answers : Answer_Array; Into : out Prediction_Array; Known : out Boolean)
+     with Pre => Has_Reference (C) and then Answers'Length = Point_Count (C) and then Into'Length = Answers'Length;
+   --  The prediction of every point of the reference from the smooth field the found answers of one keyframe lie on
+   --  (the field Add fits), each as far as that field is known there: for a keyframe whose answers came from windows
+   --  too wide to be the pixels' own, aligned again from where they were found. Known is False when the answers make
+   --  no field.
+
    procedure Forget_Last (C : in out Chain)
      with Pre => Keyframes (C) > 0;
    --  Drops the keyframe added last, as if Add had not been called for it: for a keyframe whose prediction was too

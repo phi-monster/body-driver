@@ -1129,6 +1129,40 @@ package body Driver.Alignment.Keyframes is
       Agree := Mine;
    end Realign;
 
+   procedure Offer_From_Answers
+     (C : Chain; Answers : Answer_Array; Into : out Prediction_Array; Known : out Boolean)
+   is
+      Marks : Located_Array (1 .. Answers'Length);
+      Field : Field_Fit;
+      Mine  : Flag_Array (1 .. Answers'Length);
+   begin
+      for I in Marks'Range loop
+         declare
+            A : Answer renames Answers (Answers'First + I - 1);
+         begin
+            Marks (I) :=
+              (if A.Verdict = Found
+               then (Found => True, Place => A.To, Sigma => Sqrt (Real'Max (A.Cov.UU, A.Cov.VV)))
+               else (others => <>));
+         end;
+      end loop;
+      Fit_Field (C, Marks, Field, Mine);
+      Known := Field.Valid;
+      for K in Into'Range loop
+         declare
+            P      : constant Driver.Images.Pixel := C.Points (K - Into'First + 1);
+            Spread : constant Real := (if Known then Sqrt (Variance (C, Field, P)) else 0.0);
+         begin
+            Into (K) :=
+              (From   => P,
+               To     => (if Known then (U => P.U + Evaluate (C, Field.U, P), V => P.V + Evaluate (C, Field.V, P)) else P),
+               Linear => (if Known then Gradient (C, Field, P) else Identity_Part),
+               Cov    => (UU => Spread ** 2, UV => 0.0, VV => Spread ** 2),
+               Linear_Sigma => Real'Last);
+         end;
+      end loop;
+   end Offer_From_Answers;
+
    --  Whether a field puts every point where another does, within what the two know of the place there.
    procedure Forget_Last (C : in out Chain) is
    begin
