@@ -125,9 +125,6 @@ private package Driver.Robot.Kinematics is
    --  of a step off and fitted). An arm that carries no eye has nothing to
    --  drop.
 
-   function Pending (M : Model) return Natural;
-   --  Match requests of every arm not answered yet.
-
    procedure Refit (M : in out Model; Again : Boolean := False);
    --  Fits every arm whose answers changed since its last fit
    --  (Driver.Robot.Kinematics.Fit). Its sightings are the answers of

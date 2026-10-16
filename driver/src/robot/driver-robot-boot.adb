@@ -1137,9 +1137,6 @@ package body Driver.Robot.Boot is
                   Swept.Append (P);
                end loop;
             else
-               --  The instrument answers the keyframes' matches a beat or more
-               --  after they were asked: the fit waits for every answer.
-               Driver.Robot.Motion.Hold_While_Matching (M);
                Driver.Beats.Within_A_Beat (Estimate'Access);
                Driver.Beats.Within_A_Beat (Find_Unswept'Access);
                exit when Unswept.Is_Empty;

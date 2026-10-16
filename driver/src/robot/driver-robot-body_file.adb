@@ -317,7 +317,7 @@ package body Driver.Robot.Body_File is
                        & ", ""offered"": " & Int (F.Offered) & ", ""sigma_px"": " & Num (F.Sigma_Px)
                        & ", ""distorted"": " & Flag (F.Distorted)
                        & ", ""why"": " & Driver.Json.Quote (To_String (F.Why))
-                       & ", ""from_matches"": " & Int (F.From_Matches) & ", ""from_sets"": " & Int (F.From_Sets) & "}");
+                       & ", ""from"": " & Int (F.From) & "}");
                   First := False;
                end if;
             end;
@@ -816,8 +816,7 @@ package body Driver.Robot.Body_File is
                               F.Distorted := Truth (X, "distorted");
                               F.Why := To_Unbounded_String (Driver.Json.Text (Doc, Field (X, "why")));
                               F.Judged := True;
-                              F.From_Matches := Natural'Max (0, Whole (X, "from_matches"));
-                              F.From_Sets := Natural'Max (0, Whole (X, "from_sets"));
+                              F.From := Natural'Max (0, Whole (X, "from"));
                            end;
                         end if;
                      end;

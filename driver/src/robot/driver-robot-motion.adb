@@ -664,18 +664,6 @@ package body Driver.Robot.Motion is
       end loop;
    end Hold_For_Twin;
 
-   procedure Hold_While_Matching (M : in out Model) is
-      B    : Driver.Clock.Beat;
-      Done : Boolean;
-   begin
-      loop
-         Driver.Beats.Next (B);
-         Done := Kinematics.Pending (M) = 0;
-         Driver.Beats.Send (Driver.Commands.Hold);
-         exit when Done;
-      end loop;
-   end Hold_While_Matching;
-
    procedure Hold (M : in out Model; Beats : Positive) is
       pragma Unreferenced (M);
       B : Driver.Clock.Beat;

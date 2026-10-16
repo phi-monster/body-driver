@@ -41,7 +41,6 @@ with Driver.Numerics;
 with Driver.Observations;
 private with Driver.Alignment.Keyframes;
 private with Driver.Pixels;
-private with Driver.Services;
 with Driver.Uncertain;
 
 with Driver.Bytes;
@@ -613,16 +612,15 @@ private
 
    package Keyframe_Vectors is new Ada.Containers.Vectors (Positive, Keyframe);
 
-   --  Where the reference keyframe's query points went in one keyframe, or
-   --  in another eye's view.
+   --  Where the reference keyframe's query points went in one keyframe: of the arm's own eye, or of a fixed eye's view
+   --  of the arm (Hand_View).
    type Match_Set is record
       Frame    : Positive := 1;          --  the keyframe
-      Eye      : Natural := 0;           --  the other eye whose view it is; 0 for the arm's own keyframes
       To_U, To_V     : Real_Vectors.Vector;   --  per query point, where it went
       Back_U, Back_V : Real_Vectors.Vector;   --  and where that matched back to in the reference
-      Sigma    : Real_Vectors.Vector;    --  and the standard deviation the aligner stated of the answer (none from the instrument)
+      Sigma    : Real_Vectors.Vector;    --  and the standard deviation the aligner stated of the answer
       Freedom  : Count_Vectors.Vector;   --  and how many degrees of freedom that standard deviation rests on (0: it is known)
-      Found    : Flag_Vectors.Vector;    --  the aligner or the instrument gave an answer a fit may rest on (an own keyframe: from a
+      Found    : Flag_Vectors.Vector;    --  the aligner gave an answer a fit may rest on (an own keyframe: from a
                                          --  narrow window, Followed, within Z of the typical uncertainty)
       Answered : Flag_Vectors.Vector;    --  the aligner gave an answer at all, from a window of any width (own keyframes)
       Stated   : Real := Real'Last;      --  an own keyframe: the median standard deviation its prediction stated
@@ -631,17 +629,6 @@ private
    end record;
 
    package Match_Set_Vectors is new Ada.Containers.Vectors (Positive, Match_Set);
-
-
-   type Pending_Match is record
-      Frame  : Positive := 1;
-      Eye    : Natural := 0;           --  as Match_Set has it
-      Points : Natural;                --  how many query points were asked: the answer's size (no default,
-                                       --  so no request can leave it out)
-      Ticket : Driver.Services.Ticket;
-   end record;
-
-   package Pending_Vectors is new Ada.Containers.Vectors (Positive, Pending_Match);
 
    --  An arm's kinematics and its eye's lens as last fitted (Driver.Robot.Kinematics.Fit).
    type Joint_Fit is record
@@ -688,11 +675,6 @@ private
       Table        : Driver.Geometry.Plane_Estimate;
       Table_A      : Vec3 := [0.0, 0.0, 0.0];                 --  the same plane as its eye sees it (Fit.Sight_Plane)
       Table_Covariance : Mat3 := [others => [others => 0.0]];  --  of Table_A, its lens's lines of sight held
-      --  What the plane moves by with the fit's terms (the depths and the lens's lines of sight): 3 x Terms,
-      --  row by row; and the covariance of its points' scatter about it, which no term moves. A fixed eye
-      --  that sees points on the table carries them (Kinematics.Fixed).
-      Table_Response : Real_Vectors.Vector;
-      Table_Scatter  : Mat3 := [others => [others => 0.0]];
       Table_On     : Flag_Vectors.Vector;                      --  per track: it lies on the table
       --  Every track's point in its reference frame, three numbers each,
       --  where Track_Known holds (its depth is a depth: Fit.Depth_Known), at
@@ -707,41 +689,75 @@ private
       Placement    : Driver.Numerics.Rigid := Driver.Numerics.Identity;
       Scale        : Real := 1.0;
       Scale_Sigma  : Real := 0.0;
-      Placement_Covariance : Real_Vectors.Vector;   --  6 x 6, row by row: its turn (world frame), its centre
-      Placed_Px    : Real := 0.0;                  --  the noise of the link that placed it, in its eye's units
-      Placed_Points : Natural := 0;                --  the points that placed it
+      Placement_Covariance : Real_Vectors.Vector;   --  7 x 7, row by row: its turn (world frame), its centre, the
+                                                    --  logarithm of its scale
+      Placed_Px    : Real := 0.0;                  --  the noise of the fixed eye that placed it, in its pixels
+      Placed_Points : Natural := 0;                --  the sightings that eye's fit rested on
       Placed_Through : Natural := 0;               --  the eye that saw both it and the first arm
-      --  Per track, row by row: how the logarithm of its depth moves with each term of Covariance, the others'
-      --  depths at their best (Fit_Report.Depth_Gains): the share of every depth's uncertainty all of them have
-      --  in common, which a fixed eye placed from these points carries (Kinematics.Fixed).
-      Depth_Gains  : Real_Vectors.Vector;
    end record;
 
-   --  The lens and pose of an eye fixed in the world, measured from points the first arm's eye placed and the
-   --  answers it gave to where they are (Kinematics.Fixed): its camera in the world (the first arm's reference
-   --  frame, in that arm's unit) and its lens, with the covariance of both: 12 x 12, row by row, the lens's six
-   --  terms as an arm's fit has them (Kinematics.Fit.Lens_Terms: the logarithms of Fx and Fy, Cx, Cy, K1, K2; the
-   --  distortion terms zero when not kept), then the camera's turn about its own axes and its centre in the world.
-   --  Known only when the points determine them; Why says what they leave out when not.
+   --  The lens and pose of an eye fixed in the world, measured from the arms it watches move (Kinematics.Hand_Eye):
+   --  its camera in the world (the first arm's reference frame, in that arm's unit) and its lens, with the
+   --  covariance of both: 12 x 12, row by row, the lens's six terms as an arm's fit has them
+   --  (Kinematics.Fit.Lens_Terms: the logarithms of Fx and Fy, Cx, Cy, K1, K2; the distortion terms zero when not
+   --  kept), then the camera's turn about its own axes and its centre in the world. Known only when the arms'
+   --  motion determines them and the first arm's pose is one of them; Why says what it leaves out when not.
    type Fixed_Fit is record
       Known      : Boolean := False;
-      Arm        : Arm_Id'Base := 0;            --  the arm whose points measured it
+      Arm        : Arm_Id'Base := 0;            --  the arm whose frame is the world
       Lens       : Lens_Fit;
       Pose       : Driver.Numerics.Rigid := Driver.Numerics.Identity;
       Covariance : Real_Vectors.Vector;
-      Used       : Natural := 0;               --  the answers that fit
-      Offered    : Natural := 0;               --  the answers it was given
+      Used       : Natural := 0;               --  the sightings that fit
+      Offered    : Natural := 0;               --  the sightings the model had a place for
       Sigma_Px   : Real := 0.0;                --  the noise they show
       Distorted  : Boolean := False;           --  the distortion terms are kept
       Why        : Ada.Strings.Unbounded.Unbounded_String;
-      --  What it was measured from, so that it is measured again only when that changed: the world arm's fit
-      --  (its keyframes with matches) and the sets of its reference matched into other eyes.
+      --  What it was measured from, so that it is measured again only when that changed: the keyframes of every arm
+      --  that the eye saw, aligned (and aligned again).
       Judged       : Boolean := False;
-      From_Matches : Natural := 0;
-      From_Sets    : Natural := 0;
+      From         : Natural := 0;
    end record;
 
    package Fixed_Fit_Vectors is new Ada.Containers.Vectors (Eye_Id, Fixed_Fit);
+
+   --  What a fixed eye was fitted to as it watched one arm move (Kinematics.Hand_Eye): its lens (which every arm it
+   --  watches shares) and its camera in the arm's reference frame, and for each query point of the view the number of
+   --  joints that move it and its depth along its line of sight, in the arm's unit.
+   type Hand_Fit is record
+      Placed   : Boolean := False;       --  the eye's pose in this arm's frame is determined
+      Lens     : Lens_Fit;
+      Pose     : Driver.Numerics.Rigid := Driver.Numerics.Identity;   --  the eye's camera frame in the arm's frame
+      Link     : Count_Vectors.Vector;   --  per query point: the joints that move it (0: it rides on nothing the fit explains)
+      Depth    : Real_Vectors.Vector;    --  per query point (zero where it has none)
+      Sigma_Px : Real := 0.0;            --  the noise the sightings show beyond what they state
+      Matches  : Natural := 0;           --  the keyframes behind it, aligned again ones counted again
+      --  The covariance of the fit's terms, row by row (Kinematics.Hand_Eye.Terms): the lens's six, then the pose of
+      --  every arm the eye was fitted to (the turn about its own axes, the centre), one after another; this arm's is
+      --  the Slot-th. Empty when it has none.
+      Covariance : Real_Vectors.Vector;
+      Slot     : Natural := 0;
+   end record;
+
+   package Image_Vectors is new Ada.Containers.Vectors (Positive, Driver.Images.Image, Driver.Images."=");
+
+   --  A fixed eye's view of an arm as the arm moves. The eye's picture is kept at each keyframe of the arm (the first is
+   --  the view's reference), and the query points are the centres of the reference picture's cells that respond to the
+   --  arm's push (the lock-in): those show the arm. Driver.Alignment finds where they went in every later picture, as
+   --  for the arm's own eye (Kinematics.Align_New), and the eye is fitted to the arm's motion they follow.
+   type Hand_View is record
+      Eye      : Eye_Id'Base := 0;
+      Images   : Image_Vectors.Vector;   --  per keyframe of the arm: the eye's picture then; none where it was not settled
+                                         --  or where it is used up
+      Query_U, Query_V : Real_Vectors.Vector;
+      Chain    : Driver.Alignment.Keyframes.Chain;
+      Aligned  : Natural := 0;           --  how many of the arm's keyframes are aligned into Matches
+      Revision : Natural := 0;           --  how many were aligned again from the fitted eye (Kinematics.Realign)
+      Matches  : Match_Set_Vectors.Vector;   --  one per aligned keyframe after the reference, in order
+      Result   : Hand_Fit;
+   end record;
+
+   package Hand_View_Vectors is new Ada.Containers.Vectors (Positive, Hand_View);
 
    type Arm_Evidence is record
       Arm      : Arm_Id'Base := 0;
@@ -792,19 +808,8 @@ private
       --  (Refit: Fit.Sighting's Off_U, Off_V).
       Point_Gu, Point_Gv : Real_Vectors.Vector;
       Point_G_Told       : Flag_Vectors.Vector;
-      Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
-      --  The first arm's reference view matched into this arm's, its query
-      --  points into this arm's reference image (Kinematics.Observe), and of
-      --  which reference of which group it was asked.
-      World_Pending   : Pending_Vectors.Vector;
-      World_Matches   : Match_Set_Vectors.Vector;
-      World_Asked     : Boolean := False;
-      World_Group     : Group_Id'Base := 0;
-      World_Reference : Natural := 0;
-      --  The reference's query points matched into every other eye's view at
-      --  the reference beat, one set per eye (Kinematics.Observe).
-      Eye_Pending     : Pending_Vectors.Vector;
-      Eye_Matches     : Match_Set_Vectors.Vector;
+      --  What every fixed eye that sees the arm move saw of it (Kinematics.Observe), one view per eye.
+      Views    : Hand_View_Vectors.Vector;
       Result   : Arm_Fit;
    end record;
 

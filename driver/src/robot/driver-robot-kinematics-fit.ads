@@ -84,8 +84,6 @@ package Driver.Robot.Kinematics.Fit is
 
    package Real_Lists is new Ada.Containers.Vectors (Positive, Real);
 
-
-
    type Lens is record
       Fx, Fy, Cx, Cy : Real := 0.0;   --  focal lengths and principal point, pixels
       K1, K2         : Real := 0.0;   --  radial distortion: r_d = r (1 + K1 r^2 + K2 r^4)
@@ -148,6 +146,11 @@ package Driver.Robot.Kinematics.Fit is
    --  state (one per residual): the one at which the median of a residual over its scale is the Gaussian's, so a
    --  residual of the size typical of its sighting is typical. With none stated it is the noise the residuals show
    --  (the robust scale about zero); zero when what the sightings state accounts for the residuals by itself.
+
+   function Scale_Freedom (Floor, Own : Real; Own_Freedom : Natural) return Natural;
+   --  How many degrees of freedom the scale a residual is judged at (Scale_Of) rests on: the sighting's own standard
+   --  deviation rests on Own_Freedom of them and the floor on none to speak of, so the scale's variance has as many as
+   --  the Welch-Satterthwaite formula gives; none (the scale is known) when the sighting's own is.
 
    function Terms (Joints : Natural) return Natural is (Lens_Terms + Joint_Terms * Joints);
    function Term_Of (Joint : Positive; T : Joint_Term) return Positive is
@@ -372,10 +375,6 @@ package Driver.Robot.Kinematics.Fit is
      with Pre => Into'Length <= N;
    --  Into'Length distinct numbers of 1 .. N, the next of the generator's.
 
-   function Rayleigh_Median return Real;
-   --  The median of the length of a vector of two components that are Gaussian with the same sigma, over that
-   --  sigma: the sigma of what a least median of lengths found.
-
    type Flag_Array is array (Positive range <>) of Boolean;
 
    --  A track as the reference eye has it: on the line of sight H (H (3) = 1)
@@ -465,126 +464,6 @@ package Driver.Robot.Kinematics.Fit is
 
    procedure Plane_Axes (P : Sight_Plane; Normal, E1, E2 : out Vec3);
    --  The plane's normal and two directions along it, right-handed with it.
-
-   function On_Plane (P : Sight_Plane; H : Vec3) return Vec3;
-   --  Where the line of sight H meets the plane.
-
-   ---------------------------------------------------------------------------
-   --  Linking two frames through an eye that sees one plane in both.
-
-   --  A point on a plane, in the plane's coordinates, and where an eye sees it.
-   type Plane_Point is record
-      X, Y : Real := 0.0;
-      U, V : Real := 0.0;
-   end record;
-
-   type Plane_Point_Array is array (Positive range <>) of Plane_Point;
-
-   procedure Plane_Homography
-     (Points : Plane_Point_Array;
-      H      : out Mat3;
-      Fits   : out Flag_Array;
-      Sigma  : out Real;
-      Found  : out Boolean)
-     with Pre => Fits'First = Points'First and then Fits'Last = Points'Last;
-   --  The homography that takes the plane's coordinates to where the eye sees
-   --  them (exact for an eye without distortion): by the least median of the
-   --  residuals over samples of four (the direct linear transform of each, on
-   --  coordinates centred and scaled), so up to half the points may be
-   --  anything; then by robust least squares on the points that fit (Fits),
-   --  re-chosen at their own noise until the choice settles. Sigma is their
-   --  noise.
-
-   --  One frame's side of a link: its eye's lens and that lens's covariance,
-   --  the tracks on its plane, and where the linking eye answered them.
-   type Table_Track is record
-      U0, V0 : Real := 0.0;          --  the track's reference pixel
-      Depth  : Real := 0.0;          --  along its reference line of sight
-      Sigma  : Real := Real'Last;    --  of the logarithm of the depth
-   end record;
-
-   package Track_Lists is new Ada.Containers.Vectors (Positive, Table_Track);
-
-   type Eye_Answer is record
-      Track : Positive := 1;         --  which of the side's tracks
-      U, V  : Real := 0.0;           --  where the linking eye sees it
-   end record;
-
-   package Answer_Lists is new Ada.Containers.Vectors (Positive, Eye_Answer);
-
-   type Chain_Side is record
-      L                : Lens;
-      Lens_Covariance  : Real_Lists.Vector;    --  Lens_Terms x Lens_Terms, row by row (the fit's)
-      Plane_Covariance : Mat3 := [others => [others => 0.0]];   --  of its plane's A beyond its lens's
-                                                                  --  lines of sight (Plane_Covariance)
-      Tracks           : Track_Lists.Vector;    --  the tracks on its plane
-      Answers          : Answer_Lists.Vector;
-   end record;
-
-   function Side_Plane (S : Chain_Side; L : Lens) return Sight_Plane;
-   --  The side's plane through its tracks seen through lens L, their depths
-   --  held (Refit_Plane over all of them).
-
-   package Flag_Lists is new Ada.Containers.Vectors (Positive, Boolean);
-
-   --  The joint parameters of a link, in this order: the first plane's
-   --  homography into the eye (its eight free entries), the similarity that
-   --  takes the second plane's coordinates to the first's (log scale, turn,
-   --  two shifts), then per side its lens (Lens_Terms) and how far the eye's
-   --  view moves its plane from the one its tracks give (three).
-   Similarity_Terms : constant := 4;
-   Side_Terms       : constant := Lens_Terms + 3;
-   Link_Terms       : constant := Similarity_Terms + 2 * Side_Terms;   --  what the placement rests on
-   Chain_Terms      : constant := 8 + Link_Terms;
-
-   type Plane_Link is record
-      Found      : Boolean := False;
-      Consistent : Boolean := False;   --  one homography explains both sides' points
-      X          : Real_Lists.Vector;  --  the joint solution, Chain_Terms
-      Covariance : Real_Lists.Vector;  --  of X's last Link_Terms, row by row
-      Sigma      : Real := Real'Last;  --  the noise the sides' own homographies leave their answers, pooled
-      Joint      : Real := Real'Last;  --  the joint fit's, its answers' residuals only, in the first side's units
-      F          : Real := 0.0;        --  the test of the four constraints one homography adds
-      First_Fits, Second_Fits : Flag_Lists.Vector;   --  per answer: its side's homography kept it
-      Used       : Natural := 0;       --  answers of both sides kept
-   end record;
-
-   procedure Plane_Chain (First, Second : Chain_Side; Second_Eye : Boolean; Link : out Plane_Link);
-   --  The similarity S that takes the second side's plane coordinates to the
-   --  first's (x a track's coordinates on its own side's plane: where its line
-   --  of sight through its lens meets the plane, along the plane's axes), from
-   --  an eye's view of both. An eye whose lens is unknown answered both sides'
-   --  tracks: one homography H of the first plane into it explains both, H (x)
-   --  for the first's answers and H (S (x)) for the second's. With
-   --  Second_Eye, the second side's own eye answered the first side's tracks,
-   --  and its lens explains them: S^-1 (x) back on the second plane, seen
-   --  through the second lens. Each side's lens and plane are its own frame's
-   --  estimates, held to them by their covariances: the eye's view moves them
-   --  only as far as their uncertainty lets, so that their errors are not
-   --  taken for the link's. From the homography of each side's answers
-   --  (Plane_Homography, at the estimates) and the similarity nearest the map
-   --  they give, then all of it by robust least squares on the answers those
-   --  homographies kept, each in units of its side's own noise. Consistent is
-   --  False when the joint fit leaves more than a free homography for each
-   --  side's answers does, by more than Z's tail allows (the extra sum of
-   --  squares of the four constraints, F (4, 2 n - 8 per homography)): then
-   --  the two sides are no views of one plane through one eye. Covariance is
-   --  the sandwich over the answers with the estimates' own.
-
-   procedure Chain_Placement
-     (First, Second : Chain_Side;
-      Link          : Plane_Link;
-      Placement     : out Rigid;
-      Scale         : out Real;
-      Covariance    : out Real_Lists.Vector)
-     with Pre => Natural (Link.X.Length) = Chain_Terms;
-   --  The second frame in the first, X_first = Placement * (Scale * X_second):
-   --  the turn takes the second plane's axes to the first's turned by the
-   --  similarity's turn, the shift follows the similarity's along the first
-   --  plane and the planes' offsets across it, each plane and lens as the
-   --  link left them. Covariance (7 x 7, row by row) is that of the turn (a
-   --  rotation vector in the first frame), the centre and the log of the
-   --  scale, carried from the link's.
 
 private
 

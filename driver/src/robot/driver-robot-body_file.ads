@@ -22,7 +22,7 @@ private package Driver.Robot.Body_File is
    Lag_Method        : constant := 3;
    Lockin_Method     : constant := 5;
    Graph_Method      : constant := 2;
-   Kinematics_Method : constant := 9;
+   Kinematics_Method : constant := 10;
 
    function Text (M : Model) return String;
    --  The whole file.
