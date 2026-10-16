@@ -771,23 +771,6 @@ package body Driver.Robot.Motion is
    function False_Alarm (M : Model; E : Eye_Id) return Real is
      (if M.Eyes (E).Rest_Counts_Known then 1.0 / Real (M.Eyes (E).Rest_Count_Beats + 1) else Tail);
 
-   --  How many seen moves in a row make a chance run rarer than Z's tail over
-   --  every level a probe may try, when one move is a false alarm with that
-   --  chance; none can when the chance is not below one.
-   function Run_Needed (Chance : Real) return Natural is
-   begin
-      if Chance <= 0.0 then
-         return 1;
-      elsif Chance >= 1.0 then
-         return Natural'Last;
-      end if;
-      declare
-         K : constant Real := Real'Ceiling (Ln (Tail / Real (Levels)) / Ln (Chance));
-      begin
-         return (if K >= Real (Natural'Last) then Natural'Last else Natural'Max (1, Natural (K)));
-      end;
-   end Run_Needed;
-
    --  Some eye's image moved at a beat from From on, and the chance that a
    --  look at that many verdicts finds one by noise alone.
    procedure Look (M : Model; From : Natural; Seen : out Boolean; Chance : out Real) is
@@ -804,7 +787,7 @@ package body Driver.Robot.Motion is
       end loop;
       --  The chance that at least one of the verdicts looked at is a false alarm: one less the chance that none
       --  is, the verdicts independent. Summed instead, a look of twenty beats over three eyes with rest counts of
-      --  53 beats "had a chance" of 1.1, above one, and Run_Needed found no run of moves that could make such a
+      --  53 beats "had a chance" of 1.1, above one, and no run of moves could make such a
       --  level certain: the ladder doubled past every level an eye saw, to 56 radians and the arm's ends (seed 2
       --  of the fake robot, 10-14: levels 10 to 21 all seen, none confirmed).
       Chance := 1.0 - Ada.Numerics.Long_Elementary_Functions.Exp (-Chance);
@@ -1037,15 +1020,19 @@ package body Driver.Robot.Motion is
      (Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom));
 
    --  A level some eye saw, confirmed by moves back and forth by the same
-   --  offsets, each of them seen and each executed by the body, as many as
-   --  the chance of one false alarm asks. Executed as the level's own look
-   --  asks (Probe_Together): some listed reading went the way the move asked,
+   --  offsets, each of them seen and each executed by the body, until the
+   --  chance that every look of the run, the level's first, saw a false
+   --  alarm (the product of their own chances) is below Z's tail over every
+   --  level: a long look has a large chance, a short one a small one, and a
+   --  count set by the level's look alone asked 6455 moves of s18 (servo seed
+   --  4, 10-17) whose own looks each had 0.134, where five do. Executed as
+   --  the level's own look asks (Probe_Together): some listed reading went the way the move asked,
    --  from where the move before left it, significantly against its own
    --  noise (Executed). A move the body did not make is no evidence however
    --  its look went: on the servo fake the level of 4.9 units took one
    --  channel out of its dead band once and none again, the eye "saw" each
    --  move after it with a chance of a false alarm near one, and the run that
-   --  chance asks was some 270 moves, 10800 beats (s02 and s04 on 10-16).
+   --  chance asked was some 270 moves, 10800 beats (s02 and s04 on 10-16).
    procedure Confirm
      (M         : in out Model;
       Listed    : Channel_Refs;
@@ -1059,7 +1046,10 @@ package body Driver.Robot.Motion is
       Chance    : Real;
       Confirmed : out Boolean)
    is
-      Needed    : constant Natural := Run_Needed (Chance);
+      --  The run is rare enough when the chance that every look in it was a false alarm, the product of their own
+      --  chances (the level's look first), is below Z's tail over every level a probe may try.
+      Rare      : constant Real := Ln (Tail / Real (Levels));
+      Run_Log   : Real := (if Chance > 0.0 then Ln (Chance) else Real'First);
       Run       : Natural := 1;
       At_Amount : Boolean := True;
       Seen      : Boolean;
@@ -1070,7 +1060,7 @@ package body Driver.Robot.Motion is
       Read_At   : Natural;
       Made      : Boolean;
    begin
-      while Needed /= Natural'Last and then Run < Needed loop
+      while Run_Log > Rare loop
          At_Amount := not At_Amount;
          declare
             Back : Real_Array (1 .. Listed'Length);
@@ -1095,10 +1085,18 @@ package body Driver.Robot.Motion is
             end if;
          end loop;
          exit when not Made;
+         --  A look whose chance is not below one tells nothing, and no run of them becomes rare.
+         exit when Again >= 1.0;
+         Run_Log := (if Again > 0.0 then Run_Log + Ln (Again) else Real'First);
          Before := Now;
          Run := Run + 1;
       end loop;
-      Confirmed := Needed /= Natural'Last and then Run >= Needed;
+      Confirmed := Run_Log <= Rare;
+      Driver.Log.Line (Driver.Log.Robot, "probe: the level's look and" & Natural'Image (Run - 1) & " moves back and forth"
+                       & " after it, each seen and made, had together a chance of e^"
+                       & Driver.Log.Image ((if Run_Log = Real'First then -Real'Last else Run_Log), 2)
+                       & " of false alarms only, against e^" & Driver.Log.Image (Rare, 2) & ": "
+                       & (if Confirmed then "confirmed" else "not confirmed"));
    end Confirm;
 
    --  Where every listed channel is held and reads, read in a held beat:
@@ -1261,6 +1259,19 @@ package body Driver.Robot.Motion is
                   end;
                end if;
             end loop;
+            declare
+               Went_Along : Natural := 0;
+            begin
+               for I in 1 .. N loop
+                  if Usable (I) and then Did (I) then
+                     Went_Along := Went_Along + 1;
+                  end if;
+               end loop;
+               Driver.Log.Line (Driver.Log.Robot, "probe: level" & Level'Image & " of every channel together, "
+                                & Scientific (Amount) & " units, read at beat" & Now_At'Image & ": seen " & Seen'Image
+                                & " (the look's chance of a false alarm " & Driver.Log.Image (Chance, 3) & "), "
+                                & Went_Along'Image & " channels went along their ask");
+            end;
             --  A level is seen only when the body executed it: some channel's reading went along its ask. A
             --  camera on an arm whose servo hums against its dead band shakes, and an eye sees motion where no
             --  reading moved (R6 on the kiwi, 10-14: every channel together "first seen" at 4.9 units while no
@@ -1276,9 +1287,8 @@ package body Driver.Robot.Motion is
                      Report.Excursion := Amount;
                   else
                      Driver.Log.Line (Driver.Log.Robot, "probe: level" & Level'Image & " of every channel together, "
-                                      & Scientific (Amount) & " units, was seen by an eye but not confirmed by"
-                                      & Run_Needed (Chance)'Image & " moves back and forth (the look's chance of a false"
-                                      & " alarm " & Driver.Log.Image (Chance, 3) & ")");
+                                      & Scientific (Amount) & " units, was seen by an eye but not confirmed (the look's"
+                                      & " chance of a false alarm " & Driver.Log.Image (Chance, 3) & ")");
                   end if;
                end;
             elsif Seen then

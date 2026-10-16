@@ -1144,6 +1144,27 @@ procedure Measure (H : in out Hands; M : in out Model) is
             --  shakes).
             Driver.Robot.Motion.Settle (M, Waited);
             Hold_Beat (Read_Arrival'Access);
+            if not Reached then
+               declare
+                  Off_Text : Ada.Strings.Unbounded.Unbounded_String;
+                  procedure Read_Off (O : Observation) is
+                     Now : constant Real_Array := O.Readings.Element (Arm_Is);
+                  begin
+                     for C in 1 .. Natural'Min (Now'Length, Goal'Length) loop
+                        Ada.Strings.Unbounded.Append
+                          (Off_Text, " c" & C'Image & " " & Driver.Log.Image (Now (Now'First + C - 1) - Goal (Goal'First + C - 1), 6)
+                           & " (noise " & Driver.Log.Image (Reading_Noise (M, Arm_Is, C), 6) & ", eye step "
+                           & (if Known (Visible_Step (M, Arm_Is, C)) then Driver.Log.Image (Visible_Step (M, Arm_Is, C).Value, 6)
+                              else "?") & ")");
+                     end loop;
+                  end Read_Off;
+               begin
+                  Hold_Beat (Read_Off'Access);
+                  Driver.Log.Line (Driver.Log.Robot, "hand: the arm sent back " & (if To_Start then "to where the descent began"
+                                   else "to where the step began") & " rests off it by:"
+                                   & Ada.Strings.Unbounded.To_String (Off_Text));
+               end;
+            end if;
             if To_Start then
                Descended := 0.0;
             elsif Step_Reached then

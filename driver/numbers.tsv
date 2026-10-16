@@ -1316,7 +1316,9 @@ driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Least, 4) & ""	4	format	d
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Limit, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Place, 5) & ""	5	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Turn_Sigma, 5)	5	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Reading_Noise (M, Arm_Is, C), 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Yaw, 4) & "");	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& (if Known (Visible_Step (M, Arm_Is, C)) then Driver.Log.Image (Visible_Step (M, Arm_Is, C).Value, 6)	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& (if Pixel > 0.0 then Driver.Log.Image (Pixel, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Aimed.Turn, 4) & "" & Ada.Strings.Unbounded.To_String (Report.Detail)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
@@ -1338,6 +1340,7 @@ driver-robot-hand-measure.adb	("" & Driver.Log.Image (Part, 6) & "" & Wait_At_Mo
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (Part, 6));	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	(Off, "" & C'Image & "" & Driver.Log.Image (Now (Now'First + C - 1) - Goal (Goal'First + C - 1), 4));	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	(Off, "" & Driver.Log.Image (Cl (Cl'First + C - 1) - Was (Was'First + C - 1), 6));	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	(Off_Text, "" & C'Image & "" & Driver.Log.Image (Now (Now'First + C - 1) - Goal (Goal'First + C - 1), 6)	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	(R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	1	structure	a one-element array of directions
 driver-robot-hand-measure.adb	(R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
@@ -2630,8 +2633,8 @@ driver-robot-kinematics.adb	Covariance (3 + P, 3 + Q) := Covariance (3 + P, 3 + 
 driver-robot-kinematics.adb	Covariance (3 + P, 3 + Q) := Covariance (3 + P, 3 + Q) + Rel_1 ** 2 * C (P) * C (Q);	3	structure	the centre's three terms follow the turn's three
 driver-robot-kinematics.adb	Covariance (3 + P, 3 + Q) := Covariance (3 + P, 3 + Q) + Rel_1 ** 2 * C (P) * C (Q);	3	structure	the centre's three terms follow the turn's three
 driver-robot-kinematics.adb	D (P, P) := JtJ (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
-driver-robot-kinematics.adb	D := (1.0 / (H * (if C = 0.0 then 1.0 else C))) * (Eye_In_Reference (M, A, Xp).Translation - T0.Translation);	1.0	math	the derivative of the place: one over the step
 driver-robot-kinematics.adb	D := (1.0 / (H * (if C = 0.0 then 1.0 else C))) * (Eye_In_Reference (M, A, Xp).Translation - T0.Translation);	1.0	math	a joint the fit gives no turn per reading is weighed by its reading
+driver-robot-kinematics.adb	D := (1.0 / (H * (if C = 0.0 then 1.0 else C))) * (Eye_In_Reference (M, A, Xp).Translation - T0.Translation);	1.0	math	the derivative of the place: one over the step
 driver-robot-kinematics.adb	Depth : constant Real := F.Tracks (3 * I + 2);	2	structure	a track's point, three numbers each: its depth along its line of sight is the third
 driver-robot-kinematics.adb	Depth : constant Real := F.Tracks (3 * I + 2);	3	structure	a track's point, three numbers each: its depth along its line of sight is the third
 driver-robot-kinematics.adb	Depth_On : constant Real := (if On then 1.0 / (F.Table_A * H) else 0.0);	1.0	math	the line of sight H meets the plane A * X = 1 at depth 1 over A * H
@@ -2862,9 +2865,12 @@ driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: twice the critical value in 2 Q - K
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	4.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, four Z to the fourth
 driver-robot-motion.adb	"" & G'Image & "" & C'Image & "" & Driver.Log.Image (Stop, 6) & ""	6	format	digits printed in a log line or a message
+driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & "");	3	format	digits printed in a log line or a message
+driver-robot-motion.adb	& "" & Driver.Log.Image (Rare, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (W (C), 6));	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& (if Way = Increasing then "" else "") & "" & Driver.Log.Image (Stop.Value, 6)	6	format	digits printed in a log line or a message
+driver-robot-motion.adb	& Driver.Log.Image ((if Run_Log = Real'First then -Real'Last else Run_Log), 2)	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Asked, 6) & "" & Driver.Log.Image (Start, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Asked, 6) & "" & Driver.Log.Image (Start, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Chance, 3) & "");	3	format	digits printed in a log line or a message
@@ -2931,12 +2937,10 @@ driver-robot-motion.adb	Window : Natural := 2;	2	structure	the beat of the move 
 driver-robot-motion.adb	Window := Natural'Max (Window, 2 + Natural'Max (0, Image_Lag (M, Eye_Id (E))));	2	structure	the beat of the move and the beat it shows in the readings
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom);	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
-driver-robot-motion.adb	elsif Chance >= 1.0 then	1.0	math	a chance of one or more cannot be beaten by any run
+driver-robot-motion.adb	exit when Again >= 1.0;	1.0	math	a chance of one is certainty of a false alarm: such a look is no evidence
 driver-robot-motion.adb	for K in 1 .. 3 loop	3	numerics	the three shares K over four, the quarter, the middle and the three quarters
 driver-robot-motion.adb	if Known (D) and then D.Value > 0.0 and then D.Value < 1.0	1.0	structure	a share below one: the group delivered less than it was asked; one or more is asked as it is
 driver-robot-motion.adb	return (if Executed < Real'Last then Counted + 2.0 * Executed else Counted);	2.0	math	the landing and the reference it is counted from, each within the dead band of where it was sent
-driver-robot-motion.adb	return (if K >= Real (Natural'Last) then Natural'Last else Natural'Max (1, Natural (K)));	1	structure	at least one move
-driver-robot-motion.adb	return 1;	1	structure	one move suffices when false alarms cannot happen
 driver-robot-motion.adb	then "" & Driver.Log.Image (E.Delivered.Value, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	then Real'Max (Driver.Conventions.Z * Sqrt (2.0) * Channels.Noise (M, G, I + 1),	2.0	statistics	the difference of two readings of a channel has the root of two of its noise
 driver-robot-motion.ads	Channel : Positive := 1;	1	structure	channels are numbered from one
