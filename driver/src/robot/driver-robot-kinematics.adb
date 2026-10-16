@@ -3172,6 +3172,9 @@ package body Driver.Robot.Kinematics is
    function Fitted (M : Model; A : Arm_Id) return Boolean is
      (Index_Of (M, A) > 0 and then M.Kinematics (Index_Of (M, A)).Result.Fitted);
 
+   function Order_Told (M : Model; A : Arm_Id) return Boolean is
+     (Fitted (M, A) and then M.Kinematics (Index_Of (M, A)).Result.Order_Told);
+
    function Table (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate is
      (if Fitted (M, A) then M.Kinematics (Index_Of (M, A)).Result.Table else (others => <>));
 

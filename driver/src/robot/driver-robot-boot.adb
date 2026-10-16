@@ -446,11 +446,13 @@ package body Driver.Robot.Boot is
             Followed_Now : Boolean := False;
             Framed_Now   : Boolean := False;   --  a keyframe was taken in the span at all
             Fitted_Now   : Boolean := False;
+            Told_Now     : Boolean := False;   --  and its joints' order told (Kinematics.Order_Told)
             procedure Read_Followed is
             begin
                Followed_Now := Driver.Robot.Kinematics.Followed (M, A, Ask_From, Ask_To);
                Framed_Now := Driver.Robot.Kinematics.Framed (M, A, Ask_From, Ask_To);
                Fitted_Now := Driver.Robot.Kinematics.Fitted (M, A);
+               Told_Now := Driver.Robot.Kinematics.Order_Told (M, A);
             end Read_Followed;
             --  The beats the body has seen, read in a held beat.
             Beat_Now : Natural := 0;
@@ -934,8 +936,20 @@ package body Driver.Robot.Boot is
                      end if;
                   end;
                end loop;
+               --  A fitted arm whose sightings do not tell its joints' order takes its cells once more as its passes
+               --  end, climbing as a fitted arm's cells do (Together): the order is told by what two joints turned
+               --  together do that each alone does not, and a pass that followed nothing new took no cells at all
+               --  (s06 on 10-16: fitted, its order not told, its last pass followed nothing, and its cells never
+               --  climbed). Once: climbed as far as the view lets them, the cells give no more than they gave.
+               if N > 1 and then Fitted_Now and then not Told_Now then
+                  Together (Shares);
+                  Measure_The_Round;
+                  Driver.Beats.Within_A_Beat (Read_Followed'Access);
+               end if;
                Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " swept in" & Passes'Image & " passes of"
-                                & Rounds'Image & " rounds, " & (if Fitted_Now then "fitted" else "not fitted"));
+                                & Rounds'Image & " rounds, "
+                                & (if not Fitted_Now then "not fitted" elsif Told_Now then "fitted"
+                                   else "fitted, its joints' order not told"));
             end;
             declare
                Waited_Here : Natural;   --  each arm's own: arms are swept at once
