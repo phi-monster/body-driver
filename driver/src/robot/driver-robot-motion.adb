@@ -1764,13 +1764,20 @@ package body Driver.Robot.Motion is
    is
    begin
       Report := (Outcome => Reached, others => <>);
-      for W of P.Waypoints loop
+      for K in P.Waypoints.First_Index .. P.Waypoints.Last_Index loop
          declare
             C : Driver.Commands.Command;
          begin
-            Driver.Commands.Set_Target (C, P.Group, W);
+            Driver.Commands.Set_Target (C, P.Group, P.Waypoints (K));
             Step (M, C, Report, Stop);
          end;
+         --  Which waypoint of how many the path ended at, and how: the step's own account of its channels.
+         if Report.Outcome /= Reached and then not Report.Stopped then
+            Driver.Log.Line (Driver.Log.Robot, "motion: a path of" & Natural'Image (Natural (P.Waypoints.Length))
+                             & " waypoints ended at waypoint" & Natural'Image (K - P.Waypoints.First_Index + 1) & ", "
+                             & Report.Outcome'Image & " after" & Report.Beats'Image & " beats: "
+                             & To_String (Report.Detail));
+         end if;
          exit when Report.Outcome /= Reached or else Report.Stopped;
       end loop;
    end Follow;

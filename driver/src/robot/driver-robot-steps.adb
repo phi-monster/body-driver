@@ -140,7 +140,11 @@ package body Driver.Robot.Steps is
                   E.Blocked :=
                     not Answered
                     or else (Falls_Short and then Channels.Visible (M, G, Along_Ask (S, E.Length, Short)));
-                  if Answered and then not E.Blocked then
+                  --  A free push's shortfall is where it landed, its readings still: one given up while they still moved
+                  --  had not landed, and kept as free it raises the most a free push falls short by, and the shortfall a
+                  --  push is blocked by with it (h27, servo seed 3, 10-17: the last pushes of four aims delivered 0.011
+                  --  to 0.418 of theirs, two given up still moving, and none was judged blocked: each step "reached").
+                  if Answered and then Rested and then not E.Blocked then
                      S.Free_Shortfalls.Append (Short);
                   end if;
                end;

@@ -1670,6 +1670,7 @@ package body Driver.Robot.Hand is
       Past    : Real := 0.0;     --  the last step past the band, doubling
       Outcome : Lowered;
       Allowed : Natural := Natural'Last;   --  the steps the schedule takes to cover the eye's room: no more are made
+      Cut     : Boolean := False;   --  the last step was cut to the room left
       Seen    : Heights;
 
       --  Seeking, the contact is looked for as the presses so far predict it, or by doubling; Halving, a step met
@@ -1810,18 +1811,25 @@ package body Driver.Robot.Hand is
                      By := Fast;
                      Fast := 2.0 * Fast;
                   end if;
-                  --  No step takes the eye past as far as the surface can be (the room, as above).
+                  --  No step takes the eye past as far as the surface can be (the room, as above), and the last step
+                  --  goes to it though it is less than Least: seeking the surface asks only whether a step meets it, which
+                  --  the step's own push tells (Blocked), not how far the tool went. Ending when less than Least was left,
+                  --  h27 (servo seed 3, 10-17), its Least 10 to 11.5 where its aims' fit placed the tool loosely, made one
+                  --  step of each press and stopped with 9.5 of the room left and the jaws' tips short of the table.
                   if Known (Seen.Eye) then
                      declare
                         Room : constant Real :=
                           Seen.Eye.Value + Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
                      begin
-                        if Room < Least then
+                        if Room <= 0.0 or else (Room < Least and then Cut) then
                            Steps.Spent := True;
                            exit;
                         elsif By > Room then
                            By := Room;
                            Steps.Capped := Steps.Capped + 1;
+                           Cut := True;
+                        else
+                           Cut := False;
                         end if;
                      end;
                   end if;
