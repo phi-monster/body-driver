@@ -89,7 +89,9 @@ On every keyboard:
 - `until arrived` and `until refused` are never offered (section 4).
 - `say look = <eye number>` is offered when the body has more than one eye
   with a picture, and types only the numbers of those eyes. A free sentence
-  cannot hold `=`, so it cannot type an eye that does not exist.
+  cannot hold `=`, so it cannot type an eye that does not exist. A program
+  types it once at most, inside a block or not: the eye it names is the large
+  picture of the next round, and a second one would only replace the first.
 - A name is plain words, as many as it needs, but none of the words of this
   round's grammar, and not `item`. The decoder cannot type a language word
   inside a name, so a word the brain wanted there ends up glued to its
@@ -241,7 +243,8 @@ and far from anything it might hit.
   inside a behaviour the attempt called. A `try` around `until stuck` jumps
   even when the stretch stopped exactly as asked.
 - `say` sends the sentence to the person and to the next round. `say look =
-  <n>` also makes eye n the large picture from the next round on.
+  <n>` also makes eye n the large picture from the next round on (once in a
+  program at most).
 - `done` ends the program. It also says the task is finished, and the brain
   is asked nothing more for this task, only when the brain had seen how every
   stretch before it ended: no stretch ran before it, or each one ran inside a

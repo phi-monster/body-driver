@@ -564,9 +564,33 @@ package body Driver.Brain.Keyboard.Tests is
              "the sheet lists exactly the eye numbers the grammar offers");
    end Looking;
 
+   --  A program says look once at most, on every keyboard (the eye it names is the next round's): inside a block too.
+   procedure Looking_Once is
+      Speech : constant String :=
+        Grammar (Choose (Words, Words, [others => False], All_Relations, False, No_Relation, Eyes_Up_To (3)));
+      Hand   : constant String := Grammar (Hand_Body (Eyes => 3));
+      Full   : constant String := Grammar (Handless_Body (Eyes => 3));
+      Change : constant String := "do the black box height up until settled" & LF;
+   begin
+      Check (Accepts (Speech, "say hello" & LF & "say look = 2" & LF & "say bye" & LF)
+             and then not Accepts (Speech, "say look = 2" & LF & "say look = 3" & LF),
+             "the speech keyboard: one look is typed, a second is not");
+      Check (Accepts (Hand, "say look = 2" & LF & Change & "done" & LF) and then Accepts (Hand, Change & "say look = 2" & LF)
+             and then not Accepts (Hand, "say look = 2" & LF & Change & "say look = 3" & LF)
+             and then not Accepts (Hand, "say look = 2" & LF & "say look = 3" & LF & "say look = 1" & LF),
+             "the quantity keyboard: one look, before or after the change, is typed, a second is not");
+      Check (Accepts (Full, "repeat 2 times:" & LF & "say look = 2" & LF & "end" & LF)
+             and then Accepts (Full, "say look = 1" & LF & "do me still until settled" & LF)
+             and then not Accepts (Full, "say look = 1" & LF & "repeat 2 times:" & LF & "say look = 2" & LF & "end" & LF)
+             and then not Accepts (Full, "if settled:" & LF & "say look = 1" & LF & "else:" & LF & "say look = 2" & LF
+                                         & "end" & LF),
+             "the full keyboard: one look, in a block or not, is typed, a second anywhere is not");
+   end Looking_Once;
+
    procedure Register is
    begin
       Register ("brain.keyboard.choice", "a body gets keys it cannot use, or loses keys it can", Choice'Access);
+      Register ("brain.keyboard.look_once", "a program can say look twice, or cannot say it once", Looking_Once'Access);
       Register ("brain.keyboard.look", "the brain can type an eye that does not exist, or cannot switch to one that"
                 & " does", Looking'Access);
       Register ("brain.keyboard.quantity", "the quantity keyboard lets through what it must not, or blocks what it"

@@ -91,6 +91,13 @@ package Driver.Robot.Hand.Presses is
    --  that command asks for would put it (unknown when not given). Found is
    --  True at the beat a press ends.
 
+   procedure Met (W : in out Watcher; Tool : Pose_Estimate);
+   --  What a press met, felt by the closer before the arm's push was judged blocked, taken for the block, the tool
+   --  at Tool: the hand measure stops a press the moment what its lobe meets pushes the closer off the opening the
+   --  press is made at (Measure's Closer_Left), long before the arm's readings stall, and the push then ends
+   --  unblocked. The watcher saw no block, so no let-go and no rest: a20 on 10-16 waited 7041 beats, the stream's
+   --  length, after one such press, and some 10,000 after another. Nothing when the watcher is not free.
+
 private
 
    type Phase is (Free, Driven, Let_Go, Settling);

@@ -46,15 +46,26 @@ package body Driver.Brain.Rounds is
    function Has_Picture (Now : Snapshot; E : Eye_Id) return Boolean is
      (E in Now.Images.First_Index .. Now.Images.Last_Index and then not Driver.Images.Is_Empty (Now.Images (E)));
 
-   --  The eye a task starts in: the first one fixed in the scene, else the
-   --  first with a picture (LANGUAGE.md 17.5: the brain switches with look).
+   --  The eye a task starts in: of the ones fixed in the scene, the one that sees the most of the body's arms move
+   --  (it watches where they act; the first of equals), else the first with a picture (LANGUAGE.md 17.5: the brain
+   --  switches with look). The first fixed eye was taken: a10 to a20 on 10-16 began every task in the wrist eye of
+   --  the fake's dead arm, fixed because it never moved, its picture that arm's own two fingers on the table, and the
+   --  black box only in the strip below; the eye that saw arm 1 move saw the box.
    function First_View (Now : Snapshot) return Eye_Id'Base is
+      Best : Eye_Id'Base := 0;
+      Most : Natural := 0;
    begin
       for F of Now.Eyes loop
-         if F.Mount.Kind = Driver.Robot.World_Fixed and then Has_Picture (Now, F.Eye) then
-            return F.Eye;
+         if F.Mount.Kind = Driver.Robot.World_Fixed and then Has_Picture (Now, F.Eye)
+           and then (Best = 0 or else F.Arms > Most)
+         then
+            Best := F.Eye;
+            Most := F.Arms;
          end if;
       end loop;
+      if Best > 0 then
+         return Best;
+      end if;
       for E in Now.Images.First_Index .. Now.Images.Last_Index loop
          if Has_Picture (Now, E) then
             return E;
