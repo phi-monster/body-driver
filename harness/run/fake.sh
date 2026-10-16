@@ -62,4 +62,4 @@ echo "$NAME: $why ($(grep -c "" "$R/truth.jsonl") truth lines)"
 zstd -q -dc "$R/run.rec.zst" | "$R/bin/replay" /dev/stdin --estimates "$R/estimates.jsonl" > "$R/replay.log" 2>&1
 tail -2 "$R/replay.log"
 SCR=(); [ -f "$R/scramble.json" ] && SCR=(--scramble "$R/scramble.json")
-zstd -q -dc "$R/run.rec.zst" | "$R/bin/score" "${SCR[@]}" "$R/estimates.jsonl" /dev/stdin "$R/truth.jsonl" | tee "$R/score.txt"
+zstd -q -dc "$R/run.rec.zst" | "$R/bin/score" ${SCR[@]+"${SCR[@]}"} "$R/estimates.jsonl" /dev/stdin "$R/truth.jsonl" | tee "$R/score.txt"
