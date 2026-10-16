@@ -9,7 +9,12 @@ geometry where it is used, and the model's own confidence is recorded but
 never used as a gate. Changing the model changes only the service.
 
 The reference service is [`harness/instruments/serve.py`](../harness/instruments/serve.py)
-(RoMa for matching, SAM 2.1 for segmentation, weights pinned by sha256). It
+(SAM 2.1 for segmentation, weights pinned by sha256; RoMa for matching only when
+`INST_SERVE=match,segment` asks for it, since a robot runs nothing in a cloud and
+RoMa needs a large GPU). It picks CUDA, else Apple's MPS, else the CPU
+(`INST_DEVICE` overrides), and loads the checkpoint `SAM_CKPT` with the config
+`SAM_CFG`: on a Mac or a Raspberry Pi the tiny model (`sam2.1_hiera_tiny.pt`,
+`configs/sam2.1/sam2.1_hiera_t.yaml`). A path it does not serve answers 404. It
 is one of the two programs outside the driver that may be Python, because its
 models only run in PyTorch; the driver itself talks to it like to any other
 service.

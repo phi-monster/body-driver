@@ -33,7 +33,9 @@ mkfifo "$R/run.rec.fifo"
 zstd -q -T2 -3 -o "$R/run.rec.zst" < "$R/run.rec.fifo" &
 ZST=$!
 BRAIN=(); if [ -n "${FAKE_BRAIN:-}" ]; then BRAIN=(--eye "$FAKE_BRAIN"); export BL_BRAIN_SAMPLING='{"temperature":1.0,"top_p":1.0,"top_k":20,"min_p":0,"presence_penalty":2.0,"repetition_penalty":1.0,"chat_template_kwargs":{"enable_thinking":false}}'; fi
-"$R/bin/body_driver" --listen "$PORT" --body "$R/body.json" --record "$R/run.rec.fifo" ${BRAIN[@]+"${BRAIN[@]}"} > "$R/driver.log" 2>&1 &
+# FAKE_INST=HOST:PORT: the instrument service (harness/instruments/serve.py; segmentation only by default), as the kiwi runs it.
+INST=(); [ -n "${FAKE_INST:-}" ] && INST=(--inst "$FAKE_INST")
+"$R/bin/body_driver" --listen "$PORT" --body "$R/body.json" --record "$R/run.rec.fifo" ${BRAIN[@]+"${BRAIN[@]}"} ${INST[@]+"${INST[@]}"} > "$R/driver.log" 2>&1 &
 DRV=$!
 for _ in $(seq 1 120); do grep -q "listening on port" "$R/driver.log" 2>/dev/null && break; sleep 0.5; done
 "$R/bin/fake_robot" --connect "127.0.0.1:$PORT" --seed "$SEED" --out "$R" --stop "$R/stop" "$@" > "$R/fake.log" 2>&1 &

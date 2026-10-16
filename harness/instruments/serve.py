@@ -43,12 +43,18 @@ WEIGHTS = {
     "roma_outdoor.pth": "c7a45c80d41ad788a63c641d1b686d7cb3f297f40097c6f4e75039889e5cc8ba",
     "dinov2_vitl14_pretrain.pth": "d5383ea8f4877b2472eb973e0fd72d557c7da5d3611bd527ceeb1d7162cbf428",
     "sam2.1_hiera_small.pt": "6d1aa6f30de5c92224f8172114de081d104bbd23dd9dc5c58996f0cad5dc4d38",
+    # 2026-10-17 owner:"sam装";Pi 上也要用,一个超小模型。Mac 和 Pi 上用 tiny(39M),dl.fbaipublicfiles.com 092824 原文件
+    "sam2.1_hiera_tiny.pt": "7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69",
 }
 ROMA_DIR = os.environ.get("ROMA_DIR", "/root/instruments/RoMa")
 ROMA_W = os.environ.get("ROMA_W", os.path.expanduser("~/.cache/torch/hub/checkpoints/roma_outdoor.pth"))
 ROMA_DINO = os.environ.get("ROMA_DINO", os.path.expanduser("~/.cache/torch/hub/checkpoints/dinov2_vitl14_pretrain.pth"))
 SAM_CKPT = os.environ.get("SAM_CKPT", "/root/instruments/weights/sam2.1_hiera_small.pt")
 SAM_CFG = os.environ.get("SAM_CFG", "configs/sam2.1/sam2.1_hiera_s.yaml")   # 仓库在 /root/instruments/sam2_repo(不许放在本文件同级叫 sam2:会遮住包)
+# 设备:有 CUDA 用 CUDA(箱子),否则 Mac 的 MPS,否则 CPU(Pi)。半精度只在 CUDA 上开
+DEVICE = os.environ.get("INST_DEVICE") or ("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
+# 起哪几样:默认只起分割。配点(RoMa)owner 09-27 定了真机不用、RoboDojo 也不用,要它得写明 INST_SERVE=match,segment
+SERVE = set(s for s in os.environ.get("INST_SERVE", "segment").split(",") if s)
 
 # 每个模型一把锁(2026-09-26):配点和抠图互不排队
 _lock_match = threading.Lock()
@@ -78,12 +84,13 @@ def _load_sam():
     global _sam
     if _sam is None:
         h = hashlib.sha256(open(SAM_CKPT, "rb").read()).hexdigest()
-        if h != WEIGHTS["sam2.1_hiera_small.pt"]:
-            raise RuntimeError("SAM 2.1 权重哈希对不上:%s" % h)
+        name = os.path.basename(SAM_CKPT)
+        if h != WEIGHTS.get(name):
+            raise RuntimeError("SAM 2.1 权重 %s 哈希对不上:%s" % (name, h))
         from sam2.build_sam import build_sam2
         from sam2.sam2_image_predictor import SAM2ImagePredictor
-        _sam = SAM2ImagePredictor(build_sam2(SAM_CFG, SAM_CKPT, device="cuda"))
-        print("[仪器] sam2.1_hiera_small sha256=%s" % h, flush=True)
+        _sam = SAM2ImagePredictor(build_sam2(SAM_CFG, SAM_CKPT, device=DEVICE))
+        print("[仪器] %s sha256=%s 设备 %s" % (name, h, DEVICE), flush=True)
     return _sam
 
 
@@ -99,7 +106,7 @@ def segment(b64, box, points):
         kw["point_labels"] = np.array([int(p[2]) if len(p) > 2 else 1 for p in points], dtype=np.int32)
     if not kw:
         return {"ok": False, "err": "no box / points"}
-    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+    with torch.inference_mode(), torch.autocast(DEVICE, dtype=torch.bfloat16, enabled=(DEVICE == "cuda")):
         m.set_image(img)
         masks, scores, _ = m.predict(multimask_output=False, **kw)
     mk = np.asarray(masks[0]).astype(bool).reshape(-1)
@@ -224,7 +231,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._send(200, {"instruments": ["match", "segment"], "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"})
+            self._send(200, {"instruments": sorted(SERVE), "device": torch.cuda.get_device_name(0) if DEVICE == "cuda" else DEVICE})
         else:
             self._send(404, {"ok": False, "err": "no such instrument"})
 
@@ -234,6 +241,12 @@ class H(BaseHTTPRequestHandler):
             req = json.loads(self.rfile.read(n).decode("utf-8"))
         except Exception as e:
             self._send(400, {"ok": False, "err": "bad json: %s" % e})
+            return
+        if self.path in ("/frame", "/match", "/describe") and "match" not in SERVE:
+            self._send(404, {"ok": False, "err": "matching is not served here (INST_SERVE)"})
+            return
+        if self.path == "/segment" and "segment" not in SERVE:
+            self._send(404, {"ok": False, "err": "segmentation is not served here (INST_SERVE)"})
             return
         try:
             if self.path == "/frame":   # 只解码,不用模型 ⇒ 不排那把锁
@@ -263,7 +276,9 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    _load_roma()   # 起来就把模型装进显存,第一帧不慢
-    _load_sam()
-    print("[仪器] 听 %d · match=roma · segment=sam2.1" % PORT, flush=True)
+    if "match" in SERVE:
+        _load_roma()   # 起来就把模型装进显存,第一帧不慢
+    if "segment" in SERVE:
+        _load_sam()
+    print("[仪器] 听 %d · %s · 设备 %s" % (PORT, ",".join(sorted(SERVE)), DEVICE), flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()
