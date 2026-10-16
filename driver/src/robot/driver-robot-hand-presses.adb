@@ -28,6 +28,22 @@ package body Driver.Robot.Hand.Presses is
       end;
    end Moved_Into;
 
+   --  The block's first beat: the tool there, and the way it came from where it last stood still.
+   procedure Drive (W : in out Watcher; Tool : Pose_Estimate) is
+   begin
+      W.State := Driven;
+      W.Commands := 0;
+      W.Block_At := Tool;
+      W.Approach := (if W.Stood then Moved_Into (W.Last_Still, Tool) else (others => <>));
+   end Drive;
+
+   procedure Met (W : in out Watcher; Tool : Pose_Estimate) is
+   begin
+      if W.State = Free then
+         Drive (W, Tool);
+      end if;
+   end Met;
+
    procedure Observe
      (W       : in out Watcher;
       Beat    : Driver.Clock.Beat;
@@ -54,10 +70,7 @@ package body Driver.Robot.Hand.Presses is
       case W.State is
          when Free =>
             if Blocked then
-               W.State := Driven;
-               W.Commands := 0;
-               W.Block_At := Tool;
-               W.Approach := (if W.Stood then Moved_Into (W.Last_Still, Tool) else (others => <>));
+               Drive (W, Tool);
             elsif Still and then not Pushing then
                --  Where the tool stood still while free, no push under way: a push that met the table holds the tool
                --  still against it, as far as its pose tells, for as long as the push takes to be judged blocked, and

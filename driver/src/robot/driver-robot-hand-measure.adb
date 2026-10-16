@@ -1383,7 +1383,23 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Rests_Before : Natural;
             Longest      : Natural;
             Waited       : Natural := 0;
+            --  A press stopped where the closer was pushed off its opening (Felt) ended its push unblocked: the
+            --  watcher is told what it met, the tool where the stop left it (Presses.Met).
+            procedure Mark_Met (O : Observation) is
+            begin
+               Lost := not Present (Id, R);
+               if not Lost then
+                  Driver.Robot.Hand.Presses.Met (H.Data.Found (Id).Watch, Tool_In_Arm (M, R.Arm, O));
+               end if;
+            end Mark_Met;
          begin
+            if Felt then
+               Hold_Beat (Mark_Met'Access);
+               if Lost then
+                  End_Lost (Moved => True);
+                  return False;
+               end if;
+            end if;
             Hold_Beat (Read_Rests'Access);
             if Lost then
                End_Lost (Moved => True);
