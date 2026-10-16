@@ -176,14 +176,16 @@ package body Driver.Robot.Body_File is
       Add ("]}," & LF);
 
       --  The step responses: the longest wait for an answer, every free
-      --  push's shortfall, and per channel the least ask a push moved it for.
+      --  push's shortfall, and per channel the least ask a push moved it for and the most a positioning
+      --  stood off its target.
       Add (" ""steps"": {""method"": " & Int (Steps_Method) & ", ""groups"": [");
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          Add (Separator (G = M.Groups.First_Index) & "{""delay"": " & Int (M.Groups (G).Delay_Beats)
               & ", ""delay_known"": " & Flag (M.Groups (G).Delay_Known)
               & ", ""free_shortfalls"": " & Reals (M.Groups (G).Free_Shortfalls)
               & ", ""executed"": " & Reals (Executed_Of (M.Groups (G)))
-              & ", ""executed_known"": " & Flags (Executed_Known_Of (M.Groups (G))) & "}");
+              & ", ""executed_known"": " & Flags (Executed_Known_Of (M.Groups (G)))
+              & ", ""landed_off"": " & Reals (M.Groups (G).Landed_Off) & "}");
       end loop;
       Add ("]}," & LF);
 
@@ -578,6 +580,7 @@ package body Driver.Robot.Body_File is
                      S.Delay_Beats := Natural'Max (0, Whole (Item (Gs, I), "delay"));
                      S.Delay_Known := Truth (Item (Gs, I), "delay_known");
                      S.Free_Shortfalls := Reals_Of (Field (Item (Gs, I), "free_shortfalls"));
+                     S.Landed_Off := Reals_Of (Field (Item (Gs, I), "landed_off"));
                      declare
                         Ex    : constant Real_Vectors.Vector := Reals_Of (Field (Item (Gs, I), "executed"));
                         Known : constant Flag_Vectors.Vector := Flags_Of (Field (Item (Gs, I), "executed_known"));
