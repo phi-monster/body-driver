@@ -225,12 +225,22 @@ package body Driver.Robot is
          Lockin.Measure (M);
       end if;
       Took ("lock-in");
+      --  The keyframes are aligned before the graph is derived: what they tell of how the view moves (Arm_Evidence.
+      --  Shift_Seen, the graph's Told_Eye) stands over the lock-in's verdict, and a sweep's first round had told
+      --  nothing yet when the graph came first. b03 (10-16): at the estimate after its first round the lock-in read the
+      --  wrist eye as undecided, the graph took the eye off the arm and the arm with it, the round's keyframes were
+      --  not aligned (the evidence was no current arm's), the next pass took no keyframe (the arm had no eye until the
+      --  estimate after it), and the closer's sweep was dropped.
+      --  They are aligned as the graph last had the arms (Kinematics.Current).
+      if not M.From_File (Stored_Kinematics) then
+         Kinematics.Align_New (M);
+      end if;
+      Took ("alignment");
       if not M.From_File (Stored_Graph) then
          Graph.Derive (M);
       end if;
       Took ("graph");
       if not M.From_File (Stored_Kinematics) then
-         Kinematics.Align_New (M);
          Kinematics.Refit (M);
          --  The keyframes the first fit could not rest on are aligned again from it, as long as it narrows a window
          --  to what the aligner can rest a fit on or by a size of the pictures (so a keyframe is aligned again only
