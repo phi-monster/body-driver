@@ -473,6 +473,9 @@ private
       Executed    : Real_Vectors.Vector;   --  per channel: the least ask of it a push moved it for (Driver.Robot.Steps:
                                            --  the body executes asks that large; a servo stands still for one within
                                            --  its dead band), Real'Last until one did; empty before any push
+      Landed_Off  : Real_Vectors.Vector;   --  per channel: the most a positioning has stood off its target where it
+                                           --  came to rest, its sendings again done (Driver.Robot.Motion.Step); 0
+                                           --  until one has; empty before any
       Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
       Seen_At     : Real_Vectors.Vector;   --  per channel: the turn at which the recognition's probe saw an eye move
                                            --  with it (Boot), 0 where none did; empty before the groups are recognized

@@ -69,7 +69,7 @@ measured from:
 | `noise` | every channel's reading noise and its degrees of freedom, and its creep (`drift`: its steady change a beat at rest, 0 where none stands out) | the readings |
 | `travel` | every channel's lowest and highest reading so far | the readings |
 | `ends` | every channel's end down and up, found where the body stopped a push of it at the same reading from two poses of the other channels (`low`, `high`, with `has_low` and `has_high` saying whether there is one), and the `stops` not yet found again, each with the channel, the sense, the reading and the group's readings it was made from | the noise |
-| `steps` | every group's longest wait for an answer, its free pushes' shortfalls | the noise |
+| `steps` | every group's longest wait for an answer, its free pushes' shortfalls, and per channel the least ask a push moved it for and the most a positioning stood off its target | the noise |
 | `lags` | every eye's image lag, and whether it is known, and the longest it took to settle after a move (`settling`, beats) | the noise |
 | `responses` | every eye's cell noise at rest, what each channel's push does to each cell, each group's effect on the eye | the noise, the lags |
 | `graph` | every group's role and arm, the turns at which the recognition saw each of its channels move an eye (`seen_at`, 0 where none did; the sweeps begin there), the arms, the carrier, every eye's mount | the responses |
