@@ -1937,6 +1937,7 @@ driver-robot-kinematics-fit.adb	Into (K + 2) := (if Ahead then V - P.V else Real
 driver-robot-kinematics-fit.adb	Into : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Into : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Into : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	Into : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;	1.0	math	the golden angle and the golden ratio
 driver-robot-kinematics-fit.adb	Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;	2.0	math	the golden angle and the golden ratio
 driver-robot-kinematics-fit.adb	Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;	5.0	math	the golden angle and the golden ratio
@@ -2176,10 +2177,10 @@ driver-robot-kinematics-fit.adb	Warm_Angle (J) := Arccos (Real'Min (1.0, abs Dot
 driver-robot-kinematics-fit.adb	Warm_Angle : array (1 .. N) of Real := [others => -1.0];	1.0	format	no angle measured this search: an angle is never negative
 driver-robot-kinematics-fit.adb	Ways : constant Positive := (if N >= 2 then N * (N - 1) else N);	2	structure	two joints or more have a second joint to split by
 driver-robot-kinematics-fit.adb	Weight (I) := 1.0;	1.0	math	a sighting that fits begins at full weight
+driver-robot-kinematics-fit.adb	Weights : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Wf (I) := 1.0 / Ll ** 2;	1.0	math	the weight that makes the algebraic residual the geometric one
 driver-robot-kinematics-fit.adb	Wh (I) := 1.0 / Pz ** 2;	1.0	math	the weight that makes the algebraic residual the geometric one
 driver-robot-kinematics-fit.adb	Wh, Wf : Pixel_Array := [others => 1.0];	1.0	statistics	the first solution weights every sighting alike
-driver-robot-kinematics-fit.adb	Weights : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Width : constant Real := Sigma + Sigma;	2xSigma	math	a central difference: one standard deviation either way spans two
 driver-robot-kinematics-fit.adb	Within := (B - A) / 2.0;	2.0	math	half the ended bracket: the focal length is told to about this either way
 driver-robot-kinematics-fit.adb	Wp : Real_Array (1 .. Count) := [others => 1.0];	1.0	statistics	the first solution weights every sighting alike
@@ -2326,8 +2327,6 @@ driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (4, 2 * M, Dri
 driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (4, 2 * M, Driver.Conventions.Initial_Damping, Evaluate);	4	structure	the four terms the refinement moves: two of the axis, the point's angle, the scale's logarithm
 driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate, At_Once => True);	2	structure	two residuals a point, across and down
 driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (8, 2 * Used, Real'Model_Epsilon, Evaluate, At_Once => True);	8	math	a homography has eight free terms
-driver-robot-kinematics-fit.adb	return (Smaller_Ranks - Mm * (Mm + 1.0) / 4.0)	1.0	statistics	the mean of Wilcoxon's signed-rank sum, n (n + 1) / 4
-driver-robot-kinematics-fit.adb	return (Smaller_Ranks - Mm * (Mm + 1.0) / 4.0)	4.0	statistics	the mean of Wilcoxon's signed-rank sum, n (n + 1) / 4
 driver-robot-kinematics-fit.adb	return (Lower + Upper) / 2.0 > Typical;	2.0	statistics	an even count's median, the mean of its two middle values
 driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);	2	structure	two residuals per answer, across and down
 driver-robot-kinematics-fit.adb	return (if 2 * Kept > 8 and then Sum > 0.0 then Sqrt (Sum / Real (2 * Kept - 8)) else Real'Last);	2	structure	two residuals per answer, across and down

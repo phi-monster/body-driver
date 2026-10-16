@@ -4336,88 +4336,128 @@ package body Driver.Robot.Kinematics.Fit is
                      Free (Into);
                   end Tell_From;
                   procedure Tell_All is new Driver.Parallel_For (Tell_From);
+
+                  --  An arm fitted before whose order was told keeps it while every order a swap of two joints next to
+                  --  each other away from it still leaves residuals significantly the larger (Smaller, the test that
+                  --  told it): those are the orders the sightings tell apart last (s10's untold orders were two such
+                  --  swaps, of joints whose axes meet). Every order searched and then scored again to tell the best took
+                  --  7.8 to 9.9 s of a fit (a13), fit after fit, while the sweep went on adding keyframes to an order
+                  --  already told: a22 (10-16) told 5 4 1 2 6 3 in its third pass and fitted twenty times more, its
+                  --  thirteen fits that gave their stages' times spending 112 s in this stage. An order one of those
+                  --  swaps comes near is searched again as ever.
+                  Kept_Told : Boolean := False;
                begin
-                  Here := Real'Last;
-                  Search_All (1, Ways);
-                  for J in 1 .. Ways loop
-                     if Results (J).Found and then (not Found or else Results (J).Median < Here) then
-                        Found := True;
-                        Order := Results (J).Order.all;
-                        Here := Results (J).Median;
-                        Here_R.all := Results (J).Residuals.all;
-                     end if;
-                  end loop;
-                  --  An arm fitted before keeps the order it had (From.Chain) unless the least here leaves residuals
-                  --  significantly the smaller (Smaller, the test that tells an order): a later estimate's orders can
-                  --  all score alike, and the least of equals, the first of the sequence, then took the place of the
-                  --  order the fits before had found (a19 on 10-16, at beat 7568: every order's median about 0.52 px
-                  --  where the right one had left 0.17, the order 1 2 3 4 5 6 taken, and the arm's fit fell to focal
-                  --  lengths of 130 and 145 px; s08's best order went back and forth between two, fit after fit).
-                  if Found and then From.Valid and then From.N = N and then From.Chain /= Order then
+                  if From.Valid and then From.N = N and then From.Order_Told then
                      declare
-                        Own    : Rigid_Access := new Pose_Array;
-                        Before : Real_Access := new Real_Array (1 .. 2 * Multi);
-                        M, E   : Real;
+                        Own     : Rigid_Access := new Pose_Array;
+                        Into    : Real_Access := new Real_Array (1 .. 2 * Multi);
+                        M, E    : Real;
+                        Swapped : Chain_Order (1 .. N);
                      begin
-                        Score_Into (From.Chain, Own.all, Before.all, M, E);
-                        if not Smaller (Here_R (1 .. 2 * Placed), Before (1 .. 2 * Placed)) then
-                           Order := From.Chain;
-                           Here := M;
-                           Here_R.all := Before.all;
-                        end if;
+                        Score_Into (From.Chain, Own.all, Here_R.all, Here, E);
+                        Kept_Told := Here < Real'Last;
+                        for K in 1 .. N - 1 loop
+                           exit when not Kept_Told;
+                           Swapped := From.Chain;
+                           Swapped (K) := From.Chain (K + 1);
+                           Swapped (K + 1) := From.Chain (K);
+                           Score_Into (Swapped, Own.all, Into.all, M, E);
+                           Kept_Told := Smaller (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed));
+                        end loop;
                         Free (Own);
-                        Free (Before);
+                        Free (Into);
                      end;
                   end if;
-                  Order_Is_Told := Here < Real'Last;
-                  if Order_Is_Told then
-                     Tell_All (1, Ways);
+                  if Kept_Told then
+                     Found := True;
+                     Order := From.Chain;
+                     Order_Is_Told := True;
+                     Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along the arm,"
+                                      & Image (Order) & ", told before, is told still against every swap of two joints"
+                                      & " next to each other; no other order is searched");
+                  else
+                     Here := Real'Last;
+                     Search_All (1, Ways);
                      for J in 1 .. Ways loop
-                        if Results (J).Fails then
-                           Order_Is_Told := False;
-                           Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along the arm,"
-                                            & Image (Order) & ", is not told: the order"
-                                            & Image (Results (J).Fail_Order.all) & " leaves residuals of median "
-                                            & Driver.Log.Image (Results (J).Fail_Median, 3) & " px against "
-                                            & Driver.Log.Image (Here, 3)
-                                            & " px, not significantly the larger by their signed ranks");
-                           exit;
+                        if Results (J).Found and then (not Found or else Results (J).Median < Here) then
+                           Found := True;
+                           Order := Results (J).Order.all;
+                           Here := Results (J).Median;
+                           Here_R.all := Results (J).Residuals.all;
                         end if;
                      end loop;
-                     --  An order not told: the joints next to each other along it whose swap leaves residuals not
-                     --  significantly the larger (Smaller) are the ones it lacks the evidence of, and Boot turns them
-                     --  together, a pair at a time. Two joints apart by a swap are told only by what they do turned
-                     --  together: the orders differ in the product of the two turns, not in either alone. The order
-                     --  nearest in residuals was taken for the pairs: s08's was the true order, two swaps away (5 with 1,
-                     --  2 with 6), s10's another (5 4 3 1 2 6 for 5 1 4 3 2 6, where the true order was 1 5 4 3 6 2),
-                     --  and s10 turned c1 with c4 and c1 with c3, its order still not told.
-                     if not Order_Is_Told then
+                     --  An arm fitted before keeps the order it had (From.Chain) unless the least here leaves residuals
+                     --  significantly the smaller (Smaller, the test that tells an order): a later estimate's orders can
+                     --  all score alike, and the least of equals, the first of the sequence, then took the place of the
+                     --  order the fits before had found (a19 on 10-16, at beat 7568: every order's median about 0.52 px
+                     --  where the right one had left 0.17, the order 1 2 3 4 5 6 taken, and the arm's fit fell to focal
+                     --  lengths of 130 and 145 px; s08's best order went back and forth between two, fit after fit).
+                     if Found and then From.Valid and then From.N = N and then From.Chain /= Order then
                         declare
-                           Own     : Rigid_Access := new Pose_Array;
-                           Into    : Real_Access := new Real_Array (1 .. 2 * Multi);
-                           M, E    : Real;
-                           Swapped : Chain_Order (1 .. N);
-                           Said    : Ada.Strings.Unbounded.Unbounded_String;
+                           Own    : Rigid_Access := new Pose_Array;
+                           Before : Real_Access := new Real_Array (1 .. 2 * Multi);
+                           M, E   : Real;
                         begin
-                           for K in 1 .. N - 1 loop
-                              Swapped := Order;
-                              Swapped (K) := Order (K + 1);
-                              Swapped (K + 1) := Order (K);
-                              Score_Into (Swapped, Own.all, Into.all, M, E);
-                              if not Smaller (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed)) then
-                                 Untold.Append (Joint_Pair'(Earlier => Order (K), Later => Order (K + 1)));
-                                 Ada.Strings.Unbounded.Append
-                                   (Said, " " & Driver.Log.Image (Order (K)) & " with " & Driver.Log.Image (Order (K + 1))
-                                          & " (" & Driver.Log.Image (M, 3) & " px)");
-                              end if;
-                           end loop;
+                           Score_Into (From.Chain, Own.all, Before.all, M, E);
+                           if not Smaller (Here_R (1 .. 2 * Placed), Before (1 .. 2 * Placed)) then
+                              Order := From.Chain;
+                              Here := M;
+                              Here_R.all := Before.all;
+                           end if;
                            Free (Own);
-                           Free (Into);
-                           Driver.Log.Line (Driver.Log.Robot, "kinematics: the joints next to each other along"
-                                            & Image (Order) & " whose swap is not told:"
-                                            & (if Untold.Is_Empty then " none"
-                                               else Ada.Strings.Unbounded.To_String (Said)));
+                           Free (Before);
                         end;
+                     end if;
+                     Order_Is_Told := Here < Real'Last;
+                     if Order_Is_Told then
+                        Tell_All (1, Ways);
+                        for J in 1 .. Ways loop
+                           if Results (J).Fails then
+                              Order_Is_Told := False;
+                              Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along the arm,"
+                                               & Image (Order) & ", is not told: the order"
+                                               & Image (Results (J).Fail_Order.all) & " leaves residuals of median "
+                                               & Driver.Log.Image (Results (J).Fail_Median, 3) & " px against "
+                                               & Driver.Log.Image (Here, 3)
+                                               & " px, not significantly the larger by their signed ranks");
+                              exit;
+                           end if;
+                        end loop;
+                        --  An order not told: the joints next to each other along it whose swap leaves residuals not
+                        --  significantly the larger (Smaller) are the ones it lacks the evidence of, and Boot turns them
+                        --  together, a pair at a time. Two joints apart by a swap are told only by what they do turned
+                        --  together: the orders differ in the product of the two turns, not in either alone. The order
+                        --  nearest in residuals was taken for the pairs: s08's was the true order, two swaps away (5 with 1,
+                        --  2 with 6), s10's another (5 4 3 1 2 6 for 5 1 4 3 2 6, where the true order was 1 5 4 3 6 2),
+                        --  and s10 turned c1 with c4 and c1 with c3, its order still not told.
+                        if not Order_Is_Told then
+                           declare
+                              Own     : Rigid_Access := new Pose_Array;
+                              Into    : Real_Access := new Real_Array (1 .. 2 * Multi);
+                              M, E    : Real;
+                              Swapped : Chain_Order (1 .. N);
+                              Said    : Ada.Strings.Unbounded.Unbounded_String;
+                           begin
+                              for K in 1 .. N - 1 loop
+                                 Swapped := Order;
+                                 Swapped (K) := Order (K + 1);
+                                 Swapped (K + 1) := Order (K);
+                                 Score_Into (Swapped, Own.all, Into.all, M, E);
+                                 if not Smaller (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed)) then
+                                    Untold.Append (Joint_Pair'(Earlier => Order (K), Later => Order (K + 1)));
+                                    Ada.Strings.Unbounded.Append
+                                      (Said, " " & Driver.Log.Image (Order (K)) & " with " & Driver.Log.Image (Order (K + 1))
+                                             & " (" & Driver.Log.Image (M, 3) & " px)");
+                                 end if;
+                              end loop;
+                              Free (Own);
+                              Free (Into);
+                              Driver.Log.Line (Driver.Log.Robot, "kinematics: the joints next to each other along"
+                                               & Image (Order) & " whose swap is not told:"
+                                               & (if Untold.Is_Empty then " none"
+                                                  else Ada.Strings.Unbounded.To_String (Said)));
+                           end;
+                        end if;
                      end if;
                   end if;
                   for J in 1 .. Ways loop
