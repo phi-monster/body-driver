@@ -1170,40 +1170,68 @@ package body Driver.Robot.Hand.Lobes.Tests is
              "a lobe with no way to its tip has a region");
    end Tip_Region_Spread;
 
-   --  A jaw that enters from the picture's bottom border, a step of a few pixels from where it was: what changed
-   --  between the two views is two crescents, and the jaw's pixels at the second view, and its tip, are what was
-   --  there less what changed and the changed ones it did not hold (a15 on 10-16: placed between such views the
-   --  lobe was the crescents, which reach no border, and no tip was found at the 19 stops nearest the open end).
+   --  A dark jaw that enters from the picture's bottom border, a step of a few pixels from where it was, over a
+   --  textured table, its shading a few levels different in the second view (the jaw turned: a16 on 10-16): every
+   --  pixel of it changed, and the exclusive or of the changed pixels and its old ones is stripes; its pixels at the
+   --  second view, and its tip, are its old ones less those it left and those it came to, the changes beyond half
+   --  its contrast with the table.
    procedure Moved_Jaw is
+      use Driver.Bytes;
+      use type Driver.Bytes.Offset;
       W : constant := 80;
       H : constant := 60;
       --  A bar from the bottom row up to row Top, columns Left .. Left + 9.
+      function In_Bar (Left, Top, C, R : Natural) return Boolean is (R >= Top and then C in Left .. Left + 9);
       function Bar (Left, Top : Natural) return Mask is
          M : Mask := Create (W, H);
       begin
-         for R in Top .. H - 1 loop
-            for C in Left .. Left + 9 loop
-               Include (M, C, R);
+         for R in 0 .. H - 1 loop
+            for C in 0 .. W - 1 loop
+               if In_Bar (Left, Top, C, R) then
+                  Include (M, C, R);
+               end if;
             end loop;
          end loop;
          return M;
       end Bar;
-      Before  : constant Mask := Bar (30, 20);
-      After   : constant Mask := Bar (34, 22);   --  four columns over, two rows shorter
-      Changed : Mask := Create (W, H);
-      Region  : Mask;
+      function Picture (Left, Top, Shade : Natural) return Driver.Pixels.View is
+         Data : Byte_Array (1 .. 3 * W * H);
+         V    : Driver.Pixels.View := Driver.Pixels.Empty (W, H);
+      begin
+         for R in 0 .. H - 1 loop
+            for C in 0 .. W - 1 loop
+               declare
+                  Level : constant Natural :=
+                    (if In_Bar (Left, Top, C, R) then 20 + Shade + (C + Shade) mod 4 else 120 + (C * 7 + R * 3) mod 20);
+               begin
+                  for K in 1 .. 3 loop
+                     Data (Offset (3 * (R * W + C) + K)) := Byte (Level);
+                  end loop;
+               end;
+            end loop;
+         end loop;
+         Driver.Pixels.Add (V, Driver.Images.Create (W, H, Data));
+         return V;
+      end Picture;
+      Before   : constant Mask := Bar (30, 20);
+      After    : constant Mask := Bar (34, 22);   --  four columns over, two rows shorter
+      Was      : constant Driver.Pixels.View := Picture (30, 20, 0);
+      Now      : constant Driver.Pixels.View := Picture (34, 22, 3);
+      Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Was, Now);
+      Region   : Mask;
       Centre, Tip : Pixel;
-      Known   : Boolean;
-      Off     : Natural := 0;
+      Known    : Boolean;
+      Off, Stripes : Natural := 0;
    begin
       for R in 0 .. H - 1 loop
          for C in 0 .. W - 1 loop
-            if Contains (Before, C, R) /= Contains (After, C, R) then
-               Include (Changed, C, R);
+            if (Contains (Before, C, R) /= Contains (Compared.Changed, C, R)) /= Contains (After, C, R) then
+               Stripes := Stripes + 1;
             end if;
          end loop;
       end loop;
-      Moved_Lobe (Before, Changed, Region, Centre, Tip, Known);
+      Check (Stripes > 0, "the jaw's shading changed none of its pixels: the test shows nothing");
+      Moved_Lobe (Before, Compared.Changed, Was, Now, Region, Centre, Tip, Known);
       Check (Known, "the moved jaw has no tip");
       for R in 0 .. H - 1 loop
          for C in 0 .. W - 1 loop
@@ -1212,15 +1240,16 @@ package body Driver.Robot.Hand.Lobes.Tests is
             end if;
          end loop;
       end loop;
-      Check (Off = 0, "the moved jaw's pixels are off its true ones at" & Off'Image & " pixels");
+      Check (Off = 0, "the moved jaw's pixels are off its true ones at" & Off'Image & " pixels (the exclusive or of "
+             & "every changed pixel is off at" & Stripes'Image & ")");
       Check (Known and then Tip.V < 23.0 and then Tip.U >= 34.0 and then Tip.U <= 44.0,
              "the moved jaw's tip is at" & Tip.U'Image & "," & Tip.V'Image & ", not on its top row (22) over 34 .. 43");
    end Moved_Jaw;
 
    procedure Register is
    begin
-      Driver.Tests.Register ("hand.lobes.moved", "a jaw a few pixels from where it was is not rebuilt from what "
-                             & "changed, or has no tip on its top row", Moved_Jaw'Access);
+      Driver.Tests.Register ("hand.lobes.moved", "a jaw a few pixels from where it was, its shading changed, is not "
+                             & "rebuilt from the changes beyond half its contrast, or has no tip on its top row", Moved_Jaw'Access);
       Driver.Tests.Register ("hand.lobes.cap", "the region at a lobe's tip, its spread from the tip pixel, is not the "
                              & "lobe's own width and reach", Tip_Region_Spread'Access);
       Driver.Tests.Register ("hand.lobes.lit", "a closed finger's lit face, whose brightness the table's at the other "

@@ -162,12 +162,14 @@ package body Driver.Robot.Hand.Lobes is
    procedure Tip_Of (Lobe_Mask, Seeds, Attached : Mask; Tip : out Pixel; Known : out Boolean);
 
    procedure Moved_Lobe
-     (Before  : Mask;
-      Changed : Mask;
-      Region  : out Mask;
-      Centre  : out Pixel;
-      Tip     : out Pixel;
-      Known   : out Boolean)
+     (Before   : Mask;
+      Changed  : Mask;
+      Anchored : Driver.Pixels.View;
+      Now      : Driver.Pixels.View;
+      Region   : out Mask;
+      Centre   : out Pixel;
+      Tip      : out Pixel;
+      Known    : out Boolean)
    is
       W     : constant Natural := Width (Before);
       H     : constant Natural := Height (Before);
@@ -177,16 +179,82 @@ package body Driver.Robot.Hand.Lobes is
       Centre := (U => 0.0, V => 0.0);
       Tip := (U => 0.0, V => 0.0);
       Known := False;
-      if W = 0 or else H = 0 or else Width (Changed) /= W or else Height (Changed) /= H then
+      if W = 0 or else H = 0 or else Width (Changed) /= W or else Height (Changed) /= H
+        or else Driver.Pixels.Width (Anchored) /= W or else Driver.Pixels.Height (Anchored) /= H
+        or else Driver.Pixels.Width (Now) /= W or else Driver.Pixels.Height (Now) /= H
+        or else Driver.Pixels.Frames (Anchored) = 0 or else Driver.Pixels.Frames (Now) = 0
+      then
          return;
       end if;
-      for R in 0 .. H - 1 loop
-         for C in 0 .. W - 1 loop
-            if Contains (Before, C, R) /= Contains (Changed, C, R) then
-               Include (Moved, C, R);
+      declare
+         Was    : Real_Access := new Real_Array (1 .. W * H);
+         Is_Now : Real_Access := new Real_Array (1 .. W * H);
+         Inside, Around : Real_Access;
+         In_Count, Around_Count : Natural := 0;
+         Half_Contrast : Real;
+
+         --  The pixel is not the lobe's and touches one of its pixels.
+         function Touches (C, R : Natural) return Boolean is
+         begin
+            if Contains (Before, C, R) then
+               return False;
             end if;
+            for Dr in -1 .. 1 loop
+               for Dc in -1 .. 1 loop
+                  if C + Dc in 0 .. W - 1 and then R + Dr in 0 .. H - 1 and then Contains (Before, C + Dc, R + Dr) then
+                     return True;
+                  end if;
+               end loop;
+            end loop;
+            return False;
+         end Touches;
+      begin
+         Driver.Pixels.Means (Anchored, Was.all);
+         Driver.Pixels.Means (Now, Is_Now.all);
+         for R in 0 .. H - 1 loop
+            for C in 0 .. W - 1 loop
+               if Contains (Before, C, R) then
+                  In_Count := In_Count + 1;
+               elsif Touches (C, R) then
+                  Around_Count := Around_Count + 1;
+               end if;
+            end loop;
          end loop;
-      end loop;
+         if In_Count = 0 or else Around_Count = 0 then
+            Free (Was);
+            Free (Is_Now);
+            return;
+         end if;
+         Inside := new Real_Array (1 .. In_Count);
+         Around := new Real_Array (1 .. Around_Count);
+         In_Count := 0;
+         Around_Count := 0;
+         for R in 0 .. H - 1 loop
+            for C in 0 .. W - 1 loop
+               if Contains (Before, C, R) then
+                  In_Count := In_Count + 1;
+                  Inside (In_Count) := Was (R * W + C + 1);
+               elsif Touches (C, R) then
+                  Around_Count := Around_Count + 1;
+                  Around (Around_Count) := Was (R * W + C + 1);
+               end if;
+            end loop;
+         end loop;
+         Half_Contrast := abs (Driver.Stats.Median (Inside.all) - Driver.Stats.Median (Around.all)) / 2.0;
+         for R in 0 .. H - 1 loop
+            for C in 0 .. W - 1 loop
+               if Contains (Before, C, R)
+                 /= (Contains (Changed, C, R) and then abs (Is_Now (R * W + C + 1) - Was (R * W + C + 1)) > Half_Contrast)
+               then
+                  Include (Moved, C, R);
+               end if;
+            end loop;
+         end loop;
+         Free (Was);
+         Free (Is_Now);
+         Free (Inside);
+         Free (Around);
+      end;
       declare
          L      : constant Labels := Components (Moved);
          Shared : array (1 .. L.Count) of Natural := [others => 0];

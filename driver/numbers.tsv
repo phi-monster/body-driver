@@ -1181,6 +1181,7 @@ driver-robot-hand-lobes.adb	Dof : constant Natural := Natural (Real'Floor (Mad_E
 driver-robot-hand-lobes.adb	Family : constant Gate := Vector_Gate (2, Noise.Displacement.Degrees_Of_Freedom, Tests => Tests);	2	structure	an image displacement has two components
 driver-robot-hand-lobes.adb	Flips := Flips + Boolean'Pos ((Next (J) > 0.5) /= Label (J));	0.5	math	a pixel is of the kind it is likelier to be of: a share above a half
 driver-robot-hand-lobes.adb	Gaps : Reals_Access := new Reals (1 .. Natural'Max (1, W * H));	1	structure	one entry at the least, whatever the picture
+driver-robot-hand-lobes.adb	Half_Contrast := abs (Driver.Stats.Median (Inside.all) - Driver.Stats.Median (Around.all)) / 2.0;	2.0	math	the midpoint between no change and the whole contrast
 driver-robot-hand-lobes.adb	Kind_A : Real := 1.0;	1.0	statistics	one pseudo-pixel counted in the kind, as in every histogram
 driver-robot-hand-lobes.adb	Label (J) := Next (J) > 0.5;	0.5	math	a pixel is of the kind it is likelier to be of: a share above a half
 driver-robot-hand-lobes.adb	Levels : constant := 256;	256	format	a pixel's brightness in whole levels of eight bits
@@ -1261,6 +1262,8 @@ driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbo
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
@@ -1277,6 +1280,8 @@ driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbo
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
 driver-robot-hand-lobes.adb	function Share (Count : Natural) return Real is (if Averaged then 1.0 / Real (Count) else 1.0);	1.0	math	n pixels placed on their own share a centre's variance by 1/n; placed together by the one edge, they do not
 driver-robot-hand-lobes.adb	function Share (Count : Natural) return Real is (if Averaged then 1.0 / Real (Count) else 1.0);	1.0	math	n pixels placed on their own share a centre's variance by 1/n; placed together by the one edge, they do not
 driver-robot-hand-lobes.adb	if 2 * Right < Seeded then	2	math	fewer than half of the seeds
