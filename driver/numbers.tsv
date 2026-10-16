@@ -1299,6 +1299,8 @@ driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4)	4	format	digits pr
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Raised, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6)	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& "" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6)	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Least, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Limit, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& "" & Driver.Log.Image (Off.Place, 5) & ""	5	format	digits printed in a log line or a message
@@ -1323,8 +1325,6 @@ driver-robot-hand-measure.adb	& Driver.Log.Image (Start, 6) & "" & Driver.Log.Im
 driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (To, 6) & "" & Driver.Log.Image (Reading, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (Bound, 4)	4	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	("" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6) & ""	6	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	("" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (From, 6) & "" & Driver.Log.Image (To, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (Part, 6) & "" & Wait_At_Most'Image	6	format	digits printed in a log line or a message
@@ -1562,6 +1562,7 @@ driver-robot-hand.adb	& "" & Driver.Log.Image (Across (1), 3) & "" & Driver.Log.
 driver-robot-hand.adb	& "" & Driver.Log.Image (Across (1), 3) & "" & Driver.Log.Image (Across (2), 3)	3	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (G.Value, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (Reach.Value * R.Lobes (L).Sights (Which).Spread, 3)	3	format	digits printed in a log line or a message
+driver-robot-hand.adb	& "" & Driver.Log.Image (Readings (Wide + 1), 6)	6	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (Said.Asked, 4) & "" & Driver.Log.Image (Said.Went, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	& "" & Driver.Log.Image (Said.Asked, 4) & "" & Driver.Log.Image (Said.Went, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	& (if F.Count > 0 then "" & Driver.Log.Image (F.Sigma, 3) & ""	3	format	digits printed in a log line or a message
@@ -1577,6 +1578,7 @@ driver-robot-hand.adb	& Driver.Log.Image (Readings (Wide + 1), 6) & ""	6	format	
 driver-robot-hand.adb	& Driver.Log.Image (Readings (Wide), 6) & "" & Image (Tips (Wide + 1)) & ""	6	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Shift.Still, 1) & "" & Driver.Log.Image (Shift.Typical, 1)	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	& Driver.Log.Image (Shift.Still, 1) & "" & Driver.Log.Image (Shift.Typical, 1)	1	format	digits printed in a log line or a message
+driver-robot-hand.adb	& Lobe_No'Image & "" & Driver.Log.Image (Readings (Wide), 6)	6	format	digits printed in a log line or a message
 driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	(2 + Natural (Found (H, Id).Lobes (Lobe).Stops.Length));	2	structure	the two openings beside the stops between them
@@ -1613,6 +1615,7 @@ driver-robot-hand.adb	Tips : Follow.Pixel_Array (1 .. N + 2);	2	structure	the cl
 driver-robot-hand.adb	Upper_F : Real := 1.0;	1.0	structure	the closed end of the closing as a fraction
 driver-robot-hand.adb	Which : Positive := 1;	1	structure	channels are numbered from one; the first stands until the one that moved is found
 driver-robot-hand.adb	Which : constant Opening := (if S = 1 then Open else Closed_Empty);	1	structure	the first setting is the open end
+driver-robot-hand.adb	elsif Wide > 1 then	1	structure	a part of the travel followed: at least two views before the step too wide
 driver-robot-hand.adb	if E.Start < 1 or else not Driver.Robot.Channels.Has_Reading (M, Arm_Is, E.Start - 1)	1	structure	a push needs the reading before it: it began at the second beat or later
 driver-robot-hand.adb	if E.Start < 1 or else not Driver.Robot.Channels.Has_Reading (M, Arm_Is, E.Start - 1)	1	structure	a push needs the reading before it: it began at the second beat or later
 driver-robot-hand.adb	if F <= 0.0 or else F >= 1.0 then	1.0	structure	the closing runs from 0 (open) to 1 (closed)
@@ -1621,9 +1624,10 @@ driver-robot-hand.adb	if Moved /= 1 then	1	structure	the motion is the one chann
 driver-robot-hand.adb	if N = 0 or else Size = 0 or else R < 1 or else Natural (S.Du.Length) < (B + 1) * N	1	structure	a step needs the readings of the beat before it, and beats are counted from zero
 driver-robot-hand.adb	if Pushes = 1 then	1	structure	the first push says whether the way answered
 driver-robot-hand.adb	if S = 1 or else S = Last then	1	structure	the first setting is the open end
+driver-robot-hand.adb	if Wide = 1 then	1	structure	the first step from the open end too wide: no part of the travel followed
 driver-robot-hand.adb	return In_World (H, M, Id, O, (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	return In_World (H, M, Id, O, (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
-driver-robot-hand.adb	return Shapes.Fit (Mount.Pose.Translation, Seen, 1, Seen'Last, Bordered);	1	structure	the tip's sighting, put first for the shape's open anchor
+driver-robot-hand.adb	return Shapes.Fit (Mount.Pose.Translation, Seen, 1, Seen'Last, Bordered, Closed_Is_End => not Partial);	1	structure	the open tip is the first sighting, the shape's first anchor
 driver-robot-hand.adb	return Tip_Along (H, Id, Lobe, 0.0);	0.0	structure	a lobe no channel moves stands at the open end of a closing it does not have
 driver-robot-hand.ads	(Positive'Max (1, (if Longest_Formed > 0 or else Longest_Settling > 0	1	structure	a view is waited for one beat at least: the asking after the push
 driver-robot-hand.ads	Mad_Efficiency : constant := 0.367_5;	0.367_5	statistics	asymptotic efficiency of the median absolute deviation for Gaussian data

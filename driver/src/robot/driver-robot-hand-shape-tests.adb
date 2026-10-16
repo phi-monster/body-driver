@@ -287,7 +287,7 @@ package body Driver.Robot.Hand.Shape.Tests is
    --  The hand's chain on the rig: the matcher's answers, the lobes from them,
    --  each lobe's shape from its moves through the eye's lines of sight, the
    --  tips the presses would give with their noise, and the sizes.
-   function Run (R : Rig; Seed : Integer; Change : Tip_Change := null) return Outcome is
+   function Run (R : Rig; Seed : Integer; Change : Tip_Change := null; Closed_Is_End : Boolean := True) return Outcome is
       Result   : Outcome;
       Forward  : Correspondences_Access;
       Backward : Correspondences_Access;
@@ -357,7 +357,7 @@ package body Driver.Robot.Hand.Shape.Tests is
                      Have (L) := True;
                      Result.Found := Result.Found + 1;
                      Result.Masks (L) := F.Here;
-                     Fits (L) := Fit (R.Eye, Seen, F.Tip_Move_Here, Seen'Last, F.Bordered_Here);
+                     Fits (L) := Fit (R.Eye, Seen, F.Tip_Move_Here, Seen'Last, F.Bordered_Here, Closed_Is_End);
                      Result.Shapes (L) := Fits (L);
                      Result.Tips (L) := [Open => At_Open.Point, Closed_Empty => At_Shut.Point];
                      for O in Opening loop
@@ -627,6 +627,22 @@ package body Driver.Robot.Hand.Shape.Tests is
       end if;
    end Tips_Disagree;
 
+   --  A lobe followed only part of its travel (its tip not seen near the closed end: a jaw swung onto a fixed one,
+   --  a13 on 10-16), its second view where it was last followed: scaled by its open press alone, its sizes come
+   --  back within their sigma, whatever its closed press says (moved 20 sigma off here, which the two presses
+   --  would disagree on).
+   procedure Partway is
+      R : constant Rig := Parallel;
+      O : constant Outcome := Run (R, Seed => 7, Change => Displace_Closed_Tip'Access, Closed_Is_End => False);
+   begin
+      Check (O.Found = 2, "the parallel lobes were not found: " & To_String (O.Problem));
+      if O.Found = 2 then
+         Check (Index (O.Size.Why, "disagree") = 0, "a lobe followed part of its travel is scaled by its closed press: "
+                & To_String (O.Size.Why));
+         Check_Against_Truth ("partway", R, O);
+      end if;
+   end Partway;
+
    procedure Bent_Tip is
       --  The part of lobe 1 beyond 90 mm, its tip with it, lands three
       --  pixels off where the rest of the lobe's motion puts it, down the
@@ -711,6 +727,8 @@ package body Driver.Robot.Hand.Shape.Tests is
                              Unpressed'Access);
       Driver.Tests.Register ("hand.shape.disagree", "a lobe whose two tips disagree on its scale reports sizes",
                              Tips_Disagree'Access);
+      Driver.Tests.Register ("hand.shape.partway", "a lobe followed part of its travel is not measured, or not "
+                             & "within its sigma, or scaled by its closed press", Partway'Access);
       Driver.Tests.Register ("hand.shape.bent", "a lobe whose tip does not move with the rest of it reports sizes",
                              Bent_Tip'Access);
       Driver.Tests.Register ("hand.shape.task", "the shape's fit fails in a task with the default stack",
