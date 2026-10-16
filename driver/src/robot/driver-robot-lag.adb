@@ -315,26 +315,63 @@ package body Driver.Robot.Lag is
                                and then Window (I - 1) = Window (I - Shift - 1)))
             and then (for all J in 1 .. K => Speeds (Varying (J)).Have (I - Shift)));
 
+         --  Every row of a shift, in order: of every beat for a short one, and for a longer one of the beats of each
+         --  window long enough to hold the shift, the shift into it. Every beat scanned for every shift took the lag
+         --  measure 0.7 to 1.1 s of a 3 s estimate at 5900 beats, 1011 shifts up to 508 (b09, 10-17), 0.0 to 0.2 before
+         --  the longer shifts.
+         procedure Each_Row (Motion : Series; Shift : Integer; Visit : not null access procedure (I : Positive)) is
+         begin
+            if abs Shift <= Every then
+               for I in Motion.Value'Range loop
+                  if Row (Motion, Shift, I) then
+                     Visit (I);
+                  end if;
+               end loop;
+               return;
+            end if;
+            declare
+               Lo : Integer := 0;   --  the window's first beat
+            begin
+               for W in 0 .. Natural (Starts.Length) loop
+                  declare
+                     Hi : constant Integer :=
+                       (if W < Natural (Starts.Length) then Starts (Starts.First_Index + W) - 1 else Last);
+                  begin
+                     if Hi - Lo >= abs Shift then
+                        for B in Lo + Integer'Max (0, Shift) .. Hi + Integer'Min (0, Shift) loop
+                           if B + 1 in Motion.Value'Range and then Row (Motion, Shift, B + 1) then
+                              Visit (B + 1);
+                           end if;
+                        end loop;
+                     end if;
+                     Lo := Integer'Max (Lo, Hi + 1);
+                  end;
+               end loop;
+            end;
+         end Each_Row;
+
          --  Whether a shift has rows enough for its fit.
          function Testable (Motion : Series; Shift : Integer) return Boolean is
             Rows : Natural := 0;
+            procedure Count (I : Positive) is
+               pragma Unreferenced (I);
+            begin
+               Rows := Rows + 1;
+            end Count;
          begin
-            for I in Motion.Value'Range loop
-               if Row (Motion, Shift, I) then
-                  Rows := Rows + 1;
-               end if;
-            end loop;
+            Each_Row (Motion, Shift, Count'Access);
             return K > 0 and then Rows > K + 1;
          end Testable;
 
          function Fit_Tail (Motion : Series; Shift : Integer) return Real is
             Rows    : Natural := 0;
+            procedure Count (I : Positive) is
+               pragma Unreferenced (I);
+            begin
+               Rows := Rows + 1;
+            end Count;
          begin
-            for I in Motion.Value'Range loop
-               if Row (Motion, Shift, I) then
-                  Rows := Rows + 1;
-               end if;
-            end loop;
+            Each_Row (Motion, Shift, Count'Access);
             if K = 0 or else Rows <= K + 1 then
                return 1.0;
             end if;
@@ -343,16 +380,16 @@ package body Driver.Robot.Lag is
                Y    : Real_Access := new Real_Array (1 .. Rows);
                R    : Natural := 0;
                Used : Natural;
+               procedure Fill (I : Positive) is
+               begin
+                  R := R + 1;
+                  Y (R) := Motion.Value (I);
+                  for J in 1 .. K loop
+                     X (R, J) := Speeds (Varying (J)).Value (I - Shift);
+                  end loop;
+               end Fill;
             begin
-               for I in Motion.Value'Range loop
-                  if Row (Motion, Shift, I) then
-                     R := R + 1;
-                     Y (R) := Motion.Value (I);
-                     for J in 1 .. K loop
-                        X (R, J) := Speeds (Varying (J)).Value (I - Shift);
-                     end loop;
-                  end if;
-               end loop;
+               Each_Row (Motion, Shift, Fill'Access);
                declare
                   R2 : constant Real := Regression.Explained_Nonnegative (X.all, Y.all, Used);
                begin
