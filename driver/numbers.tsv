@@ -1325,8 +1325,6 @@ driver-robot-hand-measure.adb	& Driver.Log.Image (By, 4) & "" & Driver.Log.Image
 driver-robot-hand-measure.adb	& Driver.Log.Image (By, 4) & "" & Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Descended, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Descended, 4)));	4	format	digits printed in a log line or a message
-driver-robot-hand-measure.adb	& Driver.Log.Image (Driver.Robot.Hand.Aims.Spread (R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	1	structure	a one-element array of directions
-driver-robot-hand-measure.adb	& Driver.Log.Image (Driver.Robot.Hand.Aims.Spread (R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Least, 4) & "")	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place_Sigma, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place_Sigma, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
@@ -1342,6 +1340,8 @@ driver-robot-hand-measure.adb	("" & Driver.Log.Image (Part, 6) & "" & Wait_At_Mo
 driver-robot-hand-measure.adb	("" & Driver.Log.Image (Part, 6));	6	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	(Off, "" & C'Image & "" & Driver.Log.Image (Now (Now'First + C - 1) - Goal (Goal'First + C - 1), 4));	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	(Off, "" & Driver.Log.Image (Cl (Cl'First + C - 1) - Was (Was'First + C - 1), 6));	6	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	(R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	1	structure	a one-element array of directions
+driver-robot-hand-measure.adb	(R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
 driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	the first arm until the closer's pair is read: a closer an eye on an arm watches has its own
 driver-robot-hand-measure.adb	Bound : Real := Ada.Numerics.Pi / 2.0;	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
@@ -1598,6 +1598,7 @@ driver-robot-hand.adb	(Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Funct
 driver-robot-hand.adb	(Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (Over / Step + 1.0, 2.0))));	2.0	math	the base of doubling
 driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Driver.Log.Image (E.Sigma, 4) else "");	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Driver.Log.Image (E.Sigma, 4) else "");	4	format	digits printed in a log line or a message
+driver-robot-hand.adb	(if X'Length = 0 then "" else "" & Driver.Log.Image (X (X'First), 6) & Image (X (X'First + 1 .. X'Last)));	6	format	digits printed in a log line or a message
 driver-robot-hand.adb	Allowed := Allowed + 2 * Natural (Real'Ceiling (Threshold (Scalar_Gate (Seen.Tip.Degrees_Of_Freedom)))) + 1	2	structure	a band is two Z sigma wide, in steps of one sigma
 driver-robot-hand.adb	Allowed := Doublings (Room, Least) + 2;	2	structure	the step cut to the room, and the one that finds none left
 driver-robot-hand.adb	Append (Said_By, "" & (if Said.Point = 1 then "" else ""	1	structure	the first point of the hand is the tool's origin

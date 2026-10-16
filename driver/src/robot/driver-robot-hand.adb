@@ -1379,8 +1379,21 @@ package body Driver.Robot.Hand is
                           & "; the fit of the presses: " & Driver.Robot.Hand.Tips.Fit_Account (R.Book));
          Size_Up (R, Id);
       else
-         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image
-                          & ": a press with the closer at neither measured opening is not used");
+         --  With the readings it was judged by: where the closer stood at the press and before it, the openings as
+         --  measured, and the noise the test allows (a27 on 10-16: two presses at open dropped so, which a replay
+         --  cannot show, the presses being the boot's and not the recording's).
+         declare
+            Sigma : constant Real_Array := Closer_Sigma (M, R.Group);
+            function Image (X : Real_Array) return String is
+              (if X'Length = 0 then "" else " " & Driver.Log.Image (X (X'First), 6) & Image (X (X'First + 1 .. X'Last)));
+         begin
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image
+                             & ": a press with the closer at neither measured opening is not used: the closer read"
+                             & Image (Press.Closer.Element) & " at the press and"
+                             & (if Press.Before.Is_Empty then " nothing" else Image (Press.Before.Element))
+                             & " before it; open" & Image (R.Readings (Open).Element) & ", closed"
+                             & Image (R.Readings (Closed_Empty).Element) & ", the noise" & Image (Sigma));
+         end;
       end if;
    end Watch;
 
