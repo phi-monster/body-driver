@@ -998,7 +998,7 @@ driver-robot-body_file.ads	Kinematics_Method : constant := 9;	9	structure	the ki
 driver-robot-body_file.ads	Lag_Method : constant := 3;	3	format	the third version of this method: every eye's longest settling after a move (settling) beside its lag; a file of the second version is measured again
 driver-robot-body_file.ads	Lockin_Method : constant := 5;	5	format	the fifth version of this method; the body file records per eye the count above which a beat's moved cells are motion (Rest_Count_Level)
 driver-robot-body_file.ads	Noise_Method : constant := 2;	2	format	the second version of this method: each channel's creep (drift) beside its noise; a file of the first version is measured again
-driver-robot-body_file.ads	Steps_Method : constant := 4;	4	format	the fourth version of this method; the body file records per channel the most a positioning stood off its target (Steps.Landed_Off) besides the least ask a push moved it for
+driver-robot-body_file.ads	Steps_Method : constant := 3;	3	format	the third version of this method; the body file records per channel the least ask a push moved it for (Steps.Executed_Least)
 driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log names
 driver-robot-boot.adb	& "" & Driver.Log.Image (Pulls (G, E), 2));	2	format	digits printed in a log line or a message
@@ -2695,7 +2695,7 @@ driver-robot-kinematics.adb	or else Natural (F.Depth_Gains.Length) /= Q * T or e
 driver-robot-kinematics.adb	or else Natural (F.Table_Response.Length) /= 3 * T	3	structure	three coordinates per point; three terms for the plane's own error
 driver-robot-kinematics.adb	or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) /= 36	36	structure	a pose's covariance, six terms by six, row by row
 driver-robot-kinematics.adb	or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) < 36	36	structure	a six by six covariance, row by row
-driver-robot-kinematics.adb	return Real'Max (Step, 2.0 * Band);	2.0	math	two landings of one asked pose, each within the band of it
+driver-robot-kinematics.adb	return (if Band < Real'Last then Real'Max (Step, 2.0 * Band) else Step);	2.0	math	two landings of one asked pose, each within the dead band of it
 driver-robot-kinematics.adb	return Square_Root (Fixed_Angle_Sigma (M, E) ** 2 + Var / 2.0);	2.0	math	half the trace: the variance per axis across a line
 driver-robot-kinematics.adb	then "" & Driver.Log.Image (Report.Linear_To, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	then "" & Pm (Report.L.K1, Sd (5), 4) & "" & Pm (Report.L.K2, Sd (6), 4)	4	structure	the index of a term of the covariance
@@ -2814,7 +2814,6 @@ driver-robot-motion.adb	Listed : constant Channel_Refs (1 .. 1) := [1 => Ref];	1
 driver-robot-motion.adb	Moving : Flag_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	Noise : Real_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	Now : Real_Array (1 .. 1);	1	structure	one channel
-driver-robot-motion.adb	Off.Append (0.0);	0.0	structure	no landing off its target known yet
 driver-robot-motion.adb	Offset : constant Real := Amount * 2.0 ** (Report.Levels (Way) - 1);	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
 driver-robot-motion.adb	Offsets : constant Real_Array (1 .. 1) := [1 => Signs (Way) * Offset];	1	structure	one channel
 driver-robot-motion.adb	Offsets : constant Real_Array (1 .. 1) := [1 => Signs (Way) * Offset];	1	structure	one channel

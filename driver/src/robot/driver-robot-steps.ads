@@ -93,10 +93,6 @@ private package Driver.Robot.Steps is
    --  execute asks that large, and nothing is known of smaller ones (a servo stands still for an ask within its
    --  dead band: the kiwi's joints, asked 2.4 to 3.8 units, R5 on 10-14). Real'Last until a push moved it.
 
-   function Landed_Off (M : Model; G : Group_Id; Channel : Positive) return Real;
-   --  The most a positioning of the group has stood off its target in the channel where it came to rest, its
-   --  sendings again done (Group_Stream.Landed_Off), in reading units; 0 until one has.
-
    function Latest (M : Model; G : Group_Id) return Episode
      with Pre => Episodes (M, G) > 0;
 

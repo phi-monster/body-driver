@@ -634,46 +634,6 @@ package body Driver.Robot.Tests is
       Check (Role (M, 3) = Closer, "once the eye decided nothing moved, the group is " & Role (M, 3)'Image);
    end Undecided_Eye_Leaves_Group_Unclassified;
 
-   --  The turn the fit counts a joint turned from is no nearer than two landings of one asked pose can differ:
-   --  twice the most a positioning stood off its target, however small a turn the joint is known to execute. A
-   --  sending again of a landing far off its target, asked a little, moves the joint: s11 (servo seed 3, 10-16)
-   --  counted joint 2 turned from 6.43 units, twice such a sending's 3.2, under its landings of 8 and 12 off the
-   --  reference in joint 5's keyframes, which then were none of joint 5's own.
-   procedure Counted_Turn_Covers_Landings is
-      M : Model;
-      G : Group_Id;
-   begin
-      Exercise_Rig (M);
-      G := Arm_Group (M, 1);
-      declare
-         S     : Group_Stream renames M.Groups (G);
-         Swept : constant Real := Kinematics.Counted_Turn (M, 1, 2);
-      begin
-         Check (Swept > 0.0, "arm 1's second joint counts no turn after its sweep");
-         while Natural (S.Executed.Length) < S.Size loop
-            S.Executed.Append (Real'Last);
-         end loop;
-         while Natural (S.Landed_Off.Length) < S.Size loop
-            S.Landed_Off.Append (0.0);
-         end loop;
-         S.Executed.Replace_Element (1, Swept / 4.0);
-         S.Landed_Off.Replace_Element (1, 0.0);
-      end;
-      declare
-         S     : Group_Stream renames M.Groups (G);
-         Plain : constant Real := Kinematics.Counted_Turn (M, 1, 2);
-      begin
-         S.Landed_Off.Replace_Element (1, Plain);
-         Check (Kinematics.Counted_Turn (M, 1, 2) >= 2.0 * Plain,
-                "a joint that landed" & Plain'Image & " off its target is counted turned from"
-                & Kinematics.Counted_Turn (M, 1, 2)'Image);
-         S.Landed_Off.Replace_Element (1, 0.0);
-         Check (Kinematics.Counted_Turn (M, 1, 2) = Plain,
-                "with no landing off its target, the counted turn moved from" & Plain'Image & " to"
-                & Kinematics.Counted_Turn (M, 1, 2)'Image);
-      end;
-   end Counted_Turn_Covers_Landings;
-
    --  An arm whose own eye the lock-in calls undecided keeps that eye while its keyframes tell that the eye's view
    --  moves with it (Arm_Evidence.Shift_Seen): the aligner measures over the whole picture what the lock-in's flow
    --  measures a beat at a time (f15o on 10-15: the lock-in, regressing the sweep's and the hand's beats again,
@@ -8506,8 +8466,6 @@ package body Driver.Robot.Tests is
                              & "the arm stopped gives no keyframe", Boot_With_Settling_Views'Access);
       Driver.Tests.Register ("robot.boot.keeps", "a boot that fails after recognizing the body leaves no body file to "
                              & "reload it from", Boot_Keeps_What_It_Measured'Access);
-      Driver.Tests.Register ("robot.sweep.landed", "a joint is counted turned from less than twice what its positionings "
-                             & "landed off their targets", Counted_Turn_Covers_Landings'Access);
       Driver.Tests.Register ("robot.sweep.untold", "the fit names joints next to each other whose swap it tells, or "
                              & "misses two never turned together", Untold_Neighbours'Access);
       Driver.Tests.Register ("robot.sweep.twin", "an arm at rest takes no still twin of its reference, or its sweep "

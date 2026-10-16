@@ -148,9 +148,6 @@ package body Driver.Robot.Steps is
    function Executed_Least (M : Model; G : Group_Id; Channel : Positive) return Real is
      (if Channel <= Natural (M.Groups (G).Executed.Length) then M.Groups (G).Executed (Channel - 1) else Real'Last);
 
-   function Landed_Off (M : Model; G : Group_Id; Channel : Positive) return Real is
-     (if Channel <= Natural (M.Groups (G).Landed_Off.Length) then M.Groups (G).Landed_Off (Channel - 1) else 0.0);
-
    procedure Start (M : in out Model; G : Group_Id; Beat : Natural) is
       S : Group_Stream renames M.Groups (G);
       E : Episode;

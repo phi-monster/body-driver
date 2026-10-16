@@ -18,7 +18,7 @@ private package Driver.Robot.Body_File is
    Noise_Method      : constant := 2;
    Travel_Method     : constant := 1;
    Ends_Method       : constant := 2;
-   Steps_Method      : constant := 4;
+   Steps_Method      : constant := 3;
    Lag_Method        : constant := 3;
    Lockin_Method     : constant := 5;
    Graph_Method      : constant := 2;
