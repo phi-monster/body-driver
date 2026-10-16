@@ -348,6 +348,15 @@ package body Driver.Robot.Motion is
                      Farthest : Real := Real'Last;
                      Stopped  : Boolean := False;   --  the last sending ended against something: no sending again
                      Errors : Ada.Strings.Unbounded.Unbounded_String;
+                     --  The arm whose joints the group are, if any: a landing of an arm's joint off its target by
+                     --  less than the turn the fit counts (Kinematics.Counted_Turn) is no turn of it to the fit, which
+                     --  takes a keyframe's joints from their readings and counts a joint as turned only from that turn:
+                     --  such a landing changes nothing the sweep's keyframes are for, and is not sent again. The eye's
+                     --  visible step alone let it be where the lock-in tells sub-pixel motion: a25 (10-16, a simulated
+                     --  arm in noise-free pictures) sent 172 landings again in its second pass, 663 of its 2186 beats,
+                     --  each error under a twentieth of a unit, where the matcher's steps were 0.04 to 0.28 units and
+                     --  the lock-in's 0.001 to 0.009.
+                     Arm : Arm_Id'Base := 0;
                      --  A landing the body cannot tell from its target is where it was sent: its error as a change
                      --  of the readings is no motion by the body's one test (Channels.Visible), an eye seeing none
                      --  of it. Judged against the readings' noise alone, a simulator's arm that repeats its readings
@@ -361,6 +370,11 @@ package body Driver.Robot.Motion is
                                   [for C in 1 .. Target'Length =>
                                      Target (Target'First + C - 1) - Reading (Reading'First + C - 1)]);
                   begin
+                     for Other in 1 .. Arm_Count (M) loop
+                        if Natural (Arm_Group (M, Arm_Id (Other))) = G then
+                           Arm := Arm_Id (Other);
+                        end if;
+                     end loop;
                      if Steps.Episodes (M, Group_Id (G)) > 0 then
                         declare
                            E : constant Episode := Steps.Latest (M, Group_Id (G));
@@ -385,10 +399,12 @@ package body Driver.Robot.Motion is
                            --  sent again two to four times each, 340 times in a boot whose sweep then held still
                            --  for no keyframe (R6's eighth start, 10-14).
                            Least : constant Real := Steps.Executed_Least (M, Group_Id (G), C);
+                           Counted : constant Real := (if Arm > 0 then Kinematics.Counted_Turn (M, Arm, C) else 0.0);
                         begin
                            if not Stopped and then Noise < Real'Last and then Noise > 0.0
                              and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))
                              and then (Least = Real'Last or else abs Error >= Least)
+                             and then abs Error >= Counted
                            then
                               Off := True;
                               Largest := Real'Max (Largest, abs Error / (Noise * Sqrt (2.0)));
