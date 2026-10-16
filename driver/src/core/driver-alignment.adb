@@ -226,6 +226,16 @@ package body Driver.Alignment is
    is
       X : constant Real := U - 0.5;
       Y : constant Real := V - 0.5;
+
+      --  The whole part of a place at or beyond 1: the conversion to an integer rounds to the nearest, which is
+      --  the whole part or one above it. Real'Floor calls the run-time's software attribute (System.Fat_Lflt), and
+      --  the spline is sampled at every pixel of every pass: 1532 of the 25366 working samples of s07's estimate
+      --  at beat 2842 (replayed, 10-16) were in that call.
+      function Whole (P : Real) return Natural is
+         N : constant Natural := Natural (P);
+      begin
+         return (if Real (N) > P then N - 1 else N);
+      end Whole;
    begin
       Value := 0.0;
       Dx := 0.0;
@@ -235,8 +245,8 @@ package body Driver.Alignment is
          return;
       end if;
       declare
-         I  : constant Natural := Natural (Real'Floor (X));
-         J  : constant Natural := Natural (Real'Floor (Y));
+         I  : constant Natural := Whole (X);
+         J  : constant Natural := Whole (Y);
          Fx : constant Real := X - Real (I);
          Fy : constant Real := Y - Real (J);
          type Taps is array (0 .. 3) of Real;
