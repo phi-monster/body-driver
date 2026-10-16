@@ -275,8 +275,10 @@ package body Driver.Robot.Hand.Tests is
       --  table when the steps pass the height of the eye above it. The eye is
       --  0.05 above the tip, the tip starts 0.2 above the table, the tool's
       --  Least is 0.001 and the eye's height is known to 0.001:
-      --  (a) no step takes the eye nearer the table than Z sigma of its height,
-      --      and the descent ends, Spent, when less than Least is left;
+      --  (a) no step takes the eye further than Z sigma of its height below it
+      --      (as far as the table can be: the owner's most aggressive option,
+      --      10-05, and h22 and h23 on 10-17, every press stopped short of the
+      --      table), and the descent ends, Spent, when less than Least is left;
       --  (b) the steps double up to the last, cut to what is left: the cut
       --      step is counted, and there is one;
       --  (c) with the eye's height unknown nothing caps the steps, which go on
@@ -313,8 +315,8 @@ package body Driver.Robot.Hand.Tests is
       Descend (Above'Access, Least, Lower'Access, Back'Access, Steps);
       Check (Steps.Spent, "the eye went on lowering past the table: " & Pushes'Image & " pushes, the eye at"
              & Real'Image (Lowest));
-      Check (Lowest >= Z * Sigma - 1.0e-12, "a step took the eye to" & Real'Image (Lowest) & ", nearer the table than Z sigma");
-      Check (Lowest - Z * Sigma < Least, "the descent ended with" & Real'Image (Lowest - Z * Sigma) & " of the eye's room unused");
+      Check (Lowest >= -Z * Sigma - 1.0e-12, "a step took the eye to" & Real'Image (Lowest) & ", past where the table can be");
+      Check (Lowest + Z * Sigma < Least, "the descent ended with" & Real'Image (Lowest + Z * Sigma) & " of the eye's room unused");
       Check (Steps.Capped = 1 and then Total (Steps) = Pushes and then Steps.Blind = Total (Steps),
              "the last step was not the one cut to the room left: capped" & Steps.Capped'Image & " of" & Pushes'Image);
       Known_Eye := False;
@@ -835,7 +837,7 @@ package body Driver.Robot.Hand.Tests is
                              Way_Goes_On_Below_A_Pixel'Access);
       Driver.Tests.Register ("hand.measure.press", "a press overshoots the surface by more than the least push, or is "
                              & "not made from where its descent began", Press_Overshoot'Access);
-      Driver.Tests.Register ("hand.measure.room", "a step lowers the eye below the table its arm's own eye saw",
+      Driver.Tests.Register ("hand.measure.room", "a step lowers the eye past as far as the table its arm's own eye saw can be",
                              Eye_Room_Caps_The_Steps'Access);
       Driver.Tests.Register ("hand.measure.stall", "a hand the arm follows and that stops going down is pushed on to the "
                              & "end of its room, or is not a press", Stalled_Descent'Access);

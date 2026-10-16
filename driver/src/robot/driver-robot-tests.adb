@@ -5241,7 +5241,7 @@ package body Driver.Robot.Tests is
       begin
          O.Readings.Append (Start);
          declare
-            P : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Fit.Eye_At (Truth, Along (Truth), Goal_Q), Position_Only => False));
+            P : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Fit.Eye_At (Truth, Along (Truth), Goal_Q), Position_Only => False, Free_About => <>));
          begin
             Check (Motion.Status (P) = Motion.Planned, "a goal a period away is not planned: " & Motion.Why (P));
             if Motion.Status (P) = Motion.Planned then
@@ -5348,7 +5348,7 @@ package body Driver.Robot.Tests is
       Line := Unit (Goal.Translation - From.Translation);
       declare
          Sigma : constant Real := Driver.Robot.Kinematics.Angle_Sigma (M, 1);
-         Free  : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Goal, Position_Only => False));
+         Free  : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Goal, Position_Only => False, Free_About => <>));
          Bow   : Real;
       begin
          Check (Motion.Status (Free) = Motion.Planned, "a pose the arm can reach is not planned: " & Motion.Why (Free));
@@ -5359,7 +5359,7 @@ package body Driver.Robot.Tests is
          declare
             Asked : constant Real := Bow / 8.0;
             Held  : constant Motion.Plan := Motion.Plan_Reach_In_Arm
-              (M, 1, O, (Pose => Goal, Position_Only => False), Clearance => Asked);
+              (M, 1, O, (Pose => Goal, Position_Only => False, Free_About => <>), Clearance => Asked);
          begin
             Check (Motion.Status (Held) = Motion.Planned, "a pose the arm can reach is not planned with a clearance: "
                    & Motion.Why (Held));
@@ -5384,7 +5384,7 @@ package body Driver.Robot.Tests is
          --  search, hundreds of times over).
          declare
             Far    : constant Rigid := (Rotation => Goal.Rotation, Translation => From.Translation + 100.0 * Line);
-            Lost   : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Far, Position_Only => False));
+            Lost   : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Far, Position_Only => False, Free_About => <>));
             Levels : constant Natural :=
               Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (100.0 / Sigma)
                                      / Ada.Numerics.Long_Elementary_Functions.Log (2.0)));
@@ -5484,7 +5484,7 @@ package body Driver.Robot.Tests is
                declare
                   Goal : constant Rigid := Fit.Eye_At (Truth, Along (Truth), Q);
                   Held : constant Motion.Plan :=
-                    Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Goal, Position_Only => True), Clearance => Asked);
+                    Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Goal, Position_Only => True, Free_About => <>), Clearance => Asked);
                begin
                   if Motion.Status (Held) = Motion.Planned and then abs (Goal.Translation - From.Translation) > Sigma then
                      declare
@@ -6736,7 +6736,8 @@ package body Driver.Robot.Tests is
          Goal   : constant Motion.Pose_Goal :=
            (Pose          => (Rotation    => Tool.Pose.Rotation * Driver.Numerics.Exp ([0.0, 0.02, 0.0]),
                               Translation => Tool.Pose.Translation + [0.02, -0.01, 0.0]),
-            Position_Only => False);
+            Position_Only => False,
+            Free_About    => <>);
          Plan   : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 2, O, Goal);
          True_N : Vec3;
          True_O : Real;
@@ -6791,7 +6792,7 @@ package body Driver.Robot.Tests is
                       and then Motion.Last_Readings (Unplaced) = Motion.Last_Readings (Plan),
                       "a reach in the arm's own frame does not plan, or plans elsewhere, with the arm not placed");
                Check (Tool_In_Arm (M, 2, O) = Tool, "the tool in its own frame changes with the arm not placed");
-               Check (Motion.Status (Motion.Plan_Reach (M, 2, O, (Pose => World.Pose, Position_Only => False)))
+               Check (Motion.Status (Motion.Plan_Reach (M, 2, O, (Pose => World.Pose, Position_Only => False, Free_About => <>)))
                       = Motion.Unmeasured, "a reach given in the world plans for an arm not placed in it");
             end;
          end if;
@@ -6818,7 +6819,7 @@ package body Driver.Robot.Tests is
       Want.Readings.Append (Q_Goal);
       declare
          Goal : constant Rigid := Tool_Pose (M, 2, Want).Pose;
-         P    : constant Motion.Plan := Motion.Plan_Reach (M, 2, O, (Pose => Goal, Position_Only => False));
+         P    : constant Motion.Plan := Motion.Plan_Reach (M, 2, O, (Pose => Goal, Position_Only => False, Free_About => <>));
       begin
          Check (Motion.Status (P) = Motion.Planned, "a reach given in the world for the placed arm is not planned: "
                 & Motion.Why (P));
@@ -7178,7 +7179,7 @@ package body Driver.Robot.Tests is
       O.Readings.Append (Real_Array'(1 .. 6 => 0.0));
       declare
          Goal : constant Driver.Robot.Motion.Pose_Goal :=
-           (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q_Goal), Position_Only => False);
+           (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q_Goal), Position_Only => False, Free_About => <>);
          use type Driver.Robot.Motion.Plan_Status;
       begin
          Check (Driver.Robot.Motion.Status (Driver.Robot.Motion.Plan_Reach (Back, 1, O, Goal))
@@ -7342,7 +7343,7 @@ package body Driver.Robot.Tests is
       declare
          use type Driver.Robot.Motion.Plan_Status;
          Goal : constant Driver.Robot.Motion.Pose_Goal :=
-           (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Beyond_Goal), Position_Only => False);
+           (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Beyond_Goal), Position_Only => False, Free_About => <>);
          P    : constant Driver.Robot.Motion.Plan := Driver.Robot.Motion.Plan_Reach (M, 1, O, Goal);
          Done : Boolean := False with Atomic;
          Got  : Driver.Robot.Motion.Step_Report;
@@ -8231,7 +8232,7 @@ package body Driver.Robot.Tests is
             S.Has_Stopped_Low.Append (False);
          end loop;
          return Driver.Robot.Motion.Plan_Reach
-           (M, 1, O, (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Beyond_Goal), Position_Only => False));
+           (M, 1, O, (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Beyond_Goal), Position_Only => False, Free_About => <>));
       end Planned_With;
       use type Driver.Robot.Motion.Plan_Status;
    begin

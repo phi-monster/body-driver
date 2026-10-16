@@ -87,7 +87,7 @@ package body Action_Rig is
       Must_Be_Inside (P, "a reach");
       declare
          Plan : constant Motion.Plan :=
-           Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only),
+           Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only, Free_About => <>),
                               Clearance => Goal.Clearance, Lever => Goal.Lever);
          Answer : constant Plants.Reach_Answer :=
            (case Motion.Status (Plan) is
@@ -137,7 +137,7 @@ package body Action_Rig is
             begin
                P.Last := Driver.Beats.Latest.all;
                Plan := Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last,
-                                          (Pose => G.Tool, Position_Only => G.Position_Only),
+                                          (Pose => G.Tool, Position_Only => G.Position_Only, Free_About => <>),
                                           Clearance => G.Clearance, Lever => G.Lever);
             end Planning;
             procedure Arrived is

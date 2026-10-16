@@ -1345,6 +1345,7 @@ driver-robot-hand-measure.adb	(R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_
 driver-robot-hand-measure.adb	(R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
 driver-robot-hand-measure.adb	Arm : Arm_Id := 1;	1	structure	the first arm until the closer's pair is read: a closer an eye on an arm watches has its own
+driver-robot-hand-measure.adb	Arrived := not Significant (Reading - To, Sqrt (2.0) * Closer_Sigma (M, G) (C));	2.0	statistics	the difference of two readings has twice the variance of one
 driver-robot-hand-measure.adb	Bound : Real := Ada.Numerics.Pi / 2.0;	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
 driver-robot-hand-measure.adb	By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);	2.0	numerics	doubling search: the raise that shows is reached within a factor two in a number of raises logarithmic in it
 driver-robot-hand-measure.adb	By := (if First then Driver.Robot.Hand.Pressing.Least_Push (M, Arm, O) else 2.0 * By);	2.0	structure	each raise twice the one before, so that the smallest raise that frees the closer is found within a doubling of it
@@ -1377,6 +1378,7 @@ driver-robot-hand-pressing.adb	Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real
 driver-robot-hand-pressing.adb	Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);	2	structure	the sequence alternates, so the step K is the turn of (K + 1) over 2 steps of an eighth of a turn, and the parity of K is its sign
 driver-robot-hand-pressing.adb	Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);	4.0	math	an eighth of a turn is a quarter of a half turn: the pose of the hand about the way down is tried at the eight multiples of it
 driver-robot-hand-pressing.adb	for K in 0 .. 7 loop	7	structure	the eight poses of the circle the hand can be turned through about the way down, at multiples of an eighth of a turn from the least rotation
+driver-robot-hand-pressing.adb	then Real'Remainder (Yaw + Extra, 2.0 * Ada.Numerics.Pi) else Yaw);	2.0	math	a whole turn
 driver-robot-hand-selfsight.adb	Kept := Kept + Boolean'Pos (S.Poses >= 2);	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-selfsight.adb	Poses => 1,	1	structure	a setting is first seen from one pose
 driver-robot-hand-selfsight.adb	Sqrt (2.0) * Noise (Noise'First + I - A'First))));	2.0	math	each reading carries its noise, so their difference carries it twice over
@@ -1597,6 +1599,8 @@ driver-robot-hand.adb	(2 + Natural (Found (H, Id).Lobes (Lobe).Stops.Length));	2
 driver-robot-hand.adb	(Lobe_Record'(Channel => 1,	1	structure	a hand given to the tests has its lobes on the closer first channel
 driver-robot-hand.adb	(Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (Over / Step + 1.0, 2.0))));	1.0	math	doubling from Step covers Over in n steps when Step times two to the n less one reaches it
 driver-robot-hand.adb	(Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (Over / Step + 1.0, 2.0))));	2.0	math	the base of doubling
+driver-robot-hand.adb	(Result (C), 2.0 * Driver.Robot.Steps.Free_Landing (M, G) / (Driver.Conventions.Z * Sqrt (2.0)));	2.0	math	two landings of one asked setting, each within the free landing of it, differ by up to twice that
+driver-robot-hand.adb	(Result (C), 2.0 * Driver.Robot.Steps.Free_Landing (M, G) / (Driver.Conventions.Z * Sqrt (2.0)));	2.0	statistics	the difference of two readings has twice the variance of one
 driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Driver.Log.Image (E.Sigma, 4) else "");	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	(if Known (E) then Driver.Log.Image (E.Value, 4) & "" & Driver.Log.Image (E.Sigma, 4) else "");	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	(if X'Length = 0 then "" else "" & Driver.Log.Image (X (X'First), 6) & Image (X (X'First + 1 .. X'Last)));	6	format	digits printed in a log line or a message
@@ -1622,8 +1626,6 @@ driver-robot-hand.adb	P.Motion_U.Append (0.0, Ada.Containers.Count_Type (Size * 
 driver-robot-hand.adb	P.Motion_V.Append (0.0, Ada.Containers.Count_Type (Size * N));	0.0	math	a tally begins at nothing
 driver-robot-hand.adb	Past := Real'Max (2.0 * Past, Real'Max (G.Sigma, Least));	2.0	numerics	doubling steps past the band
 driver-robot-hand.adb	Readings : Real_Array (1 .. N + 2);	2	structure	the closer's two ends besides its stops
-driver-robot-hand.adb	Result (C) := Real'Max (Result (C), 2.0 * Least / (Driver.Conventions.Z * Sqrt (2.0)));	2.0	math	two landings of one asked setting differ by up to twice the least ask the body executes
-driver-robot-hand.adb	Result (C) := Real'Max (Result (C), 2.0 * Least / (Driver.Conventions.Z * Sqrt (2.0)));	2.0	statistics	the difference of two readings has twice the variance of one
 driver-robot-hand.adb	Result (C) := Real'Max (Result (C), Step.Value / (Driver.Conventions.Z * Sqrt (2.0)));	2.0	statistics	the difference of two readings carries the sigma of each: the step is Z times the square root of two of it
 driver-robot-hand.adb	Sqrt (2.0) * Sigma (C)));	2.0	statistics	the difference of two readings carries the sigma of each: the square root of two times one
 driver-robot-hand.adb	Tips : Follow.Pixel_Array (1 .. N + 2);	2	structure	the closer's two ends besides its stops
@@ -1757,6 +1759,7 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Exp (Low), 1) & "" & Dr
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (F_Least, 3) & "" & Driver.Log.Image (F_Most, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (F_Least, 3) & "" & Driver.Log.Image (F_Most, 1)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Focal, 1) & ""	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Here, 3) & "");	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Lens0.Fx, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (M, 3) & "");	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Warm_Far * 180.0 / Ada.Numerics.Pi, 2)	180.0	format	radians to degrees for the log
@@ -2648,7 +2651,7 @@ driver-robot-kinematics.adb	Fu : constant Regression.Fit := Regression.Solve (X,
 driver-robot-kinematics.adb	Fv : constant Regression.Fit := Regression.Solve (X, Yv, 1.0);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
 driver-robot-kinematics.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Q (Q'First + K - 1));	1.0	numerics	a finite-difference step scales with the reading, and with one where the reading is smaller than one, so that it stays above the reading's own rounding
 driver-robot-kinematics.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Q (Q'First + K - 1));	1.0	numerics	forward differences at the square root of the float's resolution relative to each reading's size
-driver-robot-kinematics.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (K));	1.0	numerics	the scale floor of a finite difference
+driver-robot-kinematics.adb	Hk : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (K));	1.0	numerics	the scale floor of a finite difference
 driver-robot-kinematics.adb	J (3 + A) := [(Up.U - Down.U) / (2.0 * Step * Scale),	2.0	math	a central difference over a step each way is the difference over twice the step
 driver-robot-kinematics.adb	J (3 + A) := [(Up.U - Down.U) / (2.0 * Step * Scale),	3	structure	the three derivatives by the eye's turn come before those by its place
 driver-robot-kinematics.adb	J (7) := [(Up.U - Down.U) / (2.0 * Step), (Up.V - Down.V) / (2.0 * Step)];	2.0	math	a central difference over a step each way is the difference over twice the step
@@ -2669,7 +2672,10 @@ driver-robot-kinematics.adb	Place (P, Q) := C (Fit.Lens_Terms + 3 + P, Fit.Lens_
 driver-robot-kinematics.adb	Place (P, Q) := C (Fit.Lens_Terms + 3 + P, Fit.Lens_Terms + 3 + Q);	3	structure	the turn's three terms follow the lens's
 driver-robot-kinematics.adb	Poses : constant Fixed.Pose_Array (1 .. 1) := [1 => Driver.Numerics.Identity];	1	structure	one pose: the base, where the points stand still
 driver-robot-kinematics.adb	Poses : constant Fixed.Pose_Array (1 .. 1) := [1 => Driver.Numerics.Identity];	1	structure	one pose: the base, where the points stand still
-driver-robot-kinematics.adb	R (1 .. 3) := D;	3	structure	three rows of position, three of turn
+driver-robot-kinematics.adb	R (1 .. 3) := T.Translation - Goal.Translation;	3	structure	three rows of position, three of turn
+driver-robot-kinematics.adb	R (4 .. 6) := (1.0 / (Real'(abs Is_At) * Real'(abs Want))) * Driver.Numerics.Cross (Is_At, Want);	1.0	math	the cross product over the two lengths: the sine of the angle between unit directions
+driver-robot-kinematics.adb	R (4 .. 6) := (1.0 / (Real'(abs Is_At) * Real'(abs Want))) * Driver.Numerics.Cross (Is_At, Want);	4	structure	three rows of position, three of turn
+driver-robot-kinematics.adb	R (4 .. 6) := (1.0 / (Real'(abs Is_At) * Real'(abs Want))) * Driver.Numerics.Cross (Is_At, Want);	6	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	R (4 .. 6) := Driver.Numerics.Log (Transpose (T.Rotation) * Goal.Rotation);	4	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	R (4 .. 6) := Driver.Numerics.Log (Transpose (T.Rotation) * Goal.Rotation);	6	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	R.Aligned := 1;	1	structure	the reference is the first keyframe and is aligned with itself
@@ -2972,6 +2978,7 @@ driver-robot-steps.adb	and then Driver.Uncertain.Significant (Along, Sqrt (2.0) 
 driver-robot-steps.adb	and then Driver.Uncertain.Significant (Gone, Noise * Sqrt (2.0), Channels.Noise_Freedom (M, G, C))	2.0	statistics	the noise of a difference of two readings is sqrt 2 times one reading's
 driver-robot-steps.adb	else Beat - Natural'Min (Beat, Natural'Max (1, S.Episodes.Last_Element.Start) - 1));	1	structure	the beat before the push's start, where its readings were read
 driver-robot-steps.adb	if E.Length <= 0.0 or else Beat < E.Start + 2	2	structure	the last two beats of a push: three readings tell two steps and their ratio, the fewest that tell a run of shrinking steps
+driver-robot-steps.adb	if G > M.Groups.Last_Index or else Natural (M.Groups (G).Free_Shortfalls.Length) <= 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	if Natural (M.Groups (G).Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	if Natural (S.Free_Shortfalls.Length) > 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	if not (E.Ended and then E.Rested and then E.Blocked) or else E.Length <= 0.0 or else E.Start < 1	1	structure	a push needs the reading before it: it began at the second beat or later

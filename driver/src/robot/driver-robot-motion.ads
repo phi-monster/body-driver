@@ -252,6 +252,10 @@ package Driver.Robot.Motion is
    type Pose_Goal is record
       Pose          : Rigid;
       Position_Only : Boolean := False;   --  orientation free
+      Free_About    : Vec3 := [0.0, 0.0, 0.0];
+      --  A direction of the tool frame, not nought: where it points is the goal's, and the turn about it is the goal's
+      --  where the arm reaches the whole goal, else the nearest pose's that points it (Kinematics.Solve_Pose; a press
+      --  aims a lobe's line of sight down, and an arm of five joints reaches few turns about the way down).
    end record;
 
    type Plan_Status is (Planned, Unreachable, Unmeasured);
@@ -333,7 +337,8 @@ package Driver.Robot.Motion is
    --  what planning cost, whether it ended Planned or Unreachable.
 
    function Stray
-     (M : Model; A : Arm_Id; From, To : Rigid; Q0, Q1 : Real_Array; Lever : Real := 0.0; Position_Only : Boolean := False)
+     (M : Model; A : Arm_Id; From, To : Rigid; Q0, Q1 : Real_Array; Lever : Real := 0.0; Position_Only : Boolean := False;
+      Free_About : Vec3 := [0.0, 0.0, 0.0])
       return Real
      with Pre => Q0'Length = Q1'Length and then Q0'First = Q1'First;
    --  How far the tool strays from the straight path from From to To (straight

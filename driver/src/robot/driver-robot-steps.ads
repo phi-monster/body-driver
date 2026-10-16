@@ -88,6 +88,12 @@ private package Driver.Robot.Steps is
    --  before any push was answered (the same for every push: no wait is longer than all the waiting so far). 0
    --  before any push.
 
+   function Free_Landing (M : Model; G : Group_Id) return Real;
+   --  How far off its target a free push of the group lands, either way, along its ask, in reading units: the bound
+   --  Z robust deviations above the median of what every push that was not blocked fell short by (a servo stops
+   --  anywhere within its dead band of its target, an arm sags by its load). Not the most of them: a push that met
+   --  an end before three free ones were known to judge it by was kept as free. 0 before three free pushes.
+
    function Executed_Least (M : Model; G : Group_Id; Channel : Positive) return Real;
    --  The least ask of the channel a push of the group moved it for, in reading units: the body is known to
    --  execute asks that large, and nothing is known of smaller ones (a servo stands still for an ask within its

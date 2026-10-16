@@ -203,8 +203,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
          begin
             Reading := R (R'First + C - 1);
             Noise := Sqrt (2.0) * Reading_Noise (M, G, C);
-            Arrived := not Significant (Reading - To, Noise)
-              or else (Known (Visible_Step (M, G, C)) and then abs (Reading - To) < Visible_Step (M, G, C).Value);
+            --  Within the closer's sigma of To (Closer_Sigma: its noise, the step an eye can see, and where a free
+            --  push of it lands off its target): a servo that stops within its dead band of To is not held. s21 (servo
+            --  seed 3, 10-17): asked back to 605 it read 593, "it is held", and the hand was raised off the table.
+            Arrived := not Significant (Reading - To, Sqrt (2.0) * Closer_Sigma (M, G) (C));
             Placed := P > 0;
             if Placed then
                Arm := H.Data.Pairs (P).Arm;

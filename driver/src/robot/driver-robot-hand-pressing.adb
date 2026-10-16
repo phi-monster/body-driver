@@ -86,14 +86,28 @@ package body Driver.Robot.Hand.Pressing is
       Result.Turn := Angle (Transpose (Tool.Pose.Rotation) * Result.Above.Rotation);
       --  The aim points the line of sight at "down" as the arm's eye saw the table: known to that direction's sigma; a
       --  blind aim is the tool's own turn, known as the fit knows it.
+      --  The line of sight is pointed; the turn about it is Yaw where the arm reaches the whole pose, else the nearest
+      --  pose's that points it (Free_About, Kinematics.Solve_Pose), and the aim is where the plan takes the tool.
       Result.Plan := Driver.Robot.Motion.Plan_Reach_In_Arm
-        (M, Arm, O, (Pose => Result.Above, Position_Only => False), Goal_Turn_Sigma => (if Blind then 0.0 else Down.Sigma));
+        (M, Arm, O, (Pose => Result.Above, Position_Only => False, Free_About => Along),
+         Goal_Turn_Sigma => (if Blind then 0.0 else Down.Sigma));
+      Result.Yawed := Yaw;
       if Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Planned then
          declare
             There : Observation := O;
+            Asked : constant Mat3 := Result.Above.Rotation;
          begin
             There.Readings.Replace_Element (Arm_Group (M, Arm), Driver.Robot.Motion.Last_Readings (Result.Plan));
             Result.Least := Least_Push (M, Arm, There);
+            Result.Above := Tool_In_Arm (M, Arm, There).Pose;
+            Result.Turn := Angle (Transpose (Tool.Pose.Rotation) * Result.Above.Rotation);
+            --  A turn the fit cannot tell from the one asked (its Angle_Sigma) is the one asked.
+            declare
+               Extra : constant Real := Real'(Driver.Numerics.Log (Result.Above.Rotation * Transpose (Asked)) * Result.Into);
+            begin
+               Result.Yawed := (if Driver.Uncertain.Significant (Extra, Driver.Robot.Kinematics.Angle_Sigma (M, Arm))
+                                then Real'Remainder (Yaw + Extra, 2.0 * Ada.Numerics.Pi) else Yaw);
+            end;
          end;
       end if;
    end Aim;
@@ -214,10 +228,14 @@ package body Driver.Robot.Hand.Pressing is
                declare
                   Push : constant Real := Least_Push (M, Arm, There);
                begin
-                  if not Any or else Push < Best_Push then
+                  --  The least rotation of those as sure: the turns are tried from the least, and a later one is taken
+                  --  only where the fit places the tool surer by more than the fraction that counts as no change. By the
+                  --  bare comparison, h24 (servo seed 3, 10-17) took turns of 2.36 and 3.14 rad for differences no fit
+                  --  tells, and the arm did not reach four of its aims (blocked, or given up still moving).
+                  if not Any or else Push < (1.0 - Driver.Conventions.Unchanged_Fraction) * Best_Push then
                      Any := True;
                      Best := Result;
-                     Best_Yaw := Yaw;
+                     Best_Yaw := Result.Yawed;
                      Best_Push := Push;
                   end if;
                end;
@@ -241,10 +259,14 @@ package body Driver.Robot.Hand.Pressing is
    is
       Tool : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
    begin
+      --  The tool's direction that points along Into keeps pointing so, and its turn about it is held where the arm
+      --  reaches the whole pose, else the nearest pose's (Free_About), as the aim leaves it: held whole, a descent of
+      --  an arm with five joints asks a full pose at every waypoint.
       return Driver.Robot.Motion.Plan_Reach_In_Arm
         (M, Arm, O,
          (Pose          => (Rotation => Tool.Pose.Rotation, Translation => Tool.Pose.Translation + By * Into),
-          Position_Only => Turn_Free));
+          Position_Only => Turn_Free,
+          Free_About    => Transpose (Tool.Pose.Rotation) * Into));
    end Lowered;
 
    function Gap

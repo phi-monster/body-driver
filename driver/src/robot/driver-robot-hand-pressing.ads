@@ -33,6 +33,7 @@ package Driver.Robot.Hand.Pressing is
       Into  : Vec3 := Zero3;      --  down: into the table, unit, arm frame
       Least : Real := Real'Last;  --  the smallest move of the tool that tells from its noise, where the aim leaves it
       Plan  : Driver.Robot.Motion.Plan;   --  from the tool as at O to Above; unset unless Ok
+      Yawed : Real := 0.0;        --  the turn about the way down the plan took from the least rotation, radians
    end record;
 
    --  How far the tool stands off where an aim put it, and what tells it from there.
@@ -70,6 +71,13 @@ package Driver.Robot.Hand.Pressing is
    --  circle and not others (A22's lobe 2 aimed straight stands 0.117 outside
    --  the readings the arm has shown at the least rotation, 0.103 inside them
    --  at 30 degrees).
+   --  Along is pointed down exactly and the turn about the way down is Yaw
+   --  where the arm reaches the whole pose, else that of the nearest pose
+   --  pointing Along down (Motion.Pose_Goal Free_About): an arm of five
+   --  joints reaches a pose with Along down at one turn of the circle at most,
+   --  and h20 (servo seed 3, 10-17) planned none of its sixteen aims, each left
+   --  0.036 rad off its turn at a fifth of the way, its conditioning 1e-6.
+   --  Above is then where the plan takes the tool, Yawed the turn it took.
 
    procedure Aim_Reaching
      (M       : Model;

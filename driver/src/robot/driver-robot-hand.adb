@@ -170,18 +170,15 @@ package body Driver.Robot.Hand is
             if Known (Step) then
                Result (C) := Real'Max (Result (C), Step.Value / (Driver.Conventions.Z * Sqrt (2.0)));
             end if;
-            --  Two landings of one asked setting differ by up to twice the least ask the body executes (a servo lands
-            --  within its dead band of where it is sent, every time: Kinematics.Counted_Turn): readings no nearer are
-            --  one setting as far as sending the closer there can tell. h09 and h15 (servo seed 3, 10-17): the closer
-            --  sent back to its end at 601 read 605, four ticks off where the eyes' least step is 1.2, a setting of its
-            --  own, and the poses gathered there were never the end's; no hand was made.
-            declare
-               Least : constant Real := Driver.Robot.Steps.Executed_Least (M, G, C);
-            begin
-               if Least < Real'Last then
-                  Result (C) := Real'Max (Result (C), 2.0 * Least / (Driver.Conventions.Z * Sqrt (2.0)));
-               end if;
-            end;
+            --  Two landings of one asked setting differ by up to twice what a free push of the group lands off its
+            --  target by (Steps.Free_Landing: a servo stops anywhere within its dead band): readings no nearer are one
+            --  setting as far as sending the closer there can tell. h09 and h15 (servo seed 3, 10-17): the closer sent
+            --  back to its end at 601 read 605, four ticks off where the eyes' least step is 1.2, a setting of its own,
+            --  and the poses gathered there were never the end's; no hand was made. Twice the least ask the body
+            --  executed did not cover it: s21 (the same body), sent back to 605, read 593 and then 617, to 677 read
+            --  669, three ticks of four units off either way, and again no hand was made.
+            Result (C) := Real'Max
+              (Result (C), 2.0 * Driver.Robot.Steps.Free_Landing (M, G) / (Driver.Conventions.Z * Sqrt (2.0)));
          end;
       end loop;
       return Result;
@@ -1719,10 +1716,17 @@ package body Driver.Robot.Hand is
          Steps.Stalled := True;
          return;
       end if;
+      --  The eye's room above the surface is as far as the surface can be: its measured height and Z of its sigma, not
+      --  that less them. A tip below the eye meets the surface first, and the press is made where it does; the step that
+      --  meets it ends the descent, not where the estimate puts the surface. Less the margin, h22 (servo seed 3, 10-17)
+      --  stopped every press with the eye 4.5 of its 14.8 above the table (its sigma 1.5), the jaws' tips 4 cm above it;
+      --  at the height itself h23 still stopped short, its lowering in the fit's units some 15 per cent longer than the
+      --  arm's in the world: nothing was met, no tip measured. Safety is the least of the driver's concerns (owner,
+      --  10-05): the eye may meet the surface too, and that is the event.
       if Known (Seen.Eye) then
          declare
             Room : constant Real :=
-              Seen.Eye.Value - Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
+              Seen.Eye.Value + Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
          begin
             if Room >= Least then
                --  Doubling from Least covers the room, the last step cut to it and the one
@@ -1806,11 +1810,11 @@ package body Driver.Robot.Hand is
                      By := Fast;
                      Fast := 2.0 * Fast;
                   end if;
-                  --  The eye stays above the surface, whatever the tip does.
+                  --  No step takes the eye past as far as the surface can be (the room, as above).
                   if Known (Seen.Eye) then
                      declare
                         Room : constant Real :=
-                          Seen.Eye.Value - Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
+                          Seen.Eye.Value + Threshold (Scalar_Gate (Seen.Eye.Degrees_Of_Freedom)) * Seen.Eye.Sigma;
                      begin
                         if Room < Least then
                            Steps.Spent := True;

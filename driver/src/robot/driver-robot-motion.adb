@@ -1516,7 +1516,8 @@ package body Driver.Robot.Motion is
      ((State => State, Reason => To_Unbounded_String (Why), others => <>));
 
    function Stray
-     (M : Model; A : Arm_Id; From, To : Rigid; Q0, Q1 : Real_Array; Lever : Real := 0.0; Position_Only : Boolean := False)
+     (M : Model; A : Arm_Id; From, To : Rigid; Q0, Q1 : Real_Array; Lever : Real := 0.0; Position_Only : Boolean := False;
+      Free_About : Vec3 := [0.0, 0.0, 0.0])
       return Real
    is
       use Driver.Numerics.Arrays;
@@ -1533,7 +1534,13 @@ package body Driver.Robot.Motion is
                Translation => (1.0 - Share) * From.Translation + Share * To.Translation);
          begin
             Worst := Real'Max (Worst, abs (Is_At.Translation - Want.Translation));
-            if not Position_Only then
+            if Position_Only then
+               null;
+            elsif abs Free_About > 0.0 then
+               Worst := Real'Max
+                 (Worst, abs Driver.Numerics.Cross (Is_At.Rotation * Free_About, Want.Rotation * Free_About)
+                         / (abs Free_About) ** 2 * Lever);
+            else
                Worst := Real'Max (Worst, Driver.Numerics.Angle (Transpose (Is_At.Rotation) * Want.Rotation) * Lever);
             end if;
          end;
@@ -1591,7 +1598,8 @@ package body Driver.Robot.Motion is
              (M, A, O,
               (Pose          => (Rotation    => Back * Goal.Pose.Rotation,
                                  Translation => (1.0 / Scale) * (Back * (Goal.Pose.Translation - Placement.Translation))),
-               Position_Only => Goal.Position_Only),
+               Position_Only => Goal.Position_Only,
+               Free_About    => Goal.Free_About),
               Clearance => (if Clearance < Real'Last then Clearance / Scale else Real'Last),
               Lever     => Lever / Scale);
       begin
@@ -1659,14 +1667,14 @@ package body Driver.Robot.Motion is
                --  A goal whose turn is free leaves it free along the way too: held at the start's on every segment
                --  but the last, a raise of the hand's own eye near the wrist's singularity (conditioning 1e-6) was
                --  refused for a turn 2.26e-3 rad off at a third of the way, and no hand was made (f16f on 10-15).
-               Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only, Next, Position_Off, Turn_Off);
+               Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only, Next, Position_Off, Turn_Off, Goal.Free_About);
                if not Driver.Uncertain.Significant (Position_Off, Sigma)
                  and then not Driver.Uncertain.Significant (Turn_Off, Sqrt (Sigma ** 2 + Goal_Turn_Sigma ** 2))
                then
                   declare
                      Bow : constant Real :=
                        (if Clearance < Real'Last
-                        then Stray (M, A, Along (A_Of), Along (B_Of), Q, Next, Lever, Goal.Position_Only)
+                        then Stray (M, A, Along (A_Of), Along (B_Of), Q, Next, Lever, Goal.Position_Only, Goal.Free_About)
                         else 0.0);
                   begin
                      if Bow > Clearance and then Can_Cut (A_Of, B_Of, Depth) then

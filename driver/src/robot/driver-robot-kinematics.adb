@@ -3463,101 +3463,147 @@ package body Driver.Robot.Kinematics is
       Position_Only : Boolean;
       Q             : out Real_Array;
       Position_Off  : out Real;
-      Turn_Off      : out Real)
+      Turn_Off      : out Real;
+      Free_About    : Vec3 := [0.0, 0.0, 0.0])
    is
       use Driver.Numerics.Arrays;
       use Ada.Numerics.Long_Elementary_Functions;
       N    : constant Natural := Start'Length;
+      --  What a residual holds: the eye's place alone, its place and its whole turn, or its place and where
+      --  Free_About points (their cross product: the sine of the angle between them, along the axis it turns about).
+      type Held is (Place, Whole, Pointing);
       Rows : constant Positive := (if Position_Only then 3 else 6);
-      X    : Real_Array (1 .. N) := Start;
-      Lambda : Real := Real'Model_Epsilon;
 
-      function Residual (V : Real_Array) return Real_Vector is
+      function Residual (V : Real_Array; H : Held) return Real_Vector is
          T : constant Rigid := Eye_In_Reference (M, A, V);
          R : Real_Vector (1 .. Rows);
-         D : constant Vec3 := T.Translation - Goal.Translation;
       begin
-         R (1 .. 3) := D;
-         if not Position_Only then
-            R (4 .. 6) := Driver.Numerics.Log (Transpose (T.Rotation) * Goal.Rotation);
-         end if;
+         R (1 .. 3) := T.Translation - Goal.Translation;
+         case H is
+            when Place =>
+               null;
+            when Whole =>
+               R (4 .. 6) := Driver.Numerics.Log (Transpose (T.Rotation) * Goal.Rotation);
+            when Pointing =>
+               declare
+                  Is_At : constant Vec3 := T.Rotation * Free_About;
+                  Want  : constant Vec3 := Goal.Rotation * Free_About;
+               begin
+                  R (4 .. 6) := (1.0 / (Real'(abs Is_At) * Real'(abs Want))) * Driver.Numerics.Cross (Is_At, Want);
+               end;
+         end case;
          return R;
       end Residual;
 
       function Cost (R : Real_Vector) return Real is (R * R);
 
-      R0 : Real_Vector (1 .. Rows);
-   begin
-      R0 := Residual (X);
-      loop
-         declare
-            J : Real_Matrix (1 .. Rows, 1 .. N);
-            Improved, Lowered : Boolean := False;
-         begin
-            for K in 1 .. N loop
-               declare
-                  Xp : Real_Array := X;
-                  H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (K));
-                  Rp : Real_Vector (1 .. Rows);
-               begin
-                  Xp (K) := Xp (K) + H;
-                  Rp := Residual (Xp);
-                  for I in 1 .. Rows loop
-                     J (I, K) := (Rp (I) - R0 (I)) / H;
-                  end loop;
-               end;
-            end loop;
+      --  Damped least squares from X on what H holds, until a step lowers what is left by less than the unchanged
+      --  fraction of it.
+      procedure Minimize (X : in out Real_Array; H : Held; R0 : out Real_Vector) is
+         Lambda : Real := Real'Model_Epsilon;
+      begin
+         R0 := Residual (X, H);
+         loop
             declare
-               JtJ : constant Real_Matrix := Transpose (J) * J;
-               G   : constant Real_Vector := -(Transpose (J) * R0);
+               J : Real_Matrix (1 .. Rows, 1 .. N);
+               Improved, Lowered : Boolean := False;
             begin
-               loop
+               for K in 1 .. N loop
                   declare
-                     D  : Real_Matrix := JtJ;
-                     Lf : Real_Matrix (1 .. N, 1 .. N);
-                     Pd : Boolean;
-                     Moves : Boolean := False;
+                     Xp : Real_Array := X;
+                     Hk : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (K));
+                     Rp : Real_Vector (1 .. Rows);
                   begin
-                     for P in 1 .. N loop
-                        D (P, P) := JtJ (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;
+                     Xp (K) := Xp (K) + Hk;
+                     Rp := Residual (Xp, H);
+                     for I in 1 .. Rows loop
+                        J (I, K) := (Rp (I) - R0 (I)) / Hk;
                      end loop;
-                     Driver.Numerics.Dense.Cholesky (D, Lf, Pd);
-                     if Pd then
-                        declare
-                           Step : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, G);
-                           Xn   : Real_Array (1 .. N);
-                        begin
-                           for P in 1 .. N loop
-                              Xn (P) := X (P) + Step (P);
-                           end loop;
-                           Moves := (for some P in 1 .. N => Xn (P) /= X (P));
-                           if Moves then
-                              declare
-                                 Rn : constant Real_Vector := Residual (Xn);
-                              begin
-                                 if Cost (Rn) < Cost (R0) then
-                                    Improved := Cost (R0) - Cost (Rn) > Driver.Conventions.Unchanged_Fraction * Cost (R0);
-                                    X := Xn;
-                                    R0 := Rn;
-                                    Lambda := Lambda / 2.0;
-                                    Lowered := True;
-                                 end if;
-                              end;
-                           end if;
-                        end;
-                     else
-                        Moves := True;
-                     end if;
-                     --  No further than a float goes (as Fixed.Refine): past it the damping is infinite, the damped matrix no
-                     --  number, never positive definite, and nothing would end the loop.
-                     exit when Lowered or else not Moves or else Lambda >= Real'Last / 2.0;
-                     Lambda := 2.0 * Lambda;
                   end;
                end loop;
+               declare
+                  JtJ : constant Real_Matrix := Transpose (J) * J;
+                  G   : constant Real_Vector := -(Transpose (J) * R0);
+               begin
+                  loop
+                     declare
+                        D  : Real_Matrix := JtJ;
+                        Lf : Real_Matrix (1 .. N, 1 .. N);
+                        Pd : Boolean;
+                        Moves : Boolean := False;
+                     begin
+                        for P in 1 .. N loop
+                           D (P, P) := JtJ (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;
+                        end loop;
+                        Driver.Numerics.Dense.Cholesky (D, Lf, Pd);
+                        if Pd then
+                           declare
+                              Step : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, G);
+                              Xn   : Real_Array (1 .. N);
+                           begin
+                              for P in 1 .. N loop
+                                 Xn (P) := X (P) + Step (P);
+                              end loop;
+                              Moves := (for some P in 1 .. N => Xn (P) /= X (P));
+                              if Moves then
+                                 declare
+                                    Rn : constant Real_Vector := Residual (Xn, H);
+                                 begin
+                                    if Cost (Rn) < Cost (R0) then
+                                       Improved := Cost (R0) - Cost (Rn) > Driver.Conventions.Unchanged_Fraction * Cost (R0);
+                                       X := Xn;
+                                       R0 := Rn;
+                                       Lambda := Lambda / 2.0;
+                                       Lowered := True;
+                                    end if;
+                                 end;
+                              end if;
+                           end;
+                        else
+                           Moves := True;
+                        end if;
+                        --  No further than a float goes (as Fixed.Refine): past it the damping is infinite, the damped
+                        --  matrix no number, never positive definite, and nothing would end the loop.
+                        exit when Lowered or else not Moves or else Lambda >= Real'Last / 2.0;
+                        Lambda := 2.0 * Lambda;
+                     end;
+                  end loop;
+               end;
+               exit when not Improved;
             end;
-            exit when not Improved;
+         end loop;
+      end Minimize;
+
+      X  : Real_Array (1 .. N) := Start;
+      R0 : Real_Vector (1 .. Rows);
+   begin
+      if Position_Only then
+         Minimize (X, Place, R0);
+      elsif abs Free_About = 0.0 then
+         Minimize (X, Whole, R0);
+      else
+         --  Where Free_About points first, from Start: the nearest pose that points it. Then the whole goal from there,
+         --  taken where the arm reaches it within what its fit tells (Angle_Sigma), the place and the turn both, and
+         --  the nearest pose that points it where it does not: an arm with a joint to spare reaches the pointing along
+         --  a line of poses, and the goal's turn about the direction held as a weighed residual drew the solve along
+         --  that line from where the arm stood (h25, servo seed 3, 10-17: aims a few thousandths from where the tool
+         --  stood asked 4500 to 4800 units of the joints, and the arm was blocked at once).
+         Minimize (X, Pointing, R0);
+         declare
+            Sigma : constant Real := Angle_Sigma (M, A);
+            W     : Real_Array (1 .. N) := X;
+            RW    : Real_Vector (1 .. Rows);
+         begin
+            Minimize (W, Whole, RW);
+            if Sigma < Real'Last
+              and then not Driver.Uncertain.Significant (Sqrt (RW (1) ** 2 + RW (2) ** 2 + RW (3) ** 2), Sigma)
+              and then not Driver.Uncertain.Significant (Sqrt (RW (4) ** 2 + RW (5) ** 2 + RW (6) ** 2), Sigma)
+            then
+               X := W;
+               R0 := Residual (X, Pointing);
+            end if;
          end;
-      end loop;
+      end if;
       Q := Nearest_Readings (M, A, Start, X);
       Position_Off := Sqrt (R0 (1) ** 2 + R0 (2) ** 2 + R0 (3) ** 2);
       Turn_Off := (if Position_Only then 0.0 else Sqrt (R0 (4) ** 2 + R0 (5) ** 2 + R0 (6) ** 2));

@@ -1,6 +1,7 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Robot.Channels;
+with Driver.Stats;
 with Driver.Uncertain;
 
 package body Driver.Robot.Steps is
@@ -148,6 +149,23 @@ package body Driver.Robot.Steps is
       end if;
       S.Episodes.Replace_Element (S.Episodes.Last_Index, E);
    end Finish;
+
+   function Free_Landing (M : Model; G : Group_Id) return Real is
+   begin
+      if G > M.Groups.Last_Index or else Natural (M.Groups (G).Free_Shortfalls.Length) <= 2 then
+         return 0.0;
+      end if;
+      declare
+         Off : Real_Array (1 .. Natural (M.Groups (G).Free_Shortfalls.Length));
+         K   : Natural := 0;
+      begin
+         for F of M.Groups (G).Free_Shortfalls loop
+            K := K + 1;
+            Off (K) := abs F;
+         end loop;
+         return Driver.Stats.Median (Off) + Driver.Conventions.Z * Driver.Stats.Robust_Sigma (Off);
+      end;
+   end Free_Landing;
 
    function Executed_Least (M : Model; G : Group_Id; Channel : Positive) return Real is
      (if Channel <= Natural (M.Groups (G).Executed.Length) then M.Groups (G).Executed (Channel - 1) else Real'Last);

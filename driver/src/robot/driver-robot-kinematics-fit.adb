@@ -4450,6 +4450,11 @@ package body Driver.Robot.Kinematics.Fit is
                               exit;
                            end if;
                         end loop;
+                        if Order_Is_Told then
+                           Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along the arm,"
+                                            & Image (Order) & ", is told: every other order searched leaves residuals"
+                                            & " significantly the larger than its " & Driver.Log.Image (Here, 3) & " px");
+                        end if;
                         --  An order not told: the joints next to each other along it whose swap leaves residuals not
                         --  significantly the larger (Smaller) are the ones it lacks the evidence of, and Boot turns them
                         --  together, a pair at a time. Two joints apart by a swap are told only by what they do turned

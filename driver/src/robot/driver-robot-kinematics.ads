@@ -235,7 +235,8 @@ private package Driver.Robot.Kinematics is
       Position_Only : Boolean;
       Q             : out Real_Array;
       Position_Off  : out Real;
-      Turn_Off      : out Real)
+      Turn_Off      : out Real;
+      Free_About    : Vec3 := [0.0, 0.0, 0.0])
      with Pre => Q'Length = Start'Length;
    --  The readings that bring the arm's eye (in its reference frame) nearest
    --  Goal by the fitted model, within the readings the arm has shown or
@@ -244,6 +245,9 @@ private package Driver.Robot.Kinematics is
    --  by less than the unchanged fraction of it; how far the eye remains
    --  from Goal. Q gives every joint that turns as the reading nearest Start
    --  (Nearest_Readings): the same pose, the way the arm is nearest to go.
+   --  With Free_About (a direction of the eye's frame, not nought) the turn left is how far that direction points
+   --  from where Goal points it (the sine of the angle between them); the eye's turn about it is Goal's where the
+   --  arm reaches the whole of Goal within what its fit tells, and that of the nearest pose pointing it elsewhere.
 
    function Conditioning (M : Model; A : Arm_Id; Q : Real_Array) return Real;
    --  How near the arm stands at readings Q to a pose where its eye cannot move every way: the least singular value
