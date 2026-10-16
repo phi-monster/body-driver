@@ -771,6 +771,14 @@ package body Fake_World is
             end loop;
          end if;
       end loop;
+      --  What the arm holds goes with it, into the table or not.
+      for O of W.Solids loop
+         if O.Held_By = A then
+            for P of Corners (O) loop
+               D := Real'Max (D, W.Table_Z - P (3));
+            end loop;
+         end if;
+      end loop;
       return D;
    end Deepest;
 
@@ -852,9 +860,11 @@ package body Fake_World is
       Was_Touching : Boolean := False;
       Tool_Before  : constant Vec3 := W.Links (W.Tools (A)).Pose.Translation;
       Sunk         : constant Real := Deepest (W, A);   --  how far the arm already gave into what blocks it
+      Was_In       : constant Boolean := Penetrates (W, A);   --  and whether it stands in it at all
       Closer       : constant Natural := W.Closers (A);
       Z_Wanted     : Real;
       Lo, Hi       : Real := 0.0;
+      Cut          : Boolean := False;   --  the step was cut short by what blocks the arm
 
       procedure Place (Share : Real);
       procedure Place (Share : Real) is
@@ -866,6 +876,13 @@ package body Fake_World is
          end loop;
          Forward (W);
       end Place;
+
+      --  Whether the arm now goes further into the table or a thing than it already stood: what it presses on
+      --  pushes back against going in, never against coming out or sliding along it. Cut by going in at all, a
+      --  hand that had given into the table could not be lifted: a21 on 10-16, the jaw's press at open, every
+      --  share of the first beat of its way back up still went into the table, and the arm stood 40 beats where it
+      --  was while the driver asked it up.
+      function Deeper return Boolean is (if Was_In then Deepest (W, A) > Sunk else Penetrates (W, A));
    begin
       --  Gravity takes up a joint's slack on the side it pulls the tool's load to when it pulls harder than the
       --  gears' friction holds, a twentieth of the hardest pull on any joint of the arm; a joint pulled less (a
@@ -935,17 +952,18 @@ package body Fake_World is
          end;
       end loop;
       --  Where the hand meets the table or a thing, the arm stops: the
-      --  largest share of the way that goes into nothing, then the give.
+      --  largest share of the way that goes no further in, then the give.
       Place (1.0);
       Z_Wanted := W.Links (W.Tools (A)).Pose.Translation (3);
-      if Penetrates (W, A) then
+      if Deeper then
+         Cut := True;
          Hi := 1.0;
          for Halving in 1 .. 12 loop
             declare
                Mid : constant Real := (Lo + Hi) / 2.0;
             begin
                Place (Mid);
-               if Penetrates (W, A) then
+               if Deeper then
                   Hi := Mid;
                else
                   Lo := Mid;
@@ -974,6 +992,8 @@ package body Fake_World is
                end if;
             end;
          end if;
+      end if;
+      if Cut or else Penetrates (W, A) then
          Mark_Touching (W, A);
       else
          for I in Old'Range loop
