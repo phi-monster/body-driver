@@ -885,6 +885,32 @@ procedure Measure (H : in out Hands; M : in out Model) is
                                                                      else "the stream had run before the sweep")
                                       elsif Answered then "following from the first" else "at its end there"));
                end;
+               --  The poses a deviation needs are gathered at the end the pushes left the closer at, before it leaves
+               --  it: the setting of an end is the readings it was seen at, and a closer sent back to them later can
+               --  land elsewhere (h09 on 10-17: a servo's closer asked back to 601 read 605, four ticks off with the
+               --  eyes' least step 1.2, a setting of its own, and the poses gathered there were never the end's). The
+               --  arm is taken back to where it stood, so the other end is seen from the same rest of the body.
+               if not Unformed and then not Gone then
+                  declare
+                     Arm_Is  : Group_Id'Base := 0;
+                     Arm_Was : Driver.Robot.Hand.Views.Reading_Holders.Holder;
+                     Enough  : Boolean;
+                     procedure Read_Arm (O : Observation) is
+                        P : constant Natural := Own_Pair (G);
+                     begin
+                        Arm_Is := (if P > 0 then Arm_Group (M, H.Data.Pairs (P).Arm) else 0);
+                        if Arm_Is > 0 then
+                           Arm_Was := Driver.Robot.Hand.Views.Reading_Holders.To_Holder (O.Readings.Element (Arm_Is));
+                        end if;
+                     end Read_Arm;
+                  begin
+                     Hold_Beat (Read_Arm'Access);
+                     Gather_Own_Poses (G, Driver.Robot.Hand.Selfsight.Needed, Enough);
+                     if Arm_Is > 0 and then not Arm_Was.Is_Empty then
+                        Move_Group (Arm_Is, Arm_Was.Element);
+                     end if;
+                  end;
+               end if;
                Return_Channel (G, C, Start);
             end loop;
             if Gone then
