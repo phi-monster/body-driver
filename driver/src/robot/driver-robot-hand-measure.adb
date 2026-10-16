@@ -533,29 +533,46 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   for Lobe_No in 1 .. Natural (Lobes.Length) loop
                      declare
                         L         : constant Driver.Robot.Hand.Lobes.Lobe := Lobes (Lobe_No);
-                        Last_Seen : Boolean := L.Tip_Known_Here;
-                        Last_Tip  : Driver.Images.Pixel := L.Tip_Here;
-                        Last_R    : Real := Low_R;
+                        --  Along the travel from the open end, the stops by their readings, to the closed end: the
+                        --  lobe is followed from the open end as far as each step is one the matcher follows
+                        --  (Hand.Followed_Shape), so the gaps nearest the open end are cut first. Cut from the low end,
+                        --  a14 (10-16) cut 41 stops into the gaps by the closed end, its tip unseen there, before the
+                        --  13 pixels of the first step from the open end.
+                        Open_Low  : constant Boolean := Sweeps.Closed_End_Is_High (S, C);
+                        --  The view at place K of the travel from the low end: 0 the low end, Stops + 1 the high.
+                        procedure View (K : Natural; Seen : out Boolean; Tip : out Driver.Images.Pixel; R : out Real) is
+                        begin
+                           if K = 0 then
+                              Seen := L.Tip_Known_Here;
+                              Tip := L.Tip_Here;
+                              R := Low_R;
+                           elsif K > Stops then
+                              Seen := L.Tip_Known_There;
+                              Tip := L.Tip_There;
+                              R := High_R;
+                           else
+                              declare
+                                 At_Stop : constant Sweeps.Stop_Tips := Sweeps.Tips_At_Stop (S, C, K);
+                              begin
+                                 Seen := Lobe_No in At_Stop'Range and then At_Stop (Lobe_No).Known;
+                                 Tip := (if Seen then At_Stop (Lobe_No).Tip else (0.0, 0.0));
+                                 R := Sweeps.Stop_Reading (S, C, K);
+                              end;
+                           end if;
+                        end View;
+                        Last_Seen : Boolean;
+                        Last_Tip  : Driver.Images.Pixel;
+                        Last_R    : Real;
                      begin
                         Limit := Driver.Alignment.Finest_Radius (Driver.Images.Width (L.Here), Driver.Images.Height (L.Here));
-                        --  Along the travel from the low end, the stops by their readings, then the high end.
-                        for K in 1 .. Stops + 1 loop
+                        View ((if Open_Low then 0 else Stops + 1), Last_Seen, Last_Tip, Last_R);
+                        for Step in 1 .. Stops + 1 loop
                            declare
                               Seen : Boolean;
                               Tip  : Driver.Images.Pixel;
-                              R    : constant Real := (if K <= Stops then Sweeps.Stop_Reading (S, C, K) else High_R);
+                              R    : Real;
                            begin
-                              if K <= Stops then
-                                 declare
-                                    At_Stop : constant Sweeps.Stop_Tips := Sweeps.Tips_At_Stop (S, C, K);
-                                 begin
-                                    Seen := Lobe_No in At_Stop'Range and then At_Stop (Lobe_No).Known;
-                                    Tip := (if Seen then At_Stop (Lobe_No).Tip else Last_Tip);
-                                 end;
-                              else
-                                 Seen := L.Tip_Known_There;
-                                 Tip := L.Tip_There;
-                              end if;
+                              View ((if Open_Low then Step else Stops + 1 - Step), Seen, Tip, R);
                               if Seen then
                                  if Last_Seen
                                    and then Sqrt ((Tip.U - Last_Tip.U) ** 2 + (Tip.V - Last_Tip.V) ** 2) > Limit
@@ -622,6 +639,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                Wait_At_Most : constant Positive := Driver.Robot.Hand.Wait_For_A_View (Longest_Formed, Settles, Began);
                Last   : Real := From;
                Gathered : Boolean := False;
+               Jumped : Boolean := False;   --  the gap was passed over: no part of it is apart from the one before
                procedure Read_Gathered (O : Observation) is
                   pragma Unreferenced (O);
                   P : constant Natural := Own_Pair (G);
@@ -634,11 +652,19 @@ procedure Measure (H : in out Hands; M : in out Model) is
                      Part   : constant Real := From + (To - From) * Real (K) / Real (Parts);
                      Waited : Natural := 0;
                   begin
+                     --  Readings no further apart than the channel's noise: the tip jumps there however finely the
+                     --  closer stops, and the gap is passed over as one no stop sees through, the others cut (a14 on
+                     --  10-16: 84 pixels between 6.559 and 6.562 ended the cutting with 13 pixels left uncut at the
+                     --  open end).
                      if not Significant (Part - Last, Sqrt (2.0) * Sigma) then
-                        Why := Ada.Strings.Unbounded.To_Unbounded_String
-                          ("between " & Driver.Log.Image (From, 6) & " and " & Driver.Log.Image (To, 6) & ", where a tip"
-                           & " moves" & Natural'Image (Natural (Widest)) & " pixels, a part of" & Parts'Image
-                           & " is no further from the one before than the channel's noise");
+                        Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
+                                         & ": between " & Driver.Log.Image (From, 6) & " and " & Driver.Log.Image (To, 6)
+                                         & ", where a tip moves" & Natural'Image (Natural (Widest)) & " pixels, a part of"
+                                         & Parts'Image & " is no further from the one before than the channel's noise:"
+                                         & " the tip jumps there, and the other gaps are cut");
+                        Unseen_From.Append (From);
+                        Unseen_To.Append (To);
+                        Jumped := True;
                         exit;
                      end if;
                      Move_Channel (G, C, Part, Followed);
@@ -667,7 +693,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   Move_Channel (G, C, To, Followed);
                   Hold_Beat (Read_Gap'Access);
                end if;
-               exit when Ada.Strings.Unbounded.Length (Why) > 0 or else Stops <= Before;
+               exit when Ada.Strings.Unbounded.Length (Why) > 0 or else (Stops <= Before and then not Jumped);
                --  The gap found again between the same two views: the parts cut into it saw no tip of that lobe
                --  (Read_Gap passes over a stop without one), so the tip is not seen through the readings between and
                --  cutting finer gives nothing more to follow (its farthest pixel left the picture's border for its
