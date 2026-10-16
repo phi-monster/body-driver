@@ -1281,9 +1281,18 @@ procedure Measure (H : in out Hands; M : in out Model) is
                return False;
             end if;
             Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": pressing lobe" & Lobe'Image & " at "
-                             & (if Which = Open then "open" else "closed") & ", its line of sight tilted "
-                             & Driver.Log.Image (Driver.Robot.Hand.Aims.Spread (R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)
-                             & " rad from straight down, aimed by turning the hand " & Driver.Log.Image (Aimed.Turn, 4) & " rad"
+                             & (if Which = Open then "open" else "closed")
+                             --  A lobe no closer moves has no line of sight (Press_Lobe): it is pressed along the way down,
+                             --  and its line of sight's tilt from it is no number (s14 on 10-16, the hand's closer not its
+                             --  own: the tilt of a zero line of sight stopped the boot).
+                             & (if R.Lobes (Lobe).Channel > 0 and then R.Lobes (Lobe).Sights (Which).Known
+                                then ", its line of sight tilted "
+                                     & Driver.Log.Image
+                                         (Driver.Robot.Hand.Aims.Spread
+                                            (R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector, [1 => Along]), 4)
+                                     & " rad from straight down"
+                                else ", along the way down (it has no line of sight)")
+                             & ", aimed by turning the hand " & Driver.Log.Image (Aimed.Turn, 4) & " rad"
                              & (if Known (First.Tip)
                                 then ", " & Driver.Log.Image (First.Tip.Value, 4) & " +- " & Driver.Log.Image (First.Tip.Sigma, 4)
                                      & " above the surface the presses so far fixed"
