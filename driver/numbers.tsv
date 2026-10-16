@@ -2829,6 +2829,8 @@ driver-robot-motion.adb	(if M.Eyes (E).Rest_Counts_Known then 1.0 / Real (M.Eyes
 driver-robot-motion.adb	(if Q'Length = 0 then "" else Readings_Image (Q (Q'First .. Q'Last - 1)) & "" & Driver.Log.Image (Q (Q'Last), 6));	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	(if Step > 0.0 and then Noise < Real'Last then Step + Driver.Conventions.Z * Sqrt (2.0) * Noise else Step);	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	* (S.High_Seen (I) - S.Low_Seen (I)) / 2.0)	2.0	math	two independent stops fall anywhere in the channel's travel and meet within D of one another with probability 2 D over the travel: D is that probability, the false alarm rate of Z, times the travel over two
+driver-robot-motion.adb	* (if At_Amount then 1.0 else -1.0);	1.0	math	a direction's sign, along or against
+driver-robot-motion.adb	* (if At_Amount then 1.0 else -1.0);	1.0	math	a direction's sign, along or against
 driver-robot-motion.adb	Amount := 2.0 * Amount;	2.0	structure	the probe doubles
 driver-robot-motion.adb	Append (Errors, "" & C'Image & "" & Driver.Log.Image (Error, 1));	1	format	digits printed in a log line or a message
 driver-robot-motion.adb	Append (Report.Detail, "" & Driver.Log.Image (Largest, 1)	1	format	digits printed in a log line or a message
@@ -2872,6 +2874,8 @@ driver-robot-motion.adb	Start : Real_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	Translation => (1.0 / Scale) * (Back * (Goal.Pose.Translation - Placement.Translation))),	1.0	math	the placement undone: X_arm = Placement' (X_world - centre) / Scale
 driver-robot-motion.adb	Usable : Flag_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	Wait : Natural := 1;	1	structure	the beat the move shows in the readings
+driver-robot-motion.adb	Way : constant Real := (if Offsets (Offsets'First + I - 1) > 0.0 then 1.0 else -1.0)	1.0	math	a direction's sign, along or against
+driver-robot-motion.adb	Way : constant Real := (if Offsets (Offsets'First + I - 1) > 0.0 then 1.0 else -1.0)	1.0	math	a direction's sign, along or against
 driver-robot-motion.adb	Window : Natural := 2;	2	structure	the beat of the move and the beat it shows in the readings
 driver-robot-motion.adb	Window := Natural'Max (Window, 2 + Natural'Max (0, Image_Lag (M, Eye_Id (E))));	2	structure	the beat of the move and the beat it shows in the readings
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom);	2.0	math	the difference of two readings has twice the variance of one
