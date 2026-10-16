@@ -436,20 +436,38 @@ package body Driver.Robot.Kinematics.Fit is
             Improved : Boolean := False;
             Lowered  : Boolean := False;
          begin
-            for I in 1 .. Residuals loop
-               declare
-                  W : constant Real := Huber (R0 (I) / Sigma) / Sigma ** 2;
+            --  The normal equations, each parameter's row at once (Driver.Parallel_For), every sum over the
+            --  residuals in their order whichever task makes it, so that it is the sum one task made, to the last
+            --  bit (as Refine_Tracks sums its own). One task summed every residual into every row: the stage that
+            --  fits everything at once on the sightings that fit spent 2.6 s of a 60 s sample doing it while the
+            --  workers waited (a13's fit of 10452 sightings replayed from its dump, 10-16).
+            declare
+               Weights : Real_Access := new Real_Array (1 .. Residuals);
+               procedure Row (P : Positive) is
+                  Sum_G : Real := 0.0;
+                  Sum_A : Real_Array (P .. Parameters) := [others => 0.0];
                begin
-                  for P in 1 .. Parameters loop
+                  for I in 1 .. Residuals loop
                      if J (I, P) /= 0.0 then
-                        G (P) := G (P) - W * J (I, P) * R0 (I);
+                        Sum_G := Sum_G - Weights (I) * J (I, P) * R0 (I);
                         for Q in P .. Parameters loop
-                           A (P, Q) := A (P, Q) + W * J (I, P) * J (I, Q);
+                           Sum_A (Q) := Sum_A (Q) + Weights (I) * J (I, P) * J (I, Q);
                         end loop;
                      end if;
                   end loop;
-               end;
-            end loop;
+                  G (P) := Sum_G;
+                  for Q in P .. Parameters loop
+                     A (P, Q) := Sum_A (Q);
+                  end loop;
+               end Row;
+               procedure Rows is new Driver.Parallel_For (Row);
+            begin
+               for I in 1 .. Residuals loop
+                  Weights (I) := Huber (R0 (I) / Sigma) / Sigma ** 2;
+               end loop;
+               Rows (1, Parameters);
+               Free (Weights);
+            end;
             for P in 1 .. Parameters loop
                for Q in 1 .. P - 1 loop
                   A (P, Q) := A (Q, P);
