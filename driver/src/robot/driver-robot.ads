@@ -558,6 +558,8 @@ private
                                              --  for the kiwi's wrist eye, and a jaw opening 1250 units moved 130 to
                                              --  156 cells, unseen, R6 on 10-14)
       Rest_Count_Beats   : Natural := 0;     --  over how many beats
+      Rest_Count_Above   : Natural := 0;     --  of those beats, how many counted more than the level: as often a
+                                             --  beat at rest is called motion
       Still_At      : Flag_Vectors.Vector;   --  per beat: judged still
       Settled_At    : Flag_Vectors.Vector;   --  per beat: its picture had stopped changing since the body last began
                                              --  to move (the watch's Done at that beat, Stillness)

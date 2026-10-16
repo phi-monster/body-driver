@@ -1158,6 +1158,12 @@ package body Driver.Robot.Lockin is
                                 + Driver.Conventions.Z
                                   * Real'Max (Driver.Stats.Robust_Sigma (Counts (Start .. K)),
                                               Sqrt (Sum / Real (K - Start + 1)));
+                              S.Rest_Count_Above := 0;
+                              for I in Start .. K loop
+                                 if Counts (I) > S.Rest_Count_Level then
+                                    S.Rest_Count_Above := S.Rest_Count_Above + 1;
+                                 end if;
+                              end loop;
                            end;
                         end if;
                      end;
@@ -1213,10 +1219,8 @@ package body Driver.Robot.Lockin is
       if Tested = 0 then
          return False;
       end if;
-      --  More than at any beat nobody pushed (its own fingers' jitter, the
-      --  scene): a count at rest beats all n of them with chance 1 / (n + 1),
-      --  whatever their distribution. Before that is measured, against the
-      --  false alarms of the per-cell test alone.
+      --  More than the counts at the beats nobody pushed (its own fingers' jitter, the scene) reach but rarely
+      --  (Rest_Count_Level). Before those are measured, against the false alarms of the per-cell test alone.
       return (if S.Rest_Counts_Known
               then Real (Count) > S.Rest_Count_Level
               else Regression.Count_Significant

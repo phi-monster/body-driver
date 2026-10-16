@@ -765,11 +765,14 @@ package body Driver.Robot.Motion is
 
    function Tail return Real is (Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z));
 
-   --  The chance that one verdict of the eye is a false alarm: a count at
-   --  rest beats all n counts it had at rest with chance at most 1 / (n + 1);
-   --  without those, the per-cell test's own level.
+   --  The chance that one verdict of the eye is a false alarm: of n counts it had at rest, k exceeded the level a
+   --  verdict asks (Rest_Count_Above), and a count at rest exceeds it with chance at most (k + 1) / (n + 1), whatever
+   --  their distribution; without those, the per-cell test's own level. (1 / (n + 1) holds only of a level above
+   --  every count at rest: b06's eye 2, 10-17, called motion above 5.4 cells where its rest counts reached 11.)
    function False_Alarm (M : Model; E : Eye_Id) return Real is
-     (if M.Eyes (E).Rest_Counts_Known then 1.0 / Real (M.Eyes (E).Rest_Count_Beats + 1) else Tail);
+     (if M.Eyes (E).Rest_Counts_Known
+      then Real (M.Eyes (E).Rest_Count_Above + 1) / Real (M.Eyes (E).Rest_Count_Beats + 1)
+      else Tail);
 
    --  Some eye's image moved at a beat from From on, and the chance that a
    --  look at that many verdicts finds one by noise alone.
@@ -853,6 +856,7 @@ package body Driver.Robot.Motion is
       --  A push nothing answered and no eye saw is not waited for: before the body's delay is measured, Steps
       --  gives such a push up only after as many beats as the stream has had, and the first probe's levels below
       --  the dead band would each wait that long (R6's fifth start, 10-14: 500 beats into the first probe).
+      Looked_To : Natural := 0;   --  the last beat a look of this move judged
       Seen_Any : Boolean := False;
       function Still_Pushing return Boolean is
         (for some I in 1 .. N =>
@@ -964,8 +968,8 @@ package body Driver.Robot.Motion is
             end if;
             if Done then
                Look (M, From, Seen, Chance);
+               Looked_To := M.Beats - 1;
                Seen_Any := Seen;
-               Unlooked := M.Beats;
                Read_Ends;
             end if;
             Driver.Beats.Send (Driver.Commands.Hold);
@@ -989,8 +993,22 @@ package body Driver.Robot.Motion is
       while Still_Pushing loop
          Driver.Beats.Next (B);
          Read_Ends;
+         --  While its push is under way, what an eye sees is this move's answer, later than the wait above: a look
+         --  that has not seen it yet goes on over these beats, its chance with them. The next move's look begins
+         --  where this push ended. Charged with the tail before it, each look of a level's confirmation covered some
+         --  twenty beats (690 beats over 31 moves), its chance of a false alarm 0.73, and confirming the level took
+         --  those 31 moves (b07, seed 8, 10-17).
+         if not Seen then
+            Look (M, From, Seen, Chance);
+            Looked_To := M.Beats - 1;
+            Seen_Any := Seen;
+         end if;
          Driver.Beats.Send (Driver.Commands.Hold);
       end loop;
+      Unlooked := M.Beats;
+      Driver.Log.Line (Driver.Log.Robot, "probe: the move's look judged beats" & From'Image & " to" & Looked_To'Image
+                       & (if Seen then ", seen" else ", nothing seen") & ", its chance of a false alarm "
+                       & Driver.Log.Image (Chance, 3) & "; its push ended at beat" & Natural'Image (M.Beats - 1));
    end Move_And_Look;
 
    --  A probe level took the channel further along its ask than any smaller

@@ -357,7 +357,11 @@ package body Driver.Robot.Kinematics is
       --  below the readings' noise per beat is not still, though no two beats
       --  tell (a reading creeping towards its command; item 21). Still at
       --  every beat of the span, and not moved over the span as a whole.
-      Span : constant Positive := 1 + (if M.Groups (G).Delay_Known then M.Groups (G).Delay_Beats else 0);
+      --  And over the eye's lag: its picture shows the beat its lag before, and readings still for less than it
+      --  leave the picture showing the move, its watch still the last one's: robot.boot.settling (10-17), arm 1
+      --  given a keyframe at the beat it stopped from a one-beat move, its picture a beat behind and flickering.
+      Span : constant Positive := 1 + (if M.Groups (G).Delay_Known then M.Groups (G).Delay_Beats else 0)
+        + (if E = 0 then 0 else Natural'Max (0, Image_Lag (M, E)));
    begin
       if E = 0 or else Beat < Span then
          return False;

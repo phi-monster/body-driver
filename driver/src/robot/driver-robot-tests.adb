@@ -200,9 +200,9 @@ package body Driver.Robot.Tests is
    --  closer shakes arm 1's reading by a ten-millionth of the closer's
    --  change (a reaction).
 
-   --  Of the latest Boot_On_Rig: how many times arm 1 was held still for a keyframe at a new pose at a beat where
-   --  eye 1's picture still changed by a level or more from the beat before, after the arm's last move (the rig's
-   --  own account of its flicker): a keyframe waits for the picture to settle, so this must stay zero.
+   --  Of the latest Boot_On_Rig: how many of arm 1's keyframes were taken at a beat where eye 1's picture still
+   --  changed by a level or more from the beat before, after the arm's last move (the rig's own account of its
+   --  flicker): a keyframe waits for the picture to settle, so this must stay zero.
    Unsettled_Stills : Natural := 0;
 
    Rig_Width  : constant := 64;
@@ -3307,6 +3307,9 @@ package body Driver.Robot.Tests is
       --  As many beats as the boot may take: every channel of the rig probed
       --  from the resolution of one reading unit, pushed both ways, and swept.
       Bound : constant := 40_000;
+      --  Per beat: eye 1's picture changed by a level or more (the flicker's step from the beat before: what a byte
+      --  picture can show), as the rig made it. The flicker's remaining offset is no change.
+      Changing : array (0 .. Bound) of Boolean := [others => False];
    begin
       Beats := 0;
       Still_Poses := 0;
@@ -3422,20 +3425,9 @@ package body Driver.Robot.Tests is
             then
                Still_Poses := Still_Poses + 1;
                Poses (Still_Poses) := Now.Arm_1;
-               --  The picture changed this beat by a level or more (the flicker's step from the beat before: what
-               --  a byte picture can show), as the rig made it: a keyframe held then was held on a picture still
-               --  changing. The flicker's remaining offset is no change.
-               if Settling and then Since < Natural'Last
-                 and then (if Since = 0 then Trail else Trail * 0.3 * 0.7 ** (Since - 1)) >= 1.0
-               then
-                  Unsettled_Stills := Unsettled_Stills + 1;
-                  Driver.Log.Line (Driver.Log.Robot, "rig: arm 1 held still at beat" & M.Beats'Image & " with since"
-                                   & Since'Image & ", trail " & Driver.Log.Image (Trail, 2) & ", pose "
-                                   & Driver.Log.Image (Now.Arm_1 (1), 5) & " " & Driver.Log.Image (Now.Arm_1 (2), 5)
-                                   & ", group 1 moving " & Boolean'Image (Channels.Moving (M, 1, M.Beats - 1))
-                                   & ", eye 1 settled " & Boolean'Image (Driver.Robot.Stillness.Eye_Settled (M, 1)));
-               end if;
             end if;
+            Changing (B) := Settling and then Since < Natural'Last
+              and then (if Since = 0 then Trail else Trail * 0.3 * 0.7 ** (Since - 1)) >= 1.0;
             --  Arm 2 is swept with its eye where the model has eye 2 on it: a pose counted while the estimate had eye
             --  2 on another arm, or on none, is a pose of a group the boot was not sweeping with that eye (a beat of the
             --  first probe at which the lock-in, its lag not yet told, briefly read eye 2 whole on group 2 passed this
@@ -3495,6 +3487,22 @@ package body Driver.Robot.Tests is
       if not Finished then
          abort Decider;
       end if;
+      --  The keyframes arm 1 was given, each at the beat its picture was taken: one taken while the picture still
+      --  changed was held on a picture still changing. Counted from the keyframes once the boot is over, not from
+      --  the model while the decider ran: the rig's main side read Held_Still between the decider's estimates and
+      --  counted beats no keyframe was taken at, one of them with the eye's own watch unsettled (robot.boot.settling,
+      --  10-17, beat 916, the keyframes at 899 and 924).
+      for R of M.Kinematics loop
+         if R.Arm = 1 then
+            for F of R.Frames loop
+               if F.Beat in Changing'Range and then Changing (F.Beat) then
+                  Unsettled_Stills := Unsettled_Stills + 1;
+                  Driver.Log.Line (Driver.Log.Robot, "rig: arm 1 keyframe at beat" & F.Beat'Image
+                                   & " taken while its picture still changed");
+               end if;
+            end loop;
+         end if;
+      end loop;
       Done := Finished;
       Ok := Fine_Run;
    end Boot_On_Rig;
@@ -3823,13 +3831,13 @@ package body Driver.Robot.Tests is
                        & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
       Check (Levels > 0, "arm 1 was not swept");
       Check (Poses >= Levels, "arm 1 could give" & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
-      --  A keyframe waits for the picture to settle: arm 1 is never held still for one while eye 1's picture
-      --  still flickers by a level or more after its move (the rig counts those). The same boot with pictures
+      --  A keyframe waits for the picture to settle: arm 1 is given none while eye 1's picture still flickers by a
+      --  level or more after its move (the rig counts those). The same boot with pictures
       --  that settle at once finishes too. (The sweep once visited every other level and passed the rest before
       --  the picture settled, so that this boot held fewer poses than the ideal one; now every level is held until
       --  the picture settles, and the counts tell nothing.)
-      Check (Unsettled_Stills = 0, "arm 1 was held still for a keyframe" & Unsettled_Stills'Image
-             & " times at a beat where its picture still changed by a level or more");
+      Check (Unsettled_Stills = 0, "arm 1 was given" & Unsettled_Stills'Image
+             & " keyframes at beats where its picture still changed by a level or more");
       declare
          Ideal                                 : Model;
          Ideal_Done, Ideal_Ok                  : Boolean;

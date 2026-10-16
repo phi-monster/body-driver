@@ -1101,7 +1101,7 @@ package body Driver.Robot is
                     & (if M.Eyes (E).Rest_Counts_Known
                         then ", at most" & M.Eyes (E).Rest_Count_Max'Image & " cells move at rest ("
                              & Driver.Log.Image (M.Eyes (E).Rest_Count_Beats) & " beats; motion is more than "
-                             & Driver.Log.Image (M.Eyes (E).Rest_Count_Level, 1) & ")"
+                             & Driver.Log.Image (M.Eyes (E).Rest_Count_Level, 1) & ", as" & M.Eyes (E).Rest_Count_Above'Image & " of them were" & ")"
                         else "")
                     & ASCII.LF);
          end;
