@@ -170,6 +170,18 @@ package body Driver.Robot.Hand is
             if Known (Step) then
                Result (C) := Real'Max (Result (C), Step.Value / (Driver.Conventions.Z * Sqrt (2.0)));
             end if;
+            --  Two landings of one asked setting differ by up to twice the least ask the body executes (a servo lands
+            --  within its dead band of where it is sent, every time: Kinematics.Counted_Turn): readings no nearer are
+            --  one setting as far as sending the closer there can tell. h09 and h15 (servo seed 3, 10-17): the closer
+            --  sent back to its end at 601 read 605, four ticks off where the eyes' least step is 1.2, a setting of its
+            --  own, and the poses gathered there were never the end's; no hand was made.
+            declare
+               Least : constant Real := Driver.Robot.Steps.Executed_Least (M, G, C);
+            begin
+               if Least < Real'Last then
+                  Result (C) := Real'Max (Result (C), 2.0 * Least / (Driver.Conventions.Z * Sqrt (2.0)));
+               end if;
+            end;
          end;
       end loop;
       return Result;

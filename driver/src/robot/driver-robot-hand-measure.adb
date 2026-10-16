@@ -5,6 +5,7 @@ with Driver.Robot.Hand.Pressing;
 with Driver.Robot.Hand.Selfsight;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
+with Driver.Robot.Steps;
 
 --  The decider that measures the hands. Every closer channel is swept from
 --  where it is to both ends of its travel, pushing further with doubling
@@ -1092,7 +1093,11 @@ procedure Measure (H : in out Hands; M : in out Model) is
                end if;
             end Read_Stalls;
             Goal : constant Real_Array := (if To_Start then Aim_At.Element else Step_From.Element);
-            --  Every channel of the arm where it rests within its noise of Goal, or nearer than a step an eye can see.
+            --  Every channel of the arm where it rests within its noise of Goal, nearer than a step an eye can see, or
+            --  nearer than the fit counts the joint as turned (Kinematics.Counted_Turn): the motion layer sends an arm
+            --  again for no landing that near, and a press reads where the arm stands. h14 (seed 6, 10-17), sent back
+            --  three times, rested 0.008 to 0.023 off on four joints (the arm sags under its load), the eyes' least
+            --  steps there 0.0009 to 0.010, and every press was lost.
             procedure Read_Arrival (O : Observation) is
                Now : constant Real_Array := O.Readings.Element (Arm_Is);
             begin
@@ -1102,7 +1107,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
                                               Sqrt (2.0) * Reading_Noise (M, Arm_Is, C))
                              or else (Known (Visible_Step (M, Arm_Is, C))
                                       and then abs (Now (Now'First + C - 1) - Goal (Goal'First + C - 1))
-                                               < Visible_Step (M, Arm_Is, C).Value));
+                                               < Visible_Step (M, Arm_Is, C).Value)
+                             or else abs (Now (Now'First + C - 1) - Goal (Goal'First + C - 1))
+                                     < Driver.Robot.Kinematics.Counted_Turn (M, R.Arm, C));
             end Read_Arrival;
             Waited : Natural;
          begin
@@ -1118,6 +1125,30 @@ procedure Measure (H : in out Hands; M : in out Model) is
             --  shakes).
             Driver.Robot.Motion.Settle (M, Waited);
             Hold_Beat (Read_Arrival'Access);
+            --  An arm that rests off its goal as its free pushes stop short of theirs (the push that took it there not
+            --  Blocked, Steps) is back: it sags under its load or lands within its dead band, and the press reads where
+            --  it stands. Blocked, something holds it (a21: the hand caught in the table). h14 and h16 (seed 6, 10-17):
+            --  sent back, the arm rested 0.008 to 0.023 off on four joints, three to four of the eyes' least steps, and
+            --  every press was lost though nothing held the arm.
+            if not Reached then
+               declare
+                  Free_Landing : Boolean := False;
+                  procedure Read_Push (O : Observation) is
+                     pragma Unreferenced (O);
+                  begin
+                     Free_Landing := Driver.Robot.Steps.Episodes (M, Arm_Is) > 0
+                       and then Driver.Robot.Steps.Latest (M, Arm_Is).Ended
+                       and then not Driver.Robot.Steps.Latest (M, Arm_Is).Blocked;
+                  end Read_Push;
+               begin
+                  Hold_Beat (Read_Push'Access);
+                  if Free_Landing then
+                     Driver.Log.Line (Driver.Log.Robot, "hand: the arm sent back rests off its goal as its free pushes"
+                                      & " stop short, not held by anything: it is back where it stands");
+                     Reached := True;
+                  end if;
+               end;
+            end if;
             if not Reached then
                declare
                   Off_Text : Ada.Strings.Unbounded.Unbounded_String;

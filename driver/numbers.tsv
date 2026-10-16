@@ -1622,6 +1622,8 @@ driver-robot-hand.adb	P.Motion_U.Append (0.0, Ada.Containers.Count_Type (Size * 
 driver-robot-hand.adb	P.Motion_V.Append (0.0, Ada.Containers.Count_Type (Size * N));	0.0	math	a tally begins at nothing
 driver-robot-hand.adb	Past := Real'Max (2.0 * Past, Real'Max (G.Sigma, Least));	2.0	numerics	doubling steps past the band
 driver-robot-hand.adb	Readings : Real_Array (1 .. N + 2);	2	structure	the closer's two ends besides its stops
+driver-robot-hand.adb	Result (C) := Real'Max (Result (C), 2.0 * Least / (Driver.Conventions.Z * Sqrt (2.0)));	2.0	math	two landings of one asked setting differ by up to twice the least ask the body executes
+driver-robot-hand.adb	Result (C) := Real'Max (Result (C), 2.0 * Least / (Driver.Conventions.Z * Sqrt (2.0)));	2.0	statistics	the difference of two readings has twice the variance of one
 driver-robot-hand.adb	Result (C) := Real'Max (Result (C), Step.Value / (Driver.Conventions.Z * Sqrt (2.0)));	2.0	statistics	the difference of two readings carries the sigma of each: the step is Z times the square root of two of it
 driver-robot-hand.adb	Sqrt (2.0) * Sigma (C)));	2.0	statistics	the difference of two readings carries the sigma of each: the square root of two times one
 driver-robot-hand.adb	Tips : Follow.Pixel_Array (1 .. N + 2);	2	structure	the closer's two ends besides its stops
