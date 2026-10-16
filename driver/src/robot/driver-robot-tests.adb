@@ -7299,6 +7299,64 @@ package body Driver.Robot.Tests is
       end if;
    end Plan_And_Follow_Beyond_The_Travel;
 
+   --  The eye's place in the arm's own unit (Fit.Place_Covariance_In_Unit): what the fit leaves uncertain of every
+   --  length of the arm together moves every place with the unit, and is none of a place's uncertainty in that unit;
+   --  one length alone is. The pose's covariance (Fit.Pose_Covariance) holds both (a18 on 10-16: 12 per cent of
+   --  the eye's place, 6.5 units from the reference, where the truth put the tool within a seventieth of a unit).
+   procedure Place_In_Own_Unit is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      N      : constant := 3;
+      Joints : constant Fit.Joint_Array (1 .. N) :=
+        [(W => [0.0, 0.0, 1.0], P => [0.3, -0.2, 0.0], C => 1.0, Slide => False),
+         (W => [1.0, 0.0, 0.0], P => [0.0, 0.5, -1.0], C => 1.0, Slide => False),
+         (W => Driver.Numerics.Unit ([0.0, 1.0, 0.2]), P => [0.4, 0.1, -0.6], C => 1.0, Slide => False)];
+      Chain  : constant Fit.Chain_Order := [1, 2, 3];
+      --  The unit's keyframes, each joint turned alone and all together, near the reference; the place asked, far.
+      Unit_Changes : constant Real_Matrix (1 .. 4, 1 .. N) :=
+        [[0.1, 0.0, 0.0], [0.0, 0.1, 0.0], [0.0, 0.0, 0.1], [0.05, -0.05, 0.05]];
+      Far     : constant Real_Array (1 .. N) := [0.4, -0.3, 0.5];
+      Reduced : constant Natural := Fit.Terms (N);
+      Sigma   : constant Real := 0.01;
+      G       : Real_Array (1 .. Reduced) := [others => 0.0];
+      Every_Length, One_Length : Fit.Real_Lists.Vector;
+
+      function Trace (X : Driver.Numerics.Mat3) return Real is (X (1, 1) + X (2, 2) + X (3, 3));
+   begin
+      --  Every length scaled together: each joint's point moved across its axis by its own share (Fit.Across).
+      for J in 1 .. N loop
+         declare
+            E1, E2 : Driver.Numerics.Vec3;
+         begin
+            Fit.Across (Joints (J).W, E1, E2);
+            G (Fit.Term_Of (J, Fit.Point_1)) := Driver.Numerics.Dot (Joints (J).P, E1);
+            G (Fit.Term_Of (J, Fit.Point_2)) := Driver.Numerics.Dot (Joints (J).P, E2);
+         end;
+      end loop;
+      for P in 1 .. Reduced loop
+         for Q in 1 .. Reduced loop
+            Every_Length.Append (Sigma ** 2 * G (P) * G (Q));
+            One_Length.Append (if P = Q and then P = Fit.Term_Of (2, Fit.Point_1) then Sigma ** 2 else 0.0);
+         end loop;
+      end loop;
+      declare
+         Turn, Every_Pose, One_Pose : Driver.Numerics.Mat3;
+         Every_Unit : constant Driver.Numerics.Mat3 :=
+           Fit.Place_Covariance_In_Unit (Joints, Chain, Far, Unit_Changes, Every_Length);
+         One_Unit   : constant Driver.Numerics.Mat3 :=
+           Fit.Place_Covariance_In_Unit (Joints, Chain, Far, Unit_Changes, One_Length);
+      begin
+         Fit.Pose_Covariance (Joints, Chain, Far, Every_Length, Turn, Every_Pose);
+         Fit.Pose_Covariance (Joints, Chain, Far, One_Length, Turn, One_Pose);
+         Check (Trace (Every_Pose) > 0.0, "every length scaled together does not move the eye's place: the test shows nothing");
+         Check (Trace (Every_Unit) <= Driver.Conventions.Unchanged_Fraction ** 2 * Trace (Every_Pose),
+                "every length scaled together leaves the eye's place in the arm's own unit uncertain by"
+                & Trace (Every_Unit)'Image & " of the" & Trace (Every_Pose)'Image & " it leaves the pose");
+         Check (Trace (One_Unit) >= Driver.Conventions.Unchanged_Fraction * Trace (One_Pose),
+                "one length alone leaves the eye's place in the arm's own unit uncertain by" & Trace (One_Unit)'Image
+                & " of the" & Trace (One_Pose)'Image & " it leaves the pose");
+      end;
+   end Place_In_Own_Unit;
+
    --  The unit of length is the first fit's. A keyframe taken after the arm
    --  was fitted (every rest of a hand's presses, every stop of an action)
    --  refines every term and moves no length: the eye's position at a pose
@@ -8129,6 +8187,8 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.kinematics.pending", "a joint whose widest keyframes have no sightings yet (their "
                              & "matches have not come back) raises in the search of its axis, or leaves the arm "
                              & "unfitted", Kinematics_With_Matches_Pending'Access);
+      Driver.Tests.Register ("robot.kinematics.own_unit", "every length of an arm scaled together leaves the eye's place "
+                             & "uncertain in the arm's own unit, or one length alone does not", Place_In_Own_Unit'Access);
       Driver.Tests.Register ("robot.kinematics.unit", "a keyframe taken after the arm was fitted moves the lengths of "
                              & "its frame (the unit follows every keyframe, not the first fit's), or the refit leaves "
                              & "it out", Unit_Holds_As_Keyframes_Arrive'Access);

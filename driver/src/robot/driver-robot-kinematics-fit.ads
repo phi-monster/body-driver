@@ -181,6 +181,24 @@ package Driver.Robot.Kinematics.Fit is
    --  Place are Real'Last on the diagonal when the covariance is not the
    --  fit's of these joints.
 
+   function Place_Covariance_In_Unit
+     (Joints       : Joint_Array;
+      Chain        : Chain_Order;
+      Change       : Real_Array;
+      Unit_Changes : Driver.Numerics.Arrays.Real_Matrix;
+      Covariance   : Real_Lists.Vector) return Mat3
+     with Pre => Change'Length = Joints'Length and then Chain'Length = Joints'Length
+                 and then Unit_Changes'Length (2) = Joints'Length;
+   --  The covariance of the eye's place at readings Q0 + Change (Eye_At) in the arm's own unit, the root mean
+   --  square of the eye's positions over the unit's keyframes (Unit_Changes, one a row, as Unit_Sigma has them):
+   --  each joint term is moved by its standard deviation either way and the place is taken over the unit the moved
+   --  joints make, times the unit the fit's joints make. What the fit leaves uncertain of the arm's lengths against
+   --  its depths moves every place with the unit, the farther from the reference the more, and every length the
+   --  hand compares (a tip's distance, a press's hit, the eye's room above the table) is in that unit: in it, that
+   --  part is none (a18 on 10-16, a14's body: the eye 6.5 units below the reference, its place uncertain by 0.82
+   --  units by Pose_Covariance, 12 per cent, where the truth puts the arm's tool within 0.16 mm, a seventieth of a
+   --  unit, once its scale is taken out). Real'Last on the diagonal as Pose_Covariance.
+
    --  A point the reference keyframe shows at (U0, V0), seen again at (U, V)
    --  in keyframe Frame (2 or more; the reference is 1).
    type Sighting is record

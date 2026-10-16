@@ -114,6 +114,12 @@ package body Driver.Robot.Hand.Pressing.Tests is
             R.Covariance.Append (if Row /= Column then 0.0 elsif Row <= Fit.Lens_Terms then 1.0e-8 else 9.0e-8);
          end loop;
       end loop;
+      --  The unit's keyframes (Arm_Fit.Unit_Changes): each joint turned a little from the reference alone.
+      for F in Truth'Range loop
+         for K in Truth'Range loop
+            R.Unit_Changes.Append (if K = F then 0.05 else 0.0);
+         end loop;
+      end loop;
       R.Table := Table_Of (A);
       R.Placed := A = 1 or else How /= Unplaced;
       if A = 1 then

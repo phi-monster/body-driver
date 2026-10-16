@@ -282,6 +282,7 @@ package body Driver.Robot.Body_File is
                  & ", ""sigma_px"": " & Num (F.Sigma_Px) & ", ""matches"": " & Int (F.Matches)
                  & ", ""why"": " & Driver.Json.Quote (To_String (F.Why))
                  & ", ""covariance"": " & Reals (F.Covariance)
+                 & ", ""unit_changes"": " & Reals (F.Unit_Changes)
                  & ", ""table"": {""centre"": " & Three (F.Table.Centre) & ", ""normal"": " & Three (F.Table.Normal)
                  & ", ""tangent"": " & Three (F.Table.Tangent_1) & ", ""offset_sigma"": " & Num (F.Table.Offset_Sigma)
                  & ", ""tilt"": [" & Num (F.Table.Tilt_11) & ", " & Num (F.Table.Tilt_12) & ", "
@@ -754,6 +755,7 @@ package body Driver.Robot.Body_File is
                      R.Result.Matches := Natural'Max (0, Whole (X, "matches"));
                      R.Result.Why := To_Unbounded_String (Driver.Json.Text (Doc, Field (X, "why")));
                      R.Result.Covariance := Reals_Of (Field (X, "covariance"));
+                     R.Result.Unit_Changes := Reals_Of (Field (X, "unit_changes"));
                      declare
                         T : constant Node := Field (X, "table");
                         P : constant Node := Field (X, "placement");
