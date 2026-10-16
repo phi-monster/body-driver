@@ -267,3 +267,18 @@ which the driver does not allow.
 driver/bin/fake_brain 8090 &
 driver/bin/body_driver --listen 9080 --eye 127.0.0.1:8090 --inst 127.0.0.1:8077
 ```
+
+With a folder as its second argument, a person is the brain:
+
+```
+driver/bin/fake_brain 8090 asked/ &
+```
+
+Question N is written into the folder as `N.ask`, the question's text (its
+first line says which of the two questions it is), and `N.bmp`, its
+picture; the service then waits for `N.answer`, however long it takes: the
+program for question one, written as the brain would write it, and for
+question two the JSON object of section 4. Write the answer under another
+name and move it to `N.answer`, so that it is never read half written. The
+folder must be empty when the service starts: an answer left in it would be
+read as the answer to a new question.
