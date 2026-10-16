@@ -449,7 +449,7 @@ package body Driver.Robot.Boot is
             Framed_Now   : Boolean := False;   --  a keyframe was taken in the span at all
             Fitted_Now   : Boolean := False;
             Told_Now     : Boolean := False;   --  and its joints' order told (Kinematics.Order_Told)
-            Contested    : Driver.Robot.Kinematics.Joint_Pair_Lists.Vector;   --  if not, the pairs it lacks
+            Contested    : Joint_Pair_Lists.Vector;   --  if not, the pairs it lacks
             procedure Read_Followed is
             begin
                Followed_Now := Driver.Robot.Kinematics.Followed (M, A, Ask_From, Ask_To);
@@ -723,7 +723,7 @@ package body Driver.Robot.Boot is
                --  with the product of their turns (s08 on 10-16: the cells of every joint at the end of its passes
                --  turned each by about 0.08 rad, and the orders 5 1 4 3 2 6 and 1 5 4 3 6 2 left residuals of median
                --  0.361 and 0.363 px).
-               function Pair_Shares (P : Driver.Robot.Kinematics.Joint_Pair) return Real_Array is
+               function Pair_Shares (P : Joint_Pair) return Real_Array is
                   Every : constant Real_Array := Shares;
                   Share : Real_Array (Every'Range) := [others => 0.0];
                begin
@@ -970,29 +970,46 @@ package body Driver.Robot.Boot is
                --  together do that each alone does not, and a pass that followed nothing new took no cells at all
                --  (s06 on 10-16: fitted, its order not told, its last pass followed nothing, and its cells never
                --  climbed). Once: climbed as far as the view lets them, the cells give no more than they gave.
-               --  When the fit names the order nearest its own that it cannot tell from it, the cells turn the joints the
-               --  two orders give each the other way, a pair at a time (Pair_Shares), in place of every joint at once.
+               --  When the fit names joints next to each other along its order whose swap it cannot tell (Contested), the
+               --  cells turn those two, a pair at a time (Pair_Shares), in place of every joint at once; a pair once each:
+               --  a fit after them may name others (the order it tells then may be another, with other neighbours), and
+               --  those are turned in their round. Every joint at once, once, when it names none.
                if N > 1 and then Fitted_Now and then not Told_Now then
-                  if Contested.Is_Empty then
-                     Together (Shares);
-                  else
-                     declare
-                        Said : Ada.Strings.Unbounded.Unbounded_String;
-                     begin
-                        for P of Contested loop
-                           Ada.Strings.Unbounded.Append (Said, " c" & Driver.Log.Image (P.Earlier) & " with c"
-                                                         & Driver.Log.Image (P.Later));
-                        end loop;
-                        Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & "'s joints' order is not told; its cells"
-                                         & " turn the joints the order nearest it gives the other way, a pair at a time:"
-                                         & Ada.Strings.Unbounded.To_String (Said));
-                     end;
-                     for P of Contested loop
-                        Together (Pair_Shares (P));
+                  declare
+                     Turned   : Joint_Pair_Lists.Vector;   --  the pairs turned together so far
+                     All_Once : Boolean := False;          --  every joint turned at once
+                  begin
+                     loop
+                        declare
+                           Fresh : Joint_Pair_Lists.Vector;
+                           Said  : Ada.Strings.Unbounded.Unbounded_String;
+                        begin
+                           for P of Contested loop
+                              if not Turned.Contains (P) then
+                                 Fresh.Append (P);
+                                 Ada.Strings.Unbounded.Append (Said, " c" & Driver.Log.Image (P.Earlier) & " with c"
+                                                               & Driver.Log.Image (P.Later));
+                              end if;
+                           end loop;
+                           exit when Fresh.Is_Empty and then (All_Once or else not Turned.Is_Empty);
+                           if Fresh.Is_Empty then
+                              Together (Shares);
+                              All_Once := True;
+                           else
+                              Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & "'s joints' order is not told; its"
+                                               & " cells turn the joints next to each other whose swap is not told, a pair at"
+                                               & " a time:" & Ada.Strings.Unbounded.To_String (Said));
+                              for P of Fresh loop
+                                 Together (Pair_Shares (P));
+                                 Turned.Append (P);
+                              end loop;
+                           end if;
+                        end;
+                        Measure_The_Round;
+                        Driver.Beats.Within_A_Beat (Read_Followed'Access);
+                        exit when not Fitted_Now or else Told_Now;
                      end loop;
-                  end if;
-                  Measure_The_Round;
-                  Driver.Beats.Within_A_Beat (Read_Followed'Access);
+                  end;
                end if;
                Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " swept in" & Passes'Image & " passes of"
                                 & Rounds'Image & " rounds, "
