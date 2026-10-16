@@ -1055,27 +1055,24 @@ procedure Measure (H : in out Hands; M : in out Model) is
             end Read_Arrival;
             Waited : Natural;
          begin
-            Move_Group (Arm_Is, Goal, Reached);
-            --  A way back judged blocked can still get there: let go of what it pressed, the arm bounces, its first
-            --  beats swing against the ask, and the step was given up as blocked while the arm went on to stand where
-            --  it was sent (f16q on 10-15: the jaw's press at open, sent back to where its last step began, was given
-            --  up blocked at its third beat and stood at its target by its tenth; "the arm did not get back", and
-            --  nothing was pressed). Where the arm comes to rest is what tells.
-            if not Reached then
-               Driver.Robot.Motion.Settle (M, Waited);
-               Hold_Beat (Read_Arrival'Access);
-            end if;
+            Move_Group (Arm_Is, Goal);
+            --  Where the arm comes to rest is what tells whether it got back, whatever the step's verdict: a way back
+            --  given up as blocked can still get there (let go of what it pressed, the arm bounces and its first beats
+            --  swing against the ask: f16q on 10-15, the jaw's press at open given up blocked at its third beat and at
+            --  its target by its tenth), and one the step judged under way can stand where it was (a21 on 10-16, the
+            --  same press: sent back up from the table, the arm shook about where it stood, the step took that for
+            --  moving, and the arm was taken as back while its third channel stood 4.6 units off and the jaw lay on the
+            --  table). The closer is judged where it rests too: let go of what it pressed, it shakes for a while about
+            --  its place (f16t on 10-15: 0.0016 units off its opening at the beat it was read, back on it between
+            --  shakes).
+            Driver.Robot.Motion.Settle (M, Waited);
+            Hold_Beat (Read_Arrival'Access);
             if To_Start then
                Descended := 0.0;
             elsif Step_Reached then
                Descended := Descended - By;
             end if;
             Hold_Beat (Read_Stalls'Access);
-            --  The closer is judged where it rests: let go of what it pressed, it shakes for a while about its place
-            --  (f16t on 10-15: 0.0016 units off its opening at the beat it was read, back on it between shakes).
-            if Reached then
-               Driver.Robot.Motion.Settle (M, Waited);
-            end if;
             declare
                Arm_Back : constant Boolean := Reached;
             begin
