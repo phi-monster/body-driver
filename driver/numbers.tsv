@@ -2808,6 +2808,7 @@ driver-robot-kinematics.adb	when 5 => (L with delta K1 => L.K1 + By),	5	structur
 driver-robot-kinematics.adb	with Pre => On'First = 1	1	structure	indexes start at one
 driver-robot-kinematics.adb	with Pre => S'First = 1 and then S'Length = Natural (U.Length) and then Natural (V.Length) = Natural (U.Length)	1	structure	indexes start at one
 driver-robot-lag.adb	Best : Real := 1.0;	1.0	math	a probability: no fit yet, so noise explains everything
+driver-robot-lag.adb	Beyond : Real := 1.0;	1.0	math	a probability: no fit yet, so noise explains everything
 driver-robot-lag.adb	Child := 2 * Root;	2	structure	in a binary heap the children of node k are 2 k and 2 k + 1
 driver-robot-lag.adb	Gaps : Real_Access := new Real_Array (1 .. Natural'Max (1, Natural (List.Length)));	1	structure	at least one element, so an empty list allocates a buffer no smaller than one
 driver-robot-lag.adb	I : Positive := 1;	1	structure	arrays are indexed from one

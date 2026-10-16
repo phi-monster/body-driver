@@ -3436,8 +3436,13 @@ package body Driver.Robot.Tests is
                                    & ", eye 1 settled " & Boolean'Image (Driver.Robot.Stillness.Eye_Settled (M, 1)));
                end if;
             end if;
+            --  Arm 2 is swept with its eye where the model has eye 2 on it: a pose counted while the estimate had eye
+            --  2 on another arm, or on none, is a pose of a group the boot was not sweeping with that eye (a beat of the
+            --  first probe at which the lock-in, its lag not yet told, briefly read eye 2 whole on group 2 passed this
+            --  count for a boot that never swept arm 2, robot.boot.reread on 10-17).
             for A in 1 .. Arm_Count (M) loop
                if Arm_Group (M, Arm_Id (A)) = 2 and then Now.Arm_2 /= [0.0, 0.0]
+                 and then Eye_Mount (M, 2).Kind = Arm_Carried and then Eye_Mount (M, 2).Arm = Arm_Id (A)
                  and then Driver.Robot.Kinematics.Held_Still (M, Arm_Id (A), M.Beats - 1)
                  and then (for all K in 1 .. Arm_2_Poses => Poses_2 (K) /= Now.Arm_2)
                  and then Arm_2_Poses < Poses_2'Length
