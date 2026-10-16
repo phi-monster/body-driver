@@ -36,10 +36,14 @@ package body Driver.Robot.Steps is
       --  is not executing: a sending again by a landing's error asks two or three units, and a servo settling a
       --  tick or two gave the kiwi's arm_b third joint an executed least of 2.4 units where its dead band stops
       --  asks below 19 (R6's second start, 10-14: the sweep's first level 2.449, from the readings' noise alone).
+      --  Nor did a push born moving (Episode.Born_Moving) execute anything: its channels were on their way from
+      --  the push before, and that motion answers that one (s11 on 10-16, servo seed 3: push 372 began at beat 4161
+      --  while joint 2 still moved toward the 816.8 of push 371, at 802; it asked 3.2 to 805.2, read 806, and joint
+      --  2's executed least became 3.2 where its landings stood 8 to 12 off: the fit counted those as turns).
       while Natural (S.Executed.Length) < S.Size loop
          S.Executed.Append (Real'Last);
       end loop;
-      if E.Length > 0.0 and then Channels.Has_Reading (M, G, Beat) then
+      if E.Length > 0.0 and then not E.Born_Moving and then Channels.Has_Reading (M, G, Beat) then
          for C in 1 .. S.Size loop
             declare
                Ask   : constant Real := S.Ask (C - 1);
