@@ -79,12 +79,17 @@ package Driver.Robot.Hand.Shape is
       Sightings     : Sighting_Array;
       Open_Anchor   : Positive;
       Closed_Anchor : Positive;
-      Bordered      : Boolean) return Lobe_Shape
+      Bordered      : Boolean;
+      Closed_Is_End : Boolean := True) return Lobe_Shape
      with Pre => Open_Anchor in Sightings'Range and then Closed_Anchor in Sightings'Range;
    --  Eye is the eye's centre in the tool frame. The anchors are the
    --  sightings of the lobe's tip at the open end and at the closed end, the
    --  points the presses measure. Bordered: the lobe touches the picture's
-   --  border at its open end, so where it begins is not seen.
+   --  border at its open end, so where it begins is not seen. Closed_Is_End:
+   --  the second anchor is the tip at the closed end; when it is not, the lobe
+   --  was followed only part of its travel (its tip not seen through the rest),
+   --  the second anchor is its tip where it was last followed, and only the open
+   --  end's press scales it (Measure).
 
    function Unfitted (Why : String) return Lobe_Shape;
    --  A lobe whose shape cannot be fitted, and why.
@@ -122,8 +127,9 @@ package Driver.Robot.Hand.Shape is
      with Pre => Tips'First (1) = Shapes'First and then Tips'Last (1) = Shapes'Last;
    --  The hand's sizes from its lobes' shapes and their tips at both
    --  openings (tool frame, from the presses). A lobe is measured when its
-   --  shape is fitted and both its tips are known; the depth and the axis,
-   --  when every lobe is.
+   --  shape is fitted and both its tips are known (the open one alone for a
+   --  lobe followed part of its travel: Fit's Closed_Is_End); the depth and the
+   --  axis, when every lobe is.
 
 private
 
@@ -158,6 +164,7 @@ private
       Open_Anchor   : Positive := 1;
       Closed_Anchor : Positive := 1;
       Bordered      : Boolean := False;
+      Closed_Is_End : Boolean := True;
    end record;
 
 end Driver.Robot.Hand.Shape;

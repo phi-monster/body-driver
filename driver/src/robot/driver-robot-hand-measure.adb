@@ -495,6 +495,14 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Sigma    : Real := 0.0;        --  the channel's noise (Closer_Sigma)
          Began    : Natural := 0;
          Settles  : Natural := 0;
+         --  The gaps whose parts saw no tip: passed over when the gaps are looked for again, so that the others are
+         --  cut (a13 on 10-16: the first gap was such a one, near the closed end, and the cutting stopped there with
+         --  an 87-pixel step left on the open side).
+         package Gap_Lists is new Ada.Containers.Vectors (Positive, Real);
+         Unseen_From, Unseen_To : Gap_Lists.Vector;
+         function Unseen (A, B : Real) return Boolean is
+           (for some K in Unseen_From.First_Index .. Unseen_From.Last_Index =>
+              Unseen_From (K) = A and then Unseen_To (K) = B);
          procedure Read_Gap (O : Observation) is
             P : constant Natural := Own_Pair (G);
          begin
@@ -551,6 +559,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                               if Seen then
                                  if Last_Seen
                                    and then Sqrt ((Tip.U - Last_Tip.U) ** 2 + (Tip.V - Last_Tip.V) ** 2) > Limit
+                                   and then not Unseen (Last_R, R)
                                  then
                                     Found := True;
                                     From := Last_R;
@@ -673,12 +682,13 @@ procedure Measure (H : in out Hands; M : in out Model) is
                begin
                   Hold_Beat (Read_Gap'Access);
                   if Found and then From = Was_From and then To = Was_To then
-                     Why := Ada.Strings.Unbounded.To_Unbounded_String
-                       ("between " & Driver.Log.Image (From, 6) & " and " & Driver.Log.Image (To, 6) & " a tip moves"
-                        & Natural'Image (Natural (Widest)) & " pixels, and the" & Parts'Image
-                        & " parts cut into it saw no tip: it is not seen through those readings, and not followed"
-                        & " across them by cutting");
-                     exit;
+                     Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
+                                      & ": between " & Driver.Log.Image (From, 6) & " and " & Driver.Log.Image (To, 6)
+                                      & " a tip moves" & Natural'Image (Natural (Widest)) & " pixels, and the"
+                                      & Parts'Image & " parts cut into it saw no tip: it is not seen through those"
+                                      & " readings, and the other gaps are cut");
+                     Unseen_From.Append (From);
+                     Unseen_To.Append (To);
                   end if;
                end;
             end;

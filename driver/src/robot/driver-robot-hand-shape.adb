@@ -155,13 +155,15 @@ package body Driver.Robot.Hand.Shape is
       Sightings     : Sighting_Array;
       Open_Anchor   : Positive;
       Closed_Anchor : Positive;
-      Bordered      : Boolean) return Lobe_Shape
+      Bordered      : Boolean;
+      Closed_Is_End : Boolean := True) return Lobe_Shape
    is
       Unknowns : constant := 5;   --  the turn's three and the shift's direction's two
       Result   : Lobe_Shape := (Eye           => Eye,
                                 Open_Anchor   => Open_Anchor,
                                 Closed_Anchor => Closed_Anchor,
                                 Bordered      => Bordered,
+                                Closed_Is_End => Closed_Is_End,
                                 others        => <>);
       Points   : Point_Access := new Point_Array (Sightings'Range);
       Trial    : Real_Access := new Real_Array (Sightings'Range);
@@ -521,7 +523,9 @@ package body Driver.Robot.Hand.Shape is
    --  and the closed tip's at the closed end, where the motion carries its
    --  point. Both lean on the same motion, so their difference is tested
    --  with what they share taken out, and they are combined as two
-   --  correlated estimates of one quantity.
+   --  correlated estimates of one quantity. A lobe followed part of its
+   --  travel (not Closed_Is_End) has its second anchor where it was last
+   --  followed, which no press measured: the open tip's estimate alone.
    function Scale_Of (S : Lobe_Shape; Open_Tip, Closed_Tip : Point_Estimate) return Scaled is
       Sights  : Sighting_Array renames S.Sightings.Constant_Reference.Element.all;
       Points  : Point_Array renames S.Points.Constant_Reference.Element.all;
@@ -547,6 +551,22 @@ package body Driver.Robot.Hand.Shape is
             Range_G (K) := V_C * By_Motion (K) - Lean_C * C (K);
          end loop;
       end;
+      if not S.Closed_Is_End then
+         if Depth_O <= 0.0 or else Rho_O <= 0.0 then
+            R.Why := To_Unbounded_String ("its open tip lies behind its eye");
+            return R;
+         end if;
+         declare
+            S_O : constant Real := Rho_O / Depth_O;
+         begin
+            R.Ok := True;
+            R.Scale := S_O;
+            R.Own := (S_O ** 2) * ((Sigma_Along (Open_Tip.Covariance, U_O) / Rho_O) ** 2
+                                   + (S.Scatter ** 2) * Points (S.Open_Anchor).Own / Depth_O ** 2);
+            R.Gradient := (S_O / Depth_O) * Coupling_At (S, S.Open_Anchor);
+         end;
+         return R;
+      end if;
       if Depth_O <= 0.0 or else T_C.Range_At <= 0.0 or else Rho_O <= 0.0 or else Rho_C <= 0.0 then
          R.Why := To_Unbounded_String ("a tip lies behind its eye");
          return R;
@@ -859,8 +879,9 @@ package body Driver.Robot.Hand.Shape is
          begin
             if not S.Fitted then
                Say (L, (if Length (S.Why) > 0 then To_String (S.Why) else "its shape is not seen"));
-            elsif not Known (Opened) or else not Known (Shut) then
-               Say (L, "its tip is not pressed at both openings yet");
+            elsif not Known (Opened) or else (S.Closed_Is_End and then not Known (Shut)) then
+               Say (L, (if S.Closed_Is_End then "its tip is not pressed at both openings yet"
+                        else "its tip is not pressed at the open opening yet"));
             else
                Work (L).Scale := Scale_Of (S, Opened, Shut);
                if not Work (L).Scale.Ok then

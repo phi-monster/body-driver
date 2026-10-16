@@ -654,7 +654,12 @@ package body Driver.Robot.Hand is
       --  with where it is at the closed end, and the tip, the point the presses measure, from where the placing put
       --  it at the open end to where it put it at the closed one; their lines of sight taken into the tool frame
       --  through the eye's mount as it was when the open end was seen. A stop where the lobe's tip was not found is
-      --  passed over.
+      --  passed over. Where a step on the way is wider than the matcher follows, the views from the open end up to
+      --  it are followed and fitted, a lobe followed part of its travel (Shape.Fit's Closed_Is_End): a jaw swung
+      --  onto a fixed one is not told from it near the closed end, its tip seen at none of the stops there however
+      --  fine the closer stops (a13 on 10-16: 84 pixels between 0.697 and 0.814, thirteen stops between and no tip
+      --  at any), and its shape, its width and how deep a thing goes between the jaws are what the open part of
+      --  its travel shows.
       function Followed_Shape
         (C : Positive; Lobe_No : Positive; L : Driver.Robot.Hand.Lobes.Lobe;
          Low, High : Driver.Robot.Hand.Views.View; Closed_High : Boolean) return Driver.Robot.Hand.Shape.Lobe_Shape
@@ -676,6 +681,8 @@ package body Driver.Robot.Hand is
          Tips       : Follow.Pixel_Array (1 .. N + 2);
          Readings   : Real_Array (1 .. N + 2);   --  the channel's reading at each view kept
          Count      : Natural := 0;
+         All_Views  : Natural := 0;   --  every view where the tip is seen; Count, those followed
+         function Partial return Boolean is (Count < All_Views);
 
          function Line (Px : Driver.Images.Pixel) return Vec3 is
            (Mount.Pose.Rotation * Eye_Ray (M, P.Eye, Px).Direction.Unit_Vector);
@@ -716,17 +723,25 @@ package body Driver.Robot.Hand is
          for J in 0 .. N + 1 loop
             Take (if Closed_High then J else N + 1 - J);
          end loop;
+         All_Views := Count;
          declare
             Wide : constant Natural := Follow.Widest_Step (Tips (1 .. Count), Width, Height);
          begin
-            if Wide > 0 then
+            if Wide = 1 then
                return Shapes.Unfitted
-                 ("its pixels are not followed from the open end to the closed one: its tip moves"
-                  & Natural'Image (Natural (Follow.Tip_Step (Tips (1 .. Count), Wide))) & " pixels between two of the"
-                  & Count'Image & " views where it is seen, from " & Image (Tips (Wide)) & " at "
+                 ("its pixels are not followed from the open end: its tip moves"
+                  & Natural'Image (Natural (Follow.Tip_Step (Tips (1 .. Count), Wide))) & " pixels between the first two"
+                  & " of the" & Count'Image & " views where it is seen, from " & Image (Tips (Wide)) & " at "
                   & Driver.Log.Image (Readings (Wide), 6) & " to " & Image (Tips (Wide + 1)) & " at "
                   & Driver.Log.Image (Readings (Wide + 1), 6) & ", farther than the matcher searches at its finest ("
                   & Natural'Image (Natural (Driver.Alignment.Finest_Radius (Width, Height))) & " pixels)");
+            elsif Wide > 1 then
+               Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & P.Group'Image & " channel" & C'Image & " lobe"
+                                & Lobe_No'Image & ": followed from the open end to " & Driver.Log.Image (Readings (Wide), 6)
+                                & ", where its tip moves" & Natural'Image (Natural (Follow.Tip_Step (Tips (1 .. Count), Wide)))
+                                & " pixels to the next view, at " & Driver.Log.Image (Readings (Wide + 1), 6)
+                                & ": part of its travel");
+               Count := Wide;
             end if;
          end;
          declare
@@ -763,14 +778,16 @@ package body Driver.Robot.Hand is
                   Followed_Moves : Driver.Robot.Hand.Lobes.Move_Array renames F.Moves.Constant_Reference.Element.all;
                   Moves : Driver.Robot.Hand.Lobes.Move_Array (1 .. F.Count + 1);
                begin
-                  --  The tip first: the point the presses measure at each end, the shape's anchors.
-                  Moves (1) := (From => Open_Tip, To => Closed_Tip);
+                  --  The tip first: the point the presses measure at the open end, the shape's first anchor; the
+                  --  second, the tip at the closed end, or where it was last followed (Closed_Is_End).
+                  Moves (1) := (From => Open_Tip, To => (if Partial then Tips (Count) else Closed_Tip));
                   Moves (2 .. F.Count + 1) := Followed_Moves;
                   declare
                      Seen : constant Shapes.Sighting_Array :=
-                       Shapes.From_Moves (Moves, (From => Closed_Tip, To => Open_Tip), Line'Access, F.Sigma);
+                       Shapes.From_Moves (Moves, (From => (if Partial then Tips (Count) else Closed_Tip), To => Open_Tip),
+                                          Line'Access, F.Sigma);
                   begin
-                     return Shapes.Fit (Mount.Pose.Translation, Seen, 1, Seen'Last, Bordered);
+                     return Shapes.Fit (Mount.Pose.Translation, Seen, 1, Seen'Last, Bordered, Closed_Is_End => not Partial);
                   end;
                end;
             end;
