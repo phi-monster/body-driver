@@ -431,6 +431,16 @@ procedure Measure (H : in out Hands; M : in out Model) is
                Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & ": the raise of its eye ended "
                                 & Report.Outcome'Image & " after" & Report.Beats'Image & " beats: "
                                 & Ada.Strings.Unbounded.To_String (Report.Detail));
+               --  A raise the body did not execute at all (none of it delivered) carried the eye nowhere, as one too
+               --  small to show does: the next is twice it (Gather_Poses). Nothing stops an arm that never started,
+               --  and a raise is planned within the arm's reach; ended there, the eye had one pose of the two it needs.
+               --  s47 (servo seed 6 of the fake robot, 10-17): the second raise, 0.1047 the way the eye moves furthest,
+               --  delivered 0.000 of 8.7452 units in 3 beats, and no hand was made.
+               if Report.Outcome = Driver.Robot.Motion.Blocked and then Known (Report.Delivered)
+                 and then Report.Delivered.Value <= 0.0
+               then
+                  Raised := True;
+               end if;
             end if;
          end Raise_Eye;
       begin
