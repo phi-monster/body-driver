@@ -78,6 +78,15 @@ package body Driver.Robot.Graph is
       end Told_Eye;
 
       Own : array (M.Groups.First_Index .. M.Groups.Last_Index) of Boolean := [others => False];
+
+      --  The eye last mounted on the group as an arm (Group_Stream.Rider) still rides on it while it shows the group
+      --  a patch of its view or is undecided: a sweep's small pushes leave the far cells of a whole view unanswered,
+      --  and the lock-in, regressing on every push of the stream, falls back from whole (robot.boot.patch, 10-17:
+      --  arm 2's eye whole at the recognition and undecided, 33 of 48 cells, at an estimate between its sweep's third
+      --  and fourth passes; the arm was taken for a part and its sweep cut at 16 poses, in two runs of three). Only
+      --  an eye in which the group moves nothing (Nothing), or that another arm moves whole, takes it off.
+      function Still_Ridden (G : Group_Id) return Boolean is
+        (M.Groups (G).Rider > 0 and then Effect (M, G, M.Groups (G).Rider).Verdict in Undecided | Patch);
    begin
       --  Once a push of the group was its own it stays so: the longest lag the stream can tell of is the median gap
       --  between its bursts, which the arms' sweeps, their pushes far apart, widen, and the recognition's pushes of a
@@ -136,7 +145,7 @@ package body Driver.Robot.Graph is
                      Gr.Carrier := G;
                      Gr.Roles.Replace_Element (G, Carrier);
                   end if;
-               elsif Whole_Eyes > 0 or else Told_Eye (G) > 0 then
+               elsif Whole_Eyes > 0 or else Told_Eye (G) > 0 or else Still_Ridden (G) then
                   Gr.Arms.Append (G);
                   Gr.Roles.Replace_Element (G, Arm);
                   Gr.Arm_Of.Replace_Element (G, Gr.Arms.Last_Index);
@@ -170,10 +179,19 @@ package body Driver.Robot.Graph is
                   end if;
                end;
             end loop;
+            if Keyed = 0 and then Best_Arm = 0 then
+               for A in Gr.Arms.First_Index .. Gr.Arms.Last_Index loop
+                  if M.Groups (Gr.Arms (A)).Rider = E and then Still_Ridden (Gr.Arms (A)) then
+                     Best_Arm := A;
+                  end if;
+               end loop;
+            end if;
             if Keyed > 0 then
                Gr.Mounts.Replace_Element (E, (Kind => Arm_Carried, Arm => Keyed));
+               M.Groups (Gr.Arms (Keyed)).Rider := E;
             elsif Best_Arm > 0 then
                Gr.Mounts.Replace_Element (E, (Kind => Arm_Carried, Arm => Best_Arm));
+               M.Groups (Gr.Arms (Best_Arm)).Rider := E;
             elsif Gr.Carrier > 0 and then Effect (M, Gr.Carrier, E).Verdict = Whole then
                Gr.Mounts.Replace_Element (E, (Kind => Carrier_Carried));
             else

@@ -637,12 +637,17 @@ package body Driver.Robot.Tests is
    --  moves with it (Arm_Evidence.Shift_Seen): the aligner measures over the whole picture what the lock-in's flow
    --  measures a beat at a time (f15o on 10-15: the lock-in, regressing the sweep's and the hand's beats again,
    --  read arm 1's eye as undecided, the graph took the eye off the arm, and the hand measured in it was dropped).
-   --  Where no keyframe told, the lock-in alone decides, and the arm no longer carries the eye.
+   --  Where no keyframe told, the lock-in alone decides: undecided is no verdict against the eye the arm carried
+   --  (Group_Stream.Rider), which stays; an eye in which the arm moves nothing goes (robot.boot.patch, 10-17: an
+   --  arm under its sweep, its keyframes not yet telling, lost its eye to an undecided verdict between two passes).
    procedure Keyframes_Hold_An_Eye_On_Its_Arm is
       M : Model;
       Undecided_Own : constant Eye_Effect :=
         (Verdict => Undecided, Responding => 24, Textured => 48,
          Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True);
+      Nothing_Own : constant Eye_Effect :=
+        (Verdict => Nothing, Responding => 0, Textured => 48,
+         Fraction => (Value => 0.0, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => False);
       G : Group_Id;
       E : Eye_Id'Base := 0;
       K : Natural := 0;   --  arm 1's evidence
@@ -670,8 +675,14 @@ package body Driver.Robot.Tests is
          M.Kinematics (K).Shift_Seen.Replace_Element (C, False);
       end loop;
       Driver.Robot.Graph.Derive (M);
+      Check (Role (M, G) = Arm and then Eye_Mount (M, E).Kind = Arm_Carried
+             and then Eye_Mount (M, E).Arm = M.Graph.Arm_Of (G),
+             "with no keyframe telling, an eye the lock-in is undecided about no longer rides arm 1: "
+             & Role (M, G)'Image & ", " & Eye_Mount (M, E).Kind'Image);
+      M.Graph.Effects.Replace_Element ((Natural (G) - 1) * Eye_Count (M) + Natural (E), Nothing_Own);
+      Driver.Robot.Graph.Derive (M);
       Check (not (Eye_Mount (M, E).Kind = Arm_Carried and then Eye_Mount (M, E).Arm = M.Graph.Arm_Of (G)),
-             "with no keyframe telling, an eye the lock-in is undecided about still rides arm 1");
+             "with no keyframe telling, an eye in which arm 1 moves nothing still rides it");
    end Keyframes_Hold_An_Eye_On_Its_Arm;
 
    --  A group that carries an eye moves the whole of its picture, though much
@@ -8455,7 +8466,8 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.roles.undecided", "a group some eye is still undecided about is called a closer or a "
                              & "part, though that eye may ride on it", Undecided_Eye_Leaves_Group_Unclassified'Access);
       Driver.Tests.Register ("robot.roles.keyframes", "an arm loses the eye its keyframes tell moves with it when the "
-                             & "lock-in is undecided about it, or keeps one no keyframe tells of", Keyframes_Hold_An_Eye_On_Its_Arm'Access);
+                             & "lock-in is undecided about it, or keeps one the lock-in sees it move nothing in",
+                             Keyframes_Hold_An_Eye_On_Its_Arm'Access);
       Driver.Tests.Register ("robot.roles.noisy", "an eye that a group carries is called a patch of it because part of its "
                              & "picture is too faintly textured for its cells to tell the group's push, or a patch "
                              & "among well-textured cells is called the whole picture",
