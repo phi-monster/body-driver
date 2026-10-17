@@ -2785,6 +2785,7 @@ driver-robot-kinematics.adb	with Pre => S'First = 1 and then S'Length = Natural 
 driver-robot-lag.adb	Best : Real := 1.0;	1.0	math	a probability: no fit yet, so noise explains everything
 driver-robot-lag.adb	Beyond : Real := 1.0;	1.0	math	a probability: no fit yet, so noise explains everything
 driver-robot-lag.adb	Child := 2 * Root;	2	structure	in a binary heap the children of node k are 2 k and 2 k + 1
+driver-robot-lag.adb	Due : constant Boolean := M.Lag_Evidence = 0 or else M.Beats >= 2 * M.Lag_Evidence;	2	numerics	measuring again when the evidence doubles keeps the number of measures logarithmic in the stream, as the estimates (Graph_Evidence)
 driver-robot-lag.adb	Gaps : Real_Access := new Real_Array (1 .. Natural'Max (1, Natural (List.Length)));	1	structure	at least one element, so an empty list allocates a buffer no smaller than one
 driver-robot-lag.adb	I : Positive := 1;	1	structure	arrays are indexed from one
 driver-robot-lag.adb	Ranks (L) := Real (I + J) / 2.0;	2.0	math	tied values share the mean of the ranks they span
