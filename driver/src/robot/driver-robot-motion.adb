@@ -1236,6 +1236,73 @@ package body Driver.Robot.Motion is
       if Amount <= 0.0 or else (for all U of Usable => not U) then
          return;
       end if;
+      --  Where the body begins to execute, first: the amount climbs one doubling more at each level no listed reading
+      --  went along, and once one did, it is halved back between the last that none did and the least that some did
+      --  until the two lie within a doubling; the ladder then starts from the least that some did. Every level no
+      --  reading answers is waited for as long as no push of the body had ever been answered (Steps.First_Push), and
+      --  the ladder doubled through the body's dead band one such wait at a time: b13 (seed 10 of the fake robot,
+      --  readings in milliradians, 10-17) asked 4.2e-7 units first, its readings first went along at 1.76, twenty-two
+      --  levels of 45 beats each, a thousand of the recognition's 2059 beats. An amount is judged from the hold: after
+      --  a level some reading went along, the body is sent back to it before the next.
+      declare
+         Least  : constant Real := Amount;
+         Most   : constant Real := Least * 2.0 ** Levels;   --  as far as the ladder itself would double
+         Lo, Hi : Real := 0.0;   --  the largest amount no reading went along, the least some did
+         Stride : Natural := 0;  --  the doublings the amount climbed at its last level
+         Back   : Step_Report;
+      begin
+         loop
+            declare
+               Ask     : constant Real := (if Hi = 0.0 then Amount else Sqrt (Lo * Hi));
+               Offsets : Real_Array (1 .. N);
+               Seen    : Boolean;
+               Chance  : Real;
+               Now     : Real_Array (1 .. N);
+               Moving  : Flag_Array (1 .. N);
+               Now_At  : Natural;
+               Went    : Natural := 0;
+            begin
+               for I in 1 .. N loop
+                  Offsets (I) := Sign * Ask;
+               end loop;
+               Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving, Now_At);
+               for I in 1 .. N loop
+                  if Usable (I)
+                    and then Executed (Sign * (Now (I) - Start (I)) - Sign * Creep (I) * Real (Now_At - Start_At),
+                                       Noise (I), Freedom (I))
+                  then
+                     Went := Went + 1;
+                  end if;
+               end loop;
+               Driver.Log.Line (Driver.Log.Robot, "probe: where the body begins to execute, every channel together at "
+                                & Scientific (Ask) & " units, read at beat" & Now_At'Image & ":" & Went'Image
+                                & " channels went along their ask");
+               if Went > 0 then
+                  Hi := Ask;
+                  --  Back to the hold, and its readings, before the next amount is judged from them.
+                  Step (M, Base, Back);
+                  Start_At := M.Beats - 1;
+                  for I in 1 .. N loop
+                     if Usable (I) then
+                        Start (I) := Driver.Robot.Channels.Reading (M, Listed (I).Group, Start_At, Listed (I).Channel);
+                     end if;
+                  end loop;
+               else
+                  Lo := Ask;
+                  if Hi = 0.0 then
+                     Stride := Stride + 1;
+                     Amount := Real'Min (Ask * 2.0 ** Stride, Most);
+                  end if;
+               end if;
+               exit when Hi > 0.0 and then (Lo = 0.0 or else Hi <= 2.0 * Lo);
+               exit when Hi = 0.0 and then Lo >= Most;
+            end;
+         end loop;
+         if Hi > 0.0 then
+            Amount := Hi;
+         end if;
+         Farthest_At := [others => Start_At];
+      end;
       for Level in 1 .. Levels loop
          Report.Steps := Level;
          declare
