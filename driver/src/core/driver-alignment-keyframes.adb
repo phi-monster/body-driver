@@ -1410,7 +1410,9 @@ package body Driver.Alignment.Keyframes is
       Spread : Real;
       Riding : Flag_Array;
       Into   : out Prediction_Array;
-      Result : out Motion)
+      Result : out Motion;
+      Stood  : out Flag_Array;
+      Moved  : out Flag_Array)
    is
       Count  : constant Natural := Natural (C.Points.Length);
       Radius : constant Real := Window_Radius (Spread);
@@ -1445,6 +1447,8 @@ package body Driver.Alignment.Keyframes is
       Finest_Size : constant Natural := Finest_Tried;
    begin
       Result := (others => <>);
+      Stood := [others => False];
+      Moved := [others => False];
       Ada.Numerics.Float_Random.Reset (Gen, Count);
       for Size in reverse Finest_Size .. Start loop
          declare
@@ -1949,6 +1953,23 @@ package body Driver.Alignment.Keyframes is
                   end if;
                   Result.Told :=
                     Real (Result.Own) - Real (Result.Other) > Z * Sqrt (Real (Result.Own + Result.Other));
+                  --  Where the field is told, a point whose best place was where it stood while the field moves it
+                  --  there beyond a place the size resolves stood against the view; one on the field that moved
+                  --  moved with it.
+                  if Result.Told then
+                     for K in 1 .. Count loop
+                        if Peaks (K) /= null then
+                           declare
+                              Du : constant Real := Move_U (Best, U_Of (K), V_Of (K));
+                              Dv : constant Real := Move_V (Best, U_Of (K), V_Of (K));
+                              Far : constant Boolean := Du ** 2 + Dv ** 2 > Tolerance ** 2;
+                           begin
+                              Stood (K) := Stayed (K) and then Far;
+                              Moved (K) := On_Best (K) and then not Stayed (K) and then Far;
+                           end;
+                        end if;
+                     end loop;
+                  end if;
                end if;
             end if;
             if (if Was_Prior then Refined else Result.Told) then
@@ -2027,6 +2048,28 @@ package body Driver.Alignment.Keyframes is
 
    function Last_Motion (C : Chain) return Motion is (C.Motion);
 
+   procedure Keep_Evidence (C : in out Chain; Stood, Moved : Flag_Array) is
+   begin
+      C.Stood.Clear;
+      C.Moved_On.Clear;
+      for K in Stood'Range loop
+         C.Stood.Append (Stood (K));
+         C.Moved_On.Append (Moved (K));
+      end loop;
+   end Keep_Evidence;
+
+   procedure Stood_And_Moved (C : Chain; Stood, Moved : out Flag_Array) is
+   begin
+      for K in Stood'Range loop
+         declare
+            P : constant Positive := K - Stood'First + 1;
+         begin
+            Stood (K) := P <= Natural (C.Stood.Length) and then C.Stood (P);
+            Moved (Moved'First + K - Stood'First) := P <= Natural (C.Moved_On.Length) and then C.Moved_On (P);
+         end;
+      end loop;
+   end Stood_And_Moved;
+
    procedure Add
      (C       : in out Chain;
       Image   : Driver.Images.Image;
@@ -2052,6 +2095,8 @@ package body Driver.Alignment.Keyframes is
       end loop;
       Answers := [others => Not_Asked_Answer];
       C.Motion := (others => <>);
+      C.Stood.Clear;
+      C.Moved_On.Clear;
       --  The points by doubling: first the fewest a field stands on, spread over the picture (every Stride-th
       --  point, Stride the largest power of two that leaves that many), then twice as many each round, the new
       --  points predicted from the field so far where there is one; the rounds end when a round's field puts
@@ -2060,7 +2105,11 @@ package body Driver.Alignment.Keyframes is
       --  alignments and 132 s for ten keyframes, for fields of twelve terms.)
       declare
          Asked  : Prediction_Array (1 .. Count) := Given;
-         Done   : Flag_Array (1 .. Count) := [others => False];
+         --  A point that rides with the eye tells nothing of how the view moved: it is not asked, and neither the
+         --  common motion nor the keyframe's field rests on it (s30 on 10-17: the jaws' points drew both to no
+         --  motion where the wrist had turned the view 8 to 88 degrees).
+         Done   : Flag_Array (1 .. Count) :=
+           [for K in 1 .. Count => Riding'Length > 0 and then Riding (Riding'First + K - 1)];
          Stride : Positive := 1;
       begin
          --  A prediction whose windows are wider than a patch at the full size (where several places may fit a patch
@@ -2102,7 +2151,13 @@ package body Driver.Alignment.Keyframes is
                     (if C.Last = New_Direction then Sqrt (Given (Given'First).Cov.UU)
                      else Farthest / Window_Multiple + Typical);
                begin
-                  Common_Motion (C, Second, Real'Min (Spread, Largest_Sigma (C.Pictures, Second)), Riding, Asked, Common);
+                  declare
+                     Stood, Moved : Flag_Array (1 .. Count);
+                  begin
+                     Common_Motion (C, Second, Real'Min (Spread, Largest_Sigma (C.Pictures, Second)), Riding, Asked, Common,
+                                    Stood, Moved);
+                     Keep_Evidence (C, Stood, Moved);
+                  end;
                   Common.Searched := True;
                   C.Motion := Common;
                   if not Common.Told then
@@ -2126,8 +2181,14 @@ package body Driver.Alignment.Keyframes is
                   Common : Motion;
                   Places : Prediction_Array (1 .. Count);
                begin
-                  Common_Motion (C, Second, Real'Min (Farthest / Window_Multiple + Typical, Largest_Sigma (C.Pictures, Second)),
-                                 Riding, Places, Common);
+                  declare
+                     Stood, Moved : Flag_Array (1 .. Count);
+                  begin
+                     Common_Motion (C, Second, Real'Min (Farthest / Window_Multiple + Typical, Largest_Sigma (C.Pictures, Second)),
+                                 Riding, Places, Common,
+                                    Stood, Moved);
+                     Keep_Evidence (C, Stood, Moved);
+                  end;
                   Common.Searched := True;
                   C.Motion := Common;
                   if Common.Told then

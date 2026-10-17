@@ -171,8 +171,24 @@ package body Driver.Robot.Kinematics is
    end Query_Points;
 
    --  The point moves with the view, as far as its keyframes tell (Measure_Shifts: not Arm_Evidence.Still).
+   --  The query point rides with the eye by the common motions of its keyframes (Keyframes.Stood_And_Moved): it
+   --  stood where it was against the field told more often, out of the times it had a place there, than the points
+   --  told of the world stood so (Measure_Shifts: Stand_Rate). Before any point was told of the world, no point rides
+   --  by them. At the even chance the test asked nine stands of a jaw's point, and the keyframes of the sweep's
+   --  first pass were followed on the jaws; at the per-point test's false-alarm rate it took two, and a third of the
+   --  world's points with them (s29 replayed, 10-17: 1544 sightings of 5000 left, the focal length 172 px of 135). Its slopes (Measure_Shifts) are taken from the
+   --  answers that agree with their keyframe's field, and a point on the jaws' edges agrees with no field whose
+   --  view moved: it was never told still, rode into every common motion and every field, and the keyframes that
+   --  turned the wrist far, whose points of the world were found nowhere, were followed on the jaws' points alone
+   --  at no motion (s30, servo seed 7, 10-17, judged against the simulator's truth: keyframes of the roll turned 8
+   --  to 88 degrees, their sightings moved a mean 0.2 px).
+   function Rides (R : Arm_Evidence; P : Natural) return Boolean is
+     (P < Natural (R.Stood_Off.Length) and then P < Natural (R.Moved_With.Length) and then R.Stood_Off (P) > 0
+      and then R.Stand_Rate > 0.0
+      and then Regression.Count_Significant (R.Stood_Off (P), R.Stood_Off (P) + R.Moved_With (P), R.Stand_Rate));
+
    function Moving_Point (R : Arm_Evidence; P : Natural) return Boolean is
-     (P >= Natural (R.Still.Length) or else not R.Still (P));
+     ((P >= Natural (R.Still.Length) or else not R.Still (P)) and then not Rides (R, P));
 
    function Readings_Of (M : Model; G : Group_Id; Beat : Natural) return Real_Array is
       Result : Real_Array (1 .. M.Groups (G).Size);
@@ -508,6 +524,8 @@ package body Driver.Robot.Kinematics is
                               Query_Points
                                 (M, E, G, R.Frames.Last_Element.Image, R.Query_U, R.Query_V, R.Query_Responds);
                               R.Still.Clear;
+                              R.Stood_Off.Clear;
+                              R.Moved_With.Clear;
                               --  The reference's points into every other eye's view at
                               --  this beat: what links this arm to the others through
                               --  an eye that sees both (Place).
@@ -1359,6 +1377,22 @@ package body Driver.Robot.Kinematics is
                   end if;
                end loop;
             end loop;
+            --  How often a point told of the world stood against its keyframe's common motion: the rate a point that
+            --  rides with the eye is told apart from (Rides), by the rule of succession (one stand more than seen over
+            --  two times more than counted: never nought, never certain).
+            declare
+               Stood, Had : Natural := 0;
+            begin
+               for P in 0 .. Queries - 1 loop
+                  if Informative (P) and then P < Natural (R.Stood_Off.Length) and then P < Natural (R.Moved_With.Length) then
+                     Stood := Stood + R.Stood_Off (P);
+                     Had := Had + R.Stood_Off (P) + R.Moved_With (P);
+                  end if;
+               end loop;
+               if Had > 0 then
+                  R.Stand_Rate := (Real (Stood) + 1.0) / (Real (Had) + 2.0);
+               end if;
+            end;
             Free (Of_World);
          end;
          for P in 0 .. Queries - 1 loop
@@ -1614,11 +1648,28 @@ package body Driver.Robot.Kinematics is
                Riding : Keyframes.Flag_Array (1 .. Queries);
             begin
                for I in Riding'Range loop
-                  Riding (I) :=
+                  Riding (I) := Rides (R, I - 1) or else
                     (if I - 1 < Natural (R.Still.Length) then R.Still (I - 1)
                      else I - 1 < Natural (R.Query_Responds.Length) and then not R.Query_Responds (I - 1));
                end loop;
                Keyframes.Add (R.Chain, R.Frames (F).Image, Change, Given.all, Answers.all, Agree.all, Riding);
+               declare
+                  Stood, Moved : Keyframes.Flag_Array (1 .. Queries);
+               begin
+                  Keyframes.Stood_And_Moved (R.Chain, Stood, Moved);
+                  while Natural (R.Stood_Off.Length) < Queries loop
+                     R.Stood_Off.Append (0);
+                     R.Moved_With.Append (0);
+                  end loop;
+                  for I in 1 .. Queries loop
+                     if Stood (I) then
+                        R.Stood_Off.Replace_Element (I - 1, R.Stood_Off (I - 1) + 1);
+                     end if;
+                     if Moved (I) then
+                        R.Moved_With.Replace_Element (I - 1, R.Moved_With (I - 1) + 1);
+                     end if;
+                  end loop;
+               end;
             end;
             Rss_After := Driver.Memory.Resident_Kilobytes / 1024;
             Set_Of (F, R, Given.all, Answers.all, Agree.all, Set);

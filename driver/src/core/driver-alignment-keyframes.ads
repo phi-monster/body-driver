@@ -129,6 +129,13 @@ package Driver.Alignment.Keyframes is
    --  The view's common motion a keyframe was asked from (Add): every keyframe whose prediction's windows are wider
    --  than a patch, a new direction's among them.
 
+   procedure Stood_And_Moved (C : Chain; Stood, Moved : out Flag_Array)
+     with Pre => Has_Reference (C) and then Stood'Length = Point_Count (C) and then Moved'Length = Stood'Length;
+   --  Per point, of the view's common motion the keyframe added last was asked from: its best place was where it
+   --  stood while the field told moved it there beyond what the size scanned resolves (Stood), or it moved, on the
+   --  field (Moved); neither where no field was told or the point had no place there. A point of the world stands
+   --  so only by a false peak: one that stands so again and again rides with the eye (Kinematics.Align_Arm).
+
    No_Riding : constant Flag_Array (1 .. 0) := [];
 
    procedure Add
@@ -176,6 +183,7 @@ private
 
    package Real_Vectors is new Ada.Containers.Vectors (Positive, Real);
    package Pixel_Vectors is new Ada.Containers.Vectors (Positive, Driver.Images.Pixel);
+   package Flag_Vectors is new Ada.Containers.Vectors (Positive, Boolean);
 
    type Field_Fit is record
       U, V    : Real_Array (1 .. Terms) := [others => 0.0];   --  the displacement as a polynomial of the place, per axis
@@ -260,6 +268,7 @@ private
       Combined : Combination;   --  the sum of single-channel moves considered for the keyframe being added
       Last     : Source := Supplied;   --  where the last prediction came from, until the keyframe it was for is added
       Motion   : Driver.Alignment.Keyframes.Motion;   --  the common motion the keyframe added last was asked from
+      Stood, Moved_On : Flag_Vectors.Vector;   --  per point, of that motion (Stood_And_Moved)
    end record;
 
 end Driver.Alignment.Keyframes;

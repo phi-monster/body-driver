@@ -793,6 +793,12 @@ private
                                      --  a keyframe at every pose, minutes of work, for a measurement the sweep's
                                      --  first level makes itself)
       Still    : Flag_Vectors.Vector;   --  per query point, once its keyframes tell: it does not move with the view
+      Stood_Off, Moved_With : Count_Vectors.Vector;
+      --  per query point: the keyframes whose common motion it stood against, and moved with
+      --  (Keyframes.Stood_And_Moved)
+      Stand_Rate : Real := 0.0;
+      --  how often a point of the world stood against its keyframe's common motion (Measure_Shifts); 0 before any
+      --  point was told of the world
                                         --  (Kinematics.Measure_Shifts: fixed to the eye, as the hand's jaws in a
                                         --  wrist eye's view are, or answered at its place by false peaks); nothing
                                         --  is known of a point beyond its length

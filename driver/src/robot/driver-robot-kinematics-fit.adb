@@ -3717,6 +3717,17 @@ package body Driver.Robot.Kinematics.Fit is
       --  plane (2), the side of the eye (1) and the logarithm of the size of
       --  its turn per reading unit (1; its sign is stage 1's); then the log
       --  focal length.
+      --  A joint whose own keyframes left its turn per reading unit nought (none of their sightings told the view turned
+      --  with it) has no size whose logarithm stage 2 could fit: the arm is not fitted, and why is said. The fit took the
+      --  logarithm of nought and the driver ended (s29 replayed, 10-17, with the points that ride with the eye left out:
+      --  the wrist roll's keyframes far out kept no point of the world).
+      for J in 1 .. N loop
+         if not (abs Joints (Joints'First + J - 1).C > 0.0) then
+            Fail ("joint" & J'Image & "'s own keyframes leave its turn per reading unit nought: none of their sightings"
+                  & " tells how far it turns the view");
+            return;
+         end if;
+      end loop;
       Enter (2);
       declare
          Count : constant Positive := 4 * N + 1;

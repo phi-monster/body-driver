@@ -2687,6 +2687,8 @@ driver-robot-kinematics.adb	R.Point_Gu.Append (0.0);	0.0	structure	no motion per
 driver-robot-kinematics.adb	R.Point_Gv.Append (0.0);	0.0	structure	no motion per unit until the regression tells one
 driver-robot-kinematics.adb	R.Scale := 1.0;	1.0	math	the identity's scale: the first arm is the world as it is
 driver-robot-kinematics.adb	R.Shifts.Append (0.0);	0.0	structure	not measured yet
+driver-robot-kinematics.adb	R.Stand_Rate := (Real (Stood) + 1.0) / (Real (Had) + 2.0);	1.0	statistics	Laplace's rule of succession: one more than seen over two more than counted
+driver-robot-kinematics.adb	R.Stand_Rate := (Real (Stood) + 1.0) / (Real (Had) + 2.0);	2.0	statistics	Laplace's rule of succession: one more than seen over two more than counted
 driver-robot-kinematics.adb	Regression.Test_Block (Fu, 1, Kp, Stat, Rank);	1	structure	the whole block of the point's columns, from the first: its numerical rank must equal their count for the point's coefficients to be determined
 driver-robot-kinematics.adb	Report.Depth_Gains.Append (0.0);	0.0	structure	a query no sighting names has no track in the fit: its depth moves with no term
 driver-robot-kinematics.adb	Res_N : Counts_Access := new Count_List'(1 .. Natural'Max (1, Frame_Count) => 0);	1	format	digits printed in a log line or a message
