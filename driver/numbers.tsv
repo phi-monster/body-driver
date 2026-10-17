@@ -2945,7 +2945,7 @@ driver-robot-regression.adb	return (if R = 0.0 then 1.0 else 0.0);	1.0	math	with
 driver-robot-regression.adb	return (if U <= Huber_K then 1.0 else Huber_K / U);	1.0	math	Huber's weight is one inside the cutoff
 driver-robot-regression.ads	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean	1	structure	a count that is no best of many is one test
 driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
-driver-robot-steps.adb	(X.Followed < 2	2	structure	a scatter needs two beats; with fewer there is no chatter to tell a gain from
+driver-robot-steps.adb	(X.Followed < 2 or else not X.Turned	2	structure	a scatter needs two beats; with fewer there is no chatter to tell a gain from
 driver-robot-steps.adb	(if Ask > 0.0 then 1.0 else -1.0) * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));	1.0	math	the sign of the ask: motion along it counts positive
 driver-robot-steps.adb	(if Ask > 0.0 then 1.0 else -1.0) * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));	1.0	math	the sign of the ask: motion along it counts positive
 driver-robot-steps.adb	Before := Before + Unit * (Channels.Reading (M, G, Beat - 1, C) - Channels.Reading (M, G, Beat - 2, C));	2	structure	the last two beats of a push: three readings tell two steps and their ratio, the fewest that tell a run of shrinking steps

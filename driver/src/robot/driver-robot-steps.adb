@@ -210,10 +210,13 @@ package body Driver.Robot.Steps is
       S.Episodes.Append (E);
    end Start;
 
-   --  Counts the quantity at the beat among those since its extreme (Welford's running mean and sum of squares).
-   procedure Note (X : in out Extreme; Value : Real) is
+   --  Counts the quantity at the beat among those since its extreme (Welford's running mean and sum of squares), and
+   --  whether it went back the way it had come since the beat before (Back).
+   procedure Note (X : in out Extreme; Value : Real; Back : Boolean) is
       Off : constant Real := Value - X.Mean;
    begin
+      X.Turned := X.Turned or else (X.Followed > 0 and then Back);
+      X.Last := Value;
       X.Followed := X.Followed + 1;
       X.Mean := X.Mean + Off / Real (X.Followed);
       X.Spread := X.Spread + Off * (Value - X.Mean);
@@ -227,9 +230,17 @@ package body Driver.Robot.Steps is
    --  since the extreme, that one included, say how much the quantity moves
    --  about, and a gain is the difference of two of them. With fewer than
    --  two there is no chatter to tell it from: a push that gains at every
-   --  beat never has any.
+   --  beat never has any. Nor has a quantity that never went back the way it
+   --  came since its extreme (Extreme.Turned): it did not move about, and the
+   --  scatter of its beats is its own progress. A servo coming to its target
+   --  in steps of its wire, a beat still between two of them, scattered by
+   --  its approach alone: s41 (servo seed 6 of the fake robot, 10-17) neared
+   --  the target of a press's push by 6.3, 10.1 and 16.0 units over three
+   --  beats after its extreme, against a scatter of 0.4, 5.0 and 6.9 of those
+   --  same beats, was given up at beat 16904 as going nowhere and judged
+   --  blocked three beats before it met the table.
    function Beyond_Chatter (X : Extreme; Gain : Real) return Boolean is
-     (X.Followed < 2
+     (X.Followed < 2 or else not X.Turned
       or else Driver.Uncertain.Significant (Gain, Sqrt (2.0 * X.Spread / Real (X.Followed - 1)), X.Followed - 1));
 
    --  Follows the moving push under way, in the channels it asked a step
@@ -260,6 +271,7 @@ package body Driver.Robot.Steps is
       Away, Way : Real_Array (1 .. S.Size) := [others => 0.0];
       Near, Far, Asked : Real := 0.0;
       Nearer, Farther  : Boolean;
+      Turned_Near, Turned_Far : Boolean;   --  back the way it had come since the beat before (Note)
    begin
       if not Channels.Has_Reading (M, G, Beat) then
          return;
@@ -276,6 +288,17 @@ package body Driver.Robot.Steps is
       Near := Sqrt (Near);
       Far := Sqrt (Far);
       Asked := Sqrt (Asked);
+      declare
+         --  Back the way it had come since the beat before, by a step the one test of motion sees: farther from the
+         --  target along the ask, or nearer to where the push began along the way the group went.
+         Back_Near : constant Boolean := E.Nearest.Followed > 0 and then Asked > 0.0 and then Near > E.Nearest.Last
+           and then Channels.Visible (M, G, [for C in Way'Range => Way (C) * (Near - E.Nearest.Last) / Asked]);
+         Back_Far  : constant Boolean := E.Farthest.Followed > 0 and then Far > 0.0 and then Far < E.Farthest.Last
+           and then Channels.Visible (M, G, [for C in Away'Range => Away (C) * (E.Farthest.Last - Far) / Far]);
+      begin
+         Turned_Near := Back_Near;
+         Turned_Far := Back_Far;
+      end;
       --  Nearer by a step seen along the ask, farther by one seen along the way the group went.
       Nearer := Near < E.Nearest.Value
         and then Channels.Visible (M, G, [for C in Way'Range => Way (C) * (E.Nearest.Value - Near) / Asked])
@@ -289,8 +312,8 @@ package body Driver.Robot.Steps is
       if Farther then
          E.Farthest := (Value => Far, others => <>);
       end if;
-      Note (E.Nearest, Near);
-      Note (E.Farthest, Far);
+      Note (E.Nearest, Near, Back => not Nearer and then Turned_Near);
+      Note (E.Farthest, Far, Back => not Farther and then Turned_Far);
       if Nearer or else Farther then
          E.Progress_At := Beat;
       end if;

@@ -396,6 +396,9 @@ private
       Followed : Natural := 0;
       Mean     : Real := 0.0;
       Spread   : Real := 0.0;
+      Last     : Real := 0.0;       --  the quantity at the latest beat counted
+      Turned   : Boolean := False;  --  since the extreme it went back the way it had come at some beat, by a step the
+                                    --  one test of motion sees: the group moves about (Driver.Robot.Steps)
    end record;
 
    --  One push of a group and how it went (Driver.Robot.Steps).
