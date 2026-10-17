@@ -35,15 +35,17 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  show in it at all: the body's delay and the eye's lag, both kept in the body file. A boot begun from one has
    --  seen few moves of its own: its closer's sweep waited one beat for a view, had none, and no hand was made of
    --  the closer (f16j on 10-15, from f16h's body kept after its sweeps).
-   function Settling_Of (E : Eye_Id) return Natural is
+   --  The beats a still picture of the eye takes to show what the body did: the body's delay and the eye's lag.
+   function Showing_Of (E : Eye_Id) return Natural is
       Delay_Beats : Natural;
       Delay_Known : Boolean;
    begin
       Driver.Robot.Steps.Body_Delay (M, Delay_Beats, Delay_Known);
-      return Natural'Max (Longest_Settling (M, E),
-                          (if Delay_Known then Delay_Beats else 0)
-                          + (if Lag_Known (M, E) then Natural'Max (0, Image_Lag (M, E)) else 0));
-   end Settling_Of;
+      return (if Delay_Known then Delay_Beats else 0)
+        + (if Lag_Known (M, E) then Natural'Max (0, Image_Lag (M, E)) else 0);
+   end Showing_Of;
+
+   function Settling_Of (E : Eye_Id) return Natural is (Natural'Max (Longest_Settling (M, E), Showing_Of (E)));
 
    procedure Hold_Beat (Read : access procedure (O : Observation)) is
       procedure During is
@@ -303,6 +305,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Have   : Natural := 0;       --  the poses its eye has seen its readings from
          Began  : Natural := 0;       --  the beats the stream had
          Settles : Natural := 0;     --  the most beats the own eye has taken to settle after a move
+         Shows  : Natural := 0;       --  the beats a still picture of the own eye takes to show (Showing_Of)
          Plan   : Driver.Robot.Motion.Plan;
          Ready  : Boolean := False;   --  the raise is planned and its readings show
          Why    : Ada.Strings.Unbounded.Unbounded_String;   --  when it is not, why
@@ -317,6 +320,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Began := Natural (O.Beat);
             Placed := P > 0;
             Settles := (if Placed then Settling_Of (H.Data.Pairs (P).Eye) else 0);
+            Shows := (if Placed then Showing_Of (H.Data.Pairs (P).Eye) else 0);
             Have := 0;
             if Placed then
                Arm := H.Data.Pairs (P).Arm;
@@ -420,9 +424,13 @@ procedure Measure (H : in out Hands; M : in out Model) is
          if not Placed or else Reached then
             return;
          end if;
+         --  A raise is followed to rest (Motion.Follow settles the body and every eye's picture after each step): its
+         --  pose is kept as the picture comes to rest, or within the beats a still picture takes to show, or not at
+         --  all. It was waited for as long as any move of the run had taken to settle (Wait_For_A_View): s37 (servo
+         --  seed 6 of the fake robot, 10-17), its eye once 350 beats settling, waited 350 beats after each of the
+         --  raises that kept no frame, about 2000 beats of its hand's 3000.
          Driver.Robot.Hand.Gather_Poses
-           (Wanted, Driver.Robot.Hand.Wait_For_A_View (Longest_Formed, Settles, Began), Poses_Now'Access,
-            Raise_Eye'Access, Raises, Reached);
+           (Wanted, 1 + Shows, Poses_Now'Access, Raise_Eye'Access, Raises, Reached);
          Hold_Beat (Read_Poses'Access);
          Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & ": after" & Raises'Image & " raises its eye has seen"
                           & " its readings from" & Have'Image & " poses, of the" & Wanted'Image & " asked"
