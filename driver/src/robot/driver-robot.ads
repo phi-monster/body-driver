@@ -478,6 +478,8 @@ private
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
       Asks        : Flag_Vectors.Vector;   --  of the push under way: the channels it asked a step the one test of motion sees
       Free_Shortfalls : Real_Vectors.Vector;   --  of every answered push that was not blocked, along its ask, in order
+      Pause       : Natural := 0;          --  the most beats the group stood still within a push, short of its target,
+                                           --  and then went on toward it with no new ask (Driver.Robot.Steps)
       Executed    : Real_Vectors.Vector;   --  per channel: the least ask of it a push moved it for (Driver.Robot.Steps:
                                            --  the body executes asks that large; a servo stands still for one within
                                            --  its dead band), Real'Last until one did; empty before any push
