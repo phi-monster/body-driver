@@ -2545,11 +2545,46 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                   Active (A) := True;
                   Lens_Known := True;
                else
-                  Say ("arm" & A'Image
-                       & (case Verdict is
-                             when Ambiguous      => " has points that two eyes in different poses explain alike",
-                             when Not_Reproduced => " has points whose best eye the starts do not agree on",
-                             when others         => " has no points whose motion an eye in any pose explains"));
+                  declare
+                     --  What the links were read from, told with the reason: per joint the keyframes that turned it
+                     --  alone, and the tracks given a link (s38, servo seed 6 of the fake robot, 10-17, replayed: its
+                     --  fixed eyes never determined, and nothing said what the links had to go on).
+                     Alone  : array (1 .. Watching.Joints) of Natural := [others => 0];
+                     Linked : Natural := 0;
+                     Per    : Unbounded_String;
+                  begin
+                     for F in 1 .. Watching.Frames loop
+                        declare
+                           Moved, Which : Natural := 0;
+                        begin
+                           for C in 1 .. Watching.Joints loop
+                              if Watching.Visible (C) > 0.0 and then abs Watching.Change (F, C) >= Watching.Visible (C) then
+                                 Moved := Moved + 1;
+                                 Which := C;
+                              end if;
+                           end loop;
+                           if Moved = 1 then
+                              Alone (Which) := Alone (Which) + 1;
+                           end if;
+                        end;
+                     end loop;
+                     for I in 1 .. Watching.Tracks loop
+                        if Start (P.First_Track (A) + I) >= 1 then
+                           Linked := Linked + 1;
+                        end if;
+                     end loop;
+                     for C in Alone'Range loop
+                        Append (Per, Alone (C)'Image);
+                     end loop;
+                     Say ("arm" & A'Image
+                          & (case Verdict is
+                                when Ambiguous      => " has points that two eyes in different poses explain alike",
+                                when Not_Reproduced => " has points whose best eye the starts do not agree on",
+                                when others         => " has no points whose motion an eye in any pose explains")
+                          & " (" & Linked'Image & " of" & Watching.Tracks'Image & " tracks given a link, from"
+                          & Watching.Sightings'Image & " sightings; keyframes that turned one joint alone, by joint:"
+                          & To_String (Per) & ")");
+                  end;
                end if;
             end;
          end loop;

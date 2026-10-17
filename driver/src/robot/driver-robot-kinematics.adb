@@ -365,6 +365,18 @@ package body Driver.Robot.Kinematics is
                         View.Eye := H;
                         Query_Points (M, H, R.Group, Picture, View.Query_U, View.Query_V, Responds);
                         View.Images.Append (Picture);
+                        --  Where the view's points are, for the log: what the view of the arm tracks.
+                        declare
+                           Text : Ada.Strings.Unbounded.Unbounded_String;
+                        begin
+                           for I in View.Query_U.First_Index .. View.Query_U.Last_Index loop
+                              Ada.Strings.Unbounded.Append
+                                (Text, " (" & Driver.Log.Image (View.Query_U (I), 1) & "," & Driver.Log.Image (View.Query_V (I), 1) & ")");
+                           end loop;
+                           Driver.Log.Line (Driver.Log.Robot, "kinematics: eye" & H'Image & "'s view of arm" & R.Arm'Image
+                                            & " asks" & View.Query_U.Length'Image & " points, at its reference keyframe:"
+                                            & Ada.Strings.Unbounded.To_String (Text));
+                        end;
                         if not View.Query_U.Is_Empty then
                            R.Views.Append (View);
                         end if;
@@ -1468,6 +1480,22 @@ package body Driver.Robot.Kinematics is
       return Result;
    end Readings_Array;
 
+   type Tally is array (Driver.Alignment.Reason) of Natural;
+
+   --  A tally of the aligner's reasons, for the log: "; because: matched 5358, no_texture 1200, ...".
+   function Reasons_Text (Of_These : Tally) return String is
+      Text : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      for Why in Of_These'Range loop
+         if Of_These (Why) > 0 then
+            Ada.Strings.Unbounded.Append
+              (Text, (if Ada.Strings.Unbounded.Length (Text) = 0 then "; because: " else ", ")
+               & Ada.Characters.Handling.To_Lower (Why'Image) & Of_These (Why)'Image);
+         end if;
+      end loop;
+      return Ada.Strings.Unbounded.To_String (Text);
+   end Reasons_Text;
+
    --  The arm's keyframes not yet aligned, in order.
    procedure Align_Arm (M : Model; R : in out Arm_Evidence) is
       N       : constant Natural := M.Groups (R.Group).Size;
@@ -1477,22 +1505,7 @@ package body Driver.Robot.Kinematics is
       Start   : constant Duration := Driver.Clock.Seconds;
       First   : constant Natural := R.Aligned + 1;
       Found   : Natural := 0;
-      type Tally is array (Driver.Alignment.Reason) of Natural;
       Because : Tally := [others => 0];   --  why each point was or was not found
-
-      --  A tally of the aligner's reasons, for the log: "; because: matched 5358, no_texture 1200, ...".
-      function Reasons_Text (Of_These : Tally) return String is
-         Text : Ada.Strings.Unbounded.Unbounded_String;
-      begin
-         for Why in Of_These'Range loop
-            if Of_These (Why) > 0 then
-               Ada.Strings.Unbounded.Append
-                 (Text, (if Ada.Strings.Unbounded.Length (Text) = 0 then "; because: " else ", ")
-                  & Ada.Characters.Handling.To_Lower (Why'Image) & Of_These (Why)'Image);
-            end if;
-         end loop;
-         return Ada.Strings.Unbounded.To_String (Text);
-      end Reasons_Text;
    begin
       for C in 1 .. N loop
          Noise (C) := Channels.Noise (M, R.Group, C);
@@ -1913,6 +1926,35 @@ package body Driver.Robot.Kinematics is
                   Keyframes.Add (V.Chain, Picture, Change, Given.all, Answers.all, Agree.all);
                   Set_Of ("arm" & R.Arm'Image & "'s eye" & V.Eye'Image, F, V.Query_U, V.Query_V, Flag_Vectors.Empty_Vector,
                           Given.all, Answers.all, Agree.all, Set);
+                  --  Each keyframe of the view, as the arm's own have theirs: how it was predicted and what was found.
+                  declare
+                     Here, Replied : Natural := 0;
+                     Moves : Real_Access := new Real_Array (1 .. Answers'Length);   --  how far each found point moved
+                     Why   : Tally := [others => 0];
+                  begin
+                     for I in Answers'Range loop
+                        Why (Answers (I).Because) := Why (Answers (I).Because) + 1;
+                        if Answers (I).Verdict = Driver.Alignment.Found then
+                           Replied := Replied + 1;
+                           if Set.Found (I - Answers'First) then
+                              Here := Here + 1;
+                              Moves (Here) := Ada.Numerics.Long_Elementary_Functions.Sqrt
+                                ((Answers (I).To.U - Given (I).From.U) ** 2 + (Answers (I).To.V - Given (I).From.V) ** 2);
+                           end if;
+                        end if;
+                     end loop;
+                     Driver.Log.Line
+                       (Driver.Log.Robot, "kinematics: eye" & V.Eye'Image & "'s view of arm" & R.Arm'Image & " keyframe"
+                        & F'Image & ", predicted " & Ada.Characters.Handling.To_Lower (From'Image)
+                        & (if From = Keyframes.New_Direction then Motion_Image (Keyframes.Last_Motion (V.Chain))
+                           else " stating " & Driver.Log.Image (Stated_By (Given.all), 1) & " px"
+                                & (if Keyframes.Last_Motion (V.Chain).Searched
+                                   then ", asked" & Motion_Image (Keyframes.Last_Motion (V.Chain)) else ""))
+                        & ":" & Here'Image & " of" & Queries'Image & " points found," & Replied'Image & " answered"
+                        & (if Here > 0 then ", moved a median " & Driver.Log.Image (Driver.Stats.Median (Moves (1 .. Here)), 2)
+                                            & " px from where they stood" else "") & Reasons_Text (Why));
+                     Free (Moves);
+                  end;
                   Free (Given);
                   Free (Offered);
                   Free (Answers);

@@ -294,9 +294,25 @@ package body Driver.Robot.Hand is
             if Still_A_Pair (D.Pairs (I), M) then
                I := I + 1;
             else
-               Driver.Log.Line (Driver.Log.Robot, "hand: group" & D.Pairs (I).Group'Image & " is no longer a closer"
-                                & " of arm" & D.Pairs (I).Arm'Image & " watched in eye" & D.Pairs (I).Eye'Image
-                                & "; its sweep there is dropped");
+               declare
+                  --  Why, for the log: what the roles say of the group and of the eye now, and every eye's verdict on
+                  --  the group (s32, s36, s37, s38 on 10-17 each lost their closer at an estimate, and the lines said
+                  --  nothing of what had changed).
+                  G    : constant Group_Id := D.Pairs (I).Group;
+                  Says : Ada.Strings.Unbounded.Unbounded_String;
+               begin
+                  for E in 1 .. Eye_Id'Base (Eye_Count (M)) loop
+                     Ada.Strings.Unbounded.Append (Says, " eye" & E'Image & " " & Response (M, G, E)'Image);
+                  end loop;
+                  Driver.Log.Line (Driver.Log.Robot, "hand: group" & G'Image & " is no longer a closer"
+                                   & " of arm" & D.Pairs (I).Arm'Image & " watched in eye" & D.Pairs (I).Eye'Image
+                                   & "; its sweep there is dropped: the group is " & Role (M, G)'Image
+                                   & (if Role (M, G) = Closer then " of arm" & Closer_Arm (M, G)'Image else "")
+                                   & ", eye" & D.Pairs (I).Eye'Image & " " & Eye_Mount (M, D.Pairs (I).Eye).Kind'Image
+                                   & (if Eye_Mount (M, D.Pairs (I).Eye).Kind = Arm_Carried
+                                      then " on arm" & Eye_Mount (M, D.Pairs (I).Eye).Arm'Image else "")
+                                   & "; the eyes on the group:" & Ada.Strings.Unbounded.To_String (Says));
+               end;
                D.Pairs.Delete (I);
             end if;
          end loop;

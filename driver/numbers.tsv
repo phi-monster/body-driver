@@ -2439,10 +2439,12 @@ driver-robot-kinematics-hand_eye.adb	if 2 * Fitting <= N then	2	statistics	no mo
 driver-robot-kinematics-hand_eye.adb	if Cost_Of_H (Hyp) <= Least * (1.0 + Driver.Conventions.Unchanged_Fraction) then	1.0	numerics	within the conventions' unchanged fraction of the least
 driver-robot-kinematics-hand_eye.adb	if Count >= 2 and then Sxx > 0.0 then	2	statistics	a line or a track needs two points at least
 driver-robot-kinematics-hand_eye.adb	if Linear_To < Driver.Conventions.Z - 1.0 then	1.0	statistics	the cost not quadratic out to a sigma short of Z: the covariance is not to be trusted
+driver-robot-kinematics-hand_eye.adb	if Moved = 1 then	1	structure	one joint alone (Infer_Link's keyframes, as its own count)
 driver-robot-kinematics-hand_eye.adb	if N >= 2 then	2	statistics	a line or a track needs two points at least
 driver-robot-kinematics-hand_eye.adb	if Own <= 3 then	3	structure	a pose's terms: three of its turn, then three of its centre
 driver-robot-kinematics-hand_eye.adb	if Pick >= 1 then	1	structure	a track's link 0 rides on nothing; 1 and more are links of the arm
 driver-robot-kinematics-hand_eye.adb	if Pick >= 1 then	1	structure	a track's link 0 rides on nothing; 1 and more are links of the arm
+driver-robot-kinematics-hand_eye.adb	if Start (P.First_Track (A) + I) >= 1 then	1	structure	a link of one joint or more (Infer_Link: 0 is none)
 driver-robot-kinematics-hand_eye.adb	if Times_Seen (T) >= 2 then	2	statistics	a line or a track needs two points at least
 driver-robot-kinematics-hand_eye.adb	if not (Driver.Conventions.Z * Sqrt (Cov (3, 3)) < Real (Width) / 2.0	2.0	math	the principal point known to within half the picture
 driver-robot-kinematics-hand_eye.adb	when 1 => (Fx => L.Fx * Exp (X), Fy => L.Fy, Cx => L.Cx, Cy => L.Cy, K1 => L.K1, K2 => L.K2),	1	structure	the lens's terms in Fit.Lens_Terms' order: the focal lengths' logarithms, the principal point, the distortion
@@ -2469,6 +2471,7 @@ driver-robot-kinematics.adb	& "" & Driver.Log.Image (Real (Driver.Clock.Seconds 
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Report.Sigma_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Response (Outputs), 4));	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Step_Of (M, R.Arm, C), 4));	4	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& (if Here > 0 then "" & Driver.Log.Image (Driver.Stats.Median (Moves (1 .. Here)), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& (if Known (Seen) then Driver.Log.Image (Seen.Value, 6) else "") & ""	6	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Common.Shift_U, 1) & "" & Driver.Log.Image (Common.Shift_V, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Common.Shift_U, 1) & "" & Driver.Log.Image (Common.Shift_V, 1) & ""	1	format	digits printed in a log line or a message
@@ -2513,6 +2516,8 @@ driver-robot-kinematics.adb	(Off, Channels.Noise (M, R.Group, C) * Ada.Numerics.
 driver-robot-kinematics.adb	(Square_Root (Variance (First) + Variance (First + 1) + Variance (First + 2)), 4)	2	structure	a pose's three turn terms or three centre terms together
 driver-robot-kinematics.adb	(Square_Root (Variance (First) + Variance (First + 1) + Variance (First + 2)), 4)	4	format	four decimals in the log
 driver-robot-kinematics.adb	(Text, "" & C'Image & "" & Driver.Log.Image (Keyframe_Step (M, R.Arm, C), 6) & ""	6	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	(Text, "" & Driver.Log.Image (View.Query_U (I), 1) & "" & Driver.Log.Image (View.Query_V (I), 1) & "");	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	(Text, "" & Driver.Log.Image (View.Query_U (I), 1) & "" & Driver.Log.Image (View.Query_V (I), 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	(Up.V - Down.V) / (2.0 * Step * Scale)];	2.0	math	a central difference over a step each way is the difference over twice the step
 driver-robot-kinematics.adb	(case A is when 1 => [1.0, 0.0, 0.0], when 2 => [0.0, 1.0, 0.0], when others => [0.0, 0.0, 1.0]);	1	structure	the first axis of space
 driver-robot-kinematics.adb	(case A is when 1 => [1.0, 0.0, 0.0], when 2 => [0.0, 1.0, 0.0], when others => [0.0, 0.0, 1.0]);	2	structure	the second axis of space
@@ -2680,6 +2685,7 @@ driver-robot-kinematics.adb	and then Driver.Uncertain.Significant (Change (S.Fra
 driver-robot-kinematics.adb	and then Natural (R.Result.Tracks.Length) >= 3 * Queries;	3	structure	a track's point is three numbers
 driver-robot-kinematics.adb	and then Place (1, 1) < Real'Last	1	structure	an uncertainty that is not known has its first diagonal entry unbounded
 driver-robot-kinematics.adb	and then Place (1, 1) < Real'Last	1	structure	an uncertainty that is not known has its first diagonal entry unbounded
+driver-robot-kinematics.adb	else "" & Driver.Log.Image (Stated_By (Given.all), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	else "" & Driver.Log.Image (Stated_By (Given.all), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	else Then_Radius - Now_Radius >= 1.0);	1.0	structure	a pixel, the grid the aligner's candidate places lie on: a window narrower by less than one holds the same candidates
 driver-robot-kinematics.adb	else [0.0, 0.0, 1.0 / X (3)]);	1.0	math	the plane across the line of sight at depth z has slope one over z along it
