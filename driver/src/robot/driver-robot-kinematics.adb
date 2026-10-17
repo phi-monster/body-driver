@@ -3739,6 +3739,37 @@ package body Driver.Robot.Kinematics is
       end if;
    end Pose_Covariance;
 
+   function Step_Covariance (M : Model; A : Arm_Id; From, To : Real_Array) return Mat3 is
+      R : constant Arm_Fit := (if Index_Of (M, A) > 0 then M.Kinematics (Index_Of (M, A)).Result else (others => <>));
+      Unknown : constant Mat3 := [[Real'Last, 0.0, 0.0], [0.0, Real'Last, 0.0], [0.0, 0.0, Real'Last]];
+   begin
+      if not (R.Fitted and then Natural (R.Joints.Length) = From'Length and then To'Length = From'Length
+              and then Natural (R.Chain.Length) = From'Length and then Natural (R.Reference.Length) = From'Length)
+      then
+         return Unknown;
+      end if;
+      declare
+         Joints   : Fit.Joint_Array (1 .. From'Length);
+         From_Chg : Real_Array (1 .. From'Length);
+         To_Chg   : Real_Array (1 .. From'Length);
+         Cov      : Fit.Real_Lists.Vector;
+      begin
+         for J in Joints'Range loop
+            declare
+               F : constant Joint_Fit := R.Joints (J);
+            begin
+               Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
+               From_Chg (J) := From (From'First + J - 1) - R.Reference (J - 1);
+               To_Chg (J) := To (To'First + J - 1) - R.Reference (J - 1);
+            end;
+         end loop;
+         for X of R.Covariance loop
+            Cov.Append (X);
+         end loop;
+         return Fit.Step_Covariance (Joints, Chain_Of (R), From_Chg, To_Chg, Cov);
+      end;
+   end Step_Covariance;
+
    function Place_Covariance_In_Unit (M : Model; A : Arm_Id; Readings : Real_Array) return Mat3 is
       Unknown : constant Mat3 := [[Real'Last, 0.0, 0.0], [0.0, Real'Last, 0.0], [0.0, 0.0, Real'Last]];
       K       : constant Natural := Index_Of (M, A);

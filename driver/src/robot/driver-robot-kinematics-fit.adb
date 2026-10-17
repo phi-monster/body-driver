@@ -4978,6 +4978,67 @@ package body Driver.Robot.Kinematics.Fit is
       end loop;
    end Pose_Covariance;
 
+   function Step_Covariance
+     (Joints     : Joint_Array;
+      Chain      : Chain_Order;
+      From, To   : Real_Array;
+      Covariance : Real_Lists.Vector) return Mat3
+   is
+      N       : constant Natural := Joints'Length;
+      Reduced : constant Natural := Terms (N);
+      Unknown : constant Mat3 := [[Real'Last, 0.0, 0.0], [0.0, Real'Last, 0.0], [0.0, 0.0, Real'Last]];
+      function V (P, Q : Positive) return Real is (Covariance (Covariance.First_Index + (P - 1) * Reduced + Q - 1));
+      --  How the displacement moves per unit of each joint term.
+      D : array (1 .. N, Joint_Term) of Vec3 := [others => [others => [0.0, 0.0, 0.0]]];
+      Result : Mat3 := [others => [others => 0.0]];
+   begin
+      if Natural (Covariance.Length) /= Reduced * Reduced then
+         return Unknown;
+      end if;
+      for J in 1 .. N loop
+         for T in Joint_Term loop
+            declare
+               P     : constant Positive := Term_Of (J, T);
+               Sigma : constant Real := (if V (P, P) > 0.0 then Sqrt (V (P, P)) else 0.0);
+            begin
+               if Sigma > 0.0 then
+                  declare
+                     function Moved (H : Real) return Vec3 is
+                        Jx     : Joint_Array := Joints;
+                        A      : Joint renames Jx (Jx'First + J - 1);
+                        E1, E2 : Vec3;
+                     begin
+                        Perp (A.W, E1, E2);
+                        case T is
+                           when Tilt_1  => A.W := Unit (A.W + H * E1);
+                           when Tilt_2  => A.W := Unit (A.W + H * E2);
+                           when Point_1 => A.P := A.P + H * E1;
+                           when Point_2 => A.P := A.P + H * E2;
+                           when Scale   => A.C := A.C + H;
+                        end case;
+                        return Eye_At (Jx, Chain, To).Translation - Eye_At (Jx, Chain, From).Translation;
+                     end Moved;
+                     Width : constant Real := Sigma + Sigma;
+                  begin
+                     --  Central differences.
+                     D (J, T) := (1.0 / Width) * (Moved (Sigma) - Moved (-Sigma));
+                  end;
+               end if;
+            end;
+         end loop;
+      end loop;
+      for J in 1 .. N loop
+         for T in Joint_Term loop
+            for K in 1 .. N loop
+               for U in Joint_Term loop
+                  Result := Result + V (Term_Of (J, T), Term_Of (K, U)) * Driver.Numerics.Outer (D (J, T), D (K, U));
+               end loop;
+            end loop;
+         end loop;
+      end loop;
+      return Result;
+   end Step_Covariance;
+
    ---------------------------------------------------------------------------
    --  Consensus
 

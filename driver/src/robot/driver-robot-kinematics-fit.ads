@@ -185,6 +185,18 @@ package Driver.Robot.Kinematics.Fit is
    --  Place are Real'Last on the diagonal when the covariance is not the
    --  fit's of these joints.
 
+   function Step_Covariance
+     (Joints     : Joint_Array;
+      Chain      : Chain_Order;
+      From, To   : Real_Array;
+      Covariance : Real_Lists.Vector) return Mat3
+     with Pre => From'Length = Joints'Length and then To'Length = Joints'Length
+                 and then Chain'Length = Joints'Length;
+   --  What the fit's uncertainty leaves the eye's displacement from readings Q0 + From to Q0 + To uncertain by (the
+   --  difference of Eye_At's places), from the joints' parameters, each moved by its standard deviation either way:
+   --  one fit's errors move both ends, and a step short beside where the eye stands is known far better than either
+   --  end. Real'Last on the diagonal when the covariance is not the fit's of these joints.
+
    function Place_Covariance_In_Unit
      (Joints       : Joint_Array;
       Chain        : Chain_Order;

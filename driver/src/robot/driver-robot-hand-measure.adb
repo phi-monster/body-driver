@@ -1526,11 +1526,15 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Waited       : Natural := 0;
             --  A press stopped where the closer was pushed off its opening (Felt) ended its push unblocked: the
             --  watcher is told what it met, the tool where the stop left it (Presses.Met).
+            function Step_Of (From, To : Real_Array) return Point_Estimate is (Tool_Step_In_Arm (M, R.Arm, From, To));
             procedure Mark_Met (O : Observation) is
             begin
                Lost := not Present (Id, R);
                if not Lost then
-                  Driver.Robot.Hand.Presses.Met (H.Data.Found (Id).Watch, Tool_In_Arm (M, R.Arm, O));
+                  Driver.Robot.Hand.Presses.Met (H.Data.Found (Id).Watch, Tool_In_Arm (M, R.Arm, O),
+                                                 O.Readings.Element (Arm_Is),
+                                                 (if Step_From.Is_Empty then [1 .. 0 => 0.0] else Step_From.Element),
+                                                 Step_Of'Unrestricted_Access);
                end if;
             end Mark_Met;
          begin

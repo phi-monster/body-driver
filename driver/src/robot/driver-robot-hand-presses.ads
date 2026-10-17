@@ -71,6 +71,10 @@ package Driver.Robot.Hand.Presses is
 
    type Watcher is private;
 
+   type Step_Function is access function (From, To : Real_Array) return Point_Estimate;
+   --  How far the tool moved from one reading of the arm to another, in the frame of its poses, uncertain as a
+   --  displacement (Driver.Robot.Tool_Step_In_Arm): one fit puts both ends, and its errors move them alike.
+
    procedure Observe
      (W       : in out Watcher;
       Beat    : Driver.Clock.Beat;
@@ -83,20 +87,28 @@ package Driver.Robot.Hand.Presses is
       Found   : out Boolean;
       Press   : out Event;
       Retargeted : Boolean := False;
-      Asked   : Pose_Estimate := (others => <>));
+      Asked   : Pose_Estimate := (others => <>);
+      Step_Of : Step_Function := null);
    --  One beat of one arm, Arm its readings; Blocked the verdict on its
    --  latest push, Pushing that push still under way, Still its own readings
    --  at rest, Retargeted a new command for the arm took effect at the beat
    --  (Driver.Robot.Channels.Target_Changed), Asked the tool where the readings
-   --  that command asks for would put it (unknown when not given). Found is
-   --  True at the beat a press ends.
+   --  that command asks for would put it (unknown when not given), Step_Of the
+   --  tool's displacement between two readings of the arm (none: the
+   --  difference of the two poses, their uncertainties added). Found is True
+   --  at the beat a press ends.
 
-   procedure Met (W : in out Watcher; Tool : Pose_Estimate);
+   procedure Met (W : in out Watcher; Tool : Pose_Estimate; Arm, From : Real_Array := [1 .. 0 => 0.0];
+                  Step_Of : Step_Function := null);
    --  What a press met, felt by the closer before the arm's push was judged blocked, taken for the block, the tool
    --  at Tool: the hand measure stops a press the moment what its lobe meets pushes the closer off the opening the
    --  press is made at (Measure's Closer_Left), long before the arm's readings stall, and the push then ends
    --  unblocked. The watcher saw no block, so no let-go and no rest: a20 on 10-16 waited 7041 beats, the stream's
-   --  length, after one such press, and some 10,000 after another. Nothing when the watcher is not free.
+   --  length, after one such press, and some 10,000 after another. Nothing when the watcher is not free. From is
+   --  the arm's readings where the push that met it began, Arm where it stands: the way it pressed is the step
+   --  between them (Step_Of). Told after the push was stopped, the watcher had already taken the arm at rest on what
+   --  it met for where it last stood still, and the way it pressed was no step at all (s42, servo seed 6 of the fake
+   --  robot, 10-17: all ten presses, each given to no lobe).
 
 private
 
@@ -110,6 +122,7 @@ private
       State      : Phase := Free;
       Stood      : Boolean := False;   --  a still pose is known
       Last_Still : Pose_Estimate;      --  where the tool last stood still while free
+      Last_Arm   : Reading_Holders.Holder;   --  the arm's readings there
       Closer_Still : Reading_Holders.Holder;   --  the closer group's readings there
       Approach   : Direction_Estimate; --  measured at the first blocked beat
       Commands   : Natural := 0;       --  the new commands that took effect since the block

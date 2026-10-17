@@ -1337,6 +1337,9 @@ package body Driver.Robot.Hand is
         (R.Stalled /= 0 and then Driver.Robot.Steps.Episodes (M, Arm_Group (M, R.Arm)) > 0
          and then Driver.Robot.Steps.Latest (M, Arm_Group (M, R.Arm)).Start = R.Stalled);
 
+      --  The tool's displacement between two of the arm's readings, as one fit puts both (Tool_Step_In_Arm).
+      function Step_Of (From, To : Real_Array) return Point_Estimate is (Tool_Step_In_Arm (M, R.Arm, From, To));
+
       function Pose_Of (Arm : Real_Array) return Pose_Estimate is
          Then_Read : Observation;
       begin
@@ -1379,7 +1382,8 @@ package body Driver.Robot.Hand is
                                             Tool_In_Arm (M, R.Arm, O),
                                             O.Readings.Element (G),
                                             (if R.Group > 0 then O.Readings.Element (R.Group) else [1 .. 0 => 0.0]),
-                                            Found, Press, Retargeted => Retargeted, Asked => Asked);
+                                            Found, Press, Retargeted => Retargeted, Asked => Asked,
+                                            Step_Of => Step_Of'Unrestricted_Access);
       end;
       if not Found then
          return;

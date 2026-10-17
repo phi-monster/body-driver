@@ -211,6 +211,11 @@ package Driver.Robot is
    --  uncertain only by the arm's own fit; known once the arm is fitted,
    --  placed in the world or not. Tool_Pose is this, placed.
 
+   function Tool_Step_In_Arm (M : Model; A : Arm_Id; From, To : Real_Array) return Point_Estimate;
+   --  How far the last link moved from the arm's readings From to the readings To, in the arm's own frame, uncertain
+   --  by the arm's fit as a displacement (Kinematics.Step_Covariance), not as two places; unknown until the arm is
+   --  fitted.
+
    function Up_In_Arm (M : Model; A : Arm_Id) return Direction_Estimate;
    --  Away from gravity in the arm's own frame: the normal of the table its
    --  eye saw (Table_In_Arm), its sigma the tilt's along the direction it is

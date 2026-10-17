@@ -1368,7 +1368,9 @@ driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Eye.Value, 4) & 
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then Driver.Robot.Hand.Aims.Spread (Sight, [1 => R.Lobes (Lobe).Sights (Other_End).Ray.Direction.Unit_Vector])	1	structure	the one other line of sight of a lone lobe
+driver-robot-hand-presses.adb	+ Step.Covariance (3, 3) - U * (Step.Covariance * U)) / 2.0));	2.0	math	the variance across a direction shared by the two axes across it, as in Moved_Into
 driver-robot-hand-presses.adb	- U * (Step.Covariance * U)) / 2.0);	2.0	math	the mean of the variance about the two axes across the move
+driver-robot-hand-presses.adb	U : constant Vec3 := (1.0 / Length) * Step.Mean;	1.0	math	a vector over its length is its unit vector
 driver-robot-hand-presses.adb	U : constant Vec3 := (1.0 / Length) * Step.Mean;	1.0	math	a vector over its length is its unit vector
 driver-robot-hand-presses.adb	if W.Commands > 1 then	1	structure	the first command that takes effect after the block is the let-go; a second before the hand has rested is the retreat's
 driver-robot-hand-pressing.adb	& "" & Driver.Log.Image (Within, 4) & "");	4	format	digits printed in a log line or a message
@@ -1860,6 +1862,7 @@ driver-robot-kinematics-fit.adb	Covariance => (Real (Count) / Real (Count - 3)) 
 driver-robot-kinematics-fit.adb	Cross (B, Back * (Maps ((Sg.Frame - 1) * N + J) * (if Axis = 1 then E_1 (J) else E_2 (J))));	1	structure	a joint's first direction across its axis
 driver-robot-kinematics-fit.adb	D (J, T) := (1.0 / (Sigma + Sigma)) * (Moved (Sigma) - Moved (-Sigma));	1.0	math	a central difference over a step each way is the difference over twice the step
 driver-robot-kinematics-fit.adb	D (J, T) := (1.0 / (Sigma + Sigma)) * (Moved (Sigma) - Moved (-Sigma));	2xSigma	math	a central difference over a step each way is the difference over twice the step
+driver-robot-kinematics-fit.adb	D (J, T) := (1.0 / Width) * (Moved (Sigma) - Moved (-Sigma));	1.0	math	a central difference: the change between one standard deviation either way, over the width it spans
 driver-robot-kinematics-fit.adb	D (J, T) := (Moved (Sigma) - Moved (-Sigma)) / (Sigma + Sigma);	2xSigma	math	a central difference: one standard deviation either way spans two
 driver-robot-kinematics-fit.adb	D (J, T).Place := (1.0 / Width) * (Up.Translation - Down.Translation);	1.0	math	a central difference: the change between one standard deviation either way, over the width it spans
 driver-robot-kinematics-fit.adb	D (J, T).Turn := (1.0 / Width) * Driver.Numerics.Log (Up.Rotation * Transpose (Down.Rotation));	1.0	math	a central difference: the change between one standard deviation either way, over the width it spans
@@ -2110,6 +2113,7 @@ driver-robot-kinematics-fit.adb	Weights : Real_Access := new Real_Array (1 .. 2 
 driver-robot-kinematics-fit.adb	Wf (I) := 1.0 / Ll ** 2;	1.0	math	the weight that makes the algebraic residual the geometric one
 driver-robot-kinematics-fit.adb	Wh (I) := 1.0 / Pz ** 2;	1.0	math	the weight that makes the algebraic residual the geometric one
 driver-robot-kinematics-fit.adb	Wh, Wf : Pixel_Array := [others => 1.0];	1.0	statistics	the first solution weights every sighting alike
+driver-robot-kinematics-fit.adb	Width : constant Real := Sigma + Sigma;	2xSigma	math	a central difference: one standard deviation either way spans two
 driver-robot-kinematics-fit.adb	Width : constant Real := Sigma + Sigma;	2xSigma	math	a central difference: one standard deviation either way spans two
 driver-robot-kinematics-fit.adb	Within := (B - A) / 2.0;	2.0	math	half the ended bracket: the focal length is told to about this either way
 driver-robot-kinematics-fit.adb	Wp : Real_Array (1 .. Count) := [others => 1.0];	1.0	statistics	the first solution weights every sighting alike

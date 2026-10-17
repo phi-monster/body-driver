@@ -620,6 +620,19 @@ package body Driver.Robot is
       end;
    end Tool_In_Arm;
 
+   function Tool_Step_In_Arm (M : Model; A : Arm_Id; From, To : Real_Array) return Point_Estimate is
+      use Driver.Numerics.Arrays;
+   begin
+      if Natural (A) > Arm_Count (M) or else not Kinematics.Fitted (M, A) or else From'Length /= To'Length
+        or else From'Length /= Group_Size (M, Arm_Group (M, A))
+      then
+         return (others => <>);
+      end if;
+      return (Mean       => Kinematics.Eye_In_Reference (M, A, To).Translation
+                            - Kinematics.Eye_In_Reference (M, A, From).Translation,
+              Covariance => Kinematics.Step_Covariance (M, A, From, To));
+   end Tool_Step_In_Arm;
+
    function World_Table (M : Model) return Driver.Geometry.Plane_Estimate is (Kinematics.World_Table (M));
 
    function Table_In_Arm (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate is

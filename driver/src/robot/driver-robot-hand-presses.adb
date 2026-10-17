@@ -28,19 +28,54 @@ package body Driver.Robot.Hand.Presses is
       end;
    end Moved_Into;
 
-   --  The block's first beat: the tool there, and the way it came from where it last stood still.
-   procedure Drive (W : in out Watcher; Tool : Pose_Estimate) is
+   --  The way the tool went by a displacement Step, in its frame at To; unknown when the step is not significant
+   --  against its own uncertainty along it. One fit puts both of a step's ends, and what it does not know of where the
+   --  tool stands moves them alike: added as two poses' own, their uncertainties made every short step of s42's
+   --  descents (servo seed 6 of the fake robot, 10-17) no move at all, and all ten of its presses were given to no
+   --  lobe for want of the way they pressed.
+   function Moved_Along (Step : Point_Estimate; To : Pose_Estimate) return Direction_Estimate is
+      Unknown_Direction : Direction_Estimate;
+      Length : constant Real := (if Known (Step) then abs Step.Mean else 0.0);
+   begin
+      if not (Length > 0.0) then
+         return Unknown_Direction;
+      end if;
+      declare
+         U      : constant Vec3 := (1.0 / Length) * Step.Mean;
+         Along  : constant Real := Sqrt (Real'Max (0.0, U * (Step.Covariance * U)));
+         Across : constant Real := Sqrt (Real'Max (0.0, (Step.Covariance (1, 1) + Step.Covariance (2, 2)
+                                                         + Step.Covariance (3, 3) - U * (Step.Covariance * U)) / 2.0));
+      begin
+         if not Driver.Uncertain.Significant (Length, Along) then
+            return Unknown_Direction;
+         end if;
+         return (Unit_Vector => Transpose (To.Pose.Rotation) * U, Sigma => Across / Length);
+      end;
+   end Moved_Along;
+
+   --  The block's first beat: the tool there, and the way it came from where it last stood still: by the step between
+   --  the arm's readings there and here when Step_Of says what it is, else by the two poses.
+   procedure Drive (W : in out Watcher; Tool : Pose_Estimate; Arm : Real_Array; Step_Of : Step_Function) is
    begin
       W.State := Driven;
       W.Commands := 0;
       W.Block_At := Tool;
-      W.Approach := (if W.Stood then Moved_Into (W.Last_Still, Tool) else (others => <>));
+      W.Approach :=
+        (if not W.Stood then (others => <>)
+         elsif Step_Of /= null and then not W.Last_Arm.Is_Empty and then Arm'Length = W.Last_Arm.Element'Length
+         then Moved_Along (Step_Of (W.Last_Arm.Element, Arm), Tool)
+         else Moved_Into (W.Last_Still, Tool));
    end Drive;
 
-   procedure Met (W : in out Watcher; Tool : Pose_Estimate) is
+   procedure Met (W : in out Watcher; Tool : Pose_Estimate; Arm, From : Real_Array := [1 .. 0 => 0.0];
+                  Step_Of : Step_Function := null) is
    begin
       if W.State = Free then
-         Drive (W, Tool);
+         if From'Length > 0 and then From'Length = Arm'Length then
+            W.Last_Arm := Reading_Holders.To_Holder (From);
+            W.Stood := True;
+         end if;
+         Drive (W, Tool, Arm, Step_Of);
       end if;
    end Met;
 
@@ -56,7 +91,8 @@ package body Driver.Robot.Hand.Presses is
       Found   : out Boolean;
       Press   : out Event;
       Retargeted : Boolean := False;
-      Asked   : Pose_Estimate := (others => <>))
+      Asked   : Pose_Estimate := (others => <>);
+      Step_Of : Step_Function := null)
    is
       --  The command takes the tool back nearer where it stood before the push than where the block left it: a
       --  retreat, which a hold at the readings the block left (the arm easing back a little since) never is.
@@ -70,7 +106,7 @@ package body Driver.Robot.Hand.Presses is
       case W.State is
          when Free =>
             if Blocked then
-               Drive (W, Tool);
+               Drive (W, Tool, Arm, Step_Of);
             elsif Still and then not Pushing then
                --  Where the tool stood still while free, no push under way: a push that met the table holds the tool
                --  still against it, as far as its pose tells, for as long as the push takes to be judged blocked, and
@@ -78,6 +114,7 @@ package body Driver.Robot.Hand.Presses is
                --  to no lobe, and no tip was fitted).
                W.Stood := True;
                W.Last_Still := Tool;
+               W.Last_Arm := Reading_Holders.To_Holder (Arm);
                W.Closer_Still := Reading_Holders.To_Holder (Closer);
             end if;
          when Driven =>
@@ -128,6 +165,7 @@ package body Driver.Robot.Hand.Presses is
                W.State := Free;
                W.Stood := True;
                W.Last_Still := Tool;
+               W.Last_Arm := Reading_Holders.To_Holder (Arm);
                W.Closer_Still := Reading_Holders.To_Holder (Closer);
             end if;
          when Free | Driven =>
