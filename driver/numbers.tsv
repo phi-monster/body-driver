@@ -3026,11 +3026,11 @@ driver-robot-surfaces.adb	J : array (1 .. 2, 1 .. 3) of Real := [others => [othe
 driver-robot-surfaces.adb	J : array (1 .. 2, 1 .. 3) of Real := [others => [others => 0.0]];	3	structure	a point of the frame: its three coordinates
 driver-robot-surfaces.adb	L : constant Natural := At_Offset (-1, 0);	1	math	the neighbour one column left
 driver-robot-surfaces.adb	Lines : Natural := 1;	1	structure	the eye now is the first line of sight
-driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
-driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
-driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
 driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line of sight is the first
 driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line of sight is the first
+driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
+driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
+driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
 driver-robot-surfaces.adb	Mid : constant Real := (Lo + Hi) / 2.0;	2.0	numerics	bisection: the depth halfway between the two that bracket a window's width
 driver-robot-surfaces.adb	Near := Near / 2.0;	2.0	structure	the depth halves while the view still sees the place: the nearest depth within the halvings a float can tell
 driver-robot-surfaces.adb	Ok := Ahead and then Driver.Distributions.Chi_Square_Deviate (Miss, 2 * Used - 3) <= Z;	2	statistics	two degrees of freedom a line: its distance across it
@@ -3283,6 +3283,8 @@ driver-world-estimates.adb	for R in Natural (Real'Floor (Queries (K).V)) - Strid
 driver-world-estimates.adb	if Has_Image (Seen.Element.all, E) and then Driver.World.Sight.Views_Of (S.Views, E) > 1 then	1	structure	views from more than one place: one place alone places nothing
 driver-world-estimates.ads	Placed_At : Driver.Clock.Beat'Base := -1;	1	structure	sentinel: no measurement of the region placed yet (beats start at 0)
 driver-world-estimates.ads	Tried_At : Driver.Clock.Beat'Base := -1;	1	structure	sentinel: not tried yet (beats start at 0)
+driver-world-estimates.ads	Tried_Prompt : Driver.Images.Pixel := (U => -1.0, V => -1.0);	1.0	format	no pixel asked yet: a place outside every picture
+driver-world-estimates.ads	Tried_Prompt : Driver.Images.Pixel := (U => -1.0, V => -1.0);	1.0	format	no pixel asked yet: a place outside every picture
 driver-world-regions.adb	Diagonal : constant Real := Sqrt (2.0);	2.0	math	a diagonal step between pixels is the square root of two
 driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C + 1, R) + 1.0, At_Pixel (C, R + 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
 driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C + 1, R) + 1.0, At_Pixel (C, R + 1) + 1.0),	1.0	math	a step between side neighbours is one pixel

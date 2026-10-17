@@ -36,6 +36,7 @@ with Ada.Containers.Indefinite_Vectors;
 with Ada.Containers.Vectors;
 with Driver.Clock;
 with Driver.Images;
+with Driver.Instrument;
 with Driver.Services;
 with Driver.World.Cameras;
 with Driver.World.Points;
@@ -199,6 +200,8 @@ private
       Match_Due : Boolean := False;   --  lost at a still beat: its pixels are to be looked for in the latest picture
       Asked     : Point_Holders.Holder;   --  those pixels (Tracks.Match_Points)
       Tried_At  : Driver.Clock.Beat'Base := -1;   --  the thing's points it was last started from here (Start_Elsewhere)
+      Tried_Box    : Driver.Instrument.Box;         --  and the box and point it was asked about then
+      Tried_Prompt : Driver.Images.Pixel := (U => -1.0, V => -1.0);
       Placed_At : Driver.Clock.Beat'Base := -1;   --  the measurement of its region the eye's points were placed from
       Outline   : Point_Vectors.Vector;   --  a pointed region, carried out to the depth of what is seen of
                                           --  the thing; kept while the eye looks for it again

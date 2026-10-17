@@ -1024,7 +1024,12 @@ package body Driver.Action.Execution is
                      Limit := Real'Min (Limit, Real'Min (Pi, Turn) / abs Goal.Motion.Angular);
                   end;
                end if;
-               if Limit < Real'Last and then Fits (Limit) then
+               if not (abs Goal.Motion.Angular > 0.0) and then not (abs Goal.Motion.Linear > 0.0) then
+                  --  A twist that moves nothing has no step: every step of it fits where the tool stands, and the
+                  --  doubling never ends (s71: a still twist, its leg and gap unbounded, doubled to infinity, and
+                  --  the episode stopped on the rotation of infinity times nought).
+                  Step := 0.0;
+               elsif Limit < Real'Last and then Fits (Limit) then
                   Step := Limit;
                else
                   --  Doubled from the smallest step while it fits, then halved back down to it.

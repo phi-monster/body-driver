@@ -3,7 +3,6 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Ada.Strings.Unbounded;
 with Driver.Alignment;
-with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot.Surfaces;
 with Driver.World.Regions;
@@ -15,6 +14,8 @@ package body Driver.World.Estimates is
    use Driver.Numerics.Arrays;
    use type Driver.Observations.Camera_Id;
    use type Driver.Alignment.Verdict;
+   use type Driver.Instrument.Box;
+   use type Driver.Images.Pixel;
    use type Driver.World.Tracking.Phase;
 
    package Tracks renames Driver.World.Tracking;
@@ -741,6 +742,22 @@ package body Driver.World.Estimates is
                      Visible : Boolean;
                   begin
                      Cam.Project ((1.0 / Real (Count)) * Middle, Prompt, Visible);
+                     --  The same box and point asked again is the same question: s71 asked eye 3 about one point
+                     --  every six beats, 19 times, while the points it came from flickered and fell in the same pixel.
+                     if Visible and then Has_Slot (R, Into) and then R.Eyes (Into).Tried_Box = Box
+                       and then R.Eyes (Into).Tried_Prompt = Prompt
+                     then
+                        Visible := False;
+                     end if;
+                     if Visible then
+                        declare
+                           Here : Slot := R.Eyes (Into);
+                        begin
+                           Here.Tried_Box := Box;
+                           Here.Tried_Prompt := Prompt;
+                           R.Eyes.Replace_Element (Into, Here);
+                        end;
+                     end if;
                      if Visible then
                         declare
                            Request : constant String :=
