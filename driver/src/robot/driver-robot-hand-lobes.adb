@@ -1302,7 +1302,9 @@ package body Driver.Robot.Hand.Lobes is
       end loop;
    end Keep_Large;
 
-   procedure Reach_Tip (Lobe_Mask, Attached : Mask; Tip : out Pixel; Known : out Boolean);
+   procedure Reach_Tip (Lobe_Mask, Attached : Mask; Tip : out Pixel; Known : out Boolean;
+                        Anchor : out Pixel; Anchored : out Boolean; Given : Pixel := (U => 0.0, V => 0.0);
+                        Is_Given : Boolean := False);
    --  The tip of a lobe attached to the image's border or to the robot's
    --  pixels that did not change: the pixel farthest along the lobe's reach,
    --  the way from where it is attached to where its pixels are. The farthest
@@ -1311,9 +1313,14 @@ package body Driver.Robot.Hand.Lobes is
    --  keyboard pixels along the bottom of the picture, 143 pixels from the
    --  left border where the wedge's own apex was 118, and the strip was its tip.
    --  Along the reach that strip is 110 pixels from where the lobe is
-   --  attached and the apex 157.
+   --  attached and the apex 157. Anchor is the centre of the lobe's attached
+   --  pixels (Anchored, when it has any); a lobe with none reaches from Given
+   --  when Is_Given: the anchor of the same lobe at the other end, whose part
+   --  it was attached through (Lobes_Of_Sets).
 
-   procedure Reach_Tip (Lobe_Mask, Attached : Mask; Tip : out Pixel; Known : out Boolean) is
+   procedure Reach_Tip (Lobe_Mask, Attached : Mask; Tip : out Pixel; Known : out Boolean;
+                        Anchor : out Pixel; Anchored : out Boolean; Given : Pixel := (U => 0.0, V => 0.0);
+                        Is_Given : Boolean := False) is
       W : constant Natural := Width (Lobe_Mask);
       H : constant Natural := Height (Lobe_Mask);
       Has_Attached : constant Boolean := Width (Attached) = W and then Height (Attached) = H;
@@ -1339,6 +1346,8 @@ package body Driver.Robot.Hand.Lobes is
    begin
       Tip := (U => 0.0, V => 0.0);
       Known := False;
+      Anchor := (U => 0.0, V => 0.0);
+      Anchored := False;
       for R in 0 .. H - 1 loop
          for C in 0 .. W - 1 loop
             if Contains (Lobe_Mask, C, R) then
@@ -1354,10 +1363,17 @@ package body Driver.Robot.Hand.Lobes is
          end loop;
       end loop;
       if Anchors = 0 then
-         return;
+         if not Is_Given or else Pixels = 0 then
+            return;
+         end if;
+         Au := Given.U;
+         Av := Given.V;
+      else
+         Au := Au / Real (Anchors);
+         Av := Av / Real (Anchors);
+         Anchor := (U => Au, V => Av);
+         Anchored := True;
       end if;
-      Au := Au / Real (Anchors);
-      Av := Av / Real (Anchors);
       Cu := Cu / Real (Pixels);
       Cv := Cv / Real (Pixels);
       declare
@@ -1479,6 +1495,58 @@ package body Driver.Robot.Hand.Lobes is
                Kept_Here    : Natural := 0;
                Kept_There   : Natural := 0;
             begin
+               --  A part of one end beside an attached part of the other end is attached too: a jaw that moves little
+               --  between its ends changes the pixels along its edges only, a sliver at each end side by side with the
+               --  other end's, and one of the two may reach the picture's border while the other stops short of it (s43,
+               --  servo seed 6 of the fake robot, 10-17: the closer's three slivers at its low end reached the border, the
+               --  three beside them at its high end did not, 942 to 967 pixels each, and no hand was made of it).
+               declare
+                  procedure Attach_Through (Parts : Part_Access; Ls : Labels; Other : Part_Access; Other_Ls : Labels) is
+                  begin
+                     for R in 0 .. H - 1 loop
+                        for C in 0 .. W - 1 loop
+                           declare
+                              K : constant Natural := Ls.Of_Pixel (Index (W, C, R));
+                           begin
+                              if K > 0 and then not Parts (K).Attached then
+                                 for Dr in -1 .. 1 loop
+                                    for Dc in -1 .. 1 loop
+                                       if C + Dc in 0 .. W - 1 and then R + Dr in 0 .. H - 1 then
+                                          declare
+                                             O : constant Natural := Other_Ls.Of_Pixel (Index (W, C + Dc, R + Dr));
+                                          begin
+                                             if O > 0 and then Other (O).Attached then
+                                                Parts (K).Attached := True;
+                                             end if;
+                                          end;
+                                       end if;
+                                    end loop;
+                                 end loop;
+                              end if;
+                           end;
+                        end loop;
+                     end loop;
+                  end Attach_Through;
+
+                  --  The kept parts numbered again: the attached ones that hold more pixels than the doubt (Parts_Of).
+                  procedure Number (Parts : Part_Access) is
+                     Kept : Natural := 0;
+                  begin
+                     for P of Parts.all loop
+                        if P.Attached and then Real (P.Count) > Doubt then
+                           Kept := Kept + 1;
+                           P.Kept := Kept;
+                        else
+                           P.Kept := 0;
+                        end if;
+                     end loop;
+                  end Number;
+               begin
+                  Attach_Through (There_Parts, There_Labels, Here_Parts, Here_Labels);
+                  Attach_Through (Here_Parts, Here_Labels, There_Parts, There_Labels);
+                  Number (Here_Parts);
+                  Number (There_Parts);
+               end;
                --  Of the parts that are attached and above the doubt, those of the
                --  size of the lobes: the size distribution of both ends parts the
                --  fragments from them.
@@ -1621,8 +1689,18 @@ package body Driver.Robot.Hand.Lobes is
                      Summarize (L.There, L.Count_There, L.Centre_There);
                      if L.Count_Here > 0 and then L.Count_There > 0 then
                         --  Every pixel of a lobe changed, so any may be its tip: the one farthest along its reach.
-                        Reach_Tip (L.Here, Attached, L.Tip_Here, L.Tip_Known_Here);
-                        Reach_Tip (L.There, Attached, L.Tip_There, L.Tip_Known_There);
+                        declare
+                           Anchor_Here, Anchor_There : Pixel;
+                           Anchored_Here, Anchored_There : Boolean;
+                        begin
+                           Reach_Tip (L.Here, Attached, L.Tip_Here, L.Tip_Known_Here, Anchor_Here, Anchored_Here);
+                           Reach_Tip (L.There, Attached, L.Tip_There, L.Tip_Known_There, Anchor_There, Anchored_There,
+                                      Given => Anchor_Here, Is_Given => Anchored_Here);
+                           if not Anchored_Here and then Anchored_There then
+                              Reach_Tip (L.Here, Attached, L.Tip_Here, L.Tip_Known_Here, Anchor_Here, Anchored_Here,
+                                         Given => Anchor_There, Is_Given => True);
+                           end if;
+                        end;
                         L.Bordered_Here := On_Border (L.Here);
                         L.Bordered_There := On_Border (L.There);
                         Result.Append (L);
