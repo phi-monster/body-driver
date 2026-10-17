@@ -29,12 +29,65 @@ package body Driver.Robot.Motion is
       Eyes   : constant Natural := Eye_Count (M);
       Group_Beats : array (1 .. Groups) of Natural := [others => 0];
       Eye_Beats   : array (1 .. Eyes) of Natural := [others => 0];
+      Period      : Natural := 0;   --  the beats of the cycle the body goes round, once one is seen
+
+      --  Whether the readings went round a cycle of P beats: each of the last P beats read where the beat P before
+      --  it read, every channel within what two readings of its noise tell apart, and some channel moved within
+      --  the P beats (a body whose readings stand still while an eye settles is waited for). A body that goes round
+      --  a cycle about where it was sent settles no further however long it is held: s31 (servo seed 7 of the fake
+      --  robot, 10-17), its hand pressed on the table, arm 1 and its closer went round four poses a beat apart from
+      --  beat 6409, and the boot held in Settle five thousand beats with nothing in its log.
+      function Cycle_Of (P : Positive) return Boolean is
+         Now   : constant Natural := M.Beats - 1;
+         Moved : Boolean := False;
+      begin
+         for K in 0 .. P - 1 loop
+            for G in 1 .. Groups loop
+               declare
+                  Gid : constant Group_Id := Group_Id (G);
+               begin
+                  if Driver.Robot.Channels.Has_Reading (M, Gid, Now - K)
+                    and then Driver.Robot.Channels.Has_Reading (M, Gid, Now - K - P)
+                    and then Driver.Robot.Channels.Has_Reading (M, Gid, Now - P + 1)
+                  then
+                     for C in 1 .. Group_Size (M, Gid) loop
+                        declare
+                           Noise : constant Real := Driver.Robot.Channels.Noise (M, Gid, C);
+                        begin
+                           if Noise >= Real'Last then
+                              return False;
+                           end if;
+                           if Driver.Uncertain.Significant
+                                (Driver.Robot.Channels.Reading (M, Gid, Now - K, C)
+                                 - Driver.Robot.Channels.Reading (M, Gid, Now - K - P, C), Noise * Sqrt (2.0))
+                           then
+                              return False;
+                           end if;
+                           Moved := Moved or else Driver.Uncertain.Significant
+                             (Driver.Robot.Channels.Reading (M, Gid, Now - K, C)
+                              - Driver.Robot.Channels.Reading (M, Gid, Now - P + 1, C), Noise * Sqrt (2.0));
+                        end;
+                     end loop;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         return Moved;
+      end Cycle_Of;
    begin
       Beats_Waited := 0;
       loop
          Driver.Beats.Next (B);
+         if not Still (M) and then M.Beats > 0 then
+            for P in 2 .. Beats_Waited / 2 loop
+               if M.Beats > 2 * P and then Cycle_Of (P) then
+                  Period := P;
+                  exit;
+               end if;
+            end loop;
+         end if;
          declare
-            Done : constant Boolean := Still (M);
+            Done : constant Boolean := Still (M) or else Period > 0;
          begin
             if not Done and then M.Beats > 0 then
                for G in 1 .. Groups loop
@@ -67,7 +120,10 @@ package body Driver.Robot.Motion is
                   Append (Text, " eye" & E'Image & " unsettled" & Eye_Beats (E)'Image);
                end if;
             end loop;
-            Driver.Log.Line (Driver.Log.Robot, "motion: settled after" & Beats_Waited'Image & " beats:" & To_String (Text));
+            Driver.Log.Line (Driver.Log.Robot, "motion: " & (if Period > 0 then "held" else "settled") & " after"
+                             & Beats_Waited'Image & " beats:" & To_String (Text)
+                             & (if Period > 0 then "; the body goes round a cycle of" & Period'Image
+                                   & " beats about where it was sent and settles no further" else ""));
          end;
       end if;
    end Settle;
