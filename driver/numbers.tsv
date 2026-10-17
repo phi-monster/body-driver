@@ -1038,6 +1038,7 @@ driver-robot-boot.adb	Group : Group_Id := 1;	1	structure	a placeholder, set befo
 driver-robot-boot.adb	Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)));	1	structure	a hold of one beat at the least while no lag is told: the beat after the push
 driver-robot-boot.adb	Hold_After_A_Push (M, Group_Id (G), Natural'Max (1, Driver.Robot.Lag.Longest (M)))];	1	structure	the guessed hold begins at one beat, the unit, while the stream can tell no lag; the doubling goes on from it
 driver-robot-boot.adb	Last : Count_Grid := [others => [others => -1]];	1	structure	no count: an eye that was not open after the round before
+driver-robot-boot.adb	Last := Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else 2.0 * Patch);	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
 driver-robot-boot.adb	Levels : array (1 .. 2 * Size) of Level_Vectors.Vector;	2	structure	two pushes a channel: one each way
 driver-robot-boot.adb	Lost_Least : Real_Array (1 .. 2 * Size) := [others => Real'Last];	2	structure	two pushes a channel: one each way
 driver-robot-boot.adb	M.Groups (R.Ref.Group).Seen_At.Append (0.0);	0.0	math	a channel no probe saw move an eye: no turn
@@ -1078,7 +1079,6 @@ driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (
 driver-robot-boot.adb	else 2.0 * Off);	2.0	structure	the ladder doubles: each level twice the one before
 driver-robot-boot.adb	elsif Per_Unit (P.Channel) > 0.0 and then 2.0 * Last.Offset * Per_Unit (P.Channel) > Half then	2.0	structure	the next level, twice this one, would move the view by more than half of it
 driver-robot-boot.adb	exit when Cell_Motion (2.0 * Scale) > Half;	2.0	structure	the cell's next level, twice its shares
-driver-robot-boot.adb	exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else 2.0 * Patch);	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
 driver-robot-boot.adb	if M.Beats >= 2 * Rest_Beats then	2	structure	the rest is compared with itself at every doubling of its beats, as the estimates are scheduled
 driver-robot-boot.adb	if N > 1 and then Fitted_Now and then not Told_Now then	1	structure	more than one joint: an order to tell
 driver-robot-boot.adb	if N > 1 and then Followed_In_Pass > 0 and then Fitted_Now then	1	structure	joints move together only when there are at least two

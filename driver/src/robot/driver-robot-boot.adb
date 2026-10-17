@@ -445,18 +445,12 @@ package body Driver.Robot.Boot is
                Driver.Robot.Motion.Hold_And_Estimate (M);
             end Measure_The_Round;
 
-            --  Whether the keyframe taken in the beats the arm was held for a push (Ask_From .. Ask_To) was followed
-            --  (Kinematics.Followed) and whether the arm is fitted now, read in a held beat.
-            Ask_From, Ask_To : Natural := 0;
-            Followed_Now : Boolean := False;
-            Framed_Now   : Boolean := False;   --  a keyframe was taken in the span at all
+            --  Whether the arm is fitted now, read in a held beat (the levels' own verdicts: Read_Round).
             Fitted_Now   : Boolean := False;
             Told_Now     : Boolean := False;   --  and its joints' order told (Kinematics.Order_Told)
             Contested    : Joint_Pair_Lists.Vector;   --  if not, the pairs it lacks
             procedure Read_Followed is
             begin
-               Followed_Now := Driver.Robot.Kinematics.Followed (M, A, Ask_From, Ask_To);
-               Framed_Now := Driver.Robot.Kinematics.Framed (M, A, Ask_From, Ask_To);
                Fitted_Now := Driver.Robot.Kinematics.Fitted (M, A);
                Told_Now := Driver.Robot.Kinematics.Order_Told (M, A);
                Contested := Driver.Robot.Kinematics.Contested_Pairs (M, A);
@@ -467,6 +461,18 @@ package body Driver.Robot.Boot is
             begin
                Beat_Now := M.Beats;
             end Read_Beat_Now;
+            --  The two at once: a push's channels told to the kinematics in the beat that reads where its first level
+            --  begins, and the beat that reads where its last level ends tells them the push is over (Take).
+            procedure Tell_And_Read is
+            begin
+               Tell_Asking;
+               Read_Beat_Now;
+            end Tell_And_Read;
+            procedure Read_And_Tell is
+            begin
+               Read_Beat_Now;
+               Tell_Asking;
+            end Read_And_Tell;
          begin
             Driver.Beats.Within_A_Beat (Read_Start'Access);
             Driver.Beats.Within_A_Beat (Read_Plan'Access);
@@ -510,6 +516,8 @@ package body Driver.Robot.Boot is
                   Offset   : Real := 0.0;
                   From, To : Natural := 0;
                   Short    : Boolean := False;   --  the step to it was not reached: the joint met something
+                  Followed : Boolean := False;   --  after the round's estimate: its keyframe was followed
+                  Framed   : Boolean := False;   --  and one was taken at all (Kinematics.Followed, Framed: Read_Round)
                end record;
                package Level_Vectors is new Ada.Containers.Vectors (Positive, Level_Mark);
                Levels : array (1 .. 2 * Size) of Level_Vectors.Vector;
@@ -518,6 +526,32 @@ package body Driver.Robot.Boot is
                Swept   : array (1 .. Size) of Positive;
                N       : Natural := 0;
                Rounds, Passes : Natural := 0;
+
+               --  What the round's estimate told, read in one held beat after it: how far the view moves per unit of
+               --  each channel and the channels it does not see move it (Read_Shifts, Read_Unseen), of every level the
+               --  climbing pushes took whether its keyframe was followed and whether one was taken at all, and whether
+               --  the arm is fitted and its order told (Read_Followed). Each read took a held beat of its own, one a
+               --  level, and nothing moved meanwhile: 14 to 22 held beats after each of s43's estimates (servo seed 6 of
+               --  the fake robot, 10-17), its sweep 2946 beats.
+               procedure Read_Round is
+               begin
+                  Read_Shifts;
+                  Read_Unseen;
+                  for I in 1 .. Count loop
+                     if State (I) = Climbing then
+                        for K in Levels (I).First_Index .. Levels (I).Last_Index loop
+                           declare
+                              L : Level_Mark := Levels (I) (K);
+                           begin
+                              L.Followed := Driver.Robot.Kinematics.Followed (M, A, L.From, L.To);
+                              L.Framed := Driver.Robot.Kinematics.Framed (M, A, L.From, L.To);
+                              Levels (I).Replace_Element (K, L);
+                           end;
+                        end loop;
+                     end if;
+                  end loop;
+                  Read_Followed;
+               end Read_Round;
 
                --  The push's keyframes for the pass: the joint moved by the push's offset from the held pose and
                --  held still there for the kinematics, then on to twice the offset, and on, until the turn would
@@ -541,47 +575,60 @@ package body Driver.Robot.Boot is
                   Pose : Real_Array := Start;
                   Off  : Real := Offset (I);
                   Mark : Level_Mark;
+                  Last : Boolean;   --  the level just taken is the push's last
                begin
                   Levels (I).Clear;
                   Asked_Now := [others => False];
                   Asked_Now (P.Channel) := True;
-                  Driver.Beats.Within_A_Beat (Tell_Asking'Access);
+                  --  Each held beat that reads where the stream stands does what the beats beside it need: the one that
+                  --  tells the kinematics the push's channels reads where the first level begins, the one that ends a
+                  --  level begins the next, and the last tells them the push is over. Each read had a held beat of its
+                  --  own, four a push of one level, where nothing moved (s43, servo seed 6 of the fake robot, 10-17: 23
+                  --  beats between the keyframes of its first pass).
+                  Driver.Beats.Within_A_Beat (Tell_And_Read'Access);
                   loop
                      Pose (P.Channel) := Start (P.Channel) + P.Sign * Off;
-                     Driver.Beats.Within_A_Beat (Read_Beat_Now'Access);
-                     Mark := (Offset => Off, From => Beat_Now, To => 0, Short => False);
+                     Mark := (Offset => Off, From => Beat_Now, To => 0, Short => False, others => <>);
                      Go_To (G, Pose, Report, Land => True);
                      if Report.At_Rest then
                         Driver.Robot.Motion.Hold_For_Keyframe (M, A);
                      end if;
-                     Driver.Beats.Within_A_Beat (Read_Beat_Now'Access);
-                     Mark.To := (if Beat_Now > 0 then Beat_Now - 1 else 0);
                      Mark.Short := Report.Outcome /= Driver.Robot.Motion.Reached;
+                     Last := Mark.Short or else Per_Unit (P.Channel) = 0.0;
+                     if not Last then
+                        --  Twice the level, or the level that moves the view by a patch once the view's motion per unit is
+                        --  measured, whichever is wider: a patch beyond the followed level is what the aligner follows by
+                        --  itself (the brake below), and doubling from the least turn a keyframe counts took six to eight
+                        --  levels a push to get there, each a keyframe aligned and fitted (f16b on 10-15: pass 2 of arm 1, 69
+                        --  keyframes from 0.03 units to 2 to 8).
+                        Off := (if Per_Unit (P.Channel) > 0.0 then Real'Max (2.0 * Off, Patch / Per_Unit (P.Channel))
+                                else 2.0 * Off);
+                        Last := Off >= Lost_Least (I);
+                     end if;
+                     if not Last then
+                        --  Before the arm is fitted, the ladder climbs only as far as the aligner follows by itself: an
+                        --  extrapolation from the levels before to about a patch of displacement beyond them (A22, A23).
+                        --  A doubled level's increment is the level before it, so a level whose whole motion is two
+                        --  patches is one patch beyond the followed level before it; the levels beyond are followed only
+                        --  by a fitted arm's prediction (Motion.Sweep_Start). Taken blind in one pass, they are keyframes
+                        --  nothing finds (R6's second start, 10-14: arm_a's levels at 214, 463, 967 and 2792 units of its
+                        --  elbow, 0 of 441 points each, from a view's motion per unit measured ten times too small, and
+                        --  the elbow swung 245 degrees before its ladder met the servo's range). The brake stood at one
+                        --  patch of whole motion, half the increment the aligner follows: the kiwi's ladders took one
+                        --  doubling a pass, and the parallax that tells a wrist joint's lever (a turn of ~150 units)
+                        --  lay five passes and ten minutes away (R6's tenth start, 10-14).
+                        Last := Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else 2.0 * Patch);
+                     end if;
+                     if Last then
+                        Asked_Now := [others => False];
+                        Driver.Beats.Within_A_Beat (Read_And_Tell'Access);
+                     else
+                        Driver.Beats.Within_A_Beat (Read_Beat_Now'Access);
+                     end if;
+                     Mark.To := (if Beat_Now > 0 then Beat_Now - 1 else 0);
                      Levels (I).Append (Mark);
-                     exit when Mark.Short or else Per_Unit (P.Channel) = 0.0;
-                     --  Twice the level, or the level that moves the view by a patch once the view's motion per unit is
-                     --  measured, whichever is wider: a patch beyond the followed level is what the aligner follows by
-                     --  itself (the brake below), and doubling from the least turn a keyframe counts took six to eight
-                     --  levels a push to get there, each a keyframe aligned and fitted (f16b on 10-15: pass 2 of arm 1, 69
-                     --  keyframes from 0.03 units to 2 to 8).
-                     Off := (if Per_Unit (P.Channel) > 0.0 then Real'Max (2.0 * Off, Patch / Per_Unit (P.Channel))
-                             else 2.0 * Off);
-                     exit when Off >= Lost_Least (I);
-                     --  Before the arm is fitted, the ladder climbs only as far as the aligner follows by itself: an
-                     --  extrapolation from the levels before to about a patch of displacement beyond them (A22, A23).
-                     --  A doubled level's increment is the level before it, so a level whose whole motion is two
-                     --  patches is one patch beyond the followed level before it; the levels beyond are followed only
-                     --  by a fitted arm's prediction (Motion.Sweep_Start). Taken blind in one pass, they are keyframes
-                     --  nothing finds (R6's second start, 10-14: arm_a's levels at 214, 463, 967 and 2792 units of its
-                     --  elbow, 0 of 441 points each, from a view's motion per unit measured ten times too small, and
-                     --  the elbow swung 245 degrees before its ladder met the servo's range). The brake stood at one
-                     --  patch of whole motion, half the increment the aligner follows: the kiwi's ladders took one
-                     --  doubling a pass, and the parallax that tells a wrist joint's lever (a turn of ~150 units)
-                     --  lay five passes and ten minutes away (R6's tenth start, 10-14).
-                     exit when Off * Per_Unit (P.Channel) > (if Fitted_Now then Half else 2.0 * Patch);
+                     exit when Last;
                   end loop;
-                  Asked_Now := [others => False];
-                  Driver.Beats.Within_A_Beat (Tell_Asking'Access);
                end Take;
 
                --  Every swept joint at once, in cells whose signs no two share
@@ -838,8 +885,7 @@ package body Driver.Robot.Boot is
                            Together (Shares);
                         end if;
                         Measure_The_Round;
-                        Driver.Beats.Within_A_Beat (Read_Shifts'Access);
-                        Driver.Beats.Within_A_Beat (Read_Unseen'Access);
+                        Driver.Beats.Within_A_Beat (Read_Round'Access);
                         for I in 1 .. Count loop
                            if State (I) = Climbing then
                               declare
@@ -850,9 +896,6 @@ package body Driver.Robot.Boot is
                               begin
                                  for K in 1 .. Natural (Levels (I).Length) loop
                                     Last := Levels (I) (K);
-                                    Ask_From := Last.From;
-                                    Ask_To := Last.To;
-                                    Driver.Beats.Within_A_Beat (Read_Followed'Access);
                                     --  Followed as the aligner says, the first level too: a keyframe of a new direction is
                                     --  asked from the view's common motion and its answers on the keyframe's own field
                                     --  again narrowly (Keyframes.Add). The first level used to count as followed whenever
@@ -860,13 +903,13 @@ package body Driver.Robot.Boot is
                                     --  f15i's fifth joint had its shift from the cells of the pass, its first level
                                     --  (310 units) found 0 of 242 points, and the ladder climbed on from it to 2508
                                     --  instead of halving to a level the aligner follows (10-15).
-                                    if Followed_Now then
+                                    if Last.Followed then
                                        Followed_In_Pass := Followed_In_Pass + 1;
                                        Reached (P.Channel) := Real'Max (Reached (P.Channel), Last.Offset);
                                        Followed_Most (I) := Real'Max (Followed_Most (I), Last.Offset);
                                        Followed_Here := True;
                                        Descending (I) := False;
-                                    elsif Framed_Now then
+                                    elsif Last.Framed then
                                        --  A keyframe the aligner could not follow, too large: the ladder stops at
                                        --  this level; a fitted arm may predict it in another pass.
                                        Lost := K;
