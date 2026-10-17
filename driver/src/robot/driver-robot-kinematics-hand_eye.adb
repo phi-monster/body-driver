@@ -128,12 +128,19 @@ package body Driver.Robot.Kinematics.Hand_Eye is
             --  it is from none, in the scatter the line leaves where that is more than the sightings state.
             Count          : Natural := 0;
             Sxx, Sxu, Sxv  : Real := 0.0;
-            Floor          : constant Real := Driver.Alignment.Quantization;
+            --  Each sighting at the sigma the aligner stated of it, the variance of a place known to a pixel where it
+            --  stated none; a stated sigma too small shows in the scatter about the line, which widens the line's
+            --  (Inflate below). Every sighting used to be floored at a pixel's quantization, 0.29 px a coordinate, where
+            --  the aligner errs by about 0.02 on still twins: the view of s38's fixed eye 1 (servo seed 6 of the fake
+            --  robot, 10-17, replayed) found 23 to 26 of its 26 points at the keyframes of single joints, moved 0.16 to
+            --  0.67 px, and no track was given a link.
+            function Variance_Of (Own : Real) return Real is
+              (if Own > 0.0 then Own ** 2 else Driver.Alignment.Quantization);
          begin
             for S of A.Seen loop
                if S.Track = T and then S.Frame <= A.Frames and then Alone (S.Frame) = J then
                   declare
-                     Variance : constant Real := S.Own ** 2 + Floor;
+                     Variance : constant Real := Variance_Of (S.Own);
                      X        : constant Real := A.Change (S.Frame, J);
                   begin
                      Count := Count + 1;
@@ -152,7 +159,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                   for S of A.Seen loop
                      if S.Track = T and then S.Frame <= A.Frames and then Alone (S.Frame) = J then
                         declare
-                           Variance : constant Real := S.Own ** 2 + Floor;
+                           Variance : constant Real := Variance_Of (S.Own);
                            X        : constant Real := A.Change (S.Frame, J);
                         begin
                            Spread := Spread + ((S.U - A.Track (T).U0 - Bu * X) ** 2
