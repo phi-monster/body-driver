@@ -182,6 +182,7 @@ package body Driver.Robot.Body_File is
          Add (Separator (G = M.Groups.First_Index) & "{""delay"": " & Int (M.Groups (G).Delay_Beats)
               & ", ""delay_known"": " & Flag (M.Groups (G).Delay_Known)
               & ", ""free_shortfalls"": " & Reals (M.Groups (G).Free_Shortfalls)
+              & ", ""pause"": " & Int (M.Groups (G).Pause)
               & ", ""executed"": " & Reals (Executed_Of (M.Groups (G)))
               & ", ""executed_known"": " & Flags (Executed_Known_Of (M.Groups (G))) & "}");
       end loop;
@@ -580,6 +581,8 @@ package body Driver.Robot.Body_File is
                      S.Delay_Beats := Natural'Max (0, Whole (Item (Gs, I), "delay"));
                      S.Delay_Known := Truth (Item (Gs, I), "delay_known");
                      S.Free_Shortfalls := Reals_Of (Field (Item (Gs, I), "free_shortfalls"));
+                     --  A body file written before pauses were measured has none: the group pauses as it is seen to.
+                     S.Pause := Natural'Max (0, Whole (Item (Gs, I), "pause"));
                      declare
                         Ex    : constant Real_Vectors.Vector := Reals_Of (Field (Item (Gs, I), "executed"));
                         Known : constant Flag_Vectors.Vector := Flags_Of (Field (Item (Gs, I), "executed_known"));

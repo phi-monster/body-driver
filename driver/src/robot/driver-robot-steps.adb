@@ -1,5 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
+with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Stats;
 with Driver.Uncertain;
@@ -415,6 +416,81 @@ package body Driver.Robot.Steps is
             return Channels.Visible (M, G, Along_Ask (S, E.Length, Last * Ratio / (1.0 - Ratio)));
          end;
       end Closing;
+      --  The group stands still short of its push's target for no longer than it has paused before within a push
+      --  that went on toward its target after (Group_Stream.Pause): a servo whose readings come in steps of its wire
+      --  stands still a beat or more on its way. s41 (servo seed 6 of the fake robot, 10-17): a press's push of 752
+      --  units stood still at beat 16902, was ended there as rested, and went on four beats more to the table with
+      --  no new ask; the next step began where the arm passed at 16904, six to twelve units short of the table, the
+      --  way back there lay inside the servos' dead band, the arm did not move, and the press was lost. A group that
+      --  stands within the least ask the body executes of the target on every channel it was asked (the dead band it
+      --  stops anywhere in), or no step an eye can see short of it, has landed: it does not pause there.
+      function Pausing (G : Group_Id; Beat : Natural) return Boolean is
+         S      : Group_Stream renames M.Groups (G);
+         E      : constant Episode := S.Episodes.Last_Element;
+         Short  : Real_Array (1 .. S.Size) := [others => 0.0];
+         Within : Boolean := True;
+         Still  : Natural := 0;
+         B      : Natural := Beat;
+      begin
+         if S.Pause = 0 or else not Channels.Has_Reading (M, G, Beat) then
+            return False;
+         end if;
+         for C in 1 .. S.Size loop
+            if S.Asks (C - 1) then
+               Short (C) := S.From (C - 1) + S.Ask (C - 1) - Channels.Reading (M, G, Beat, C);
+               Within := Within and then Executed_Least (M, G, C) < Real'Last
+                 and then abs Short (C) < Executed_Least (M, G, C);
+            end if;
+         end loop;
+         if Within or else not Channels.Visible (M, G, Short) then
+            return False;
+         end if;
+         while B > E.Moved_At and then not Channels.Moving (M, G, B) loop
+            Still := Still + 1;
+            B := B - 1;
+         end loop;
+         return Still <= S.Pause;
+      end Pausing;
+
+      --  A push ended at rest whose group then comes nearer its target than it ever had, by a step the one test of
+      --  motion sees and its chatter does not make, with no new ask, had paused there, not rested: the beats from its
+      --  end to that step are a pause of the group (Group_Stream.Pause). Only within as many beats as the push took
+      --  from its start to its end: a push is given up on that scale (Follow), and motion later than that is not
+      --  its own. A servo hunting a tick about where it stopped comes no nearer than it had, and is no pause.
+      procedure Learn_Pause (G : Group_Id; Beat : Natural) is
+         S     : Group_Stream renames M.Groups (G);
+         E     : constant Episode := S.Episodes.Last_Element;
+         Way   : Real_Array (1 .. S.Size) := [others => 0.0];
+         Near, Asked : Real := 0.0;
+      begin
+         if not (E.Ended and then E.Rested and then E.Moved) or else E.Length <= 0.0 or else Beat <= E.End_At
+           or else Beat - E.End_At > E.End_At - E.Start or else not Channels.Has_Reading (M, G, Beat)
+           or else not Channels.Moving (M, G, Beat)
+         then
+            return;
+         end if;
+         for C in 1 .. S.Size loop
+            if S.Asks (C - 1) then
+               Way (C) := S.Ask (C - 1);
+               Near := Near + (S.Ask (C - 1) - (Channels.Reading (M, G, Beat, C) - S.From (C - 1))) ** 2;
+               Asked := Asked + S.Ask (C - 1) ** 2;
+            end if;
+         end loop;
+         Near := Sqrt (Near);
+         Asked := Sqrt (Asked);
+         if Asked > 0.0 and then Near < E.Nearest.Value
+           and then Channels.Visible (M, G, [for C in Way'Range => Way (C) * (E.Nearest.Value - Near) / Asked])
+           and then Beyond_Chatter (E.Nearest, E.Nearest.Value - Near)
+         then
+            if Beat - E.End_At > S.Pause then
+               S.Pause := Beat - E.End_At;
+               Driver.Log.Line (Driver.Log.Robot, "steps: group" & G'Image & " stood still" & S.Pause'Image
+                                & " beats within the push of beat" & E.Start'Image & ", short of its target, and went on"
+                                & " toward it at beat" & Beat'Image & " with no new ask: a rest short of a target waits"
+                                & " that long");
+            end if;
+         end if;
+      end Learn_Pause;
    begin
       Body_Delay (M, Delay_Beats, Delay_Known);
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -444,9 +520,11 @@ package body Driver.Robot.Steps is
                         elsif Beat - E.Start > Wait then
                            Finish (M, G, Beat, Answered => False, Settled => True, Rested => True);
                         end if;
-                     elsif not Channels.Moving (M, G, Beat) and then not Closing (G, Beat) then
+                     elsif not Channels.Moving (M, G, Beat) and then not Closing (G, Beat) and then not Pausing (G, Beat)
+                     then
                         Finish (M, G, Beat, Answered => True, Settled => True, Rested => True);
                      else
+                        --  A group standing still within a pause (Pausing) is followed as one under way.
                         --  An answered push is given up by its own progress; the least it is followed for is the
                         --  body's delay where that is measured, else the wait this push itself took to answer:
                         --  not the beats the stream had before it (R4 on the Pi, 10-13: before any delay was
@@ -455,6 +533,8 @@ package body Driver.Robot.Steps is
                         Follow (M, G, Beat, Natural'Max (Delay_Beats, E.Moved_At - E.Start));
                      end if;
                   end;
+               elsif not S.Episodes.Is_Empty then
+                  Learn_Pause (G, Beat);
                end if;
             end;
          end if;
