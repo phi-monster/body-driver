@@ -221,15 +221,15 @@ package Driver.Alignment is
    --  either side of the point. A prediction's window no wider than a patch at the full size is searched where the
    --  pictures are, and such a point is followed (Driver.Robot.Kinematics.Followed).
 
+   Quantization : constant Real := 1.0 / 12.0;
+   --  The variance of a uniform rounding to a whole unit: of a pixel's level, and of a place known to a pixel.
+
 private
 
    Window_Gate     : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
    Window_Multiple : constant Real := Driver.Uncertain.Threshold (Window_Gate);
    --  How many standard deviations of a prediction a place may lie from it: the length of a two-dimensional
    --  difference, significant at the tail probability Z has for one dimension.
-
-   Quantization : constant Real := 1.0 / 12.0;
-   --  The variance of a uniform rounding to a whole unit: of a pixel's level, and of a place known to a pixel.
 
    Finest : constant := 0;
    --  The size of the pyramid that is the picture itself.

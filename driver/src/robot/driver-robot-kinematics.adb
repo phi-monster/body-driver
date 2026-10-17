@@ -13,11 +13,10 @@ with Driver.Distributions;
 with Driver.Numerics.Dense;
 with Driver.Parallel_For;
 with Driver.Robot.Kinematics.Fit;
-with Driver.Robot.Kinematics.Fixed;
+with Driver.Robot.Kinematics.Hand_Eye;
 with Driver.Robot.Stillness;
 with Driver.Stats;
 with Driver.Uncertain;
-with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
@@ -37,10 +36,6 @@ package body Driver.Robot.Kinematics is
    type Counts_Access is access Count_List;
    procedure Free is new Ada.Unchecked_Deallocation (Count_List, Counts_Access);
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
-   type Answer_Access is access Driver.Instrument.Answer_Array;
-   procedure Free is new Ada.Unchecked_Deallocation (Driver.Instrument.Answer_Array, Answer_Access);
-   type Point_Access is access Driver.Instrument.Point_Array;
-   procedure Free is new Ada.Unchecked_Deallocation (Driver.Instrument.Point_Array, Point_Access);
    type Matrix_Access is access Driver.Numerics.Arrays.Real_Matrix;
    procedure Free is new Ada.Unchecked_Deallocation (Driver.Numerics.Arrays.Real_Matrix, Matrix_Access);
    type Flags_Access is access Fit.Flag_Matrix;
@@ -49,6 +44,12 @@ package body Driver.Robot.Kinematics is
    type Flag_Access is access Flag_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flag_Access);
 
+   package Hand renames Driver.Robot.Kinematics.Hand_Eye;
+
+   --  The terms of a fixed eye's covariance: its lens's six and its pose's six.
+   Fixed_Terms : constant := Fit.Lens_Terms + Hand.Pose_Terms;
+
+   use type Real_Vectors.Vector;
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
 
@@ -189,6 +190,19 @@ package body Driver.Robot.Kinematics is
    function Moving_Point (R : Arm_Evidence; P : Natural) return Boolean is
      ((P >= Natural (R.Still.Length) or else not R.Still (P)) and then not Rides (R, P));
 
+   --  Per point of the arm's reference, whether it does not move with the view (not Moving_Point): still at every
+   --  keyframe, or riding with the eye by the keyframes' own evidence (Rides). Set_Of judges a keyframe's sightings
+   --  by it: the merge of the fixed eyes' views (Set_Of's flags given apart, d449b0c6) had dropped the riding
+   --  points from it, and the jaws in a wrist eye's view would be sightings of the world again (691533d2).
+   function Unmoving (R : Arm_Evidence) return Flag_Vectors.Vector is
+   begin
+      return Flags : Flag_Vectors.Vector do
+         for P in 0 .. Natural (R.Query_U.Length) - 1 loop
+            Flags.Append (not Moving_Point (R, P));
+         end loop;
+      end return;
+   end Unmoving;
+
    function Readings_Of (M : Model; G : Group_Id; Beat : Natural) return Real_Array is
       Result : Real_Array (1 .. M.Groups (G).Size);
    begin
@@ -197,67 +211,6 @@ package body Driver.Robot.Kinematics is
       end loop;
       return Result;
    end Readings_Of;
-
-   --  Reads the answers ready in Pending into Into.
-   procedure Collect_Into
-     (R       : in out Arm_Evidence;
-      Pending : in out Pending_Vectors.Vector;
-      Into    : in out Match_Set_Vectors.Vector)
-   is
-      K : Natural := Pending.First_Index;
-   begin
-      while K <= Pending.Last_Index loop
-         if Driver.Services.Ready (Pending (K).Ticket) then
-            declare
-               P      : constant Pending_Match := Pending (K);
-               Reply  : constant Driver.Services.Reply := Driver.Services.Collect (P.Ticket);
-               Result : Answer_Access := new Driver.Instrument.Answer_Array (1 .. P.Points);
-               Ok     : Boolean;
-               Why    : Ada.Strings.Unbounded.Unbounded_String;
-               Set    : Match_Set;
-            begin
-               Driver.Instrument.Read_Match (Reply, True, Result.all, Ok, Why);
-               if Ok then
-                  Set.Frame := P.Frame;
-                  Set.Eye := P.Eye;
-                  for A of Result.all loop
-                     Set.To_U.Append (A.To.U);
-                     Set.To_V.Append (A.To.V);
-                     Set.Back_U.Append (A.Back.U);
-                     Set.Back_V.Append (A.Back.V);
-                     Set.Found.Append (A.Found);
-                  end loop;
-                  Into.Append (Set);
-               elsif Reply.Lasting and then P.Eye > 0 then
-                  --  Another eye's view of the reference: that link is lost; the
-                  --  arm's own sweep learns from its own requests whether the
-                  --  instrument can answer at all.
-                  Driver.Log.Line (Driver.Log.Robot, "kinematics: eye" & P.Eye'Image & "'s view of arm" & R.Arm'Image
-                                   & "'s reference gets no matches: " & Ada.Strings.Unbounded.To_String (Why));
-               elsif Reply.Lasting then
-                  if not R.Unanswerable then
-                     Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image
-                                      & " gets no matches, and asks no more: " & Ada.Strings.Unbounded.To_String (Why));
-                  end if;
-                  R.Unanswerable := True;
-               else
-                  Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe" & P.Frame'Image
-                                   & " has no matches: " & Ada.Strings.Unbounded.To_String (Why));
-               end if;
-               Free (Result);
-               Pending.Delete (K);
-            end;
-         else
-            K := K + 1;
-         end if;
-      end loop;
-   end Collect_Into;
-
-   procedure Collect (R : in out Arm_Evidence) is
-   begin
-      Collect_Into (R, R.World_Pending, R.World_Matches);
-      Collect_Into (R, R.Eye_Pending, R.Eye_Matches);
-   end Collect;
 
    --  The arm's joints along it, from its base, as its fit found them.
    function Chain_Of (R : Arm_Fit) return Fit.Chain_Order is
@@ -298,44 +251,6 @@ package body Driver.Robot.Kinematics is
       end loop;
       return 0;
    end Index_Of;
-
-   --  The noise of a round trip over the answers of Sets: the robust scale
-   --  about zero of every answer's return to its query, both coordinates; 0
-   --  without answers.
-   function Round_Trip_Sigma (R : Arm_Evidence; Sets : Match_Set_Vectors.Vector) return Real is
-      Queries : constant Natural := Natural (R.Query_U.Length);
-      Count   : Natural := 0;
-   begin
-      for S of Sets loop
-         for I in 0 .. Queries - 1 loop
-            if S.Found (I) and then Moving_Point (R, I) then
-               Count := Count + 1;
-            end if;
-         end loop;
-      end loop;
-      if Count = 0 then
-         return 0.0;
-      end if;
-      declare
-         Trips : Real_Access := new Real_Array (1 .. 2 * Count);
-         K     : Natural := 0;
-      begin
-         for S of Sets loop
-            for I in 0 .. Queries - 1 loop
-               if S.Found (I) and then Moving_Point (R, I) then
-                  Trips (K + 1) := abs (S.Back_U (I) - R.Query_U (I));
-                  Trips (K + 2) := abs (S.Back_V (I) - R.Query_V (I));
-                  K := K + 2;
-               end if;
-            end loop;
-         end loop;
-         return Sigma : constant Real :=
-           Driver.Stats.Median (Trips.all) / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5)
-         do
-            Free (Trips);
-         end return;
-      end;
-   end Round_Trip_Sigma;
 
    --  How far the aligner errs on the arm's keyframes (Driver.Alignment.Keyframes.Scatter).
    function Match_Sigma (R : Arm_Evidence) return Real is (Driver.Alignment.Keyframes.Scatter (R.Chain));
@@ -405,15 +320,72 @@ package body Driver.Robot.Kinematics is
       end;
    end Held_Still;
 
+   --  The graph mounts the eye fixed in the world.
+   function Is_Fixed (M : Model; E : Eye_Id) return Boolean is
+     (E <= M.Graph.Mounts.Last_Index and then M.Graph.Mounts (E).Kind = World_Fixed);
+
+   --  Eye E's view shows group G move, as the lock-in measured it.
+   function Sees (M : Model; E : Eye_Id; G : Group_Id) return Boolean is
+      K : constant Natural := (Natural (G) - 1) * Natural (M.Eyes.Length) + Natural (E);
+   begin
+      return K in M.Graph.Effects.First_Index .. M.Graph.Effects.Last_Index
+        and then M.Graph.Effects (K).Verdict in Patch | Whole;
+   end Sees;
+
+   --  The fixed eyes that see the arm move keep their pictures at the arm's keyframes, the one just taken (the last of
+   --  R.Frames) included. The first keyframe is a view's reference: its query points are the cells of the eye's picture
+   --  that respond to the arm's push, taken there once. An eye that does not see the arm move at the first keyframe, or
+   --  has no settled picture then, has no view of the arm: the keyframes that move one joint alone, which tell the
+   --  points' links, are all taken from the reference. A later keyframe at which the eye has no settled picture is
+   --  kept without one.
+   procedure Take_Views (M : Model; O : Observation; R : in out Arm_Evidence) is
+   begin
+      for H in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         if Is_Fixed (M, H) then
+            declare
+               Picture : constant Driver.Images.Image :=
+                 (if H <= O.Images.Last_Index and then Driver.Observations.Has_Image (O, H)
+                    and then Stillness.Eye_Settled (M, H)
+                  then O.Images (H) else Driver.Images.No_Image);
+               Seen    : Natural := 0;
+            begin
+               for V in R.Views.First_Index .. R.Views.Last_Index loop
+                  if R.Views (V).Eye = H then
+                     Seen := V;
+                  end if;
+               end loop;
+               if Seen > 0 then
+                  R.Views (Seen).Images.Append (Picture);
+               elsif Natural (R.Frames.Length) = 1 then
+                  declare
+                     View : Hand_View;
+                     Responds : Flag_Vectors.Vector;   --  every cell a fixed eye's view asks follows the push
+                  begin
+                     if Driver.Images.Width (Picture) > 0 and then Sees (M, H, R.Group) then
+                        View.Eye := H;
+                        Query_Points (M, H, R.Group, Picture, View.Query_U, View.Query_V, Responds);
+                        View.Images.Append (Picture);
+                        if not View.Query_U.Is_Empty then
+                           R.Views.Append (View);
+                        end if;
+                     end if;
+                     if View.Query_U.Is_Empty then
+                        Driver.Log.Line
+                          (Driver.Log.Robot, "kinematics: eye" & H'Image & " keeps no view of arm" & R.Arm'Image & ": "
+                           & (if Driver.Images.Width (Picture) = 0 then "its picture is not settled at the arm's first keyframe"
+                              elsif not Sees (M, H, R.Group) then "the lock-in shows no response of its picture to the arm"
+                              else "no textured cell of its picture responds to the arm"));
+                     end if;
+                  end;
+               end if;
+            end;
+         end if;
+      end loop;
+   end Take_Views;
+
    procedure Observe (M : in out Model; O : Observation) is
       Beat : constant Natural := M.Beats;
    begin
-      --  Every arm's answers, whether or not the graph lists the arm now: a
-      --  request is pending until its answer is read (Hold_While_Matching
-      --  waits for all of them).
-      for R of M.Kinematics loop
-         Collect (R);
-      end loop;
       for A in 1 .. Arm_Count (M) loop
          declare
             Arm : constant Arm_Id := Arm_Id (A);
@@ -525,34 +497,8 @@ package body Driver.Robot.Kinematics is
                               R.Still.Clear;
                               R.Stood_Off.Clear;
                               R.Moved_With.Clear;
-                              --  The reference's points into every other eye's view at
-                              --  this beat: what links this arm to the others through
-                              --  an eye that sees both (Place).
-                              R.Eye_Matches.Clear;
-                              if not R.Query_U.Is_Empty then
-                                 declare
-                                    Points : Point_Access :=
-                                      new Driver.Instrument.Point_Array (1 .. Natural (R.Query_U.Length));
-                                 begin
-                                    for P in Points'Range loop
-                                       Points (P) := (U => R.Query_U (P - 1), V => R.Query_V (P - 1));
-                                    end loop;
-                                    for Other in O.Images.First_Index .. O.Images.Last_Index loop
-                                       if Other /= E and then Driver.Observations.Has_Image (O, Other) then
-                                          R.Eye_Pending.Append
-                                            (Pending_Match'(Frame  => 1,
-                                                            Eye    => Natural (Other),
-                                                            Points => Points'Length,
-                                                            Ticket => Driver.Instrument.Submit_Match
-                                                              ((Stored => False, Image => O.Images (E)),
-                                                               (Stored => False, Image => O.Images (Other)),
-                                                               Points.all, True, O.Beat)));
-                                       end if;
-                                    end loop;
-                                    Free (Points);
-                                 end;
-                              end if;
                            end if;
+                           Take_Views (M, O, R);
                         end if;
                      end;
                   end if;
@@ -560,50 +506,6 @@ package body Driver.Robot.Kinematics is
             end if;
          end;
       end loop;
-      --  Every other arm's reference view, once taken, is matched against the
-      --  first arm's: the first arm's query points, into it. Asked again when
-      --  either reference is taken anew.
-      declare
-         W : constant Natural := Index_Of (M, 1);
-      begin
-         if W > 0 and then not M.Kinematics (W).Frames.Is_Empty and then not M.Kinematics (W).Query_U.Is_Empty
-           and then not M.Kinematics (W).Unanswerable
-         then
-            for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
-               declare
-                  Asked_Of : constant Natural := M.Kinematics (W).Frames.First_Element.Beat;
-               begin
-                  if K /= W and then Current (M, M.Kinematics (K)) and then not M.Kinematics (K).Frames.Is_Empty
-                    and then not M.Kinematics (K).Unanswerable
-                    and then not (M.Kinematics (K).World_Asked
-                                  and then M.Kinematics (K).World_Group = M.Kinematics (W).Group
-                                  and then M.Kinematics (K).World_Reference = Asked_Of)
-                  then
-                     declare
-                        Points : Point_Access := new Driver.Instrument.Point_Array (1 .. Natural (M.Kinematics (W).Query_U.Length));
-                     begin
-                        for P in Points'Range loop
-                           Points (P) := (U => M.Kinematics (W).Query_U (P - 1), V => M.Kinematics (W).Query_V (P - 1));
-                        end loop;
-                        M.Kinematics (K).World_Matches.Clear;
-                        M.Kinematics (K).World_Pending.Append
-                          (Pending_Match'(Frame  => 1,
-                                          Eye    => 0,
-                                          Points => Points'Length,
-                                          Ticket => Driver.Instrument.Submit_Match
-                                            ((Stored => False, Image => M.Kinematics (W).Frames.First_Element.Image),
-                                             (Stored => False, Image => M.Kinematics (K).Frames.First_Element.Image),
-                                             Points.all, True, O.Beat)));
-                        M.Kinematics (K).World_Asked := True;
-                        M.Kinematics (K).World_Group := M.Kinematics (W).Group;
-                        M.Kinematics (K).World_Reference := Asked_Of;
-                        Free (Points);
-                     end;
-                  end if;
-               end;
-            end loop;
-         end if;
-      end;
    end Observe;
 
    function Match_Noise (M : Model; A : Arm_Id) return Real is
@@ -766,15 +668,6 @@ package body Driver.Robot.Kinematics is
 
    function Matched (M : Model; A : Arm_Id) return Natural is
      (if Index_Of (M, A) > 0 then Natural (M.Kinematics (Index_Of (M, A)).Matches.Length) else 0);
-
-   function Pending (M : Model) return Natural is
-      K : Natural := 0;
-   begin
-      for R of M.Kinematics loop
-         K := K + Natural (R.World_Pending.Length) + Natural (R.Eye_Pending.Length);
-      end loop;
-      return K;
-   end Pending;
 
    ---------------------------------------------------------------------------
    --  Aligning the keyframes
@@ -997,7 +890,7 @@ package body Driver.Robot.Kinematics is
       --  (Match_Set.Answered, the aligner's sets), else where it records an answer a fit rests on (Found: sets
       --  made elsewhere, which hold no wider answers).
       function Answered (S : Match_Set; P : Natural) return Boolean is
-        (S.Eye = 0 and then S.Frame <= Natural (R.Frames.Length)
+        (S.Frame <= Natural (R.Frames.Length)
          and then (if P < Natural (S.Answered.Length) then S.Answered (P)
                    else P < Natural (S.Found.Length) and then S.Found (P)));
 
@@ -1042,7 +935,7 @@ package body Driver.Robot.Kinematics is
             Low, High : Real := 0.0;   --  the reference itself is at zero
          begin
             for S of R.Matches loop
-               if S.Eye = 0 and then S.Frame <= Natural (R.Frames.Length) then
+               if S.Frame <= Natural (R.Frames.Length) then
                   Low := Real'Min (Low, Change (S.Frame, C));
                   High := Real'Max (High, Change (S.Frame, C));
                end if;
@@ -1070,7 +963,7 @@ package body Driver.Robot.Kinematics is
          Moving : array (1 .. N) of Natural := [others => 0];   --  per channel: the keyframes that moved it
       begin
          for S of R.Matches loop
-            if S.Eye = 0 and then S.Frame <= Natural (R.Frames.Length) then
+            if S.Frame <= Natural (R.Frames.Length) then
                for C in 1 .. N loop
                   if Active (C) and then Noise (C) < Real'Last
                     and then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))
@@ -1289,7 +1182,7 @@ package body Driver.Robot.Kinematics is
             function Verified (C : Positive; P : Natural) return Boolean is
             begin
                for S of R.Matches loop
-                  if S.Eye = 0 and then S.Frame <= Natural (R.Frames.Length) and then P < Natural (S.Found.Length)
+                  if S.Frame <= Natural (R.Frames.Length) and then P < Natural (S.Found.Length)
                     and then S.Found (P)
                     and then (if Noise (C) < Real'Last
                               then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))
@@ -1457,8 +1350,9 @@ package body Driver.Robot.Kinematics is
    end Measure_Shifts;
 
    procedure Set_Of
-     (F : Positive; R : Arm_Evidence; Given : Keyframes.Prediction_Array; Answers : Keyframes.Answer_Array;
-      Agree : Keyframes.Flag_Array; Set : out Match_Set)
+     (Who : String; F : Positive; Query_U, Query_V : Real_Vectors.Vector; Still : Flag_Vectors.Vector;
+      Given : Keyframes.Prediction_Array; Answers : Keyframes.Answer_Array; Agree : Keyframes.Flag_Array;
+      Set : out Match_Set)
    is
       Counted : Natural := 0;
       Typical : Real := 0.0;
@@ -1470,7 +1364,8 @@ package body Driver.Robot.Kinematics is
       --  found at its place in every keyframe, and is no evidence that the view followed, nor of where the world
       --  is (the hand's jaws in the kiwi's wrist eyes, R5 on 10-14: every keyframe of a joint turned 2277 units
       --  was followed by them).
-      function Moving (I : Natural) return Boolean is (Answered (I) and then Moving_Point (R, I - 1));
+      function Moving (I : Natural) return Boolean is
+        (Answered (I) and then (I - 1 >= Natural (Still.Length) or else not Still (I - 1)));
       Followed : Boolean := False;
       function Sighted (I : Natural) return Boolean is (Followed and then Moving (I) and then Answers (I).Narrow);
    begin
@@ -1514,7 +1409,7 @@ package body Driver.Robot.Kinematics is
                      end;
                   end if;
                end loop;
-               Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " keyframe" & F'Image & " not followed: "
+               Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " keyframe" & F'Image & " not followed: "
                                 & Found'Image & " moving points found," & From_Narrow'Image & " in narrow windows;"
                                 & " found a median " & Mid (Off_N, KN) & " px from their predictions in narrow windows, "
                                 & Mid (Off_W, KW) & " px in wide ones; the predictions stated " & Mid (Said, KS) & " px");
@@ -1544,15 +1439,15 @@ package body Driver.Robot.Kinematics is
             Free (Sigmas);
          end;
       end if;
-      Set := (Frame => F, Eye => 0, Stated => Stated_By (Given), Followed => Followed, others => <>);
+      Set := (Frame => F, Stated => Stated_By (Given), Followed => Followed, others => <>);
       for I in Answers'Range loop
          Set.To_U.Append (Answers (I).To.U);
          Set.To_V.Append (Answers (I).To.V);
          Set.Sigma.Append (if Answers (I).Verdict = Driver.Alignment.Found then Sigma_Of (Answers (I)) else 0.0);
          Set.Freedom.Append (if Answers (I).Verdict = Driver.Alignment.Found then Answers (I).Degrees_Of_Freedom else 0);
          --  There is no way back: an answer is judged by its own uncertainty, not by another answer.
-         Set.Back_U.Append (R.Query_U (I - 1));
-         Set.Back_V.Append (R.Query_V (I - 1));
+         Set.Back_U.Append (Query_U (I - 1));
+         Set.Back_V.Append (Query_V (I - 1));
          Set.Found.Append (Sighted (I) and then Sigma_Of (Answers (I)) <= Driver.Conventions.Z * Typical);
          Set.Answered.Append (Answered (I));
          if Keyframes.Prediction_Caused (Answers (I)) or else (Moving (I) and then not Sighted (I)) then
@@ -1671,7 +1566,8 @@ package body Driver.Robot.Kinematics is
                end;
             end;
             Rss_After := Driver.Memory.Resident_Kilobytes / 1024;
-            Set_Of (F, R, Given.all, Answers.all, Agree.all, Set);
+            Set_Of ("arm" & R.Arm'Image, F, R.Query_U, R.Query_V, Unmoving (R), Given.all, Answers.all, Agree.all,
+                    Set);
             --  A change of a channel whose shift the keyframes have not measured is a new direction: the keyframe is
             --  asked from the view's common motion (Keyframes.Add). Before, a new direction searched every point
             --  alone as wide as the aligner looks, and when that found nothing it was aligned again from the lock-in's
@@ -1780,16 +1676,282 @@ package body Driver.Robot.Kinematics is
       end;
    end Align_Arm;
 
+   ---------------------------------------------------------------------------
+   --  A fixed eye's view of an arm
+
+   --  The lens moved along its term Term (in Fit.Lens_Terms' order) by By.
+   function Moved (L : Fit.Lens; Term : Positive; By : Real) return Fit.Lens is
+     (case Term is
+         when 1      => (L with delta Fx => L.Fx * Ada.Numerics.Long_Elementary_Functions.Exp (By)),
+         when 2      => (L with delta Fy => L.Fy * Ada.Numerics.Long_Elementary_Functions.Exp (By)),
+         when 3      => (L with delta Cx => L.Cx + By),
+         when 4      => (L with delta Cy => L.Cy + By),
+         when 5      => (L with delta K1 => L.K1 + By),
+         when others => (L with delta K2 => L.K2 + By));
+
+   --  The arm's joints as its fit has them.
+   --  Along the arm from its base (Chain_Of), the order a fixed eye's fit takes them in (Hand_Eye.Watched): a point
+   --  on the arm's Link-th link moves with the first Link of them.
+   function Joints_Of (F : Arm_Fit) return Fit.Joint_Array is
+      Order  : constant Fit.Chain_Order := Chain_Of (F);
+      Result : Fit.Joint_Array (1 .. Order'Length);
+   begin
+      for J in Result'Range loop
+         declare
+            Joint : constant Joint_Fit := F.Joints (Order (J));
+         begin
+            Result (J) := (W => Joint.W, P => Joint.P, C => Joint.C, Slide => Joint.Slide);
+         end;
+      end loop;
+      return Result;
+   end Joints_Of;
+
+   --  The fitted fixed eye's own prediction of where its reference's query points are in a keyframe of the arm at
+   --  those readings. A query the fit gave a link and a depth is a point of the arm's links: at rest it lies on its
+   --  line of sight at that depth, the eye's pose carries it into the arm's reference frame, the links' motion at
+   --  the readings (the arm's fit's joints) to where it is, and the pose and the lens back into the picture. The
+   --  prediction's uncertainty is the noise the fit's sightings showed and what the covariance of the fit's lens
+   --  and of this arm's pose leave the pixel uncertain by (the terms moved by their standard deviations, the
+   --  correlations kept); a point without a link or a depth is not predicted. Known is False when the eye is not
+   --  fitted to this arm.
+   procedure Offer_Hand
+     (R : Arm_Evidence; V : Hand_View; Readings : Real_Array; Into : out Keyframes.Prediction_Array;
+      Known : out Boolean)
+   is
+      use Driver.Numerics.Arrays;
+      F         : Hand_Fit renames V.Result;
+      Queries   : constant Natural := Natural (V.Query_U.Length);
+      Joints    : constant Fit.Joint_Array := Joints_Of (R.Result);
+      Order     : constant Fit.Chain_Order := Chain_Of (R.Result);   --  the joints' readings, along the arm
+      Unbounded : constant Real := Real'Last / 4.0;
+      Total     : constant Natural := Natural (Ada.Numerics.Long_Elementary_Functions.Sqrt
+                                                 (Real (Natural (F.Covariance.Length))));
+      Offset    : constant Natural := Fit.Lens_Terms + Hand.Pose_Terms * (F.Slot - 1);
+      --  The terms the prediction depends on: the lens's, then this arm's pose's (the turn about the eye's axes, the
+      --  centre).
+      Eye_Terms : constant := Fit.Lens_Terms + Hand.Pose_Terms;
+      Turn_At   : constant := Fit.Lens_Terms;
+      Place_At  : constant := Fit.Lens_Terms + 3;
+      Lens      : constant Fit.Lens := Fit_Lens (F.Lens);
+
+      --  The covariance of the lens's six terms and this arm's pose's six, row by row of the 12 they make.
+      function Term_Index (T : Positive) return Positive is
+        (if T <= Fit.Lens_Terms then T else Offset + T - Fit.Lens_Terms);
+
+      function Variance (A, B : Positive) return Real is
+        (F.Covariance (F.Covariance.First_Index + (Term_Index (A) - 1) * Total + Term_Index (B) - 1));
+   begin
+      Known := F.Placed and then F.Slot > 0 and then R.Result.Fitted and then Joints'Length = Readings'Length
+        and then Natural (R.Result.Reference.Length) = Joints'Length and then Natural (F.Link.Length) >= Queries
+        and then Natural (F.Depth.Length) >= Queries and then Lens.Fx > 0.0 and then Lens.Fy > 0.0;
+      for K in Into'Range loop
+         declare
+            Q  : constant Natural := K - Into'First;
+            U0 : constant Real := (if Q < Queries then V.Query_U (Q) else 0.0);
+            V0 : constant Real := (if Q < Queries then V.Query_V (Q) else 0.0);
+         begin
+            Into (K) := (From => (U => U0, V => V0), To => (U => U0, V => V0),
+                         Cov => (UU => Unbounded, UV => 0.0, VV => Unbounded), others => <>);
+            if Known and then Q < Queries and then F.Link (Q) >= 1 and then F.Link (Q) <= Joints'Length
+              and then F.Depth (Q) > 0.0
+            then
+               declare
+                  Link   : constant Positive := F.Link (Q);
+                  Change : Real_Array (1 .. Link);
+                  Depth  : constant Real := F.Depth (Q);
+                  Move   : Rigid;
+
+                  --  Where the point lands for a lens and a pose moved from the fit's by those of the 12 terms.
+                  procedure Land (By : Real_Array; Where : out Driver.Images.Pixel; Front : out Boolean) is
+                     L     : Fit.Lens := Lens;
+                     Pose  : Rigid := F.Pose;
+                  begin
+                     for T in 1 .. Fit.Lens_Terms loop
+                        L := Moved (L, T, By (T));
+                     end loop;
+                     Pose := (Rotation    => F.Pose.Rotation
+                                          * Driver.Numerics.Exp ([By (Turn_At + 1), By (Turn_At + 2), By (Turn_At + 3)]),
+                              Translation => F.Pose.Translation
+                                             + [By (Place_At + 1), By (Place_At + 2), By (Place_At + 3)]);
+                     Fit.Project (L, Inverse (Pose) * (Move * (Pose * (Depth * Fit.Ray (L, U0, V0)))),
+                                  Where.U, Where.V, Front);
+                  end Land;
+
+                  Here  : Driver.Images.Pixel;
+                  Front : Boolean;
+                  None  : constant Real_Array (1 .. Eye_Terms) := [others => 0.0];
+               begin
+                  for K in Change'Range loop
+                     Change (K) := Readings (Readings'First + Order (K) - 1) - R.Result.Reference (Order (K) - 1);
+                  end loop;
+                  Move := Fit.Eye_At (Joints (1 .. Link), [for K in 1 .. Link => K], Change (1 .. Link));
+                  Land (None, Here, Front);
+                  if Front then
+                     declare
+                        Cov : array (1 .. 3) of Real := [0.0, 0.0, 0.0];   --  UU, UV, VV
+                        Dir : array (1 .. Eye_Terms) of Driver.Images.Pixel := [others => (U => 0.0, V => 0.0)];
+                     begin
+                        if Total * Total = Natural (F.Covariance.Length) and then Offset + Hand.Pose_Terms <= Total
+                        then
+                           for T in 1 .. Eye_Terms loop
+                              if Variance (T, T) > 0.0 then
+                                 declare
+                                    H        : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt
+                                                                  (Variance (T, T));
+                                    Up, Down : Driver.Images.Pixel;
+                                    F1, F2   : Boolean;
+                                    By       : Real_Array (1 .. Eye_Terms) := [others => 0.0];
+                                 begin
+                                    By (T) := H;
+                                    Land (By, Up, F1);
+                                    By (T) := -H;
+                                    Land (By, Down, F2);
+                                    if F1 and then F2 then
+                                       Dir (T) := (U => (Up.U - Down.U) / (2.0 * H), V => (Up.V - Down.V) / (2.0 * H));
+                                    end if;
+                                 end;
+                              end if;
+                           end loop;
+                           for A in 1 .. Eye_Terms loop
+                              for B in 1 .. Eye_Terms loop
+                                 Cov (1) := Cov (1) + Dir (A).U * Variance (A, B) * Dir (B).U;
+                                 Cov (2) := Cov (2) + Dir (A).U * Variance (A, B) * Dir (B).V;
+                                 Cov (3) := Cov (3) + Dir (A).V * Variance (A, B) * Dir (B).V;
+                              end loop;
+                           end loop;
+                        end if;
+                        Into (K).To := Here;
+                        Into (K).Cov := (UU => F.Sigma_Px ** 2 + Cov (1), UV => Cov (2), VV => F.Sigma_Px ** 2 + Cov (3));
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+   end Offer_Hand;
+
+   --  A keyframe the view has no picture of: nothing of it is found, and nothing was refused for a prediction.
+   function Empty_Set (F : Positive; U, V : Real_Vectors.Vector) return Match_Set is
+      Set : Match_Set;
+   begin
+      Set.Frame := F;
+      for I in U.First_Index .. U.Last_Index loop
+         Set.To_U.Append (U (I));
+         Set.To_V.Append (V (I));
+         Set.Back_U.Append (U (I));
+         Set.Back_V.Append (V (I));
+         Set.Sigma.Append (0.0);
+         Set.Freedom.Append (0);
+         Set.Found.Append (False);
+      end loop;
+      return Set;
+   end Empty_Set;
+
+   --  The view's keyframes not yet aligned, in order, as the arm's own are (Align_Arm): the fixed eye's picture of each
+   --  against its reference picture, each predicted from the ones before it, or by the fitted eye when it has one.
+   procedure Align_View (M : Model; R : in out Arm_Evidence; Index : Positive) is
+      V       : Hand_View renames R.Views (Index);
+      N       : constant Natural := M.Groups (R.Group).Size;
+      Queries : constant Natural := Natural (V.Query_U.Length);
+      Noise   : Real_Array (1 .. N);
+      Shift   : Real_Array (1 .. N);
+      Start   : constant Duration := Driver.Clock.Seconds;
+      First   : constant Natural := V.Aligned + 1;
+      Found   : Natural := 0;
+   begin
+      for C in 1 .. N loop
+         Noise (C) := Channels.Noise (M, R.Group, C);
+         Shift (C) := Lockin.Shift (M, V.Eye, R.Group, C);
+      end loop;
+      if (for some X of Noise => X >= Real'Last) then
+         return;
+      end if;
+      if V.Aligned = 0 then
+         declare
+            Points : Keyframe_Point_Access := new Keyframes.Point_Array (1 .. Queries);
+         begin
+            for I in Points'Range loop
+               Points (I) := (U => V.Query_U (I - 1), V => V.Query_V (I - 1));
+            end loop;
+            Keyframes.Begin_Reference (V.Chain, V.Images.First_Element, Points.all);
+            Free (Points);
+         end;
+         V.Images.Replace_Element (1, Driver.Images.No_Image);
+         V.Aligned := 1;
+      end if;
+      while V.Aligned < Natural (R.Frames.Length) and then V.Aligned < Natural (V.Images.Length) loop
+         declare
+            F       : constant Positive := V.Aligned + 1;
+            Picture : constant Driver.Images.Image := V.Images (F);
+            Set     : Match_Set;
+         begin
+            if Driver.Images.Width (Picture) = 0 then
+               Set := Empty_Set (F, V.Query_U, V.Query_V);
+            else
+               declare
+                  Change  : Real_Array (1 .. N);
+                  Given   : Prediction_Access := new Keyframes.Prediction_Array (1 .. Queries);
+                  Offered : Prediction_Access := new Keyframes.Prediction_Array (1 .. Queries);
+                  Answers : Alignment_Access := new Keyframes.Answer_Array (1 .. Queries);
+                  Agree   : Agreement_Access := new Keyframes.Flag_Array (1 .. Queries);
+                  From    : Keyframes.Source;
+                  Known   : Boolean;
+               begin
+                  for C in 1 .. N loop
+                     Change (C) := R.Frames (F).Readings (C - 1) - R.Frames.First_Element.Readings (C - 1);
+                  end loop;
+                  Offer_Hand (R, V, Readings_Array (R.Frames (F)), Offered.all, Known);
+                  if Known then
+                     Keyframes.Predict (V.Chain, Change, Noise, Shift, Offered.all, Given.all, From);
+                  else
+                     Keyframes.Predict (V.Chain, Change, Noise, Shift, Keyframes.No_Offer, Given.all, From);
+                  end if;
+                  Keyframes.Add (V.Chain, Picture, Change, Given.all, Answers.all, Agree.all);
+                  Set_Of ("arm" & R.Arm'Image & "'s eye" & V.Eye'Image, F, V.Query_U, V.Query_V, Flag_Vectors.Empty_Vector,
+                          Given.all, Answers.all, Agree.all, Set);
+                  Free (Given);
+                  Free (Offered);
+                  Free (Answers);
+                  Free (Agree);
+               end;
+            end if;
+            for Seen of Set.Found loop
+               if Seen then
+                  Found := Found + 1;
+               end if;
+            end loop;
+            V.Matches.Append (Set);
+            V.Aligned := F;
+            --  A keyframe that refused nothing for its prediction needs its picture no more.
+            if Set.Wide = 0 then
+               V.Images.Replace_Element (F, Driver.Images.No_Image);
+            end if;
+         end;
+      end loop;
+      Driver.Log.Line
+        (Driver.Log.Robot, "kinematics: eye" & V.Eye'Image & "'s view of arm" & R.Arm'Image & " aligned keyframes"
+         & First'Image & " to" & V.Aligned'Image & ":" & Found'Image & " of"
+         & Natural'Image ((V.Aligned - First + 1) * Queries) & " points found, in "
+         & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
+   end Align_View;
+
    procedure Align_New (M : in out Model) is
    begin
       for Index in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
          declare
             R : Arm_Evidence renames M.Kinematics (Index);
          begin
-            if Current (M, R) and then Natural (R.Frames.Length) > R.Aligned and then not R.Query_U.Is_Empty
-              and then R.Group <= M.Groups.Last_Index and then R.Eye <= M.Eyes.Last_Index
-            then
-               Align_Arm (M, R);
+            if Current (M, R) and then R.Group <= M.Groups.Last_Index and then R.Eye <= M.Eyes.Last_Index then
+               if Natural (R.Frames.Length) > R.Aligned and then not R.Query_U.Is_Empty then
+                  Align_Arm (M, R);
+               end if;
+               for Position in R.Views.First_Index .. R.Views.Last_Index loop
+                  if R.Views (Position).Eye <= M.Eyes.Last_Index
+                    and then Natural (R.Views (Position).Images.Length) > R.Views (Position).Aligned
+                  then
+                     Align_View (M, R, Position);
+                  end if;
+               end loop;
             end if;
          end;
       end loop;
@@ -1805,7 +1967,7 @@ package body Driver.Robot.Kinematics is
               else Then_Radius - Now_Radius >= 1.0);
    end Narrowed;
 
-   function Realign (M : in out Model) return Boolean is
+   function Realign_Arms (M : in out Model) return Boolean is
       Changed : Boolean := False;
    begin
       for Index in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
@@ -1836,7 +1998,8 @@ package body Driver.Robot.Kinematics is
                            declare
                               Set : Match_Set;
                            begin
-                              Set_Of (F, R, Offered.all, Answers.all, Agree.all, Set);
+                              Set_Of ("arm" & R.Arm'Image, F, R.Query_U, R.Query_V, Unmoving (R), Offered.all, Answers.all, Agree.all,
+                                      Set);
                               R.Matches.Replace_Element (S, Set);
                               if Set.Wide = 0 then
                                  R.Frames (F).Image := Driver.Images.No_Image;
@@ -1863,36 +2026,90 @@ package body Driver.Robot.Kinematics is
          end;
       end loop;
       return Changed;
+   end Realign_Arms;
+
+   --  The same for the views of the fixed eyes: a keyframe whose first alignment refused points for the prediction's
+   --  uncertainty is aligned again when the fitted eye predicts it with a narrower window.
+   function Realign_Views (M : in out Model) return Boolean is
+      Changed : Boolean := False;
+   begin
+      for Index in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+         declare
+            R : Arm_Evidence renames M.Kinematics (Index);
+         begin
+            if Current (M, R) and then R.Result.Fitted then
+               for Position in R.Views.First_Index .. R.Views.Last_Index loop
+                  declare
+                     V       : Hand_View renames R.Views (Position);
+                     Queries : constant Natural := Natural (V.Query_U.Length);
+                     Done    : Natural := 0;
+                     Start   : constant Duration := Driver.Clock.Seconds;
+                  begin
+                     if V.Result.Placed and then V.Aligned >= 2 and then Queries > 0 then
+                        for S in V.Matches.First_Index .. V.Matches.Last_Index loop
+                           declare
+                              F : constant Positive := V.Matches (S).Frame;
+                           begin
+                              if V.Matches (S).Wide > 0 and then F <= Natural (V.Images.Length)
+                                and then Driver.Images.Width (V.Images (F)) > 0
+                              then
+                                 declare
+                                    Offered : Prediction_Access := new Keyframes.Prediction_Array (1 .. Queries);
+                                    Answers : Alignment_Access := new Keyframes.Answer_Array (1 .. Queries);
+                                    Agree   : Agreement_Access := new Keyframes.Flag_Array (1 .. Queries);
+                                    Known   : Boolean;
+                                 begin
+                                    Offer_Hand (R, V, Readings_Array (R.Frames (F)), Offered.all, Known);
+                                    if Known and then Narrowed (V.Matches (S), Stated_By (Offered.all)) then
+                                       Keyframes.Realign (V.Chain, V.Images (F), Offered.all, Answers.all, Agree.all);
+                                       declare
+                                          Set : Match_Set;
+                                       begin
+                                          Set_Of ("arm" & R.Arm'Image & "'s eye" & V.Eye'Image, F, V.Query_U, V.Query_V, Flag_Vectors.Empty_Vector,
+                                                  Offered.all, Answers.all, Agree.all, Set);
+                                          V.Matches.Replace_Element (S, Set);
+                                          if Set.Wide = 0 then
+                                             V.Images.Replace_Element (F, Driver.Images.No_Image);
+                                          end if;
+                                       end;
+                                       V.Revision := V.Revision + 1;
+                                       Done := Done + 1;
+                                       Changed := True;
+                                    end if;
+                                    Free (Offered);
+                                    Free (Answers);
+                                    Free (Agree);
+                                 end;
+                              end if;
+                           end;
+                        end loop;
+                        if Done > 0 then
+                           Driver.Log.Line
+                             (Driver.Log.Robot, "kinematics: eye" & V.Eye'Image & "'s view of arm" & R.Arm'Image
+                              & " aligned" & Done'Image & " keyframes again from the fitted eye, in "
+                              & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
+                        end if;
+                     end if;
+                  end;
+               end loop;
+            end if;
+         end;
+      end loop;
+      return Changed;
+   end Realign_Views;
+
+   function Realign (M : in out Model) return Boolean is
+      Arms  : constant Boolean := Realign_Arms (M);
+      Views : constant Boolean := Realign_Views (M);
+   begin
+      return Arms or else Views;
    end Realign;
 
-   --  The match set of the arm's reference into eye E; 0 when there is none.
-   function Set_Into (R : Arm_Evidence; E : Natural) return Natural is
-   begin
-      for K in R.Eye_Matches.First_Index .. R.Eye_Matches.Last_Index loop
-         if R.Eye_Matches (K).Eye = E then
-            return K;
-         end if;
-      end loop;
-      return 0;
-   end Set_Into;
+   --  Every fixed eye's lens and pose from the arms it saw move (Hand_Eye), and the fixed eye each is the world's.
+   procedure Fit_Hands (M : in out Model);
 
-   --  Every arm but the first placed in the world, by its reference view of
-   --  the first arm's tracked points (In_World).
+   --  Every arm but the first placed in the world, through a fixed eye that saw it and the first arm move (In_World).
    procedure Place (M : in out Model);
-
-   --  Every eye fixed in the world, from the first arm's points and the eye's answers to where they are
-   --  (Fixed).
-   procedure Fit_Fixed_Eyes (M : in out Model);
-
-   --  The lens moved along its term Term (in Fit.Lens_Terms' order) by By.
-   function Moved (L : Fit.Lens; Term : Positive; By : Real) return Fit.Lens is
-     (case Term is
-         when 1      => (L with delta Fx => L.Fx * Ada.Numerics.Long_Elementary_Functions.Exp (By)),
-         when 2      => (L with delta Fy => L.Fy * Ada.Numerics.Long_Elementary_Functions.Exp (By)),
-         when 3      => (L with delta Cx => L.Cx + By),
-         when 4      => (L with delta Cy => L.Cy + By),
-         when 5      => (L with delta K1 => L.K1 + By),
-         when others => (L with delta K2 => L.K2 + By));
 
    type Sight_Access is access Fit.Sight_Point_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Fit.Sight_Point_Array, Sight_Access);
@@ -1943,8 +2160,7 @@ package body Driver.Robot.Kinematics is
       Plane      : Fit.Sight_Plane;
       Gains      : Fit.Real_Lists.Vector;
       Covariance : Fit.Real_Lists.Vector;
-      Estimate   : out Driver.Geometry.Plane_Estimate;
-      Response   : out Real_Vectors.Vector)
+      Estimate   : out Driver.Geometry.Plane_Estimate)
    is
       use Driver.Numerics.Arrays;
       Q     : constant Natural := Natural (U.Length);
@@ -1955,7 +2171,6 @@ package body Driver.Robot.Kinematics is
    begin
       if not Plane.Found or else Terms < Fit.Lens_Terms or else Terms * Terms /= Natural (Covariance.Length) then
          Estimate := (others => <>);
-         Response.Clear;
          return;
       end if;
       declare
@@ -2001,12 +2216,6 @@ package body Driver.Robot.Kinematics is
                end loop;
             end loop;
             Total := Plane.Covariance + T * Cv * Transpose (T);
-            Response.Clear;
-            for A in 1 .. 3 loop
-               for K in 1 .. Terms loop
-                  Response.Append (T (T'First (1) + A - 1, T'First (2) + K - 1));
-               end loop;
-            end loop;
             Free (On);
             Free (S);
             Estimate := Fit.Plane_Estimate_Of (Plane, Total);
@@ -2352,7 +2561,6 @@ package body Driver.Robot.Kinematics is
                      if Report.Fitted then
                         declare
                            Plane  : Fit.Sight_Plane;
-                           Response : Real_Vectors.Vector;
                            Sights : Sight_Access := new Fit.Sight_Point_Array (1 .. Queries);
                            On     : Fit_Flag_Access := new Fit.Flag_Array (1 .. Queries);
                         begin
@@ -2376,10 +2584,10 @@ package body Driver.Robot.Kinematics is
                                  Sights (I + 1) := (H => H, Depth => D, Sigma => S);
                               end;
                            end loop;
-                           --  How every depth moves with the fit's terms together, which a fixed eye
-                           --  placed by these points carries (Fit_Fixed_Eyes). The fit has a track to the
-                           --  last query that has a sighting: the queries after it, that no keyframe
-                           --  answered, have no depth (above) and none that moves with a term.
+                           --  How every depth moves with the fit's terms together, which the table's uncertainty carries
+                           --  (Table_Estimate). The fit has a track to the last query that has a sighting: the
+                           --  queries after it, that no keyframe answered, have no depth (above) and none that
+                           --  moves with a term.
                            declare
                               Terms : constant Natural :=
                                 Natural (Ada.Numerics.Long_Elementary_Functions.Sqrt
@@ -2389,21 +2597,16 @@ package body Driver.Robot.Kinematics is
                                  Report.Depth_Gains.Append (0.0);
                               end loop;
                            end;
-                           for X of Report.Depth_Gains loop
-                              Result.Depth_Gains.Append (X);
-                           end loop;
                            --  The table: the plane most of them lie on, with its
                            --  whole uncertainty (Table_In_Arm).
                            Fit.Dominant_Plane (Sights.all, Plane, On.all);
                            for B of On.all loop
                               Result.Table_On.Append (B);
                            end loop;
-                           Result.Table_Scatter := Plane.Covariance;
                            Table_Estimate (R.Query_U, R.Query_V, Result, Lens, Sights.all, Plane,
-                                           Report.Depth_Gains, Report.Covariance, Result.Table, Response);
-                           Result.Table_Response := Response;
-                           --  For the link, which holds the lens apart: its points'
-                           --  scatter and what the fit moves every depth by together.
+                                           Report.Depth_Gains, Report.Covariance, Result.Table);
+                           --  For the arm's placement: the plane as its eye sees it, with its points' scatter and
+                           --  what the fit moves every depth by together.
                            Plane.Covariance :=
                              Fit.Plane_Covariance (Sights.all, On.all, Plane, Report.Depth_Gains, Report.Covariance);
                            Result.Table_A := Plane.A;
@@ -2496,224 +2699,601 @@ package body Driver.Robot.Kinematics is
    begin
       Fit_Arms (M.Kinematics.First_Index, M.Kinematics.Last_Index);
       Fitted := Driver.Clock.Seconds;
-      Place (M);
+      Fit_Hands (M);
       Placed := Driver.Clock.Seconds;
-      Fit_Fixed_Eyes (M);
+      Place (M);
       Driver.Log.Line (Driver.Log.Robot, "kinematics: the arms fitted in "
-                       & Driver.Log.Image (Real (Fitted - Start), 1) & " s, placed in "
-                       & Driver.Log.Image (Real (Placed - Fitted), 1) & " s, the fixed eyes in "
+                       & Driver.Log.Image (Real (Fitted - Start), 1) & " s, the fixed eyes in "
+                       & Driver.Log.Image (Real (Placed - Fitted), 1) & " s, the arms placed in "
                        & Driver.Log.Image (Real (Driver.Clock.Seconds - Placed), 1) & " s");
    end Refit;
 
-   procedure Place (M : in out Model) is
-      W : constant Natural := Index_Of (M, 1);
+   ---------------------------------------------------------------------------
+   --  Eyes fixed in the world
 
-      --  How well the arm's fit unit is known against its depths (Fit.Unit_Sigma):
-      --  the unit's keyframes, the first fit's.
-      function Unit_Sigma_Of (R : Arm_Evidence) return Real is
-         N      : constant Natural := Natural (R.Result.Joints.Length);
-         Frames : constant Natural := (if N = 0 then 0 else Natural (R.Result.Unit_Changes.Length) / N);
+   function Square_Root (X : Real) return Real renames Ada.Numerics.Long_Elementary_Functions.Sqrt;
+
+   procedure Free_Watched is new Ada.Unchecked_Deallocation (Hand.Watched, Hand.Watched_Access);
+
+   type Index_List is array (Positive range <>) of Natural;
+
+   --  The block of the arm's fit covariance that is its joints' terms (the lens's left out), row by row, the joints
+   --  along the arm from its base (Chain_Of) as Joints_Of has them: the fit keeps them in the order of their readings.
+   function Joint_Covariance (F : Arm_Fit) return Fit.Real_Lists.Vector is
+      Result : Fit.Real_Lists.Vector;
+      N      : constant Natural := Natural (F.Joints.Length);
+      Terms  : constant Natural := Fit.Terms (N);
+      Order  : constant Fit.Chain_Order := Chain_Of (F);
+      --  The fit's term (from 0) that is term P (from 0) of the K-th joint along the arm.
+      function Term (K : Positive; P : Natural) return Natural is
+        (Fit.Lens_Terms + (Order (K) - 1) * Fit.Joint_Terms + P);
+   begin
+      if Natural (F.Covariance.Length) = Terms * Terms and then Order'Length = N then
+         for K in 1 .. N loop
+            for P in 0 .. Fit.Joint_Terms - 1 loop
+               for L in 1 .. N loop
+                  for Q in 0 .. Fit.Joint_Terms - 1 loop
+                     Result.Append (F.Covariance (Term (K, P) * Terms + Term (L, Q)));
+                  end loop;
+               end loop;
+            end loop;
+         end loop;
+      end if;
+      return Result;
+   end Joint_Covariance;
+
+   --  What the arm gives of itself to the fixed eye's fit (Hand_Eye): its joints as fitted, the readings of its
+   --  keyframes, the points of the view and what the view found of each at every keyframe.
+   function Watched_Of (M : Model; R : Arm_Evidence; V : Hand_View) return Hand.Watched_Access is
+      N       : constant Natural := Natural (R.Result.Joints.Length);
+      Order   : constant Fit.Chain_Order := Chain_Of (R.Result);   --  the joints' readings, along the arm
+      Frames  : constant Natural := Natural (R.Frames.Length);
+      Queries : constant Natural := Natural (V.Query_U.Length);
+      Sights  : Natural := 0;
+   begin
+      for S of V.Matches loop
+         for Seen of S.Found loop
+            if Seen then
+               Sights := Sights + 1;
+            end if;
+         end loop;
+      end loop;
+      declare
+         W : constant Hand.Watched_Access :=
+           new Hand.Watched (Joints => N, Frames => Frames, Tracks => Queries, Sightings => Sights);
+         K : Natural := 0;
       begin
-         if N = 0 or else Frames = 0 or else Natural (R.Result.Reference.Length) /= N
-           or else Natural (R.Result.Chain.Length) /= N
-         then
-            return Real'Last;
-         end if;
+         W.Joint := Joints_Of (R.Result);
+         for F in 1 .. Frames loop
+            for K in 1 .. N loop
+               W.Change (F, K) :=
+                 R.Frames (F).Readings (Order (K) - 1) - R.Frames.First_Element.Readings (Order (K) - 1);
+            end loop;
+         end loop;
+         for K in 1 .. N loop
+            W.Visible (K) := Keyframe_Step (M, R.Arm, Order (K));
+         end loop;
+         W.Covariance := Joint_Covariance (R.Result);
+         for I in 1 .. Queries loop
+            W.Track (I) := (U0 => V.Query_U (I - 1), V0 => V.Query_V (I - 1));
+         end loop;
+         for S of V.Matches loop
+            for I in 0 .. Queries - 1 loop
+               if S.Found (I) then
+                  K := K + 1;
+                  W.Seen (K) := (Track => I + 1, Frame => S.Frame, U => S.To_U (I), V => S.To_V (I),
+                                 Own => S.Sigma (I), Own_Freedom => S.Freedom (I));
+               end if;
+            end loop;
+         end loop;
+         return W;
+      end;
+   end Watched_Of;
+
+   --  The fixed eye H fitted to the arms it saw move: the lens it has, its pose in each arm's frame, and the pose in
+   --  the world (the first arm's frame) with the covariance of both.
+   procedure Fit_Hand (M : in out Model; H : Eye_Id) is
+      Start    : constant Duration := Driver.Clock.Seconds;
+      World    : constant Natural := Index_Of (M, 1);
+      Count    : Natural := 0;
+      Evidence : Natural := 0;
+      Kin_Of   : Index_List (1 .. Natural'Max (1, Natural (M.Kinematics.Length))) := [others => 0];
+      View_Of  : Index_List (1 .. Natural'Max (1, Natural (M.Kinematics.Length))) := [others => 0];
+   begin
+      for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
          declare
-            Joints  : Fit.Joint_Array (1 .. N);
-            Changes : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. N);
-            Cov     : Fit.Real_Lists.Vector;
+            R : Arm_Evidence renames M.Kinematics (K);
          begin
-            for J in 1 .. N loop
-               declare
-                  F : constant Joint_Fit := R.Result.Joints (J);
-               begin
-                  Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
-               end;
-            end loop;
-            for F in 1 .. Frames loop
-               for C in 1 .. N loop
-                  Changes (F, C) := R.Result.Unit_Changes ((F - 1) * N + C - 1);
-               end loop;
-            end loop;
-            for X of R.Result.Covariance loop
-               Cov.Append (X);
-            end loop;
-            return Result : constant Real := Fit.Unit_Sigma (Joints, Chain_Of (R.Result), Changes.all, Cov) do
-               Free (Changes);
-            end return;
-         end;
-      end Unit_Sigma_Of;
-
-      --  Eye E's view shows group G move, as the lock-in measured it.
-      function Sees (E : Natural; G : Group_Id) return Boolean is
-         K : constant Natural := (Natural (G) - 1) * Natural (M.Eyes.Length) + E;
-      begin
-         return E > 0 and then K in M.Graph.Effects.First_Index .. M.Graph.Effects.Last_Index
-           and then M.Graph.Effects (K).Verdict in Patch | Whole;
-      end Sees;
-
-      --  A way to link the second arm to the first: an eye that shows both
-      --  arms move and has both arms' table points in its view. A fixed eye
-      --  has each arm's reference matched into its view at that arm's
-      --  reference beat; the arm's own eye has the first arm's reference
-      --  matched into its own, and its own points where they are.
-      type Link_Way is record
-         Eye : Natural := 0;
-         Own : Boolean := False;
-      end record;
-
-      --  Each query point's track on the arm's table, by number among the
-      --  side's tracks; 0 for a point not on it.
-      type Index_Array is array (Natural range <>) of Natural;
-      type Index_Access is access Index_Array;
-      procedure Free is new Ada.Unchecked_Deallocation (Index_Array, Index_Access);
-
-      --  The arm's side of a link: its lens and the lens's covariance, its
-      --  table's tracks (Of_Query maps its query points to them).
-      procedure Side_Of (R : Arm_Evidence; S : out Fit.Chain_Side; Of_Query : Index_Access) is
-         F     : constant Arm_Fit := R.Result;
-         Terms : constant Natural :=
-           Natural (Ada.Numerics.Long_Elementary_Functions.Sqrt (Real (Natural (F.Covariance.Length))));
-      begin
-         S.L := Fit_Lens (F.Lens);
-         S.Plane_Covariance := F.Table_Covariance;
-         S.Lens_Covariance.Clear;
-         S.Tracks.Clear;
-         S.Answers.Clear;
-         if Terms >= Fit.Lens_Terms and then Terms * Terms = Natural (F.Covariance.Length) then
-            for P in 1 .. Fit.Lens_Terms loop
-               for Q in 1 .. Fit.Lens_Terms loop
-                  S.Lens_Covariance.Append (F.Covariance (F.Covariance.First_Index + (P - 1) * Terms + Q - 1));
-               end loop;
-            end loop;
-         end if;
-         for I in Of_Query'Range loop
-            Of_Query (I) := 0;
-            if I < Natural (F.Table_On.Length) and then F.Table_On (I)
-              and then I < Natural (F.Track_Known.Length) and then F.Track_Known (I)
+            if Current (M, R) and then R.Result.Fitted and then Natural (R.Result.Joints.Length) > 0
+              and then Natural (R.Result.Reference.Length) = Natural (R.Result.Joints.Length)
             then
-               --  Each element read into a constant of its own first: a container's
-               --  element reference inside an aggregate actual does not outlive
-               --  the aggregate (AddressSanitizer: stack use after scope).
-               declare
-                  U0    : constant Real := R.Query_U (I);
-                  V0    : constant Real := R.Query_V (I);
-                  Depth : constant Real := F.Tracks (3 * I + 2);
-                  Sigma : constant Real := (if I < Natural (F.Track_Sigmas.Length) then F.Track_Sigmas (I) else Real'Last);
-                  Track : constant Fit.Table_Track := (U0 => U0, V0 => V0, Depth => Depth, Sigma => Sigma);
-               begin
-                  S.Tracks.Append (Track);
-               end;
-               Of_Query (I) := Natural (S.Tracks.Length);
+               for Position in R.Views.First_Index .. R.Views.Last_Index loop
+                  if R.Views (Position).Eye = H and then R.Views (Position).Aligned >= 2 then
+                     Count := Count + 1;
+                     Kin_Of (Count) := K;
+                     View_Of (Count) := Position;
+                     Evidence := Evidence + R.Views (Position).Aligned + R.Views (Position).Revision
+                       + R.Result.Matches;
+                  end if;
+               end loop;
             end if;
-         end loop;
-      end Side_Of;
-
-      --  Where an eye answered the side's tracks.
-      procedure Answers_Of (R : Arm_Evidence; S : in out Fit.Chain_Side; Set : Match_Set; Of_Query : Index_Access) is
+         end;
+      end loop;
+      declare
+         F : Fixed_Fit renames M.Fixed_Eyes (H);
       begin
-         for I in 0 .. Natural (Set.Found.Length) - 1 loop
-            if I <= Of_Query'Last and then Of_Query (I) > 0 and then Set.Found (I) and then Moving_Point (R, I) then
-               declare
-                  U      : constant Real := Set.To_U (I);
-                  V      : constant Real := Set.To_V (I);
-                  Answer : constant Fit.Eye_Answer := (Track => Of_Query (I), U => U, V => V);
-               begin
-                  S.Answers.Append (Answer);
-               end;
-            end if;
-         end loop;
-      end Answers_Of;
-
-      Outputs : constant := 7;   --  turn, centre, log scale
-      type Output_Covariance is array (1 .. Outputs, 1 .. Outputs) of Real;
-
-      --  Placed through one way: the link, the placement and its covariance;
-      --  Why when it cannot be. A fixed eye has each arm's reference matched
-      --  into its view; the second arm's own eye has the first arm's points
-      --  matched into it, and its own lens sees them (Fit.Plane_Chain).
-      procedure Through
-        (R1, R2     : Arm_Evidence;
-         Way        : Link_Way;
-         Placement  : out Rigid;
-         Scale      : out Real;
-         Covariance : out Output_Covariance;
-         Link       : out Fit.Plane_Link;
-         Placed     : out Boolean;
-         Why        : out Ada.Strings.Unbounded.Unbounded_String)
-      is
-         S1, S2 : Fit.Chain_Side;
-         Map1   : Index_Access := new Index_Array (0 .. Natural (R1.Query_U.Length) - 1);
-         Map2   : Index_Access := new Index_Array (0 .. Natural (R2.Query_U.Length) - 1);
-      begin
-         Placement := Driver.Numerics.Identity;
-         Scale := 1.0;
-         Covariance := [others => [others => 0.0]];
-         Link := (others => <>);
-         Placed := False;
-         Why := Ada.Strings.Unbounded.Null_Unbounded_String;
-         Side_Of (R1, S1, Map1);
-         Side_Of (R2, S2, Map2);
-         if Way.Own then
-            Answers_Of (R1, S1, R2.World_Matches.First_Element, Map1);
-         else
-            Answers_Of (R1, S1, R1.Eye_Matches (Set_Into (R1, Way.Eye)), Map1);
-            Answers_Of (R2, S2, R2.Eye_Matches (Set_Into (R2, Way.Eye)), Map2);
-         end if;
-         Free (Map1);
-         Free (Map2);
-         if not (Driver.Geometry.Known (R1.Result.Table) and then Driver.Geometry.Known (R2.Result.Table)) then
-            Why := Ada.Strings.Unbounded.To_Unbounded_String ("an arm's table is not found");
+         if Count = 0 then
+            F := (Judged => True,
+                  Why    => Ada.Strings.Unbounded.To_Unbounded_String
+                              ("none of the arms the eye sees move is fitted and has its keyframes aligned in the "
+                               & "eye's view yet"),
+                  others => <>);
             return;
          end if;
-         Fit.Plane_Chain (S1, S2, Way.Own, Link);
-         if not Link.Found then
-            Why := Ada.Strings.Unbounded.To_Unbounded_String
-              ("of their tables' points" & S1.Answers.Length'Image & " and" & S2.Answers.Length'Image
-               & " are in its view, too few for a homography of each and both");
-         elsif not Link.Consistent then
-            Why := Ada.Strings.Unbounded.To_Unbounded_String
-              ("their tables are not one plane in its view: one homography for both leaves"
-               & " F =" & Link.F'Image & " over the two apart (its noise" & Link.Joint'Image & " against"
-               & Link.Sigma'Image & " px, " & Link.Used'Image & " points)");
-         else
-            declare
-               Cov : Fit.Real_Lists.Vector;
-            begin
-               Fit.Chain_Placement (S1, S2, Link, Placement, Scale, Cov);
-               if Natural (Cov.Length) = Outputs * Outputs then
-                  for P in 1 .. Outputs loop
-                     for Q in 1 .. Outputs loop
-                        Covariance (P, Q) := Cov (Cov.First_Index + (P - 1) * Outputs + Q - 1);
-                     end loop;
-                  end loop;
-                  Placed := Scale > 0.0;
-               else
-                  Why := Ada.Strings.Unbounded.To_Unbounded_String ("the link's uncertainty is not determined");
-               end if;
-            end;
-            --  And how well each fit's unit is known against its own depths:
-            --  the first arm's scales the world about its origin, so the
-            --  centre; both compare in the scale.
-            declare
-               Rel_1 : constant Real := Unit_Sigma_Of (R1);
-               Rel_2 : constant Real := Unit_Sigma_Of (R2);
-               C     : constant Vec3 := Placement.Translation;
-            begin
-               if Rel_1 < Real'Last then
-                  for P in 1 .. 3 loop
-                     for Q in 1 .. 3 loop
-                        Covariance (3 + P, 3 + Q) := Covariance (3 + P, 3 + Q) + Rel_1 ** 2 * C (P) * C (Q);
-                     end loop;
-                  end loop;
-               end if;
-               if Rel_1 < Real'Last and then Rel_2 < Real'Last then
-                  Covariance (Outputs, Outputs) := Covariance (Outputs, Outputs) + Rel_1 ** 2 + Rel_2 ** 2;
-               end if;
-            end;
+         if F.Judged and then F.From = Evidence then
+            return;
          end if;
-      end Through;
+      end;
+      declare
+         Arms   : Hand.Watched_Array (1 .. Count);
+         Prior  : Hand.Fit_Report;   --  what the fit of the evidence so far found
+         Report : Hand.Fit_Report;
+         Slot   : Natural := 0;   --  the first arm's place among the arms fitted
+         Eye    : Eye_Stream renames M.Eyes (H);
+         Lens   : Lens_Fit;
+      begin
+         for K in 1 .. Count loop
+            Arms (K) := Watched_Of (M, M.Kinematics (Kin_Of (K)), M.Kinematics (Kin_Of (K)).Views (View_Of (K)));
+            if Kin_Of (K) = World then
+               Slot := K;
+            end if;
+            declare
+               Result   : Hand_Fit renames M.Kinematics (Kin_Of (K)).Views (View_Of (K)).Result;
+               Previous : Hand.Arm_Report;
+            begin
+               Previous.Placed := Result.Placed;
+               Previous.Pose := Result.Pose;
+               for L of Result.Link loop
+                  Previous.Link.Append (L);
+               end loop;
+               for D of Result.Depth loop
+                  Previous.Depth.Append (D);
+               end loop;
+               Prior.Arms.Append (Previous);
+               if Result.Placed then
+                  Prior.L := (Fx => Result.Lens.Fx, Fy => Result.Lens.Fy, Cx => Result.Lens.Cx, Cy => Result.Lens.Cy,
+                              K1 => Result.Lens.K1, K2 => Result.Lens.K2);
+               end if;
+            end;
+         end loop;
+         Hand.Fit_Eye (Arms, Eye.Grid.Width, Eye.Grid.Height, Prior, Report);
+         for K in 1 .. Count loop
+            Free_Watched (Arms (K));
+         end loop;
+         Lens := (Fx => Report.L.Fx, Fy => Report.L.Fy, Cx => Report.L.Cx, Cy => Report.L.Cy,
+                  K1 => Report.L.K1, K2 => Report.L.K2);
+         for K in 1 .. Count loop
+            declare
+               V      : Hand_View renames M.Kinematics (Kin_Of (K)).Views (View_Of (K));
+               Result : Hand_Fit;
+            begin
+               Result.Placed := Report.Arms (K).Placed;
+               Result.Lens := Lens;
+               Result.Pose := Report.Arms (K).Pose;
+               for L of Report.Arms (K).Link loop
+                  Result.Link.Append (L);
+               end loop;
+               for D of Report.Arms (K).Depth loop
+                  Result.Depth.Append (D);
+               end loop;
+               Result.Sigma_Px := Report.Sigma_Px;
+               Result.Matches := V.Aligned + V.Revision;
+               for X of Report.Covariance loop
+                  Result.Covariance.Append (X);
+               end loop;
+               Result.Slot := K;
+               V.Result := Result;
+            end;
+         end loop;
+         declare
+            F     : Fixed_Fit renames M.Fixed_Eyes (H);
+            Terms : constant Natural := Hand.Terms (Count);
+            Own   : constant Natural := Fit.Lens_Terms + Hand.Pose_Terms * (Slot - 1);
+
+            --  The report's term of the fixed eye's 12: the lens's six, then the world arm's pose.
+            function Index (T : Positive) return Positive is
+              (if T <= Fit.Lens_Terms then T else Own + T - Fit.Lens_Terms);
+         begin
+            F := (Judged => True, From => Evidence, Lens => Lens, Used => Report.Used, Offered => Report.Offered,
+                  Sigma_Px => Report.Sigma_Px, Distorted => Report.Distorted, Why => Report.Why, others => <>);
+            if World > 0 then
+               F.Arm := M.Kinematics (World).Arm;
+            end if;
+            if Report.Determined and then Slot > 0 and then Report.Arms (Slot).Placed then
+               F.Known := True;
+               F.Pose := Report.Arms (Slot).Pose;
+               for P in 1 .. Fixed_Terms loop
+                  for Q in 1 .. Fixed_Terms loop
+                     F.Covariance.Append (Report.Covariance (Report.Covariance.First_Index
+                                                             + (Index (P) - 1) * Terms + Index (Q) - 1));
+                  end loop;
+               end loop;
+            elsif Report.Determined then
+               F.Why := Ada.Strings.Unbounded.To_Unbounded_String
+                 ("the eye's lens is measured, but the first arm, whose frame is the world, is not among the arms it "
+                  & "places");
+            end if;
+            declare
+               --  What the fit says of itself, with its standard deviations where it has a covariance.
+               function Variance (T : Positive) return Real is
+                 (if Report.Covariance.Is_Empty then Real'Last
+                  else Report.Covariance (Report.Covariance.First_Index + (T - 1) * Terms + T - 1));
+
+               --  The standard deviation of term T, times Scale (the focal lengths' terms are logarithms).
+               function Sigma (T : Positive; Scale : Real := 1.0) return String is
+                 (if Variance (T) < Real'Last then Driver.Log.Image (Scale * Square_Root (Variance (T)), 2) else "?");
+
+               function Spread (First : Positive) return String is
+                 (if Variance (First) < Real'Last
+                  then Driver.Log.Image
+                         (Square_Root (Variance (First) + Variance (First + 1) + Variance (First + 2)), 4)
+                  else "?");
+
+               Poses : Ada.Strings.Unbounded.Unbounded_String;
+            begin
+               for K in 1 .. Count loop
+                  Ada.Strings.Unbounded.Append
+                    (Poses, "; arm" & M.Kinematics (Kin_Of (K)).Arm'Image & ": "
+                     & (if Report.Arms (K).Placed then "placed" else "not placed") & ", turn +-"
+                     & Spread (Fit.Lens_Terms + Hand.Pose_Terms * (K - 1) + 1) & " rad, centre +-"
+                     & Spread (Fit.Lens_Terms + Hand.Pose_Terms * (K - 1) + 4));
+               end loop;
+               Driver.Log.Line
+                 (Driver.Log.Robot, "kinematics: eye" & H'Image & " watched" & Count'Image & " arms move: "
+                  & (if F.Known then "determined"
+                     else "not determined (" & Ada.Strings.Unbounded.To_String (F.Why) & ")")
+                  & "; focal " & Driver.Log.Image (Lens.Fx, 2) & " +-" & Sigma (1, Lens.Fx) & " x "
+                  & Driver.Log.Image (Lens.Fy, 2) & " +-" & Sigma (2, Lens.Fy)
+                  & ", centre " & Driver.Log.Image (Lens.Cx, 2) & " +-" & Sigma (3) & ", "
+                  & Driver.Log.Image (Lens.Cy, 2) & " +-" & Sigma (4) & (if Report.Distorted then ", distorted" else "")
+                  & Ada.Strings.Unbounded.To_String (Poses) & ";"
+                  & Report.Used'Image & " of" & Report.Offered'Image & " sightings fit, noise "
+                  & Driver.Log.Image (Report.Sigma_Px, 3) & " px, its cost quadratic over "
+                  & Driver.Log.Image (Report.Linear_To, 1) & " of " & Driver.Log.Image (Driver.Conventions.Z, 0)
+                  & " sigmas, in " & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
+            end;
+         end;
+      end;
+   end Fit_Hand;
+
+   procedure Fit_Hands (M : in out Model) is
+   begin
+      while M.Fixed_Eyes.Last_Index < M.Eyes.Last_Index loop
+         M.Fixed_Eyes.Append (Fixed_Fit'(others => <>));
+      end loop;
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         if Is_Fixed (M, E) then
+            Fit_Hand (M, E);
+         else
+            M.Fixed_Eyes (E) := (others => <>);
+         end if;
+      end loop;
+   end Fit_Hands;
+
+   ---------------------------------------------------------------------------
+   --  The arms placed in the world
+
+   Outputs : constant := 7;   --  turn, centre, log scale
+
+   type Output_Covariance is array (1 .. Outputs, 1 .. Outputs) of Real;
+   type Output_Vector is array (1 .. Outputs) of Real;
+
+   --  How well the arm's fit unit is known against its depths (Fit.Unit_Sigma):
+   --  the unit's keyframes, the first fit's.
+   function Unit_Sigma_Of (R : Arm_Evidence) return Real is
+      N      : constant Natural := Natural (R.Result.Joints.Length);
+      Frames : constant Natural := (if N = 0 then 0 else Natural (R.Result.Unit_Changes.Length) / N);
+   begin
+      if N = 0 or else Frames = 0 or else Natural (R.Result.Reference.Length) /= N
+        or else Natural (R.Result.Chain.Length) /= N
+      then
+         return Real'Last;
+      end if;
+      declare
+         Joints  : Fit.Joint_Array (1 .. N);
+         Changes : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. N);
+         Cov     : Fit.Real_Lists.Vector;
+      begin
+         for J in 1 .. N loop
+            declare
+               F : constant Joint_Fit := R.Result.Joints (J);
+            begin
+               Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
+            end;
+         end loop;
+         for F in 1 .. Frames loop
+            for C in 1 .. N loop
+               Changes (F, C) := R.Result.Unit_Changes ((F - 1) * N + C - 1);
+            end loop;
+         end loop;
+         for X of R.Result.Covariance loop
+            Cov.Append (X);
+         end loop;
+         return Result : constant Real := Fit.Unit_Sigma (Joints, Chain_Of (R.Result), Changes.all, Cov) do
+            Free (Changes);
+         end return;
+      end;
+   end Unit_Sigma_Of;
+
+   --  The axis along which V has its smallest component: a direction that is not nearly V's own.
+   function Smallest_Axis (V : Vec3) return Vec3 is
+     (if abs V (1) <= abs V (2) and then abs V (1) <= abs V (3) then [1.0, 0.0, 0.0]
+      elsif abs V (2) <= abs V (3) then [0.0, 1.0, 0.0]
+      else [0.0, 0.0, 1.0]);
+
+   --  Arm 2 placed in arm 1's frame through the fixed eye that saw both move (V1, V2: its views of them, of one fit).
+   --  The eye stands at C1 in arm 1's frame, turned R1, and at C2 in arm 2's, turned R2: an arm-2 point X2 is at the
+   --  eye's frame R2^T (X2 - C2) in arm 2's unit and K times that in arm 1's, so X1 = R1 K R2^T (X2 - C2) + C1:
+   --  turn R1 R2^T, scale K and centre C1 - K R1 R2^T C2. The two units are compared by the table: it is one plane,
+   --  and the eye's distance from it (along its normal) is D1 units of arm 1 and D2 of arm 2 (a table plane is
+   --  A.X = 1 in the arm's frame, the eye at C is (1 - A.C) / |A| from it), so K = D1 / D2. Both arms' tables must
+   --  also be one plane to the eye: their normals, in the eye's frame, agree to within their sigmas.
+   --  Covariance is that of (the turn about the world's axes, the centre, the logarithm of the scale), from the
+   --  fit's covariance of both poses (their correlations through the lens kept), the two tables' planes, and how
+   --  well each arm's unit is known against its depths (the eye's centre is in the joints' unit, the table in the
+   --  depths').
+   procedure Through
+     (R1, R2     : Arm_Evidence;
+      V1, V2     : Hand_View;
+      Placement  : out Rigid;
+      Scale      : out Real;
+      Covariance : out Output_Covariance;
+      Response   : out Output_Vector;
+      Placed     : out Boolean;
+      Why        : out Ada.Strings.Unbounded.Unbounded_String)
+   is
+      use Driver.Numerics.Arrays;
+      Total : constant Natural := Natural (Square_Root (Real (Natural (V1.Result.Covariance.Length))));
+      O1    : constant Natural := Fit.Lens_Terms + Hand.Pose_Terms * (V1.Result.Slot - 1);
+      O2    : constant Natural := Fit.Lens_Terms + Hand.Pose_Terms * (V2.Result.Slot - 1);
+   begin
+      Placement := Driver.Numerics.Identity;
+      Scale := 1.0;
+      Covariance := [others => [others => 0.0]];
+      Response := [others => 0.0];
+      Placed := False;
+      Why := Ada.Strings.Unbounded.Null_Unbounded_String;
+      if Total * Total /= Natural (V1.Result.Covariance.Length) or else V1.Result.Covariance /= V2.Result.Covariance
+        or else O1 + Hand.Pose_Terms > Total or else O2 + Hand.Pose_Terms > Total
+      then
+         Why := Ada.Strings.Unbounded.To_Unbounded_String ("the eye's fits of the two arms are not one fit");
+         return;
+      end if;
+      if not (Driver.Geometry.Known (R1.Result.Table) and then Driver.Geometry.Known (R2.Result.Table)) then
+         Why := Ada.Strings.Unbounded.To_Unbounded_String ("an arm's table is not found");
+         return;
+      end if;
+      declare
+         Pose1 : Rigid renames V1.Result.Pose;
+         Pose2 : Rigid renames V2.Result.Pose;
+         A1    : constant Vec3 := R1.Result.Table_A;
+         A2    : constant Vec3 := R2.Result.Table_A;
+         Gap1  : constant Real := 1.0 - A1 * Pose1.Translation;
+         Gap2  : constant Real := 1.0 - A2 * Pose2.Translation;
+      begin
+         if not (Gap1 > 0.0 and then Gap2 > 0.0) then
+            Why := Ada.Strings.Unbounded.To_Unbounded_String
+              ("the eye lies on the far side of an arm's table plane from that arm's eye");
+            return;
+         end if;
+         declare
+            Norm1   : constant Real := abs A1;
+            Norm2   : constant Real := abs A2;
+            D1      : constant Real := Gap1 / Norm1;
+            D2      : constant Real := Gap2 / Norm2;
+            Kappa   : constant Real := D1 / D2;
+            Rp      : constant Mat3 := Pose1.Rotation * Transpose (Pose2.Rotation);
+            Lever   : constant Vec3 := Rp * Pose2.Translation;   --  the eye's centre in arm 2's frame, turned to arm 1's
+            Spread  : constant Vec3 := Kappa * Lever;
+            --  How the logarithm of each distance moves with the eye's centre and the plane.
+            G_C1    : constant Vec3 := (-1.0 / Gap1) * A1;
+            G_A1    : constant Vec3 := (-1.0 / Gap1) * Pose1.Translation - (1.0 / Norm1 ** 2) * A1;
+            G_C2    : constant Vec3 := (-1.0 / Gap2) * A2;
+            G_A2    : constant Vec3 := (-1.0 / Gap2) * Pose2.Translation - (1.0 / Norm2 ** 2) * A2;
+            --  The inputs, in this order: the first pose's turn about the eye's axes and its centre, the second's, the
+            --  first plane, the second; each a number of terms in.
+            Turn_1  : constant := 0;
+            Place_1 : constant := 3;
+            Turn_2  : constant := 6;
+            Place_2 : constant := 9;
+            Plane_1 : constant := 12;
+            Plane_2 : constant := 15;
+            Inputs  : constant := 18;
+            --  The outputs: the turn, then the centre, then the logarithm of the scale.
+            Centre_Row : constant := 3;
+            Sigma_U : Real_Matrix (1 .. Inputs, 1 .. Inputs) := [others => [others => 0.0]];
+            J       : Real_Matrix (1 .. Outputs, 1 .. Inputs) := [others => [others => 0.0]];
+            Rel1    : constant Real := Unit_Sigma_Of (R1);
+            Rel2    : constant Real := Unit_Sigma_Of (R2);
+
+            function Fit_Term (T : Positive) return Positive is
+              (if T <= Hand.Pose_Terms then O1 + T else O2 + T - Hand.Pose_Terms);
+
+            function Cv (P, Q : Positive) return Real is
+              (V1.Result.Covariance (V1.Result.Covariance.First_Index + (Fit_Term (P) - 1) * Total + Fit_Term (Q) - 1));
+
+            function Cv_Lens (A, B : Positive) return Real is
+              (V1.Result.Covariance (V1.Result.Covariance.First_Index + (A - 1) * Total + B - 1));
+
+            --  The covariance of pose term P (of the 12) with the logarithm of the focal length Lens_Term.
+            function Cv_Pose_Lens (P, Lens_Term : Positive) return Real is
+              (V1.Result.Covariance (V1.Result.Covariance.First_Index + (Fit_Term (P) - 1) * Total + Lens_Term - 1));
+
+            Skewed : constant Mat3 := Kappa * (Driver.Numerics.Skew (Lever) * Pose1.Rotation);
+         begin
+            for P in 1 .. Plane_1 loop
+               for Q in 1 .. Plane_1 loop
+                  Sigma_U (P, Q) := Cv (P, Q);
+               end loop;
+            end loop;
+            --  The centres are in the joints' unit, the tables in the depths': the unit's uncertainty.
+            if Rel1 < Real'Last then
+               for P in 1 .. 3 loop
+                  for Q in 1 .. 3 loop
+                     Sigma_U (Place_1 + P, Place_1 + Q) := Sigma_U (Place_1 + P, Place_1 + Q)
+                       + Rel1 ** 2 * Pose1.Translation (P) * Pose1.Translation (Q);
+                  end loop;
+               end loop;
+            end if;
+            if Rel2 < Real'Last then
+               for P in 1 .. 3 loop
+                  for Q in 1 .. 3 loop
+                     Sigma_U (Place_2 + P, Place_2 + Q) := Sigma_U (Place_2 + P, Place_2 + Q)
+                       + Rel2 ** 2 * Pose2.Translation (P) * Pose2.Translation (Q);
+                  end loop;
+               end loop;
+            end if;
+            for P in 1 .. 3 loop
+               for Q in 1 .. 3 loop
+                  Sigma_U (Plane_1 + P, Plane_1 + Q) := R1.Result.Table_Covariance (P, Q);
+                  Sigma_U (Plane_2 + P, Plane_2 + Q) := R2.Result.Table_Covariance (P, Q);
+               end loop;
+            end loop;
+            --  The turn about the world's axes: R1 (theta1 - theta2).
+            for A in 1 .. 3 loop
+               for B in 1 .. 3 loop
+                  J (A, Turn_1 + B) := Pose1.Rotation (A, B);
+                  J (A, Turn_2 + B) := -Pose1.Rotation (A, B);
+               end loop;
+            end loop;
+            --  The centre: C1 - K R_p C2.
+            for A in 1 .. 3 loop
+               for B in 1 .. 3 loop
+                  J (Centre_Row + A, Turn_1 + B) := Skewed (A, B);
+                  J (Centre_Row + A, Turn_2 + B) := -Skewed (A, B);
+                  J (Centre_Row + A, Place_1 + B) := (if A = B then 1.0 else 0.0) - Spread (A) * G_C1 (B);
+                  J (Centre_Row + A, Place_2 + B) := -Kappa * Rp (A, B) + Spread (A) * G_C2 (B);
+                  J (Centre_Row + A, Plane_1 + B) := -Spread (A) * G_A1 (B);
+                  J (Centre_Row + A, Plane_2 + B) := Spread (A) * G_A2 (B);
+               end loop;
+            end loop;
+            --  The logarithm of the scale: ln D1 - ln D2.
+            for B in 1 .. 3 loop
+               J (Outputs, Place_1 + B) := G_C1 (B);
+               J (Outputs, Place_2 + B) := -G_C2 (B);
+               J (Outputs, Plane_1 + B) := G_A1 (B);
+               J (Outputs, Plane_2 + B) := -G_A2 (B);
+            end loop;
+            declare
+               Result : constant Real_Matrix := J * Sigma_U * Transpose (J);
+            begin
+               for P in 1 .. Outputs loop
+                  for Q in 1 .. Outputs loop
+                     Covariance (P, Q) := (Result (P, Q) + Result (Q, P)) / 2.0;
+                  end loop;
+               end loop;
+            end;
+            --  How the placement moves with the eye's lens: the regression of its outputs on the logarithms of the
+            --  two focal lengths (their covariance with the lens's through the poses), for both focal lengths a
+            --  hundredth too long.
+            declare
+               Fx_Fy : constant Real := Cv_Lens (1, 1) * Cv_Lens (2, 2) - Cv_Lens (1, 2) ** 2;
+            begin
+               if Fx_Fy > 0.0 then
+                  declare
+                     Cross : Real_Matrix (1 .. Outputs, 1 .. 2) := [others => [others => 0.0]];
+                  begin
+                     for Row in 1 .. Outputs loop
+                        for Lens_Term in 1 .. 2 loop
+                           for P in 1 .. Plane_1 loop
+                              Cross (Row, Lens_Term) := Cross (Row, Lens_Term) + J (Row, P) * Cv_Pose_Lens (P, Lens_Term);
+                           end loop;
+                        end loop;
+                     end loop;
+                     for Row in 1 .. Outputs loop
+                        Response (Row) :=
+                          0.01 * ((Cross (Row, 1) * (Cv_Lens (2, 2) - Cv_Lens (1, 2))
+                                   + Cross (Row, 2) * (Cv_Lens (1, 1) - Cv_Lens (1, 2))) / Fx_Fy);
+                     end loop;
+                  end;
+               end if;
+            end;
+            --  The tables as one plane to the eye: its normals in the eye's frame, M1 and M2, differ by what their
+            --  sigmas allow, across the line between them (two dimensions: the normals are unit).
+            declare
+               N1     : constant Vec3 := A1 / Norm1;
+               N2     : constant Vec3 := A2 / Norm2;
+               M1     : constant Vec3 := Transpose (Pose1.Rotation) * N1;
+               M2     : constant Vec3 := Transpose (Pose2.Rotation) * N2;
+               Mid    : constant Vec3 := M1 + M2;
+               Gap_N  : constant Real := abs (M1 - M2);
+            begin
+               if abs Mid <= 0.0 then
+                  Why := Ada.Strings.Unbounded.To_Unbounded_String ("the two tables face opposite ways to the eye");
+                  return;
+               end if;
+               declare
+                  Across_1 : constant Vec3 := Unit (Cross (Mid, Smallest_Axis (Mid)));
+                  Across_2 : constant Vec3 := Unit (Cross (Mid, Across_1));
+                  Delta_N  : constant Vec3 := M1 - M2;
+                  --  How the difference moves with the inputs (3 x 18).
+                  Jd       : Real_Matrix (1 .. 3, 1 .. Inputs) := [others => [others => 0.0]];
+                  P1       : constant Mat3 := Identity3 - Driver.Numerics.Outer (N1, N1);
+                  P2       : constant Mat3 := Identity3 - Driver.Numerics.Outer (N2, N2);
+                  Sk1      : constant Mat3 := Driver.Numerics.Skew (M1);
+                  Sk2      : constant Mat3 := Driver.Numerics.Skew (M2);
+                  By_A1    : constant Mat3 := (1.0 / Norm1) * (Transpose (Pose1.Rotation) * P1);
+                  By_A2    : constant Mat3 := (1.0 / Norm2) * (Transpose (Pose2.Rotation) * P2);
+               begin
+                  for A in 1 .. 3 loop
+                     for B in 1 .. 3 loop
+                        Jd (A, Turn_1 + B) := Sk1 (A, B);
+                        Jd (A, Turn_2 + B) := -Sk2 (A, B);
+                        Jd (A, Plane_1 + B) := By_A1 (A, B);
+                        Jd (A, Plane_2 + B) := -By_A2 (A, B);
+                     end loop;
+                  end loop;
+                  declare
+                     Sigma_D : constant Real_Matrix := Jd * Sigma_U * Transpose (Jd);
+                     D1v     : constant Real := Across_1 * Delta_N;
+                     D2v     : constant Real := Across_2 * Delta_N;
+                     C11, C12, C22 : Real := 0.0;
+                  begin
+                     for A in 1 .. 3 loop
+                        for B in 1 .. 3 loop
+                           C11 := C11 + Across_1 (A) * Sigma_D (A, B) * Across_1 (B);
+                           C12 := C12 + Across_1 (A) * Sigma_D (A, B) * Across_2 (B);
+                           C22 := C22 + Across_2 (A) * Sigma_D (A, B) * Across_2 (B);
+                        end loop;
+                     end loop;
+                     declare
+                        Det : constant Real := C11 * C22 - C12 * C12;
+                        Chi : constant Real :=
+                          (if Det > 0.0 then (C22 * D1v * D1v - 2.0 * C12 * D1v * D2v + C11 * D2v * D2v) / Det
+                           else Real'Last);
+                     begin
+                        if Chi >= Real'Last
+                          or else (Chi > 0.0 and then Driver.Distributions.Chi_Square_Deviate (Chi, 2) > Driver.Conventions.Z)
+                        then
+                           Why := Ada.Strings.Unbounded.To_Unbounded_String
+                             ("the two tables are not one plane to the eye: their normals differ by"
+                              & Real'Image (Gap_N) & " rad, more than their sigmas allow");
+                           return;
+                        end if;
+                     end;
+                  end;
+               end;
+            end;
+            Placement := (Rotation => Rp, Translation => Pose1.Translation - Spread);
+            Scale := Kappa;
+            Placed := Kappa > 0.0 and then Covariance (Outputs, Outputs) < Real'Last
+              and then Covariance (4, 4) < Real'Last and then Covariance (1, 1) < Real'Last;
+         end;
+      end;
+   end Through;
+
+   procedure Place (M : in out Model) is
+      W : constant Natural := Index_Of (M, 1);
    begin
       --  The first arm is the world as it is.
       if W > 0 then
@@ -2726,7 +3306,9 @@ package body Driver.Robot.Kinematics is
             R.Scale_Sigma := 0.0;
             R.Placed_Through := 0;
             R.Placement_Covariance.Clear;
-            R.Placement_Covariance.Append (0.0, 36);
+            for Entry_Of in 1 .. Outputs * Outputs loop
+               R.Placement_Covariance.Append (0.0);
+            end loop;
          end;
       end if;
       for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
@@ -2743,81 +3325,66 @@ package body Driver.Robot.Kinematics is
                else
                   declare
                      use type Ada.Strings.Unbounded.Unbounded_String;
-                     R1    : Arm_Evidence renames M.Kinematics (W);
-                     Best  : Real := Real'Last;
-                     Ways  : Natural := 0;
+                     R1   : Arm_Evidence renames M.Kinematics (W);
+                     Best : Real := Real'Last;
+                     Ways : Natural := 0;
                   begin
-                     --  Every eye that shows both arms move, its own and the fixed
-                     --  ones: the measured overlap.
-                     for E in 1 .. Natural (M.Eyes.Length) loop
-                        declare
-                           Way   : constant Link_Way := (Eye => E, Own => E = Natural (R2.Eye));
-                           Fixed : constant Boolean :=
-                             E <= Natural (M.Graph.Mounts.Length) and then M.Graph.Mounts (Eye_Id (E)).Kind = World_Fixed;
-                           Ready : constant Boolean :=
-                             (if Way.Own
-                              then not R2.World_Matches.Is_Empty and then R2.World_Group = R1.Group
-                                   and then not R1.Frames.Is_Empty
-                                   and then R2.World_Reference = R1.Frames.First_Element.Beat
-                              else Set_Into (R1, E) > 0 and then Set_Into (R2, E) > 0);
-                        begin
-                           if (Fixed or else Way.Own) and then Sees (E, R1.Group) and then Sees (E, R2.Group) then
-                              if not Ready then
-                                 Why := Why & "eye" & E'Image & " shows both arms, but its view of their points is not"
-                                        & " answered yet; ";
-                              else
-                                 declare
-                                    Placement  : Rigid;
-                                    Scale      : Real;
-                                    Covariance : Output_Covariance;
-                                    Link       : Fit.Plane_Link;
-                                    Placed     : Boolean;
-                                    Not_Placed : Ada.Strings.Unbounded.Unbounded_String;
-                                 begin
-                                    Ways := Ways + 1;
-                                    Through (R1, R2, Way, Placement, Scale, Covariance, Link, Placed, Not_Placed);
-                                    if not Placed then
-                                       Why := Why & "through eye" & E'Image & ", " & Not_Placed & "; ";
-                                    elsif Covariance (4, 4) + Covariance (5, 5) + Covariance (6, 6) < Best then
-                                       Best := Covariance (4, 4) + Covariance (5, 5) + Covariance (6, 6);
-                                       R2.Result.Placed := True;
-                                       R2.Result.Placement := Placement;
-                                       R2.Result.Scale := Scale;
-                                       R2.Result.Scale_Sigma :=
-                                         Scale * Ada.Numerics.Long_Elementary_Functions.Sqrt
-                                                   (Real'Max (0.0, Covariance (Outputs, Outputs)));
-                                       R2.Result.Placement_Covariance.Clear;
-                                       for P in 1 .. 6 loop
-                                          for Q in 1 .. 6 loop
-                                             R2.Result.Placement_Covariance.Append (Covariance (P, Q));
-                                          end loop;
+                     --  Every fixed eye that saw both arms move and has its pose in both frames.
+                     for V1 of R1.Views loop
+                        for V2 of R2.Views loop
+                           if V1.Eye = V2.Eye and then V1.Result.Placed and then V2.Result.Placed then
+                              declare
+                                 Placement  : Rigid;
+                                 Scale      : Real;
+                                 Covariance : Output_Covariance;
+                                 Response   : Output_Vector;
+                                 Placed     : Boolean;
+                                 Not_Placed : Ada.Strings.Unbounded.Unbounded_String;
+                              begin
+                                 Ways := Ways + 1;
+                                 Through (R1, R2, V1, V2, Placement, Scale, Covariance, Response, Placed, Not_Placed);
+                                 if not Placed then
+                                    Why := Why & "through eye" & V1.Eye'Image & ", " & Not_Placed & "; ";
+                                 elsif Covariance (4, 4) + Covariance (5, 5) + Covariance (6, 6) < Best then
+                                    Best := Covariance (4, 4) + Covariance (5, 5) + Covariance (6, 6);
+                                    R2.Result.Placed := True;
+                                    R2.Result.Placement := Placement;
+                                    R2.Result.Scale := Scale;
+                                    R2.Result.Scale_Sigma := Scale * Square_Root (Real'Max (0.0, Covariance (Outputs, Outputs)));
+                                    R2.Result.Placement_Covariance.Clear;
+                                    for P in 1 .. Outputs loop
+                                       for Q in 1 .. Outputs loop
+                                          R2.Result.Placement_Covariance.Append (Covariance (P, Q));
                                        end loop;
-                                       R2.Result.Placed_Px := Link.Sigma;
-                                       R2.Result.Placed_Points := Link.Used;
-                                       R2.Result.Placed_Through := E;
-                                       Driver.Log.Line
-                                         (Driver.Log.Robot, "kinematics: arm" & R2.Arm'Image & " placed in the world"
-                                          & " through eye" & E'Image & (if Way.Own then " (its own)" else "")
-                                          & ", which sees both arms' tables as one plane:" & Link.Used'Image
-                                          & " of their points (noise " & Driver.Log.Image (Link.Joint, 3) & " against "
-                                          & Driver.Log.Image (Link.Sigma, 3) & " apart, F " & Driver.Log.Image (Link.F, 3)
-                                          & "); its scale "
-                                          & Driver.Log.Image (Scale, 4) & " +- "
-                                          & Driver.Log.Image (R2.Result.Scale_Sigma, 4) & ", its eye to "
-                                          & Driver.Log.Image (Ada.Numerics.Long_Elementary_Functions.Sqrt
-                                                                (Covariance (4, 4) + Covariance (5, 5) + Covariance (6, 6)), 4)
-                                          & " world units and "
-                                          & Driver.Log.Image (Ada.Numerics.Long_Elementary_Functions.Sqrt
-                                                                (Covariance (1, 1) + Covariance (2, 2) + Covariance (3, 3)), 4)
-                                          & " rad");
-                                    end if;
-                                 end;
-                              end if;
+                                    end loop;
+                                    R2.Result.Placed_Px := V2.Result.Sigma_Px;
+                                    R2.Result.Placed_Points := M.Fixed_Eyes (V1.Eye).Used;
+                                    R2.Result.Placed_Through := Natural (V1.Eye);
+                                    Driver.Log.Line
+                                      (Driver.Log.Robot, "kinematics: arm" & R2.Arm'Image & " placed in the world"
+                                       & " through eye" & V1.Eye'Image & ", which saw both arms move; its scale "
+                                       & Driver.Log.Image (Scale, 4) & " +- " & Driver.Log.Image (R2.Result.Scale_Sigma, 4)
+                                       & ", its centre to "
+                                       & Driver.Log.Image (Square_Root (Covariance (4, 4) + Covariance (5, 5)
+                                                                        + Covariance (6, 6)), 4)
+                                       & " world units and "
+                                       & Driver.Log.Image (Square_Root (Covariance (1, 1) + Covariance (2, 2)
+                                                                        + Covariance (3, 3)), 4)
+                                       & " rad; both focal lengths a hundredth too long move its centre by "
+                                       & Driver.Log.Image (Square_Root (Response (4) ** 2 + Response (5) ** 2
+                                                                        + Response (6) ** 2), 4)
+                                       & " world units, turn it by "
+                                       & Driver.Log.Image (Square_Root (Response (1) ** 2 + Response (2) ** 2
+                                                                        + Response (3) ** 2), 4)
+                                       & " rad and its scale by " & Driver.Log.Image (Response (Outputs), 4));
+                                 end if;
+                              end;
                            end if;
-                        end;
+                        end loop;
                      end loop;
                      if Ways = 0 and then Ada.Strings.Unbounded.Length (Why) = 0 then
-                        Why := Ada.Strings.Unbounded.To_Unbounded_String ("no eye shows both it and the first arm move");
+                        Why := Ada.Strings.Unbounded.To_Unbounded_String
+                          ("no fixed eye has both it and the first arm move in its view with its pose in both");
                      end if;
                   end;
                end if;
@@ -2829,307 +3396,6 @@ package body Driver.Robot.Kinematics is
          end if;
       end loop;
    end Place;
-
-   ---------------------------------------------------------------------------
-   --  Eyes fixed in the world
-
-   function Square_Root (X : Real) return Real renames Ada.Numerics.Long_Elementary_Functions.Sqrt;
-
-   type Fixed_Points is access Fixed.Point_Array;
-   procedure Free is new Ada.Unchecked_Deallocation (Fixed.Point_Array, Fixed_Points);
-   type Fixed_Sightings is access Fixed.Sighting_Array;
-   procedure Free is new Ada.Unchecked_Deallocation (Fixed.Sighting_Array, Fixed_Sightings);
-
-   --  The graph mounts the eye fixed in the world.
-   function Is_Fixed (M : Model; E : Eye_Id) return Boolean is
-     (E <= M.Graph.Mounts.Last_Index and then M.Graph.Mounts (E).Kind = World_Fixed);
-
-   --  The fixed eye E measured from the first arm's evidence W (an index of Kinematics; 0 when there is none): the
-   --  points the arm's eye tracked, each with the uncertainty of its depth (apart from the others') and the share
-   --  of it every depth has in common (the arm's fit moves them together), and where the eye answered them.
-   procedure Fit_Fixed_Eye (M : in out Model; W : Natural; E : Eye_Id) is
-      use Ada.Strings.Unbounded;
-      use Driver.Numerics.Arrays;
-      From_Matches : constant Natural := (if W > 0 then M.Kinematics (W).Result.Matches else 0);
-      From_Sets    : constant Natural := (if W > 0 then Natural (M.Kinematics (W).Eye_Matches.Length) else 0);
-
-      --  The eye is not placed, and why; what it was measured from, to measure it again when that changes.
-      procedure Leave (Why : String; Say : Boolean := True; Offered : Natural := 0) is
-      begin
-         M.Fixed_Eyes (E) := (Why => To_Unbounded_String (Why), Offered => Offered, Judged => True,
-                              From_Matches => From_Matches, From_Sets => From_Sets, others => <>);
-         if Say then
-            Driver.Log.Line (Driver.Log.Robot, "kinematics: eye" & E'Image & " is fixed in the world, and not placed: "
-                             & Why);
-         end if;
-      end Leave;
-   begin
-      if M.Fixed_Eyes (E).Judged and then M.Fixed_Eyes (E).From_Matches = From_Matches
-        and then M.Fixed_Eyes (E).From_Sets = From_Sets
-      then
-         return;
-      end if;
-      if W = 0 or else not M.Kinematics (W).Result.Fitted then
-         Leave ("the first arm is not fitted", Say => False);
-         return;
-      end if;
-      declare
-         R      : Arm_Evidence renames M.Kinematics (W);
-         F      : Arm_Fit renames R.Result;
-         K      : constant Natural := Set_Into (R, Natural (E));
-         Q      : constant Natural := Natural (R.Query_U.Length);
-         T      : constant Natural := Natural (Square_Root (Real (Natural (F.Covariance.Length))));
-         Width  : constant Natural := M.Eyes (E).Grid.Width;
-         Height : constant Natural := M.Eyes (E).Grid.Height;
-      begin
-         if K = 0 then
-            Leave ("the first arm's reference has no answers from the eye");
-            return;
-         end if;
-         if T < Fit.Lens_Terms or else T * T /= Natural (F.Covariance.Length)
-           or else Natural (F.Depth_Gains.Length) /= Q * T or else Natural (F.Tracks.Length) /= 3 * Q
-           or else Natural (F.Table_Response.Length) /= 3 * T
-         then
-            Leave ("the first arm's fit has no covariance of its points' depths");
-            return;
-         end if;
-         if Width = 0 or else Height = 0 then
-            Leave ("the eye's picture has no size");
-            return;
-         end if;
-         declare
-            Set    : Match_Set renames R.Eye_Matches (K);
-            Single : Match_Set_Vectors.Vector;
-            Sigma  : Real;
-            Kept   : Natural := 0;
-
-            --  The answer comes back to its query, within the noise of all the round trips.
-            function Returns (I : Natural) return Boolean is
-              (I < Natural (Set.Found.Length) and then I < Natural (Set.Back_U.Length) and then Set.Found (I)
-               and then Moving_Point (R, I)
-               and then (Sigma = 0.0
-                         or else (not Driver.Uncertain.Significant (Set.Back_U (I) - R.Query_U (I), Sigma)
-                                  and then not Driver.Uncertain.Significant (Set.Back_V (I) - R.Query_V (I), Sigma))));
-
-            --  And the arm has the point's depth, to an uncertainty it can state.
-            function Usable (I : Natural) return Boolean is
-              (Returns (I) and then I < Natural (F.Track_Known.Length) and then F.Track_Known (I)
-               and then I < Natural (F.Track_Sigmas.Length) and then F.Track_Sigmas (I) < Real'Last
-               and then I < Natural (F.Table_On.Length)
-               and then (not F.Table_On (I)
-                         or else F.Table_A * Fit.Ray (Fit_Lens (F.Lens), R.Query_U (I), R.Query_V (I)) > 0.0));
-         begin
-            Single.Append (Set);
-            Sigma := Round_Trip_Sigma (R, Single);
-            for I in 0 .. Q - 1 loop
-               if Usable (I) then
-                  Kept := Kept + 1;
-               end if;
-            end loop;
-            if Kept = 0 then
-               Leave ("no answer of the eye returns to its query");
-               return;
-            end if;
-            declare
-               Points   : Fixed_Points := new Fixed.Point_Array (1 .. Kept);
-               Seen     : Fixed_Sightings := new Fixed.Sighting_Array (1 .. Kept);
-               On_Plane : Fit_Flag_Access := new Fit.Flag_Array (1 .. Kept);
-               Common   : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 3 * Kept, 1 .. T + 3);
-               Cov      : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. T + 3, 1 .. T + 3);
-               Poses    : constant Fixed.Pose_Array (1 .. 1) := [1 => Driver.Numerics.Identity];
-               Lens     : constant Fit.Lens := Fit_Lens (F.Lens);
-               Sigmas   : Real_Array (1 .. Fit.Lens_Terms);
-               N        : Natural := 0;
-               Report   : Fixed.Fit_Report;
-               Start_Lens : Fit.Lens;
-               Start_Pose : Rigid;
-               Found    : Boolean;
-            begin
-               Cov.all := [others => [others => 0.0]];
-               for A in 1 .. T loop
-                  for B in 1 .. T loop
-                     Cov (A, B) := F.Covariance (F.Covariance.First_Index + (A - 1) * T + B - 1);
-                  end loop;
-               end loop;
-               for A in 1 .. 3 loop
-                  for B in 1 .. 3 loop
-                     Cov (T + A, T + B) := F.Table_Scatter (A, B);
-                  end loop;
-               end loop;
-               for Term in 1 .. Fit.Lens_Terms loop
-                  Sigmas (Term) := Square_Root (Real'Max (0.0, Cov (Term, Term)));
-               end loop;
-               for I in 0 .. Q - 1 loop
-                  if Usable (I) then
-                     N := N + 1;
-                     --  Each element read into a constant of its own first (a container's element reference inside
-                     --  an aggregate does not outlive the aggregate). A point on the arm's table is where its line
-                     --  of sight meets the table: its depth comes from the plane, which every point on it shares,
-                     --  not from its own refinement, whose error along the plane's normal would pass for the
-                     --  structure that fixes the eye's lens (a plane alone fixes none).
-                     declare
-                        On  : constant Boolean := F.Table_On (I);
-                        U0  : constant Real := R.Query_U (I);
-                        V0  : constant Real := R.Query_V (I);
-                        H   : constant Vec3 := Fit.Ray (Lens, U0, V0);
-                        Depth_On : constant Real := (if On then 1.0 / (F.Table_A * H) else 0.0);
-                        X1  : constant Real := F.Tracks (3 * I);
-                        X2  : constant Real := F.Tracks (3 * I + 1);
-                        X3  : constant Real := F.Tracks (3 * I + 2);
-                        Own_X : constant Vec3 := [X1, X2, X3];
-                        X   : constant Vec3 := (if On then Depth_On * H else Own_X);
-                        S   : constant Real := F.Track_Sigmas (I);
-                        Own : constant Mat3 :=
-                          (if On then [others => [others => 0.0]] else S ** 2 * Driver.Numerics.Outer (X, X));
-                        Answer_U : constant Real := Set.To_U (I);
-                        Answer_V : constant Real := Set.To_V (I);
-                     begin
-                        Points (N) := (Position => X, Own => Own, U0 => U0, V0 => V0);
-                        Seen (N) := (Point => N, Pose => 1, U => Answer_U, V => Answer_V);
-                        On_Plane (N) := On;
-                        --  How the point moves with each of the arm's terms: its line of sight with the lens's
-                        --  terms, and its depth, which for a point on the table is the plane's (the plane moves
-                        --  with the terms, Table_Response) and otherwise its own, which the other depths follow
-                        --  (Depth_Gains).
-                        for Term in 1 .. T loop
-                           declare
-                              Turn : Vec3 := [0.0, 0.0, 0.0];   --  how the line of sight moves
-                              Move : Vec3;
-                           begin
-                              if Term <= Fit.Lens_Terms and then Sigmas (Term) > 0.0 then
-                                 Turn := (Fit.Ray (Moved (Lens, Term, Sigmas (Term)), U0, V0)
-                                          - Fit.Ray (Moved (Lens, Term, -Sigmas (Term)), U0, V0))
-                                   / (2.0 * Sigmas (Term));
-                              end if;
-                              if On then
-                                 declare
-                                    Plane_Moves : constant Vec3 :=
-                                      [F.Table_Response (Term - 1), F.Table_Response (T + Term - 1),
-                                       F.Table_Response (2 * T + Term - 1)];
-                                    Depth_Moves : constant Real :=
-                                      -Depth_On ** 2 * (Plane_Moves * H + F.Table_A * Turn);
-                                 begin
-                                    Move := Depth_Moves * H + Depth_On * Turn;
-                                 end;
-                              else
-                                 Move := X3 * Turn + F.Depth_Gains (I * T + Term - 1) * X;
-                              end if;
-                              for A in 1 .. 3 loop
-                                 Common (3 * (N - 1) + A, Term) := Move (A);
-                              end loop;
-                           end;
-                        end loop;
-                        --  And with the plane's own error (its points' scatter about it), which every point on it
-                        --  shares.
-                        for B in 1 .. 3 loop
-                           for A in 1 .. 3 loop
-                              Common (3 * (N - 1) + A, T + B) := (if On then -Depth_On ** 2 * H (B) * H (A) else 0.0);
-                           end loop;
-                        end loop;
-                     end;
-                  end if;
-               end loop;
-               Fixed.Start (Points.all, Poses, Seen.all, On_Plane.all, F.Table_A, Start_Lens, Start_Pose, Found);
-               if not Found then
-                  --  A plane alone leaves the lens undetermined: the points off the table are what fix it.
-                  declare
-                     Off_Table : Natural := 0;
-                  begin
-                     for B of On_Plane.all loop
-                        if not B then
-                           Off_Table := Off_Table + 1;
-                        end if;
-                     end loop;
-                     Leave ("the first arm's points give the eye no start (" & Kept'Image & " answers return,"
-                            & Off_Table'Image & " off the first arm's table)", Offered => Kept);
-                  end;
-               else
-                  Fixed.Fit_Eye (Points.all, Poses, Seen.all, Common.all, Cov.all, Width, Height,
-                                 Start_Lens, Start_Pose, Report);
-                  declare
-                     Result : Fixed_Fit :=
-                       (Known        => Report.Determined,
-                        Arm          => R.Arm,
-                        Lens         => (Fx => Report.L.Fx, Fy => Report.L.Fy, Cx => Report.L.Cx, Cy => Report.L.Cy,
-                                         K1 => Report.L.K1, K2 => Report.L.K2),
-                        Pose         => Report.Pose,
-                        Used         => Report.Used,
-                        Offered      => Report.Offered,
-                        Sigma_Px     => Report.Sigma_Px,
-                        Distorted    => Report.Distorted,
-                        Why          => Report.Why,
-                        Judged       => True,
-                        From_Matches => From_Matches,
-                        From_Sets    => From_Sets,
-                        others       => <>);
-                     Turn : constant Vec3 := Driver.Numerics.Log (Report.Pose.Rotation);
-
-                     --  The standard deviation of term K of the covariance (0 when there is none).
-                     function Sd (K : Positive) return Real is
-                       (if Natural (Report.Covariance.Length) = Fixed.Terms ** 2
-                        then Square_Root (Real'Max (0.0, Report.Covariance (Report.Covariance.First_Index
-                                                                              + (K - 1) * Fixed.Terms + K - 1)))
-                        else 0.0);
-
-                     --  A value with its standard deviation, to that many places.
-                     function Pm (X, S : Real; Places : Natural) return String is
-                       (Driver.Log.Image (X, Places) & " +-" & Driver.Log.Image (S, Places));
-
-                     Lens_Text : constant String :=
-                       "focal " & Pm (Report.L.Fx, Report.L.Fx * Sd (1), 2) & " x "
-                       & Pm (Report.L.Fy, Report.L.Fy * Sd (2), 2) & " px, centre " & Pm (Report.L.Cx, Sd (3), 2)
-                       & ", " & Pm (Report.L.Cy, Sd (4), 2)
-                       & (if Report.Distorted
-                          then ", distortion " & Pm (Report.L.K1, Sd (5), 4) & ", " & Pm (Report.L.K2, Sd (6), 4)
-                          else ", no distortion");
-                     --  The camera's rotation as a rotation vector, its terms' sigmas about the camera's own axes.
-                     Pose_Text : constant String :=
-                       "in the world at " & Pm (Report.Pose.Translation (1), Sd (10), 3) & ", "
-                       & Pm (Report.Pose.Translation (2), Sd (11), 3) & ", "
-                       & Pm (Report.Pose.Translation (3), Sd (12), 3) & ", turned "
-                       & Pm (Turn (1), Sd (7), 4) & ", " & Pm (Turn (2), Sd (8), 4) & ", " & Pm (Turn (3), Sd (9), 4);
-                  begin
-                     for X of Report.Covariance loop
-                        Result.Covariance.Append (X);
-                     end loop;
-                     M.Fixed_Eyes (E) := Result;
-                     Driver.Log.Line
-                       (Driver.Log.Robot, "kinematics: eye" & E'Image & " fixed in the world: "
-                        & (if Report.Determined then "placed" else "not placed") & " from" & Kept'Image
-                        & " answers of" & Q'Image & " points," & Report.Used'Image & " fit, noise "
-                        & Driver.Log.Image (Report.Sigma_Px, 3) & " px"
-                        & (if Report.Linear_To < Real'Last
-                           then ", its cost quadratic over " & Driver.Log.Image (Report.Linear_To, 1) & " of "
-                                & Driver.Log.Image (Driver.Conventions.Z, 0) & " sigmas"
-                           else "")
-                        & "; " & Lens_Text & "; " & Pose_Text
-                        & (if Report.Determined then "" else ": " & To_String (Report.Why)));
-                  end;
-               end if;
-               Free (Points);
-               Free (Seen);
-               Free (On_Plane);
-               Free (Common);
-               Free (Cov);
-            end;
-         end;
-      end;
-   end Fit_Fixed_Eye;
-
-   procedure Fit_Fixed_Eyes (M : in out Model) is
-      W : constant Natural := Index_Of (M, 1);
-   begin
-      while M.Fixed_Eyes.Last_Index < M.Eyes.Last_Index loop
-         M.Fixed_Eyes.Append (Fixed_Fit'(others => <>));
-      end loop;
-      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
-         if Is_Fixed (M, E) then
-            Fit_Fixed_Eye (M, W, E);
-         else
-            M.Fixed_Eyes (E) := (others => <>);
-         end if;
-      end loop;
-   end Fit_Fixed_Eyes;
 
    function Fixed_Known (M : Model; E : Eye_Id) return Boolean is
      (E <= M.Fixed_Eyes.Last_Index and then Is_Fixed (M, E) and then M.Fixed_Eyes (E).Known);
@@ -3144,7 +3410,7 @@ package body Driver.Robot.Kinematics is
      (if E <= M.Fixed_Eyes.Last_Index then Fit_Lens (M.Fixed_Eyes (E).Lens) else (others => <>));
 
    function Fixed_Pose (M : Model; E : Eye_Id) return Pose_Estimate is
-      Terms : constant Natural := Fixed.Terms;
+      Terms : constant Natural := Fixed_Terms;
    begin
       if not Fixed_Known (M, E) or else Natural (M.Fixed_Eyes (E).Covariance.Length) /= Terms * Terms then
          return (others => <>);
@@ -3186,7 +3452,7 @@ package body Driver.Robot.Kinematics is
 
    function Fixed_Line_Sigma (M : Model; E : Eye_Id; U, V : Real; In_World : Boolean) return Real is
       use Driver.Numerics.Arrays;
-      Terms : constant Natural := Fixed.Terms;
+      Terms : constant Natural := Fixed_Terms;
    begin
       if not Fixed_Known (M, E) or else Natural (M.Fixed_Eyes (E).Covariance.Length) /= Terms * Terms then
          return Real'Last;
@@ -3310,7 +3576,7 @@ package body Driver.Robot.Kinematics is
       Turn := Unknown;
       Place := Unknown;
       if K = 0 or else not M.Kinematics (K).Result.Placed
-        or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) /= 36
+        or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) /= Outputs * Outputs
       then
          return;
       end if;
@@ -3319,29 +3585,43 @@ package body Driver.Robot.Kinematics is
          Own_Turn, Own_Place : Mat3;
          Rp     : constant Mat3 := R.Placement.Rotation;
          T      : constant Vec3 := Eye_In_Reference (M, A, Readings).Translation;
-         Lever  : constant Vec3 := Rp * T;
-         J      : constant Mat3 := -Driver.Numerics.Skew (R.Scale * Lever);
-         function C (P, Q : Positive) return Real is (R.Placement_Covariance ((P - 1) * 6 + Q - 1));
-         Tt, Cc, Tc : Mat3;
+         --  The eye's offset from the placement's centre, in the world.
+         Lever  : constant Vec3 := R.Scale * (Rp * T);
+         Spin   : constant Mat3 := -Driver.Numerics.Skew (Lever);
+         --  How the eye's place in the world moves with the placement's turn, its centre and the logarithm of its
+         --  scale (the scale grows every length in the arm's frame, the lever to the eye with it).
+         By     : Real_Matrix (1 .. 3, 1 .. Outputs) := [others => [others => 0.0]];
+         Whole  : Real_Matrix (1 .. Outputs, 1 .. Outputs);
+         Turned : Mat3;
+         Moved  : Real_Matrix (1 .. 3, 1 .. 3);
       begin
          Pose_Covariance (M, A, Readings, Own_Turn, Own_Place);
          if Own_Turn (1, 1) = Real'Last or else Own_Place (1, 1) = Real'Last then
             return;
          end if;
-         for P in 1 .. 3 loop
-            for Q in 1 .. 3 loop
-               Tt (P, Q) := C (P, Q);
-               Cc (P, Q) := C (3 + P, 3 + Q);
-               Tc (P, Q) := C (3 + P, Q);
+         for P in 1 .. Outputs loop
+            for Q in 1 .. Outputs loop
+               Whole (P, Q) := R.Placement_Covariance ((P - 1) * Outputs + Q - 1);
             end loop;
          end loop;
-         --  The eye in the world: turn Rp R_a, place Scale Rp t_a + centre. Its
-         --  turn takes the arm's own and the placement's; its place the arm's
-         --  own scaled, the centre's, the placement's turn on the lever to the
-         --  eye, and the scale's along it.
-         Turn := Rp * Own_Turn * Transpose (Rp) + Tt;
-         Place := R.Scale ** 2 * (Rp * Own_Place * Transpose (Rp)) + Cc + J * Tt * Transpose (J)
-           + Tc * Transpose (J) + J * Transpose (Tc) + R.Scale_Sigma ** 2 * Driver.Numerics.Outer (Lever, Lever);
+         for P in 1 .. 3 loop
+            for Q in 1 .. 3 loop
+               By (P, Q) := Spin (P, Q);
+               By (P, 3 + Q) := (if P = Q then 1.0 else 0.0);
+            end loop;
+            By (P, Outputs) := Lever (P);
+         end loop;
+         for P in 1 .. 3 loop
+            for Q in 1 .. 3 loop
+               Turned (P, Q) := Whole (P, Q);
+            end loop;
+         end loop;
+         Moved := By * Whole * Transpose (By);
+         --  The eye in the world: turn Rp R_a, place Scale Rp t_a + centre. Its turn takes the arm's own and the
+         --  placement's; its place the arm's own scaled, and the placement's (its turn on the lever to the eye, its
+         --  centre, its scale along the lever), their correlations kept.
+         Turn := Rp * Own_Turn * Transpose (Rp) + Turned;
+         Place := R.Scale ** 2 * (Rp * Own_Place * Transpose (Rp)) + Moved;
       end;
    end World_Pose_Covariance;
 
@@ -3466,7 +3746,7 @@ package body Driver.Robot.Kinematics is
          for F in reverse 2 .. Natural (R.Frames.Length) loop
             if R.Frames (F).Beat in From .. To then
                for S of R.Matches loop
-                  if S.Frame = F and then S.Eye = 0 then
+                  if S.Frame = F then
                      return S.Followed;
                   end if;
                end loop;

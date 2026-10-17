@@ -123,16 +123,18 @@ package body Driver.Robot.Hand.Pressing.Tests is
       R.Table := Table_Of (A);
       R.Placed := A = 1 or else How /= Unplaced;
       if A = 1 then
-         for I in 1 .. 36 loop
+         for I in 1 .. 49 loop
             R.Placement_Covariance.Append (0.0);
          end loop;
       else
          R.Placement := Placement_2;
          R.Scale := Unit_2;
          R.Scale_Sigma := 1.0e-2;
-         for Row in 1 .. 6 loop
-            for Column in 1 .. 6 loop
-               R.Placement_Covariance.Append (if Row /= Column then 0.0 elsif Row <= 3 then 1.0e-6 else 1.0e-4);
+         --  Its turn, its centre and the logarithm of its scale.
+         for Row in 1 .. 7 loop
+            for Column in 1 .. 7 loop
+               R.Placement_Covariance.Append
+                 (if Row /= Column then 0.0 elsif Row <= 3 then 1.0e-6 elsif Row <= 6 then 1.0e-4 else 1.0e-4);
             end loop;
          end loop;
          if How = Misplaced then

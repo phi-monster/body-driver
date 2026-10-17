@@ -97,10 +97,6 @@ package Driver.Robot.Motion is
    --  Holds the body for one beat and brings the estimates up to date between the beat and the hold
    --  (Estimate_Now): a round of the sweep is measured before the next round is moved.
 
-   procedure Hold_While_Matching (M : in out Model);
-   --  Holds the body until the instrument has answered every match the
-   --  estimators asked of it (the kinematics' keyframes).
-
    procedure Hold_For_Twin (M : in out Model; A : Arm_Id);
    --  Holds the body still until the arm's still twin of its reference has
    --  its match answered or refused (Kinematics.Twin_Answered), so the
