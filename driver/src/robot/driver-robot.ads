@@ -471,6 +471,9 @@ private
       Rider       : Eye_Id'Base := 0;
       --  the eye last mounted on the group as an arm (Graph.Derive): it rides on it while it shows the group a patch
       --  of its view or is undecided about it
+      Closer_Eye  : Eye_Id'Base := 0;
+      --  the eye on an arm that last showed the group a closer of that arm (Graph.Derive): it does while it tells
+      --  nothing against it (not measured, undecided, a patch)
       Episodes    : Episode_Vectors.Vector;   --  every push and how it went (Driver.Robot.Steps)
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
       Asks        : Flag_Vectors.Vector;   --  of the push under way: the channels it asked a step the one test of motion sees

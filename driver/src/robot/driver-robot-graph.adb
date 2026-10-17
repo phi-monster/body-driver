@@ -214,6 +214,7 @@ package body Driver.Robot.Graph is
          if Own (G) and then Gr.Roles (G) = Unclassified then
             declare
                Best_Arm   : Arm_Id'Base := 0;
+               Best_Eye   : Eye_Id'Base := 0;
                Best_Count : Natural := 0;
                Patched    : Boolean := False;
                Unsure     : Boolean := False;   --  some eye has not told
@@ -230,6 +231,7 @@ package body Driver.Robot.Graph is
                            if Mt.Kind = Arm_Carried and then F.Responding > Best_Count then
                               Best_Count := F.Responding;
                               Best_Arm := Mt.Arm;
+                              Best_Eye := E;
                            end if;
                         when Undecided =>
                            Unsure := True;
@@ -250,11 +252,25 @@ package body Driver.Robot.Graph is
                --  patch of 11 cells in its own eye, the other arm's eye undecided
                --  between 19 and 133 cells of 255; no closer, no hand, the brain
                --  given only speech).
+               --  The eye on an arm that last showed the group a closer of it (Group_Stream.Closer_Eye) still does while
+               --  it tells nothing against it: not measured (the lock-in kept no column of the group at an estimate:
+               --  s38, servo seed 6 of the fake robot, 10-17, replayed: at beat 2145 every eye UNMEASURED on its closer,
+               --  the group unclassified, its closer's sweep and its hand dropped; s32, s36 and s37 lost theirs the
+               --  same day), undecided, or a patch. An eye that may ride the group (undecided, its view possibly
+               --  whole: the rule above) still leaves it unclassified; an eye in which the group moves nothing, or
+               --  moves the whole view, takes the role off, and so does the eye leaving the arm.
                if Undecided_Eye then
                   null;
+               elsif M.Groups (G).Closer_Eye > 0
+                 and then Gr.Mounts (M.Groups (G).Closer_Eye).Kind = Arm_Carried
+                 and then Effect (M, G, M.Groups (G).Closer_Eye).Verdict in Unmeasured | Undecided | Patch
+               then
+                  Gr.Roles.Replace_Element (G, Closer);
+                  Gr.Arm_Of.Replace_Element (G, Gr.Mounts (M.Groups (G).Closer_Eye).Arm);
                elsif Best_Arm > 0 then
                   Gr.Roles.Replace_Element (G, Closer);
                   Gr.Arm_Of.Replace_Element (G, Best_Arm);
+                  M.Groups (G).Closer_Eye := Best_Eye;
                elsif Patched then
                   Gr.Roles.Replace_Element (G, Part);
                elsif not Unsure then
