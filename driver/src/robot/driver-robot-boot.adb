@@ -585,8 +585,8 @@ package body Driver.Robot.Boot is
                end Take;
 
                --  Every swept joint at once, in cells whose signs no two share
-               --  (the rows of a Sylvester-Hadamard matrix after its first, its
-               --  columns after its first): a joint's own frames tell its axis
+               --  (every row of a Sylvester-Hadamard matrix, its columns after
+               --  its first): a joint's own frames tell its axis
                --  but not how far that axis is from the others', which only
                --  frames that move several joints show. Each joint moves by its
                --  share: its part of the offset its own keyframes were followed
@@ -596,6 +596,16 @@ package body Driver.Robot.Boot is
                --  joint having moved (a sixth of three steps is none, and a cell
                --  of such parts moves no two joints the fit can see).
                --  The joints with no share stand at the start, and the matrix's columns are the ones of those with one.
+               --  Every row, the first too (every joint by its share the same way): over all of them each joint turns
+               --  as often one way as the other, and so does the product of any two joints' turns, which is what tells
+               --  their order (the matrix's columns are orthogonal, and the product of two of them is a third). Without
+               --  the first, a product's sign was the opposite of its two joints' in one cell more than the same (three
+               --  of seven, of six joints; one of three, of a pair), and an error of the fitted arm that is the same in
+               --  every cell (one even in the turns: as large for a joint turned either way) told the order the cells'
+               --  majority leaned to: s43 (servo seed 6 of the fake robot, 10-17) told 1 4 3 2 5 6 for 1 3 4 2 5 6, the
+               --  wrong order the smaller in its four cells that turned channels 3 and 4 opposite ways (by 0.00 to
+               --  0.15 px a residual) and the true one in its three that turned them the same way (by 0.01 to 0.13),
+               --  over 1148 residuals that the signed ranks counted as many independent ones.
                procedure Together (Share : Real_Array) is
                   Rows   : Positive := 1;
                   Turned : array (1 .. N) of Positive;   --  the swept joints with a share, by their place in Swept
@@ -615,7 +625,7 @@ package body Driver.Robot.Boot is
                      Asked_Now (Swept (Turned (J))) := True;
                   end loop;
                   Driver.Beats.Within_A_Beat (Tell_Asking'Access);
-                  for Row in 1 .. Rows - 1 loop
+                  for Row in 0 .. Rows - 1 loop
                      declare
                         Scale : Real := 1.0;   --  of the shares: halved where the cell met something
 
