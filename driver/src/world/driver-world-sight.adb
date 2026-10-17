@@ -105,7 +105,8 @@ package body Driver.World.Sight is
       O         : Observation;
       Queries   : Driver.Robot.Surfaces.Pixel_Array;
       Columns   : Positive;
-      Result    : out Driver.Robot.Surfaces.Placed_Array)
+      Result    : out Driver.Robot.Surfaces.Placed_Array;
+      Counts    : out Driver.Robot.Surfaces.Placing_Counts)
    is
       Held_Now : constant Observation_Holders.Holder := Observation_Holders.To_Holder (O);
       Ref_Now  : constant Observation_Holders.Constant_Reference_Type := Held_Now.Constant_Reference;
@@ -130,6 +131,7 @@ package body Driver.World.Sight is
       for R of Result loop
          R := (others => <>);
       end loop;
+      Counts := (others => 0);
       if not Driver.Geometry.Known (Table) or else E > O.Images.Last_Index
         or else not Driver.Observations.Has_Image (O, E) or else not Known_Pose (Now_Pose)
       then
@@ -166,7 +168,8 @@ package body Driver.World.Sight is
          Driver.Robot.Surfaces.Place
            ((Pose => Now_Pose.Pose, Picture => Driver.Alignment.Pyramid_Of (O.Images (E)), Lens => 1,
              Noise => Now_Cam.Noise),
-            Elsewhere, Queries, Columns, Table, Lens_Ray'Unrestricted_Access, Lens_Project'Unrestricted_Access, Result);
+            Elsewhere, Queries, Columns, Table, Lens_Ray'Unrestricted_Access, Lens_Project'Unrestricted_Access, Result,
+            Counts);
       end;
    end Place;
 

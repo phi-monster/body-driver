@@ -176,9 +176,14 @@ package body Driver.World is
       Points  : Driver.World.Points.Placed_Vectors.Vector;
       Normals : Driver.World.Estimates.Normal_Vectors.Vector;
       Asked   : Natural := 0;
+      Counts  : Driver.Robot.Surfaces.Placing_Counts;
    begin
       if S.Data /= null then
-         Driver.World.Estimates.Place_Pixels (S.Data.State, E, Camera_Of'Access, O, Region, Points, Normals, Asked);
+         Driver.World.Estimates.Place_Pixels
+           (S.Data.State, E, Camera_Of'Access, O, Region, Points, Normals, Asked, Counts);
+         Driver.Log.Line (Driver.Log.World, "the region asked of eye" & E'Image & ": "
+                          & Natural (Points.Length)'Image & " of its points stand above the table ("
+                          & Driver.Robot.Surfaces.Image (Counts) & ")");
       end if;
       return Result : Driver.Robot.Surfaces.Surface_Point_Array (1 .. Natural (Points.Length)) do
          for K in Result'Range loop
@@ -205,6 +210,21 @@ package body Driver.World is
    begin
       Driver.Recording.Write_Shared (Driver.Recording.World_Written, B.To_Array);
    end Record_Write;
+
+   procedure Seen_Anew (S : in out Scene) is
+   begin
+      if Driver.Recording.Shared_Started then
+         declare
+            B : Driver.Bytes.Buffer;
+         begin
+            Driver.Msgpack.Put_Array_Header (B, 1);
+            Driver.Msgpack.Put_String (B, "seen anew");
+            Record_Write (B);
+         end;
+      end if;
+      Ensure (S);
+      Driver.World.Estimates.Seen_Anew (S.Data.State);
+   end Seen_Anew;
 
    procedure Put_Point (B : in out Driver.Bytes.Buffer; P : Point_Estimate) is
    begin
@@ -531,7 +551,9 @@ package body Driver.World is
          What : constant String := Text (Doc, Element (Doc, R, 1));
          N    : constant Natural := Count (Doc, R);
       begin
-         if What = "remember" and then N = 2 then
+         if What = "seen anew" and then N = 1 then
+            Seen_Anew (S);
+         elsif What = "remember" and then N = 2 then
             declare
                Place : Place_Id;
             begin

@@ -45,7 +45,8 @@ package body Driver.Robot.Surfaces is
       Table     : Driver.Geometry.Plane_Estimate;
       Ray       : not null Lens_Ray;
       Project   : not null Lens_Project;
-      Result    : out Placed_Array)
+      Result    : out Placed_Array;
+      Counts    : out Placing_Counts)
    is
       Z      : constant Real := Driver.Conventions.Z;
       Centre : constant Vec3 := Now.Pose.Translation;
@@ -84,6 +85,7 @@ package body Driver.Robot.Surfaces is
       for R of Result loop
          R := (others => <>);
       end loop;
+      Counts := (others => 0);
       if Elsewhere'Length = 0 or else not Driver.Geometry.Known (Table) or else Now.Noise <= 0.0 then
          return;
       end if;
@@ -104,6 +106,8 @@ package body Driver.Robot.Surfaces is
                Angles  : array (1 .. Elsewhere'Length + 1) of Real := [others => 0.0];
                Lines   : Natural := 1;
                Done    : Boolean := False;
+               Found_Some : Boolean := False;   --  some view's answer came back
+               Met_Some   : Boolean := False;   --  three lines of sight met
 
                --  Whether the lines but Drop (0: none) meet, and where, with what uncertainty: X minimises the sum of
                --  every line's squared distance to it over that distance's variance (its angle's sigma times its
@@ -202,6 +206,7 @@ package body Driver.Robot.Surfaces is
                         exit when Ok;
                      end loop;
                   end if;
+                  Met_Some := Met_Some or else Ok;
                   if Ok and then Telling ((if Ok then Drop else 0), X, Cov) >= 2 then
                      Done := True;
                      declare
@@ -276,6 +281,7 @@ package body Driver.Robot.Surfaces is
 
                procedure Add_Line (V : View; Got : Driver.Alignment.Answer) is
                begin
+                  Found_Some := True;
                   Lines := Lines + 1;
                   Origins (Lines) := V.Pose.Translation;
                   Ways (Lines) := Sight (V, Got.To.U, Got.To.V);
@@ -518,6 +524,20 @@ package body Driver.Robot.Surfaces is
                   exit when Done;
                   Scan (Order (Pick));
                end loop;
+               Counts.Asked := Counts.Asked + 1;
+               if Result (I).Found then
+                  Counts.Placed := Counts.Placed + 1;
+               elsif Done then
+                  Counts.Below := Counts.Below + 1;
+               elsif Count < 2 then
+                  Counts.Unseen := Counts.Unseen + 1;
+               elsif Met_Some then
+                  Counts.Untold := Counts.Untold + 1;
+               elsif Found_Some then
+                  Counts.Unmet := Counts.Unmet + 1;
+               else
+                  Counts.Unfound := Counts.Unfound + 1;
+               end if;
             end;
          end if;
       end loop;
@@ -579,6 +599,8 @@ package body Driver.Robot.Surfaces is
          for I in Result'Range loop
             if Edge (I) then
                Result (I) := (others => <>);
+               Counts.Placed := Counts.Placed - 1;
+               Counts.Edge := Counts.Edge + 1;
             end if;
          end loop;
       end;
@@ -617,5 +639,11 @@ package body Driver.Robot.Surfaces is
          end if;
       end loop;
    end Place;
+
+   function Image (C : Placing_Counts) return String is
+     (C.Placed'Image & " of" & C.Asked'Image & " placed;" & C.Unseen'Image & " seen by fewer than two views elsewhere,"
+      & C.Unfound'Image & " found in none there and back," & C.Unmet'Image & " found but no three lines of sight met,"
+      & C.Untold'Image & " met but told by fewer than two views," & C.Below'Image & " below the table,"
+      & C.Edge'Image & " at an edge");
 
 end Driver.Robot.Surfaces;

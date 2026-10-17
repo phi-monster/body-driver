@@ -2848,6 +2848,19 @@ driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, twice Z squared times (2 Q - K)
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: twice the critical value in 2 Q - K
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	4.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, four Z to the fourth
+driver-robot-look.adb	& (if Sign then "" else "") & Driver.Log.Image (Amount, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-look.adb	& Driver.Log.Image (Gain, 4) & "");	4	format	digits printed in a log line or a message
+driver-robot-look.adb	& Driver.Log.Image (Turn, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-look.adb	Amount := Amount / 2.0;	2.0	structure	halved while the body does not reach it, as a step is halved elsewhere
+driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the middle spans the angle a pixel does
+driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the middle spans the angle a pixel does
+driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the middle spans the angle a pixel does
+driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	2.0	math	the middle of the picture: half its width and half its height
+driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	2.0	math	the middle of the picture: half its width and half its height
+driver-robot-look.adb	Mid : constant Vec3 := Ray_In_Eye (M, E, W / 2.0, H / 2.0);	2.0	math	the middle of the picture: half its width and half its height
+driver-robot-look.adb	Mid : constant Vec3 := Ray_In_Eye (M, E, W / 2.0, H / 2.0);	2.0	math	the middle of the picture: half its width and half its height
+driver-robot-look.adb	Moved (C) := Moved (C) + 1.0 / Shift;	1.0	structure	the turn that moves the picture one pixel: the parallax a pixel of motion gains
+driver-robot-look.adb	Turn := (W / 4.0) / Shift;	4.0	structure	a quarter of the picture each way: the middle half of what the eye shows now stays in each view, as the sweep moves the picture by half of it
 driver-robot-motion.adb	"" & G'Image & "" & C'Image & "" & Driver.Log.Image (Stop, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & "");	3	format	digits printed in a log line or a message
@@ -3013,6 +3026,7 @@ driver-robot-surfaces.adb	Unseen : Real := Near / 2.0;	2.0	numerics	the first de
 driver-robot-surfaces.adb	Used : constant Natural := Lines - (if Drop > 0 then 1 else 0);	1	structure	one line left out
 driver-robot-surfaces.adb	W : constant Real := (if Weighted then 1.0 / (Angles (L) * R) ** 2 else 1.0);	1.0	math	a weight is the inverse of a variance
 driver-robot-surfaces.adb	W : constant Real := (if Weighted then 1.0 / (Angles (L) * R) ** 2 else 1.0);	1.0	math	the unweighted meeting: every line weighs one
+driver-robot-surfaces.adb	elsif Count < 2 then	2	structure	two views elsewhere: with the eye's own line of sight the three a point needs
 driver-robot-surfaces.adb	exit when not Seen (Near / 2.0);	2.0	numerics	halving the depth while it stays seen
 driver-robot-surfaces.adb	for A in 1 .. 3 loop	3	structure	the three axes of the frame
 driver-robot-surfaces.adb	for A in 1 .. 3 loop	3	structure	the three axes of the frame
@@ -3292,6 +3306,7 @@ driver-world.adb	Bits (Driver.Bytes.Offset ((Y * W + X) / 8 + 1)) or 2 ** ((Y * 
 driver-world.adb	Bits (Driver.Bytes.Offset ((Y * W + X) / 8 + 1)) or 2 ** ((Y * W + X) mod 8);	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	Bits : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset ((W * H + 7) / 8)) := [others => 0];	7	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	Bits : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset ((W * H + 7) / 8)) := [others => 0];	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
+driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 1);	1	format	the record of the write: its name alone
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 2);	2	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 3);	3	format	the field count of a W record (Replay_Write): the hold's name, its thing and its hand
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 3);	3	format	the field count or a field's place in a W record (Replay_Write)
@@ -3317,6 +3332,7 @@ driver-world.adb	V => Number (Doc, Element (Doc, P, 2))),	2	format	a placed poin
 driver-world.adb	W : constant Natural := Natural (Whole (4));	4	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	What : constant String := Text (Doc, Element (Doc, R, 1));	1	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	and then Kind_Of (Doc, Element (Doc, R, 1)) = String_Value;	1	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	elsif What = "" and then N = 2 then	2	format	the record of a remembered place: its name and the point
 driver-world.adb	elsif What = "" and then N = 3 then	3	format	the field count of a W record (Replay_Write): the hold's
 driver-world.adb	elsif What = "" and then N = 3 then	3	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	elsif What = "" and then N = 4 then	4	format	the field count or a field's place in a W record (Replay_Write)
@@ -3328,4 +3344,4 @@ driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mo
 driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mod 8) mod 2 = 1 then	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mod 8) mod 2 = 1 then	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	if N = 7 then	7	format	an adopt record with the placed points has seven elements
-driver-world.adb	if What = "" and then N = 2 then	2	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	if What = "" and then N = 1 then	1	format	the record of the scene seen anew: its name alone

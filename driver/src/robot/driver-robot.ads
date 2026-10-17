@@ -843,6 +843,12 @@ private
                                              --  with it are not a patch of those told: Kinematics.Measure_Shifts);
                                              --  False for a channel that moves a part of the body in the view
       Shift_Told   : Count_Vectors.Vector;   --  per channel: how many points were told of it
+      Scatter      : Real := 0.0;
+      --  How far the aligner errs on the arm's eye's pictures (Driver.Alignment.Keyframes.Scatter) as the keyframes
+      --  last measured it: kept when the sweep begins anew and in the body file, the eye's error until the keyframes
+      --  measure it again (Kinematics.Match_Noise); 0 until measured. An arm begun from a body file keeps no keyframes,
+      --  and its eye's error was unknown: s58 (servo seed 6, 10-18) placed none of the 336 points of its scene, and its
+      --  eye could not look around (Driver.Robot.Look), every place judged with an error of 0.
       Asking   : Flag_Vectors.Vector;   --  per channel: the sweep is turning it now (Kinematics.Asking), copied into
                                         --  the keyframes taken meanwhile (Keyframe.Asked)
       Sweeping : Boolean := False;   --  the arm's sweep has begun (Kinematics.Begin_Anew): its keyframes are taken

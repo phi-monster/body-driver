@@ -67,6 +67,21 @@ package Driver.Robot.Surfaces is
 
    type Placed_Array is array (Positive range <>) of Placed;
 
+   --  What became of the queries asked, each by the first thing that kept it from being placed.
+   type Placing_Counts is record
+      Asked  : Natural := 0;
+      Unseen : Natural := 0;   --  fewer than two views see where its line of sight meets the table
+      Unfound : Natural := 0;  --  no view found it along its segment, there and back
+      Unmet  : Natural := 0;   --  found, but no three lines of sight met within their uncertainties
+      Untold : Natural := 0;   --  met, but fewer than two views told its depth by themselves
+      Below  : Natural := 0;   --  placed below the table
+      Edge   : Natural := 0;   --  left out where its depth does not go on through its neighbours'
+      Placed : Natural := 0;
+   end record;
+
+   function Image (C : Placing_Counts) return String;
+   --  For the log: of the queries asked, how many were placed and why the others were not.
+
    procedure Place
      (Now       : View;
       Elsewhere : View_Array;
@@ -75,7 +90,8 @@ package Driver.Robot.Surfaces is
       Table     : Driver.Geometry.Plane_Estimate;
       Ray       : not null Lens_Ray;
       Project   : not null Lens_Project;
-      Result    : out Placed_Array)
+      Result    : out Placed_Array;
+      Counts    : out Placing_Counts)
      with Pre => Result'First = Queries'First and then Result'Last = Queries'Last;
    --  Each query pixel of Now's picture placed from the views Elsewhere, of any eyes, as above. Table is in the frame
    --  of the poses, its normal towards the eyes. The queries are a grid of Columns per row, row by row, a query

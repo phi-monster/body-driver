@@ -190,6 +190,7 @@ package body Driver.Robot.Surfaces.Tests is
       Columns : constant Positive := (Width + Step - 1) / Step;
       Rows    : constant Positive := (Height + Step - 1) / Step;
       Queries : Pixel_Array (1 .. Columns * Rows);
+      Counts  : Placing_Counts;
       Asked   : Natural := 0;
       Table   : constant Driver.Geometry.Plane_Estimate :=
         (Centre => [0.0, 0.0, 0.0], Normal => [0.0, 0.0, 1.0], Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
@@ -219,7 +220,7 @@ package body Driver.Robot.Surfaces.Tests is
          end loop;
       end loop;
       Check (Asked > 0, "the box covers no query of the grid");
-      Place (Now, Views, Queries, Columns, Table, Lens_Ray'Access, Lens_Project'Access, Result);
+      Place (Now, Views, Queries, Columns, Table, Lens_Ray'Access, Lens_Project'Access, Result, Counts);
       Judge (Now_Pose, 1, Queries, Result, Found, Off, Told_Wrong, On_Box, On_Table, Shown_Elsewhere);
       --  What In_Region keeps of it: the points above the table, the box's own.
       for R of Result loop
@@ -412,12 +413,13 @@ package body Driver.Robot.Surfaces.Tests is
       Result   : Placed_Array (Queries'Range);
       Found, Off, Told_Wrong, On_Box, On_Table, Shown_Elsewhere : Natural;
       Seeable  : Natural := 0;
+      Counts   : Placing_Counts;
    begin
       for K in Views'Range loop
          Views (K) := (Pose => Poses (K), Picture => Driver.Alignment.Pyramid_Of (Render (Poses (K), Ignored)),
                        Lens => 1, Noise => 0.3);
       end loop;
-      Place (Now, Views, Queries, Columns, Scene_Table, Lens_Ray'Access, Lens_Project'Access, Result);
+      Place (Now, Views, Queries, Columns, Scene_Table, Lens_Ray'Access, Lens_Project'Access, Result, Counts);
       Judge (Now_Pose, 1, Queries, Result, Found, Off, Told_Wrong, On_Box, On_Table, Shown_Elsewhere);
       --  What can be placed at all: a query whose point two other views see, in their pictures and not hidden behind
       --  the box from them (their own line of sight to it meets the scene there first).

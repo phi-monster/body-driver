@@ -6767,6 +6767,8 @@ package body Driver.Robot.Tests is
       Why     : Ada.Strings.Unbounded.Unbounded_String;
    begin
       Measured_Body (M);
+      --  An aligner's error as keyframes measure it, which the synthetic keyframes of this body do not show.
+      M.Kinematics (M.Kinematics.First_Index).Scatter := 0.3;
       Check (Driver.Robot.Kinematics.Fitted (M, 1), "the body to write has no fitted arm");
       declare
          Written : constant String := Driver.Robot.Body_File.Text (M);
@@ -6778,6 +6780,10 @@ package body Driver.Robot.Tests is
          end loop;
          Check (Driver.Robot.Body_File.Text (Back) = Written, "the reloaded body writes another file");
          Check (Driver.Robot.Kinematics.Fitted (Back, 1), "the reloaded arm is not fitted");
+         Check (Driver.Robot.Kinematics.Match_Noise (M, 1) > 0.0
+                and then Driver.Robot.Kinematics.Match_Noise (Back, 1) = Driver.Robot.Kinematics.Match_Noise (M, 1),
+                "the aligner's error on the arm's eye, " & Driver.Robot.Kinematics.Match_Noise (M, 1)'Image
+                & " px, was reloaded as" & Driver.Robot.Kinematics.Match_Noise (Back, 1)'Image);
          declare
             Q    : constant Real_Array (1 .. 6) := [0.1, -0.05, 0.08, 0.05, 0.1, -0.1];
             Was  : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q);

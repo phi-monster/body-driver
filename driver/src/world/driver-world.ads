@@ -72,6 +72,10 @@ package Driver.World is
    --  Does it, each part at the observation that made it due. It takes seconds: the main program computes it apart
    --  from its loop with the robot's heavier estimates (Driver.Apart), a replay where the run did.
 
+   procedure Seen_Anew (S : in out Scene);
+   --  The eyes have seen the scene from new places (Driver.Robot.Look): it is measured again at the next still beat,
+   --  from the views those places gave. A decider's write, made within a beat's window.
+
    function Views_Of (S : Scene; E : Eye_Id) return Natural;
    --  How many still pictures of the eye, from as many places, the eyes place from (Driver.World.Sight).
 

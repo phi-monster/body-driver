@@ -522,6 +522,7 @@ package body Driver.World.Estimates is
                   declare
                      Queries : Driver.Robot.Surfaces.Pixel_Array (1 .. Columns * Rows);
                      Got     : Driver.Robot.Surfaces.Placed_Array (Queries'Range);
+                     Counts  : Driver.Robot.Surfaces.Placing_Counts;
                      Asked, Added, Table_Points : Natural := 0;
                   begin
                      for R in 0 .. Rows - 1 loop
@@ -539,7 +540,8 @@ package body Driver.World.Estimates is
                            end;
                         end loop;
                      end loop;
-                     Driver.World.Sight.Place (S.Views, Camera_Of, S.Table, E, Seen.Element.all, Queries, Columns, Got);
+                     Driver.World.Sight.Place
+                       (S.Views, Camera_Of, S.Table, E, Seen.Element.all, Queries, Columns, Got, Counts);
                      for K in Got'Range loop
                         if Got (K).Found then
                            Incoming.Append
@@ -558,7 +560,8 @@ package body Driver.World.Estimates is
                      end if;
                      Driver.Log.Line (Driver.Log.World, "the scene: eye" & E'Image & " placed" & Added'Image & " of its"
                                       & Asked'Image & " points from" & Driver.World.Sight.Views (S.Views)'Image
-                                      & " views," & Table_Points'Image & " of them on the table");
+                                      & " views," & Table_Points'Image & " of them on the table ("
+                                      & Driver.Robot.Surfaces.Image (Counts) & ")");
                   end;
                end if;
             end;
@@ -748,7 +751,8 @@ package body Driver.World.Estimates is
       Region    : Driver.Images.Mask;
       Points    : out Driver.World.Points.Placed_Vectors.Vector;
       Normals   : out Normal_Vectors.Vector;
-      Asked     : out Natural)
+      Asked     : out Natural;
+      Counts    : out Driver.Robot.Surfaces.Placing_Counts)
    is
       Held    : constant Observation_Holders.Holder := Observation_Holders.To_Holder (O);
       Seen    : constant Observation_Holders.Constant_Reference_Type := Held.Constant_Reference;
@@ -764,6 +768,7 @@ package body Driver.World.Estimates is
       Points.Clear;
       Normals.Clear;
       Asked := 0;
+      Counts := (others => 0);
       for R in 0 .. Rows - 1 loop
          for C in 0 .. Columns - 1 loop
             declare
@@ -782,7 +787,7 @@ package body Driver.World.Estimates is
       if Asked = 0 then
          return;
       end if;
-      Driver.World.Sight.Place (S.Views, Camera_Of, S.Table, E, O, Queries, Columns, Got);
+      Driver.World.Sight.Place (S.Views, Camera_Of, S.Table, E, O, Queries, Columns, Got, Counts);
       for K in Got'Range loop
          if Got (K).Found and then not Got (K).On_Table then
             Points.Append (Driver.World.Points.Placed'(Pixel => Queries (K), Point => Got (K).Point, Eye => E));
@@ -800,15 +805,17 @@ package body Driver.World.Estimates is
       Points  : Driver.World.Points.Placed_Vectors.Vector;
       Normals : Normal_Vectors.Vector;
       Asked   : Natural;
+      Counts  : Driver.Robot.Surfaces.Placing_Counts;
    begin
       if Req.Thing > S.Things.Last_Index or else not Has_Slot (S.Things (Req.Thing), Req.Eye) then
          return;
       end if;
       Place_Pixels (S, Req.Eye, Camera_Of, Req.Seen.Element, Tracks.Region (S.Things (Req.Thing).Eyes (Req.Eye).Track),
-                    Points, Normals, Asked);
+                    Points, Normals, Asked, Counts);
       if Asked > 0 then
          Driver.Log.Line (Driver.Log.World, "thing" & Req.Thing'Image & ": eye" & Req.Eye'Image & " placed"
-                          & Points.Length'Image & " of the" & Asked'Image & " points of its region above the table");
+                          & Points.Length'Image & " of the" & Asked'Image & " points of its region above the table ("
+                          & Driver.Robot.Surfaces.Image (Counts) & ")");
       end if;
       if not Points.Is_Empty then
          Place_Points (S, Req.Thing, Points, Normals);
@@ -816,6 +823,11 @@ package body Driver.World.Estimates is
    end Place_Region;
 
    function Views_Of (S : State; E : Eye_Id) return Natural is (Driver.World.Sight.Views_Of (S.Views, E));
+
+   procedure Seen_Anew (S : in out State) is
+   begin
+      S.Due := True;
+   end Seen_Anew;
 
    procedure Keep_View
      (S         : in out State;

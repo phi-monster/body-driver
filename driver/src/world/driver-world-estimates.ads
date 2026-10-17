@@ -87,6 +87,9 @@ private package Driver.World.Estimates is
    --  Eye E's picture at O, kept as a view the eyes place from (Driver.World.Sight.Keep_View): a still picture the
    --  world did not see at a still beat of its own, as one of an arm's sweep.
 
+   procedure Seen_Anew (S : in out State);
+   --  As Driver.World.Seen_Anew: the scene is due.
+
    function Views_Of (S : State; E : Eye_Id) return Natural;
    --  How many views of the eye are kept (Driver.World.Sight.Views_Of).
 
@@ -128,7 +131,8 @@ private package Driver.World.Estimates is
       Region    : Driver.Images.Mask;
       Points    : out Driver.World.Points.Placed_Vectors.Vector;
       Normals   : out Normal_Vectors.Vector;
-      Asked     : out Natural);
+      Asked     : out Natural;
+      Counts    : out Driver.Robot.Surfaces.Placing_Counts);
    --  The points eye E's picture at O shows in the region that stand above the table, placed from the views kept
    --  (Sight.Place) at a grid of the region's pixels a patch's half width apart, less the pixels showing the robot
    --  (Asked of them): each with the pixel it was asked at and its normal.

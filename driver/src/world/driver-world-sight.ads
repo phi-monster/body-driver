@@ -51,7 +51,8 @@ private package Driver.World.Sight is
       O         : Observation;
       Queries   : Driver.Robot.Surfaces.Pixel_Array;
       Columns   : Positive;
-      Result    : out Driver.Robot.Surfaces.Placed_Array)
+      Result    : out Driver.Robot.Surfaces.Placed_Array;
+      Counts    : out Driver.Robot.Surfaces.Placing_Counts)
      with Pre => Result'First = Queries'First and then Result'Last = Queries'Last;
    --  The queries of eye E's picture at O placed from the views kept, as above, in the world frame; none when the
    --  eye is not measured, the table not known, or no view stands apart from where the eye stands.
