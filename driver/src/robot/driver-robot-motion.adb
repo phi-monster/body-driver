@@ -1490,7 +1490,16 @@ package body Driver.Robot.Motion is
                Now     : Real_Array (1 .. 1);
                Moving  : Flag_Array (1 .. 1);
                Now_At  : Natural;
+               Waited  : Natural;
             begin
+               --  Each push from a body at rest and every picture settled: a sighting of this channel is confirmed by
+               --  the lock-in (below), whose regression counts a push only from a picture at rest, and an eye whose
+               --  picture still settled from the move before when the push began has no row of it. s49 and s50 (servo
+               --  seed 6 of the fake robot, 10-17 and 10-18): the closer's pushes began a beat after the probe's
+               --  together levels ended, while eye 3 (on the arm those levels swung) still settled, none of them was a
+               --  row of eye 3, the closer's column never had a beat there, and the closer, which only eye 3 sees, was
+               --  left unclassified. The waits after looks that saw nothing real gave those pictures their rest before.
+               Settle (M, Waited);
                Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving, Now_At);
                declare
                   Excursion : constant Real := Signs (Way) * (Now (1) - Start (1));
