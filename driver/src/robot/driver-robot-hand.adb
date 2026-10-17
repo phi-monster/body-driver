@@ -652,6 +652,9 @@ package body Driver.Robot.Hand is
                      return False;
                   end if;
                   for C in 1 .. Sweeps.Channels (P.Sweep) loop
+                     if Sweeps.Status (P.Sweep, C) = Sweeps.Waiting then
+                        return False;
+                     end if;
                      declare
                         Open_At   : constant Real_Array := H.Readings (Open).Element;
                         Closed_At : constant Real_Array := H.Readings (Closed_Empty).Element;
