@@ -160,6 +160,10 @@ package body Driver.World is
       Driver.World.Estimates.Measure (S.Data.State, Driver.Robot.Eye_Count (M), Camera_Of'Access);
    end Measure;
 
+   function Free_Pixel (S : Scene; E : Eye_Id; Width, Height : Positive) return Driver.Images.Pixel is
+     (if S.Data = null then (U => Real (Width) / 2.0, V => Real (Height) / 2.0)
+      else Driver.World.Estimates.Free_Pixel (S.Data.State, E, Width, Height));
+
    function Scene_Pending (S : Scene) return Boolean is
      (S.Data /= null and then Driver.World.Estimates.Scene_Pending (S.Data.State));
 

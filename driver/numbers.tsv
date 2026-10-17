@@ -2854,22 +2854,20 @@ driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	4.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, four Z to the fourth
 driver-robot-look.adb	& (if Sign then "" else "") & Driver.Log.Image (Amount, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-look.adb	& Driver.Log.Image (Gain, 4) & "");	4	format	digits printed in a log line or a message
+driver-robot-look.adb	& Driver.Log.Image (Px.U, 1) & "" & Driver.Log.Image (Px.V, 1) & ""	1	format	digits printed in a log line or a message
+driver-robot-look.adb	& Driver.Log.Image (Px.U, 1) & "" & Driver.Log.Image (Px.V, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-look.adb	& Driver.Log.Image (Turn, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-look.adb	Amount := Amount / 2.0;	2.0	structure	halved while the body does not reach it, as a step is halved elsewhere
+driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, Px.U + 1.0, Px.V))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the pixel aimed at spans the angle a pixel does
+driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, Px.U + 1.0, Px.V))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the pixel aimed at spans the angle a pixel does
+driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, Px.U + 1.0, Px.V))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the pixel aimed at spans the angle a pixel does
 driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the middle spans the angle a pixel does
 driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the middle spans the angle a pixel does
 driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the middle spans the angle a pixel does
-driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the middle spans the angle a pixel does
-driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the middle spans the angle a pixel does
-driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	1.0	numerics	a cosine is kept within -1 and 1 against rounding; one pixel on from the middle spans the angle a pixel does
-driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	2.0	math	the middle of the picture: half its width and half its height
-driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	2.0	math	the middle of the picture: half its width and half its height
 driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	2.0	math	the middle of the picture: half its width and half its height
 driver-robot-look.adb	Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));	2.0	math	the middle of the picture: half its width and half its height
 driver-robot-look.adb	Cols : constant Vec3 := [0.0, 1.0, 0.0] - Mid (2) * Mid;	1.0	structure	the eye frame's second axis: the picture's columns
 driver-robot-look.adb	J : array (1 .. 2, 1 .. Size) of Real := [others => [others => 0.0]];	2	structure	the two coordinates of a pixel
-driver-robot-look.adb	Mid : constant Vec3 := Ray_In_Eye (M, E, W / 2.0, H / 2.0);	2.0	math	the middle of the picture: half its width and half its height
-driver-robot-look.adb	Mid : constant Vec3 := Ray_In_Eye (M, E, W / 2.0, H / 2.0);	2.0	math	the middle of the picture: half its width and half its height
 driver-robot-look.adb	Mid : constant Vec3 := Ray_In_Eye (M, E, W / 2.0, H / 2.0);	2.0	math	the middle of the picture: half its width and half its height
 driver-robot-look.adb	Mid : constant Vec3 := Ray_In_Eye (M, E, W / 2.0, H / 2.0);	2.0	math	the middle of the picture: half its width and half its height
 driver-robot-look.adb	Moved (C) := Moved (C) + 1.0 / Shift;	1.0	structure	the turn that moves the picture one pixel
@@ -3031,6 +3029,8 @@ driver-robot-surfaces.adb	Lines : Natural := 1;	1	structure	the eye now is the f
 driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
 driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
 driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
+driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line of sight is the first
+driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line of sight is the first
 driver-robot-surfaces.adb	Mid : constant Real := (Lo + Hi) / 2.0;	2.0	numerics	bisection: the depth halfway between the two that bracket a window's width
 driver-robot-surfaces.adb	Near := Near / 2.0;	2.0	structure	the depth halves while the view still sees the place: the nearest depth within the halvings a float can tell
 driver-robot-surfaces.adb	Ok := Ahead and then Driver.Distributions.Chi_Square_Deviate (Miss, 2 * Used - 3) <= Z;	2	statistics	two degrees of freedom a line: its distance across it
@@ -3250,6 +3250,8 @@ driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real
 driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2	structure	the middle pixel of a grid cell is half the cell in
 driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2xStride	structure	the middle pixel of a grid cell is half the cell in
 driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2xStride	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	Best := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-estimates.adb	Best := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-world-estimates.adb	Cam.Project ((1.0 / Real (Count)) * Middle, Prompt, Visible);	1.0	math	the mean of the points: their sum over their count
 driver-world-estimates.adb	Columns : constant Positive := Positive'Max (1, (W + Step - 1) / Step);	1	numerics	at least one column, and the grid's columns rounded up
 driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);	1.0	math	a mean over the points
@@ -3258,8 +3260,14 @@ driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real 
 driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	F : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
+driver-world-estimates.adb	Middle : constant Driver.Images.Pixel := (U => Real (Width) / 2.0, V => Real (Height) / 2.0);	2.0	math	the middle of the picture: half its width and half its height
+driver-world-estimates.adb	Middle : constant Driver.Images.Pixel := (U => Real (Width) / 2.0, V => Real (Height) / 2.0);	2.0	math	the middle of the picture: half its width and half its height
 driver-world-estimates.adb	Middle : constant Vec3 := (1.0 / N) * Sum;	1.0	math	a mean over the points
 driver-world-estimates.adb	Middle := (1.0 / Real (R.Points.Length)) * Middle;	1.0	math	a mean over the points
+driver-world-estimates.adb	Middle_Off : constant Real := (Real (C) + 0.5 - Middle.U) ** 2 + (Real (R) + 0.5 - Middle.V) ** 2;	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-estimates.adb	Middle_Off : constant Real := (Real (C) + 0.5 - Middle.U) ** 2 + (Real (R) + 0.5 - Middle.V) ** 2;	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-estimates.adb	Natural (Real'Floor (Queries (K).U)) - Stride / 2 + Stride - 1	2	structure	a grid cell reaches half a stride either side of its middle
+driver-world-estimates.adb	Natural (Real'Floor (Queries (K).V)) - Stride / 2 + Stride - 1	2	structure	a grid cell reaches half a stride either side of its middle
 driver-world-estimates.adb	Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (B.Column_1 - B.Column_0 + 1,	1	structure	a grid at least one pixel apart
 driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
 driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
@@ -3270,6 +3278,8 @@ driver-world-estimates.adb	Step : constant Positive := Positive'Max (1, Driver.A
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	1	structure	a family holds at least one test
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	2	structure	each point is tested from both eyes that saw it
 driver-world-estimates.adb	and then (for some E in 1 .. Eye_Id'Base (Eyes) => Driver.World.Sight.Views_Of (S.Views, E) > 1)	1	structure	views from more than one place: one place alone places nothing
+driver-world-estimates.adb	for C in Natural (Real'Floor (Queries (K).U)) - Stride / 2 ..	2	structure	a grid cell reaches half a stride either side of its middle
+driver-world-estimates.adb	for R in Natural (Real'Floor (Queries (K).V)) - Stride / 2 ..	2	structure	a grid cell reaches half a stride either side of its middle
 driver-world-estimates.adb	if Has_Image (Seen.Element.all, E) and then Driver.World.Sight.Views_Of (S.Views, E) > 1 then	1	structure	views from more than one place: one place alone places nothing
 driver-world-estimates.ads	Placed_At : Driver.Clock.Beat'Base := -1;	1	structure	sentinel: no measurement of the region placed yet (beats start at 0)
 driver-world-estimates.ads	Tried_At : Driver.Clock.Beat'Base := -1;	1	structure	sentinel: not tried yet (beats start at 0)
@@ -3320,6 +3330,8 @@ driver-world.adb	& (if Known (Closer) then Driver.Log.Image (Closer.Value, 3) el
 driver-world.adb	& Driver.Log.Image (Closer.Sigma, 3) & "" & Hd.Points.Length'Image	3	format	digits printed in a log line or a message
 driver-world.adb	(Low => Number (Doc, Element (Doc, R, 3)), High => Number (Doc, Element (Doc, R, 4))));	3	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	(Low => Number (Doc, Element (Doc, R, 3)), High => Number (Doc, Element (Doc, R, 4))));	4	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	(if S.Data = null then (U => Real (Width) / 2.0, V => Real (Height) / 2.0)	2.0	math	the middle of the picture: half its width and half its height
+driver-world.adb	(if S.Data = null then (U => Real (Width) / 2.0, V => Real (Height) / 2.0)	2.0	math	the middle of the picture: half its width and half its height
 driver-world.adb	Adopt (S, M, Eye_Id (Whole (2)), O, Region, Placed, Thing);	2	format	the recorded adopt's eye is its second element
 driver-world.adb	Adopt (S, M, Eye_Id (Whole (2)), O, Region, Thing);	2	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Bits (Driver.Bytes.Offset ((Y * W + X) / 8 + 1)) :=	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)

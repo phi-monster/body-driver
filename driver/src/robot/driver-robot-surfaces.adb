@@ -72,6 +72,7 @@ package body Driver.Robot.Surfaces is
          Trip_V   : Real := 0.0;
          Back_Cov : Driver.Alignment.Place_Covariance;   --  the way back's own covariance
          Depth    : Real := 0.0;   --  where its line of sight and the eye now's pass nearest, along the eye now's
+         Riding   : Boolean := False;   --  its patch stays where it is in the same eye's picture from elsewhere
       end record;
       type First_Finds is array (Positive range <>) of First_Find;
       type First_Access is access First_Finds;
@@ -239,10 +240,10 @@ package body Driver.Robot.Surfaces is
                         --  Below it beyond that: no point the line of sight could end at.
                         if Height > Z * Sigma then
                            Result (I) := (Found => True, Point => (Mean => X, Covariance => Cov), Normal => Zero3,
-                                          On_Table => False);
+                                          On_Table => False, Riding => False);
                         elsif Height >= -Z * Sigma then
                            Result (I) := (Found => True, Point => (Mean => X, Covariance => Cov), Normal => Zero3,
-                                          On_Table => True);
+                                          On_Table => True, Riding => False);
                         end if;
                      end;
                   end if;
@@ -308,7 +309,8 @@ package body Driver.Robot.Surfaces is
                                  Firsts (I) := (Found => True, View => K, Got => Got, Trip_U => Back.To.U - Q.U,
                                                 Trip_V => Back.To.V - Q.V, Back_Cov => Back.Cov,
                                                 Depth => (if Den > 0.0 then (Dot (Dd, D_Now) - B * Dot (Dd, W)) / Den
-                                                          else 0.0));
+                                                          else 0.0),
+                                                Riding => False);
                               end;
                            end if;
                            Done := True;
@@ -563,6 +565,61 @@ package body Driver.Robot.Surfaces is
                      end;
                   end loop;
                end if;
+               --  A patch that stays where it is in the picture of the same eye from the farthest place rides with the
+               --  eye: the robot's own body, carried with it, which no line of sight places, and whose round trips are
+               --  no error between views (s66: the arm's eye's jaw covered the middle of its picture, found nowhere or
+               --  met nowhere, a third of every round, and covered the black box the eye was turned to). Unless the
+               --  two lines of sight through it meet as one point of the scene's: a point both pictures look straight
+               --  at stays where it is too (the world test's views all looked at the box: 9 of its points were taken
+               --  for the robot).
+               if Measuring then
+                  declare
+                     Farthest : Natural := 0;
+                     Apart_By : Real := 0.0;
+                  begin
+                     for K in Elsewhere'Range loop
+                        if Elsewhere (K).Same_Eye and then abs (Elsewhere (K).Pose.Translation - Centre) > Apart_By then
+                           Apart_By := abs (Elsewhere (K).Pose.Translation - Centre);
+                           Farthest := K;
+                        end if;
+                     end loop;
+                     if Farthest > 0 then
+                        declare
+                           Err : constant Real := Now_Noise ** 2 + View_Noise (Farthest) ** 2;
+                           Window : constant Driver.Alignment.Place_Covariance := (UU => Err, UV => 0.0, VV => Err);
+                           Got : constant Driver.Alignment.Answer :=
+                             Driver.Alignment.Align_At_Scale
+                               (Now.Picture, Elsewhere (Farthest).Picture,
+                                (From => Q, To => Q, Linear => Driver.Alignment.Identity_Part, Cov => Window,
+                                 Linear_Sigma => Real'Model_Epsilon), Widen => False);
+                        begin
+                           if Got.Verdict = Driver.Alignment.Found
+                             and then not Apart (Got.To.U - Q.U, Got.To.V - Q.V, Plus (Got.Cov, Window))
+                           then
+                              declare
+                                 X  : Vec3;
+                                 C  : Mat3;
+                                 Ok : Boolean;
+                              begin
+                                 Lines := 1;
+                                 Add_Line (Farthest, Got);
+                                 Meet_All (0, X, C, Ok);
+                                 Lines := 1;
+                                 if not Ok then
+                                    Firsts (I).Riding := True;
+                                    return;
+                                 end if;
+                              end;
+                           end if;
+                        end;
+                     end if;
+                  end;
+               elsif Firsts (I).Riding then
+                  Result (I).Riding := True;
+                  Counts.Asked := Counts.Asked + 1;
+                  Counts.Riding := Counts.Riding + 1;
+                  return;
+               end if;
                if Measuring then
                   --  Where a neighbour on the grid was found, this one is asked there first, along its own line of
                   --  sight at the neighbour's depth, in one window of the scan's: a surface goes on.
@@ -804,7 +861,7 @@ package body Driver.Robot.Surfaces is
    end Place;
 
    function Image (C : Placing_Counts) return String is
-     (C.Placed'Image & " of" & C.Asked'Image & " placed;" & C.Unseen'Image & " seen by fewer than two views elsewhere,"
+     (C.Placed'Image & " of" & C.Asked'Image & " placed;" & C.Riding'Image & " ride with the eye," & C.Unseen'Image & " seen by fewer than two views elsewhere,"
       & C.Unfound'Image & " found in none there and back," & C.Unmet'Image & " found but no three lines of sight met,"
       & C.Untold'Image & " met but told by fewer than two views," & C.Below'Image & " below the table,"
       & C.Edge'Image & " at an edge; the aligner erring by " & Driver.Log.Image (C.Error, 3) & " px between the views");

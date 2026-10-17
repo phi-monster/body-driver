@@ -4,7 +4,6 @@ with Driver.Beats;
 with Driver.Commands;
 with Driver.Conventions;
 with Driver.Geometry;
-with Driver.Images;
 with Driver.Log;
 with Driver.Robot.Kinematics;
 with Driver.Robot.Motion;
@@ -18,7 +17,7 @@ package body Driver.Robot.Look is
    use type Driver.Observations.Camera_Id;
    use type Driver.Observations.Group_Id;
 
-   procedure At_Point (M : in out Model; A : Arm_Id; X : Vec3; Reached : out Boolean) is
+   procedure At_Point (M : in out Model; A : Arm_Id; X : Vec3; Px : Driver.Images.Pixel; Reached : out Boolean) is
       E     : constant Eye_Id'Base := Kinematics.Eye_Of (M, A);
       G     : constant Group_Id := Arm_Group (M, A);
       Size  : constant Natural := Group_Size (M, G);
@@ -45,16 +44,15 @@ package body Driver.Robot.Look is
          end if;
          declare
             Target : constant Vec3 := (1.0 / Scale) * (Inverse (Placement) * X);
-            W      : constant Real := Real (Driver.Images.Width (O.Images (E)));
-            H      : constant Real := Real (Driver.Images.Height (O.Images (E)));
             Q      : Real_Array := O.Readings.Element (G);
-            --  The middle line of sight in the eye's frame, and the picture's rows and columns square to it.
-            Mid    : constant Vec3 := Ray_In_Eye (M, E, W / 2.0, H / 2.0);
+            --  The line of sight through the pixel aimed at, in the eye's frame, and the picture's rows and columns
+            --  square to it.
+            Mid    : constant Vec3 := Ray_In_Eye (M, E, Px.U, Px.V);
             Rows   : constant Vec3 := [1.0, 0.0, 0.0] - Mid (1) * Mid;
             Cols   : constant Vec3 := [0.0, 1.0, 0.0] - Mid (2) * Mid;
             Pixel  : constant Real :=
-              Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, W / 2.0 + 1.0, H / 2.0))));
-            --  Within Z of the aligner's error of the picture's middle, as an angle: there.
+              Arccos (Real'Max (-1.0, Real'Min (1.0, Mid * Ray_In_Eye (M, E, Px.U + 1.0, Px.V))));
+            --  Within Z of the aligner's error of that pixel, as an angle: there.
             Near   : constant Real := Driver.Conventions.Z * Eye_Noise (M, E) * Pixel;
             --  How far the line of sight to the point turns from the middle one at those readings, as an angle along
             --  the picture's rows and columns: the whole angle, up to a half turn, so a point behind the eye is
@@ -176,7 +174,8 @@ package body Driver.Robot.Look is
             Driver.Robot.Motion.Settle (M, Waited);
          end;
       end if;
-      Driver.Log.Line (Driver.Log.Robot, "look: arm" & A'Image & " turned its eye to the point: "
+      Driver.Log.Line (Driver.Log.Robot, "look: arm" & A'Image & " turned its eye to the point, to its pixel ("
+                       & Driver.Log.Image (Px.U, 1) & ", " & Driver.Log.Image (Px.V, 1) & "): "
                        & Report.Outcome'Image & " after" & Report.Beats'Image & " beats"
                        & (if Reached then "" else ": " & To_String (Report.Detail)));
    end At_Point;

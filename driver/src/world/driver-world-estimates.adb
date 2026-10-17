@@ -542,6 +542,31 @@ package body Driver.World.Estimates is
                      end loop;
                      Driver.World.Sight.Place
                        (S.Views, Camera_Of, S.Table, E, Seen.Element.all, Queries, Columns, Got, Counts);
+                     --  The cells that ride with the eye: the robot's own body there.
+                     declare
+                        Riding : Driver.Images.Mask := Driver.Images.Create (Driver.Images.Width (Image),
+                                                                               Driver.Images.Height (Image));
+                     begin
+                        for K in Got'Range loop
+                           if Got (K).Riding then
+                              for R in Natural (Real'Floor (Queries (K).V)) - Stride / 2 ..
+                                       Natural (Real'Floor (Queries (K).V)) - Stride / 2 + Stride - 1
+                              loop
+                                 for C in Natural (Real'Floor (Queries (K).U)) - Stride / 2 ..
+                                          Natural (Real'Floor (Queries (K).U)) - Stride / 2 + Stride - 1
+                                 loop
+                                    if R < Driver.Images.Height (Image) and then C < Driver.Images.Width (Image) then
+                                       Driver.Images.Include (Riding, C, R);
+                                    end if;
+                                 end loop;
+                              end loop;
+                           end if;
+                        end loop;
+                        while Natural (S.Riding.Length) < Natural (E) loop
+                           S.Riding.Append (Driver.Images.Create (0, 0));
+                        end loop;
+                        S.Riding.Replace_Element (Positive (E), Riding);
+                     end;
                      for K in Got'Range loop
                         if Got (K).Found then
                            Incoming.Append
@@ -775,7 +800,9 @@ package body Driver.World.Estimates is
                Cell : constant Driver.Images.Pixel :=
                  (U => Real (C * Step + Step / 2) + 0.5, V => Real (R * Step + Step / 2) + 0.5);
             begin
-               if Inside (Region, Cell) and then not Inside (Robot, Cell) then
+               if Inside (Region, Cell) and then not Inside (Robot, Cell)
+                 and then not (Natural (E) <= Natural (S.Riding.Length) and then Inside (S.Riding (Positive (E)), Cell))
+               then
                   Queries (R * Columns + C + 1) := Cell;
                   Asked := Asked + 1;
                else
@@ -823,6 +850,67 @@ package body Driver.World.Estimates is
    end Place_Region;
 
    function Views_Of (S : State; E : Eye_Id) return Natural is (Driver.World.Sight.Views_Of (S.Views, E));
+
+   function Free_Pixel (S : State; E : Eye_Id; Width, Height : Positive) return Driver.Images.Pixel is
+      Middle : constant Driver.Images.Pixel := (U => Real (Width) / 2.0, V => Real (Height) / 2.0);
+   begin
+      if Natural (E) > Natural (S.Riding.Length) or else Driver.Images.Width (S.Riding (Positive (E))) /= Width
+        or else Driver.Images.Height (S.Riding (Positive (E))) /= Height
+        or else not Inside (S.Riding (Positive (E)), Middle)
+      then
+         return Middle;
+      end if;
+      declare
+         --  The pixel furthest from every pixel that rides with the eye and from the picture's edge, so that what is
+         --  seen there and around it is the scene's; of those as far, the one nearest the middle. A pixel beside the robot's own body shows a
+         --  thing half hidden by it (s67: the black box the eye was turned to lay at its jaw's edge).
+         Riding   : Driver.Images.Mask renames S.Riding (Positive (E));
+         Best     : Driver.Images.Pixel := Middle;
+         Farthest : Natural := 0;
+         Nearest  : Real := Real'Last;
+         --  Each pixel's distance from the nearest riding pixel, in steps along the rows and columns (two passes).
+         type Distances is array (0 .. Height - 1, 0 .. Width - 1) of Natural;
+         type Distances_Access is access Distances;
+         procedure Free is new Ada.Unchecked_Deallocation (Distances, Distances_Access);
+         D : Distances_Access := new Distances;
+         Far_Away : constant Natural := Width + Height;
+      begin
+         for R in 0 .. Height - 1 loop
+            for C in 0 .. Width - 1 loop
+               D (R, C) := (if Driver.Images.Contains (Riding, C, R) then 0 else Far_Away);
+               if R > 0 then
+                  D (R, C) := Natural'Min (D (R, C), D (R - 1, C) + 1);
+               end if;
+               if C > 0 then
+                  D (R, C) := Natural'Min (D (R, C), D (R, C - 1) + 1);
+               end if;
+            end loop;
+         end loop;
+         for R in reverse 0 .. Height - 1 loop
+            for C in reverse 0 .. Width - 1 loop
+               if R < Height - 1 then
+                  D (R, C) := Natural'Min (D (R, C), D (R + 1, C) + 1);
+               end if;
+               if C < Width - 1 then
+                  D (R, C) := Natural'Min (D (R, C), D (R, C + 1) + 1);
+               end if;
+               --  The picture's edge bounds what is seen as the robot's body does.
+               D (R, C) := Natural'Min (D (R, C), Natural'Min (Natural'Min (R + 1, C + 1), Natural'Min (Height - R, Width - C)));
+               declare
+                  Middle_Off : constant Real := (Real (C) + 0.5 - Middle.U) ** 2 + (Real (R) + 0.5 - Middle.V) ** 2;
+               begin
+                  if D (R, C) > Farthest or else (D (R, C) = Farthest and then Middle_Off < Nearest) then
+                     Farthest := D (R, C);
+                     Nearest := Middle_Off;
+                     Best := (U => Real (C) + 0.5, V => Real (R) + 0.5);
+                  end if;
+               end;
+            end loop;
+         end loop;
+         Free (D);
+         return Best;
+      end;
+   end Free_Pixel;
 
    function Scene_Pending (S : State) return Boolean is (S.Due or else S.Scene_Asked);
 

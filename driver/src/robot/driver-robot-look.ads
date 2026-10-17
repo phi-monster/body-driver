@@ -14,10 +14,13 @@
 --  (Driver.World.Observe at still beats), and the joint is brought back. Two places: with the eye's own line of sight,
 --  the three a point needs (Driver.Robot.Surfaces.Place).
 
+with Driver.Images;
+
 package Driver.Robot.Look is
 
-   procedure At_Point (M : in out Model; A : Arm_Id; X : Vec3; Reached : out Boolean);
-   --  The fitted arm A turns its joints until its eye's middle line of sight passes through the world point X, and
+   procedure At_Point (M : in out Model; A : Arm_Id; X : Vec3; Px : Driver.Images.Pixel; Reached : out Boolean);
+   --  The fitted arm A turns its joints until its eye's line of sight through the pixel Px (its middle, or where the
+   --  robot's own body does not cover its picture there) passes through the world point X, and
    --  holds there: the least turn that does it by the fit (Gauss-Newton from where the arm stands, the turns that
    --  move the picture a pixel as its steps), never a solver's pose on another branch. Called by a decider, outside a
    --  beat's window; Reached is False when the arm is not fitted or placed in the world, the point is behind the eye

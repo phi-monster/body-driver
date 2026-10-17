@@ -52,6 +52,7 @@ package Driver.Robot.Surfaces is
       Picture : Driver.Alignment.Pyramid;
       Lens    : Positive := 1;               --  its lens, by the number the caller's Lens_Ray and Lens_Project take
       Noise   : Real := 0.0;                 --  the aligner's error on its pictures, in pixels
+      Same_Eye : Boolean := False;           --  a picture of the eye that asks, taken from elsewhere
    end record;
 
    type View_Array is array (Positive range <>) of View;
@@ -63,6 +64,9 @@ package Driver.Robot.Surfaces is
       Point    : Point_Estimate;   --  in the frame of the views' poses
       Normal   : Vec3 := Zero3;
       On_Table : Boolean := False;   --  on the table within their uncertainties: the table there, nothing on it
+      Riding   : Boolean := False;
+      --  Its patch stays where it is in a picture of the same eye taken from elsewhere: it rides with the eye, the
+      --  robot's own body (its hand, its jaws), not the scene, and no line of sight places it.
    end record;
 
    type Placed_Array is array (Positive range <>) of Placed;
@@ -70,6 +74,7 @@ package Driver.Robot.Surfaces is
    --  What became of the queries asked, each by the first thing that kept it from being placed.
    type Placing_Counts is record
       Asked  : Natural := 0;
+      Riding : Natural := 0;   --  ride with the eye: the robot's own body
       Unseen : Natural := 0;   --  fewer than two views see where its line of sight meets the table
       Unfound : Natural := 0;  --  no view found it along its segment, there and back
       Unmet  : Natural := 0;   --  found, but no three lines of sight met within their uncertainties
@@ -94,7 +99,8 @@ package Driver.Robot.Surfaces is
       Result    : out Placed_Array;
       Counts    : out Placing_Counts)
      with Pre => Result'First = Queries'First and then Result'Last = Queries'Last;
-   --  Each query pixel of Now's picture placed from the views Elsewhere, of any eyes, as above. Table is in the frame
+   --  Each query pixel of Now's picture placed from the views Elsewhere, of any eyes, as above, but those whose patch
+   --  stays where it is in the picture of the same eye from the farthest place (Riding): the robot's own body. Table is in the frame
    --  of the poses, its normal towards the eyes. The queries are a grid of Columns per row, row by row, a query
    --  missing from the grid given as a pixel with a negative U (it is not asked and has no neighbours). A point on
    --  the table within their uncertainties is placed and told so (On_Table); one below it is not placed.

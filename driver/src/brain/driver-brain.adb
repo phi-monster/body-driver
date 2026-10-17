@@ -42,9 +42,9 @@ package body Driver.Brain is
    exception
       when E : others =>
          --  The decider is a task: an exception would end it without a word,
-         --  and the robot would hold for good. Say so, and wait for the next episode.
-         Driver.Log.Line (Driver.Log.Brain, "the rounds stopped on " & Ada.Exceptions.Exception_Name (E) & ": "
-                          & Ada.Exceptions.Exception_Message (E) & "; holding still until the next episode");
+         --  and the robot would hold for good. Say so, where it happened, and wait for the next episode.
+         Driver.Log.Line (Driver.Log.Brain, "the rounds stopped; holding still until the next episode: "
+                          & Ada.Exceptions.Exception_Information (E));
    end Run_Episode;
 
 end Driver.Brain;

@@ -77,6 +77,10 @@ package Driver.World is
    --  from the views those places gave. A decider's write, made within a beat's window.
 
    function Scene_Pending (S : Scene) return Boolean;
+
+   function Free_Pixel (S : Scene; E : Eye_Id; Width, Height : Positive) return Driver.Images.Pixel;
+   --  Where in the eye's picture a point it is turned to is to be seen: its middle, or, where its latest scene showed
+   --  the robot's own body riding with it there, the nearest pixel that showed none.
    --  The scene is due, or being measured: a decider that asked for it (Seen_Anew) holds the body until it is not.
 
    function Views_Of (S : Scene; E : Eye_Id) return Natural;

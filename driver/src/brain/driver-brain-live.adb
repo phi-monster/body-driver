@@ -17,6 +17,9 @@ package body Driver.Brain.Live is
 
    use type Driver.World.Surface_Id;
    use type Driver.Brain.Names.Patch;
+   use type Driver.Robot.Mount_Kind;
+   use type Driver.Robot.Arm_Id;
+   use type Driver.Observations.Camera_Id;
    use Driver.Numerics;
    use Driver.Numerics.Arrays;
    use Driver.Uncertain;
@@ -343,8 +346,35 @@ package body Driver.Brain.Live is
                   declare
                      Reached : Boolean;
                      Taken   : Natural := 0;
+                     Px      : Driver.Images.Pixel := (U => 0.0, V => 0.0);
+                     Sized   : Boolean := False;
+                     --  Where in the arm's eye's picture the thing is to be seen: away from the robot's own body there.
+                     procedure Read_Free is
+                        O  : constant Driver.Observations.Observation := Driver.Beats.Latest.all;
+                        AE : Driver.Robot.Eye_Id'Base := 0;
+                     begin
+                        for K in 1 .. Driver.Robot.Eye_Count (B.C.Robot.all) loop
+                           if Driver.Robot.Eye_Mount (B.C.Robot.all, Driver.Robot.Eye_Id (K)).Kind = Driver.Robot.Arm_Carried
+                             and then Driver.Robot.Eye_Mount (B.C.Robot.all, Driver.Robot.Eye_Id (K)).Arm = Driver.Robot.Arm_Id (A)
+                           then
+                              AE := Driver.Robot.Eye_Id (K);
+                           end if;
+                        end loop;
+                        if AE > 0 and then Natural (AE) <= Natural (O.Images.Length)
+                          and then Driver.Images.Width (O.Images (AE)) > 0
+                        then
+                           Px := Driver.World.Free_Pixel (B.C.Scene.all, AE, Driver.Images.Width (O.Images (AE)),
+                                                          Driver.Images.Height (O.Images (AE)));
+                           Sized := True;
+                        end if;
+                     end Read_Free;
                   begin
-                     Driver.Robot.Look.At_Point (B.C.Robot.all, Driver.Robot.Arm_Id (A), Target, Reached);
+                     Within_A_Beat (Read_Free'Access);
+                     if Sized then
+                        Driver.Robot.Look.At_Point (B.C.Robot.all, Driver.Robot.Arm_Id (A), Target, Px, Reached);
+                     else
+                        Reached := False;
+                     end if;
                      if Reached then
                         Driver.Robot.Look.Around (B.C.Robot.all, Driver.Robot.Arm_Id (A), Taken);
                         Places := Places + Taken;

@@ -162,12 +162,13 @@ package body Driver.World.Sight is
                Elsewhere (K) := (Pose    => Cam.Pose.Pose,
                                  Picture => Driver.Alignment.Pyramid_Of (V.Seen.Constant_Reference.Element.Images (V.Eye)),
                                  Lens    => K + 1,
-                                 Noise   => Cam.Noise);
+                                 Noise   => Cam.Noise,
+                                 Same_Eye => V.Eye = E);
             end;
          end loop;
          Driver.Robot.Surfaces.Place
            ((Pose => Now_Pose.Pose, Picture => Driver.Alignment.Pyramid_Of (O.Images (E)), Lens => 1,
-             Noise => Now_Cam.Noise),
+             Noise => Now_Cam.Noise, Same_Eye => False),
             Elsewhere, Queries, Columns, Table, Lens_Ray'Unrestricted_Access, Lens_Project'Unrestricted_Access, Result,
             Counts);
       end;

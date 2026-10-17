@@ -32,6 +32,7 @@
 --  support is worked out again only when its points or the surfaces change.
 
 with Ada.Containers.Indefinite_Holders;
+with Ada.Containers.Indefinite_Vectors;
 with Ada.Containers.Vectors;
 with Driver.Clock;
 with Driver.Images;
@@ -93,6 +94,10 @@ private package Driver.World.Estimates is
    --  As Driver.World.Seen_Anew: the scene is due.
 
    function Views_Of (S : State; E : Eye_Id) return Natural;
+
+   function Free_Pixel (S : State; E : Eye_Id; Width, Height : Positive) return Driver.Images.Pixel;
+   --  The middle of the eye's picture, or where its latest scene showed the robot riding with it there, the middle of
+   --  the cell of its grid nearest it that did not: where a point the eye is turned to is to be seen.
    --  How many views of the eye are kept (Driver.World.Sight.Views_Of).
 
    procedure Adopt (S : in out State; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id);
@@ -178,6 +183,7 @@ private
    use type Driver.Clock.Beat;
 
    package Point_Holders is new Ada.Containers.Indefinite_Holders (Driver.World.Tracking.Point_Array, Driver.World.Tracking."=");
+   package Mask_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, Driver.Images.Mask, Driver.Images."=");
    package Image_Holders is new Ada.Containers.Indefinite_Holders (Driver.Images.Image, Driver.Images."=");
    package Observation_Holders is new Ada.Containers.Indefinite_Holders (Observation, Driver.Observations."=");
    package Request_Holders is new Ada.Containers.Indefinite_Holders (String);
@@ -262,6 +268,9 @@ private
       Round_Seen  : Observation_Holders.Holder;   --  the observation it is measured at
       Seen_From   : Vec3 := Zero3;                --  where an eye that placed its points stands
       Views       : Driver.World.Sight.Bank;      --  the eyes' still pictures
+      Riding      : Mask_Vectors.Vector;
+      --  Per eye, the pixels its latest scene showed riding with it (Driver.Robot.Surfaces.Placed.Riding), the cells
+      --  of its grid there: the robot's own body in that eye, asked of nothing it places.
       To_Place    : Place_Request_Vectors.Vector; --  the regions measured anew, to be placed apart
       Up          : Direction_Estimate;
       Places      : Place_Vectors.Vector;

@@ -184,7 +184,7 @@ package body Driver.Robot.Surfaces.Tests is
       Region  : Driver.Images.Mask;
       Ignored : Driver.Images.Mask;
       Now     : constant View := (Pose => Now_Pose, Picture => Driver.Alignment.Pyramid_Of (Render (Now_Pose, Region)),
-                                  Lens => 1, Noise => 0.3);
+                                  Lens => 1, Noise => 0.3, Same_Eye => False);
       Views   : View_Array (1 .. 4);
       Step    : constant Positive := Positive'Max (1, Driver.Alignment.Half_Patch (Width, Height));
       Columns : constant Positive := (Width + Step - 1) / Step;
@@ -201,7 +201,7 @@ package body Driver.Robot.Surfaces.Tests is
    begin
       for K in Views'Range loop
          Views (K) := (Pose => Poses (K), Picture => Driver.Alignment.Pyramid_Of (Render (Poses (K), Ignored)),
-                       Lens => 1, Noise => 0.3);
+                       Lens => 1, Noise => 0.3, Same_Eye => True);
       end loop;
       for R in 0 .. Rows - 1 loop
          for C in 0 .. Columns - 1 loop
@@ -403,7 +403,7 @@ package body Driver.Robot.Surfaces.Tests is
          Look ([0.0, -0.13, 0.27], Target), Look ([0.01, -0.18, 0.22], Target)];
       Ignored  : Driver.Images.Mask;
       Now      : constant View := (Pose => Now_Pose, Picture => Driver.Alignment.Pyramid_Of (Render (Now_Pose, Ignored)),
-                                   Lens => 1, Noise => 0.3);
+                                   Lens => 1, Noise => 0.3, Same_Eye => False);
       Views    : View_Array (1 .. 4);
       Step     : constant Positive := Positive'Max (1, Driver.Alignment.Half_Patch (Width, Height));
       Columns  : constant Positive := (Width + Step - 1) / Step;
@@ -417,7 +417,7 @@ package body Driver.Robot.Surfaces.Tests is
    begin
       for K in Views'Range loop
          Views (K) := (Pose => Poses (K), Picture => Driver.Alignment.Pyramid_Of (Render (Poses (K), Ignored)),
-                       Lens => 1, Noise => 0.3);
+                       Lens => 1, Noise => 0.3, Same_Eye => True);
       end loop;
       Place (Now, Views, Queries, Columns, Scene_Table, Lens_Ray'Access, Lens_Project'Access, Result, Counts);
       Judge (Now_Pose, 1, Queries, Result, Found, Off, Told_Wrong, On_Box, On_Table, Shown_Elsewhere);
