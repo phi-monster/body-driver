@@ -1265,6 +1265,8 @@ driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbo
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
@@ -1283,6 +1285,8 @@ driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbo
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	function Share (Count : Natural) return Real is (if Averaged then 1.0 / Real (Count) else 1.0);	1.0	math	n pixels placed on their own share a centre's variance by 1/n; placed together by the one edge, they do not
 driver-robot-hand-lobes.adb	function Share (Count : Natural) return Real is (if Averaged then 1.0 / Real (Count) else 1.0);	1.0	math	n pixels placed on their own share a centre's variance by 1/n; placed together by the one edge, they do not
 driver-robot-hand-lobes.adb	if 2 * Right < Seeded then	2	math	fewer than half of the seeds
