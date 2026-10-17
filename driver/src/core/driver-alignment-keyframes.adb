@@ -757,6 +757,67 @@ package body Driver.Alignment.Keyframes is
          C.Last := Same_Pose;
          return;
       end if;
+      --  A chain whose points move each by its own (Begin_Reference's Own_Points: a fixed eye watching an arm) has no
+      --  fields to extrapolate. Each point is asked from the keyframe nearest this one, of those it was found at and
+      --  the reference (where it stands), by how far the change between them can move the view (the readings' change
+      --  itself where a shift is not known): at its place and warp there, within that and what the aligner stated of
+      --  it there. A large move is so asked from the keyframes along it, a smaller step each, the reference's patch
+      --  warped as far as it was: asked from the reference alone, the view of s38's fixed eye 1 (servo seed 6 of the
+      --  fake robot, 10-17, replayed) lost its points at the large moves of a joint (3 of 26 at a turn of 612 units),
+      --  and the eye's fit was never determined from the small ones.
+      if C.Own_Points then
+         declare
+            Known       : constant Boolean := Shifts_Known (Changes, Noises, Shifts);
+            Any_Earlier : Boolean := False;
+            --  How far apart two changes of readings are: the view's motion between them, or the readings'.
+            function Apart (A, B : Real_Array) return Real is
+               D : Real_Array (A'Range);
+            begin
+               for I in A'Range loop
+                  D (I) := A (I) - B (B'First + I - A'First);
+               end loop;
+               return (if Known then Moved_By (D, Shifts) else Sqrt (Dot (D, D)));
+            end Apart;
+            Origin : constant Real_Array (Changes'Range) := [others => 0.0];
+         begin
+            for K in 1 .. Count loop
+               declare
+                  P    : constant Driver.Images.Pixel := C.Points (K);
+                  Best : Natural := 0;   --  the keyframe the point is asked from; 0: the reference
+                  Gap  : Real := Apart (Changes, Origin);
+               begin
+                  for F in C.Frames.First_Index .. C.Frames.Last_Index loop
+                     if Natural (C.Frames (F).Answers.Length) >= K
+                       and then C.Frames (F).Answers (K).Verdict = Found
+                       and then Apart (Changes, To_Array (C.Frames (F).Change)) < Gap
+                     then
+                        Gap := Apart (Changes, To_Array (C.Frames (F).Change));
+                        Best := F;
+                     end if;
+                  end loop;
+                  declare
+                     Reach : constant Real :=
+                       (if Known then Gap else Largest_Sigma (C.Pictures, C.Pictures));
+                     Own   : constant Real :=
+                       (if Best = 0 then 0.0
+                        else Sqrt (Real'Max (C.Frames (Best).Answers (K).Cov.UU, C.Frames (Best).Answers (K).Cov.VV)));
+                     Spread : constant Real := Reach ** 2 + Own ** 2;
+                  begin
+                     Into (Into'First + K - 1) :=
+                       (From         => P,
+                        To           => (if Best = 0 then P else C.Frames (Best).Answers (K).To),
+                        Linear       => (if Best = 0 then Identity_Part else C.Frames (Best).Answers (K).Linear),
+                        Cov          => (UU => Spread, UV => 0.0, VV => Spread),
+                        Linear_Sigma => Real'Last);
+                     Any_Earlier := Any_Earlier or else Best > 0;
+                  end;
+               end;
+            end loop;
+            From := (if Any_Earlier then Extrapolated else New_Direction);
+            C.Last := From;
+         end;
+         return;
+      end if;
       declare
          Own     : constant Real := Sqrt (Dot (Changes, Changes));
          --  How far the change can have moved the points, at most: a unit of each channel moves the view by
@@ -2116,6 +2177,9 @@ package body Driver.Alignment.Keyframes is
          begin
             Align_Some (C, Second, Given, Only, Answers, Marks);
             Agree := [for K in Agree'Range => Answers (Answers'First + K - Agree'First).Verdict = Found];
+            for K in 1 .. Count loop
+               Next.Answers.Append (Answers (Answers'First + K - 1));
+            end loop;
          end;
          Next.Moved := C.Last /= Same_Pose;
          C.Last := Supplied;

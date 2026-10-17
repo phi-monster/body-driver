@@ -190,6 +190,7 @@ private
    package Real_Vectors is new Ada.Containers.Vectors (Positive, Real);
    package Pixel_Vectors is new Ada.Containers.Vectors (Positive, Driver.Images.Pixel);
    package Flag_Vectors is new Ada.Containers.Vectors (Positive, Boolean);
+   package Answer_Vectors is new Ada.Containers.Vectors (Positive, Answer);
 
    type Field_Fit is record
       U, V    : Real_Array (1 .. Terms) := [others => 0.0];   --  the displacement as a polynomial of the place, per axis
@@ -226,6 +227,9 @@ private
       Weight_Sum  : Real := 0.0;
       --  The same of a prediction of this keyframe as the sum of the moves of keyframes that changed one channel
       --  each (Combination), per unit of the squared sum of the amounts it changed the channels by.
+      Answers : Answer_Vectors.Vector;
+      --  per point, of a chain whose points move each by its own: what the aligner answered at this keyframe, which
+      --  the keyframes after it near it are predicted from (Predict)
    end record;
 
    --  A prediction from the fields of earlier keyframes.
