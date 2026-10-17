@@ -2884,6 +2884,13 @@ package body Driver.Robot.Kinematics is
          if F.Judged and then F.From = Evidence then
             return;
          end if;
+         --  An eye the last fit did not determine is fitted again once its evidence has doubled, as the heavier
+         --  estimates are (Estimates_Due): the search over its turns and lenses ran at every estimate, 22 to 31 s each
+         --  on s41 (servo seed 6 of the fake robot, 10-17; 2 eyes, 26 and 7 tracks), and found nothing each time; at the
+         --  rounds of one estimate whose keyframes were aligned again it ran again, 53 to 213 s a round, 610 s in all.
+         if F.Judged and then not F.Known and then F.From > 0 and then Evidence < 2 * F.From then
+            return;
+         end if;
       end;
       declare
          Arms   : Hand.Watched_Array (1 .. Count);
