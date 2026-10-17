@@ -900,13 +900,20 @@ package body Driver.Robot.Motion is
       --  A push nothing answered and no eye saw is not waited for: before the body's delay is measured, Steps
       --  gives such a push up only after as many beats as the stream has had, and the first probe's levels below
       --  the dead band would each wait that long (R6's fifth start, 10-14: 500 beats into the first probe).
+      --  And a push whose readings have not moved is waited for while an eye still sees motion at the latest beat:
+      --  a look's sighting is one verdict of the many a look takes, each a false alarm by chance (False_Alarm), and
+      --  one sighting in a look made a push be waited for as long as Steps gives an unanswered one. s43, s46 and s47
+      --  (servo seed 6 of the fake robot, 10-17) all waited from beat 79 to 118 and from 167 to 206 after looks whose
+      --  chance of a false alarm was 0.19 and 0.99, at levels of 2.45 and 4.9 units that no channel went along.
       Looked_To : Natural := 0;   --  the last beat a look of this move judged
       Seen_Any : Boolean := False;
+      function Seen_Now return Boolean is
+        (M.Beats > 0 and then (for some E in 1 .. Eye_Count (M) => Lockin.Moved (M, Eye_Id (E), M.Beats - 1)));
       function Still_Pushing return Boolean is
         (for some I in 1 .. N =>
            Usable (I) and then Steps.Episodes (M, Listed (I).Group) > Before (I)
            and then not Steps.Latest (M, Listed (I).Group).Ended
-           and then (Seen_Any or else Steps.Latest (M, Listed (I).Group).Moved));
+           and then ((Seen_Any and then Seen_Now) or else Steps.Latest (M, Listed (I).Group).Moved));
 
       --  Each listed channel's reading at the last beat, and whether its group's readings still move there.
       procedure Read_Ends is
