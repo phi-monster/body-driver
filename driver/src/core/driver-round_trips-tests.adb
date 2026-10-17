@@ -5,7 +5,7 @@ with Driver.Conventions;
 with Driver.Tests;
 with Driver.Uncertain;
 
-package body Driver.World.Round_Trips.Tests is
+package body Driver.Round_Trips.Tests is
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Tests;
@@ -275,15 +275,15 @@ package body Driver.World.Round_Trips.Tests is
 
    procedure Register is
    begin
-      Driver.Tests.Register ("world.round_trips.climb",
+      Driver.Tests.Register ("round_trips.climb",
                              "the mixture's climb ends off the maximum long-run EM reaches, or takes as "
                              & "many passes", Climb_As_EM'Access);
-      Driver.Tests.Register ("world.round_trips.mixture",
+      Driver.Tests.Register ("round_trips.mixture",
                              "round trips of wrong matches, when most are wrong, are taken for the matcher's error",
                              Mixed_Round_Trips'Access);
-      Driver.Tests.Register ("world.round_trips.near_misses",
+      Driver.Tests.Register ("round_trips.near_misses",
                              "matches lost near what they were asked are taken for the matcher's error",
                              Near_Misses'Access);
    end Register;
 
-end Driver.World.Round_Trips.Tests;
+end Driver.Round_Trips.Tests;

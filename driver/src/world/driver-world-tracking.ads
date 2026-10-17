@@ -10,7 +10,7 @@
 --  next still beat (two frames after the change) its pixels are matched from
 --  the image they were measured on into the latest one, both ways, together
 --  with the pixels around it: the round trips of those that came back right
---  (Driver.World.Round_Trips.Matcher_Error) measure the matcher's own
+--  (Driver.Round_Trips.Matcher_Error) measure the matcher's own
 --  error, whether the thing, the eye or nothing moved, since a pixel the
 --  matcher found again comes back whatever moved it. A region pixel came
 --  back when its round trip is not significant against that error, and the

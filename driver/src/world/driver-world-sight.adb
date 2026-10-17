@@ -131,7 +131,7 @@ package body Driver.World.Sight is
       for R of Result loop
          R := (others => <>);
       end loop;
-      Counts := (others => 0);
+      Counts := (others => <>);
       if not Driver.Geometry.Known (Table) or else E > O.Images.Last_Index
         or else not Driver.Observations.Has_Image (O, E) or else not Known_Pose (Now_Pose)
       then

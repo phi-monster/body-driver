@@ -76,6 +76,9 @@ package Driver.World is
    --  The eyes have seen the scene from new places (Driver.Robot.Look): it is measured again at the next still beat,
    --  from the views those places gave. A decider's write, made within a beat's window.
 
+   function Scene_Pending (S : Scene) return Boolean;
+   --  The scene is due, or being measured: a decider that asked for it (Seen_Anew) holds the body until it is not.
+
    function Views_Of (S : Scene; E : Eye_Id) return Natural;
    --  How many still pictures of the eye, from as many places, the eyes place from (Driver.World.Sight).
 

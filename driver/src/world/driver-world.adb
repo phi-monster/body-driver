@@ -160,6 +160,9 @@ package body Driver.World is
       Driver.World.Estimates.Measure (S.Data.State, Driver.Robot.Eye_Count (M), Camera_Of'Access);
    end Measure;
 
+   function Scene_Pending (S : Scene) return Boolean is
+     (S.Data /= null and then Driver.World.Estimates.Scene_Pending (S.Data.State));
+
    function Views_Of (S : Scene; E : Eye_Id) return Natural is
      (if S.Data = null then 0 else Driver.World.Estimates.Views_Of (S.Data.State, E));
 

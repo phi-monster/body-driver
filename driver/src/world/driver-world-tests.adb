@@ -4,7 +4,6 @@ with Driver.Robot;
 with Driver.Robot.Hand;
 with Driver.Recording;
 with Driver.Tests;
-with Driver.World.Round_Trips.Tests;
 with Driver.World.Regions.Tests;
 with Driver.World.Estimates.Tests;
 with Driver.World.Holding.Tests;
@@ -199,7 +198,6 @@ package body Driver.World.Tests is
       Driver.Tests.Register ("world.scene.recorded", "a decider's write into the world is not in the recording once, or "
                              & "applied from it gives another scene", Writes_In_The_Recording'Access);
       Driver.World.Regions.Tests.Register;
-      Driver.World.Round_Trips.Tests.Register;
       Driver.World.Supports.Tests.Register;
       Driver.World.Estimates.Tests.Register;
       Driver.World.Tracking.Tests.Register;

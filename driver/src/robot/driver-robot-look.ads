@@ -16,6 +16,16 @@
 
 package Driver.Robot.Look is
 
+   procedure At_Point (M : in out Model; A : Arm_Id; X : Vec3; Reached : out Boolean);
+   --  The fitted arm A turns its joints until its eye's middle line of sight passes through the world point X, and
+   --  holds there: the least turn that does it by the fit (Gauss-Newton from where the arm stands, the turns that
+   --  move the picture a pixel as its steps), never a solver's pose on another branch. Called by a decider, outside a
+   --  beat's window; Reached is False when the arm is not fitted or placed in the world, the point is behind the eye
+   --  wherever the turns take it, or the body does not get there. A thing boxed in an eye that stands in the world
+   --  is somewhere along that eye's line of sight, and an eye the body carries places it only when it sees it: s61
+   --  (servo seed 6, 10-18) boxed the black box in the fixed eye 1, the arm's eye looked elsewhere, and every action on
+   --  the box was refused ("I have not measured where the two of them are").
+
    procedure Around (M : in out Model; A : Arm_Id; Taken : out Natural);
    --  The fitted arm A's eye looks from places apart and comes back, as above; Taken is how many places it was held
    --  at. Called by a decider, outside a beat's window; nothing when the arm is not fitted, carries no eye, or its

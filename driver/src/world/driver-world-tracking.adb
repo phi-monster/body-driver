@@ -3,7 +3,7 @@ with Ada.Unchecked_Deallocation;
 with Driver.Bytes;
 with Driver.Conventions;
 with Driver.Distributions;
-with Driver.World.Round_Trips;
+with Driver.Round_Trips;
 with Driver.World.Regions;
 
 package body Driver.World.Tracking is
@@ -254,7 +254,7 @@ package body Driver.World.Tracking is
    function Error_Of (Trips : Real_Array; Area : Real) return Error_Fit is
       Result : Error_Fit;
    begin
-      Driver.World.Round_Trips.Matcher_Error (Trips, Area, Result.Sigma, Result.Right);
+      Driver.Round_Trips.Matcher_Error (Trips, Area, Result.Sigma, Result.Right);
       return Result;
    end Error_Of;
 
@@ -291,7 +291,7 @@ package body Driver.World.Tracking is
             W       : constant Real := Real (Width (T.Asked_On.Element));
             H       : constant Real := Real (Height (T.Asked_On.Element));
             --  The matcher's error from the round trips that came back right
-            --  (Driver.World.Round_Trips.Matcher_Error): when the eye moved, many
+            --  (Driver.Round_Trips.Matcher_Error): when the eye moved, many
             --  of the pixels around may no longer be in view.
             Error   : constant Error_Fit := Error_Of (Trips.all, W * H);
             Sigma   : constant Real := Error.Sigma;

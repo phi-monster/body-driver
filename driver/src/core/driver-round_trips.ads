@@ -1,9 +1,10 @@
 --  How far a matcher errs, measured on its own round trips: each point it was asked about, matched from one picture
 --  into another and back, comes back by a right match's error or, matched wrong, anywhere. The error is measured on
 --  the matches themselves, whatever moved between the pictures, since a point the matcher found again comes back
---  whatever moved it (Driver.World.Tracking finds a thing again this way, the driver's aligner the matcher).
+--  whatever moved it (Driver.World.Tracking finds a thing again this way, the driver's aligner the matcher; the
+--  eyes' placing measures the aligner's error between views from its own round trips, Driver.Robot.Surfaces).
 
-package Driver.World.Round_Trips is
+package Driver.Round_Trips is
 
    procedure Matcher_Error (Trips : Real_Array; Area : Real; Sigma : out Real; Right : out Real)
      with Pre => Trips'Length mod 2 = 0 and then Area > 0.0;
@@ -49,4 +50,4 @@ private
    --  that many dimensions, the wrong ones spread over a range of that
    --  Measure; Passes counts the times it went over them.
 
-end Driver.World.Round_Trips;
+end Driver.Round_Trips;

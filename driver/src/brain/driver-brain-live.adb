@@ -4,7 +4,11 @@ with Driver.Brain.Words;
 with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot;
+with Driver.Geometry;
+with Driver.Numerics;
 with Driver.Robot.Hand;
+with Driver.Robot.Look;
+with Driver.Robot.Motion;
 with Driver.Robot.Surfaces;
 with Driver.Alignment;
 with Driver.Uncertain;
@@ -12,6 +16,10 @@ with Driver.Uncertain;
 package body Driver.Brain.Live is
 
    use type Driver.World.Surface_Id;
+   use type Driver.Brain.Names.Patch;
+   use Driver.Numerics;
+   use Driver.Numerics.Arrays;
+   use Driver.Uncertain;
    use type Driver.Robot.Hand.Hand_Id;
    use type Driver.Action.Operand_Kind;
    use type Driver.Action.Role;
@@ -291,6 +299,79 @@ package body Driver.Brain.Live is
          return;
       end if;
       Within_A_Beat (During'Access);
+      --  A thing boxed in an eye that places nothing by itself has a place once an eye the body carries sees it from
+      --  places apart: each arm turns its eye to where the box's middle line of sight meets the table (the thing is
+      --  on that line, between the eye and the table), looks around there (Driver.Robot.Look), and the scene is
+      --  measured from those views; its points that fall inside the box's region are the thing's.
+      if Found = Driver.Brain.Names.A_Thing then
+         declare
+            Unplaced : Boolean := False;
+            Target   : Vec3 := Zero3;
+            Places   : Natural := 0;
+            procedure Read_Thing is
+               O     : constant Driver.Observations.Observation := Driver.Beats.Latest.all;
+               M     : Driver.Robot.Model renames B.C.Robot.all;
+               S     : Driver.World.Scene renames B.C.Scene.all;
+               Table : constant Driver.Geometry.Plane_Estimate := Driver.Robot.World_Table (M);
+               Sight : constant Ray_Estimate :=
+                 Driver.Robot.Ray (M, E, O, (U => (Where.Top_Left.U + Where.Bottom_Right.U) / 2.0,
+                                             V => (Where.Top_Left.V + Where.Bottom_Right.V) / 2.0));
+               Facing : constant Real :=
+                 (if Driver.Geometry.Known (Table) then Table.Normal * Sight.Direction.Unit_Vector else 0.0);
+            begin
+               if Driver.World.Views_Of (S, E) < 2 and then not Known (Driver.World.Centre (S, T))
+                 and then Sight.Direction.Sigma < Real'Last and then Facing /= 0.0
+               then
+                  declare
+                     Along : constant Real := (Table.Normal * (Table.Centre - Sight.Origin.Mean)) / Facing;
+                  begin
+                     if Along > 0.0 then
+                        Unplaced := True;
+                        Target := Sight.Origin.Mean + Along * Sight.Direction.Unit_Vector;
+                     end if;
+                  end;
+               end if;
+            end Read_Thing;
+            procedure Anew is
+            begin
+               Driver.World.Seen_Anew (B.C.Scene.all);
+            end Anew;
+         begin
+            Within_A_Beat (Read_Thing'Access);
+            if Unplaced then
+               for A in 1 .. Driver.Robot.Arm_Count (B.C.Robot.all) loop
+                  declare
+                     Reached : Boolean;
+                     Taken   : Natural := 0;
+                  begin
+                     Driver.Robot.Look.At_Point (B.C.Robot.all, Driver.Robot.Arm_Id (A), Target, Reached);
+                     if Reached then
+                        Driver.Robot.Look.Around (B.C.Robot.all, Driver.Robot.Arm_Id (A), Taken);
+                        Places := Places + Taken;
+                     end if;
+                  end;
+               end loop;
+               if Places > 0 then
+                  Within_A_Beat (Anew'Access);
+                  --  Held until the world has measured the scene from the views (at the next still beat, apart from
+                  --  the main loop): s63 ran the program a beat after the look, and the scene was measured five
+                  --  beats after its stretch was refused for want of the thing's place.
+                  declare
+                     Pending : Boolean := True;
+                     procedure Read_Pending is
+                     begin
+                        Pending := Driver.World.Scene_Pending (B.C.Scene.all);
+                     end Read_Pending;
+                  begin
+                     while Pending loop
+                        Driver.Robot.Motion.Hold (B.C.Robot.all, 1);
+                        Within_A_Beat (Read_Pending'Access);
+                     end loop;
+                  end;
+               end if;
+            end if;
+         end;
+      end if;
    end Identify;
 
    overriding function Quantities (B : Body_Link) return Driver.Brain.Keyboard.Word_Vectors.Vector is

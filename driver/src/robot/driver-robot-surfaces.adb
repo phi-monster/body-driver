@@ -1,6 +1,9 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Distributions;
+with Driver.Log;
+with Driver.Round_Trips;
 
 package body Driver.Robot.Surfaces is
 
@@ -51,6 +54,30 @@ package body Driver.Robot.Surfaces is
       Z      : constant Real := Driver.Conventions.Z;
       Centre : constant Vec3 := Now.Pose.Translation;
 
+      --  The aligner's error on the views' pictures: each the error stated for its eye until the round trips of the
+      --  first pass measure more (Measured_Error).
+      Now_Noise  : Real := Now.Noise;
+      View_Noise : array (Elsewhere'Range) of Real := [for K in Elsewhere'Range => Elsewhere (K).Noise];
+      Measuring  : Boolean := False;          --  the first pass: one round trip a query, nothing placed
+      Trips      : Real_Vectors.Vector;       --  its round trips, two coordinates each
+
+      --  What the first pass found of each query in the view standing farthest from the eye: its answer there and its
+      --  way back, which the second pass takes up instead of scanning that view again (a scan of every view is most of
+      --  the placing's time: the first pass doubled the scene test's, 9.4 to 24.8 s, before this).
+      type First_Find is record
+         Found    : Boolean := False;
+         View     : Positive := 1;
+         Got      : Driver.Alignment.Answer;
+         Trip_U   : Real := 0.0;
+         Trip_V   : Real := 0.0;
+         Back_Cov : Driver.Alignment.Place_Covariance;   --  the way back's own covariance
+         Depth    : Real := 0.0;   --  where its line of sight and the eye now's pass nearest, along the eye now's
+      end record;
+      type First_Finds is array (Positive range <>) of First_Find;
+      type First_Access is access First_Finds;
+      procedure Free is new Ada.Unchecked_Deallocation (First_Finds, First_Access);
+      Firsts : First_Access := new First_Finds (Queries'Range);
+
       --  Where a point of the frame lands in a view's picture.
       procedure Into (V : View; P : Vec3; U, W : out Real; In_Front : out Boolean) is
       begin
@@ -81,15 +108,8 @@ package body Driver.Robot.Surfaces is
       function Inside (V : View; U, W : Real) return Boolean is
         (U >= 0.0 and then W >= 0.0 and then U <= Real (Driver.Alignment.Level_Width (V.Picture, 0))
          and then W <= Real (Driver.Alignment.Level_Height (V.Picture, 0)));
-   begin
-      for R of Result loop
-         R := (others => <>);
-      end loop;
-      Counts := (others => 0);
-      if Elsewhere'Length = 0 or else not Driver.Geometry.Known (Table) or else Now.Noise <= 0.0 then
-         return;
-      end if;
-      for I in Queries'Range loop
+      procedure Query (I : Positive) is
+      begin
          if Queries (I).U >= 0.0 then
             declare
                Q     : constant Driver.Images.Pixel := Queries (I);
@@ -249,9 +269,10 @@ package body Driver.Robot.Surfaces is
                --  A search of the view: its answer, kept when its place, aligned back into the eye now's picture,
                --  comes to the query again (a texture repeated along the way can be taken for the point once, not in
                --  both directions).
-               function Search (V : View; Ask : Driver.Alignment.Prediction; Got : out Driver.Alignment.Answer)
-                 return Boolean
+               function Search
+                 (K : Positive; Ask : Driver.Alignment.Prediction; Got : out Driver.Alignment.Answer) return Boolean
                is
+                  V  : View renames Elsewhere (K);
                   Ok : Boolean;
                begin
                   Got := Driver.Alignment.Align_At_Scale (Now.Picture, V.Picture, Ask);
@@ -261,7 +282,7 @@ package body Driver.Robot.Surfaces is
                   declare
                      Back_Linear : constant Driver.Alignment.Linear_Part := Inverse (Got.Linear, Ok);
                      Back_Cov    : constant Driver.Alignment.Place_Covariance :=
-                       Plus (Got.Cov, (UU => Now.Noise ** 2, UV => 0.0, VV => Now.Noise ** 2));
+                       Plus (Got.Cov, (UU => Now_Noise ** 2, UV => 0.0, VV => Now_Noise ** 2));
                   begin
                      if not Ok then
                         return False;
@@ -273,20 +294,41 @@ package body Driver.Robot.Surfaces is
                              (From => Got.To, To => Q, Linear => Back_Linear, Cov => Back_Cov,
                               Linear_Sigma => Ask.Linear_Sigma), Widen => False);
                      begin
+                        if Measuring then
+                           if Back.Verdict = Driver.Alignment.Found then
+                              Trips.Append (Back.To.U - Q.U);
+                              Trips.Append (Back.To.V - Q.V);
+                              declare
+                                 --  The two lines of sight's nearest approach, along the eye now's.
+                                 W  : constant Vec3 := Sight (V, Got.To.U, Got.To.V);
+                                 B  : constant Real := Dot (D_Now, W);
+                                 Dd : constant Vec3 := V.Pose.Translation - Centre;
+                                 Den : constant Real := 1.0 - B ** 2;
+                              begin
+                                 Firsts (I) := (Found => True, View => K, Got => Got, Trip_U => Back.To.U - Q.U,
+                                                Trip_V => Back.To.V - Q.V, Back_Cov => Back.Cov,
+                                                Depth => (if Den > 0.0 then (Dot (Dd, D_Now) - B * Dot (Dd, W)) / Den
+                                                          else 0.0));
+                              end;
+                           end if;
+                           Done := True;
+                           return False;
+                        end if;
                         return Back.Verdict = Driver.Alignment.Found
                           and then not Apart (Back.To.U - Q.U, Back.To.V - Q.V, Plus (Back.Cov, Back_Cov));
                      end;
                   end;
                end Search;
 
-               procedure Add_Line (V : View; Got : Driver.Alignment.Answer) is
+               procedure Add_Line (K : Positive; Got : Driver.Alignment.Answer) is
+                  V : View renames Elsewhere (K);
                begin
                   Found_Some := True;
                   Lines := Lines + 1;
                   Origins (Lines) := V.Pose.Translation;
                   Ways (Lines) := Sight (V, Got.To.U, Got.To.V);
                   Angles (Lines) :=
-                    Sqrt (Real'Max (Got.Cov.UU, Got.Cov.VV) + V.Noise ** 2) * Pixel_Angle (V, Got.To.U, Got.To.V);
+                    Sqrt (Real'Max (Got.Cov.UU, Got.Cov.VV) + View_Noise (K) ** 2) * Pixel_Angle (V, Got.To.U, Got.To.V);
                end Add_Line;
 
                --  A place the point may be at, asked of every view but Scanned (0: none) where it would be: there,
@@ -307,7 +349,8 @@ package body Driver.Robot.Surfaces is
                               declare
                                  --  The derivative of the view's place by the point, a column per axis of the frame.
                                  J  : array (1 .. 2, 1 .. 3) of Real := [others => [others => 0.0]];
-                                 Pc : Driver.Alignment.Place_Covariance := (UU => V.Noise ** 2, UV => 0.0, VV => V.Noise ** 2);
+                                 Pc : Driver.Alignment.Place_Covariance :=
+                                   (UU => View_Noise (Order (Other)) ** 2, UV => 0.0, VV => View_Noise (Order (Other)) ** 2);
                                  --  A step of the point small against where it lies: its own uncertainty.
                                  Step : constant Real := Real'Max (Sqrt (Real'Max (0.0, Cov (1, 1) + Cov (2, 2) + Cov (3, 3))),
                                                                    Real'Model_Epsilon * abs (X - Centre));
@@ -335,10 +378,10 @@ package body Driver.Robot.Surfaces is
                                  declare
                                     S_Here : constant Real := Dot (X - Centre, D_Now);
                                  begin
-                                    if Search (V, (From => Q, To => (U => U0, V => W0), Linear => Warp_At (V, S_Here),
+                                    if Search (Order (Other), (From => Q, To => (U => U0, V => W0), Linear => Warp_At (V, S_Here),
                                                    Cov => Pc, Linear_Sigma => Real'Model_Epsilon), Got)
                                     then
-                                       Add_Line (V, Got);
+                                       Add_Line (Order (Other), Got);
                                        Try;
                                     end if;
                                  end;
@@ -356,11 +399,62 @@ package body Driver.Robot.Surfaces is
                --  first: a pixel shows the nearest surface along its line of sight, and where its patch takes in the
                --  edge of a thing and what lies behind it, the views can bear out both; scanned from the table, the
                --  scene test's box top's corners were placed on the table behind it, 8.7 cm off.
-               procedure Scan (K : Positive) is
+               --  One window of a view's scan, about the place of the point at depth S along the eye now's line of
+               --  sight: its answer a candidate the other views are asked about (Verify). Run is how far that place
+               --  lies from where the line of sight meets the table, in the view's pixels.
+               procedure Window (K : Positive; S : Real; Run : out Real) is
                   V      : View renames Elsewhere (K);
                   Radius : constant Real := Driver.Alignment.Finest_Radius
                     (Driver.Alignment.Level_Width (V.Picture, 0), Driver.Alignment.Level_Height (V.Picture, 0));
                   Along  : constant Real := Driver.Alignment.Sigma_Of_Window (Radius);
+                  U, W   : Real;
+                  F      : Boolean;
+                  Un, Wn : Real;
+                  Fn     : Boolean;
+               begin
+                  At_Depth (V, S, U, W, F);
+                  At_Depth (V, Far, Un, Wn, Fn);
+                  Run := Sqrt ((Un - U) ** 2 + (Wn - W) ** 2);
+                  declare
+                     Cu  : constant Real := (if Run > 0.0 then (Un - U) / Run else 1.0);
+                     Cv  : constant Real := (if Run > 0.0 then (Wn - W) / Run else 0.0);
+                     Across : constant Real :=
+                       Sqrt (View_Noise (K) ** 2 + (Now_Noise * Pixel_Angle (Now, Q.U, Q.V) / Pixel_Angle (V, U, W)) ** 2);
+                     Cov : constant Driver.Alignment.Place_Covariance :=
+                       (UU => Along ** 2 * Cu * Cu + Across ** 2 * Cv * Cv,
+                        UV => (Along ** 2 - Across ** 2) * Cu * Cv,
+                        VV => Along ** 2 * Cv * Cv + Across ** 2 * Cu * Cu);
+                     Got : Driver.Alignment.Answer;
+                  begin
+                     if Search (K, (From => Q, To => (U => U, V => W), Linear => Warp_At (V, S), Cov => Cov,
+                                    Linear_Sigma => Real'Model_Epsilon), Got)
+                     then
+                        Lines := 1;
+                        Add_Line (K, Got);
+                        declare
+                           X  : Vec3;
+                           C  : Mat3;
+                           Ok : Boolean;
+                        begin
+                           Meet_All (0, X, C, Ok);
+                           if Ok then
+                              Verify (K, X, C);
+                           end if;
+                        end;
+                     end if;
+                  end;
+               end Window;
+
+               procedure Scan_From (K : Positive; S : Real) is
+                  Run : Real;
+               begin
+                  Window (K, S, Run);
+               end Scan_From;
+
+               procedure Scan (K : Positive) is
+                  V      : View renames Elsewhere (K);
+                  Radius : constant Real := Driver.Alignment.Finest_Radius
+                    (Driver.Alignment.Level_Width (V.Picture, 0), Driver.Alignment.Level_Height (V.Picture, 0));
                   Near   : Real := Far;
                   S      : Real;
                   function Seen (D : Real) return Boolean is
@@ -403,39 +497,12 @@ package body Driver.Robot.Surfaces is
                         U, W     : Real;
                         F        : Boolean;
                         Next     : Real := Far;   --  the depth of the next window's middle
-                        Un, Wn   : Real;
-                        Fn       : Boolean;
                      begin
                         At_Depth (V, S, U, W, F);
-                        At_Depth (V, Far, Un, Wn, Fn);
                         declare
-                           Run : constant Real := Sqrt ((Un - U) ** 2 + (Wn - W) ** 2);
-                           Cu  : constant Real := (if Run > 0.0 then (Un - U) / Run else 1.0);
-                           Cv  : constant Real := (if Run > 0.0 then (Wn - W) / Run else 0.0);
-                           Across : constant Real :=
-                             Sqrt (V.Noise ** 2 + (Now.Noise * Pixel_Angle (Now, Q.U, Q.V) / Pixel_Angle (V, U, W)) ** 2);
-                           Cov : constant Driver.Alignment.Place_Covariance :=
-                             (UU => Along ** 2 * Cu * Cu + Across ** 2 * Cv * Cv,
-                              UV => (Along ** 2 - Across ** 2) * Cu * Cv,
-                              VV => Along ** 2 * Cv * Cv + Across ** 2 * Cu * Cu);
-                           Got : Driver.Alignment.Answer;
+                           Run : Real;
                         begin
-                           if Search (V, (From => Q, To => (U => U, V => W), Linear => Warp_At (V, S), Cov => Cov,
-                                          Linear_Sigma => Real'Model_Epsilon), Got)
-                           then
-                              Lines := 1;
-                              Add_Line (V, Got);
-                              declare
-                                 X  : Vec3;
-                                 C  : Mat3;
-                                 Ok : Boolean;
-                              begin
-                                 Meet_All (0, X, C, Ok);
-                                 if Ok then
-                                    Verify (K, X, C);
-                                 end if;
-                              end;
-                           end if;
+                           Window (K, S, Run);
                            exit when Done or else Run <= Real'Model_Small or else S >= Far;
                            --  The next window's middle: a window's width on along the segment, or its end at the table.
                            if Run > 2.0 * Radius then
@@ -470,7 +537,7 @@ package body Driver.Robot.Surfaces is
             begin
                Origins (1) := Centre;
                Ways (1) := D_Now;
-               Angles (1) := Now.Noise * Pixel_Angle (Now, Q.U, Q.V);
+               Angles (1) := Now_Noise * Pixel_Angle (Now, Q.U, Q.V);
                if Far > 0.0 then
                   for K in Elsewhere'Range loop
                      declare
@@ -496,6 +563,29 @@ package body Driver.Robot.Surfaces is
                      end;
                   end loop;
                end if;
+               if Measuring then
+                  --  Where a neighbour on the grid was found, this one is asked there first, along its own line of
+                  --  sight at the neighbour's depth, in one window of the scan's: a surface goes on.
+                  if Count > 0 then
+                     declare
+                        Left  : constant Natural := (if (I - Queries'First) mod Columns > 0 then I - 1 else 0);
+                        Above : constant Natural := (if I - Queries'First >= Columns then I - Columns else 0);
+                     begin
+                        for N of Natural_Array'[Left, Above] loop
+                           exit when Done;
+                           if N > 0 and then Firsts (N).Found and then Firsts (N).View = Order (1)
+                             and then Firsts (N).Depth > 0.0 and then Firsts (N).Depth < Far
+                           then
+                              Scan_From (Order (1), Firsts (N).Depth);
+                           end if;
+                        end loop;
+                     end;
+                     if not Done then
+                        Scan (Order (1));
+                     end if;
+                  end if;
+                  return;
+               end if;
                --  The depths of the neighbours placed already, before it on its row and in the row above, asked first: a
                --  surface goes on from one pixel of the grid to the next but where it ends, and a place the views bear
                --  out there needs no scan. Each is asked where its point lies along this query's line of sight, as
@@ -519,6 +609,27 @@ package body Driver.Robot.Surfaces is
                      end if;
                   end loop;
                end;
+               --  What the first pass found in the farthest view, its way back judged by the error now measured: a
+               --  scan of that view would find it first again.
+               if not Done and then Firsts (I).Found then
+                  declare
+                     F       : constant First_Find := Firsts (I);
+                     Back_Cov : constant Driver.Alignment.Place_Covariance :=
+                       Plus (F.Got.Cov, (UU => Now_Noise ** 2, UV => 0.0, VV => Now_Noise ** 2));
+                     X  : Vec3;
+                     C  : Mat3;
+                     Ok : Boolean;
+                  begin
+                     if not Apart (F.Trip_U, F.Trip_V, Plus (F.Back_Cov, Back_Cov)) then
+                        Lines := 1;
+                        Add_Line (F.View, F.Got);
+                        Meet_All (0, X, C, Ok);
+                        if Ok then
+                           Verify (F.View, X, C);
+                        end if;
+                     end if;
+                  end;
+               end if;
                --  Every view in turn scans its segment, the widest baseline first, until the point is told.
                for Pick in 1 .. Count loop
                   exit when Done;
@@ -540,8 +651,59 @@ package body Driver.Robot.Surfaces is
                end if;
             end;
          end if;
+      end Query;
+
+      --  The aligner's error between views that stand apart, from the round trips of the first pass (Driver.Round_Trips:
+      --  the right ones' spread, the wrong ones told apart as landing anywhere): a round trip is two alignments. The error
+      --  an eye states is what its keyframes measured between two pictures of one pose (the still twin), and a view from
+      --  elsewhere sees the patch turned and foreshortened: s65 (servo seed 6, 10-18) stated 0.026 px, and of the points
+      --  found in a view, 84 of 130 had lines of sight that did not meet within it.
+      procedure Measured_Error is
+         T     : Real_Array (1 .. Natural (Trips.Length));
+         K     : Natural := 0;
+         Sigma : Real;
+         Right : Real;
+      begin
+         if Trips.Is_Empty then
+            return;
+         end if;
+         for X of Trips loop
+            K := K + 1;
+            T (K) := X;
+         end loop;
+         Driver.Round_Trips.Matcher_Error
+           (T, Real (Driver.Alignment.Level_Width (Now.Picture, 0)) * Real (Driver.Alignment.Level_Height (Now.Picture, 0)),
+            Sigma, Right);
+         if Right >= 1.0 and then Sigma < Real'Last then
+            Counts.Error := Sigma / Sqrt (2.0);
+            Now_Noise := Real'Max (Now_Noise, Counts.Error);
+            for N of View_Noise loop
+               N := Real'Max (N, Counts.Error);
+            end loop;
+         end if;
+      end Measured_Error;
+
+   begin
+      for R of Result loop
+         R := (others => <>);
       end loop;
-      --  A point whose patch takes in two surfaces is placed by neither: where the depths of its neighbours along its
+      Counts := (others => <>);
+      if Elsewhere'Length = 0 or else not Driver.Geometry.Known (Table) or else Now.Noise <= 0.0 then
+         Free (Firsts);
+         return;
+      end if;
+      --  The first pass measures the aligner's error between these views from the round trips of one search a query,
+      --  in the view that stands farthest from the eye; the second places the points with it.
+      Measuring := True;
+      for I in Queries'Range loop
+         Query (I);
+      end loop;
+      Measured_Error;
+      Measuring := False;
+      for I in Queries'Range loop
+         Query (I);
+      end loop;
+            --  A point whose patch takes in two surfaces is placed by neither: where the depths of its neighbours along its
       --  row or its column do not go on through it as a surface does (their second difference with it is beyond Z of
       --  its own uncertainty), the patch spans an edge of a thing or what it hides, and the views bear it out at one
       --  depth or the other, its place slid along the edge: the scene test's box's upright edges were placed a
@@ -638,12 +800,13 @@ package body Driver.Robot.Surfaces is
             end;
          end if;
       end loop;
+      Free (Firsts);
    end Place;
 
    function Image (C : Placing_Counts) return String is
      (C.Placed'Image & " of" & C.Asked'Image & " placed;" & C.Unseen'Image & " seen by fewer than two views elsewhere,"
       & C.Unfound'Image & " found in none there and back," & C.Unmet'Image & " found but no three lines of sight met,"
       & C.Untold'Image & " met but told by fewer than two views," & C.Below'Image & " below the table,"
-      & C.Edge'Image & " at an edge");
+      & C.Edge'Image & " at an edge; the aligner erring by " & Driver.Log.Image (C.Error, 3) & " px between the views");
 
 end Driver.Robot.Surfaces;

@@ -87,6 +87,8 @@ private package Driver.World.Estimates is
    --  Eye E's picture at O, kept as a view the eyes place from (Driver.World.Sight.Keep_View): a still picture the
    --  world did not see at a still beat of its own, as one of an arm's sweep.
 
+   function Scene_Pending (S : State) return Boolean;
+
    procedure Seen_Anew (S : in out State);
    --  As Driver.World.Seen_Anew: the scene is due.
 

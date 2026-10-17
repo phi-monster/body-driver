@@ -77,6 +77,7 @@ package Driver.Robot.Surfaces is
       Below  : Natural := 0;   --  placed below the table
       Edge   : Natural := 0;   --  left out where its depth does not go on through its neighbours'
       Placed : Natural := 0;
+      Error  : Real := 0.0;    --  the aligner's error between the views the round trips measured, in pixels; 0: not
    end record;
 
    function Image (C : Placing_Counts) return String;

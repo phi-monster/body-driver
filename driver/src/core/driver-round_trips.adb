@@ -4,7 +4,7 @@ with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Uncertain;
 
-package body Driver.World.Round_Trips is
+package body Driver.Round_Trips is
 
    use Ada.Numerics.Long_Elementary_Functions;
 
@@ -273,4 +273,4 @@ package body Driver.World.Round_Trips is
       Free (Squared);
    end Matcher_Error;
 
-end Driver.World.Round_Trips;
+end Driver.Round_Trips;

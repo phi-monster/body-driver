@@ -768,7 +768,7 @@ package body Driver.World.Estimates is
       Points.Clear;
       Normals.Clear;
       Asked := 0;
-      Counts := (others => 0);
+      Counts := (others => <>);
       for R in 0 .. Rows - 1 loop
          for C in 0 .. Columns - 1 loop
             declare
@@ -824,6 +824,8 @@ package body Driver.World.Estimates is
 
    function Views_Of (S : State; E : Eye_Id) return Natural is (Driver.World.Sight.Views_Of (S.Views, E));
 
+   function Scene_Pending (S : State) return Boolean is (S.Due or else S.Scene_Asked);
+
    procedure Seen_Anew (S : in out State) is
    begin
       S.Due := True;
@@ -856,7 +858,15 @@ package body Driver.World.Estimates is
       S.Up := Up;
       --  The still pictures, kept as views the eyes place from (Driver.World.Sight).
       if Still then
-         Driver.World.Sight.Keep (S.Views, Eyes, Camera_Of, S.Table, O);
+         declare
+            Before : constant Natural := Driver.World.Sight.Views (S.Views);
+         begin
+            Driver.World.Sight.Keep (S.Views, Eyes, Camera_Of, S.Table, O);
+            if Driver.World.Sight.Views (S.Views) > Before then
+               Driver.Log.Line (Driver.Log.World, "views: a still picture from a new place is kept;"
+                                & Driver.World.Sight.Views (S.Views)'Image & " in all");
+            end if;
+         end;
       end if;
       for Id in S.Things.First_Index .. S.Things.Last_Index loop
          declare
