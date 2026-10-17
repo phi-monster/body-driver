@@ -466,6 +466,9 @@ private
       Pushed      : Flag_Vectors.Vector;   --  per beat, once measured: moving because it was pushed
       Delay_Beats : Natural := 0;          --  the longest wait from a push to its first motion
       Delay_Known : Boolean := False;      --  some push was answered
+      Own_Push    : Boolean := False;
+      --  some push of it was its own: answered, and no other commandable group began one within the longest lag the
+      --  stream could tell of then (Graph.Derive)
       Episodes    : Episode_Vectors.Vector;   --  every push and how it went (Driver.Robot.Steps)
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
       Asks        : Flag_Vectors.Vector;   --  of the push under way: the channels it asked a step the one test of motion sees

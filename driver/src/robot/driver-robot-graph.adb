@@ -79,8 +79,16 @@ package body Driver.Robot.Graph is
 
       Own : array (M.Groups.First_Index .. M.Groups.Last_Index) of Boolean := [others => False];
    begin
+      --  Once a push of the group was its own it stays so: the longest lag the stream can tell of is the median gap
+      --  between its bursts, which the arms' sweeps, their pushes far apart, widen, and the recognition's pushes of a
+      --  closer, alone when they were judged, came within it of the arm's later: the closer lost its role, and its arm
+      --  its hand, at the first estimate after the sweep (s32, servo seed 6 of the fake robot, 10-17: "group 1 is no
+      --  longer a closer of arm 1" at beat 3340, a hand of one lobe pressed for a tip it could not see; s31 at 11649).
       for G in Own'Range loop
-         Own (G) := M.Groups (G).Commandable and then Pushed_Alone (G);
+         if M.Groups (G).Commandable and then not M.Groups (G).Own_Push and then Pushed_Alone (G) then
+            M.Groups (G).Own_Push := True;
+         end if;
+         Own (G) := M.Groups (G).Commandable and then M.Groups (G).Own_Push;
       end loop;
       Gr.Roles.Clear;
       Gr.Arm_Of.Clear;
