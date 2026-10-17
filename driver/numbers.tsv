@@ -1953,6 +1953,8 @@ driver-robot-kinematics-fit.adb	J : Positive := 1;	1	structure	indexes start at 
 driver-robot-kinematics-fit.adb	J : constant Positive := (if Kept = 2 then (W - 1) / (N - 1) + 1 else W);	2	structure	a way of the first two joints
 driver-robot-kinematics-fit.adb	Jd (I) := (Rn (I) - R0 (I)) / (H * Real'Max (1.0, abs Depth (T)));	1.0	numerics	the scale floor of a finite difference
 driver-robot-kinematics-fit.adb	Jd : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	Joint => (if P <= 6 then 0 else (P - 7) / Per_Joint + 1));	6	structure	the positions of the parameters in the vector: the lens (6), then per joint its six
+driver-robot-kinematics-fit.adb	Joint => (if P <= 6 then 0 else (P - 7) / Per_Joint + 1));	7	structure	the positions of the parameters in the vector: the lens (6), then per joint its six
 driver-robot-kinematics-fit.adb	Jp : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 2 * Used, 1 .. Count);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	K : Real_Matrix (1 .. 3, 1 .. Terms) := [others => [others => 0.0]];	3	math	three coordinates
 driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	a reprojection has two residuals, across and down
@@ -2072,7 +2074,6 @@ driver-robot-kinematics-fit.adb	Rows (1, Count + 1);	1	structure	the parameters'
 driver-robot-kinematics-fit.adb	Rows (1, Parameters);	1	structure	the parameters' rows from the first
 driver-robot-kinematics-fit.adb	Rows : constant Positive := 2 * Link.Used + 2 * Side_Terms;	2	structure	two residuals per answer, across and down; two sides' holds
 driver-robot-kinematics-fit.adb	Rows : constant Positive := 2 * Link.Used + 2 * Side_Terms;	2	structure	two residuals per answer, across and down; two sides' holds
-driver-robot-kinematics-fit.adb	Rp : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	Rr_Of : array (1 .. 2) of Mat3;	2	structure	the two ways of a joint's probe: the turn up and the turn downdriver-robot-kinematics-fit.adb
 driver-robot-kinematics-fit.adb	Rz : constant Mat3 := [[Cos (Th), -Sin (Th), 0.0], [Sin (Th), Cos (Th), 0.0], [0.0, 0.0, 1.0]];	1.0	math	a turn about the plane's normal: its axis is unmoved
 driver-robot-kinematics-fit.adb	S : Real := (if R = K then 1.0 else 0.0);	1.0	math	a column of the identity: the inverse column by column
