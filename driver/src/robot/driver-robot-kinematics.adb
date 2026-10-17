@@ -1765,50 +1765,17 @@ package body Driver.Robot.Kinematics is
             Done    : Natural := 0;
             Start   : constant Duration := Driver.Clock.Seconds;
          begin
-            if Current (M, R) and then R.Aligned >= 2 and then Queries > 0 then
+            if Current (M, R) and then R.Result.Fitted and then R.Aligned >= 2 and then Queries > 0 then
                for S in R.Matches.First_Index .. R.Matches.Last_Index loop
-                  if (R.Matches (S).Wide > 0 or else not R.Matches (S).Followed)
-                    and then R.Matches (S).Eye = 0
-                    and then Driver.Images.Width (R.Frames (R.Matches (S).Frame).Image) > 0
-                  then
+                  if R.Matches (S).Wide > 0 and then Driver.Images.Width (R.Frames (R.Matches (S).Frame).Image) > 0 then
                      declare
                         F       : constant Positive := R.Matches (S).Frame;
                         Offered : Prediction_Access := new Keyframes.Prediction_Array (1 .. Queries);
-                        Own     : Prediction_Access := new Keyframes.Prediction_Array (1 .. Queries);
                         Answers : Alignment_Access := new Keyframes.Answer_Array (1 .. Queries);
                         Agree   : Agreement_Access := new Keyframes.Flag_Array (1 .. Queries);
-                        Known   : Boolean := False;
-                        Own_Known : Boolean;
-                        Was     : constant Match_Set := R.Matches (S);
+                        Known   : Boolean;
                      begin
-                        if R.Result.Fitted then
-                           Offer_Of (M, R, Readings_Array (R.Frames (F)), Offered.all, Known);
-                        end if;
-                        --  What the keyframe answered, from windows of any width: the smooth field those answers lie on
-                        --  predicts every point again, as narrowly as that field is known (Keyframes.Offer_From_Answers),
-                        --  and the narrower of that and the fitted arm's prediction is taken. Until the arm was fitted no
-                        --  keyframe was aligned again, and an arm whose keyframes were not followed was never fitted: s25
-                        --  (servo seed 7, 10-17), replayed, found its keyframe 29's points a median 4.78 px from their
-                        --  predictions, which had stated 3.68, every one from a window too wide for the full size, and the
-                        --  keyframe gave no sighting, nor did its keyframes 40, 42, 43, 46 and 47 by beat 1852.
-                        for I in 1 .. Queries loop
-                           if I - 1 < Natural (Was.Answered.Length) and then Was.Answered (I - 1)
-                             and then I - 1 < Natural (Was.Sigma.Length) and then Was.Sigma (I - 1) > 0.0
-                           then
-                              Answers (I) := (Verdict => Driver.Alignment.Found,
-                                              To      => (U => Was.To_U (I - 1), V => Was.To_V (I - 1)),
-                                              Cov     => (UU => Was.Sigma (I - 1) ** 2, UV => 0.0,
-                                                          VV => Was.Sigma (I - 1) ** 2),
-                                              others  => <>);
-                           else
-                              Answers (I) := (others => <>);
-                           end if;
-                        end loop;
-                        Keyframes.Offer_From_Answers (R.Chain, Answers.all, Own.all, Own_Known);
-                        if Own_Known and then (not Known or else Stated_By (Own.all) < Stated_By (Offered.all)) then
-                           Offered.all := Own.all;
-                           Known := True;
-                        end if;
+                        Offer_Of (M, R, Readings_Array (R.Frames (F)), Offered.all, Known);
                         --  A keyframe is aligned again when the fitted arm gives it a window narrower by a pixel (the grid the
                         --  aligner's candidates lie on) than the one it was aligned from, and one a size of the pictures narrower if
                         --  what it answered was what a fit may rest on already (a keyframe the fit takes in, or not, by whether most
@@ -1829,7 +1796,6 @@ package body Driver.Robot.Kinematics is
                            Done := Done + 1;
                            Changed := True;
                         end if;
-                        Free (Own);
                         Free (Offered);
                         Free (Answers);
                         Free (Agree);
@@ -1840,7 +1806,7 @@ package body Driver.Robot.Kinematics is
                   Measure_Shifts (M, R);
                   Driver.Log.Line
                     (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " aligned" & Done'Image
-                     & " keyframes again from the fitted arm or their own answers, in "
+                     & " keyframes again from the fitted arm, in "
                      & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
                end if;
             end if;

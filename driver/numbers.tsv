@@ -2776,7 +2776,7 @@ driver-robot-kinematics.adb	for R in 1 .. 3 loop	3	structure	the three coordinat
 driver-robot-kinematics.adb	for S in 1 .. 3 loop	3	structure	the three coordinates of a place
 driver-robot-kinematics.adb	function C (P, Q : Positive) return Real is (R.Placement_Covariance ((P - 1) * 6 + Q - 1));	6	structure	the six terms of a pose: its turn (three) and its centre (three)
 driver-robot-kinematics.adb	if At_Reference and then Natural (R.Frames.Length) > 1 then	1	structure	the twin is a frame after the first: there must be more than one
-driver-robot-kinematics.adb	if Current (M, R) and then R.Aligned >= 2 and then Queries > 0 then	2	structure	a keyframe after the reference is the second or later
+driver-robot-kinematics.adb	if Current (M, R) and then R.Result.Fitted and then R.Aligned >= 2 and then Queries > 0 then	2	structure	a keyframe after the reference is the second or later
 driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	2	structure	the last of a track's three numbers
 driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	3	structure	three numbers a track
 driver-robot-kinematics.adb	if Kp >= 1 and then Rows >= Kp then	1	structure	a point is regressed when a channel changed in its keyframes, and only with as many rows as columns can the rows determine them

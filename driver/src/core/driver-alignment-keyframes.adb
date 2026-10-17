@@ -938,32 +938,99 @@ package body Driver.Alignment.Keyframes is
                end if;
             end;
          end if;
-         for Order in 1 .. Orders loop
-            if C.Latest (Order).Valid and then C.Latest (Order).Median < Best then
-               Best := C.Latest (Order).Median;
-               Chosen := Order;
+         --  Where two candidates can be made they disagree by as much as the move is curved beyond what either
+         --  allows for: the curvature each allows for was measured on keyframes aligned in the windows earlier
+         --  predictions set, which cannot show an error wider than those windows (s29 replayed and judged against
+         --  the simulator's truth, 10-17: keyframes extrapolated to 33 degrees of the wrist's roll stated 1.0 px and
+         --  were found 9 px off the true motion). Each candidate's covariance at a point takes the largest
+         --  disagreement of another there, as the outer product of the difference of their moves, and the one that
+         --  then states the least is chosen.
+         declare
+            type Move_Grid is array (0 .. Orders, 1 .. Count) of Displacement;   --  0: the combination
+            Moves    : Move_Grid;
+            Apart    : Move_Grid := [others => [others => (Du => 0.0, Dv => 0.0)]];
+            Own_Sig  : array (0 .. Orders, 1 .. Count) of Real := [others => [others => 0.0]];
+            Can      : array (0 .. Orders) of Boolean := [others => False];
+            Median_Of : array (0 .. Orders) of Real := [others => Real'Last];
+         begin
+            Can (0) := C.Combined.Valid;
+            for Order in 1 .. Orders loop
+               Can (Order) := C.Latest (Order).Valid;
+            end loop;
+            for X in 0 .. Orders loop
+               if Can (X) then
+                  for K in 1 .. Count loop
+                     declare
+                        P : constant Driver.Images.Pixel := C.Points (K);
+                     begin
+                        if X = 0 then
+                           Moves (X, K) := Move_By (C, C.Combined, P);
+                           Own_Sig (X, K) := Stated_Sigma (C, C.Combined, P, Moves (X, K));
+                        else
+                           Moves (X, K) := Move_Of (C, P, C.Latest (X));
+                           Own_Sig (X, K) := Stated_Sigma (C, C.Latest (X), P, Moves (X, K));
+                        end if;
+                     end;
+                  end loop;
+               end if;
+            end loop;
+            for X in 0 .. Orders loop
+               if Can (X) then
+                  for K in 1 .. Count loop
+                     for Y in 0 .. Orders loop
+                        if Y /= X and then Can (Y) then
+                           declare
+                              D : constant Displacement :=
+                                (Du => Moves (Y, K).Du - Moves (X, K).Du, Dv => Moves (Y, K).Dv - Moves (X, K).Dv);
+                           begin
+                              if D.Du ** 2 + D.Dv ** 2 > Apart (X, K).Du ** 2 + Apart (X, K).Dv ** 2 then
+                                 Apart (X, K) := D;
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                     Sigmas (K) := Sqrt (Own_Sig (X, K) ** 2 + Real'Max (Apart (X, K).Du ** 2, Apart (X, K).Dv ** 2));
+                  end loop;
+                  Median_Of (X) := Driver.Stats.Median (Sigmas);
+               end if;
+            end loop;
+            for Order in 1 .. Orders loop
+               if Can (Order) and then Median_Of (Order) < Best then
+                  Best := Median_Of (Order);
+                  Chosen := Order;
+                  Offer_Wins := False;
+               end if;
+            end loop;
+            if Can (0) and then Median_Of (0) < Best then
+               Best := Median_Of (0);
+               Chosen := 0;
                Offer_Wins := False;
+               Combined_Wins := True;
             end if;
-         end loop;
-         if C.Combined.Valid and then C.Combined.Median < Best then
-            Best := C.Combined.Median;
-            Chosen := 0;
-            Offer_Wins := False;
-            Combined_Wins := True;
-         end if;
-         if Offer_Wins then
-            From := Supplied;
-            Into := Offered;
-         elsif Combined_Wins then
-            From := Extrapolated;
-            Extrapolate (C, C.Combined, Into);
-         elsif Chosen = 0 then
-            From := New_Direction;
-            Stay (Reach);
-         else
-            From := Extrapolated;
-            Extrapolate (C, C.Latest (Chosen), Into);
-         end if;
+            if Offer_Wins then
+               From := Supplied;
+               Into := Offered;
+            elsif Combined_Wins then
+               From := Extrapolated;
+               Extrapolate (C, C.Combined, Into);
+            elsif Chosen = 0 then
+               From := New_Direction;
+               Stay (Reach);
+            else
+               From := Extrapolated;
+               Extrapolate (C, C.Latest (Chosen), Into);
+            end if;
+            if From = Extrapolated then
+               for K in Into'Range loop
+                  declare
+                     D : Displacement renames Apart ((if Combined_Wins then 0 else Chosen), K - Into'First + 1);
+                  begin
+                     Into (K).Cov := (UU => Into (K).Cov.UU + D.Du ** 2, UV => Into (K).Cov.UV + D.Du * D.Dv,
+                                      VV => Into (K).Cov.VV + D.Dv ** 2);
+                  end;
+               end loop;
+            end if;
+         end;
          C.Last := From;
          Free (Field_Var);
          Free (Field_U);
@@ -1128,40 +1195,6 @@ package body Driver.Alignment.Keyframes is
       Settle (C, Second, Answers, Marks, Field, Mine);
       Agree := Mine;
    end Realign;
-
-   procedure Offer_From_Answers
-     (C : Chain; Answers : Answer_Array; Into : out Prediction_Array; Known : out Boolean)
-   is
-      Marks : Located_Array (1 .. Answers'Length);
-      Field : Field_Fit;
-      Mine  : Flag_Array (1 .. Answers'Length);
-   begin
-      for I in Marks'Range loop
-         declare
-            A : Answer renames Answers (Answers'First + I - 1);
-         begin
-            Marks (I) :=
-              (if A.Verdict = Found
-               then (Found => True, Place => A.To, Sigma => Sqrt (Real'Max (A.Cov.UU, A.Cov.VV)))
-               else (others => <>));
-         end;
-      end loop;
-      Fit_Field (C, Marks, Field, Mine);
-      Known := Field.Valid;
-      for K in Into'Range loop
-         declare
-            P      : constant Driver.Images.Pixel := C.Points (K - Into'First + 1);
-            Spread : constant Real := (if Known then Sqrt (Variance (C, Field, P)) else 0.0);
-         begin
-            Into (K) :=
-              (From   => P,
-               To     => (if Known then (U => P.U + Evaluate (C, Field.U, P), V => P.V + Evaluate (C, Field.V, P)) else P),
-               Linear => (if Known then Gradient (C, Field, P) else Identity_Part),
-               Cov    => (UU => Spread ** 2, UV => 0.0, VV => Spread ** 2),
-               Linear_Sigma => Real'Last);
-         end;
-      end loop;
-   end Offer_From_Answers;
 
    --  Whether a field puts every point where another does, within what the two know of the place there.
    procedure Forget_Last (C : in out Chain) is
@@ -2078,6 +2111,41 @@ package body Driver.Alignment.Keyframes is
                      else
                         Asked := Given;
                      end if;
+                  end if;
+               end;
+            elsif Count > 0 and then C.Last = Extrapolated then
+               --  A prediction from the keyframes before whose windows a patch carries is checked against the
+               --  view's common motion, searched as far as the prediction puts the points and errs: where the two
+               --  disagree by more than the common motion states, the prediction's covariance there takes the
+               --  rest of the disagreement, as the outer product of it. The curvature an extrapolation allows for
+               --  is measured on keyframes aligned in the windows earlier extrapolations set, which hold no error
+               --  wider than themselves (s29 replayed and judged against the simulator's truth, 10-17: keyframes
+               --  extrapolated to 17 and 33 degrees of the wrist's roll stated 1.5 and 1.0 px and were found 5 and
+               --  9 px off the true motion, along the table's grain).
+               declare
+                  Common : Motion;
+                  Places : Prediction_Array (1 .. Count);
+               begin
+                  Common_Motion (C, Second, Real'Min (Farthest / Window_Multiple + Typical, Largest_Sigma (C.Pictures, Second)),
+                                 Riding, Places, Common);
+                  Common.Searched := True;
+                  C.Motion := Common;
+                  if Common.Told then
+                     for K in 1 .. Count loop
+                        declare
+                           G     : Prediction renames Given (Given'First + K - 1);
+                           Du    : constant Real := Places (K).To.U - G.To.U;
+                           Dv    : constant Real := Places (K).To.V - G.To.V;
+                           Apart : constant Real := Sqrt (Du ** 2 + Dv ** 2);
+                           Rest  : constant Real := Real'Max (0.0, Apart - Sqrt (Places (K).Cov.UU));
+                        begin
+                           if Apart > 0.0 and then Rest > 0.0 then
+                              Asked (K).Cov := (UU => G.Cov.UU + (Rest / Apart) ** 2 * Du ** 2,
+                                                UV => G.Cov.UV + (Rest / Apart) ** 2 * Du * Dv,
+                                                VV => G.Cov.VV + (Rest / Apart) ** 2 * Dv ** 2);
+                           end if;
+                        end;
+                     end loop;
                   end if;
                end;
             end if;
