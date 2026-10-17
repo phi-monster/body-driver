@@ -1122,7 +1122,10 @@ procedure Measure (H : in out Hands; M : in out Model) is
             --  nearer than the fit counts the joint as turned (Kinematics.Counted_Turn): the motion layer sends an arm
             --  again for no landing that near, and a press reads where the arm stands. h14 (seed 6, 10-17), sent back
             --  three times, rested 0.008 to 0.023 off on four joints (the arm sags under its load), the eyes' least
-            --  steps there 0.0009 to 0.010, and every press was lost.
+            --  steps there 0.0009 to 0.010, and every press was lost. Or nearer than the least ask the body executes
+            --  (Steps.Executed_Least), the dead band a servo stops anywhere in: no command takes it nearer. s42 (seed 6,
+            --  10-17), sent back to where a halving step began, rested 4, 12 and 8 units off on three joints, its
+            --  servos' least executed asks about 10, and the descent ended with nothing pressed.
             procedure Read_Arrival (O : Observation) is
                Now : constant Real_Array := O.Readings.Element (Arm_Is);
             begin
@@ -1134,7 +1137,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
                                       and then abs (Now (Now'First + C - 1) - Goal (Goal'First + C - 1))
                                                < Visible_Step (M, Arm_Is, C).Value)
                              or else abs (Now (Now'First + C - 1) - Goal (Goal'First + C - 1))
-                                     < Driver.Robot.Kinematics.Counted_Turn (M, R.Arm, C));
+                                     < Driver.Robot.Kinematics.Counted_Turn (M, R.Arm, C)
+                             or else abs (Now (Now'First + C - 1) - Goal (Goal'First + C - 1))
+                                     < Driver.Robot.Steps.Executed_Least (M, Arm_Is, C));
             end Read_Arrival;
             Waited : Natural;
          begin
