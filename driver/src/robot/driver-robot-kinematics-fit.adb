@@ -382,6 +382,9 @@ package body Driver.Robot.Kinematics.Fit is
       --  at once (Driver.Parallel_For), each with its own residual array.
       To_The_End : Boolean := False;
       --  Go on while a step moves the estimate by more than the unchanged fraction of its standard error.
+      with procedure Prepare (X : Real_Array) is null;
+      --  Called with the parameters the Jacobian's columns are about to be taken about, before any of them runs: what
+      --  Evaluate makes of the parameters that most columns leave as it is may be made here once.
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real);
 
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real) is
@@ -405,6 +408,7 @@ package body Driver.Robot.Kinematics.Fit is
       Evaluate (X, R0.all);
       Cost0 := Cost (R0.all);
       loop
+         Prepare (X);
          --  Forward differences at the square root of the float's resolution
          --  relative to each parameter's size.
          declare
@@ -763,8 +767,14 @@ package body Driver.Robot.Kinematics.Fit is
             E.Ready := False;
          end Release;
 
-         --  The reprojection residuals of the chosen sightings (2 each).
-         procedure Residuals (Xv : Real_Array; Dv : Real_Array; Index : Real_Access; R : out Real_Array) is
+         --  The reprojection residuals of the chosen sightings (2 each). With Joint, only those of the keyframes that
+         --  turned that joint, the rest of R left as it is: in a keyframe that did not turn it the joint's step is the
+         --  identity whatever its parameters (its turn is zero, Rot gives the identity exactly, and its point less the
+         --  identity's image of it is nothing), so the residuals there are the same to the bit and the Jacobian's
+         --  column of the joint's parameters is zero there.
+         procedure Residuals
+           (Xv : Real_Array; Dv : Real_Array; Index : Real_Access; R : in out Real_Array; Joint : Natural := 0)
+         is
             Lx    : constant Lens := Lens_Of (Xv);
             Jx    : constant Joint_Array := Joints_Of (Xv);
             Views : Rigid_Access := new Rigid_Array (1 .. Frames);
@@ -779,9 +789,17 @@ package body Driver.Robot.Kinematics.Fit is
             Made   : Flags_Access := new Flags'(1 .. Tracks => False);
             Made_U : Real_Access := new Real_Array (1 .. Tracks);
             Made_V : Real_Access := new Real_Array (1 .. Tracks);
+            Turned : Flags_Access := new Flags'(1 .. Frames => True);
          begin
+            if Joint > 0 then
+               for F in 1 .. Frames loop
+                  Turned (F) := Changes (Changes'First (1) + F - 1, Changes'First (2) + Joint - 1) /= 0.0;
+               end loop;
+            end if;
             for F in 1 .. Frames loop
-               Views (F) := Inverse (Eye_At (Jx, Chain, Changes_Of (F)));
+               if Turned (F) then
+                  Views (F) := Inverse (Eye_At (Jx, Chain, Changes_Of (F)));
+               end if;
             end loop;
             for K in 1 .. Index'Length loop
                declare
@@ -789,22 +807,26 @@ package body Driver.Robot.Kinematics.Fit is
                   U, V : Real;
                   Ahead : Boolean;
                begin
-                  if not Made (Sg.Track) or else Made_U (Sg.Track) /= Sg.U0 or else Made_V (Sg.Track) /= Sg.V0 then
-                     declare
-                        D0 : constant Real := Exp (Dv (Sg.Track));
-                        H0 : constant Vec3 := Ray (Lx, Sg.U0, Sg.V0);
-                     begin
-                        Points (Sg.Track) := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
-                        Made (Sg.Track) := True;
-                        Made_U (Sg.Track) := Sg.U0;
-                        Made_V (Sg.Track) := Sg.V0;
-                     end;
+                  if Turned (Sg.Frame) then
+                     if not Made (Sg.Track) or else Made_U (Sg.Track) /= Sg.U0 or else Made_V (Sg.Track) /= Sg.V0
+                     then
+                        declare
+                           D0 : constant Real := Exp (Dv (Sg.Track));
+                           H0 : constant Vec3 := Ray (Lx, Sg.U0, Sg.V0);
+                        begin
+                           Points (Sg.Track) := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
+                           Made (Sg.Track) := True;
+                           Made_U (Sg.Track) := Sg.U0;
+                           Made_V (Sg.Track) := Sg.V0;
+                        end;
+                     end if;
+                     Project (Lx, Views (Sg.Frame) * Points (Sg.Track), U, V, Ahead);
+                     R (2 * K - 1) := U - Sg.U;
+                     R (2 * K) := V - Sg.V;
                   end if;
-                  Project (Lx, Views (Sg.Frame) * Points (Sg.Track), U, V, Ahead);
-                  R (2 * K - 1) := U - Sg.U;
-                  R (2 * K) := V - Sg.V;
                end;
             end loop;
+            Free (Turned);
             Free (Views);
             Free (Points);
             Free (Made);
@@ -1205,10 +1227,11 @@ package body Driver.Robot.Kinematics.Fit is
                         procedure Column (P : Positive) is
                            Xp : Real_Array := X;
                            H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));
-                           Rp : Real_Access := new Real_Array (1 .. 2 * Used);
+                           Rp : Real_Access := new Real_Array'(R0.all);
                         begin
                            Xp (P) := Xp (P) + H;
-                           Residuals (Xp, Depth.all, Index, Rp.all);
+                           Residuals (Xp, Depth.all, Index, Rp.all,
+                                      Joint => (if P <= 6 then 0 else (P - 7) / Per_Joint + 1));
                            for I in 1 .. 2 * Used loop
                               Jp (I, P) := (Rp (I) - R0 (I)) / H;
                            end loop;
@@ -4617,9 +4640,31 @@ package body Driver.Robot.Kinematics.Fit is
                declare
                   Kept : Sighting_Access := new Sighting_Array (1 .. Used);
                   K    : Natural := 0;
+                  --  The lines of sight of every kept sighting's pixel and of its reference pixel, at the lens of the
+                  --  parameters the Jacobian's columns are taken about (Prepare): a column that moves a joint leaves
+                  --  the lens, and so these lines, as they are, and every column made them again (Ray, Newton's
+                  --  method through the distortion): s29's driver sampled for 10 s in its fit, 10-17, spent 6165 of
+                  --  its 6686 samples in this Evaluate in Ray, a third of all its processors were busy with.
+                  type Vec3_Array_Access is access Vec3_Array;
+                  procedure Free is new Ada.Unchecked_Deallocation (Vec3_Array, Vec3_Array_Access);
+                  Ready     : Boolean := False;
+                  Ready_At  : Lens;
+                  Own_Lines : Vec3_Array_Access := new Vec3_Array (1 .. Used);
+                  Ref_Lines : Vec3_Array_Access := new Vec3_Array (1 .. Used);
+
+                  procedure Prepare (Xv : Real_Array) is
+                  begin
+                     Ready_At := Lens_Of (Xv);
+                     for I in 1 .. Used loop
+                        Own_Lines (I) := Ray (Ready_At, Kept (I).U, Kept (I).V);
+                        Ref_Lines (I) := Ray (Ready_At, Kept (I).U0, Kept (I).V0);
+                     end loop;
+                     Ready := True;
+                  end Prepare;
 
                   procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
                      Lx         : constant Lens := Lens_Of (Xv);
+                     Same       : constant Boolean := Ready and then Lx = Ready_At;
                      Focal_Here : constant Real := (Lx.Fx + Lx.Fy) / 2.0;
                      Poses      : Rigid_Access := new Pose_Array;
                      --  Per keyframe, its motion from the reference eye; per track, the line of sight of its reference
@@ -4641,41 +4686,49 @@ package body Driver.Robot.Kinematics.Fit is
                      for I in 1 .. Used loop
                         Track_Count := Natural'Max (Track_Count, Kept (I).Track);
                      end loop;
-                     declare
-                        type Ray_Array is array (1 .. Track_Count) of Vec3;
-                        type Ray_Access is access Ray_Array;
-                        procedure Free is new Ada.Unchecked_Deallocation (Ray_Array, Ray_Access);
-                        Rays   : Ray_Access := new Ray_Array;
-                        Made   : Flags_Access := new Flags'(1 .. Track_Count => False);
-                        Made_U : Real_Access := new Real_Array (1 .. Track_Count);
-                        Made_V : Real_Access := new Real_Array (1 .. Track_Count);
-                     begin
+                     if Same then
                         for I in 1 .. Used loop
-                           declare
-                              X : Sighting renames Kept (I);
-                           begin
-                              if not Made (X.Track) or else Made_U (X.Track) /= X.U0 or else Made_V (X.Track) /= X.V0
-                              then
-                                 Rays (X.Track) := Ray (Lx, X.U0, X.V0);
-                                 Made (X.Track) := True;
-                                 Made_U (X.Track) := X.U0;
-                                 Made_V (X.Track) := X.V0;
-                              end if;
-                              R (R'First + I - 1) := Sampson (Motions (X.Frame).Rr, Motions (X.Frame).Tt, Rays (X.Track),
-                                                              Ray (Lx, X.U, X.V), Focal_Here);
-                           end;
+                           R (R'First + I - 1) := Sampson (Motions (Kept (I).Frame).Rr, Motions (Kept (I).Frame).Tt,
+                                                           Ref_Lines (I), Own_Lines (I), Focal_Here);
                         end loop;
-                        Free (Rays);
-                        Free (Made);
-                        Free (Made_U);
-                        Free (Made_V);
-                     end;
+                     else
+                        declare
+                           type Ray_Array is array (1 .. Track_Count) of Vec3;
+                           type Ray_Access is access Ray_Array;
+                           procedure Free is new Ada.Unchecked_Deallocation (Ray_Array, Ray_Access);
+                           Rays   : Ray_Access := new Ray_Array;
+                           Made   : Flags_Access := new Flags'(1 .. Track_Count => False);
+                           Made_U : Real_Access := new Real_Array (1 .. Track_Count);
+                           Made_V : Real_Access := new Real_Array (1 .. Track_Count);
+                        begin
+                           for I in 1 .. Used loop
+                              declare
+                                 X : Sighting renames Kept (I);
+                              begin
+                                 if not Made (X.Track) or else Made_U (X.Track) /= X.U0 or else Made_V (X.Track) /= X.V0
+                                 then
+                                    Rays (X.Track) := Ray (Lx, X.U0, X.V0);
+                                    Made (X.Track) := True;
+                                    Made_U (X.Track) := X.U0;
+                                    Made_V (X.Track) := X.V0;
+                                 end if;
+                                 R (R'First + I - 1) := Sampson (Motions (X.Frame).Rr, Motions (X.Frame).Tt, Rays (X.Track),
+                                                                 Ray (Lx, X.U, X.V), Focal_Here);
+                              end;
+                           end loop;
+                           Free (Rays);
+                           Free (Made);
+                           Free (Made_U);
+                           Free (Made_V);
+                        end;
+                     end if;
                      Free (Motions);
                      Free (Poses);
                   end Evaluate;
 
                   procedure Solve is new Robust_Fit
-                    (Count, Used, Driver.Conventions.Initial_Damping, Evaluate, At_Once => True, To_The_End => True);
+                    (Count, Used, Driver.Conventions.Initial_Damping, Evaluate, At_Once => True, To_The_End => True,
+                     Prepare => Prepare);
                begin
                   for I in 1 .. S loop
                      if Inlier (I) then
@@ -4685,6 +4738,8 @@ package body Driver.Robot.Kinematics.Fit is
                   end loop;
                   Solve (X, Sigma);
                   Free (Kept);
+                  Free (Own_Lines);
+                  Free (Ref_Lines);
                   --  The axes' tangent planes anew at the solution, the points
                   --  on them nearest the reference eye.
                   Base := Joints_Of (X);
