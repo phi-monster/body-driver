@@ -884,7 +884,7 @@ procedure Fake_Robot is
 begin
    if Option ("--connect") = "" or else Option ("--out") = "" then
       Put_Line ("usage: fake_robot --connect HOST:PORT --seed N --out DIR [--width W --height H] [--beats N]"
-                & " [--stop FILE] [--scramble 0|1] [--dump N] [--quirk NAME=VALUE ...]");
+                & " [--stop FILE] [--supersample N] [--scramble 0|1] [--dump N] [--quirk NAME=VALUE ...]");
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
       return;
    end if;
@@ -900,6 +900,7 @@ begin
    Scrambled := Option ("--scramble", "1") /= "0";
    Dump_Every := Natural'Value (Option ("--dump", "0"));
    Rate := Real'Value (Option ("--rate", "10.0"));
+   Fake_Render.Supersample := Positive'Value (Option ("--supersample", "1"));
    declare
       Hands : constant String := Option ("--hands");
       Comma : constant Natural := Ada.Strings.Fixed.Index (Hands, ",");

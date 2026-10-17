@@ -187,99 +187,111 @@ package body Fake_Render is
       for Row in First_Row .. Last_Row loop
          for Col in 0 .. C.Width - 1 loop
             declare
-               --  The ray through the pixel's centre, in the camera's frame then the world's.
-               Px : constant Real := (Real (Col) + 0.5 - C.Cx) / C.Fx;
-               Py : constant Real := (Real (Row) + 0.5 - C.Cy) / C.Fy;
-               Pn : constant Real := Sqrt (Px * Px + Py * Py + 1.0);
-               Cx : constant Real := Px / Pn;
-               Cy : constant Real := Py / Pn;
-               Cz : constant Real := 1.0 / Pn;
-               Dx : constant Real := R (1, 1) * Cx + R (1, 2) * Cy + R (1, 3) * Cz;
-               Dy : constant Real := R (2, 1) * Cx + R (2, 2) * Cy + R (2, 3) * Cz;
-               Dz : constant Real := R (3, 1) * Cx + R (3, 2) * Cy + R (3, 3) * Cz;
-               Best_T : Real := Real'Last;
-               Best_S : Natural := 0;
-               K      : constant Positive := Into'First + 3 * (Row * C.Width + Col);
+               K   : constant Positive := Into'First + 3 * (Row * C.Width + Col);
+               Acc : array (1 .. 3) of Real := [others => 0.0];
             begin
-               for I in Seen'Range loop
-                  declare
-                     T : constant Real := Distance (Solids (I), Seen (I), Dx, Dy, Dz);
-                  begin
-                     if T < Best_T then
-                        Best_T := T;
-                        Best_S := I;
-                     end if;
-                  end;
-               end loop;
-               if Best_S = 0 then
-                  Into (K) := Sky;
-                  Into (K + 1) := Sky;
-                  Into (K + 2) := Sky;
-               else
-                  declare
-                     S : Solid renames Solids (Best_S);
-                     F : Seen_From renames Seen (Best_S);
-                     --  The hit in the solid's frame, and its outward normal there.
-                     Lx : constant Real := F.Rxx * Dx + F.Rxy * Dy + F.Rxz * Dz;
-                     Ly : constant Real := F.Ryx * Dx + F.Ryy * Dy + F.Ryz * Dz;
-                     Lz : constant Real := F.Rzx * Dx + F.Rzy * Dy + F.Rzz * Dz;
-                     Hx : constant Real := F.Ox + Best_T * Lx;
-                     Hy : constant Real := F.Oy + Best_T * Ly;
-                     Hz : constant Real := F.Oz + Best_T * Lz;
-                     Nx, Ny, Nz : Real := 0.0;
-                     U, V : Real;
-                  begin
-                     if S.Kind = Plane then
-                        Nz := (if Lz < 0.0 then 1.0 else -1.0);
-                        U := Hx;
-                        V := Hy;
-                     else
-                        --  The face is the one the hit lies on, to the rounding of the slab test.
-                        declare
-                           Ex : constant Real := abs (abs Hx - S.Half (1));
-                           Ey : constant Real := abs (abs Hy - S.Half (2));
-                           Ez : constant Real := abs (abs Hz - S.Half (3));
-                        begin
-                           if Ex <= Ey and then Ex <= Ez then
-                              Nx := (if Hx > 0.0 then 1.0 else -1.0);
-                              U := Hy;
-                              V := Hz;
-                           elsif Ey <= Ez then
-                              Ny := (if Hy > 0.0 then 1.0 else -1.0);
-                              U := Hx;
-                              V := Hz;
-                           else
-                              Nz := (if Hz > 0.0 then 1.0 else -1.0);
-                              U := Hx;
-                              V := Hy;
-                           end if;
-                        end;
-                     end if;
+               for Sub_Y in 1 .. Supersample loop
+                  for Sub_X in 1 .. Supersample loop
                      declare
-                        --  The normal in the world (the rotation transposed).
-                        Wx : constant Real := F.Rxx * Nx + F.Ryx * Ny + F.Rzx * Nz;
-                        Wy : constant Real := F.Rxy * Nx + F.Ryy * Ny + F.Rzy * Nz;
-                        Wz : constant Real := F.Rxz * Nx + F.Ryz * Ny + F.Rzz * Nz;
-                        Diffuse : constant Real := Real'Max (0.0, Wx * Light (1) + Wy * Light (2) + Wz * Light (3));
-                        --  Blinn-Phong: the half vector between the light and the way back to the eye.
-                        Hhx : constant Real := Light (1) - Dx;
-                        Hhy : constant Real := Light (2) - Dy;
-                        Hhz : constant Real := Light (3) - Dz;
-                        Hn  : constant Real := Sqrt (Hhx * Hhx + Hhy * Hhy + Hhz * Hhz);
-                        Spec_Cos : constant Real := Real'Max (0.0, (Wx * Hhx + Wy * Hhy + Wz * Hhz) / Hn);
-                        M       : Material renames S.Mat;
-                        Spec    : constant Real := (if M.Gloss > 0.0 then M.Gloss * Spec_Cos ** 40 else 0.0);
-                        Facing  : constant Real := 0.92 + 0.08 * abs (Wx * Dx + Wy * Dy + Wz * Dz);
-                        Tex     : constant Real := Shade_Of (M, U, V);
-                        Level   : constant Real := (Ambient + (1.0 - Ambient) * Diffuse) * Tex * Facing;
+                        --  The ray through the sub-sample's place in the pixel, in the camera's frame then the world's.
+                        Px : constant Real := (Real (Col) + (Real (Sub_X) - 0.5) / Real (Supersample) - C.Cx) / C.Fx;
+                        Py : constant Real := (Real (Row) + (Real (Sub_Y) - 0.5) / Real (Supersample) - C.Cy) / C.Fy;
+                        Pn : constant Real := Sqrt (Px * Px + Py * Py + 1.0);
+                        Cx : constant Real := Px / Pn;
+                        Cy : constant Real := Py / Pn;
+                        Cz : constant Real := 1.0 / Pn;
+                        Dx : constant Real := R (1, 1) * Cx + R (1, 2) * Cy + R (1, 3) * Cz;
+                        Dy : constant Real := R (2, 1) * Cx + R (2, 2) * Cy + R (2, 3) * Cz;
+                        Dz : constant Real := R (3, 1) * Cx + R (3, 2) * Cy + R (3, 3) * Cz;
+                        Best_T : Real := Real'Last;
+                        Best_S : Natural := 0;
                      begin
-                        for Ch in 1 .. 3 loop
-                           Into (K + Ch - 1) :=
-                             Real'Max (0.0, Real'Min (255.0, 255.0 * (M.Albedo (Ch) * Level + Spec)));
+                        for I in Seen'Range loop
+                           declare
+                              T : constant Real := Distance (Solids (I), Seen (I), Dx, Dy, Dz);
+                           begin
+                              if T < Best_T then
+                                 Best_T := T;
+                                 Best_S := I;
+                              end if;
+                           end;
                         end loop;
+                        if Best_S = 0 then
+                           Acc (1) := Acc (1) + Sky;
+                           Acc (2) := Acc (2) + Sky;
+                           Acc (3) := Acc (3) + Sky;
+                        else
+                           declare
+                              S : Solid renames Solids (Best_S);
+                              F : Seen_From renames Seen (Best_S);
+                              --  The hit in the solid's frame, and its outward normal there.
+                              Lx : constant Real := F.Rxx * Dx + F.Rxy * Dy + F.Rxz * Dz;
+                              Ly : constant Real := F.Ryx * Dx + F.Ryy * Dy + F.Ryz * Dz;
+                              Lz : constant Real := F.Rzx * Dx + F.Rzy * Dy + F.Rzz * Dz;
+                              Hx : constant Real := F.Ox + Best_T * Lx;
+                              Hy : constant Real := F.Oy + Best_T * Ly;
+                              Hz : constant Real := F.Oz + Best_T * Lz;
+                              Nx, Ny, Nz : Real := 0.0;
+                              U, V : Real;
+                           begin
+                              if S.Kind = Plane then
+                                 Nz := (if Lz < 0.0 then 1.0 else -1.0);
+                                 U := Hx;
+                                 V := Hy;
+                              else
+                                 --  The face is the one the hit lies on, to the rounding of the slab test.
+                                 declare
+                                    Ex : constant Real := abs (abs Hx - S.Half (1));
+                                    Ey : constant Real := abs (abs Hy - S.Half (2));
+                                    Ez : constant Real := abs (abs Hz - S.Half (3));
+                                 begin
+                                    if Ex <= Ey and then Ex <= Ez then
+                                       Nx := (if Hx > 0.0 then 1.0 else -1.0);
+                                       U := Hy;
+                                       V := Hz;
+                                    elsif Ey <= Ez then
+                                       Ny := (if Hy > 0.0 then 1.0 else -1.0);
+                                       U := Hx;
+                                       V := Hz;
+                                    else
+                                       Nz := (if Hz > 0.0 then 1.0 else -1.0);
+                                       U := Hx;
+                                       V := Hy;
+                                    end if;
+                                 end;
+                              end if;
+                              declare
+                                 --  The normal in the world (the rotation transposed).
+                                 Wx : constant Real := F.Rxx * Nx + F.Ryx * Ny + F.Rzx * Nz;
+                                 Wy : constant Real := F.Rxy * Nx + F.Ryy * Ny + F.Rzy * Nz;
+                                 Wz : constant Real := F.Rxz * Nx + F.Ryz * Ny + F.Rzz * Nz;
+                                 Diffuse : constant Real :=
+                                   Real'Max (0.0, Wx * Light (1) + Wy * Light (2) + Wz * Light (3));
+                                 --  Blinn-Phong: the half vector between the light and the way back to the eye.
+                                 Hhx : constant Real := Light (1) - Dx;
+                                 Hhy : constant Real := Light (2) - Dy;
+                                 Hhz : constant Real := Light (3) - Dz;
+                                 Hn  : constant Real := Sqrt (Hhx * Hhx + Hhy * Hhy + Hhz * Hhz);
+                                 Spec_Cos : constant Real := Real'Max (0.0, (Wx * Hhx + Wy * Hhy + Wz * Hhz) / Hn);
+                                 M       : Material renames S.Mat;
+                                 Spec    : constant Real := (if M.Gloss > 0.0 then M.Gloss * Spec_Cos ** 40 else 0.0);
+                                 Facing  : constant Real := 0.92 + 0.08 * abs (Wx * Dx + Wy * Dy + Wz * Dz);
+                                 Tex     : constant Real := Shade_Of (M, U, V);
+                                 Level   : constant Real := (Ambient + (1.0 - Ambient) * Diffuse) * Tex * Facing;
+                              begin
+                                 for Ch in 1 .. 3 loop
+                                    Acc (Ch) := Acc (Ch)
+                                      + Real'Max (0.0, Real'Min (255.0, 255.0 * (M.Albedo (Ch) * Level + Spec)));
+                                 end loop;
+                              end;
+                           end;
+                        end if;
                      end;
-                  end;
-               end if;
+                  end loop;
+               end loop;
+               for Ch in 1 .. 3 loop
+                  Into (K + Ch - 1) := Acc (Ch) / Real (Supersample * Supersample);
+               end loop;
             end;
          end loop;
       end loop;
