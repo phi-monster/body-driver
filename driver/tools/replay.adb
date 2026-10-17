@@ -213,7 +213,11 @@ procedure Replay is
             H : constant Hand_Id := Hand_Id (Id);
          begin
             Append (Line_Text, (if Id > 1 then "," else "") & "{""arm"":" & Natural'Image (Natural (Arm_Of (Hands, H)))
-                    & ",""closer"":""" & To_String (Reading_Path (Closer_Group (Hands, H))) & """,""lobes"":[");
+                    & ",""closer"":"""
+                    --  The hand an arm's tool is when the arm has no closer has none (Hand.Closer_Group 0): its path is
+                    --  empty (s32's replay, 10-17, ended in a range check here after 5509 beats).
+                    & (if Natural (Closer_Group (Hands, H)) > 0 then To_String (Reading_Path (Closer_Group (Hands, H))) else "")
+                    & """,""lobes"":[");
             for Lobe in 1 .. Lobe_Count (Hands, H) loop
                Append (Line_Text, (if Lobe > 1 then ",{" else "{"));
                for At_Opening in Opening loop
