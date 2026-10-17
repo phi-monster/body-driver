@@ -3,6 +3,7 @@ with Driver.Conventions;
 with Driver.Log;
 with Driver.Robot.Hand.Aims;
 with Driver.Robot.Kinematics;
+with Driver.Robot.Steps;
 
 package body Driver.Robot.Hand.Pressing is
 
@@ -44,7 +45,33 @@ package body Driver.Robot.Hand.Pressing is
             if In_Unit (1, 1) = Real'Last then
                return Real'Last;
             end if;
-            return Threshold (Vector_Gate (Vec3'Length)) * Sqrt (Widest (In_Unit));
+            --  And no less than the least move of the tool the body executes: the place of a tool the fit holds to
+            --  within nothing gave a least push of nothing, and a push under every joint's least executed step moves
+            --  nothing (a servo's dead band); the press doubled from Real'Model_Epsilon and took 6130 beats to its
+            --  hand's end (s39, servo seed 7 of the fake robot, 10-17: "doubling from 0.0000 until blocked"). The
+            --  least of the tool's moves under one joint's least executed step, from where the arm stands.
+            declare
+               Now   : constant Real_Array := O.Readings.Element (G);
+               Here  : constant Vec3 := Kinematics.Eye_In_Reference (M, Arm, Now).Translation;
+               Moves : Real := Real'Last;
+            begin
+               for C in 1 .. Group_Size (M, G) loop
+                  declare
+                     Step : constant Real := Steps.Executed_Least (M, G, C);
+                  begin
+                     if Step > 0.0 and then Step < Real'Last then
+                        declare
+                           Then_R : Real_Array := Now;
+                        begin
+                           Then_R (Then_R'First + C - 1) := Then_R (Then_R'First + C - 1) + Step;
+                           Moves := Real'Min (Moves, abs (Kinematics.Eye_In_Reference (M, Arm, Then_R).Translation - Here));
+                        end;
+                     end if;
+                  end;
+               end loop;
+               return Real'Max (Threshold (Vector_Gate (Vec3'Length)) * Sqrt (Widest (In_Unit)),
+                                (if Moves < Real'Last then Moves else 0.0));
+            end;
          end;
       end;
    end Least_Push;
