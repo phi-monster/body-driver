@@ -380,12 +380,27 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   declare
                      Goal : constant Real_Array := Driver.Robot.Motion.Last_Readings (Plan);
                      Step : constant Real_Array := [for I in Goal'Range => Goal (I) - Now (Now'First + I - Goal'First)];
+                     --  And the body executes it: some joint turns by the least the body is known to execute (a
+                     --  servo's dead band; a joint whose least is not known, by anything). s40 (servo seed 6 of the
+                     --  fake robot, 10-17): raises of 0.058 and 0.116 the way the eye moves furthest turned every
+                     --  joint within its band, the arm stood still through both (the truth), the second was called
+                     --  blocked, no frame of a second pose was kept, and no hand was made.
+                     Executes : Boolean := False;
                   begin
+                     for I in Step'Range loop
+                        declare
+                           Least : constant Real := Driver.Robot.Steps.Executed_Least (M, Group, I - Step'First + 1);
+                        begin
+                           if abs Step (I) > 0.0 and then (Least >= Real'Last or else abs Step (I) >= Least) then
+                              Executes := True;
+                           end if;
+                        end;
+                     end loop;
                      --  A pose is one the eye was carried to (Hand.Eye_Moved): the raise moves its picture by what
                      --  its cells tell, and a raise its readings show is not always one (A73: arm 2's first raises
                      --  were of a few millionths, the least the tool's place told at its reference readings, and its
                      --  eye gathered nine poses that told the fingers from nothing).
-                     if Driver.Robot.Lockin.Shows_Step (M, Eye, Group, Step) then
+                     if Executes and then Driver.Robot.Lockin.Shows_Step (M, Eye, Group, Step) then
                         Ready := True;
                         return;
                      end if;
