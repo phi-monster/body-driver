@@ -7,6 +7,7 @@ with Driver.Distributions;
 with Driver.Log;
 with Driver.Shared_For;
 with Driver.Robot.Channels;
+with Driver.Robot.Kinematics;
 with Driver.Robot.Flow;
 with Driver.Robot.Lag;
 with Driver.Robot.Regression;
@@ -1255,15 +1256,28 @@ package body Driver.Robot.Lockin is
       end;
    end Cell_Noise;
 
+   --  The arm that carries the eye moves its whole view, and its keyframes measure how far a unit of each channel moves
+   --  it in the eye they are seen in (Kinematics.Pixels_Per_Unit), where the lock-in's flow, a beat at a time, reads
+   --  that view hardly moving: s33 (servo seed 7 of the fake robot, 10-17) at beat 3217 had 0.0011 px a unit of the
+   --  arm's first channel in its own eye from the lock-in, 0.31 from the keyframes; no raise of the eye within the
+   --  arm's reach showed, its closer was seen from no second pose, and its hand was never made. The keyframes'
+   --  measure, once they have one; the lock-in's before, and for every other group and eye.
    function Shows_Step (M : Model; E : Eye_Id; G : Group_Id; Step : Real_Array) return Boolean is
-      Noise : constant Real := Cell_Noise (M, E);
+      Noise   : constant Real := Cell_Noise (M, E);
+      Mount_E : constant Mount := Eye_Mount (M, E);
+      Carrier : constant Arm_Id'Base :=
+        (if Mount_E.Kind = Arm_Carried and then Natural (Mount_E.Arm) <= Arm_Count (M)
+           and then Arm_Group (M, Mount_E.Arm) = G and then Driver.Robot.Kinematics.Eye_Of (M, Mount_E.Arm) = E
+         then Mount_E.Arm else 0);
    begin
       if Noise = Real'Last then
          return False;
       end if;
       for C in Step'Range loop
          declare
-            Per_Unit : constant Real := Shift (M, E, G, C - Step'First + 1);
+            Kept     : constant Real :=
+              (if Carrier > 0 then Driver.Robot.Kinematics.Pixels_Per_Unit (M, Carrier, C - Step'First + 1) else 0.0);
+            Per_Unit : constant Real := (if Kept > 0.0 then Kept else Shift (M, E, G, C - Step'First + 1));
          begin
             if Per_Unit > 0.0 and then Driver.Uncertain.Significant (Step (C) * Per_Unit, Noise) then
                return True;

@@ -52,7 +52,6 @@ package body Driver.Robot.Kinematics is
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
 
-   --  The arm's eye: the one the graph mounts on it; 0 when none.
    function Eye_Of (M : Model; A : Arm_Id) return Eye_Id'Base is
    begin
       for E in M.Graph.Mounts.First_Index .. M.Graph.Mounts.Last_Index loop

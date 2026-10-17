@@ -52,6 +52,9 @@ private package Driver.Robot.Kinematics is
    --  cannot say: the aligner's own error on two identical pictures is far
    --  under its error on pictures that moved.
 
+   function Eye_Of (M : Model; A : Arm_Id) return Eye_Id'Base;
+   --  The arm's eye: the one the graph mounts on it, the view its keyframes are seen in; 0 when none.
+
    function Pixels_Per_Unit (M : Model; A : Arm_Id; Channel : Positive) return Real;
 
    function Shift_Unseen (M : Model; A : Arm_Id; Channel : Positive) return Boolean;
