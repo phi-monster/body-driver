@@ -1916,6 +1916,20 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                     <= Driver.Conventions.Z
                   then
                      Rival := True;
+                     --  The rival and the best, for the log: what the two eyes are (focal, centre in the arm's frame).
+                     declare
+                        function Eye_Image (S : State) return String is
+                          ("focal " & Driver.Log.Image (S.L.Fx, 1) & " x " & Driver.Log.Image (S.L.Fy, 1) & ", centre ("
+                           & Driver.Log.Image (S.Pose (Arm).C (1), 3) & ", " & Driver.Log.Image (S.Pose (Arm).C (2), 3)
+                           & ", " & Driver.Log.Image (S.Pose (Arm).C (3), 3) & "), its axis ("
+                           & Driver.Log.Image (S.Pose (Arm).R (1, 3), 3) & ", " & Driver.Log.Image (S.Pose (Arm).R (2, 3), 3)
+                           & ", " & Driver.Log.Image (S.Pose (Arm).R (3, 3), 3) & ")");
+                     begin
+                        Driver.Log.Line (Driver.Log.Robot, "kinematics: a fixed eye's search for arm" & Arm'Image
+                                         & ": best " & Eye_Image (Racers (Ended (Best)).S.all) & "; rival "
+                                         & Eye_Image (Racers (Ended (E)).S.all) & ", likelihoods "
+                                         & Driver.Log.Image (Likely (Best), 1) & " and " & Driver.Log.Image (Likely (E), 1));
+                     end;
                   end if;
                end;
             end loop;
