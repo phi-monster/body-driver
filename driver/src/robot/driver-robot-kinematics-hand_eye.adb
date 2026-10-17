@@ -6,6 +6,7 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Log;
 with Driver.Numerics.Dense;
+with Driver.Parallel_For;
 with Driver.Robot.Kinematics.Errors;
 with Driver.Uncertain;
 
@@ -1605,21 +1606,25 @@ package body Driver.Robot.Kinematics.Hand_Eye is
 
       function Focal (Step : Integer) return Real is (Start * Half_Octave ** Step);
 
+      --  Every rotation's start at once (Driver.Parallel_For): each solves its own, from the problem it only reads.
       procedure Score (Step : Integer) is
          L        : constant Fit.Lens :=
            (Fx | Fy => Focal (Step), Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, K1 | K2 => 0.0);
          Column   : Real_Array (1 .. Rotations);
-         Depth    : Real_Access := new Real_Array (1 .. P.Tracks);
-         Centre   : Vec3;
-         Score_At : Real;
-         Ok       : Boolean;
-      begin
-         for K in 1 .. Rotations loop
+         procedure One (K : Positive) is
+            Depth    : Real_Access := new Real_Array (1 .. P.Tracks);
+            Centre   : Vec3;
+            Score_At : Real;
+            Ok       : Boolean;
+         begin
             Solve_At (P, Arm, (R => Spiral_Rotation (K, Rotations), C => Zero3), L, Start_Link, Width, Height,
                       Centre, Depth.all, Score_At, Ok);
             Column (K) := (if Ok then Score_At else Real'First);
-         end loop;
-         Free (Depth);
+            Free (Depth);
+         end One;
+         procedure Every is new Driver.Parallel_For (One);
+      begin
+         Every (1, Rotations);
          Scanned.Insert (Step, Column);
       end Score;
 
@@ -1714,12 +1719,10 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       Taken     : Fit.Flag_Array (1 .. Rotations * Focals'Length) := [others => False];
       Active    : Fit.Flag_Array (1 .. P.Arms) := [others => False];
       Which     : Free_Terms (1 .. (if Lens_Known then 0 else 4) + Pose_Terms);
-      Depth     : Real_Array (1 .. P.Tracks);
-      Centre    : Vec3;
-      Score_At  : Real;
-      Ok        : Boolean;
       Racers    : Racer_Access;
       Count     : Natural := 0;
+      Picked_K  : Fit.Count_Array (1 .. Rotations) := [others => 0];   --  each racer's rotation and focal length
+      Picked_M  : Fit.Count_Array (1 .. Rotations) := [others => 0];
 
       function Lens_At (M : Positive) return Fit.Lens is
         (if Lens_Known then S.L
@@ -1759,13 +1762,24 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       Best_S := null;
       Best_W := null;
       if Lens_Known then
-         for K in 1 .. Rotations loop
-            for M in Focals'Range loop
-               Solve_At (P, Arm, (R => Spiral_Rotation (K, Rotations), C => Zero3), Lens_At (M), Start_Link, Width,
-                         Height, Centre, Depth, Score_At, Ok);
-               Scores (K, M) := (if Ok then Score_At else Real'First);
-            end loop;
-         end loop;
+         declare
+            procedure One (K : Positive) is
+               Depth    : Real_Access := new Real_Array (1 .. P.Tracks);
+               Centre   : Vec3;
+               Score_At : Real;
+               Ok       : Boolean;
+            begin
+               for M in Focals'Range loop
+                  Solve_At (P, Arm, (R => Spiral_Rotation (K, Rotations), C => Zero3), Lens_At (M), Start_Link, Width,
+                            Height, Centre, Depth.all, Score_At, Ok);
+                  Scores (K, M) := (if Ok then Score_At else Real'First);
+               end loop;
+               Free (Depth);
+            end One;
+            procedure Every is new Driver.Parallel_For (One);
+         begin
+            Every (1, Rotations);
+         end;
       else
          Scores.all := Scan.Scores;
          Free (Scan);
@@ -1789,40 +1803,58 @@ package body Driver.Robot.Kinematics.Hand_Eye is
             exit when Pick_K = 0;
             Taken ((Pick_K - 1) * Focals'Length + Pick_M) := True;
             Count := Count + 1;
-            declare
-               Pose : constant Pose_Value := (R => Spiral_Rotation (Pick_K, Rotations), C => Zero3);
-            begin
-               Racers (Count).S := new State'(S);
-               Racers (Count).S.L := Lens_At (Pick_M);
-               Racers (Count).W := new Work (P.Tracks, P.Sightings);
-               Racers (Count).W.Link := [others => 0];
-               Racers (Count).W.Lz := [others => 0.0];
-               Racers (Count).W.Seen := [others => False];
-               Racers (Count).W.Fits := [others => False];
-               Racers (Count).W.Floor := Sqrt (Driver.Alignment.Quantization);
-               Solve_At (P, Arm, Pose, Racers (Count).S.L, Start_Link, Width, Height, Centre, Depth, Score_At, Ok);
-               Start_From (P, Arm, Racers (Count).S.all, Racers (Count).W.all, Pose, Centre, Depth, Start_Link);
-            end;
+            Picked_K (Count) := Pick_K;
+            Picked_M (Count) := Pick_M;
          end;
       end loop;
+      declare
+         procedure Start_One (C : Positive) is
+            Pose     : constant Pose_Value := (R => Spiral_Rotation (Picked_K (C), Rotations), C => Zero3);
+            Depth    : Real_Access := new Real_Array (1 .. P.Tracks);
+            Centre   : Vec3;
+            Score_At : Real;
+            Ok       : Boolean;
+         begin
+            Racers (C).S := new State'(S);
+            Racers (C).S.L := Lens_At (Picked_M (C));
+            Racers (C).W := new Work (P.Tracks, P.Sightings);
+            Racers (C).W.Link := [others => 0];
+            Racers (C).W.Lz := [others => 0.0];
+            Racers (C).W.Seen := [others => False];
+            Racers (C).W.Fits := [others => False];
+            Racers (C).W.Floor := Sqrt (Driver.Alignment.Quantization);
+            Solve_At (P, Arm, Pose, Racers (C).S.L, Start_Link, Width, Height, Centre, Depth.all, Score_At, Ok);
+            Start_From (P, Arm, Racers (C).S.all, Racers (C).W.all, Pose, Centre, Depth.all, Start_Link);
+            Free (Depth);
+         end Start_One;
+         procedure Start_Every is new Driver.Parallel_For (Start_One);
+      begin
+         Start_Every (1, Count);
+      end;
       --  The race: every racer takes Budget steps, the less likely half drops out, the budget doubles.
       declare
          Alive  : Natural := Count;
          Budget : Positive := 1;
       begin
          while Alive > Finalists loop
-            for C in 1 .. Count loop
-               if Racers (C).Alive then
-                  for Step in 1 .. Budget loop
-                     Advance (Racers (C));
-                  end loop;
-                  declare
-                     Floor : Real := -1.0;
-                  begin
-                     Likelihood_Of (Racers (C).S.all, Racers (C).W.all, Floor, Racers (C).Score);
-                  end;
-               end if;
-            end loop;
+            declare
+               procedure Run_One (C : Positive) is
+               begin
+                  if Racers (C).Alive then
+                     for Step in 1 .. Budget loop
+                        Advance (Racers (C));
+                     end loop;
+                     declare
+                        Floor : Real := -1.0;
+                     begin
+                        Likelihood_Of (Racers (C).S.all, Racers (C).W.all, Floor, Racers (C).Score);
+                     end;
+                  end if;
+               end Run_One;
+               procedure Run_Every is new Driver.Parallel_For (Run_One);
+            begin
+               Run_Every (1, Count);
+            end;
             --  Drop the worse half (the first of equals stay): each racer that has fewer more likely than itself
             --  than the keepers number stays.
             declare
@@ -1868,9 +1900,19 @@ package body Driver.Robot.Kinematics.Hand_Eye is
          Hits   : Natural := 0;   --  the finalists that ended at the best optimum
          Rival  : Boolean := False;   --  one that ended elsewhere that the sightings do not tell from it
       begin
+         declare
+            procedure Settle_One (C : Positive) is
+            begin
+               if Racers (C).Alive then
+                  Settle_Links (P, Racers (C).S.all, Active, Racers (C).W.all, Which, Width, Height);
+               end if;
+            end Settle_One;
+            procedure Settle_Every is new Driver.Parallel_For (Settle_One);
+         begin
+            Settle_Every (1, Count);
+         end;
          for C in 1 .. Count loop
             if Racers (C).Alive then
-               Settle_Links (P, Racers (C).S.all, Active, Racers (C).W.all, Which, Width, Height);
                Ends := Ends + 1;
                Ended (Ends) := C;
                declare

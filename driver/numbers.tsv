@@ -2322,6 +2322,8 @@ driver-robot-kinematics-hand_eye.adb	Entry_Of.Depth.Append ((if Held.Link (T) >=
 driver-robot-kinematics-hand_eye.adb	Equal (Q) := (if Reduced (Q, Q) > 0.0 then 1.0 / Sqrt (Reduced (Q, Q)) else 0.0);	1.0	numerics	Jacobi equilibration: each term scaled by its diagonal
 driver-robot-kinematics-hand_eye.adb	Error (2 * Taken - 1 + C) := Huber (Z) * R (K);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-hand_eye.adb	Error : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-hand_eye.adb	Every (1, Rotations);	1	structure	from the first rotation or racer
+driver-robot-kinematics-hand_eye.adb	Every (1, Rotations);	1	structure	from the first rotation or racer
 driver-robot-kinematics-hand_eye.adb	Finalists : constant := 2 * Agreeing;	2	structure	twice the starts that must agree: room for a second optimum to be told apart
 driver-robot-kinematics-hand_eye.adb	First (1) := 1;	1	structure	the first arm's tracks begin at the first
 driver-robot-kinematics-hand_eye.adb	Floor : Real := -1.0;	1.0	format	sentinel: not judged yet (a floor or a share is never negative)
@@ -2397,15 +2399,18 @@ driver-robot-kinematics-hand_eye.adb	Rn : Real_Access := new Real_Array (1 .. 2 
 driver-robot-kinematics-hand_eye.adb	Rotations := Natural'Min (2 * Rotations, Natural'Max (Rotations + 1, P.Sightings));	2	structure	the count of rotations doubles: the spiral covers them twice as finely
 driver-robot-kinematics-hand_eye.adb	Rows (2 * Taken - 1 + C, Q) := Jg (K, Q) / Scale ** 2;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-hand_eye.adb	Rows : Matrix_Access := new Real_Matrix (1 .. 2 * Used, 1 .. Count);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-hand_eye.adb	Run_Every (1, Count);	1	structure	from the first rotation or racer
 driver-robot-kinematics-hand_eye.adb	S : constant Real := Real (K) - 0.5;	0.5	math	the K-th of N points sits in the middle of its share of the spiral
 driver-robot-kinematics-hand_eye.adb	Sag : Real_Matrix (1 .. P.Tracks, 1 .. 3) := [others => [others => 0.0]];	3	structure	a point's or a frame's three dimensions
 driver-robot-kinematics-hand_eye.adb	Say ("" & Driver.Log.Image (Final.L.Fx, 1)	1	format	digits printed in a log line or a message
+driver-robot-kinematics-hand_eye.adb	Settle_Every (1, Count);	1	structure	from the first rotation or racer
 driver-robot-kinematics-hand_eye.adb	Slope : constant Real := (Up (K) - Down (K)) / (2.0 * Step) / Scale;	2.0	math	a central difference spans twice its step
 driver-robot-kinematics-hand_eye.adb	Slope : constant Real := (Up_R (K) - Down_R (K)) / (2.0 * Sigma) / Scale;	2.0	math	a central difference spans twice its step
 driver-robot-kinematics-hand_eye.adb	Slope : constant Real := 4.0 * Psi ** 3 - 1.0;	1.0	math	the derivative of x^4 - x - 4, for Newton's method
 driver-robot-kinematics-hand_eye.adb	Slope : constant Real := 4.0 * Psi ** 3 - 1.0;	4.0	math	the derivative of x^4 - x - 4, for Newton's method
 driver-robot-kinematics-hand_eye.adb	Sm (Q, Q) := A (Q, Q) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	numerics	Levenberg-Marquardt: the diagonal damped by one plus lambda
 driver-robot-kinematics-hand_eye.adb	Start : constant Real := Real (Width) / 2.0;	2.0	math	the half width seen at a right angle's half (tan 45 degrees is one): where the arm's fit starts its focal search
+driver-robot-kinematics-hand_eye.adb	Start_Every (1, Count);	1	structure	from the first rotation or racer
 driver-robot-kinematics-hand_eye.adb	Turn_Var : constant Real := Cov (O + 1, O + 1) + Cov (O + 2, O + 2) + Cov (O + 3, O + 3);	2	structure	a pose's terms: three of its turn, then three of its centre
 driver-robot-kinematics-hand_eye.adb	Turn_Var : constant Real := Cov (O + 1, O + 1) + Cov (O + 2, O + 2) + Cov (O + 3, O + 3);	2	structure	a pose's terms: three of its turn, then three of its centre
 driver-robot-kinematics-hand_eye.adb	Turn_Var : constant Real := Cov (O + 1, O + 1) + Cov (O + 2, O + 2) + Cov (O + 3, O + 3);	3	structure	a pose's terms: three of its turn, then three of its centre
