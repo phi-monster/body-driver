@@ -1784,8 +1784,6 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driv
 driver-robot-kinematics-fit.adb	((Fx => Exp (T (T'First)), Fy => Exp (T (T'First + 1)), Cx => T (T'First + 2), Cy => T (T'First + 3),	2	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
 driver-robot-kinematics-fit.adb	((Fx => Exp (T (T'First)), Fy => Exp (T (T'First + 1)), Cx => T (T'First + 2), Cy => T (T'First + 3),	3	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
 driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),	2	structure	the positions of the parameters in the vector
-driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),	2	structure	the positions of the parameters in the vector
-driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),	3	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),	3	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	(Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));	1	structure	the four entries of a turn and a shift about an axis: (A, B) the last column, (E, F) the last row
 driver-robot-kinematics-fit.adb	(Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));	1	structure	the four entries of a turn and a shift about an axis: (A, B) the last column, (E, F) the last row
@@ -1866,7 +1864,6 @@ driver-robot-kinematics-fit.adb	Cosine : constant Real := Real'Min (1.0, Real'Ma
 driver-robot-kinematics-fit.adb	Cosine : constant Real := Real'Min (1.0, Real'Max (-1.0, Plane_Normal (A) * Plane_Normal (B)));	1.0	math	a cosine lies between minus one and one
 driver-robot-kinematics-fit.adb	Count : constant Positive := 4 * N + 1;	4	structure	stage 2's terms: four per joint (tilt across its axis twice, its side, the logarithm of its turn's size), then the focal length
 driver-robot-kinematics-fit.adb	Count : constant Positive := 6 + Per_Joint * N;	6	structure	the positions of the parameters in the vector
-driver-robot-kinematics-fit.adb	Count : constant Positive := 6 + Per_Joint * N;	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Covariance := 0.5 * (Product + Transpose (Product));	0.5	math	the symmetric part of a matrix
 driver-robot-kinematics-fit.adb	Covariance => (Real (Count) / Real (Count - 3)) * (Mi * Spread * Mi),	3	statistics	the sandwich's small-sample factor: the points over the points less the plane's three parameters
 driver-robot-kinematics-fit.adb	Cross (B, Back * (Maps ((Sg.Frame - 1) * N + J) * (if Axis = 1 then E_1 (J) else E_2 (J))));	1	structure	a joint's first direction across its axis
@@ -1911,7 +1908,7 @@ driver-robot-kinematics-fit.adb	Fit_Abs (Kf) := Sqrt (All_R (2 * I - 1) ** 2 + A
 driver-robot-kinematics-fit.adb	Fit_Abs (Kf) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Fits (Filled) := (if Plane_Way (Way) then Upper_Quartile / Rayleigh_Median else 1.0)	1.0	math	an epipolar distance is on its own scale
 driver-robot-kinematics-fit.adb	Focal : constant Real := (L.Fx + L.Fy) / 2.0;	2.0	math	the focal length: the mean of the two
-driver-robot-kinematics-fit.adb	Focal_Here : constant Real := (Lx.Fx + Lx.Fy) / 2.0;	2.0	math	the mean of the two focal lengths
+driver-robot-kinematics-fit.adb	Focal : constant Real := (Lens0.Fx + Lens0.Fy) / 2.0;	2.0	math	the mean of the two focal lengths
 driver-robot-kinematics-fit.adb	Foot : constant Vec3 := (1.0 / Length ** 2) * P.A;	1.0	math	the plane A * X = 1: its point nearest the eye is A over its length squared
 driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	a placed sighting's keyframe, from the first
 driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	default: the reference frame, the first
@@ -1962,8 +1959,6 @@ driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	two residuals per answer
 driver-robot-kinematics-fit.adb	K1 => T (T'First + 4), K2 => T (T'First + 5)));	4	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
 driver-robot-kinematics-fit.adb	K1 => T (T'First + 4), K2 => T (T'First + 5)));	5	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
 driver-robot-kinematics-fit.adb	K1 => X (X'First + 4), K2 => X (X'First + 5)));	4	structure	the positions of the parameters in the vector
-driver-robot-kinematics-fit.adb	K1 => X (X'First + 4), K2 => X (X'First + 5)));	4	structure	the positions of the parameters in the vector
-driver-robot-kinematics-fit.adb	K1 => X (X'First + 4), K2 => X (X'First + 5)));	5	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	K1 => X (X'First + 4), K2 => X (X'First + 5)));	5	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Kept : constant Positive := Natural'Min (2, N);	2	structure	the orders are searched in ways of their first two joints, N (N - 1) of them, 30 for six joints against the ten processors and the Pi's four (a way a first joint: six, a19 on 10-16)
 driver-robot-kinematics-fit.adb	L : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three-dimensional space
@@ -2012,8 +2007,6 @@ driver-robot-kinematics-fit.adb	O : constant Natural := 6 + 5 * (J - 1);	5	struc
 driver-robot-kinematics-fit.adb	O : constant Natural := 6 + 5 * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	O : constant Natural := 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 4 * (J - 1);	4	structure	stage 2's terms: four per joint (tilt across its axis twice, its side, the logarithm of its turn's size), then the focal length
-driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the vector
-driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Offset := 2.0 * Offset;	2.0	structure	the profile's steps double: any distance is reached within a factor two in a number of steps that grows only with its logarithm
@@ -2208,7 +2201,6 @@ driver-robot-kinematics-fit.adb	X (O + 4) := Jx (Jx'First + J - 1).P (3);	4	stru
 driver-robot-kinematics-fit.adb	X (O + 5) := Jx (Jx'First + J - 1).C;	5	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	X (O + 5) := Jx (Jx'First + J - 1).C;	5	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	X (S_First .. S_First + 3) := [Ln (Scale), Turn, Shift_X, Shift_Y];	3	structure	the similarity's four terms
-driver-robot-kinematics-fit.adb	X (X'First .. X'First + 5) := [Ln (Lx.Fx), Ln (Lx.Fy), Lx.Cx, Lx.Cy, Lx.K1, Lx.K2];	5	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	X (X'First .. X'First + 5) := [Ln (Lx.Fx), Ln (Lx.Fy), Lx.Cx, Lx.Cy, Lx.K1, Lx.K2];	5	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	X : Real_Array (1 .. 4) := [0.0, 0.0, Result.Phi, Ln (abs Result.Scale)];	4	structure	the refinement's four terms: tilt across the axis twice, its side, the logarithm of its turn's size
 driver-robot-kinematics-fit.adb	X : Real_Array (1 .. 8) := Entries_Of (H);	8	structure	a homography's eight free entries come first
