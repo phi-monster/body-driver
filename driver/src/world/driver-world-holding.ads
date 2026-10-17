@@ -13,7 +13,7 @@
 --  and no eye places it again where it goes.
 
 with Driver.World.Estimates;
-with Driver.World.Pairs;
+with Driver.World.Points;
 
 private package Driver.World.Holding is
 
@@ -25,7 +25,7 @@ private package Driver.World.Holding is
    --  closes it further holds on). False when either is unknown.
 
    procedure Carry
-     (Points   : in out Driver.World.Pairs.Match_Vectors.Vector;
+     (Points   : in out Driver.World.Points.Placed_Vectors.Vector;
       Normals  : in out Driver.World.Estimates.Normal_Vectors.Vector;
       From, To : Pose_Estimate);
    --  Each point and normal moved as the tool moved from From to To: means

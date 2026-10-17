@@ -3,6 +3,8 @@
 --  The robot is answered every beat. A recompute of the robot's heavier
 --  estimates (Driver.Robot.Compute_Estimates) grows with the evidence behind
 --  it, to minutes after a boot's worth of beats (A27: 294 s at 8642 beats);
+--  what the world's eyes place by themselves (Driver.World.Measure) takes
+--  seconds a time;
 --  inside the main loop it left the robot unanswered as long, longer than the
 --  stock RoboDojo client waits (120 s) and than any real robot can be left
 --  without a command. So when the estimates are due, the main loop gives the
@@ -43,9 +45,9 @@ generic
    with procedure Rest (M : Message);
    --  Everything else the message gives the models.
    with function Due return Boolean;
-   --  The robot's heavier estimates are due (Driver.Robot.Estimates_Due).
+   --  The heavier estimates are due (Driver.Robot.Estimates_Due, Driver.World.Measure_Due).
    with procedure Compute;
-   --  Computes them (Driver.Robot.Compute_Estimates).
+   --  Computes those due (Driver.Robot.Compute_Estimates, Driver.World.Measure).
    with procedure Failed (E : Ada.Exceptions.Exception_Occurrence);
    --  The estimator task failed; the models are in an unknown state.
    with procedure Lighten (M : in out Message);
@@ -98,7 +100,9 @@ package Driver.Apart is
    --  that beat's message before the decider ran.
 
    procedure Replay_Apart;
-   --  Kind K.
+   --  Kind K. What is due is computed here, as the estimator computed it first: what the world is to measure became
+   --  due in the rest of the beat before (a decider's ask for the robot's estimates is computed where it asked,
+   --  kind E).
 
    procedure Replay_Taken_In (Ok : out Boolean);
    --  Kind A. Ok is False when nothing was kept back to take in: the

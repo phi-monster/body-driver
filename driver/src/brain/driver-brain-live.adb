@@ -192,22 +192,21 @@ package body Driver.Brain.Live is
          Driver.World.Adopt (S, B.C.Robot.all, E, O, Region, T);
          Found := Driver.Brain.Names.A_Thing;
       end During;
-      --  An eye that rides on a fitted arm tells which pixels in the box are the thing by itself: those whose
-      --  points, placed from the places the arm's sweep held the eye at, stand above the surface they rest on
-      --  (Driver.Robot.Surfaces), each the patch of half a patch's width about it that the point was asked at. No
-      --  instrument segments the box for it: the body on the Pi has none, and what stands on a surface is what
-      --  the body can reach for. An eye that stands still in the world has no such views of its own, and needs the
-      --  instrument's segmentation; without it the next eye is asked (Driver.Brain.Names).
+      --  An eye the body has held at more than one place tells which pixels in the box are the thing by itself:
+      --  those whose points, placed from its views from elsewhere (Driver.World.Placed_In: the places its arm's
+      --  sweep and every still beat since held it at), stand above the surface they rest on, each the patch of half
+      --  a patch's width about it that the point was asked at. No instrument segments the box for it: the body on
+      --  the Pi has none, and what stands on a surface is what the body can reach for. An eye that stands still in
+      --  the world has no such views of its own, and needs the instrument's segmentation; without it the next eye
+      --  is asked (Driver.Brain.Names).
       Placed_By_Eye : Boolean := False;
       procedure Placing is
-         use type Driver.Robot.Mount_Kind;
          O    : constant Driver.Observations.Observation := Driver.Beats.Latest.all;
          M    : Driver.Robot.Model renames B.C.Robot.all;
          S    : Driver.World.Scene renames B.C.Scene.all;
       begin
-         if Natural (E) > Driver.Robot.Eye_Count (M)
-           or else Driver.Robot.Eye_Mount (M, E).Kind /= Driver.Robot.Arm_Carried
-           or else Natural (E) > Natural (O.Images.Length)
+         if Natural (E) > Driver.Robot.Eye_Count (M) or else Natural (E) > Natural (O.Images.Length)
+           or else Driver.World.Views_Of (S, E) < 2
          then
             return;
          end if;
@@ -231,12 +230,13 @@ package body Driver.Brain.Live is
             end loop;
             declare
                Placed : constant Driver.Robot.Surfaces.Surface_Point_Array :=
-                 Driver.Robot.Surfaces.In_Region (M, E, O, Box_Mask);
+                 Driver.World.Placed_In (S, M, E, O, Box_Mask);
             begin
                Placed_By_Eye := True;
                if Placed'Length = 0 then
                   Why := To_Unbounded_String ("nothing in the box stands above the surface it rests on, as this eye "
-                                              & "places it from the places its arm held it at");
+                                              & "places it from the" & Driver.World.Views_Of (S, E)'Image
+                                              & " places it was held still at");
                   return;
                end if;
                Region := Driver.Images.Create (W, H);

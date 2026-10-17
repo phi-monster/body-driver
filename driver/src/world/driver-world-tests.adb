@@ -4,7 +4,7 @@ with Driver.Robot;
 with Driver.Robot.Hand;
 with Driver.Recording;
 with Driver.Tests;
-with Driver.World.Pairs.Tests;
+with Driver.World.Round_Trips.Tests;
 with Driver.World.Regions.Tests;
 with Driver.World.Estimates.Tests;
 with Driver.World.Holding.Tests;
@@ -35,6 +35,20 @@ package body Driver.World.Tests is
       Px := (U => C.Centre_U + C.Focal * P (1) / P (3), V => C.Centre_V + C.Focal * P (2) / P (3));
       Visible := Px.U >= 0.0 and then Px.V >= 0.0 and then Px.U < Real (C.Columns) and then Px.V < Real (C.Rows);
    end Project;
+
+   function Ray_In_Eye (C : Pinhole; U, V : Real) return Vec3 is
+     (Unit ([(U - C.Centre_U) / C.Focal, (V - C.Centre_V) / C.Focal, 1.0]));
+
+   procedure Project_In_Eye (C : Pinhole; P : Vec3; U, V : out Real; In_Front : out Boolean) is
+   begin
+      In_Front := P (3) > 0.0;
+      U := 0.0;
+      V := 0.0;
+      if In_Front then
+         U := C.Centre_U + C.Focal * P (1) / P (3);
+         V := C.Centre_V + C.Focal * P (2) / P (3);
+      end if;
+   end Project_In_Eye;
 
    function Pose (C : Pinhole) return Pose_Estimate is
      ((Pose => C.Pose_In_World, Position_Covariance => 1.0e-12 * Identity3, Rotation_Covariance => 1.0e-12 * Identity3));
@@ -185,7 +199,7 @@ package body Driver.World.Tests is
       Driver.Tests.Register ("world.scene.recorded", "a decider's write into the world is not in the recording once, or "
                              & "applied from it gives another scene", Writes_In_The_Recording'Access);
       Driver.World.Regions.Tests.Register;
-      Driver.World.Pairs.Tests.Register;
+      Driver.World.Round_Trips.Tests.Register;
       Driver.World.Supports.Tests.Register;
       Driver.World.Estimates.Tests.Register;
       Driver.World.Tracking.Tests.Register;

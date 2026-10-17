@@ -10,15 +10,15 @@
 --  next still beat (two frames after the change) its pixels are matched from
 --  the image they were measured on into the latest one, both ways, together
 --  with the pixels around it: the round trips of those that came back right
---  (Driver.World.Pairs.Matcher_Error) measure the matcher's own
+--  (Driver.World.Round_Trips.Matcher_Error) measure the matcher's own
 --  error, whether the thing, the eye or nothing moved, since a pixel the
 --  matcher found again comes back whatever moved it. A region pixel came
 --  back when its round trip is not significant against that error, and the
 --  instrument segments the thing again around where the pixels that came
 --  back went; with none coming back the thing is gone from this eye, to be
---  found in it again from elsewhere. The requests and replies are plain
---  data (the caller talks to the instrument), so the same logic runs live,
---  on a recording and in a test.
+--  found in it again from elsewhere. The matches and the segmentation are
+--  plain data (the caller matches with the driver's aligner and talks to the
+--  instrument), so the same logic runs live, on a recording and in a test.
 
 with Driver.Clock;
 with Driver.Images;
@@ -31,6 +31,17 @@ package Driver.World.Tracking is
 
    subtype Mask is Driver.Images.Mask;
    subtype Image is Driver.Images.Image;
+
+   type Point_Array is array (Positive range <>) of Driver.Images.Pixel;
+
+   --  A pixel matched into another picture.
+   type Answer is record
+      Found : Boolean := False;        --  the matcher found it
+      To    : Driver.Images.Pixel;     --  where it is in the other picture
+      Back  : Driver.Images.Pixel;     --  where To matches back to in the first
+   end record;
+
+   type Answer_Array is array (Positive range <>) of Answer;
 
    type Phase is (Holding, Lost, Matching, Segmenting, Gone);
    --  Holding     the region shows what it showed when it was measured
@@ -68,7 +79,7 @@ package Driver.World.Tracking is
    function Wants_Match (T : Track) return Boolean;
    --  Lost, and the latest beat was still.
 
-   function Match_Points (T : Track) return Driver.Instrument.Point_Array
+   function Match_Points (T : Track) return Point_Array
      with Pre => Wants_Match (T);
    --  The centres of the region's pixels asked about, in the image it was
    --  measured on, followed by those around it: the region's edge whole, and
@@ -78,7 +89,7 @@ package Driver.World.Tracking is
    function Region_Points (T : Track) return Natural;
    --  How many of Match_Points are the region's own.
 
-   function Region_And_Around (T : Track) return Driver.Instrument.Point_Array;
+   function Region_And_Around (T : Track) return Point_Array;
    --  The same points, whatever the track's state: what another eye's image
    --  is asked about for the points both eyes see.
 
@@ -86,7 +97,7 @@ package Driver.World.Tracking is
      with Pre => Wants_Match (T);
    --  The points were submitted, from Measured_On to Latest, with round trips.
 
-   procedure Matched (T : in out Track; Points : Driver.Instrument.Point_Array; Answers : Driver.Instrument.Answer_Array)
+   procedure Matched (T : in out Track; Points : Point_Array; Answers : Answer_Array)
      with Pre => State (T) = Matching and then Answers'Length = Points'Length;
 
    function Wants_Segment (T : Track) return Boolean;

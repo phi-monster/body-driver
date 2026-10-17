@@ -25,6 +25,9 @@ package Driver.World.Tests is
    overriding function Pose (C : Pinhole) return Pose_Estimate;
    overriding function Self_Mask (C : Pinhole) return Driver.Images.Mask is (Driver.Images.Create (C.Columns, C.Rows));
    --  A pinhole sees no robot.
+   overriding function Ray_In_Eye (C : Pinhole; U, V : Real) return Vec3;
+   overriding procedure Project_In_Eye (C : Pinhole; P : Vec3; U, V : out Real; In_Front : out Boolean);
+   overriding function Noise (C : Pinhole) return Real is (C.Pixel_Sigma);
 
    function Looking_At (Eye, Target : Vec3; Focal : Real; Columns, Rows : Natural; Pixel_Sigma : Real)
      return Pinhole;

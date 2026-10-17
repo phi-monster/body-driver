@@ -2,7 +2,10 @@ with Ada.Containers.Ordered_Sets;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Ada.Strings.Unbounded;
+with Driver.Alignment;
+with Driver.Instrument;
 with Driver.Log;
+with Driver.Robot.Surfaces;
 with Driver.World.Regions;
 
 package body Driver.World.Estimates is
@@ -11,23 +14,21 @@ package body Driver.World.Estimates is
    use Ada.Strings.Unbounded;
    use Driver.Numerics.Arrays;
    use type Driver.Observations.Camera_Id;
-   use type Driver.Clock.Beat;
+   use type Driver.Alignment.Verdict;
    use type Driver.World.Tracking.Phase;
 
    package Tracks renames Driver.World.Tracking;
 
    --  Everything sized by pixels, points, surfaces or things lives on the
    --  heap: the estimates also run in the decider's task, whose stack is small.
-   type Answers_Access is access Driver.Instrument.Answer_Array;
+   type Answers_Access is access Driver.World.Tracking.Answer_Array;
    type Points_Access is access Driver.Geometry.Point_Array;
    type Grid_Access is access Driver.World.Supports.Grid_Array;
-   type Flags_Access is access Driver.Geometry.Flag_Array;
    type Thing_Flags is array (Thing_Id range <>) of Boolean;
    type Thing_Flags_Access is access Thing_Flags;
-   procedure Free is new Ada.Unchecked_Deallocation (Driver.Instrument.Answer_Array, Answers_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Driver.World.Tracking.Answer_Array, Answers_Access);
    procedure Free is new Ada.Unchecked_Deallocation (Driver.Geometry.Point_Array, Points_Access);
    procedure Free is new Ada.Unchecked_Deallocation (Driver.World.Supports.Grid_Array, Grid_Access);
-   procedure Free is new Ada.Unchecked_Deallocation (Driver.Geometry.Flag_Array, Flags_Access);
    procedure Free is new Ada.Unchecked_Deallocation (Thing_Flags, Thing_Flags_Access);
 
    Empty_Slot : Slot;
@@ -58,8 +59,8 @@ package body Driver.World.Estimates is
    function Has_Image (O : Observation; E : Eye_Id) return Boolean is
      (E <= O.Images.Last_Index and then Driver.Observations.Has_Image (O, E));
 
-   --  A track's own requests: matching its pixels into the latest image of
-   --  its eye when it is lost, then segmenting around where they went.
+   --  A track's own requests: a lost track's pixels looked for in the latest picture of its eye, apart from the main
+   --  loop (Measure: Match_Track), then the instrument segmenting the thing around where they went.
    procedure Serve (Id : Thing_Id; E : Eye_Id; Here : in out Slot; Beat : Driver.Clock.Beat) is
    begin
       if Here.Out_Now and then Driver.Services.Ready (Here.Ticket) then
@@ -67,56 +68,27 @@ package body Driver.World.Estimates is
             Reply : constant Driver.Services.Reply := Driver.Services.Collect (Here.Ticket);
             Ok    : Boolean;
             Why   : Unbounded_String;
+            On    : constant Driver.Images.Image := Tracks.Latest (Here.Track);
+            Found : Driver.Images.Mask;
+            Score : Real;
          begin
             Here.Out_Now := False;
-            if Tracks.State (Here.Track) = Tracks.Matching then
-               declare
-                  Points  : constant Driver.Instrument.Point_Array := Here.Points.Element;
-                  Answers : Answers_Access := new Driver.Instrument.Answer_Array (Points'Range);
-               begin
-                  Driver.Instrument.Read_Match (Reply, True, Answers.all, Ok, Why);
-                  if Ok then
-                     Tracks.Matched (Here.Track, Points, Answers.all);
-                  else
-                     Tracks.Failed (Here.Track);
-                  end if;
-                  Free (Answers);
-               end;
+            Driver.Instrument.Read_Segment (Reply, Driver.Images.Width (On), Driver.Images.Height (On),
+                                            Found, Score, Ok, Why);
+            if Ok then
+               Tracks.Segmented (Here.Track, Found);
             else
-               declare
-                  On    : constant Driver.Images.Image := Tracks.Latest (Here.Track);
-                  Found : Driver.Images.Mask;
-                  Score : Real;
-               begin
-                  Driver.Instrument.Read_Segment (Reply, Driver.Images.Width (On), Driver.Images.Height (On),
-                                                  Found, Score, Ok, Why);
-                  if Ok then
-                     Tracks.Segmented (Here.Track, Found);
-                  else
-                     Tracks.Failed (Here.Track);
-                  end if;
-               end;
-            end if;
-            if not Ok then
+               Tracks.Failed (Here.Track);
                Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & " in eye" & E'Image
                                 & ": the instrument did not answer: " & To_String (Why));
-            elsif Tracks.State (Here.Track) = Tracks.Gone then
-               Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & " is gone from eye" & E'Image);
             end if;
          end;
       end if;
-      if not Here.Out_Now and then Tracks.Wants_Match (Here.Track) then
-         declare
-            Points : constant Driver.Instrument.Point_Array := Tracks.Match_Points (Here.Track);
-         begin
-            Here.Ticket := Driver.Instrument.Submit_Match
-              ((Stored => False, Image => Tracks.Measured_On (Here.Track)),
-               (Stored => False, Image => Tracks.Latest (Here.Track)), Points, True, Beat);
-            Here.Points := Point_Holders.To_Holder (Points);
-            Here.Out_Now := True;
-            Tracks.Asked_Match (Here.Track);
-            Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & " changed in eye" & E'Image & "; looking for it");
-         end;
+      if not Here.Out_Now and then not Here.Match_Due and then Tracks.Wants_Match (Here.Track) then
+         Here.Asked := Point_Holders.To_Holder (Tracks.Match_Points (Here.Track));
+         Here.Match_Due := True;
+         Tracks.Asked_Match (Here.Track);
+         Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & " changed in eye" & E'Image & "; looking for it");
       elsif not Here.Out_Now and then Tracks.Wants_Segment (Here.Track) then
          declare
             Around   : Driver.Instrument.Box;
@@ -131,134 +103,57 @@ package body Driver.World.Estimates is
       end if;
    end Serve;
 
-   function Measured_When_Asked (R : Thing_Record; From, Into : Eye_Id) return Driver.Clock.Beat'Base is
+   --  A lost track's pixels looked for in the latest picture of its eye, both ways, by the driver's aligner: each
+   --  from where it was, within as far as the aligner searches, and its answer aligned back from where it was found,
+   --  as widely; the round trips of the pixels around the region measure the aligner's own error, and the region's
+   --  pixels that came back right within it say where the thing went (Tracks.Matched). One eye's pictures before and
+   --  after: no other eye and no instrument.
+   procedure Match_Track (Id : Thing_Id; E : Eye_Id; Here : in out Slot) is
+      Points  : constant Tracks.Point_Array := Here.Asked.Element;
+      Answers : Answers_Access := new Tracks.Answer_Array (Points'Range);
+      Before  : constant Driver.Alignment.Pyramid := Driver.Alignment.Pyramid_Of (Tracks.Measured_On (Here.Track));
+      After   : constant Driver.Alignment.Pyramid := Driver.Alignment.Pyramid_Of (Tracks.Latest (Here.Track));
+      Wide    : constant Real := Driver.Alignment.Largest_Sigma (Before, After);
+      Window  : constant Driver.Alignment.Place_Covariance := (UU => Wide ** 2, UV => 0.0, VV => Wide ** 2);
+      Back_At : Natural := 0;
    begin
-      for A of R.Asked loop
-         if A.From = From and then A.Into = Into then
-            return A.Measured;
-         end if;
+      for K in Points'Range loop
+         declare
+            P   : constant Driver.Images.Pixel := Points (K);
+            Got : constant Driver.Alignment.Answer :=
+              Driver.Alignment.Align (Before, After, (From => P, To => P, Linear => Driver.Alignment.Identity_Part,
+                                                      Cov => Window, Linear_Sigma => Real'Last));
+         begin
+            Answers (K) := (Found => False, To => P, Back => P);
+            if Got.Verdict = Driver.Alignment.Found then
+               declare
+                  Back : constant Driver.Alignment.Answer :=
+                    Driver.Alignment.Align (After, Before, (From => Got.To, To => Got.To,
+                                                            Linear => Driver.Alignment.Identity_Part,
+                                                            Cov => Window, Linear_Sigma => Real'Last));
+               begin
+                  if Back.Verdict = Driver.Alignment.Found then
+                     Answers (K) := (Found => True, To => Got.To, Back => Back.To);
+                     Back_At := Back_At + 1;
+                  end if;
+               end;
+            end if;
+         end;
       end loop;
-      return -1;
-   end Measured_When_Asked;
-
-   procedure Note_Asked (R : in out Thing_Record; From, Into : Eye_Id; Measured : Driver.Clock.Beat) is
-   begin
-      for I in R.Asked.First_Index .. R.Asked.Last_Index loop
-         if R.Asked (I).From = From and then R.Asked (I).Into = Into then
-            R.Asked.Replace_Element (I, (From => From, Into => Into, Measured => Measured));
-            return;
-         end if;
-      end loop;
-      R.Asked.Append (Asked_Pair'(From => From, Into => Into, Measured => Measured));
-   end Note_Asked;
-
-   function Pending (R : Thing_Record; From, Into : Eye_Id) return Boolean is
-     (for some X of R.Crosses => X.From = From and then X.Into = Into);
+      Tracks.Matched (Here.Track, Points, Answers.all);
+      Free (Answers);
+      Here.Match_Due := False;
+      Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & " in eye" & E'Image & ":" & Back_At'Image & " of"
+                       & Points'Length'Image & " pixels found again both ways"
+                       & (if Tracks.State (Here.Track) = Tracks.Gone then "; it is gone from this eye" else ""));
+   end Match_Track;
 
    function Starting (R : Thing_Record; E : Eye_Id) return Boolean is (for some St of R.Starts => St.Eye = E);
 
-   --  The replies to the pairs asked: the points both eyes saw, and a track
-   --  started where the second eye had none.
    function Inside (Region : Driver.Images.Mask; Px : Driver.Images.Pixel) return Boolean is
      (Px.U >= 0.0 and then Px.V >= 0.0
       and then Px.U < Real (Driver.Images.Width (Region)) and then Px.V < Real (Driver.Images.Height (Region))
       and then Driver.Images.Contains (Region, Natural (Real'Floor (Px.U)), Natural (Real'Floor (Px.V))));
-
-   function Inside_Pointed
-     (R         : Thing_Record;
-      X         : Vec3;
-      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
-                                             return Driver.World.Cameras.Camera'Class;
-      Seen      : not null access constant Observation) return Boolean
-   is
-      --  A point of the thing falls inside its region in every eye that holds
-      --  it where it was pointed at and sees where the point is. A pair can be
-      --  wrong yet meet, when the second eye's match slid along the line the
-      --  first sight draws there: the point is then on the first sight but at
-      --  another depth, and falls outside the thing elsewhere. A thing that
-      --  moved leaves its earlier points outside its regions. Only the regions
-      --  given judge: one this layer found itself (segmented around where a
-      --  pair's pixels went) can be part of the thing or something else, and
-      --  would throw out the thing's own points. An eye that lost the thing,
-      --  as when something passes in front of it, says nothing either way: the
-      --  thing is where it was until an eye sees it elsewhere.
-   begin
-      for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
-         if Holds (R, E) and then R.Eyes (E).Pointed then
-            declare
-               Px      : Driver.Images.Pixel;
-               Visible : Boolean;
-            begin
-               Camera_Of (E, Seen).Project (X, Px, Visible);
-               if Visible and then not Inside (Tracks.Region (R.Eyes (E).Track), Px) then
-                  return False;
-               end if;
-            end;
-         end if;
-      end loop;
-      return True;
-   end Inside_Pointed;
-
-   function Seen_Where_Pointed
-     (R         : Thing_Record;
-      X         : Vec3;
-      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
-                                             return Driver.World.Cameras.Camera'Class;
-      Seen      : not null access constant Observation) return Boolean
-   is
-      --  Some eye holding the thing where it was pointed at sees where X is.
-   begin
-      for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
-         if Holds (R, E) and then R.Eyes (E).Pointed then
-            declare
-               Px      : Driver.Images.Pixel;
-               Visible : Boolean;
-            begin
-               Camera_Of (E, Seen).Project (X, Px, Visible);
-               if Visible then
-                  return True;
-               end if;
-            end;
-         end if;
-      end loop;
-      return False;
-   end Seen_Where_Pointed;
-
-   function Bare (O : Observation) return Observation_Holders.Holder is
-      --  The observation without its images: what its eyes were, kept long.
-      Copy : Observation := O;
-   begin
-      Copy.Images.Clear;
-      return Observation_Holders.To_Holder (Copy);
-   end Bare;
-
-   function In_View
-     (R          : Thing_Record;
-      From, Into : Eye_Id;
-      Second     : Driver.World.Cameras.Camera'Class) return Boolean
-   is
-      --  The thing in the second eye's view, as the points the other pairs saw
-      --  place it; in view when no other pair saw it, as nothing says not.
-      Seen_By_Others : Boolean := False;
-   begin
-      for P of R.By_Pair loop
-         if P.From /= From or else P.Into /= Into then
-            for M of P.Kept loop
-               Seen_By_Others := True;
-               declare
-                  Px      : Driver.Images.Pixel;
-                  Visible : Boolean;
-               begin
-                  Second.Project (M.Point.Mean, Px, Visible);
-                  if Visible then
-                     return True;
-                  end if;
-               end;
-            end loop;
-         end if;
-      end loop;
-      return not Seen_By_Others;
-   end In_View;
 
    procedure Gather
      (R         : in out Thing_Record;
@@ -266,103 +161,13 @@ package body Driver.World.Estimates is
                                              return Driver.World.Cameras.Camera'Class;
       Seen      : not null access constant Observation)
    is
-      --  The thing's points: every pair's latest, but those outside it now in
-      --  an eye that holds it where it was pointed at. A pair whose second
-      --  eye, as it was then, saw nothing of the thing as the other pairs
-      --  place it saw something else, and is dropped: its first answer came
-      --  before any other said where the thing is.
-      Now : Driver.World.Pairs.Match_Vectors.Vector;
-      K   : Positive := 1;
    begin
-      while K <= Natural (R.By_Pair.Length) loop
-         declare
-            Kept_It : Boolean := True;
-         begin
-            if not R.By_Pair (K).Then_Seen.Is_Empty then
-               declare
-                  Then_Seen : constant Observation_Holders.Constant_Reference_Type :=
-                    R.By_Pair (K).Then_Seen.Constant_Reference;
-               begin
-                  Kept_It := In_View (R, R.By_Pair (K).From, R.By_Pair (K).Into,
-                                      Camera_Of (R.By_Pair (K).Into, Then_Seen.Element));
-               end;
-            end if;
-            if Kept_It then
-               K := K + 1;
-            else
-               R.By_Pair.Delete (K);
-            end if;
-         end;
-      end loop;
-      --  A pair's point is the thing's only once another pair bears it out:
-      --  it lies within the thing as the other pairs' points place it, their
-      --  spread about their middle and its own uncertainty taken together, by
-      --  the one significance rule. One pair alone is two eyes alone, and two
-      --  eyes cannot tell a wrong match that met on the line its first sight
-      --  draws from a right one; another pair, through other eyes or other
-      --  pixels, can.
-      for P in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
-         declare
-            Elsewhere : Natural := 0;   --  the other pairs' points
-            Middle : Vec3 := Zero3;
-            Spread : Mat3 := [others => [others => 0.0]];
-         begin
-            for Q in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
-               if Q /= P then
-                  for M of R.By_Pair (Q).Kept loop
-                     Elsewhere := Elsewhere + 1;
-                     Middle := Middle + M.Point.Mean;
-                  end loop;
-               end if;
-            end loop;
-            if Elsewhere >= 4 then
-               Middle := (1.0 / Real (Elsewhere)) * Middle;
-               for Q in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
-                  if Q /= P then
-                     for M of R.By_Pair (Q).Kept loop
-                        Spread := Spread + Driver.Numerics.Outer (M.Point.Mean - Middle, M.Point.Mean - Middle);
-                     end loop;
-                  end if;
-               end loop;
-               Spread := (1.0 / Real (Elsewhere - 1)) * Spread;
-               for M of R.By_Pair (P).Kept loop
-                  declare
-                     D : constant Vec3 := M.Point.Mean - Middle;
-                     C : constant Mat3 := Inverse (Spread + M.Point.Covariance);
-                  begin
-                     if Inside_Pointed (R, M.Point.Mean, Camera_Of, Seen)
-                       and then not Significant
-                         (Vector_Gate (3, Elsewhere - 1, Tests => Natural'Max (1, Natural (R.By_Pair (P).Kept.Length))),
-                          Sqrt (Real'Max (0.0, D * (C * D))), 1.0)
-                     then
-                        Now.Append (M);
-                     end if;
-                  end;
-               end loop;
-            end if;
-         end;
-      end loop;
-      --  The points an eye placed by itself (Place_Points): each was found again in two views and in both
-      --  directions, so it needs no other pair to bear it out, and it was taken from inside the region the eye held
-      --  the thing in at the beat it was placed. It is not judged again by that region later: a region no matcher
-      --  follows stays where it was pointed at while the eye moves on (the body without the instrument), and would
-      --  throw out every point the moment the arm turned.
-      declare
-         Normals : Normal_Vectors.Vector;
-      begin
-         for P of Now loop
-            Normals.Append (Zero3);
-         end loop;
-         for K in R.Placed.First_Index .. R.Placed.Last_Index loop
-            Now.Append (R.Placed (K));
-            Normals.Append (R.Placed_Normals (K));
-         end loop;
-         if Driver.World.Pairs.Match_Vectors."/=" (Now, R.Points) then
-            R.Points := Now;
-            R.Normals := Normals;
-            R.Points_At := Seen.Beat;
-         end if;
-      end;
+      --  Its points: every eye's that placed it (Place_Points).
+      if Driver.World.Points.Placed_Vectors."/=" (R.Placed, R.Points) then
+         R.Points := R.Placed;
+         R.Normals := R.Placed_Normals;
+         R.Points_At := Seen.Beat;
+      end if;
       R.Has_Points := not R.Points.Is_Empty;
       --  How far the thing reaches as the eyes it was pointed at in see it:
       --  each region's pixels, on a grid as many pixels apart as the square
@@ -453,346 +258,6 @@ package body Driver.World.Estimates is
                                              return Driver.World.Cameras.Camera'Class;
       Seen      : not null access constant Observation) return Boolean;
 
-   procedure Consistent
-     (S         : State;
-      R         : Thing_Record;
-      Eye       : Vec3;
-      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
-                                             return Driver.World.Cameras.Camera'Class;
-      Seen      : not null access constant Observation;
-      Kept      : in out Driver.World.Pairs.Match_Vectors.Vector;
-      Hidden    : out Natural;
-      Apart     : out Natural)
-   is
-      --  The points a pair saw that the scene and the thing's other points bear
-      --  out, each by the one significance rule at its own uncertainty:
-      --  - not hidden: no surface of the scene, but the thing's own faces,
-      --    lies between the first eye and the point, its line of sight
-      --    crossing the surface's plane inside its reach with the point
-      --    significantly beyond. The eye could not have seen it there.
-      --  - not apart: it lies within the thing as its points from the other
-      --    pairs and earlier beats place it, their spread about their middle
-      --    and its own uncertainty taken together. A wrong match whose lines
-      --    still met lies on the first eye's sight at another depth, often by
-      --    metres, where nothing of the thing was.
-      --  The thing is still between pushes, and its points are remembered: a
-      --  new point that disagrees with them is not the thing. Before the thing
-      --  has points enough to spread (four, for a spread in three dimensions),
-      --  only the scene bears them out.
-      Tests    : constant Positive := Natural'Max (1, Natural (Kept.Length));
-      Own_Face : Flags_Access :=
-        new Driver.Geometry.Flag_Array'(S.Surfaces.First_Index .. S.Surfaces.Last_Index => False);
-      N        : constant Natural := Natural (R.Points.Length);
-      Middle   : Vec3 := Zero3;
-      Spread   : Mat3 := [others => [others => 0.0]];
-      Kept_Now : Driver.World.Pairs.Match_Vectors.Vector;
-      function Own (Member : Positive) return Boolean is (On_Thing (R, S.Scene (Member).Point.Mean, Camera_Of, Seen));
-   begin
-      Hidden := 0;
-      Apart := 0;
-      for F in Own_Face'Range loop
-         Own_Face (F) := Driver.World.Supports.Mostly (S.Surfaces (F), Own'Access);
-      end loop;
-      if N >= 4 then
-         for M of R.Points loop
-            Middle := Middle + M.Point.Mean;
-         end loop;
-         Middle := (1.0 / Real (N)) * Middle;
-         for M of R.Points loop
-            Spread := Spread + Driver.Numerics.Outer (M.Point.Mean - Middle, M.Point.Mean - Middle);
-         end loop;
-         Spread := (1.0 / Real (N - 1)) * Spread;
-      end if;
-      for M of Kept loop
-         declare
-            Behind : Boolean := False;
-            Off    : Boolean := False;
-         begin
-            for F in Own_Face'Range loop
-               exit when Behind;
-               if not Own_Face (F) then
-                  declare
-                     P      : constant Driver.Geometry.Plane_Estimate := S.Surfaces (F).Plane;
-                     Before : constant Real := Driver.Geometry.Height (P, Eye);
-                     H      : constant Estimate := Driver.Geometry.Height (P, M.Point);
-                  begin
-                     Behind := Before /= 0.0 and then H.Value * Before < 0.0
-                       and then Significant (Scalar_Gate (H.Degrees_Of_Freedom, Tests => Tests), H.Value, H.Sigma)
-                       and then In_Reach (S.Surfaces (F), Eye + (Before / (Before - H.Value)) * (M.Point.Mean - Eye));
-                  end;
-               end if;
-            end loop;
-            if not Behind and then N >= 4 then
-               declare
-                  D : constant Vec3 := M.Point.Mean - Middle;
-                  C : constant Mat3 := Inverse (Spread + M.Point.Covariance);
-               begin
-                  Off := Significant (Vector_Gate (3, N - 1, Tests => Tests), Sqrt (Real'Max (0.0, D * (C * D))), 1.0);
-               end;
-            end if;
-            if Behind then
-               Hidden := Hidden + 1;
-            elsif Off then
-               Apart := Apart + 1;
-            else
-               Kept_Now.Append (M);
-            end if;
-         end;
-      end loop;
-      Kept := Kept_Now;
-      Free (Own_Face);
-   end Consistent;
-
-   procedure Keep_View
-     (R         : in out Thing_Record;
-      Answer    : Pair_Seen;
-      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
-                                             return Driver.World.Cameras.Camera'Class)
-   is
-      --  Another view bears a pair's points out as another pair does: a wrong
-      --  match that met on the line its first sight drew in the second eye
-      --  does not come back to the same place once either eye looks from
-      --  elsewhere. From the same view it comes back: an answer from there
-      --  only replaces the pair's latest.
-      Latest, Earlier : Natural := 0;   --  the pair's entries, the earlier view first
-
-      function Elsewhere (Old : Pair_Seen) return Boolean is
-         --  Either eye stands elsewhere as the thing sees it: from the thing's
-         --  middle, as the old answer placed it, the eye's place then and now
-         --  lie at directions the two answers' matcher errors, as angles at
-         --  that eye, tell apart by the one significance rule. Where the eye
-         --  looks does not count: an eye that only turned sees each point along
-         --  the same line as before, and a wrong match comes back to it; one
-         --  that moved, even still looking at the thing, does not.
-         type Two_Eyes is array (1 .. 2) of Eye_Id;
-      begin
-         if Old.Then_Seen.Is_Empty or else Answer.Then_Seen.Is_Empty or else Old.Kept.Is_Empty
-           or else not (Old.Error < Real'Last and then Answer.Error < Real'Last)
-         then
-            return False;
-         end if;
-         declare
-            Before : constant Observation_Holders.Constant_Reference_Type := Old.Then_Seen.Constant_Reference;
-            Now    : constant Observation_Holders.Constant_Reference_Type := Answer.Then_Seen.Constant_Reference;
-            Error  : constant Real := Sqrt (Old.Error ** 2 + Answer.Error ** 2);
-            Gate   : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural'Min (Old.Freedom, Answer.Freedom));
-            Middle : Vec3 := Zero3;
-         begin
-            for M of Old.Kept loop
-               Middle := Middle + M.Point.Mean;
-            end loop;
-            Middle := (1.0 / Real (Old.Kept.Length)) * Middle;
-            for E of Two_Eyes'[Answer.From, Answer.Into] loop
-               declare
-                  Then_Eye : constant Driver.World.Cameras.Camera'Class := Camera_Of (E, Before.Element);
-                  Now_Eye  : constant Driver.World.Cameras.Camera'Class := Camera_Of (E, Now.Element);
-                  To_Then  : constant Vec3 := Then_Eye.Pose.Pose.Translation - Middle;
-                  To_Now   : constant Vec3 := Now_Eye.Pose.Pose.Translation - Middle;
-                  Px       : Driver.Images.Pixel;
-                  Visible  : Boolean;
-               begin
-                  Now_Eye.Project (Middle, Px, Visible);
-                  if Visible and then abs To_Then > 0.0 and then abs To_Now > 0.0 then
-                     declare
-                        Cosine : constant Real :=
-                          Real'(To_Then * To_Now) / (Real'(abs To_Then) * Real'(abs To_Now));
-                        Turn   : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Cosine)));
-                        Per    : constant Real := Driver.World.Cameras.Radians_Per_Pixel (Now_Eye, Px);
-                     begin
-                        if Per < Real'Last and then Significant (Gate, Turn, Error * Per) then
-                           return True;
-                        end if;
-                     end;
-                  end if;
-               end;
-            end loop;
-            return False;
-         end;
-      end Elsewhere;
-   begin
-      for K in R.By_Pair.First_Index .. R.By_Pair.Last_Index loop
-         if R.By_Pair (K).From = Answer.From and then R.By_Pair (K).Into = Answer.Into then
-            Earlier := Latest;
-            Latest := K;
-         end if;
-      end loop;
-      if Latest = 0 then
-         R.By_Pair.Append (Answer);
-      elsif Elsewhere (R.By_Pair (Latest)) then
-         if Earlier /= 0 then
-            R.By_Pair.Delete (Earlier);
-         end if;
-         R.By_Pair.Append (Answer);
-      else
-         R.By_Pair.Replace_Element (Latest, Answer);
-      end if;
-   end Keep_View;
-
-   procedure Read_Crosses
-     (S         : State;
-      Id        : Thing_Id;
-      R         : in out Thing_Record;
-      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
-                                             return Driver.World.Cameras.Camera'Class;
-      Beat      : Driver.Clock.Beat)
-   is
-      I : Positive := 1;
-   begin
-      while I <= Natural (R.Crosses.Length) loop
-         declare
-            X : constant Cross := R.Crosses (I);
-         begin
-            if Driver.Services.Ready (X.Ticket) then
-               R.Crosses.Delete (I);
-               declare
-                  Points  : constant Driver.Instrument.Point_Array := X.Points.Element;
-                  Answers : Answers_Access := new Driver.Instrument.Answer_Array (Points'Range);
-                  Ok      : Boolean;
-                  Why     : Unbounded_String;
-                  Kept    : Driver.World.Pairs.Match_Vectors.Vector;
-                  Apart   : Natural := 0;
-                  Far     : Natural := 0;
-                  Error   : Real := Real'Last;
-                  Freedom : Natural := 0;
-                  Seen    : constant Observation_Holders.Constant_Reference_Type := X.Seen.Constant_Reference;
-               begin
-                  Driver.Instrument.Read_Match (Driver.Services.Collect (X.Ticket), True, Answers.all, Ok, Why);
-                  if Ok then
-                     Driver.World.Pairs.Triangulate (Camera_Of (X.From, Seen.Element), Camera_Of (X.Into, Seen.Element),
-                                                     Points, X.Own, Answers.all, Kept, Apart, Far, Error, Freedom);
-                     if Kept.Is_Empty then
-                        declare
-                           Found : Natural := 0;
-                        begin
-                           for A of Answers.all loop
-                              Found := Found + Boolean'Pos (A.Found);
-                           end loop;
-                           Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": eyes" & X.From'Image & " and"
-                                            & X.Into'Image & " placed none of its" & Points'Length'Image & " pixels;"
-                                            & Found'Image & " were found in eye" & X.Into'Image & ", "
-                                            & (if Error < Real'Last
-                                               then "the matcher erring by " & Driver.Log.Image (Error, 2) & " px"
-                                               else "their round trips gave no matcher's error")
-                                            & "," & Apart'Image & " whose lines did not meet," & Far'Image
-                                            & " too far to place");
-                        end;
-                     end if;
-                  else
-                     Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": the instrument did not match eye"
-                                      & X.From'Image & " into eye" & X.Into'Image & ": " & To_String (Why));
-                  end if;
-                  Free (Answers);
-                  declare
-                     Met_Before : constant Natural := Natural (Kept.Length);
-                     Within     : Driver.World.Pairs.Match_Vectors.Vector;
-                     Judged     : Natural := 0;   --  met points a pointed eye holding the thing sees
-                  begin
-                     --  The second eye does not see the thing now, as its other
-                     --  points place it: whatever the pair matched there is not
-                     --  it, however well the lines met.
-                     if not Kept.Is_Empty
-                       and then not In_View (R, X.From, X.Into, Camera_Of (X.Into, Seen.Element))
-                     then
-                        Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": eye" & X.Into'Image
-                                         & " does not see it now;" & Kept.Length'Image & " points of eyes"
-                                         & X.From'Image & " and" & X.Into'Image & " are not it");
-                        Kept.Clear;
-                     end if;
-                     for M of Kept loop
-                        if Seen_Where_Pointed (R, M.Point.Mean, Camera_Of, Seen.Element) then
-                           Judged := Judged + 1;
-                        end if;
-                        if Inside_Pointed (R, M.Point.Mean, Camera_Of, Seen.Element) then
-                           Within.Append (Driver.World.Pairs.Match'(M with delta First => X.From));
-                        end if;
-                     end loop;
-                     if Met_Before > Natural (Within.Length) then
-                        Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ":" & Natural'Image
-                                           (Met_Before - Natural (Within.Length))
-                                         & " points of eyes" & X.From'Image & " and" & X.Into'Image
-                                         & " fall outside it where it was pointed at");
-                     end if;
-                     Kept := Within;
-                     --  A region this layer found, whose points the eyes where the
-                     --  thing was pointed at see and none of them inside it there,
-                     --  is not the thing: it is dropped, and asks for no more pairs.
-                     if Has_Slot (R, X.From) and then not R.Eyes (X.From).Pointed and then Judged > 0
-                       and then Kept.Is_Empty
-                     then
-                        Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": its region in eye" & X.From'Image
-                                         & " is not it: none of the" & Judged'Image
-                                         & " points it gave falls inside it where it was pointed at");
-                        R.Eyes.Replace_Element (X.From, Empty_Slot);
-                     end if;
-                     declare
-                        Hidden, Apart_From_It : Natural;
-                        Before : constant Natural := Natural (Kept.Length);
-                     begin
-                        Consistent (S, R, Camera_Of (X.From, Seen.Element).Pose.Pose.Translation, Camera_Of,
-                                    Seen.Element, Kept, Hidden, Apart_From_It);
-                        if Natural (Kept.Length) < Before then
-                           Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ": of eyes" & X.From'Image & " and"
-                                            & X.Into'Image & "'s points," & Hidden'Image
-                                            & " lie behind a surface the first eye sees, and" & Apart_From_It'Image
-                                            & " apart from the thing's other points");
-                        end if;
-                     end;
-                     --  What the pair saw before stands until it sees the thing
-                     --  again: not seeing it now says nothing of where it is.
-                     if not Kept.Is_Empty then
-                        Keep_View (R, (From => X.From, Into => X.Into, Kept => Kept, Error => Error,
-                                       Freedom => Freedom, Then_Seen => Bare (Seen.Element.all)),
-                                   Camera_Of);
-                        R.Points_In := X.From;
-                     end if;
-                  end;
-                  if not Kept.Is_Empty then
-                     Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ":" & Kept.Length'Image
-                                      & " points seen by eyes" & X.From'Image & " and" & X.Into'Image & ","
-                                      & Apart'Image & " matches whose lines did not meet," & Far'Image
-                                      & " too far to place, the matcher erring by "
-                                      & Driver.Log.Image (Error, 2) & " px");
-                     --  The second eye had no track: segment the thing there around
-                     --  where its pixels went, prompted where its inner point went.
-                     if not Holds (R, X.Into) and then not Starting (R, X.Into) then
-                        declare
-                           Box     : Driver.Instrument.Box := (X0 => Real'Last, Y0 => Real'Last,
-                                                               X1 => Real'First, Y1 => Real'First);
-                           Prompt  : Driver.Images.Pixel;
-                           Nearest : Real := Real'Last;
-                           On      : constant Driver.Images.Image := Seen.Element.Images (X.Into);
-                        begin
-                           for M of Kept loop
-                              Box := (X0 => Real'Min (Box.X0, M.In_Second.U), Y0 => Real'Min (Box.Y0, M.In_Second.V),
-                                      X1 => Real'Max (Box.X1, M.In_Second.U), Y1 => Real'Max (Box.Y1, M.In_Second.V));
-                              if (M.In_First.U - X.Inner.U) ** 2 + (M.In_First.V - X.Inner.V) ** 2 < Nearest then
-                                 Nearest := (M.In_First.U - X.Inner.U) ** 2 + (M.In_First.V - X.Inner.V) ** 2;
-                                 Prompt := M.In_Second;
-                              end if;
-                           end loop;
-                           declare
-                              Request : constant String :=
-                                Driver.Instrument.Segment_Request
-                                  (On, True, Box, [1 => (At_Pixel => Prompt, On => True)]);
-                           begin
-                              R.Starts.Append (Start'
-                                ((Eye    => X.Into,
-                                  Ticket => Driver.Services.Submit
-                                              (Driver.Services.Instrument, "/segment", Request, Beat),
-                                  On     => Image_Holders.To_Holder (On),
-                                  Beat   => Seen.Element.Beat,
-                                  Asked  => Request_Holders.To_Holder (Request))));
-                           end;
-                        end;
-                     end if;
-                  end if;
-               end;
-            else
-               I := I + 1;
-            end if;
-         end;
-      end loop;
-   end Read_Crosses;
 
    procedure Read_Starts (Id : Thing_Id; R : in out Thing_Record) is
       I : Positive := 1;
@@ -831,93 +296,26 @@ package body Driver.World.Estimates is
      (Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (Driver.Images.Width (Image),
                                                                       Driver.Images.Height (Image))))))));
 
-   function Grid_Points (Image : Driver.Images.Image; Stride : Positive; Robot : Driver.Images.Mask)
-     return Driver.Instrument.Point_Array
-   is
-      --  The centre of the middle pixel of each cell of the grid, but where
-      --  the eye sees the robot. Built where it is returned, off the stack.
-      Columns : constant Natural := Driver.Images.Width (Image) / Stride;
-      Rows    : constant Natural := Driver.Images.Height (Image) / Stride;
-      Count   : Natural := 0;
-      function Cell (C, R : Natural) return Driver.Images.Pixel is
-        ((U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5));
-   begin
-      for R in 0 .. Rows - 1 loop
-         for C in 0 .. Columns - 1 loop
-            Count := Count + Boolean'Pos (not Inside (Robot, Cell (C, R)));
-         end loop;
-      end loop;
-      return Points : Driver.Instrument.Point_Array (1 .. Count) do
-         Count := 0;
-         for R in 0 .. Rows - 1 loop
-            for C in 0 .. Columns - 1 loop
-               if not Inside (Robot, Cell (C, R)) then
-                  Count := Count + 1;
-                  Points (Count) := Cell (C, R);
-               end if;
-            end loop;
-         end loop;
-      end return;
-   end Grid_Points;
-
    function Settled (S : State) return Boolean is
      (for all R of S.Things =>
         (for all Here of R.Eyes => not Here.Has or else Tracks.State (Here.Track) in Tracks.Holding | Tracks.Gone));
    --  No thing is being looked for again in any eye.
 
-   function Round_Open (S : State) return Boolean is (for some X of S.Asking => X.Round = S.Round);
-
-   --  The scene is measured at a still beat when it is due and nothing is
-   --  being looked for again: each eye's grid into every other eye.
-   procedure Ask_Background
-     (S         : in out State;
-      Eyes      : Natural;
-      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
-                                             return Driver.World.Cameras.Camera'Class;
-      Still     : Boolean;
-      O         : Observation)
-   is
+   --  The scene is measured at a still beat when it is due and nothing is being looked for again, apart from the main
+   --  loop (Measure: Measure_Scene), at the observation of that beat; not before some eye has views from more than one
+   --  place, as nothing places a point from one place alone.
+   procedure Ask_Scene (S : in out State; Eyes : Natural; Still : Boolean; O : Observation) is
    begin
-      if not Still or else not S.Due or else Round_Open (S) or else not Settled (S) then
-         return;
-      end if;
-      S.Round := S.Round + 1;
-      S.Round_Seen := Observation_Holders.To_Holder (O);
-      S.Incoming.Clear;
-      S.Next_Column := 0;
-      S.Due := False;
-      declare
-         Seen : constant Observation_Holders.Constant_Reference_Type := S.Round_Seen.Constant_Reference;
-      begin
-      for From in 1 .. Eye_Id'Base (Eyes) loop
-         for Into in 1 .. Eye_Id'Base (Eyes) loop
-            if From /= Into and then Has_Image (O, From) and then Has_Image (O, Into) then
-               declare
-                  Stride : constant Positive := Stride_Of (O.Images (From));
-                  Points : constant Driver.Instrument.Point_Array :=
-                    Grid_Points (O.Images (From), Stride, Camera_Of (From, Seen.Element).Self_Mask);
-               begin
-                  if Points'Length > 0 then
-                     S.Asking.Append
-                       (Background'(From   => From,
-                                    Into   => Into,
-                                    Ticket => Driver.Instrument.Submit_Match
-                                                ((Stored => False, Image => O.Images (From)),
-                                                 (Stored => False, Image => O.Images (Into)), Points, True, O.Beat),
-                                    Points => Point_Holders.To_Holder (Points),
-                                    Stride => Stride,
-                                    Round  => S.Round));
-                  end if;
-               end;
-            end if;
-         end loop;
-      end loop;
-      end;
-      if Round_Open (S) then
+      if Still and then S.Due and then not S.Scene_Asked and then Settled (S) and then Driver.Geometry.Known (S.Table)
+        and then (for some E in 1 .. Eye_Id'Base (Eyes) => Driver.World.Sight.Views_Of (S.Views, E) > 1)
+      then
+         S.Round := S.Round + 1;
+         S.Round_Seen := Observation_Holders.To_Holder (O);
+         S.Due := False;
+         S.Scene_Asked := True;
          Driver.Log.Line (Driver.Log.World, "the scene: measuring it, round" & S.Round'Image);
       end if;
-   end Ask_Background;
-
+   end Ask_Scene;
 
    procedure Surfaces_Changed (S : in out State) is
    begin
@@ -979,31 +377,21 @@ package body Driver.World.Estimates is
       --  a hole in a surface than it is a surface: one wrong match, its depth
       --  slid along the line its first sight draws in the second eye, sees
       --  through anything.
-      type Two_Eyes is array (1 .. 2) of Eye_Id;
       Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));
       function "<" (A, B : Driver.World.Supports.Grid_Point) return Boolean is
         (A.Column < B.Column or else (A.Column = B.Column and then A.Row < B.Row));
       package Cell_Sets is new Ada.Containers.Ordered_Sets (Driver.World.Supports.Grid_Point, "<", Driver.World.Supports."=");
       Through : Cell_Sets.Set;
 
+      --  The eye that placed it on one side of the surface, the point significantly on the other.
       function Sees_Through (P : Scene_Point) return Boolean is
+         Eye    : constant Vec3 := Camera_Of (P.Eye, Seen).Pose.Pose.Translation;
+         Before : constant Real := Driver.Geometry.Height (Old.Plane, Eye);
+         H      : constant Estimate := Driver.Geometry.Height (Old.Plane, P.Point);
       begin
-         for E of Two_Eyes'[P.From, P.Into] loop
-            declare
-               Eye    : constant Vec3 := Camera_Of (E, Seen).Pose.Pose.Translation;
-               Before : constant Real := Driver.Geometry.Height (Old.Plane, Eye);
-               H      : constant Estimate := Driver.Geometry.Height (Old.Plane, P.Point);
-            begin
-               --  The eye on one side, the point significantly on the other.
-               if Before /= 0.0 and then H.Value * Before < 0.0
-                 and then Significant (Scalar_Gate (H.Degrees_Of_Freedom, Tests => Tests), H.Value, H.Sigma)
-                 and then In_Reach (Old, Eye + (Before / (Before - H.Value)) * (P.Point.Mean - Eye))
-               then
-                  return True;
-               end if;
-            end;
-         end loop;
-         return False;
+         return Before /= 0.0 and then H.Value * Before < 0.0
+           and then Significant (Scalar_Gate (H.Degrees_Of_Freedom, Tests => Tests), H.Value, H.Sigma)
+           and then In_Reach (Old, Eye + (Before / (Before - H.Value)) * (P.Point.Mean - Eye));
       end Sees_Through;
 
       function Has (C, R : Integer) return Boolean is (Through.Contains ((Column => C, Row => R)));
@@ -1021,140 +409,134 @@ package body Driver.World.Estimates is
       return False;
    end Seen_Through;
 
-   procedure Read_Background
+   --  The supports among the scene's points just placed (Driver.World.Supports): a surface of this episode stands
+   --  where this measurement neither found it again nor saw through it, its points coming along, since eyes that look
+   --  elsewhere now say nothing of it.
+   procedure Settle_Scene
      (S         : in out State;
+      Incoming  : Scene_Point_Vectors.Vector;
       Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
                                              return Driver.World.Cameras.Camera'Class)
    is
-      I      : Positive := 1;
-      Closed : Boolean := False;   --  the latest round's last reply came this beat
    begin
-      while I <= Natural (S.Asking.Length) loop
-         declare
-            X : constant Background := S.Asking (I);
-         begin
-            if Driver.Services.Ready (X.Ticket) then
-               S.Asking.Delete (I);
-               declare
-                  Reply : constant Driver.Services.Reply := Driver.Services.Collect (X.Ticket);
-               begin
-                  --  A reply to an earlier round, or an earlier episode's, is
-                  --  collected and dropped.
-                  if X.Round = S.Round then
-                     declare
-                        Points  : constant Driver.Instrument.Point_Array := X.Points.Element;
-                        Answers : Answers_Access := new Driver.Instrument.Answer_Array (Points'Range);
-                        Ok      : Boolean;
-                        Why     : Unbounded_String;
-                        Kept    : Driver.World.Pairs.Match_Vectors.Vector;
-                        Apart   : Natural := 0;
-                        Far     : Natural := 0;
-                        Error   : Real := Real'Last;
-                        Freedom : Natural := 0;
-                        Seen    : constant Observation_Holders.Constant_Reference_Type :=
-                          S.Round_Seen.Constant_Reference;
-                        First   : constant Driver.World.Cameras.Camera'Class := Camera_Of (X.From, Seen.Element);
-                        Second  : constant Driver.World.Cameras.Camera'Class := Camera_Of (X.Into, Seen.Element);
-                        Robot   : constant Driver.Images.Mask := Second.Self_Mask;
-                        Columns : constant Natural := Driver.Images.Width (Seen.Element.Images (X.From)) / X.Stride;
-                        Added   : Natural := 0;
-                     begin
-                        Driver.Instrument.Read_Match (Reply, True, Answers.all, Ok, Why);
-                        if Ok then
-                           Driver.World.Pairs.Triangulate
-                             (First, Second, Points, Points'Length, Answers.all, Kept, Apart, Far, Error, Freedom);
-                        else
-                           Driver.Log.Line (Driver.Log.World, "the scene: the instrument did not match eye"
-                                            & X.From'Image & " into eye" & X.Into'Image & ": " & To_String (Why));
-                        end if;
-                        Free (Answers);
-                        --  Each pair's grid apart from the others', so no two are
-                        --  neighbours; a match landing on the robot in the second
-                        --  eye is not the scene's.
-                        for M of Kept loop
-                           if not Inside (Robot, M.In_Second) then
-                              S.Incoming.Append
-                                (Scene_Point'(Point => M.Point,
-                                              Grid  => (Column => S.Next_Column
-                                                                  + Natural (Real'Floor (M.In_First.U)) / X.Stride,
-                                                        Row    => Natural (Real'Floor (M.In_First.V)) / X.Stride),
-                                              From  => X.From,
-                                              Into  => X.Into));
-                              Added := Added + 1;
-                           end if;
-                        end loop;
-                        S.Next_Column := S.Next_Column + Columns + 1;
-                        if Added > 0 then
-                           S.Seen_From := First.Pose.Pose.Translation;
-                        end if;
-                        Driver.Log.Line (Driver.Log.World, "the scene:" & Added'Image & " points seen by eyes"
-                                         & X.From'Image & " and" & X.Into'Image & "," & Apart'Image
-                                         & " matches whose lines did not meet," & Far'Image & " too far to place,"
-                                         & " the matcher erring by "
-                                         & Driver.Log.Image (Error, 2) & " px");
-                        Closed := not Round_Open (S);
-                     end;
-                  end if;
-               end;
-            else
-               I := I + 1;
-            end if;
-         end;
-      end loop;
-      if Closed then
-         if S.Incoming.Is_Empty then
-            Driver.Log.Line (Driver.Log.World, "the scene: round" & S.Round'Image & " gave no points; the surfaces stay");
-         else
-            declare
-               All_Points : Points_Access := new Driver.Geometry.Point_Array (1 .. Natural (S.Incoming.Length));
-               All_Grid   : Grid_Access := new Driver.World.Supports.Grid_Array (1 .. Natural (S.Incoming.Length));
-               Found      : Driver.World.Supports.Surface_Vectors.Vector;
-               Scene      : Scene_Point_Vectors.Vector := S.Incoming;
-               Carried    : Natural := 0;
-            begin
-               for K in All_Points'Range loop
-                  All_Points (K) := S.Incoming (K).Point;
-                  All_Grid (K) := S.Incoming (K).Grid;
-               end loop;
-               Driver.World.Supports.Find (All_Points.all, All_Grid.all, S.Up, S.Seen_From, Found);
-               --  A surface of this episode stands where this measurement neither
-               --  found it again nor saw through it: eyes that look elsewhere
-               --  now say nothing of it. Its points come along, so its members
-               --  are points of the scene still.
-               if not S.Earlier then
-                  for Old of S.Surfaces loop
-                     if not Found_Again (Old, Found)
-                       and then not Seen_Through (Old, S.Incoming, Camera_Of, S.Round_Seen.Constant_Reference.Element)
-                     then
-                        declare
-                           Kept : Driver.World.Supports.Surface := Old;
-                        begin
-                           Kept.Members.Clear;
-                           for M of Old.Members loop
-                              Scene.Append (S.Scene (M));
-                              Kept.Members.Append (Positive (Scene.Length));
-                           end loop;
-                           Found.Append (Kept);
-                           Carried := Carried + 1;
-                        end;
-                     end if;
-                  end loop;
+      if Incoming.Is_Empty then
+         Driver.Log.Line (Driver.Log.World, "the scene: round" & S.Round'Image & " gave no points; the surfaces stay");
+         return;
+      end if;
+      declare
+         All_Points : Points_Access := new Driver.Geometry.Point_Array (1 .. Natural (Incoming.Length));
+         All_Grid   : Grid_Access := new Driver.World.Supports.Grid_Array (1 .. Natural (Incoming.Length));
+         Found      : Driver.World.Supports.Surface_Vectors.Vector;
+         Scene      : Scene_Point_Vectors.Vector := Incoming;
+         Carried    : Natural := 0;
+      begin
+         for K in All_Points'Range loop
+            All_Points (K) := Incoming (K).Point;
+            All_Grid (K) := Incoming (K).Grid;
+         end loop;
+         Driver.World.Supports.Find (All_Points.all, All_Grid.all, S.Up, S.Seen_From, Found);
+         if not S.Earlier then
+            for Old of S.Surfaces loop
+               if not Found_Again (Old, Found)
+                 and then not Seen_Through (Old, Incoming, Camera_Of, S.Round_Seen.Constant_Reference.Element)
+               then
+                  declare
+                     Kept : Driver.World.Supports.Surface := Old;
+                  begin
+                     Kept.Members.Clear;
+                     for M of Old.Members loop
+                        Scene.Append (S.Scene (M));
+                        Kept.Members.Append (Positive (Scene.Length));
+                     end loop;
+                     Found.Append (Kept);
+                     Carried := Carried + 1;
+                  end;
                end if;
-               S.Surfaces := Found;
-               S.Scene := Scene;
-               S.Scene_Round := S.Round;
-               S.Incoming.Clear;
-               S.Earlier := False;
-               Surfaces_Changed (S);
-               Driver.Log.Line (Driver.Log.World, "the scene:" & Found.Length'Image & " surfaces things can rest on, from"
-                                & All_Points'Length'Image & " points," & Carried'Image
-                                & " of them measured before and not seen since");
-               Free (All_Points);
-               Free (All_Grid);
+            end loop;
+         end if;
+         S.Surfaces := Found;
+         S.Scene := Scene;
+         S.Scene_Round := S.Round;
+         S.Earlier := False;
+         Surfaces_Changed (S);
+         Driver.Log.Line (Driver.Log.World, "the scene:" & Found.Length'Image & " surfaces things can rest on, from"
+                          & All_Points'Length'Image & " points," & Carried'Image
+                          & " of them measured before and not seen since");
+         Free (All_Points);
+         Free (All_Grid);
+      end;
+   end Settle_Scene;
+
+   --  The scene at the observation it was asked at: a grid of the picture of every eye that has views from more than
+   --  one place, less the pixels that show the robot, placed from the views (Driver.World.Sight), the table among it;
+   --  each eye's grid kept apart from the others' so that no two are neighbours.
+   procedure Measure_Scene
+     (S         : in out State;
+      Eyes      : Natural;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class)
+   is
+      Held        : constant Observation_Holders.Holder := S.Round_Seen;
+      Seen        : constant Observation_Holders.Constant_Reference_Type := Held.Constant_Reference;
+      Incoming    : Scene_Point_Vectors.Vector;
+      Next_Column : Natural := 0;
+   begin
+      for E in 1 .. Eye_Id'Base (Eyes) loop
+         if Has_Image (Seen.Element.all, E) and then Driver.World.Sight.Views_Of (S.Views, E) > 1 then
+            declare
+               Image   : constant Driver.Images.Image := Seen.Element.Images (E);
+               Stride  : constant Positive := Stride_Of (Image);
+               Columns : constant Natural := Driver.Images.Width (Image) / Stride;
+               Rows    : constant Natural := Driver.Images.Height (Image) / Stride;
+               Robot   : constant Driver.Images.Mask := Camera_Of (E, Seen.Element).Self_Mask;
+            begin
+               if Columns > 0 and then Rows > 0 then
+                  declare
+                     Queries : Driver.Robot.Surfaces.Pixel_Array (1 .. Columns * Rows);
+                     Got     : Driver.Robot.Surfaces.Placed_Array (Queries'Range);
+                     Asked, Added, Table_Points : Natural := 0;
+                  begin
+                     for R in 0 .. Rows - 1 loop
+                        for C in 0 .. Columns - 1 loop
+                           declare
+                              Cell : constant Driver.Images.Pixel :=
+                                (U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);
+                           begin
+                              if Inside (Robot, Cell) then
+                                 Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);
+                              else
+                                 Queries (R * Columns + C + 1) := Cell;
+                                 Asked := Asked + 1;
+                              end if;
+                           end;
+                        end loop;
+                     end loop;
+                     Driver.World.Sight.Place (S.Views, Camera_Of, S.Table, E, Seen.Element.all, Queries, Columns, Got);
+                     for K in Got'Range loop
+                        if Got (K).Found then
+                           Incoming.Append
+                             (Scene_Point'(Point => Got (K).Point,
+                                           Grid  => (Column => Next_Column + (K - Got'First) mod Columns,
+                                                     Row    => (K - Got'First) / Columns),
+                                           Eye   => E));
+                           Added := Added + 1;
+                           Table_Points := Table_Points + Boolean'Pos (Got (K).On_Table);
+                        end if;
+                     end loop;
+                     Next_Column := Next_Column + Columns + 1;
+                     if Added > 0 then
+                        S.Seen_From := Camera_Of (E, Seen.Element).Pose.Pose.Translation;
+                     end if;
+                     Driver.Log.Line (Driver.Log.World, "the scene: eye" & E'Image & " placed" & Added'Image & " of its"
+                                      & Asked'Image & " points from" & Driver.World.Sight.Views (S.Views)'Image
+                                      & " views," & Table_Points'Image & " of them on the table");
+                  end;
+               end if;
             end;
          end if;
-      end if;
-   end Read_Background;
+      end loop;
+      Settle_Scene (S, Incoming, Camera_Of);
+   end Measure_Scene;
 
    function On_Thing
      (R         : Thing_Record;
@@ -1243,6 +625,179 @@ package body Driver.World.Estimates is
       end loop;
    end Refresh_Supports;
 
+   --  An eye with no track of the thing, where the thing's points fall in its picture: a track started there, the
+   --  instrument segmenting the thing around where they fall, prompted where their middle falls; once for every time
+   --  the points were placed anew.
+   procedure Start_Elsewhere
+     (Id        : Thing_Id;
+      R         : in out Thing_Record;
+      Eyes      : Natural;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      O         : Observation;
+      Seen      : not null access constant Observation)
+   is
+   begin
+      if not R.Has_Points then
+         return;
+      end if;
+      for Into in 1 .. Eye_Id'Base (Eyes) loop
+         if Has_Image (O, Into) and then not Holds (R, Into) and then not Starting (R, Into)
+           and then (not Has_Slot (R, Into) or else R.Eyes (Into).Tried_At < R.Points_At)
+         then
+            declare
+               Cam    : constant Driver.World.Cameras.Camera'Class := Camera_Of (Into, Seen);
+               Box    : Driver.Instrument.Box := (X0 => Real'Last, Y0 => Real'Last, X1 => Real'First, Y1 => Real'First);
+               Middle : Vec3 := Zero3;
+               Count  : Natural := 0;
+            begin
+               for M of R.Points loop
+                  declare
+                     Px      : Driver.Images.Pixel;
+                     Visible : Boolean;
+                  begin
+                     Cam.Project (M.Point.Mean, Px, Visible);
+                     if Visible then
+                        Box := (X0 => Real'Min (Box.X0, Px.U), Y0 => Real'Min (Box.Y0, Px.V),
+                                X1 => Real'Max (Box.X1, Px.U), Y1 => Real'Max (Box.Y1, Px.V));
+                        Middle := Middle + M.Point.Mean;
+                        Count := Count + 1;
+                     end if;
+                  end;
+               end loop;
+               declare
+                  Here : Slot := (if Has_Slot (R, Into) then R.Eyes (Into) else Empty_Slot);
+               begin
+                  Here.Tried_At := R.Points_At;
+                  if Has_Slot (R, Into) then
+                     R.Eyes.Replace_Element (Into, Here);
+                  else
+                     while R.Eyes.Last_Index < Into loop
+                        R.Eyes.Append (Empty_Slot);
+                     end loop;
+                     R.Eyes.Replace_Element (Into, Here);
+                  end if;
+               end;
+               if Count > 0 then
+                  declare
+                     Prompt  : Driver.Images.Pixel;
+                     Visible : Boolean;
+                  begin
+                     Cam.Project ((1.0 / Real (Count)) * Middle, Prompt, Visible);
+                     if Visible then
+                        declare
+                           Request : constant String :=
+                             Driver.Instrument.Segment_Request
+                               (O.Images (Into), True, Box, [1 => (At_Pixel => Prompt, On => True)]);
+                        begin
+                           R.Starts.Append (Start'
+                             ((Eye    => Into,
+                               Ticket => Driver.Services.Submit (Driver.Services.Instrument, "/segment", Request, O.Beat),
+                               On     => Image_Holders.To_Holder (O.Images (Into)),
+                               Beat   => O.Beat,
+                               Asked  => Request_Holders.To_Holder (Request))));
+                           Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ":" & Count'Image
+                                            & " of its points fall in eye" & Into'Image & "'s picture; segmenting it there");
+                        end;
+                     end if;
+                  end;
+               end if;
+            end;
+         end if;
+      end loop;
+   end Start_Elsewhere;
+
+   --  A region an eye holds, measured anew, placed: the pixels of a grid of it a patch's half width apart, less those
+   --  that show the robot, placed from the views (Driver.World.Sight); those standing above the table are the thing's
+   --  own, its points from that eye (Place_Points).
+   procedure Place_Pixels
+     (S         : State;
+      E         : Eye_Id;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      O         : Observation;
+      Region    : Driver.Images.Mask;
+      Points    : out Driver.World.Points.Placed_Vectors.Vector;
+      Normals   : out Normal_Vectors.Vector;
+      Asked     : out Natural)
+   is
+      Held    : constant Observation_Holders.Holder := Observation_Holders.To_Holder (O);
+      Seen    : constant Observation_Holders.Constant_Reference_Type := Held.Constant_Reference;
+      W       : constant Natural := Driver.Images.Width (Region);
+      H       : constant Natural := Driver.Images.Height (Region);
+      Step    : constant Positive := Positive'Max (1, Driver.Alignment.Half_Patch (W, H));
+      Columns : constant Positive := Positive'Max (1, (W + Step - 1) / Step);
+      Rows    : constant Positive := Positive'Max (1, (H + Step - 1) / Step);
+      Robot   : constant Driver.Images.Mask := Camera_Of (E, Seen.Element).Self_Mask;
+      Queries : Driver.Robot.Surfaces.Pixel_Array (1 .. Columns * Rows);
+      Got     : Driver.Robot.Surfaces.Placed_Array (Queries'Range);
+   begin
+      Points.Clear;
+      Normals.Clear;
+      Asked := 0;
+      for R in 0 .. Rows - 1 loop
+         for C in 0 .. Columns - 1 loop
+            declare
+               Cell : constant Driver.Images.Pixel :=
+                 (U => Real (C * Step + Step / 2) + 0.5, V => Real (R * Step + Step / 2) + 0.5);
+            begin
+               if Inside (Region, Cell) and then not Inside (Robot, Cell) then
+                  Queries (R * Columns + C + 1) := Cell;
+                  Asked := Asked + 1;
+               else
+                  Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);
+               end if;
+            end;
+         end loop;
+      end loop;
+      if Asked = 0 then
+         return;
+      end if;
+      Driver.World.Sight.Place (S.Views, Camera_Of, S.Table, E, O, Queries, Columns, Got);
+      for K in Got'Range loop
+         if Got (K).Found and then not Got (K).On_Table then
+            Points.Append (Driver.World.Points.Placed'(Pixel => Queries (K), Point => Got (K).Point, Eye => E));
+            Normals.Append (Got (K).Normal);
+         end if;
+      end loop;
+   end Place_Pixels;
+
+   procedure Place_Region
+     (S         : in out State;
+      Req       : Place_Request;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class)
+   is
+      Points  : Driver.World.Points.Placed_Vectors.Vector;
+      Normals : Normal_Vectors.Vector;
+      Asked   : Natural;
+   begin
+      if Req.Thing > S.Things.Last_Index or else not Has_Slot (S.Things (Req.Thing), Req.Eye) then
+         return;
+      end if;
+      Place_Pixels (S, Req.Eye, Camera_Of, Req.Seen.Element, Tracks.Region (S.Things (Req.Thing).Eyes (Req.Eye).Track),
+                    Points, Normals, Asked);
+      if Asked > 0 then
+         Driver.Log.Line (Driver.Log.World, "thing" & Req.Thing'Image & ": eye" & Req.Eye'Image & " placed"
+                          & Points.Length'Image & " of the" & Asked'Image & " points of its region above the table");
+      end if;
+      if not Points.Is_Empty then
+         Place_Points (S, Req.Thing, Points, Normals);
+      end if;
+   end Place_Region;
+
+   function Views_Of (S : State; E : Eye_Id) return Natural is (Driver.World.Sight.Views_Of (S.Views, E));
+
+   procedure Keep_View
+     (S         : in out State;
+      E         : Eye_Id;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      O         : Observation) is
+   begin
+      Driver.World.Sight.Keep_View (S.Views, Camera_Of, S.Table, E, O);
+   end Keep_View;
+
    procedure Observe
      (S         : in out State;
       Eyes      : Natural;
@@ -1258,7 +813,10 @@ package body Driver.World.Estimates is
       Seen  : constant Observation_Holders.Constant_Reference_Type := Held.Constant_Reference;
    begin
       S.Up := Up;
-      Read_Background (S, Camera_Of);
+      --  The still pictures, kept as views the eyes place from (Driver.World.Sight).
+      if Still then
+         Driver.World.Sight.Keep (S.Views, Eyes, Camera_Of, S.Table, O);
+      end if;
       for Id in S.Things.First_Index .. S.Things.Last_Index loop
          declare
             R : Thing_Record := S.Things (Id);
@@ -1272,6 +830,13 @@ package body Driver.World.Estimates is
                      Tracks.Observe (Here.Track, O.Images (E), O.Beat, Still);
                      Moved (Id) := Moved (Id) or else (Was = Tracks.Holding and then Tracks.State (Here.Track) = Tracks.Lost);
                      Serve (Id, E, Here, O.Beat);
+                     --  A region measured anew, held at a still beat: placed apart (Measure: Place_Region).
+                     if Tracks.Seen (Here.Track) and then Tracks.Latest_Beat (Here.Track) = O.Beat
+                       and then Tracks.Measured_At (Here.Track) /= Here.Placed_At
+                     then
+                        Here.Placed_At := Tracks.Measured_At (Here.Track);
+                        S.To_Place.Append (Place_Request'(Thing => Id, Eye => E, Seen => Held));
+                     end if;
                      R.Eyes.Replace_Element (E, Here);
                   end;
                end if;
@@ -1280,41 +845,11 @@ package body Driver.World.Estimates is
                Before : constant Driver.Clock.Beat := R.Points_At;
                Had    : constant Boolean := R.Has_Points;
             begin
-               Read_Crosses (S, Id, R, Camera_Of, O.Beat);
                Gather (R, Camera_Of, Seen.Element);
                R.Under_Due := R.Under_Due or else R.Has_Points /= Had or else R.Points_At /= Before;
             end;
             Read_Starts (Id, R);
-            --  Ask every other eye about a thing one eye sees, once for every
-            --  time its region there was measured.
-            for From in R.Eyes.First_Index .. R.Eyes.Last_Index loop
-               if R.Eyes (From).Has and then Tracks.Seen (R.Eyes (From).Track)
-                 and then Tracks.Latest_Beat (R.Eyes (From).Track) = O.Beat
-               then
-                  for Into in 1 .. Eye_Id'Base (Eyes) loop
-                     if Into /= From and then Has_Image (O, Into) and then not Pending (R, From, Into)
-                       and then Measured_When_Asked (R, From, Into) < Tracks.Measured_At (R.Eyes (From).Track)
-                     then
-                        declare
-                           T      : Tracks.Track renames R.Eyes (From).Track;
-                           Points : constant Driver.Instrument.Point_Array := Tracks.Region_And_Around (T);
-                        begin
-                           R.Crosses.Append (Cross'
-                             ((From   => From,
-                               Into   => Into,
-                               Ticket => Driver.Instrument.Submit_Match
-                                           ((Stored => False, Image => O.Images (From)),
-                                            (Stored => False, Image => O.Images (Into)), Points, True, O.Beat),
-                               Points => Point_Holders.To_Holder (Points),
-                               Own    => Tracks.Region_Points (T),
-                               Seen   => Observation_Holders.To_Holder (O),
-                               Inner  => Driver.World.Regions.Inner_Point (Tracks.Region (T)))));
-                           Note_Asked (R, From, Into, Tracks.Measured_At (T));
-                        end;
-                     end if;
-                  end loop;
-               end if;
-            end loop;
+            Start_Elsewhere (Id, R, Eyes, Camera_Of, O, Seen.Element);
             S.Things.Replace_Element (Id, R);
          end;
       end loop;
@@ -1328,8 +863,49 @@ package body Driver.World.Estimates is
          Refresh_Supports (S, Camera_Of, Seen.Element);
       end if;
       Free (Moved);
-      Ask_Background (S, Eyes, Camera_Of, Still, O);
+      Ask_Scene (S, Eyes, Still, O);
    end Observe;
+
+   function Measure_Due (S : State) return Boolean is
+     (S.Scene_Asked or else not S.To_Place.Is_Empty
+      or else (for some R of S.Things => (for some Here of R.Eyes => Here.Has and then Here.Match_Due)));
+
+   procedure Measure
+     (S         : in out State;
+      Eyes      : Natural;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class)
+   is
+   begin
+      --  The tracks lost at a still beat: their pixels looked for again.
+      for Id in S.Things.First_Index .. S.Things.Last_Index loop
+         declare
+            R : Thing_Record := S.Things (Id);
+         begin
+            for E in R.Eyes.First_Index .. R.Eyes.Last_Index loop
+               if R.Eyes (E).Has and then R.Eyes (E).Match_Due then
+                  declare
+                     Here : Slot := R.Eyes (E);
+                  begin
+                     Match_Track (Id, E, Here);
+                     R.Eyes.Replace_Element (E, Here);
+                  end;
+               end if;
+            end loop;
+            S.Things.Replace_Element (Id, R);
+         end;
+      end loop;
+      --  The regions measured anew.
+      for Req of S.To_Place loop
+         Place_Region (S, Req, Camera_Of);
+      end loop;
+      S.To_Place.Clear;
+      --  The scene.
+      if S.Scene_Asked then
+         Measure_Scene (S, Eyes, Camera_Of);
+         S.Scene_Asked := False;
+      end if;
+   end Measure;
 
    procedure Adopt (S : in out State; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id)
    is
@@ -1365,11 +941,11 @@ package body Driver.World.Estimates is
    begin
       S.Things.Clear;
       S.Places.Clear;
-      --  The surfaces stay, as an earlier episode's, until the scene is
-      --  measured again; a round still out is dropped when it answers.
+      S.To_Place.Clear;
+      --  The surfaces stay, as an earlier episode's, until the scene is measured again; one asked and not measured yet
+      --  is asked again at the next still beat.
       S.Earlier := not S.Surfaces.Is_Empty;
-      S.Round := S.Round + 1;
-      S.Incoming.Clear;
+      S.Scene_Asked := False;
       S.Due := True;
    end New_Episode;
 
@@ -1382,51 +958,58 @@ package body Driver.World.Estimates is
      (if T <= S.Things.Last_Index and then Has_Slot (S.Things (T), E) then Tracks.Region (S.Things (T).Eyes (E).Track)
       else Driver.Images.Create (0, 0));
 
-   function Points_Of (S : State; T : Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector is (S.Things (T).Points);
+   function Points_Of (S : State; T : Thing_Id) return Driver.World.Points.Placed_Vectors.Vector is (S.Things (T).Points);
 
    function Points_Eye (S : State; T : Thing_Id) return Eye_Id is (S.Things (T).Points_In);
 
    procedure Place_Points
      (S       : in out State;
       T       : Thing_Id;
-      Points  : Driver.World.Pairs.Match_Vectors.Vector;
+      Points  : Driver.World.Points.Placed_Vectors.Vector;
       Normals : Normal_Vectors.Vector;
       Carried : Boolean := False)
    is
       R   : Thing_Record := S.Things (T);
-      Old : constant Driver.World.Pairs.Match_Vectors.Vector := R.Placed;
+      Eye : constant Eye_Id'Base := (if Points.Is_Empty then 0 else Points.First_Element.Eye);
+      Kept_Points  : Driver.World.Points.Placed_Vectors.Vector;
+      Kept_Normals : Normal_Vectors.Vector;
    begin
-      R.Placed := Points;
-      R.Placed_Normals := Normals;
-      --  Into its points at once, in place of the ones placed before, as Gather keeps them; its support is worked
-      --  out again.
-      declare
-         Now     : Driver.World.Pairs.Match_Vectors.Vector;
-         Normals_Now : Normal_Vectors.Vector;
-      begin
-         for K in R.Points.First_Index .. R.Points.Last_Index loop
-            if not Old.Contains (R.Points (K)) then
-               Now.Append (R.Points (K));
-               Normals_Now.Append (if K <= R.Normals.Last_Index then R.Normals (K) else Zero3);
+      --  The points another eye placed stand; this eye's earlier ones go, and all of them when a hand carried them.
+      if not Carried then
+         for K in R.Placed.First_Index .. R.Placed.Last_Index loop
+            if R.Placed (K).Eye /= Eye then
+               Kept_Points.Append (R.Placed (K));
+               Kept_Normals.Append (R.Placed_Normals (K));
             end if;
          end loop;
-         for K in Points.First_Index .. Points.Last_Index loop
-            Now.Append (Points (K));
-            Normals_Now.Append (Normals (K));
-         end loop;
-         R.Points := Now;
-         R.Normals := Normals_Now;
-         R.Has_Points := not R.Points.Is_Empty;
-      end;
+      end if;
+      for K in Points.First_Index .. Points.Last_Index loop
+         Kept_Points.Append (Points (K));
+         Kept_Normals.Append (Normals (K));
+      end loop;
+      R.Placed := Kept_Points;
+      R.Placed_Normals := Kept_Normals;
+      --  The region they were placed from is not placed again.
+      if not Carried and then Eye > 0 and then Has_Slot (R, Eye) then
+         declare
+            Here : Slot := R.Eyes (Eye);
+         begin
+            Here.Placed_At := Tracks.Measured_At (Here.Track);
+            R.Eyes.Replace_Element (Eye, Here);
+         end;
+      end if;
+      R.Points := Kept_Points;
+      R.Normals := Kept_Normals;
+      R.Has_Points := not R.Points.Is_Empty;
       R.Under_Due := True;
       S.Things.Replace_Element (T, R);
       if not Carried then
          Driver.Log.Line (Driver.Log.World, "thing" & T'Image & ":" & Points.Length'Image
-                          & " points placed by the eye that holds it, from the places its arm held it at");
+                          & " points placed by eye" & Eye'Image & " of" & Kept_Points.Length'Image & " in all");
       end if;
    end Place_Points;
 
-   function Placed_Of (S : State; T : Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector is
+   function Placed_Of (S : State; T : Thing_Id) return Driver.World.Points.Placed_Vectors.Vector is
      (S.Things (T).Placed);
 
    function Placed_Normals_Of (S : State; T : Thing_Id) return Normal_Vectors.Vector is (S.Things (T).Placed_Normals);

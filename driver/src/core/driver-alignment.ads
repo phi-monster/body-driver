@@ -182,6 +182,19 @@ package Driver.Alignment is
    --  pixels); the caller allows that only while it has nothing else to stand on (Keyframes: no field yet).
    --  R1 on the Pi: the wide retries found one point in twelve and were most of the aligner's time.
 
+   function From_Level (P : Pyramid; Level : Natural) return Pyramid
+     with Pre => Level < Levels (P);
+   --  The picture at that level as a pyramid of its own, its sizes from that level down: a place at the level is the
+   --  full size's over Halving ** Level (corner-origin coordinates scale with the pixels).
+
+   function Align_At_Scale (First, Second : Pyramid; Query : Prediction; Widen : Boolean := True) return Answer
+     with Pre => Levels (First) > 0 and then Levels (Second) > 0;
+   --  As Align, where the two pictures may show the place at very different scales (two eyes of different lenses, or
+   --  one eye near and far): the finer picture is compared at the size of it that is as fine as the other's full size
+   --  or less than a halving finer (its coarser levels stand in for it: a direction made smaller by more than a
+   --  halving would skip over the pictures' pixels, Bad_Warp), and the answer is given at the full sizes. The scale
+   --  is the prediction's warp's (Linear): the geometric mean of how far it stretches its two directions.
+
    function Largest_Window (First, Second : Pyramid) return Real
      with Pre => Levels (First) > 0 and then Levels (Second) > 0;
    --  The radius, in pixels of the full-size pictures, of the widest window of places Align searches for a point

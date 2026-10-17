@@ -298,7 +298,7 @@ procedure Replay is
 
    --  Where a beat's time goes, written at the end: the driver's own work on
    --  each beat, layer by layer, without the robot's.
-   type Part is (Parsing, Robot_Layer, Hand_Layer, World_Layer, Estimates_Apart);
+   type Part is (Parsing, Robot_Layer, Hand_Layer, World_Layer, Estimates_Apart, World_Measure);
    Spent : array (Part) of Duration := [others => 0.0];
 
    --  With --watch, the eye followed beat by beat (Driver.Robot.Eye_Watch); with --readings, the group
@@ -377,9 +377,10 @@ procedure Replay is
       end if;
    end Rest;
 
-   function Due return Boolean is (Driver.Robot.Estimates_Due (Robot));
+   function Due return Boolean is (Driver.Robot.Estimates_Due (Robot) or else Driver.World.Measure_Due (Scene));
 
-   procedure Compute is
+   --  The robot's heavier estimates, where the run computed them: due, or asked by a decider (kind E).
+   procedure Compute_Robot is
       Start : constant Duration := Driver.Clock.Seconds;
    begin
       if Dump_Only then
@@ -387,6 +388,22 @@ procedure Replay is
       end if;
       Driver.Robot.Compute_Estimates (Robot);
       Spent (Estimates_Apart) := Spent (Estimates_Apart) + (Driver.Clock.Seconds - Start);
+   end Compute_Robot;
+
+   procedure Compute is
+      Start : Duration;
+   begin
+      if Dump_Only then
+         return;
+      end if;
+      if Driver.Robot.Estimates_Due (Robot) then
+         Compute_Robot;
+      end if;
+      if Driver.World.Measure_Due (Scene) then
+         Start := Driver.Clock.Seconds;
+         Driver.World.Measure (Scene, Robot);
+         Spent (World_Measure) := Spent (World_Measure) + (Driver.Clock.Seconds - Start);
+      end if;
    end Compute;
 
    procedure Never (E : Ada.Exceptions.Exception_Occurrence) is null;
@@ -687,7 +704,7 @@ begin
          when Driver.Recording.Service_Request => Payload.Query (Service_Request'Access);
          when Driver.Recording.Service_Reply   => Payload.Query (Service_Reply'Access);
          when Driver.Recording.File_Read       => Apart.Replay_Decider; Payload.Query (File_Read'Access);
-         when Driver.Recording.Estimates_Asked => Apart.Replay_Decider; Compute;
+         when Driver.Recording.Estimates_Asked => Apart.Replay_Decider; Compute_Robot;
          when Driver.Recording.World_Written   => Apart.Replay_Decider; Payload.Query (World_Write'Access);
          when Driver.Recording.Sweep_Begun | Driver.Recording.Channels_Asked =>
             Apart.Replay_Decider; Payload.Query (Sweep_Told'Access);

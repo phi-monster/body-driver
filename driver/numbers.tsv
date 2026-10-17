@@ -428,6 +428,8 @@ driver-alignment.adb	return Sqrt (Real'Max (0.0, (Q_VV * Du ** 2 - 2.0 * Q_UV * 
 driver-alignment.adb	type Taps is array (0 .. 3) of Real;	3	math	the cubic B-spline reads four taps, one before the place to two after
 driver-alignment.adb	when 1 => Won.First := Won.First + 1;	1	structure	the rank of the winning peak the count is kept by (first, second, later)
 driver-alignment.adb	when 2 => Won.Second := Won.Second + 1;	2	structure	the rank of the winning peak the count is kept by (first, second, later)
+driver-alignment.adb	while Down_First + 1 < Levels (First) and then Scale * Real (Halving) ** (Down_First + 1) <= 1.0 loop	1.0	math	as fine as the other picture: a scale of one
+driver-alignment.adb	while Down_Second + 1 < Levels (Second) and then Scale / Real (Halving) ** (Down_Second + 1) >= 1.0 loop	1.0	math	as fine as the other picture: a scale of one
 driver-alignment.adb	while J >= 1 and then Rho (Peaks (J)) < Rho (Held) loop	1	structure	the insertion stops at the first peak
 driver-alignment.ads	Finest : constant := 0;	0	structure	the finest size of the pyramid is the picture itself: size 0
 driver-alignment.ads	Halving : constant := 2;	2	math	a size of the pyramid is half the one before: the pictures are halved
@@ -462,6 +464,7 @@ driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal d
 driver-brain-keyboard.adb	Sentence_Rule : constant String := "";	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
 driver-brain-live.adb	Half : constant Natural := Natural'Max (1, Driver.Alignment.Half_Patch (W, H)) / 2;	1	numerics	a patch of at least one pixel
 driver-brain-live.adb	Half : constant Natural := Natural'Max (1, Driver.Alignment.Half_Patch (W, H)) / 2;	2	math	half of the patch's half width on either side of a point: the square about it a point was asked at
+driver-brain-live.adb	or else Driver.World.Views_Of (S, E) < 2	2	structure	more than one place: a line of sight from one place alone places nothing, the eye now needs a view from elsewhere
 driver-brain-live.adb	return 2 * Inside > Driver.Images.Count (Whole);	2	math	more than half: twice the part exceeds the whole
 driver-brain-pictures.adb	Channels : constant := 3;	3	format	bytes per RGB pixel
 driver-brain-rounds.adb	& (if Wait_Beats = 1 then "" else ""));	1	format	one beat is said in the singular
@@ -621,7 +624,6 @@ driver-images.adb	function Blue (I : Image; Column, Row : Natural) return Natura
 driver-images.adb	function Green (I : Image; Column, Row : Natural) return Natural is (Channel (I, Column, Row, 1));	1	structure	green is the second byte of a pixel
 driver-images.adb	return Natural (Data (Data'First + Offset (3 * (Row * I.Width + Column) + Index)));	3	format	three bytes per RGB pixel
 driver-images.ads	with Pre => RGB'Length = 3 * Width * Height;	3	format	three bytes per RGB pixel
-driver-instrument.adb	& "");	"0	format	the service's label for a prompt point off the thing
 driver-instrument.adb	& (if Points (K).On then "" else "") & "");	"0	format	the service's label for a prompt point off the thing
 driver-instrument.adb	& (if Points (K).On then "" else "") & "");	"1	format	the service's label for a prompt point on the thing
 driver-instrument.adb	B.Append (Byte (V mod 2 ** 8));	2	format	one byte holds eight bits
@@ -629,7 +631,6 @@ driver-instrument.adb	Bits_Per_Pixel : constant := 24;	24	format	BMP: a 24-bit i
 driver-instrument.adb	Channels : constant := 3;	3	format	three colour bytes per pixel
 driver-instrument.adb	File_Header : constant := 14;	14	format	BMP: the file header is 14 bytes
 driver-instrument.adb	Info_Header : constant := 40;	40	format	BMP: the BITMAPINFOHEADER is 40 bytes
-driver-instrument.adb	M.Certainty := Driver.Json.Number (Doc, Driver.Json.Element (Doc, E, 3));	3	format	the service's answer is u, v, certainty
 driver-instrument.adb	Pixels (To + Offset (Channels * Column) + 2) := RGB (From + Offset (Channels * Column));	2	format	a bitmap pixel is blue, green, red: the byte two places on in one order is the first in the other
 driver-instrument.adb	Pixels (To + Offset (Channels * Column)) := RGB (From + Offset (Channels * Column) + 2);	2	format	a bitmap pixel is blue, green, red: the byte two places on in one order is the first in the other
 driver-instrument.adb	Put_Little (B, 0, 4 * 4);	4	format	BMP: four four-byte fields of resolution and palette
@@ -646,12 +647,8 @@ driver-instrument.adb	Put_Little (B, Offset_Of_Pixels, 4);	4	format	BMP: a four-
 driver-instrument.adb	Put_Little (B, Row_Size * H, 4);	4	format	BMP: a four-byte field
 driver-instrument.adb	Put_Little (B, W, 4);	4	format	BMP: a four-byte field
 driver-instrument.adb	Row_Alignment : constant := 4;	4	format	BMP: rows are padded to a multiple of four bytes
-driver-instrument.adb	U := Driver.Json.Number (Doc, Driver.Json.Element (Doc, N, 1));	1	format	the service's answer starts with u
-driver-instrument.adb	V := Driver.Json.Number (Doc, Driver.Json.Element (Doc, N, 2));	2	format	the service's answer has v second
 driver-instrument.adb	V := V / 2 ** 8;	2	format	one byte holds eight bits
 driver-instrument.adb	if K mod 2 = 0 then	2	format	the service's runs alternate off and on, starting off
-driver-instrument.adb	if M.Found and then Driver.Json.Count (Doc, E) > 2 then	2	format	the service's answer is u, v, certainty
-driver-instrument.adb	or else Driver.Json.Count (Doc, N) < 2	2	format	a pixel answer has at least u and v
 driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#1_0000#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
 driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#400#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
 driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#D800#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
@@ -1257,6 +1254,8 @@ driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its e
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
@@ -1265,8 +1264,8 @@ driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbo
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
 driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
-driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
-driver-robot-hand-lobes.adb	for Dc in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
@@ -1285,8 +1284,6 @@ driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbo
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel and itself
-driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
-driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	function Share (Count : Natural) return Real is (if Averaged then 1.0 / Real (Count) else 1.0);	1.0	math	n pixels placed on their own share a centre's variance by 1/n; placed together by the one edge, they do not
 driver-robot-hand-lobes.adb	function Share (Count : Natural) return Real is (if Averaged then 1.0 / Real (Count) else 1.0);	1.0	math	n pixels placed on their own share a centre's variance by 1/n; placed together by the one edge, they do not
 driver-robot-hand-lobes.adb	if 2 * Right < Seeded then	2	math	fewer than half of the seeds
@@ -2980,49 +2977,55 @@ driver-robot-stillness.adb	if Natural (S.Watch_Diffs.Length) >= 2 * Natural'Max 
 driver-robot-stillness.adb	if Natural (S.Watch_Diffs.Length) >= 2 * Natural'Max (1, S.Watch_Scatter_Counted) then	2	math	doubling: the medians are recomputed when the stationary beats have doubled
 driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then	2	statistics	a variance needs two frames
 driver-robot-stillness.adb	or else S.Watch_Run >= 2)	2	statistics	a level holds when two stationary steps in a row agree on it (the agreed settling rule)
-driver-robot-surfaces.adb	(Arccos (Real'Min (1.0, Dot (Ray (U, W), Ray (U + 1.0, W)))));	1.0	math	a cosine is at most one
-driver-robot-surfaces.adb	(Arccos (Real'Min (1.0, Dot (Ray (U, W), Ray (U + 1.0, W)))));	1.0	math	the next pixel across: the angle one pixel spans
+driver-robot-surfaces.adb	((1.0 / (Angles (L) * Real'Max (abs (X - Origins (L)), Real'Model_Small)) ** 2)	1.0	math	a weight is the inverse of a variance
+driver-robot-surfaces.adb	(Arccos (Real'Min (1.0, Dot (Ray (V.Lens, U, W), Ray (V.Lens, U + 1.0, W)))));	1.0	math	a cosine is at most one
+driver-robot-surfaces.adb	(Arccos (Real'Min (1.0, Dot (Ray (V.Lens, U, W), Ray (V.Lens, U + 1.0, W)))));	1.0	math	the next pixel across: the angle one pixel spans
+driver-robot-surfaces.adb	A : constant Mat3 := Weighted (1) + Weighted (L);	1	structure	the eye now's own line is the first
 driver-robot-surfaces.adb	A := A + (1.0 / (Angles (L) * R) ** 2) * P;	1.0	math	a weight is the inverse of a variance
-driver-robot-surfaces.adb	Angles : array (1 .. 3) of Real := [others => 0.0];	3	structure	at most three lines of sight meet: the eye now and the two views
-driver-robot-surfaces.adb	Columns : constant Positive := Positive'Max (1, (W + Step - 1) / Step);	1	numerics	at least one column, and the grid's columns rounded up
-driver-robot-surfaces.adb	Cu : constant Real := (if Half > 0.0 then (Uf - Un) / (2.0 * Half) else 1.0);	1.0	math	the unit step along u when the segment has no length
-driver-robot-surfaces.adb	Cu : constant Real := (if Half > 0.0 then (Uf - Un) / (2.0 * Half) else 1.0);	2.0	math	the segment's half length: its direction is the difference over twice it
-driver-robot-surfaces.adb	Cv : constant Real := (if Half > 0.0 then (Vf - Vn) / (2.0 * Half) else 0.0);	2.0	math	the segment's half length: its direction is the difference over twice it
+driver-robot-surfaces.adb	Along (1, Column > 0, Column < Columns - 1, Column > 1, Column < Columns - 2);	1	structure	along a row the neighbours are one query apart, two apart for the pair beyond
+driver-robot-surfaces.adb	Along (1, Column > 0, Column < Columns - 1, Column > 1, Column < Columns - 2);	1	structure	along a row the neighbours are one query apart, two apart for the pair beyond
+driver-robot-surfaces.adb	Along (1, Column > 0, Column < Columns - 1, Column > 1, Column < Columns - 2);	2	structure	the pair beyond a point on one side are one and two queries off it
+driver-robot-surfaces.adb	Between : constant Real := (Unseen + Near) / 2.0;	2.0	numerics	bisection: the depth halfway between the last seen and the first not seen
+driver-robot-surfaces.adb	Cu : constant Real := (if Run > 0.0 then (Un - U) / Run else 1.0);	1.0	math	the unit step along u when the segment has no length
 driver-robot-surfaces.adb	D : constant Natural := At_Offset (0, 1);	1	math	the neighbour one row down
-driver-robot-surfaces.adb	Gate : constant Real := Driver.Alignment.Window_Radius (1.0);	1.0	math	the window of a unit standard deviation: the gate's radius in sigmas
-driver-robot-surfaces.adb	Half : constant Real := Sqrt ((Uf - Un) ** 2 + (Vf - Vn) ** 2) / 2.0;	2.0	math	half the segment's length
-driver-robot-surfaces.adb	Into (V, Centre + (Near / 2.0) * D_Now, U2, V2, F2);	2.0	structure	the depth halves while the view still sees the place: the nearest depth within the halvings a float can tell
-driver-robot-surfaces.adb	Into (V, Centre + Dist * Sight (Now, Q.U + 1.0, Q.V), U1, V1, F1);	1.0	math	the next pixel across, for the warp's derivative by u
-driver-robot-surfaces.adb	Into (V, Centre + Dist * Sight (Now, Q.U, Q.V + 1.0), U2, V2, F2);	1.0	math	the next pixel down, for the warp's derivative by v
-driver-robot-surfaces.adb	K : constant Natural := (if Pick = 1 then First else Second);	1	structure	the first of the two views
+driver-robot-surfaces.adb	I - 2 * Columns >= Result'First, I + 2 * Columns <= Result'Last);	2	structure	the pair beyond a point along a column are one and two rows off it
+driver-robot-surfaces.adb	I - 2 * Columns >= Result'First, I + 2 * Columns <= Result'Last);	2	structure	the pair beyond a point along a column are one and two rows off it
+driver-robot-surfaces.adb	Into (V, Centre + S * Sight (Now, Q.U + 1.0, Q.V), U1, V1, F1);	1.0	math	the next pixel across, for the warp's derivative by u
+driver-robot-surfaces.adb	Into (V, Centre + S * Sight (Now, Q.U, Q.V + 1.0), U2, V2, F2);	1.0	math	the next pixel down, for the warp's derivative by v
+driver-robot-surfaces.adb	J : array (1 .. 2, 1 .. 3) of Real := [others => [others => 0.0]];	2	structure	a place in a picture: its two coordinates
+driver-robot-surfaces.adb	J : array (1 .. 2, 1 .. 3) of Real := [others => [others => 0.0]];	3	structure	a point of the frame: its three coordinates
 driver-robot-surfaces.adb	L : constant Natural := At_Offset (-1, 0);	1	math	the neighbour one column left
 driver-robot-surfaces.adb	Lines : Natural := 1;	1	structure	the eye now is the first line of sight
-driver-robot-surfaces.adb	Mid_S : constant Real := (Far + Near) / 2.0;	2.0	math	the middle of the segment's depths
-driver-robot-surfaces.adb	Mid_U : constant Real := (Uf + Un) / 2.0;	2.0	math	the middle of the segment's ends
-driver-robot-surfaces.adb	Mid_V : constant Real := (Vf + Vn) / 2.0;	2.0	math	the middle of the segment's ends
+driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
+driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
+driver-robot-surfaces.adb	Mid : constant Real := (Lo + Hi) / 2.0;	2.0	numerics	bisection: the depth halfway between the two that bracket a window's width
 driver-robot-surfaces.adb	Near := Near / 2.0;	2.0	structure	the depth halves while the view still sees the place: the nearest depth within the halvings a float can tell
-driver-robot-surfaces.adb	Origins : array (1 .. 3) of Vec3 := [others => Zero3];	3	structure	at most three lines of sight meet: the eye now and the two views
+driver-robot-surfaces.adb	Ok := Ahead and then Driver.Distributions.Chi_Square_Deviate (Miss, 2 * Used - 3) <= Z;	2	statistics	two degrees of freedom a line: its distance across it
+driver-robot-surfaces.adb	Ok := Ahead and then Driver.Distributions.Chi_Square_Deviate (Miss, 2 * Used - 3) <= Z;	3	statistics	less the three the point takes
 driver-robot-surfaces.adb	Q : constant Real := (C.VV * Du * Du - 2.0 * C.UV * Du * Dv + C.UU * Dv * Dv) / Det;	2.0	math	the quadratic form's cross term is counted twice
-driver-robot-surfaces.adb	Queries (K) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
-driver-robot-surfaces.adb	Queries (K) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
-driver-robot-surfaces.adb	Queries (K) := (U => Real (U) + 0.5, V => Real (V) + 0.5);	0.5	format	a pixel's centre lies half a pixel from its corner
-driver-robot-surfaces.adb	Queries (K) := (U => Real (U) + 0.5, V => Real (V) + 0.5);	0.5	format	a pixel's centre lies half a pixel from its corner
 driver-robot-surfaces.adb	R : constant Natural := At_Offset (1, 0);	1	math	the neighbour one column right
-driver-robot-surfaces.adb	Rows : constant Positive := Positive'Max (1, (H + Step - 1) / Step);	1	numerics	at least one row, and the grid's rows rounded up
-driver-robot-surfaces.adb	Step : constant Positive := Positive'Max (1, Driver.Alignment.Half_Patch (W, H));	1	numerics	a step of at least one pixel
+driver-robot-surfaces.adb	Second : constant Real := Depth (A) - 2.0 * Depth (B) + Depth (C);	2.0	math	a second difference of three points in a line: 1, -2, 1
+driver-robot-surfaces.adb	Spread : constant Real := Sqrt (Sigma (A) ** 2 + 4.0 * Sigma (B) ** 2 + Sigma (C) ** 2);	4.0	math	the variance of a second difference: the middle point weighs -2, its variance four times
+driver-robot-surfaces.adb	Through (I - 2 * Step, I - Step, I);	2	structure	the two points before it, one and two steps off
+driver-robot-surfaces.adb	Through (I, I + Step, I + 2 * Step);	2	structure	the two points after it, one and two steps off
 driver-robot-surfaces.adb	U : constant Natural := At_Offset (0, -1);	1	math	the neighbour one row up
-driver-robot-surfaces.adb	U : constant Natural := C * Step + Step / 2;	2	math	a grid point at the middle of its step
-driver-robot-surfaces.adb	U : constant Natural := C * Step + Step / 2;	2xStep	math	a grid point at the middle of its step
-driver-robot-surfaces.adb	V : constant Natural := R * Step + Step / 2;	2	math	a grid point at the middle of its step
-driver-robot-surfaces.adb	V : constant Natural := R * Step + Step / 2;	2xStep	math	a grid point at the middle of its step
+driver-robot-surfaces.adb	Unseen : Real := Near / 2.0;	2.0	numerics	the first depth not seen: one halving past the last seen
+driver-robot-surfaces.adb	Used : constant Natural := Lines - (if Drop > 0 then 1 else 0);	1	structure	one line left out
 driver-robot-surfaces.adb	W : constant Real := (if Weighted then 1.0 / (Angles (L) * R) ** 2 else 1.0);	1.0	math	a weight is the inverse of a variance
 driver-robot-surfaces.adb	W : constant Real := (if Weighted then 1.0 / (Angles (L) * R) ** 2 else 1.0);	1.0	math	the unweighted meeting: every line weighs one
-driver-robot-surfaces.adb	Ways : array (1 .. 3) of Vec3 := [others => Zero3];	3	structure	at most three lines of sight meet: the eye now and the two views
-driver-robot-surfaces.adb	and then Driver.Distributions.Chi_Square_Deviate (Miss, 2 * Lines - 3) <= Z	2	math	two constraints a line of sight puts on a point, three coordinates the point takes
-driver-robot-surfaces.adb	and then Driver.Distributions.Chi_Square_Deviate (Miss, 2 * Lines - 3) <= Z	3	math	two constraints a line of sight puts on a point, three coordinates the point takes
-driver-robot-surfaces.adb	for Pick in 1 .. 2 loop	2	structure	the two views: the farthest and the one farthest off its line
-driver-robot-surfaces.adb	if Lines >= 2 then	2	math	two lines of sight are the fewest that meet in a point
+driver-robot-surfaces.adb	exit when not Seen (Near / 2.0);	2.0	numerics	halving the depth while it stays seen
+driver-robot-surfaces.adb	for A in 1 .. 3 loop	3	structure	the three axes of the frame
+driver-robot-surfaces.adb	for A in 1 .. 3 loop	3	structure	the three axes of the frame
+driver-robot-surfaces.adb	for B in 1 .. 3 loop	3	structure	the three axes of the frame
+driver-robot-surfaces.adb	for D in 2 .. Lines loop	2	structure	the views' lines, after the eye now's own (the first)
+driver-robot-surfaces.adb	for L in 2 .. Lines loop	2	structure	the views' lines, after the eye now's own (the first)
+driver-robot-surfaces.adb	if Ok and then Telling ((if Ok then Drop else 0), X, Cov) >= 2 then	2	structure	two views that tell the depth by themselves: one to refute the other
+driver-robot-surfaces.adb	if Run > 2.0 * Radius then	2.0	structure	a window's width: twice its radius
+driver-robot-surfaces.adb	if Sqrt ((Um - U) ** 2 + (Wm - W) ** 2) > 2.0 * Radius then	2.0	structure	a window's width: twice its radius
+driver-robot-surfaces.adb	if not Ok and then Lines >= 4 then	4	structure	one line more than the three a point needs, so that one can be left out
 driver-robot-surfaces.adb	return Driver.Distributions.Chi_Square_Deviate (Q, 2) > Driver.Conventions.Z;	2	statistics	two degrees of freedom: a place in a picture has two coordinates
+driver-robot-surfaces.adb	while At_Place > 1	1	structure	the first place of the order
+driver-robot-surfaces.ads	Lens : Positive := 1;	1	structure	the lens of a view whose caller names none: the first
 driver-robot.adb	& "" & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	1	format	digits printed in a log line or a message
 driver-robot.adb	& "" & Driver.Log.Image (Most_Px, 3) & "" & Driver.Log.Image (Most_Sigmas, 1)	3	format	digits printed in a log line or a message
@@ -3166,98 +3169,44 @@ driver-wire.adb	when 8 =>	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	when 9 =>	9	format	WebSocket framing and handshake (RFC 6455)
 driver-workers.adb	Stack : Worker_Stack (1 .. Natural'Max (1, Count));	1	structure	a pool of at least one worker
 driver-world-cameras.adb	Beside : constant Ray_Estimate := C.Ray ((U => Px.U + 1.0, V => Px.V));	1.0	structure	the next pixel along the row
-driver-world-estimates.adb	& Driver.Log.Image (Error, 2) & "");	2	format	digits printed in a log line or a message
-driver-world-estimates.adb	& Driver.Log.Image (Error, 2) & "");	2	format	digits printed in a log line or a message
-driver-world-estimates.adb	((U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5));	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
-driver-world-estimates.adb	((U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5));	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
-driver-world-estimates.adb	((U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5));	2	structure	the middle pixel of a grid cell is half the cell in
-driver-world-estimates.adb	((U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5));	2	structure	the middle pixel of a grid cell is half the cell in
-driver-world-estimates.adb	((U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5));	2xStride	structure	the middle pixel of a grid cell is half the cell in
-driver-world-estimates.adb	((U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5));	2xStride	structure	the middle pixel of a grid cell is half the cell in
-driver-world-estimates.adb	(On, True, Box, [1 => (At_Pixel => Prompt, On => True)]);	1	structure	one point prompts the segmentation
+driver-world-estimates.adb	(O.Images (Into), True, Box, [1 => (At_Pixel => Prompt, On => True)]);	1	structure	a prompt of one point
 driver-world-estimates.adb	(Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (Driver.Images.Width (Image),	1	structure	grid points are at least one pixel apart
 driver-world-estimates.adb	(Tracks.Segment_On (Here.Track), True, Around, [1 => (At_Pixel => At_Point, On => True)], Beat);	1	structure	one point prompts the segmentation
-driver-world-estimates.adb	(Vector_Gate (3, Elsewhere - 1, Tests => Natural'Max (1, Natural (R.By_Pair (P).Kept.Length))),	1	structure	a family holds at least one test
-driver-world-estimates.adb	(Vector_Gate (3, Elsewhere - 1, Tests => Natural'Max (1, Natural (R.By_Pair (P).Kept.Length))),	3	structure	a point has three coordinates
+driver-world-estimates.adb	(U => Real (C * Step + Step / 2) + 0.5, V => Real (R * Step + Step / 2) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-estimates.adb	(U => Real (C * Step + Step / 2) + 0.5, V => Real (R * Step + Step / 2) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-estimates.adb	(U => Real (C * Step + Step / 2) + 0.5, V => Real (R * Step + Step / 2) + 0.5);	2	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(U => Real (C * Step + Step / 2) + 0.5, V => Real (R * Step + Step / 2) + 0.5);	2	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(U => Real (C * Step + Step / 2) + 0.5, V => Real (R * Step + Step / 2) + 0.5);	2xStep	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(U => Real (C * Step + Step / 2) + 0.5, V => Real (R * Step + Step / 2) + 0.5);	2xStep	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2xStride	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2xStride	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	Cam.Project ((1.0 / Real (Count)) * Middle, Prompt, Visible);	1.0	math	the mean of the points: their sum over their count
+driver-world-estimates.adb	Columns : constant Positive := Positive'Max (1, (W + Step - 1) / Step);	1	numerics	at least one column, and the grid's columns rounded up
 driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);	1.0	math	a mean over the points
 driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);	1.0	math	a mean over the points and their feet
 driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	F : Positive := 1;	1	structure	vectors are indexed from one
-driver-world-estimates.adb	Gate : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural'Min (Old.Freedom, Answer.Freedom));	2	structure	a turn of a direction has two coordinates
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
-driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
-driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
-driver-world-estimates.adb	K : Positive := 1;	1	structure	the pairs are counted from one
 driver-world-estimates.adb	Middle : constant Vec3 := (1.0 / N) * Sum;	1.0	math	a mean over the points
-driver-world-estimates.adb	Middle := (1.0 / Real (Elsewhere)) * Middle;	1.0	math	a mean over the other pairs' points
-driver-world-estimates.adb	Middle := (1.0 / Real (N)) * Middle;	1.0	math	a mean over the points
-driver-world-estimates.adb	Middle := (1.0 / Real (Old.Kept.Length)) * Middle;	1.0	math	a mean: the sum over the count
 driver-world-estimates.adb	Middle := (1.0 / Real (R.Points.Length)) * Middle;	1.0	math	a mean over the points
-driver-world-estimates.adb	Off := Significant (Vector_Gate (3, N - 1, Tests => Tests), Sqrt (Real'Max (0.0, D * (C * D))), 1.0);	1.0	statistics	the distance is already in units of its sigma
-driver-world-estimates.adb	Off := Significant (Vector_Gate (3, N - 1, Tests => Tests), Sqrt (Real'Max (0.0, D * (C * D))), 1.0);	3	structure	a point has three coordinates
 driver-world-estimates.adb	Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (B.Column_1 - B.Column_0 + 1,	1	structure	a grid at least one pixel apart
-driver-world-estimates.adb	Spread := (1.0 / Real (Elsewhere - 1)) * Spread;	1.0	statistics	the sample spread loses one degree of freedom to the mean
-driver-world-estimates.adb	Spread := (1.0 / Real (N - 1)) * Spread;	1.0	statistics	the sample spread loses one degree of freedom to the mean
-driver-world-estimates.adb	Sqrt (Real'Max (0.0, D * (C * D))), 1.0)	1.0	statistics	the distance is already in units of its sigma
+driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
+driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
+driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
+driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
+driver-world-estimates.adb	Rows : constant Positive := Positive'Max (1, (H + Step - 1) / Step);	1	numerics	at least one row, and the grid's rows rounded up
+driver-world-estimates.adb	Step : constant Positive := Positive'Max (1, Driver.Alignment.Half_Patch (W, H));	1	numerics	a step of at least one pixel
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	1	structure	a family holds at least one test
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	2	structure	each point is tested from both eyes that saw it
-driver-world-estimates.adb	Tests : constant Positive := Natural'Max (1, Natural (Kept.Length));	1	structure	a family holds at least one test
-driver-world-estimates.adb	Turn : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Cosine)));	1.0	numerics	a cosine rounded past one is one, where Arccos is defined
-driver-world-estimates.adb	Turn : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Cosine)));	1.0	numerics	a cosine rounded past one is one, where Arccos is defined
-driver-world-estimates.adb	if Elsewhere >= 4 then	4	statistics	a spread in three dimensions needs one point more than it has dimensions
-driver-world-estimates.adb	if N >= 4 then	4	statistics	a spread in three dimensions needs one point more than it has dimensions
-driver-world-estimates.adb	if not Behind and then N >= 4 then	4	statistics	a spread in three dimensions needs one point more than it has dimensions
-driver-world-estimates.adb	return -1;	1	format	a beat before every beat: no measurement asked about yet
-driver-world-estimates.adb	then "" & Driver.Log.Image (Error, 2) & ""	2	format	digits printed in a log line or a message
-driver-world-estimates.adb	type Two_Eyes is array (1 .. 2) of Eye_Id;	2	structure	a pair is two eyes
-driver-world-estimates.adb	type Two_Eyes is array (1 .. 2) of Eye_Id;	2	structure	a point of the scene is seen by two eyes
-driver-world-estimates.ads	Stride : Positive := 1;	1	structure	a grid at every pixel until it is set
-driver-world-pairs.adb	(for all A in 1 .. 3 =>	3	structure	a point has three coordinates
-driver-world-pairs.adb	1.0)	1.0	statistics	the deviate is already in units of its sigma
-driver-world-pairs.adb	A : constant Real := (D - K * P.S2) / (2.0 * P.S2 ** 2);	2.0	math	the derivative of the log of a Gaussian density by its variance
-driver-world-pairs.adb	All_Right : Point := (S2 => 0.0, Pi => 1.0);	1.0	math	every error taken right: a share of the whole
-driver-world-pairs.adb	B : constant Real := (K * P.S2 - 2.0 * D) / (2.0 * P.S2 ** 3);	2.0	math	the second derivative of the log of a Gaussian density by its variance
-driver-world-pairs.adb	B : constant Real := (K * P.S2 - 2.0 * D) / (2.0 * P.S2 ** 3);	2.0	math	the second derivative of the log of a Gaussian density by its variance
-driver-world-pairs.adb	C : constant Real := (2.0 * Ada.Numerics.Pi * P.S2) ** (-K / 2.0);	2.0	math	the Gaussian density in k dimensions
-driver-world-pairs.adb	C : constant Real := (2.0 * Ada.Numerics.Pi * P.S2) ** (-K / 2.0);	2.0	math	the Gaussian density in k dimensions
-driver-world-pairs.adb	Chi := Chi + (C * P * P - 2.0 * B * P * Q + A * Q * Q) / Det;	2.0	math	the cross term of a two by two quadratic form
-driver-world-pairs.adb	D : Natural := (if Dimensions mod 2 = 0 then 0 else 1);	1	math	an odd number of dimensions starts from the segment, of one dimension
-driver-world-pairs.adb	D : Natural := (if Dimensions mod 2 = 0 then 0 else 1);	2	math	the ball's measure goes up two dimensions at a time
-driver-world-pairs.adb	D := D + 2;	2	math	the ball's measure goes up two dimensions at a time
-driver-world-pairs.adb	First_Sample : constant Positive := (if Own < Points'Length then Own + 1 else 1);	1	structure	the points after the region's own, or all of them from the first
-driver-world-pairs.adb	Freedom : constant Positive := 1;	1	statistics	two lines of sight give four image coordinates for a point's three: one degree of freedom
-driver-world-pairs.adb	G : constant Real := C * Exp (-D / (2.0 * P.S2));	2.0	math	the Gaussian density in k dimensions
-driver-world-pairs.adb	Gate : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural (Real'Floor (2.0 * Right)));	2	structure	a round trip has two coordinates
-driver-world-pairs.adb	Gate : constant Driver.Uncertain.Gate := Vector_Gate (2, Natural (Real'Floor (2.0 * Right)));	2.0	statistics	each right round trip gives two degrees of freedom
-driver-world-pairs.adb	K := K + 2;	2	structure	two coordinates per round trip
-driver-world-pairs.adb	Measure : Real := (if Dimensions mod 2 = 0 then 1.0 else 2.0 * Radius);	1.0	math	the measure of no dimensions
-driver-world-pairs.adb	Measure : Real := (if Dimensions mod 2 = 0 then 1.0 else 2.0 * Radius);	2	math	the ball's measure goes up two dimensions at a time
-driver-world-pairs.adb	Measure : Real := (if Dimensions mod 2 = 0 then 1.0 else 2.0 * Radius);	2.0	math	a segment of both signs is twice its radius long
-driver-world-pairs.adb	Measure := Measure * 2.0 * Ada.Numerics.Pi * Radius ** 2 / Real (D);	2.0	math	a ball of two dimensions more: 2 pi r squared over the dimensions times the last
-driver-world-pairs.adb	Mixture (Squared.all, 1, 2.0 * Diagonal, Line_Sigma, Line_Right, Passes);	1	structure	the distance across a line is one coordinate
-driver-world-pairs.adb	Mixture (Squared.all, 1, 2.0 * Diagonal, Line_Sigma, Line_Right, Passes);	2.0	math	a signed distance spans the image's diagonal either way
-driver-world-pairs.adb	Mixture (Squared.all, 2, Area, Sigma, Right, Passes);	2	structure	a round trip has two coordinates
-driver-world-pairs.adb	P : Point := (S2 => Start * Start, Pi => 0.5);	0.5	statistics	an even start: a round trip as likely right as wrong
-driver-world-pairs.adb	Rank : Positive := 1;	1	structure	ranks are counted from one
-driver-world-pairs.adb	Rank := Positive'Min (N, 2 * Rank);	2	structure	the mixture is started from doubling ranks
-driver-world-pairs.adb	Rest := -(L.Bend_PP * D_Pi ** 2 + 2.0 * L.Bend_PS * D_Pi * D_S2 + L.Bend_SS * D_S2 ** 2);	2.0	math	a quadratic form counts its cross term twice
-driver-world-pairs.adb	Squared (I) := Trips (Trips'First + 2 * (I - 1)) ** 2 + Trips (Trips'First + 2 * I - 1) ** 2;	2	structure	two coordinates per round trip
-driver-world-pairs.adb	Squared (I) := Trips (Trips'First + 2 * (I - 1)) ** 2 + Trips (Trips'First + 2 * I - 1) ** 2;	2	structure	two coordinates per round trip
-driver-world-pairs.adb	Squared : Real_Access := new Real_Array (1 .. Trips'Length / 2);	2	structure	two coordinates per round trip
-driver-world-pairs.adb	Trips (K + 2) := A.Back.V - P.V;	2	structure	two coordinates per round trip
-driver-world-pairs.adb	Trips : Real_Access := new Real_Array (1 .. 2 * Around);	2	structure	two coordinates per round trip
-driver-world-pairs.adb	Wrong : constant Real := 1.0 / Measure;	1.0	math	a uniform density over its range
-driver-world-pairs.adb	and then (for all B in 1 .. 3 => X.Covariance (A, B) = X.Covariance (A, B)	3	structure	a point's covariance is three by three
-driver-world-pairs.adb	exit when Right < 1.0 or else not (Sigma > 0.0 and then Sigma < Real'Last);	1.0	statistics	not even one right match to set a window by
-driver-world-pairs.adb	function Valid (P : Point) return Boolean is (P.S2 > 0.0 and then P.Pi > 0.0 and then P.Pi <= 1.0);	1.0	math	a share is at most the whole
-driver-world-pairs.adb	if P.Pi = 1.0 and then L.Slope_Pi >= 0.0 then	1.0	math	every error taken right: a share of the whole
-driver-world-pairs.adb	if Step.Pi >= 1.0 and then P.Pi < 1.0 then	1.0	math	a share of the whole: every error taken right
-driver-world-pairs.adb	if Step.Pi >= 1.0 and then P.Pi < 1.0 then	1.0	math	a share of the whole: every error taken right
-driver-world-pairs.adb	if not (Line_Sigma < Real'Last) or else Line_Right < 1.0 then	1.0	statistics	not even one right match to tell the error by
-driver-world-pairs.adb	if not (Trip_Sigma < Real'Last) or else Right < 1.0 then	1.0	statistics	not even one right match to tell the error by
-driver-world-pairs.adb	return (S2 => P.S2 - L.Slope_S2 / L.Bend_SS, Pi => 1.0);	1.0	math	every error taken right: a share of the whole
-driver-world-pairs.ads	with Pre => Trips'Length mod 2 = 0 and then Area > 0.0;	2	structure	two coordinates per round trip
+driver-world-estimates.adb	and then (for some E in 1 .. Eye_Id'Base (Eyes) => Driver.World.Sight.Views_Of (S.Views, E) > 1)	1	structure	views from more than one place: one place alone places nothing
+driver-world-estimates.adb	if Has_Image (Seen.Element.all, E) and then Driver.World.Sight.Views_Of (S.Views, E) > 1 then	1	structure	views from more than one place: one place alone places nothing
+driver-world-estimates.ads	Placed_At : Driver.Clock.Beat'Base := -1;	1	structure	sentinel: no measurement of the region placed yet (beats start at 0)
+driver-world-estimates.ads	Tried_At : Driver.Clock.Beat'Base := -1;	1	structure	sentinel: not tried yet (beats start at 0)
 driver-world-regions.adb	Diagonal : constant Real := Sqrt (2.0);	2.0	math	a diagonal step between pixels is the square root of two
 driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C + 1, R) + 1.0, At_Pixel (C, R + 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
 driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C + 1, R) + 1.0, At_Pixel (C, R + 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
@@ -3265,6 +3214,41 @@ driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C - 1, R) + 1.0, At_Pixel
 driver-world-regions.adb	Real'Min (Real'Min (At_Pixel (C - 1, R) + 1.0, At_Pixel (C, R - 1) + 1.0),	1.0	math	a step between side neighbours is one pixel
 driver-world-regions.adb	return (U => Real (Best mod W) + 0.5, V => Real (Best / W) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-world-regions.adb	return (U => Real (Best mod W) + 0.5, V => Real (Best / W) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-round_trips.adb	A : constant Real := (D - K * P.S2) / (2.0 * P.S2 ** 2);	2.0	math	the derivative of the log of a Gaussian density by its variance
+driver-world-round_trips.adb	All_Right : Point := (S2 => 0.0, Pi => 1.0);	1.0	math	every error taken right: a share of the whole
+driver-world-round_trips.adb	B : constant Real := (K * P.S2 - 2.0 * D) / (2.0 * P.S2 ** 3);	2.0	math	the second derivative of the log of a Gaussian density by its variance
+driver-world-round_trips.adb	B : constant Real := (K * P.S2 - 2.0 * D) / (2.0 * P.S2 ** 3);	2.0	math	the second derivative of the log of a Gaussian density by its variance
+driver-world-round_trips.adb	C : constant Real := (2.0 * Ada.Numerics.Pi * P.S2) ** (-K / 2.0);	2.0	math	the Gaussian density in k dimensions
+driver-world-round_trips.adb	C : constant Real := (2.0 * Ada.Numerics.Pi * P.S2) ** (-K / 2.0);	2.0	math	the Gaussian density in k dimensions
+driver-world-round_trips.adb	D : Natural := (if Dimensions mod 2 = 0 then 0 else 1);	1	math	an odd number of dimensions starts from the segment, of one dimension
+driver-world-round_trips.adb	D : Natural := (if Dimensions mod 2 = 0 then 0 else 1);	2	math	the ball's measure goes up two dimensions at a time
+driver-world-round_trips.adb	D := D + 2;	2	math	the ball's measure goes up two dimensions at a time
+driver-world-round_trips.adb	G : constant Real := C * Exp (-D / (2.0 * P.S2));	2.0	math	the Gaussian density in k dimensions
+driver-world-round_trips.adb	Measure : Real := (if Dimensions mod 2 = 0 then 1.0 else 2.0 * Radius);	1.0	math	the measure of no dimensions
+driver-world-round_trips.adb	Measure : Real := (if Dimensions mod 2 = 0 then 1.0 else 2.0 * Radius);	2	math	the ball's measure goes up two dimensions at a time
+driver-world-round_trips.adb	Measure : Real := (if Dimensions mod 2 = 0 then 1.0 else 2.0 * Radius);	2.0	math	a segment of both signs is twice its radius long
+driver-world-round_trips.adb	Measure := Measure * 2.0 * Ada.Numerics.Pi * Radius ** 2 / Real (D);	2.0	math	a ball of two dimensions more: 2 pi r squared over the dimensions times the last
+driver-world-round_trips.adb	Mixture (Squared.all, 2, Area, Sigma, Right, Passes);	2	structure	a round trip has two coordinates
+driver-world-round_trips.adb	P : Point := (S2 => Start * Start, Pi => 0.5);	0.5	statistics	an even start: a round trip as likely right as wrong
+driver-world-round_trips.adb	Rank : Positive := 1;	1	structure	ranks are counted from one
+driver-world-round_trips.adb	Rank := Positive'Min (N, 2 * Rank);	2	structure	the mixture is started from doubling ranks
+driver-world-round_trips.adb	Rest := -(L.Bend_PP * D_Pi ** 2 + 2.0 * L.Bend_PS * D_Pi * D_S2 + L.Bend_SS * D_S2 ** 2);	2.0	math	a quadratic form counts its cross term twice
+driver-world-round_trips.adb	Squared (I) := Trips (Trips'First + 2 * (I - 1)) ** 2 + Trips (Trips'First + 2 * I - 1) ** 2;	2	structure	two coordinates per round trip
+driver-world-round_trips.adb	Squared (I) := Trips (Trips'First + 2 * (I - 1)) ** 2 + Trips (Trips'First + 2 * I - 1) ** 2;	2	structure	two coordinates per round trip
+driver-world-round_trips.adb	Squared : Real_Access := new Real_Array (1 .. Trips'Length / 2);	2	structure	two coordinates per round trip
+driver-world-round_trips.adb	Wrong : constant Real := 1.0 / Measure;	1.0	math	a uniform density over its range
+driver-world-round_trips.adb	exit when Right < 1.0 or else not (Sigma > 0.0 and then Sigma < Real'Last);	1.0	statistics	not even one right match to set a window by
+driver-world-round_trips.adb	function Valid (P : Point) return Boolean is (P.S2 > 0.0 and then P.Pi > 0.0 and then P.Pi <= 1.0);	1.0	math	a share is at most the whole
+driver-world-round_trips.adb	if P.Pi = 1.0 and then L.Slope_Pi >= 0.0 then	1.0	math	every error taken right: a share of the whole
+driver-world-round_trips.adb	if Step.Pi >= 1.0 and then P.Pi < 1.0 then	1.0	math	a share of the whole: every error taken right
+driver-world-round_trips.adb	if Step.Pi >= 1.0 and then P.Pi < 1.0 then	1.0	math	a share of the whole: every error taken right
+driver-world-round_trips.adb	return (S2 => P.S2 - L.Slope_S2 / L.Bend_SS, Pi => 1.0);	1.0	math	every error taken right: a share of the whole
+driver-world-round_trips.ads	with Pre => Trips'Length mod 2 = 0 and then Area > 0.0;	2	structure	two coordinates per round trip
+driver-world-sight.adb	((Pose => Now_Pose.Pose, Picture => Driver.Alignment.Pyramid_Of (O.Images (E)), Lens => 1,	1	structure	lens 1 is the eye now, lens K + 1 the K-th view used
+driver-world-sight.adb	(if Lens = 1 then Now_Cam	1	structure	lens 1 is the eye now, lens K + 1 the K-th view used
+driver-world-sight.adb	Px : constant Driver.World.Cameras.Pixel := (U => Real (C.Width) / 2.0, V => Real (C.Height) / 2.0);	2.0	math	the middle of the picture: half its width and half its height
+driver-world-sight.adb	Px : constant Driver.World.Cameras.Pixel := (U => Real (C.Width) / 2.0, V => Real (C.Height) / 2.0);	2.0	math	the middle of the picture: half its width and half its height
+driver-world-sight.adb	Used : array (1 .. Natural (B.Kept.Length)) of Positive := [others => 1];	1	structure	a placeholder index, every one of the Count used set before it is read
 driver-world-supports.adb	Freedom : constant Natural := P.Points - 3;	3	statistics	a plane takes three of its points' degrees of freedom
 driver-world-supports.adb	Freedom > 0 and then P.Scatter > 1.0	1.0	statistics	a scatter per degree of freedom of one is what the points' own spreads say
 driver-world-supports.adb	Head : Positive := 1;	1	structure	vectors are indexed from one

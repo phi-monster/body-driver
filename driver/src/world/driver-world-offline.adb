@@ -12,7 +12,15 @@ package body Driver.World.Offline is
       O         : Observation) is
    begin
       Estimates.Observe (B.State, Eyes, Camera_Of, Up, Still, O);
+      if Estimates.Measure_Due (B.State) then
+         Estimates.Measure (B.State, Eyes, Camera_Of);
+      end if;
    end Observe;
+
+   procedure Note_Table (B : in out Bench; Plane : Driver.Geometry.Plane_Estimate) is
+   begin
+      Estimates.Note_Table (B.State, Plane);
+   end Note_Table;
 
    procedure Adopt (B : in out Bench; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id) is
    begin
@@ -30,7 +38,7 @@ package body Driver.World.Offline is
    function Region_In (B : Bench; T : Thing_Id; E : Eye_Id) return Driver.Images.Mask is
      (Estimates.Region_In (B.State, T, E));
 
-   function Points_Of (B : Bench; T : Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector is
+   function Points_Of (B : Bench; T : Thing_Id) return Driver.World.Points.Placed_Vectors.Vector is
      (Estimates.Points_Of (B.State, T));
 
    function Centre (B : Bench; T : Thing_Id) return Point_Estimate is (Estimates.Centre (B.State, T));

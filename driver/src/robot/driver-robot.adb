@@ -595,6 +595,82 @@ package body Driver.Robot is
       end;
    end Ray;
 
+   function Ray_In_Eye (M : Model; E : Eye_Id; U, V : Real) return Vec3 is
+   begin
+      if Eye_Mount (M, E).Kind = World_Fixed then
+         return (if Kinematics.Fixed_Known (M, E) then Kinematics.Fixed_Ray_In_Eye (M, E, U, V) else Zero3);
+      end if;
+      declare
+         A : constant Arm_Id'Base := Fitted_Arm (M, E);
+      begin
+         return (if A = 0 then Zero3 else Kinematics.Ray_In_Eye (M, A, U, V));
+      end;
+   end Ray_In_Eye;
+
+   procedure Project_In_Eye (M : Model; E : Eye_Id; P : Vec3; U, V : out Real; In_Front : out Boolean) is
+   begin
+      U := 0.0;
+      V := 0.0;
+      In_Front := False;
+      if Eye_Mount (M, E).Kind = World_Fixed then
+         if Kinematics.Fixed_Known (M, E) then
+            Kinematics.Fixed_Project_In_Eye (M, E, P, U, V, In_Front);
+         end if;
+         return;
+      end if;
+      declare
+         A : constant Arm_Id'Base := Fitted_Arm (M, E);
+      begin
+         if A > 0 then
+            Kinematics.Project_In_Eye (M, A, P, U, V, In_Front);
+         end if;
+      end;
+   end Project_In_Eye;
+
+   --  The evidence of the fitted arm that carries eye E; 0 when none does.
+   function Swept_By (M : Model; E : Eye_Id) return Natural is
+   begin
+      if Natural (E) > Eye_Count (M) or else Eye_Mount (M, E).Kind /= Arm_Carried then
+         return 0;
+      end if;
+      for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+         if M.Kinematics (K).Eye = E and then M.Kinematics (K).Arm = Eye_Mount (M, E).Arm
+           and then Kinematics.Fitted (M, Eye_Mount (M, E).Arm)
+         then
+            return K;
+         end if;
+      end loop;
+      return 0;
+   end Swept_By;
+
+   function Sweep_Views (M : Model; E : Eye_Id) return Natural is
+     (if Swept_By (M, E) = 0 then 0 else Natural (M.Kinematics (Swept_By (M, E)).Frames.Length));
+
+   function Sweep_View (M : Model; E : Eye_Id; K : Positive; Like : Observation) return Observation is
+      Ev : Arm_Evidence renames M.Kinematics (Swept_By (M, E));
+      F  : Keyframe renames Ev.Frames (Ev.Frames.First_Index + K - 1);
+      O  : Observation := Like;
+   begin
+      O.Beat := Driver.Clock.Beat (F.Beat);
+      O.Readings.Replace_Element (Ev.Group, [for C in 1 .. Natural (F.Readings.Length) => F.Readings (C - 1)]);
+      for C in O.Images.First_Index .. O.Images.Last_Index loop
+         O.Images.Replace_Element (C, (if C = E then F.Image else Driver.Images.No_Image));
+      end loop;
+      return O;
+   end Sweep_View;
+
+   function Eye_Noise (M : Model; E : Eye_Id) return Real is
+   begin
+      if Eye_Mount (M, E).Kind = World_Fixed then
+         return (if Kinematics.Fixed_Known (M, E) then M.Fixed_Eyes (E).Sigma_Px else 0.0);
+      end if;
+      declare
+         A : constant Arm_Id'Base := Fitted_Arm (M, E);
+      begin
+         return (if A = 0 then 0.0 else Kinematics.Match_Noise (M, A));
+      end;
+   end Eye_Noise;
+
    --  The world is the first arm's frame.
    function Up (M : Model) return Direction_Estimate is (Up_In_Arm (M, 1));
 
