@@ -364,18 +364,22 @@ package body Driver.Robot.Boot is
                   Start (C) := Channels.Reading (M, G, Last, C);
                end loop;
             end Read_Start;
-            Least  : Real_Array (1 .. Size) := [others => 0.0];   --  per channel: the least turn a keyframe counts
+            Least  : Real_Array (1 .. Size) := [others => 0.0];   --  per channel: the least turn a keyframe counts, now
             Moves  : array (1 .. Size) of Boolean := [others => False];   --  per channel: it moves the eye's view (Lockin.Seen)
             Half   : Real := 0.0;
             Patch  : Real := 0.0;   --  a patch of the eye's view, in px: the farthest the aligner follows by itself
             Eye    : Natural := 0;
             --  How far the view moves per reading unit of each channel, as the keyframes have measured it so far
             --  (Kinematics.Pixels_Per_Unit; 0 until the keyframes determine the channel): read again after every
-            --  round, since the rounds' keyframes measure it.
+            --  round, since the rounds' keyframes measure it. And the least turn a keyframe counts with it
+            --  (Motion.Least_Turn): the step a keyframe counts from is the matcher's noise over that motion, and
+            --  shrinks as the keyframes measure it (s35, servo seed 6 of the fake robot, 10-17: its fifth joint's
+            --  step from 53.4 units after the first two passes to 9.8 after the fifth).
             procedure Read_Shifts is
             begin
                for C in 1 .. Size loop
                   Per_Unit (C) := Driver.Robot.Kinematics.Pixels_Per_Unit (M, A, C);
+                  Least (C) := Driver.Robot.Motion.Least_Turn (M, A, C);
                end loop;
             end Read_Shifts;
             --  The channels the sweep is turning now, told to the kinematics for the keyframes it takes meanwhile
@@ -428,7 +432,6 @@ package body Driver.Robot.Boot is
                         First (C) := Real'Max (First (C), M.Groups (G).Seen_At (C - 1));
                         Moves (C) := Moves (C) or else M.Groups (G).Seen_At (C - 1) > 0.0;
                      end if;
-                     Least (C) := Driver.Robot.Motion.Least_Turn (M, A, C);
                   end loop;
                end if;
             end Read_Plan;
@@ -664,7 +667,7 @@ package body Driver.Robot.Boot is
                            --  (A99's arm 1 had no keyframe of several joints for that).
                            exit when Report.Outcome = Driver.Robot.Motion.Reached;
                            Scale := Scale / 2.0;
-                           exit when (for all K in 1 .. N => Scale * Share (Swept (K)) < First (Swept (K)));
+                           exit when (for all K in 1 .. N => Scale * Share (Swept (K)) < Least (Swept (K)));
                         end loop;
                         --  A fitted arm's cell climbs on in its direction, its shares doubled a level, while the
                         --  view moves by no more than half of it (Take's brake for a fitted arm), each level
@@ -690,27 +693,37 @@ package body Driver.Robot.Boot is
                end Together;
 
                --  Each swept joint's share of a frame that moves them together: its part of the offset it was
-               --  followed to, and no less than its first level (Together).
+               --  followed to, and no less than the least turn a keyframe counts (Least: the turn the fit counts as
+               --  the joint having moved, with what the readings' noise and two landings in a dead band can take off
+               --  it; Together). The floor was the joint's first level while that was the keyframe step (10-11);
+               --  the first level has since grown to what the aligner follows by itself and to the turn at which the
+               --  recognition's probe saw the view move (Read_Plan), and a cell of first levels moved the view
+               --  farther than any keyframe was followed: s35 (servo seed 6 of the fake robot, 10-17), whose fifth
+               --  joint was at its end upwards and seen downwards only at 627 units, its first level, turned that
+               --  joint by 618 to 622 units in every cell, about 62 px of view at its 0.10 px a unit beside the other
+               --  joints' first levels, and asked them from a prediction stating 68 to 76 px; no point of a cell was
+               --  found in five passes, the view's common motion untold, no keyframe moved two joints at once, and
+               --  the arm was never fitted.
                function Shares return Real_Array is
                   Share  : Real_Array (1 .. Size) := [others => 0.0];
                   Motion : Real := 0.0;   --  the view's motion the cell asks, px, by the measured motion per unit
-                  Fixed  : Real := 0.0;   --  of it, the part the first levels hold
+                  Fixed  : Real := 0.0;   --  of it, the part the least turns hold
                begin
                   for K in 1 .. N loop
-                     Share (Swept (K)) := Real'Max (First (Swept (K)), Reached (Swept (K)) / Real (N));
+                     Share (Swept (K)) := Real'Max (Least (Swept (K)), Reached (Swept (K)) / Real (N));
                      Motion := Motion + Share (Swept (K)) * Per_Unit (Swept (K));
-                     Fixed := Fixed + First (Swept (K)) * Per_Unit (Swept (K));
+                     Fixed := Fixed + Least (Swept (K)) * Per_Unit (Swept (K));
                   end loop;
                   --  And no more motion of the view in all than the ladder's own brake before a fit, two patches
-                  --  beyond the keyframes before (Take): the shares above their first levels are scaled down to it,
-                  --  the first levels themselves stand (below them a joint does not move).
+                  --  beyond the keyframes before (Take): the shares above their least turns are scaled down to it,
+                  --  the least turns themselves stand (below them the fit counts no turn).
                   if not Fitted_Now and then Motion > 2.0 * Patch and then Motion > Fixed then
                      declare
                         Scale : constant Real := Real'Max (0.0, (2.0 * Patch - Fixed) / (Motion - Fixed));
                      begin
                         for K in 1 .. N loop
                            Share (Swept (K)) :=
-                             First (Swept (K)) + Scale * (Share (Swept (K)) - First (Swept (K)));
+                             Least (Swept (K)) + Scale * (Share (Swept (K)) - Least (Swept (K)));
                         end loop;
                      end;
                   end if;
