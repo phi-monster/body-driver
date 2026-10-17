@@ -616,70 +616,12 @@ package body Driver.Robot.Hand is
       D.Found.Append (Made);
    end Keep;
 
-   procedure Drop (D : in out Hand_Data; Group : Group_Id);
-   --  The hand found from a closer group goes, when its ends were measured
-   --  again and give no lobes: a measurement of older ends no longer stands.
-
-   procedure Drop (D : in out Hand_Data; Group : Group_Id) is
-   begin
-      for Id in D.Found.First_Index .. D.Found.Last_Index loop
-         if D.Found (Id).Group = Group then
-            Driver.Log.Line (Driver.Log.Robot, "hand: the hand of closer group" & Group'Image
-                             & " is dropped: its ends were measured again and gave no lobes");
-            D.Found.Delete (Id);
-            return;
-         end if;
-      end loop;
-   end Drop;
-
    procedure Rebuild (D : in out Hand_Data; P : Pair; M : Model);
    --  The hand of a closer group from what its own eye measured: every
    --  measured channel's lobes with their tips at both openings.
 
    procedure Rebuild (D : in out Hand_Data; P : Pair; M : Model) is
       Made : Hand_Record := (Group => P.Group, Arm => P.Arm, Eye => P.Eye, others => <>);
-
-      --  The group's hand was measured at the readings that are its channels' ends now: each channel's two ends
-      --  are the readings the hand has at its two openings.
-      function Same_Ends return Boolean is
-      begin
-         for Id in D.Found.First_Index .. D.Found.Last_Index loop
-            if D.Found (Id).Group = P.Group then
-               declare
-                  H : Hand_Record renames D.Found (Id);
-               begin
-                  if H.Readings (Open).Is_Empty or else H.Readings (Closed_Empty).Is_Empty then
-                     return False;
-                  end if;
-                  for C in 1 .. Sweeps.Channels (P.Sweep) loop
-                     if Sweeps.Status (P.Sweep, C) = Sweeps.Waiting then
-                        return False;
-                     end if;
-                     declare
-                        Open_At   : constant Real_Array := H.Readings (Open).Element;
-                        Closed_At : constant Real_Array := H.Readings (Closed_Empty).Element;
-                        Low       : constant Real := Sweeps.End_Reading (P.Sweep, C, High => False);
-                        High      : constant Real := Sweeps.End_Reading (P.Sweep, C, High => True);
-                     begin
-                        if C > Open_At'Length or else C > Closed_At'Length then
-                           return False;
-                        end if;
-                        declare
-                           O : constant Real := Open_At (Open_At'First + C - 1);
-                           X : constant Real := Closed_At (Closed_At'First + C - 1);
-                        begin
-                           if not ((O = Low and then X = High) or else (O = High and then X = Low)) then
-                              return False;
-                           end if;
-                        end;
-                     end;
-                  end loop;
-                  return True;
-               end;
-            end if;
-         end loop;
-         return False;
-      end Same_Ends;
 
       function Seen_Tip
         (V      : Driver.Robot.Hand.Views.View;
@@ -983,17 +925,20 @@ package body Driver.Robot.Hand is
       end loop;
       if not Made.Lobes.Is_Empty then
          Keep (D, Made);
-      elsif Same_Ends then
-         --  Ends measured again at the very readings the hand was measured at, and no lobes this time: the views
-         --  of them that came since (from other poses of the eye) did not tell the robot from its surroundings,
-         --  which says nothing against what the views before told of the same ends. s46 (servo seed 6 of the fake
-         --  robot, 10-17): one lobe at beat 4844, its tip from (267.5, 74.5) to (183.5, 58.5) and 138 of 138 points
-         --  followed; at 4851, the eye raised once, the low end's views from two poses and the high end's from none
-         --  did not fall in two groups, the hand was dropped, and nothing was pressed.
-         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & P.Group'Image & ": its ends, measured again at "
-                          & "the readings its hand was measured at, gave no lobes; the hand from before stands");
       else
-         Drop (D, P.Group);
+         --  Ends measured again and no lobes this time: the views of them that came since did not tell the robot
+         --  from its surroundings, which says nothing against what the views before told; a hand made of them
+         --  stands. s46 (servo seed 6 of the fake robot, 10-17): one lobe at beat 4844, its tip from (267.5, 74.5)
+         --  to (183.5, 58.5), 138 of 138 points followed; at 4851, the eye raised once, the views did not fall in
+         --  two groups, the hand was dropped, and nothing was pressed. Kept only where the ends were measured
+         --  again at the very readings of the hand (a2bf1aa3), it was dropped in s53 (seed 6, 10-18): two lobes at
+         --  beat 458, the ends seen again at other readings at 633 gave none, and the brain had no hand at all.
+         for Id in D.Found.First_Index .. D.Found.Last_Index loop
+            if D.Found (Id).Group = P.Group then
+               Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & P.Group'Image & ": its ends, measured "
+                                & "again, gave no lobes; the hand from before stands");
+            end if;
+         end loop;
       end if;
    end Rebuild;
 
