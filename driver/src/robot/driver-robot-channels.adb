@@ -199,7 +199,10 @@ package body Driver.Robot.Channels is
    --  echoed value) or changes by its jitter; the changes that are not exact
    --  repeats measure the jitter. A channel that repeats exactly at every rest
    --  beat has no noise beyond its quantization (the floor below).
-   procedure Measure_Channel (M : in out Model; G : Group_Id; Channel : Positive; Rest : Natural) is
+   procedure Measure_Channel
+     (M : in out Model; G : Group_Id; Channel : Positive; Rest : Natural; Was_Noise : Real; Was_Freedom : Natural;
+      Was_Drift : Real)
+   is
       --  Every nonzero change at rest, and its negation: a change at rest has
       --  no sign of its own, so its scale is measured about zero. About their
       --  own median, two-valued changes (a reading whose last bit flips back
@@ -237,9 +240,17 @@ package body Driver.Robot.Channels is
          Start := Driver.Stats.Latest_Regime (All_Changes (Start .. Count));
       end if;
       if Count - Start + 1 < 2 and then Count >= 2 then
-         --  Trending to its last beats: nothing of its rest is measured yet.
-         M.Noise.Replace_Element (Index, Real'Last);
-         M.Noise_Freedom.Replace_Element (Index, 0);
+         --  Trending to its last beats: nothing of this rest is measured yet. The noise an earlier rest measured
+         --  stands (a reading's jitter is its sensor's, not its joint's travel): it used to be dropped, and the
+         --  channel swept last, still settling when an estimate measured the noise, had none until the next one;
+         --  its changes, untested, were no motion (Significant_Change), and the arm's every beat of a push was
+         --  held still (Kinematics.Held_Still): s36 (servo seed 7 of the fake robot, 10-17) took 41 of its 204
+         --  keyframes within two beats of the one before, the arm turning 130 units a beat through them, the
+         --  hand's jaws stood for the view in them, and its second joint's view motion a unit fell from 0.11 px
+         --  to 0.0025. Unknown only where no rest has measured it yet: the boot holds still on.
+         M.Noise.Replace_Element (Index, Was_Noise);
+         M.Noise_Freedom.Replace_Element (Index, Was_Freedom);
+         M.Drift.Replace_Element (Index, Was_Drift);
          Free (All_Changes);
          Free (Moved);
          return;
@@ -301,6 +312,10 @@ package body Driver.Robot.Channels is
 
    procedure Measure_Noise (M : in out Model) is
       Total : Natural := 0;
+      --  What the last measure had, which a channel still settling keeps (Measure_Channel).
+      Was_Noise   : constant Real_Vectors.Vector := M.Noise;
+      Was_Freedom : constant Count_Vectors.Vector := M.Noise_Freedom;
+      Was_Drift   : constant Real_Vectors.Vector := M.Drift;
    begin
       for S of M.Groups loop
          Total := Total + S.Size;
@@ -322,7 +337,15 @@ package body Driver.Robot.Channels is
             end loop;
             if Rest > 0 then
                for C in 1 .. M.Groups (G).Size loop
-                  Measure_Channel (M, G, C, Rest);
+                  declare
+                     Index : constant Natural := First_Channel (M, G) + C - 1;
+                  begin
+                     Measure_Channel
+                       (M, G, C, Rest,
+                        Was_Noise   => (if Index < Natural (Was_Noise.Length) then Was_Noise (Index) else Real'Last),
+                        Was_Freedom => (if Index < Natural (Was_Freedom.Length) then Was_Freedom (Index) else 0),
+                        Was_Drift   => (if Index < Natural (Was_Drift.Length) then Was_Drift (Index) else 0.0));
+                  end;
                end loop;
             end if;
          end;
