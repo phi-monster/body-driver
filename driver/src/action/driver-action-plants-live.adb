@@ -173,6 +173,10 @@ package body Driver.Action.Plants.Live is
                   X.Lobes.Append (Lobe);
                end;
             end loop;
+            --  How far a thing may go in between the tips before it meets the hand: the hand measures it from its
+            --  presses (Grip_Depth), and a hand whose depth is not known is no grasper (Search.Effector_Of). Left
+            --  unset, every hand was unknown here whatever its presses measured: the snapshot never had a grasper.
+            X.Depth := Robot_Hand.Grip_Depth (Hands, Id);
             X.Fraction := Robot_Hand.Fraction (Hands, Robot, Id, O);
             S.Hands.Append (X);
          end;
