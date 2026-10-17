@@ -198,6 +198,7 @@ driver-alignment-keyframes.adb	M : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	the
 driver-alignment-keyframes.adb	M : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	the three points of a sample, the three terms of an affine field
 driver-alignment-keyframes.adb	Max_Degree : constant := 2;	2	structure	the quadratic of the place is the highest degree a field has (its Terms terms)
 driver-alignment-keyframes.adb	Mid : constant Positive := (Lo + Hi) / 2;	2	math	halving the range a binary search has left
+driver-alignment-keyframes.adb	Moves : Real_Array (1 .. Natural'Max (1, Count)) := [others => 0.0];	1	structure	an array of at least one element, as Sigmas beside it
 driver-alignment-keyframes.adb	Plane : Real_Array (1 .. 6) := [others => 0.0];	6	structure	an affine field's six numbers: per axis the constant and the two coordinates
 driver-alignment-keyframes.adb	Prior_Scale : Real := 1.0;	1.0	structure	no field is told yet: the scale is read only once one is (Have_Prior)
 driver-alignment-keyframes.adb	R := R + 2;	2	math	two residuals a point, one per axis

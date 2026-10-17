@@ -2127,17 +2127,34 @@ package body Driver.Alignment.Keyframes is
             Sigmas   : Real_Array (1 .. Natural'Max (1, Count)) := [others => 0.0];
             Farthest : Real := 0.0;   --  the farthest the prediction puts a point from where it stood
             Typical  : Real := 0.0;   --  the median of what the prediction states of its points
+            Moves    : Real_Array (1 .. Natural'Max (1, Count)) := [others => 0.0];
+            Typical_Move : Real := 0.0;   --  the median of how far the prediction puts its points from where they stood
+
+            --  A field told none, drawn from no point that moved (every point on it stood where it was), where the
+            --  prediction puts its median point farther from where it stood than its median window reaches: the
+            --  view did not stand still, the points that did ride with the eye (a wrist eye's jaws), and the
+            --  keyframe is asked as predicted. Asked from that field, the jaws were found where they stood and the
+            --  view was not: s36 (servo seed 7 of the fake robot, 10-17) keyframes 55 to 57, its second joint turned
+            --  364 to 540 units, predicted 44 px off where the points stood and stating 2.4 and 8.8 px, the field
+            --  none with 161 and 156 points on it, every one where it stood; 142 and 164 points found where they
+            --  stood, and the fit's measure of the joint's view motion fell from 0.11 px a unit to 0.0025. A new
+            --  direction has no prediction that moves its points, and keeps the field.
+            function Riding_Field (Common : Motion) return Boolean is
+              (Common.Told and then Common.Draws = 0 and then Common.Unmoved >= Common.Own
+               and then C.Last /= New_Direction and then Typical_Move > Window_Radius (Typical));
          begin
             for K in 1 .. Count loop
                declare
                   G : Prediction renames Given (Given'First + K - 1);
                begin
                   Sigmas (K) := Sqrt (Real'Max (G.Cov.UU, G.Cov.VV));
-                  Farthest := Real'Max (Farthest, Sqrt ((G.To.U - G.From.U) ** 2 + (G.To.V - G.From.V) ** 2));
+                  Moves (K) := Sqrt ((G.To.U - G.From.U) ** 2 + (G.To.V - G.From.V) ** 2);
+                  Farthest := Real'Max (Farthest, Moves (K));
                end;
             end loop;
             if Count > 0 then
                Typical := Driver.Stats.Median (Sigmas (1 .. Count));
+               Typical_Move := Driver.Stats.Median (Moves (1 .. Count));
             end if;
             if Count > 0 and then Window_Radius (Typical) + 1.0 > Real (Half_Patch (C.Width, C.Height)) then
                declare
@@ -2159,8 +2176,9 @@ package body Driver.Alignment.Keyframes is
                      Keep_Evidence (C, Stood, Moved);
                   end;
                   Common.Searched := True;
+                  Common.Set_Aside := Riding_Field (Common);
                   C.Motion := Common;
-                  if not Common.Told then
+                  if not Common.Told or else Common.Set_Aside then
                      if C.Last = New_Direction then
                         Done := [others => True];
                      else
@@ -2190,8 +2208,9 @@ package body Driver.Alignment.Keyframes is
                      Keep_Evidence (C, Stood, Moved);
                   end;
                   Common.Searched := True;
+                  Common.Set_Aside := Riding_Field (Common);
                   C.Motion := Common;
-                  if Common.Told then
+                  if Common.Told and then not Common.Set_Aside then
                      for K in 1 .. Count loop
                         declare
                            G     : Prediction renames Given (Given'First + K - 1);

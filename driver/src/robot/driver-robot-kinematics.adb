@@ -827,7 +827,10 @@ package body Driver.Robot.Kinematics is
    --  The median standard deviation, over the points, that predictions state: the larger axis of each.
    --  The view's common motion a keyframe from a new direction was asked from (Keyframes.Add), for its line.
    function Motion_Image (Common : Keyframes.Motion) return String is
-     (if Common.Told
+     (if Common.Told and then Common.Set_Aside
+      then ", the view's common motion set aside (none at size" & Common.Level'Image & ", every one of its"
+           & Common.Own'Image & " points where it stood, against a prediction that moves them): asked as predicted"
+      elsif Common.Told
       then " from the view's common motion at size" & Common.Level'Image & ": turned "
            & Driver.Log.Image (Common.Turn * 180.0 / Ada.Numerics.Pi, 1) & " deg, its centre moved "
            & Driver.Log.Image (Common.Shift_U, 1) & " " & Driver.Log.Image (Common.Shift_V, 1) & " px +- "

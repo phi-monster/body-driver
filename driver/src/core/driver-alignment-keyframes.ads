@@ -124,6 +124,8 @@ package Driver.Alignment.Keyframes is
       Sigma      : Real := 0.0;        --  how far the places of the points on it lie from it, in pixels
       Draws      : Natural := 0;       --  the pairs of places the fields were drawn from, over the sizes tried
       Unmoved    : Natural := 0;       --  the points whose best place was where they stood, which drew no field
+      Set_Aside  : Boolean := False;   --  told none, every point on it where it stood, against a prediction that
+                                       --  moves them: the points that stood ride with the eye (Add)
       Searched   : Boolean := False;   --  it was searched: the keyframe's prediction had windows wider than a patch
    end record;
    --  The view's common motion a keyframe was asked from (Add): every keyframe whose prediction's windows are wider
