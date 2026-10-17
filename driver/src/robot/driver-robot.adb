@@ -145,6 +145,19 @@ package body Driver.Robot is
                      S.Has_Before := False;
                   end if;
                   Stillness.Watch (S, Reset);
+                  --  A move the readings show and the picture does not yet (its lag): the picture has not stopped
+                  --  since it, whatever it shows of the rest before. The watch starts afresh when the picture shows
+                  --  the move's first beat, and its stop from the rest before stood until then: s43 (servo seed 6 of
+                  --  the fake robot, 10-17), its closer's readings moving at beat 3923 and eye 3's lag taken as two
+                  --  beats, its picture changed by 971 pixels beyond 30 levels at 3924, and the hand's view took
+                  --  that frame and the one before as a still view of the closer at its new reading; the true view at
+                  --  that reading then showed nothing new against it, and the closer's sweep ended 39 of its 440
+                  --  units into its travel.
+                  for B in Integer'Max (0, Shown + 1) .. M.Beats loop
+                     if B <= M.Began_Moving.Last_Index and then M.Began_Moving (B) then
+                        S.Watch_Done := False;
+                     end if;
+                  end loop;
                   S.Settled_At.Append (S.Watch_Done);
                end;
                --  This frame is the next one's previous, and the previous one
