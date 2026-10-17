@@ -670,10 +670,12 @@ package body Driver.Alignment.Keyframes is
 
    ---------------------------------------------------------------------------
 
-   procedure Begin_Reference (C : out Chain; Reference : Driver.Images.Image; Points : Point_Array) is
+   procedure Begin_Reference
+     (C : out Chain; Reference : Driver.Images.Image; Points : Point_Array; Own_Points : Boolean := False)
+   is
    begin
       C := (Pictures => Pyramid_Of (Reference), Width => Driver.Images.Width (Reference),
-            Height => Driver.Images.Height (Reference), others => <>);
+            Height => Driver.Images.Height (Reference), Own_Points => Own_Points, others => <>);
       for P of Points loop
          C.Points.Append (P);
       end loop;
@@ -1191,6 +1193,10 @@ package body Driver.Alignment.Keyframes is
       Mine   : Flag_Array (1 .. Given'Length);
    begin
       Align_Some (C, Second, Given, [1 .. Given'Length => True], Answers, Marks);
+      if C.Own_Points then
+         Agree := [for K in Agree'Range => Answers (Answers'First + K - Agree'First).Verdict = Found];
+         return;
+      end if;
       Fit_Field (C, Marks, Field, Mine);
       Settle (C, Second, Answers, Marks, Field, Mine);
       Agree := Mine;
@@ -2097,6 +2103,27 @@ package body Driver.Alignment.Keyframes is
       C.Motion := (others => <>);
       C.Stood.Clear;
       C.Moved_On.Clear;
+      --  A chain whose points move each by its own (Begin_Reference's Own_Points: a fixed eye watching an arm): no
+      --  field of the whole view is told or fitted; every point not riding is asked as predicted, in one round, and
+      --  every point found agrees. Asked from the view's common motion, which their few points never told, and kept
+      --  by a field fitted to them, the views of s38's and s39's fixed eyes (servo seeds 6 and 7 of the fake robot,
+      --  10-17; 7 to 26 points a keyframe) found 0 of 143, 0 of 308 and 0 of 242 points, s38's second eye 0 of 147,
+      --  and no fixed eye was placed (Kinematics.Hand_Eye: no point of the arm whose motion an eye explains).
+      if C.Own_Points then
+         declare
+            Only : constant Flag_Array (1 .. Count) :=
+              [for K in 1 .. Count => not (Riding'Length > 0 and then Riding (Riding'First + K - 1))];
+         begin
+            Align_Some (C, Second, Given, Only, Answers, Marks);
+            Agree := [for K in Agree'Range => Answers (Answers'First + K - Agree'First).Verdict = Found];
+         end;
+         Next.Moved := C.Last /= Same_Pose;
+         C.Last := Supplied;
+         C.Latest := [others => <>];
+         C.Combined := (others => <>);
+         C.Frames.Append (Next);
+         return;
+      end if;
       --  The points by doubling: first the fewest a field stands on, spread over the picture (every Stride-th
       --  point, Stride the largest power of two that leaves that many), then twice as many each round, the new
       --  points predicted from the field so far where there is one; the rounds end when a round's field puts

@@ -1876,7 +1876,8 @@ package body Driver.Robot.Kinematics is
             for I in Points'Range loop
                Points (I) := (U => V.Query_U (I - 1), V => V.Query_V (I - 1));
             end loop;
-            Keyframes.Begin_Reference (V.Chain, V.Images.First_Element, Points.all);
+            --  The arm's points move in a fixed eye's view each by the joints of its link, and the rest of it stands.
+            Keyframes.Begin_Reference (V.Chain, V.Images.First_Element, Points.all, Own_Points => True);
             Free (Points);
          end;
          V.Images.Replace_Element (1, Driver.Images.No_Image);

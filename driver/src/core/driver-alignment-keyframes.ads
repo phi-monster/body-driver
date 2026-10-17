@@ -42,8 +42,12 @@ package Driver.Alignment.Keyframes is
    type Answer_Array is array (Positive range <>) of Answer;
    type Flag_Array is array (Positive range <>) of Boolean;
 
-   procedure Begin_Reference (C : out Chain; Reference : Driver.Images.Image; Points : Point_Array);
+   procedure Begin_Reference
+     (C : out Chain; Reference : Driver.Images.Image; Points : Point_Array; Own_Points : Boolean := False);
    --  Starts the chain from the reference picture and the points that will be asked of it; no keyframe yet.
+   --  Own_Points: the points move each by its own, not as one view (a fixed eye watching an arm: the arm's points
+   --  move by the joints of their links, the rest of the picture stands). No field of the whole view is told or
+   --  fitted for such a chain: every point is asked as predicted and every point found agrees (Add, Realign).
 
    function Has_Reference (C : Chain) return Boolean;
 
@@ -271,6 +275,7 @@ private
       Last     : Source := Supplied;   --  where the last prediction came from, until the keyframe it was for is added
       Motion   : Driver.Alignment.Keyframes.Motion;   --  the common motion the keyframe added last was asked from
       Stood, Moved_On : Flag_Vectors.Vector;   --  per point, of that motion (Stood_And_Moved)
+      Own_Points : Boolean := False;   --  the points move each by its own (Begin_Reference)
    end record;
 
 end Driver.Alignment.Keyframes;
