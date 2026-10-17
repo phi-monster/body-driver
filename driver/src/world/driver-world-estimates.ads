@@ -230,6 +230,7 @@ private
       Point : Point_Estimate;
       Grid  : Driver.World.Supports.Grid_Point;
       Eye   : Eye_Id := Eye_Id'First;   --  the eye that asked it
+      Pixel : Driver.Images.Pixel;      --  where it asked it
    end record;
 
    --  A region an eye holds, measured anew, to be placed: the thing, the eye, and the observation it was seen at.

@@ -338,6 +338,42 @@ package body Driver.World.Estimates.Tests is
          raise;
    end Started_Elsewhere;
 
+   --  A thing boxed in the eye that stands in the world, which places nothing by itself: the scene's points the moving
+   --  eye placed that fall inside its region there are its points.
+   procedure Seen_Standing is
+      S    : State;
+      Beat : Driver.Clock.Beat := 1;
+      T    : Thing_Id;
+   begin
+      Gather_Views (S, Beat);
+      New_Episode (S);
+      Observe (S, 2, Camera_Of'Access, Up, True, Seen_At (Places (1), Beat));
+      Measure (S, 2, Camera_Of'Access);
+      Beat := Beat + 1;
+      declare
+         O : constant Observation := Seen_At (Places (1), Beat);
+      begin
+         Adopt (S, 2, O, Box_Region (Standing_Eye), T);
+         Observe (S, 2, Camera_Of'Access, Up, True, O);
+      end;
+      declare
+         Points : constant Driver.World.Points.Placed_Vectors.Vector := Points_Of (S, T);
+         Off    : Natural := 0;
+      begin
+         for M of Points loop
+            if abs M.Point.Mean (1) > Box_Half + 0.01 or else abs M.Point.Mean (2) > Box_Half + 0.01
+              or else M.Point.Mean (3) > Box_Top + 0.01 or else M.Point.Mean (3) < 0.0
+            then
+               Off := Off + 1;
+            end if;
+         end loop;
+         Driver.Log.Line (Driver.Log.World, "world test: the box boxed in the standing eye has" & Points.Length'Image
+                          & " points," & Off'Image & " of them off the box");
+         Check (Natural (Points.Length) > 0, "a box boxed in the standing eye got none of the scene's points");
+         Check (Off = 0, Off'Image & " of the points it got lie off the box");
+      end;
+   end Seen_Standing;
+
    --  The world's measuring runs apart from the main loop (Driver.Apart), in a task whose stack is GNAT's default.
    procedure Measured_In_A_Task is
       S       : State;
@@ -376,6 +412,9 @@ package body Driver.World.Estimates.Tests is
       Driver.Tests.Register ("world.sight.started",
                              "an eye that stands in the world starts no track of a thing whose points fall in its picture",
                              Started_Elsewhere'Access);
+      Driver.Tests.Register ("world.sight.standing",
+                             "a box boxed in an eye that stands in the world gets none of the scene's points the moving"
+                             & " eye placed inside its region there, or points off it", Seen_Standing'Access);
       Driver.Tests.Register ("world.sight.task",
                              "the world's measuring fails in a task with the default stack", Measured_In_A_Task'Access);
    end Register;

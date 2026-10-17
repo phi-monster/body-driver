@@ -155,17 +155,53 @@ package body Driver.World.Estimates is
       and then Px.U < Real (Driver.Images.Width (Region)) and then Px.V < Real (Driver.Images.Height (Region))
       and then Driver.Images.Contains (Region, Natural (Real'Floor (Px.U)), Natural (Real'Floor (Px.V))));
 
+   function On_Thing
+     (R         : Thing_Record;
+      X         : Vec3;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      Seen      : not null access constant Observation) return Boolean;
+
    procedure Gather
-     (R         : in out Thing_Record;
+     (S         : State;
+      Id        : Thing_Id;
+      R         : in out Thing_Record;
       Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
                                              return Driver.World.Cameras.Camera'Class;
       Seen      : not null access constant Observation)
    is
+      Now         : Driver.World.Points.Placed_Vectors.Vector := R.Placed;
+      Now_Normals : Normal_Vectors.Vector := R.Placed_Normals;
    begin
-      --  Its points: every eye's that placed it (Place_Points).
-      if Driver.World.Points.Placed_Vectors."/=" (R.Placed, R.Points) then
-         R.Points := R.Placed;
-         R.Normals := R.Placed_Normals;
+      --  Its points: every eye's that placed it (Place_Points). While none did, the scene's points above the table
+      --  that fall inside its region in every eye that holds it and sees where they are (On_Thing): an eye that
+      --  stands in the world places nothing by itself, and what the eyes the body holds at several places placed of
+      --  the scene, seen through that eye's region of it, is the thing (the brain boxes a thing in such an eye as
+      --  often as in one that rides on the body: s55 adopted the black box in the fixed eye, and nothing gave it a
+      --  place). Where the eye that boxed it sees a point on the table, the table is not the thing.
+      if Now.Is_Empty and then Driver.Geometry.Known (S.Table) then
+         for P of S.Scene loop
+            declare
+               H : constant Real := Driver.Geometry.Height (S.Table, P.Point.Mean);
+               N : constant Vec3 := S.Table.Normal;
+               Sigma : constant Real :=
+                 Sqrt (N * (P.Point.Covariance * N) + Driver.Geometry.Height_Sigma (S.Table, P.Point.Mean) ** 2);
+            begin
+               if H > 0.0 and then Significant (H, Sigma) and then On_Thing (R, P.Point.Mean, Camera_Of, Seen) then
+                  Now.Append (Driver.World.Points.Placed'(Pixel => P.Pixel, Point => P.Point, Eye => P.Eye));
+                  Now_Normals.Append (Zero3);
+               end if;
+            end;
+         end loop;
+      end if;
+      if Driver.World.Points.Placed_Vectors."/=" (Now, R.Points) then
+         if R.Placed.Is_Empty and then not Now.Is_Empty then
+            Driver.Log.Line (Driver.Log.World, "thing" & Id'Image & ":" & Now.Length'Image
+                             & " of the scene's points above the table fall inside its region in every eye that"
+                             & " holds it; they are its points until an eye places its region");
+         end if;
+         R.Points := Now;
+         R.Normals := Now_Normals;
          R.Points_At := Seen.Beat;
       end if;
       R.Has_Points := not R.Points.Is_Empty;
@@ -250,14 +286,6 @@ package body Driver.World.Estimates is
    end Gather;
 
    function In_Reach (F : Driver.World.Supports.Surface; X : Vec3) return Boolean;
-
-   function On_Thing
-     (R         : Thing_Record;
-      X         : Vec3;
-      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
-                                             return Driver.World.Cameras.Camera'Class;
-      Seen      : not null access constant Observation) return Boolean;
-
 
    procedure Read_Starts (Id : Thing_Id; R : in out Thing_Record) is
       I : Positive := 1;
@@ -516,6 +544,7 @@ package body Driver.World.Estimates is
                         if Got (K).Found then
                            Incoming.Append
                              (Scene_Point'(Point => Got (K).Point,
+                                           Pixel => Queries (K),
                                            Grid  => (Column => Next_Column + (K - Got'First) mod Columns,
                                                      Row    => (K - Got'First) / Columns),
                                            Eye   => E));
@@ -845,7 +874,7 @@ package body Driver.World.Estimates is
                Before : constant Driver.Clock.Beat := R.Points_At;
                Had    : constant Boolean := R.Has_Points;
             begin
-               Gather (R, Camera_Of, Seen.Element);
+               Gather (S, Id, R, Camera_Of, Seen.Element);
                R.Under_Due := R.Under_Due or else R.Has_Points /= Had or else R.Points_At /= Before;
             end;
             Read_Starts (Id, R);
