@@ -856,6 +856,7 @@ private
       Began_Moving   : Flag_Vectors.Vector;        --  per beat: some commandable group began to move
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph
+      Lag_Evidence   : Natural := 0;               --  the beats the eyes' lags were last measured from (Recompute)
       Kinematics     : Arm_Evidence_Vectors.Vector;   --  per arm with an eye
       Fixed_Eyes     : Fixed_Fit_Vectors.Vector;     --  per eye: what is measured of it when it is fixed in the world
       Is_Booted      : Boolean := False;

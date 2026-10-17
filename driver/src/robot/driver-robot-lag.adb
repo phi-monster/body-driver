@@ -246,7 +246,24 @@ package body Driver.Robot.Lag is
       Window : Natural_Access := new Natural_Array (0 .. Natural'Max (0, Last));
       Every  : constant Natural := (if M.Beats > 0 then Identifiable (M, M.Beats - 1) else 0);
       Bound  : Natural := Every;
+      --  An eye whose lag is known keeps it until the stream has doubled since the lags were last all measured, as the
+      --  estimates themselves are redone (Observe); one whose lag is not known is measured at every estimate, as it
+      --  was. A lag is a constant of the eye and the evidence for it grows with the pushes: told again over every beat
+      --  at every estimate a decider asked for, the known lags took 6 to 10 s of each late in a sweep and 90 s at beat
+      --  33040 (s41, servo seed 6 of the fake robot, 10-17, replayed: 31521 shifts up to 15763 beats). Measured only
+      --  as the stream doubled, every eye's, an arm's noisy eye kept the lag its first pushes gave it, the lock-in
+      --  read it fixed in the world, and its arm was never swept with it (robot.boot.undecided).
+      Due       : constant Boolean := M.Lag_Evidence = 0 or else M.Beats >= 2 * M.Lag_Evidence;
+      Was_Lags  : constant Lag_Vectors.Vector := M.Lags;
+      Was_Known : constant Eye_Flag_Vectors.Vector := M.Lag_Known;
+      function Kept (E : Eye_Id) return Boolean is
+        (not Due and then Natural (E) <= Natural (Was_Known.Last_Index) and then Was_Known (E));
    begin
+      --  Every eye kept: nothing to measure, and the lags stand as they are.
+      if not M.Eyes.Is_Empty and then (for all E in M.Eyes.First_Index .. M.Eyes.Last_Index => Kept (E)) then
+         Free (Window);
+         return;
+      end if;
       Starts_Of (M, Starts, Pushes);
       declare
          K : Natural := 0;   --  the bursts begun by the beat
@@ -266,9 +283,12 @@ package body Driver.Robot.Lag is
       M.Lags.Clear;
       M.Lag_Known.Clear;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
-         M.Lags.Append (0);
-         M.Lag_Known.Append (False);
+         M.Lags.Append ((if Kept (E) then Was_Lags (E) else 0));
+         M.Lag_Known.Append (Kept (E));
       end loop;
+      if Due then
+         M.Lag_Evidence := M.Beats;
+      end if;
       if Last < 1 then
          return;
       end if;
@@ -421,7 +441,7 @@ package body Driver.Robot.Lag is
                Beyond : Real := 1.0;     --  the smallest at a shift longer than Every, told within windows
                Beyond_Lag : Integer := 0;
             begin
-               if N > 0 then
+               if N > 0 and then not Kept (E) then
                   for B in 1 .. Natural'Min (Last, Natural (S.Measured.Length) - 1) loop
                      if S.Measured (B) then
                         declare
