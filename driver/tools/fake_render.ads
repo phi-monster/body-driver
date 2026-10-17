@@ -10,6 +10,11 @@ with Fake_World;
 
 package Fake_Render is
 
+   Supersample : Positive := 1;
+   --  Rays per pixel along each axis, their light averaged: a camera's pixel integrates the light over its area, and a
+   --  texture finer than a pixel shows as its mean there, where one ray through the pixel's centre shows whatever value
+   --  of the texture the centre falls on (fake_robot --supersample).
+
    procedure Render (W : Fake_World.World; C : aliased Fake_World.Camera; Pixels : aliased in out Driver.Real_Array);
    --  RGB in [0, 255] per pixel, rows top to bottom, three values a pixel;
    --  Pixels'Length is 3 * C.Width * C.Height. One picture at a time: the
