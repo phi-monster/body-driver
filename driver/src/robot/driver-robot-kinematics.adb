@@ -2816,8 +2816,13 @@ package body Driver.Robot.Kinematics is
                  R.Frames (F).Readings (Order (K) - 1) - R.Frames.First_Element.Readings (Order (K) - 1);
             end loop;
          end loop;
+         --  The turn the arm's own fit counts (Counted_Turn), not the matcher's step alone: a joint not asked stands
+         --  a landing or two off the reference in a dead band, which is no turn of it, and Hand_Eye reads a track's
+         --  link from the keyframes that turned one joint alone (Infer_Link). With the matcher's step (0.2 to 1.4
+         --  units on s38 and s39, servo seeds 6 and 7 of the fake robot, 10-17) every keyframe after the first pass
+         --  turned several joints, and no track had a link.
          for K in 1 .. N loop
-            W.Visible (K) := Keyframe_Step (M, R.Arm, Order (K));
+            W.Visible (K) := Counted_Turn (M, R.Arm, Order (K));
          end loop;
          W.Covariance := Joint_Covariance (R.Result);
          for I in 1 .. Queries loop
