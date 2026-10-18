@@ -275,7 +275,10 @@ private
       Scene       : Scene_Point_Vectors.Vector;   --  the points the surfaces were found among
       Scene_Round : Natural := 0;                 --  the measurement of the scene they came from
       Earlier     : Boolean := False;             --  the surfaces are an earlier episode's
-      Due         : Boolean := True;              --  the scene is to be measured at the next still beat
+      Due         : Boolean := False;             --  the scene is to be measured at the next still beat: for an
+      --  episode (New_Episode) and when it changed; nothing before an episode reads it, and measured during the boot
+      --  it held the robot still (s77's cold boot, seed 6, 10-18: the scene measured at the arm's sweep kept the
+      --  robot's models back 355 beats, a seventh of the sweep, and was measured again when the episode began).
       Round       : Natural := 0;                 --  the latest measurement of the scene
       Scene_Asked : Boolean := False;             --  it is due, to be measured apart (Measure)
       Round_Seen  : Observation_Holders.Holder;   --  the observation it is measured at
