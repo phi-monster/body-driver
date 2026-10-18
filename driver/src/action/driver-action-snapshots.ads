@@ -89,6 +89,12 @@ package Driver.Action.Snapshots is
    function Tip_Sigma (L : Lobe_State) return Real;
    --  The largest sigma along the path; Real'Last for an empty one.
 
+   function Largest_Sigma (Covariance : Mat3) return Real;
+   --  The largest standard deviation along the frame's axes; Real'Last where an axis is not measured (its variance
+   --  Real'Last), not the square root of Real'Last, which no test takes for unknown (s73: a lobe's tip not measured
+   --  in depth gave the pusher a sigma of 1.3E+154, the plan to put it above the box went to infinity, and the
+   --  stretch ended stuck on a twist of nought).
+
    function Tip_At (L : Lobe_State; Fraction : Real) return Vec3;
    --  The lobe's end at that fraction: on the path between its two nodes around it; beyond an end, the end
    --  segment goes on.

@@ -66,9 +66,6 @@ package body Driver.Action.Execution is
    function Gravity (S : Snapshot) return Vec3 is
      (if S.Up.Sigma < Real'Last and then abs S.Up.Unit_Vector > 0.0 then Unit (S.Up.Unit_Vector) else Zero3);
 
-   function Largest_Sigma (C : Mat3) return Real is
-     (Sqrt (Real'Max (C (1, 1), Real'Max (C (2, 2), C (3, 3)))));
-
    --  The tool pose after a share S of a unit twist: the tool turns about the
    --  twist's axis with whatever it holds, then shifts.
    function Moved (G : Contact.Twist; S : Real; Tool : Rigid) return Rigid is
@@ -797,23 +794,28 @@ package body Driver.Action.Execution is
    --  The arm's touching parts as one side of a relation: their middle (the
    --  lobes' faces, else its own surface, else its tool), and their points.
    function Effector_Item (S : Snapshot; A : Arm_Id) return Goals.Item is
-      E   : constant Search.Effector := Search.Effector_Of (S, A);
-      Sum : Vec3 := Zero3;
-      N   : Natural := 0;
-      It  : Goals.Item;
+      E    : constant Search.Effector := Search.Effector_Of (S, A);
+      Sum  : Vec3 := Zero3;
+      N    : Natural := 0;
+      It   : Goals.Item;
+      Pads : Natural;
    begin
       for Pd of E.Pads loop
          Sum := Sum + E.Tool * Tip_At (Pd.Lobe, E.Closers (Pd.Closer).Now);
          N := N + 1;
       end loop;
+      Pads := N;
       if N = 0 then
          for Sf of E.Surface loop
             Sum := Sum + E.Tool * Sf.Point;
             N := N + 1;
          end loop;
       end if;
+      --  The lobes' ends are where the parts touch: where they are not measured, nor is the middle of them, however
+      --  well the tool is placed.
       It.Centre := (Mean => (if N > 0 then Sum / Real (N) else E.Tool.Translation),
-                    Covariance => Arm (S, A).Tool.Position_Covariance);
+                    Covariance => (if Pads > 0 and then E.Sigma = Real'Last then [others => [others => Real'Last]]
+                                   else Arm (S, A).Tool.Position_Covariance));
       It.Sigma := E.Sigma;
       for Q of Moving_Points (S, 0, A) loop
          It.Samples.Append (Sample'(Point => Q, Normal => Zero3));

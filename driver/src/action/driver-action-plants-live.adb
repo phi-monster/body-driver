@@ -20,8 +20,7 @@ package body Driver.Action.Plants.Live is
    package World renames Driver.World;
    package Motion renames Driver.Robot.Motion;
 
-   function Largest_Sigma (C : Mat3) return Real is
-     (Sqrt (Real'Max (C (1, 1), Real'Max (C (2, 2), C (3, 3)))));
+   function Largest_Sigma (Covariance : Mat3) return Real renames Driver.Action.Snapshots.Largest_Sigma;
 
    --  How finely the arm places its tool: of every joint's smallest visible
    --  step, the largest shift and turn of the tool it makes, as the arm's
