@@ -511,9 +511,55 @@ package body Driver.Robot.Kinematics is
                            end Set;
                            Fresh : constant Driver.Pixels.View :=
                              Driver.Pixels.Empty (Driver.Images.Width (Image), Driver.Images.Height (Image));
+                           --  Every group but the closer, its readings in group order: a flick is the closer's alone when
+                           --  nothing else of the body moved between its two views. Watched for the arm alone, the other
+                           --  arm's moves in the eye were taken for the closer's: u13 (servo seed 3 of the fake robot, both
+                           --  arms, 10-19), eye 1 "saw arm 1's closer flick" of 2489 and 5021 pixels at its left edge, where
+                           --  the other arm was, while both arms were swept at once.
+                           function Rest_Now return Real_Vectors.Vector is
+                              Rest : Real_Vectors.Vector;
+                           begin
+                              for G2 in 1 .. Group_Count (M) loop
+                                 if Group_Id (G2) /= Closer and then Driver.Observations.Has_Reading (O, Group_Id (G2)) then
+                                    for X of O.Readings.Element (Group_Id (G2)) loop
+                                       Rest.Append (X);
+                                    end loop;
+                                 end if;
+                              end loop;
+                              return Rest;
+                           end Rest_Now;
+                           Rest : constant Real_Vectors.Vector := Rest_Now;
+                           function Rest_Apart return Boolean is
+                              Offset : Natural := 0;
+                           begin
+                              if Natural (W.Rest_At.Length) /= Natural (Rest.Length) then
+                                 return True;
+                              end if;
+                              for G2 in 1 .. Group_Count (M) loop
+                                 if Group_Id (G2) /= Closer and then Driver.Observations.Has_Reading (O, Group_Id (G2)) then
+                                    declare
+                                       Now : constant Real_Array := O.Readings.Element (Group_Id (G2));
+                                    begin
+                                       if Channels.Visible
+                                         (M, Group_Id (G2),
+                                          [for C in Now'Range =>
+                                             Now (C) - W.Rest_At (W.Rest_At.First_Index + Offset + C - Now'First)])
+                                       then
+                                          return True;
+                                       end if;
+                                       Offset := Offset + Now'Length;
+                                    end;
+                                 end if;
+                              end loop;
+                              return False;
+                           end Rest_Apart;
+                           function Rest_Moving return Boolean is
+                             (for some G2 in 1 .. Group_Count (M) =>
+                                Group_Id (G2) /= Closer and then Channels.Moving (M, Group_Id (G2), Beat));
                         begin
-                           if Apart (Arm_Group (M, Arm), Arm_Now, W.Arm_At) then
+                           if Apart (Arm_Group (M, Arm), Arm_Now, W.Arm_At) or else Rest_Apart then
                               Set (W.Arm_At, Arm_Now);
+                              W.Rest_At := Rest;
                               Set (W.Closer_At, Closer_Now);
                               W.Gathering := Fresh;
                               W.Has_Before := False;
@@ -527,7 +573,7 @@ package body Driver.Robot.Kinematics is
                               Set (W.Closer_At, Closer_Now);
                               W.Gathering := Fresh;
                            end if;
-                           if Stillness.Eye_Settled (M, E) and then not Channels.Moving (M, Arm_Group (M, Arm), Beat)
+                           if Stillness.Eye_Settled (M, E) and then not Rest_Moving
                              and then not Channels.Moving (M, Closer, Beat)
                              and then Driver.Pixels.Width (W.Gathering) = Driver.Images.Width (Image)
                              and then Driver.Pixels.Height (W.Gathering) = Driver.Images.Height (Image)

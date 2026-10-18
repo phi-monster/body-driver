@@ -392,6 +392,49 @@ package body Driver.Robot.Hand.Lobes is
       end;
    end Tip_Of;
 
+   procedure Part_Of (Region : Mask; Seed : Pixel; Part : out Mask; Centre, Tip : out Pixel; Known : out Boolean) is
+      W      : constant Natural := Width (Region);
+      H      : constant Natural := Height (Region);
+      Column, Row : Natural;
+      Stack  : Natural_Vectors.Vector;
+      Su, Sv : Real := 0.0;
+      N      : Natural := 0;
+   begin
+      Part := Create (W, H);
+      Centre := (U => 0.0, V => 0.0);
+      Tip := (U => 0.0, V => 0.0);
+      Known := False;
+      if W = 0 or else H = 0 or else not Pixel_Of (Seed, W, H, Column, Row) or else not Contains (Region, Column, Row) then
+         return;
+      end if;
+      Include (Part, Column, Row);
+      Stack.Append (Index (W, Column, Row));
+      while not Stack.Is_Empty loop
+         declare
+            P : constant Natural := Stack.Last_Element;
+            C : constant Integer := P mod W;
+            R : constant Integer := P / W;
+         begin
+            Stack.Delete_Last;
+            Su := Su + Real (C) + 0.5;
+            Sv := Sv + Real (R) + 0.5;
+            N := N + 1;
+            for Dr in -1 .. 1 loop
+               for Dc in -1 .. 1 loop
+                  if C + Dc in 0 .. W - 1 and then R + Dr in 0 .. H - 1
+                    and then Contains (Region, C + Dc, R + Dr) and then not Contains (Part, C + Dc, R + Dr)
+                  then
+                     Include (Part, C + Dc, R + Dr);
+                     Stack.Append (Index (W, C + Dc, R + Dr));
+                  end if;
+               end loop;
+            end loop;
+         end;
+      end loop;
+      Centre := (U => Su / Real (N), V => Sv / Real (N));
+      Tip_Of (Part, Part, Create (0, 0), Tip, Known);
+   end Part_Of;
+
    procedure Summarize (M : Mask; Count : out Natural; Centre : out Pixel);
 
    procedure Summarize (M : Mask; Count : out Natural; Centre : out Pixel) is

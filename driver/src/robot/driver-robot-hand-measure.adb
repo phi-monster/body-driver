@@ -6,6 +6,7 @@ with Driver.Robot.Hand.Selfsight;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Steps;
+with Driver.Stats;
 
 --  The decider that measures the hands. Every closer channel is swept from
 --  where it is to both ends of its travel, pushing further with doubling
@@ -1325,11 +1326,11 @@ procedure Measure (H : in out Hands; M : in out Model) is
          end Above;
          Steps : Driver.Robot.Hand.Descent_Steps;
 
-         --  What the hand has found of its press since the let-go: the presses its watcher found at a rest, and the most
-         --  beats a decider waits for one: no wait is longer than all the waiting so far, the stream's length (it is the
-         --  hand settling on what it pressed that ends the wait, Driver.Robot.Hand.Presses, and a creep that decays does).
+         --  What the hand has found of its press since the let-go: the presses its watcher found at a rest, and whether
+         --  the arm's readings stood still at the beat (it is the hand settling on what it pressed that ends the wait,
+         --  Driver.Robot.Hand.Presses, and a creep that decays does).
          Rests_Now : Natural := 0;
-         Allowed   : Natural := 0;
+         Arm_Still : Boolean := False;
          procedure Read_Rests (O : Observation) is
             pragma Unreferenced (O);
          begin
@@ -1338,7 +1339,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                return;
             end if;
             Rests_Now := H.Data.Found (Id).Rests;
-            Allowed := M.Beats;
+            Arm_Still := Arm_Is > 0 and then not Driver.Robot.Channels.Moving (M, Arm_Is, M.Beats);
          end Read_Rests;
 
          procedure Read_Arm (O : Observation) is
@@ -1419,8 +1420,11 @@ procedure Measure (H : in out Hands; M : in out Model) is
                              & " at " & (if Which = Open then "open" else "closed") & ", turning the hand "
                              & Driver.Log.Image (Aimed.Turn, 4) & " rad (" & Ada.Strings.Unbounded.To_String (Report.Detail)
                              & " the tool stands " & Driver.Log.Image (Off.Place, 5) & " from the aim's place, told against "
-                             & Driver.Log.Image (Off.Place_Sigma, 5) & ", and turned " & Driver.Log.Image (Off.Turn, 5)
+                             & Driver.Log.Image (Off.Place_Sigma, 5) & " beyond the "
+                             & Driver.Log.Image (Off.Allow_Place, 5) & " the arm's own landing leaves"
+                             & ", and turned " & Driver.Log.Image (Off.Turn, 5)
                              & " rad from its turn, told against " & Driver.Log.Image (Off.Turn_Sigma, 5)
+                             & " beyond the " & Driver.Log.Image (Off.Allow_Turn, 5) & " its landing leaves"
                              & "): no press is made from where it stopped, and the arm is taken back to where the aim began");
             Hold_Beat (Note_The_Stop'Access);   --  the aim is in free air: what stopped it is the body's, and noted
             Move_Group (Arm_Is, Began.Element);
@@ -1586,15 +1590,20 @@ procedure Measure (H : in out Hands; M : in out Model) is
                   return False;
                end if;
             end if;
-            --  The stream's length at the let-go: read again at every beat of the wait, it grew with the wait and never
-            --  bounded it (A86's hand 2 waited 5,600 beats, to the end of the run).
-            Longest := Allowed;
+            --  The wait ends when the arm has stood still as long as the body has ever taken to settle after a move
+            --  (Settling_Of: its eye's longest settling, no shorter than a push takes to show) with no rest found: the
+            --  watcher takes the rest at the first beat the arm's readings are still, and a creep that decays keeps the
+            --  wait going while it moves them. Bounded by the stream's length at the let-go, a wait outlasted the run:
+            --  u13 (servo seed 3 of the fake robot, both arms, 10-19), a press let go after beat 13566 and its decider
+            --  waited there, no rest found, the body still from beat 17800 to the end of the run (A86's hand 2 had
+            --  waited 5,600 beats, its bound then the stream's length read at every beat).
+            Longest := Settling_Of (R.Eye);
             Hold_Beat (Read_Arm'Access);
             Move_Group (Arm_Is, Arm_Now.Element);
             loop
                Hold_Beat (Read_Rests'Access);
                exit when Lost or else Rests_Now > Rests_Before or else Waited >= Longest;
-               Waited := Waited + 1;
+               Waited := (if Arm_Still then Waited + 1 else 0);
             end loop;
             if Lost then
                End_Lost (Moved => True);
@@ -1602,7 +1611,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
             end if;
             if Rests_Now = Rests_Before then
                Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": no press of lobe" & Lobe'Image & " was found at the rest after"
-                                & " the let-go: the arm did not rest in" & Waited'Image & " beats, the stream's length"
+                                & " the let-go: the arm stood still" & Waited'Image
+                                & " beats, the longest the body has taken to settle, with no rest found"
                                 & "; the arm is taken back to where the descent began");
                Move_Group (Arm_Is, Aim_At.Element);
                return False;
@@ -1629,6 +1639,180 @@ procedure Measure (H : in out Hands; M : in out Model) is
          end if;
          return Done;
       end Press_Past_Its_Ends;
+
+      --  A closer is swept where its eye sees the parts it moves apart from what lies behind them. The lobes at the
+      --  stops are told from the world by the poses and by how bright each is (Lobes.From_Change), and a jaw as dark
+      --  as what stood behind it was placed wrongly at the stops, its tip now at the jaw's top and now a hundred
+      --  pixels below it, and its pixels were not followed through the views: u9 and u13 (servo seed 3 of the fake
+      --  robot, both arms, 10-19), the hand of arm 2, swept over a dark striped box, its tips off the truth by 26 to 98
+      --  pixels at four of eleven stops; the hand of arm 1, swept over the brown table, every stop's tip within 8
+      --  pixels of it. Where a lobe of the channel is not followed through the views, the closer is swept again at
+      --  the pose of the arm's keyframes where its eye's picture, about the rows the lobes sweep through, stands
+      --  farthest from the lobes' own brightness against that picture's own scatter there, when that is farther
+      --  than where it was swept. Once: that pose is the farthest the arm has shown.
+      procedure Sweep_Where_Seen (G : Group_Id; C : Positive) is
+         Unfollowed : Boolean := False;   --  a lobe of the channel was not followed through the views
+         Best       : Driver.Robot.Hand.Views.Reading_Holders.Holder;   --  the keyframe's readings, the arm's
+         Best_Score : Real := 0.0;
+         Here_Score : Real := 0.0;
+         Arm_Is     : Group_Id'Base := 0;
+         procedure Read_Backdrops (O : Observation) is
+            pragma Unreferenced (O);
+            P     : constant Natural := Own_Pair (G);
+            There : constant Natural := Index_Of (G);
+            Arm   : Arm_Id'Base := 0;
+         begin
+            Unfollowed := False;
+            Best := Driver.Robot.Hand.Views.Reading_Holders.Empty_Holder;
+            Arm_Is := 0;
+            if P = 0 or else There = 0 or else C > Sweeps.Channels (H.Data.Pairs (P).Sweep)
+              or else Sweeps.Status (H.Data.Pairs (P).Sweep, C) /= Sweeps.Measured
+            then
+               return;
+            end if;
+            for L of H.Data.Found (Hand_Id (There)).Lobes loop
+               if L.Channel = C and then Driver.Robot.Hand.Shape.Unfollowed (L.Shape) then
+                  Unfollowed := True;
+               end if;
+            end loop;
+            Arm := H.Data.Pairs (P).Arm;
+            if not Unfollowed or else Arm = 0 then
+               return;
+            end if;
+            Arm_Is := Arm_Group (M, Arm);
+            declare
+               S     : Sweeps.State renames H.Data.Pairs (P).Sweep;
+               Low   : constant Driver.Robot.Hand.Views.View := Sweeps.Low_End (S, C);
+               High  : constant Driver.Robot.Hand.Views.View := Sweeps.High_End (S, C);
+               Lobes : constant Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector := Sweeps.Lobes_Of (S, C);
+               --  The robot's own pixels the closer leaves where they are (the fixed jaw beside the moving one): the
+               --  lobes' own brightness, not what lies behind them, and out of the band. Counted in it, the fixed jaw
+               --  made every pose's picture as near the lobes' brightness as the next: u17 (servo seed 3 of the fake
+               --  robot, both arms, 10-19) swept its closer again at 0.994 of its picture's scatter from 0.763.
+               Still : constant Driver.Images.Mask := Sweeps.Located_Of (S, C).Still;
+               W     : constant Natural := Driver.Pixels.Width (Low.Frames);
+               Ht    : constant Natural := Driver.Pixels.Height (Low.Frames);
+               Reach : constant Natural := Driver.Alignment.Half_Patch (W, Ht);
+               --  Each row's span of the lobes at both ends: the part of the picture the closer moves them through.
+               From_X : array (0 .. Ht - 1) of Integer := [others => W];
+               To_X   : array (0 .. Ht - 1) of Integer := [others => -1];
+               Band   : Driver.Images.Mask := Driver.Images.Create (W, Ht);   --  within a half patch of it, outside it
+               Count  : Natural := 0;
+               Own    : Real_Vectors.Vector;   --  the lobes' brightness at their ends
+               Jaw    : Real := 0.0;
+               function Score (Luma : not null access function (X, Y : Natural) return Real) return Real is
+                  Values : Real_Array (1 .. Natural'Max (1, Count));
+                  K      : Natural := 0;
+               begin
+                  for Y in 0 .. Ht - 1 loop
+                     for X in 0 .. W - 1 loop
+                        if Driver.Images.Contains (Band, X, Y) then
+                           K := K + 1;
+                           Values (K) := Luma (X, Y);
+                        end if;
+                     end loop;
+                  end loop;
+                  if K < 2 then
+                     return 0.0;
+                  end if;
+                  return abs (Driver.Stats.Median (Values (1 .. K)) - Jaw)
+                    / Real'Max (Driver.Stats.Robust_Sigma (Values (1 .. K)), Real'Model_Epsilon);
+               end Score;
+               function Low_Luma (X, Y : Natural) return Real is (Driver.Pixels.Mean (Low.Frames, X, Y));
+            begin
+               if W = 0 or else Ht = 0 or else Lobes.Is_Empty then
+                  return;
+               end if;
+               for L of Lobes loop
+                  for Y in 0 .. Ht - 1 loop
+                     for X in 0 .. W - 1 loop
+                        if (Driver.Images.Width (L.Here) = W and then Driver.Images.Height (L.Here) = Ht
+                            and then Driver.Images.Contains (L.Here, X, Y))
+                          or else (Driver.Images.Width (L.There) = W and then Driver.Images.Height (L.There) = Ht
+                                   and then Driver.Images.Contains (L.There, X, Y))
+                        then
+                           From_X (Y) := Integer'Min (From_X (Y), X);
+                           To_X (Y) := Integer'Max (To_X (Y), X);
+                           Own.Append (if Driver.Images.Width (L.Here) = W and then Driver.Images.Height (L.Here) = Ht
+                                         and then Driver.Images.Contains (L.Here, X, Y)
+                                       then Driver.Pixels.Mean (Low.Frames, X, Y)
+                                       else Driver.Pixels.Mean (High.Frames, X, Y));
+                        end if;
+                     end loop;
+                  end loop;
+               end loop;
+               if Own.Is_Empty then
+                  return;
+               end if;
+               declare
+                  Values : Real_Array (1 .. Natural (Own.Length));
+               begin
+                  for K in Values'Range loop
+                     Values (K) := Own (Own.First_Index + K - 1);
+                  end loop;
+                  Jaw := Driver.Stats.Median (Values);
+               end;
+               for Y in 0 .. Ht - 1 loop
+                  for X in 0 .. W - 1 loop
+                     if not (From_X (Y) <= X and then X <= To_X (Y)) then
+                        for Row in Integer'Max (0, Y - Reach) .. Integer'Min (Ht - 1, Y + Reach) loop
+                           if From_X (Row) <= To_X (Row)
+                             and then X >= From_X (Row) - Reach and then X <= To_X (Row) + Reach
+                             and then not (Driver.Images.Width (Still) = W and then Driver.Images.Height (Still) = Ht
+                                           and then Driver.Images.Contains (Still, X, Y))
+                           then
+                              Driver.Images.Include (Band, X, Y);
+                              Count := Count + 1;
+                              exit;
+                           end if;
+                        end loop;
+                     end if;
+                  end loop;
+               end loop;
+               Here_Score := Score (Low_Luma'Access);
+               for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+                  if M.Kinematics (K).Arm = Arm then
+                     for F of M.Kinematics (K).Frames loop
+                        if Driver.Images.Width (F.Image) = W and then Driver.Images.Height (F.Image) = Ht
+                          and then Natural (F.Readings.Length) > 0
+                        then
+                           declare
+                              function Frame_Luma (X, Y : Natural) return Real is (Driver.Images.Luma (F.Image, X, Y));
+                              Here : constant Real := Score (Frame_Luma'Access);
+                           begin
+                              if Here > Best_Score then
+                                 Best_Score := Here;
+                                 Best := Driver.Robot.Hand.Views.Reading_Holders.To_Holder
+                                   ([for J in 1 .. Natural (F.Readings.Length) => F.Readings (F.Readings.First_Index + J - 1)]);
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                  end if;
+               end loop;
+            end;
+         end Read_Backdrops;
+      begin
+         Hold_Beat (Read_Backdrops'Access);
+         if not Unfollowed then
+            return;
+         end if;
+         if Best.Is_Empty or else Arm_Is = 0 or else not (Best_Score > Here_Score) then
+            Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image & ": its lobes are"
+                             & " not followed through its views, and no pose of the arm shows them farther from what"
+                             & " lies behind them (" & Driver.Log.Image (Here_Score, 3) & " where it was swept, "
+                             & Driver.Log.Image (Best_Score, 3) & " the farthest)");
+            return;
+         end if;
+         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image & ": its lobes are not"
+                          & " followed through its views, swept where they stand " & Driver.Log.Image (Here_Score, 3)
+                          & " of its picture's scatter from what lies behind them; swept again where they stand "
+                          & Driver.Log.Image (Best_Score, 3));
+         Move_Group (Arm_Is, Best.Element);
+         Sweep_Channel (G, C);
+         Top_Up_Poses (G, C);
+         Fill_Stops (G, C);
+      end Sweep_Where_Seen;
 
       procedure Press_Lobe (Id : Hand_Id; R : Hand_Record; Lobe : Positive; Which : Opening) is
          --  The lobe of a tool no closer moves has no line of sight: it is pressed along the way down, the
@@ -1826,6 +2010,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
             end loop;
             for C in 1 .. Channels loop
                Fill_Stops (Closer, C);
+            end loop;
+            for C in 1 .. Channels loop
+               Sweep_Where_Seen (Closer, C);
             end loop;
          elsif Is_One then
             Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & Closer'Image & " of arm" & Of_Arm'Image

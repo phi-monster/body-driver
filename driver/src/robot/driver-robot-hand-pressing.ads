@@ -42,6 +42,10 @@ package Driver.Robot.Hand.Pressing is
       Place_Sigma : Real := Real'Last;  --  and the sigma it is told against
       Turn       : Real := Real'Last;   --  how far its turn is off the aim's, radians,
       Turn_Sigma : Real := Real'Last;   --  and the sigma it is told against
+      --  How far off the aim the arm's own landing leaves the tool: its place and turn at the readings a free push of
+      --  the arm falls short by (Steps.Free_Landing), along the way the arm stands short of the aim's readings.
+      Allow_Place : Real := 0.0;
+      Allow_Turn  : Real := 0.0;
    end record;
 
    function Off_Aim (M : Model; Arm : Arm_Id; O : Observation; A : Aimed) return Aim_Offset;
@@ -52,10 +56,15 @@ package Driver.Robot.Hand.Pressing is
 
    function At_Aim (Off : Aim_Offset) return Boolean is
      (Off.Place_Sigma < Real'Last and then Off.Turn_Sigma < Real'Last
-      and then not Driver.Uncertain.Significant (Off.Place, Off.Place_Sigma)
-      and then not Driver.Uncertain.Significant (Off.Turn, Off.Turn_Sigma));
+      and then not Driver.Uncertain.Significant (Real'Max (0.0, Off.Place - Off.Allow_Place), Off.Place_Sigma)
+      and then not Driver.Uncertain.Significant (Real'Max (0.0, Off.Turn - Off.Allow_Turn), Off.Turn_Sigma));
    --  The tool stands where the aim put it, as far as anything tells: neither its place nor its turn significantly
-   --  off. What the press needs of an aim is the tool's pose, not the joints':
+   --  off. Beyond what the arm's own landing leaves: a servo stops anywhere within its dead band of its target,
+   --  and a tool told to a tenth of a millimetre was judged short of every tilted aim the dead band left a millimetre or
+   --  two off (u9, servo seed 3 of the fake robot, both arms, 10-19: hand 1's aims "delivered 0.987 of 604" and
+   --  "0.989 of 557", the tool 0.172 from the aim against 0.046, turned 0.006 rad against 0.004, and no tilted press
+   --  of its tip was made, its tip never tested across its line of sight). What the press needs of an aim is the
+   --  tool's pose, not the joints':
    --  a large aim that ends within a few ten-thousandths of its joints' targets, the arm's own sag under its load
    --  where it stands, is judged short against the free pushes of the boot that never carried that load (A89's hand
    --  2: every aim "delivered 1.000 of" 1.36 to 1.46, "blocked", and no press was made in the whole boot).

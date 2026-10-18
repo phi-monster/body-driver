@@ -155,13 +155,50 @@ package body Driver.Robot.Hand.Pressing is
       declare
          Values  : Vec3;
          Vectors : Mat3;
+         --  What the arm's own landing leaves: the tool at the readings a free push falls short by, along the way
+         --  the arm stands short of the aim's readings (all of the way when it stands no farther short than that).
+         G       : constant Group_Id := Arm_Group (M, Arm);
+         Target  : constant Real_Array := Driver.Robot.Motion.Last_Readings (A.Plan);
+         Now     : constant Real_Array := O.Readings.Element (G);
+         Free    : constant Real := Driver.Robot.Steps.Free_Landing (M, G);
+         Short   : Real := 0.0;
+         Allow_Place, Allow_Turn : Real := 0.0;
       begin
          Symmetric_Eigensystem (Tool.Position_Covariance, Values, Vectors);
+         if Target'Length = Now'Length then
+            for C in 0 .. Target'Length - 1 loop
+               Short := Short + (Target (Target'First + C) - Now (Now'First + C)) ** 2;
+            end loop;
+            Short := Sqrt (Short);
+            if Free > 0.0 and then Short > 0.0 then
+               declare
+                  There  : Observation := O;
+                  Part   : constant Real := Real'Min (1.0, Free / Short);
+                  Landed : Real_Array (Now'Range);
+               begin
+                  for C in 0 .. Now'Length - 1 loop
+                     Landed (Now'First + C) :=
+                       Target (Target'First + C) - Part * (Target (Target'First + C) - Now (Now'First + C));
+                  end loop;
+                  There.Readings.Replace_Element (G, Landed);
+                  declare
+                     At_Landing : constant Pose_Estimate := Tool_In_Arm (M, Arm, There);
+                  begin
+                     if At_Landing.Position_Covariance (1, 1) < Real'Last then
+                        Allow_Place := abs (At_Landing.Pose.Translation - A.Above.Translation);
+                        Allow_Turn := Angle (Transpose (At_Landing.Pose.Rotation) * A.Above.Rotation);
+                     end if;
+                  end;
+               end;
+            end if;
+         end if;
          return (Place       => abs (Tool.Pose.Translation - A.Above.Translation),
                  Place_Sigma => Sqrt (Sigma ** 2 + Real'Max (Values (1), Real'Max (Values (2), Values (3)))),
                  Turn        => Angle (Transpose (Tool.Pose.Rotation) * A.Above.Rotation),
                  --  A blind aim's turn (no table: the tool's own) is told against the fit's sigma alone.
-                 Turn_Sigma  => (if Down.Sigma < Real'Last then Sqrt (Sigma ** 2 + Down.Sigma ** 2) else Sigma));
+                 Turn_Sigma  => (if Down.Sigma < Real'Last then Sqrt (Sigma ** 2 + Down.Sigma ** 2) else Sigma),
+                 Allow_Place => Allow_Place,
+                 Allow_Turn  => Allow_Turn);
       end;
    end Off_Aim;
 

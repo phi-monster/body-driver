@@ -4208,6 +4208,7 @@ package body Driver.Robot.Kinematics.Fit is
                   Needed  : Real := Real'Last;     --  what the sum must pass: Z of the spread for each telling one
                   Behind  : Boolean := False;      --  A puts a telling keyframe's points behind the eye
                   Beyond  : Boolean := False;      --  only B does
+                  Aside   : Natural := 0;          --  telling keyframes neither order explains
                end record;
 
                function Judge (A, B : Real_Array) return Judgement is
@@ -4294,6 +4295,19 @@ package body Driver.Robot.Kinematics.Fit is
                      Spread  : Real := Real'Last;
                      Sum     : Real := 0.0;
                      Behind, Beyond : Boolean := False;
+                     Typical : Real := 0.0;   --  A's keyframe medians' own median
+                     Aside   : Natural := 0;
+                     --  Whether an order explains a keyframe: its median residual there no larger than A's keyframes'
+                     --  medians are, at Z of their spread. A keyframe neither order explains is sighted where neither
+                     --  puts its points (an aligner's answers on another place of the picture, a whole keyframe of them
+                     --  together), and how much farther one of them puts them is no evidence of either: summed as
+                     --  evidence, one such keyframe outweighed every other. u11 (servo seed 3 of the fake robot, both
+                     --  arms, 10-19), arm 1: of its 268 keyframes, 8 had more of their answers wrong than right by the
+                     --  truth (keyframe 228, a turn of c2 with c3, 66 of 66), the fit left them 17 to 54 px rms against
+                     --  1 to 2 elsewhere, and its order went from one swap off the truth to 4 2 1 6 5 3 and 1 4 5 2 6 3;
+                     --  u10, the same body and code, had none such of 145 and told the true order.
+                     function Explains (V : Real) return Boolean is
+                       (V < Real'Last and then (Spread >= Real'Last or else V <= Typical + Driver.Conventions.Z * Spread));
                   begin
                      for F in 1 .. Frames loop
                         if Filled (F) > 0 then
@@ -4309,6 +4323,7 @@ package body Driver.Robot.Kinematics.Fit is
                      end loop;
                      if Km > 1 then
                         Spread := Driver.Stats.Robust_Sigma (Medians (1 .. Km));
+                        Typical := Driver.Stats.Median (Medians (1 .. Km));
                      end if;
                      for F in 1 .. Frames loop
                         if Filled (F) > 0 then
@@ -4324,6 +4339,8 @@ package body Driver.Robot.Kinematics.Fit is
                            begin
                               if X >= Real'Last and then Y >= Real'Last then
                                  null;
+                              elsif not Explains (X) and then not Explains (Y) then
+                                 Aside := Aside + 1;
                               elsif X >= Real'Last then
                                  Behind := True;
                               elsif Y >= Real'Last then
@@ -4344,6 +4361,7 @@ package body Driver.Robot.Kinematics.Fit is
                      Verdict.Sum := Sum;
                      Verdict.Behind := Behind;
                      Verdict.Beyond := Beyond;
+                     Verdict.Aside := Aside;
                      if Spread < Real'Last then
                         Verdict.Needed := Driver.Conventions.Z * Spread * Sqrt (Real (M));
                      end if;
@@ -4359,14 +4377,15 @@ package body Driver.Robot.Kinematics.Fit is
 
                --  Why B was not told from A, in words.
                function Why_Image (J : Judgement) return String is
-                 (if J.Behind then "the order found puts the points of a keyframe that tells the two apart behind the eye"
+                 ((if J.Behind then "the order found puts the points of a keyframe that tells the two apart behind the eye"
                   elsif J.Telling = 0 then
                     "no keyframe of" & J.Seen'Image & " puts the two orders' points apart by more than Z of the residuals' "
                     & "scatter, " & Driver.Log.Image (J.Noise, 3) & " px"
                   else J.Telling'Image & " of" & J.Seen'Image & " keyframes put the two orders' points apart by more than Z "
                     & "of the residuals' scatter, " & Driver.Log.Image (J.Noise, 3) & " px; there its medians are larger by "
                     & Driver.Log.Image (J.Sum, 3) & " px in all, against the " & Driver.Log.Image (J.Needed, 3)
-                    & " px Z of the keyframes' spread (" & Driver.Log.Image (J.Spread, 3) & " px) asks of that many");
+                    & " px Z of the keyframes' spread (" & Driver.Log.Image (J.Spread, 3) & " px) asks of that many")
+                 & (if J.Aside > 0 then ";" & J.Aside'Image & " more set aside, explained by neither order" else ""));
 
 
                procedure Free_All is

@@ -1,5 +1,8 @@
+with Ada.Environment_Variables;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
+with Ada.Text_IO;
 with Driver.Log;
 with Driver.Pixels;
 
@@ -244,6 +247,71 @@ package body Driver.Robot.Hand.Sweep is
                      end if;
                   end;
                end loop;
+            end if;
+            --  For a study against a fake robot's truth: with BD_DUMP_KEYS naming a folder, each stop's lobes as
+            --  placed, a line a lobe: where its tip and centre are and how many pixels it has, beside the anchored
+            --  end's.
+            if Ada.Environment_Variables.Exists ("BD_DUMP_KEYS") then
+               declare
+                  File : Ada.Text_IO.File_Type;
+                  Name : constant String := Ada.Environment_Variables.Value ("BD_DUMP_KEYS") & "/stops_c"
+                    & Ada.Strings.Fixed.Trim (Channel'Image, Ada.Strings.Left) & ".txt";
+               begin
+                  begin
+                     Ada.Text_IO.Open (File, Ada.Text_IO.Append_File, Name);
+                  exception
+                     when Ada.Text_IO.Name_Error =>
+                        Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Name);
+                  end;
+                  for L in 1 .. N loop
+                     declare
+                        Mine : constant Mask :=
+                          (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
+                     begin
+                        Ada.Text_IO.Put_Line
+                          (File, "stop" & K'Image & " of" & Count'Image & " reading "
+                           & Driver.Log.Image (Driver.Robot.Hand.Views.Reading (V, Channel), 1) & " beats"
+                           & V.From'Image & V.To'Image & " lobe" & L'Image & " anchored "
+                           & (if At_Low then "low" else "high") & " pixels" & Driver.Images.Count (Mine)'Image
+                           & (if Tips (L).Known
+                              then " tip " & Driver.Log.Image (Tips (L).Tip.U, 1) & " " & Driver.Log.Image (Tips (L).Tip.V, 1)
+                                   & " centre " & Driver.Log.Image (Tips (L).Centre.U, 1) & " "
+                                   & Driver.Log.Image (Tips (L).Centre.V, 1) & " pixels"
+                                   & Driver.Images.Count (Tips (L).Region)'Image
+                              else " not found"));
+                        --  And the picture of it: the pixels that changed from the anchored end (60), the anchored
+                        --  lobe's (120) and the region placed at the stop (255), a PGM a stop and lobe.
+                        declare
+                           Picture : Ada.Text_IO.File_Type;
+                           W       : constant Natural := Driver.Images.Width (Mine);
+                           H       : constant Natural := Driver.Images.Height (Mine);
+                        begin
+                           Ada.Text_IO.Create
+                             (Picture, Ada.Text_IO.Out_File,
+                              Ada.Environment_Variables.Value ("BD_DUMP_KEYS") & "/stop_c"
+                              & Ada.Strings.Fixed.Trim (Channel'Image, Ada.Strings.Left) & "_k"
+                              & Ada.Strings.Fixed.Trim (K'Image, Ada.Strings.Left) & "_l"
+                              & Ada.Strings.Fixed.Trim (L'Image, Ada.Strings.Left) & ".pgm");
+                           Ada.Text_IO.Put_Line (Picture, "P2" & W'Image & H'Image & " 255");
+                           for Y in 0 .. H - 1 loop
+                              for X in 0 .. W - 1 loop
+                                 Ada.Text_IO.Put
+                                   (Picture,
+                                    (if Tips (L).Known and then Driver.Images.Width (Tips (L).Region) = W
+                                       and then Driver.Images.Contains (Tips (L).Region, X, Y) then " 255"
+                                     elsif Driver.Images.Contains (Mine, X, Y) then " 120"
+                                     elsif Driver.Images.Width (Compared.Changed) = W
+                                       and then Driver.Images.Contains (Compared.Changed, X, Y) then " 60"
+                                     else " 0"));
+                              end loop;
+                              Ada.Text_IO.New_Line (Picture);
+                           end loop;
+                           Ada.Text_IO.Close (Picture);
+                        end;
+                     end;
+                  end loop;
+                  Ada.Text_IO.Close (File);
+               end;
             end if;
             Now.Stops.Append
               (Stop_State'(Reading => Driver.Robot.Hand.Views.Reading (V, Channel), From => V.From,

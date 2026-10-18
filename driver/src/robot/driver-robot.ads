@@ -916,6 +916,7 @@ private
       Eye           : Eye_Id := 1;
       Closer        : Group_Id := 1;
       Arm_At        : Real_Vectors.Vector;
+      Rest_At       : Real_Vectors.Vector;   --  every other group's readings, in group order, where the arm was
       Closer_At     : Real_Vectors.Vector;
       Gathering     : Driver.Pixels.View;
       Before        : Driver.Pixels.View;

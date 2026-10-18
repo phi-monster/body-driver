@@ -98,6 +98,14 @@ package Driver.Robot.Hand.Shape is
    function Unfitted (Why : String) return Lobe_Shape;
    --  A lobe whose shape cannot be fitted, and why.
 
+   function Not_Followed (Why : String) return Lobe_Shape;
+   --  A lobe whose shape cannot be fitted because its pixels were not followed through the views of the closer's
+   --  sweep, and why: what the eye saw behind the lobe may have hidden it (Driver.Robot.Hand.Measure sweeps the
+   --  closer again elsewhere).
+
+   function Unfollowed (S : Lobe_Shape) return Boolean;
+   --  The lobe's pixels were not followed through the sweep's views (Not_Followed).
+
    function Fitted (S : Lobe_Shape) return Boolean;
    function Why (S : Lobe_Shape) return String;
    --  Why it is not fitted; empty when it is.
@@ -171,6 +179,7 @@ private
    type Lobe_Shape is record
       Fitted        : Boolean := False;
       Why           : Ada.Strings.Unbounded.Unbounded_String;
+      Unfollowed    : Boolean := False;
       Eye           : Vec3 := Zero3;
       Sightings     : Sighting_Holders.Holder;
       Points        : Point_Holders.Holder;

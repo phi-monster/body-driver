@@ -141,6 +141,11 @@ package Driver.Robot.Hand.Lobes is
    --  How far the pixels of a tip region lie from the tip pixel, per axis, in
    --  pixels (root mean square). Zero for an empty region.
 
+   procedure Part_Of (Region : Mask; Seed : Pixel; Part : out Mask; Centre, Tip : out Pixel; Known : out Boolean);
+   --  The part of Region that holds the pixel Seed, its pixels joined edge or corner to the next, with its centre
+   --  (its pixels' mean) and its tip as a lobe's: the pixel of it farthest within it from the picture's border
+   --  (shortest paths through it, steps of 1 and sqrt 2). Known is False when Seed is not in Region.
+
    function Find
      (Forward  : Correspondence_Array;   --  first view to the other
       Backward : Correspondence_Array;   --  other view to the first

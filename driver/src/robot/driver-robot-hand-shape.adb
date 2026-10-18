@@ -670,6 +670,11 @@ package body Driver.Robot.Hand.Shape is
    function Unfitted (Why : String) return Lobe_Shape is
      ((Why => To_Unbounded_String (Why), others => <>));
 
+   function Not_Followed (Why : String) return Lobe_Shape is
+     ((Why => To_Unbounded_String (Why), Unfollowed => True, others => <>));
+
+   function Unfollowed (S : Lobe_Shape) return Boolean is (S.Unfollowed);
+
    function Fitted (S : Lobe_Shape) return Boolean is (S.Fitted);
    function Why (S : Lobe_Shape) return String is (To_String (S.Why));
    function Kept (S : Lobe_Shape) return Natural is (S.Kept);

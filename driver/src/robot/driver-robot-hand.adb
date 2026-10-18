@@ -750,7 +750,7 @@ package body Driver.Robot.Hand is
             Wide : constant Natural := Follow.Widest_Step (Track (1 .. Count), Width, Height);
          begin
             if Wide = 1 then
-               return Shapes.Unfitted
+               return Shapes.Not_Followed
                  ("its pixels are not followed from the open end: its tip moves"
                   & Natural'Image (Natural (Follow.Tip_Step (Track (1 .. Count), Wide))) & " pixels between the first two"
                   & " of the" & Count'Image & " views where it is seen, from " & Image (Track (Wide)) & " at "
@@ -793,7 +793,7 @@ package body Driver.Robot.Hand is
                                         & Ada.Strings.Unbounded.To_String (F.Lost)
                                    else ""));
                if F.Count = 0 then
-                  return Shapes.Unfitted ("its pixels are not followed from the open end to the closed one: "
+                  return Shapes.Not_Followed ("its pixels are not followed from the open end to the closed one: "
                                           & Ada.Strings.Unbounded.To_String (F.Why));
                end if;
                declare
@@ -924,19 +924,18 @@ package body Driver.Robot.Hand is
                   Nearest  : Real := Real'Last;
                   Fixed_Px : Driver.Images.Pixel := (U => 0.0, V => 0.0);
                   Found    : Boolean := False;
-                  Centre   : Driver.Images.Pixel := (U => 0.0, V => 0.0);   --  of the robot's still pixels
+                  Part     : Driver.Images.Mask;   --  the fixed jaw: the part of them the moving jaw meets
+                  Part_Centre, Part_Tip : Driver.Images.Pixel := (U => 0.0, V => 0.0);
                   Still_N  : Natural := 0;
                begin
                   for Y in 0 .. H - 1 loop
                      for X in 0 .. W - 1 loop
                         if Driver.Images.Contains (Still, X, Y) then
                            Still_N := Still_N + 1;
-                           Centre := (U => Centre.U + Real (X) + 0.5, V => Centre.V + Real (Y) + 0.5);
                         end if;
                      end loop;
                   end loop;
                   if Still_N > 0 then
-                     Centre := (U => Centre.U / Real (Still_N), V => Centre.V / Real (Still_N));
                      for L of Sweeps.Lobes_Of (P.Sweep, C) loop
                         declare
                            At_Low, At_High, Never : Real;
@@ -977,10 +976,19 @@ package body Driver.Robot.Hand is
                         end;
                      end loop;
                   end if;
+                  --  The fixed jaw is the part of the still pixels the moving jaw closes onto, and its tip is that part's
+                  --  farthest pixel from the picture's border, as a moving lobe's is (Lobes.Part_Of). Taken as the
+                  --  pixel the moving jaw met on its inner edge, with every still pixel of the robot for its region, its
+                  --  tip region was 4.8 wide where the moving jaw's was 0.8, and every tilted aim of it was refused for
+                  --  the tracks standing within 19 of where it would land (u14, servo seed 3 of the fake robot, both
+                  --  arms, 10-19).
+                  if Found then
+                     Driver.Robot.Hand.Lobes.Part_Of (Still, Fixed_Px, Part, Part_Centre, Part_Tip, Found);
+                  end if;
                   if Found then
                      declare
                         Closed : constant Driver.Robot.Hand.Views.View := (if Closed_High then High else Low);
-                        Seen   : constant Sight := Seen_Tip (Closed, True, Fixed_Px, Still, Centre);
+                        Seen   : constant Sight := Seen_Tip (Closed, True, Part_Tip, Part, Part_Centre);
                      begin
                         Made.Lobes.Append
                           (Lobe_Record'(Channel => 0,
@@ -995,7 +1003,8 @@ package body Driver.Robot.Hand is
                         Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & P.Group'Image & " channel" & C'Image
                                          & " closes a jaw onto a fixed one, its lead " & Driver.Log.Image (Nearest, 1)
                                          & " px from the robot's still pixels at the closed end: a finger no channel"
-                                         & " moves, its tip at " & Image (Fixed_Px));
+                                         & " moves, its tip at " & Image (Part_Tip) & ", the moving jaw meeting it at "
+                                         & Image (Fixed_Px));
                      end;
                   end if;
                end;

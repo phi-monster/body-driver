@@ -7949,7 +7949,9 @@ package body Driver.Robot.Tests is
    --  down at 0.6 rad, a beacon 0.1 ahead of the tool's eye, the tool held at poses drawn over a 0.5 square at
    --  heights 0.05 to 0.3 and turned up to 0.4 rad about each axis, the centres seen with Gaussian errors of the
    --  sigma each states (1 to 2 pixels); the eye's lens, pose and the beacon come back within Z of their sigmas.
-   procedure Beacon_Placement is
+   --  Gross of the sightings are moved far off where the beacon shows (60 to 200 px), as another arm's moves taken for
+   --  a flick were (u14, servo seed 3 of the fake robot, both arms, 10-19: 90 and 210 px off the jaw among 14).
+   procedure Beacon_Placement_At (N : Positive; Gross : Natural) is
       package Beacon renames Driver.Robot.Kinematics.Beacon;
       Gen    : Ada.Numerics.Float_Random.Generator;
       Truth_Lens : constant Driver.Robot.Kinematics.Fit.Lens :=
@@ -7960,7 +7962,6 @@ package body Driver.Robot.Tests is
         (Rotation    => Exp (Vec3'[-(Ada.Numerics.Pi / 2.0 + Down), 0.0, 0.0]),
          Translation => [0.0, -0.6, 0.8]);
       Truth_Beacon : constant Vec3 := [0.01, 0.02, 0.1];
-      N      : constant := 40;
       Seen   : Beacon.Sighting_Array (1 .. N);
       Kept   : Natural := 0;
       Result : Beacon.Report;
@@ -7988,6 +7989,11 @@ package body Driver.Robot.Tests is
             if Front and then U > 0.0 and then U < 640.0 and then V > 0.0 and then V < 480.0 then
                Kept := Kept + 1;
                Seen (Kept) := (Carrier => Carrier, U => U + Sigma * Gaussian, V => V + Sigma * Gaussian, Sigma => Sigma);
+               if Kept <= Gross then
+                  --  Off by 60 to 200 px, either way.
+                  Seen (Kept).U := Seen (Kept).U + (if Kept mod 2 = 0 then 1.0 else -1.0) * Draw (60.0, 200.0);
+                  Seen (Kept).V := Seen (Kept).V + (if Kept mod 3 = 0 then 1.0 else -1.0) * Draw (60.0, 200.0);
+               end if;
             end if;
          end;
       end loop;
@@ -8021,7 +8027,17 @@ package body Driver.Robot.Tests is
             end loop;
          end;
       end if;
+   end Beacon_Placement_At;
+
+   procedure Beacon_Placement is
+   begin
+      Beacon_Placement_At (40, 0);
    end Beacon_Placement;
+
+   procedure Beacon_Placement_Few is
+   begin
+      Beacon_Placement_At (16, 0);
+   end Beacon_Placement_Few;
 
    procedure Order_Exam_Hard is
    begin
@@ -8586,6 +8602,8 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.order.exam", "the order exam's arms come out with a wrong order told", Order_Exam'Access);
       Driver.Tests.Register ("robot.beacon.place", "a fixed eye placed by a beacon on the tool comes back off its own "
                              & "sigmas", Beacon_Placement'Access);
+      Driver.Tests.Register ("robot.beacon.few", "a fixed eye placed by a beacon on the tool from sixteen sightings is not "
+                             & "placed or comes back off its own sigmas", Beacon_Placement_Few'Access);
       Driver.Tests.Register ("robot.order.exam_hard", "the order exam's arms, seen as the fake robot's eyes see, come out with a wrong order told", Order_Exam_Hard'Access);
       Driver.Tests.Register ("robot.kinematics.drawn", "the synthetic arm with its readings in another order and in "
                              & "other units comes out with its axes, scales, lens, order or eye at a new pose wrong",

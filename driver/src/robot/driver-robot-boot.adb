@@ -890,6 +890,15 @@ package body Driver.Robot.Boot is
                   Passes := Passes + 1;
                   declare
                      Followed_In_Pass : Natural := 0;
+                     --  The levels followed beyond the widest each push had followed before the pass: what the pass
+                     --  reached that no pass before it had. A level followed again where one was before tells nothing
+                     --  new, and counted as a pass that followed something it kept the passes going for ever: u10 (servo
+                     --  seed 3 of the fake robot, both arms, 10-19), arm 2, 26 passes from beat 9248 to 31294, each
+                     --  re-taking levels its pushes had followed (c1 at 40 units, c3 at 79, c6 at 782) and losing the
+                     --  ones beyond again, its offsets the same from pass 8 on, and the pair rounds that tell an order
+                     --  never began; arm 1 of the same run ended its passes when one followed nothing at all.
+                     New_In_Pass : Natural := 0;
+                     Most_Before : constant Real_Array (1 .. 2 * Size) := Followed_Most;
                   begin
                      if (for some I in 1 .. Count => State (I) = Climbing) then
                         Rounds := Rounds + 1;
@@ -938,6 +947,9 @@ package body Driver.Robot.Boot is
                                     --  instead of halving to a level the aligner follows (10-15).
                                     if Last.Followed then
                                        Followed_In_Pass := Followed_In_Pass + 1;
+                                       if Last.Offset > Most_Before (I) then
+                                          New_In_Pass := New_In_Pass + 1;
+                                       end if;
                                        Reached (P.Channel) := Real'Max (Reached (P.Channel), Last.Offset);
                                        Followed_Most (I) := Real'Max (Followed_Most (I), Last.Offset);
                                        Followed_Here := True;
@@ -969,6 +981,22 @@ package body Driver.Robot.Boot is
                                        --  there, or until the least turn a keyframe counts.
                                        Offset (I) := Offset (I) / 2.0;
                                        Descending (I) := True;
+                                    elsif Followed_Most (I) = 0.0 and then not Descending (I) and then Lost = 1
+                                      and then not Levels (I) (Lost).Short and then Per_Unit (P.Channel) = 0.0
+                                    then
+                                       --  The push's first level, the least turn a keyframe counts, not followed, and no level
+                                       --  of it followed before: the view moved by less than the aligner follows from no
+                                       --  prediction, and a lesser turn is none a keyframe counts. The ladder climbs: twice the
+                                       --  level, a pass at a time, until a level is followed or the joint meets something.
+                                       --  Only while how far the view moves per unit of the joint is unmeasured (the first level
+                                       --  is then the step the eye saw it move by, not one the aligner was asked to follow), and
+                                       --  not at a level the joint was stopped short of.
+                                       --  Stopped there, the joint had no keyframe of its own and its arm was never fitted:
+                                       --  u12 (servo seed 3 of the fake robot, both arms, 10-19), arm 2's channel 6, its first
+                                       --  level 43.1 units (the step the eye saw it move by), the view turned 1.7 degrees and
+                                       --  moved 0 to 4 px by the truth, no common motion told, and the arm "swept in 4 passes
+                                       --  of 4 rounds, not fitted"; u10, the same body, had 49.2 units for it and followed it.
+                                       Offset (I) := 2.0 * Levels (I) (Lost).Offset;
                                     else
                                        --  Followed below and lost here: the next pass takes the level halfway between,
                                        --  while half the gap is a step a keyframe counts. A level the aligner could not
@@ -1029,20 +1057,21 @@ package body Driver.Robot.Boot is
                         end loop;
                         Driver.Log.Line
                           (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image & " followed"
-                           & Followed_In_Pass'Image & " keyframes in" & Rounds'Image & " rounds so far; the joints"
+                           & Followed_In_Pass'Image & " keyframes," & New_In_Pass'Image & " beyond the levels followed before, in"
+                           & Rounds'Image & " rounds so far; the joints"
                            & " are followed to offsets" & Image (Reached) & ", the pushes stopped by"
                            & Ada.Strings.Unbounded.To_String (Stops));
                      end;
                      --  A fitted arm ends the pass with the joints together at the
                      --  widest offsets followed (the rounds before the fit had their
                      --  own); its predictions go into these frames.
-                     if N > 1 and then Followed_In_Pass > 0 and then Fitted_Now then
+                     if N > 1 and then New_In_Pass > 0 and then Fitted_Now then
                         Together (Shares, Climb => True);
                         Measure_The_Round;
                      end if;
                      Driver.Beats.Within_A_Beat (Read_Followed'Access);
                      exit when (for all I in 1 .. Count => State (I) /= Climbing)
-                       and then (Followed_In_Pass = 0 or else not Fitted_Now
+                       and then (New_In_Pass = 0 or else not Fitted_Now
                                  or else (for all I in 1 .. Count => State (I) /= Not_Followed));
                      --  The fitted arm predicts: the pushes that stopped unfollowed climb again.
                      if (for all I in 1 .. Count => State (I) /= Climbing) then
@@ -1689,6 +1718,23 @@ package body Driver.Robot.Boot is
          package Place_Lists is new Ada.Containers.Vectors (Positive, Driver.Numerics.Vec3, Driver.Numerics.Arrays."=");
          Places   : Place_Lists.Vector;
          Ends     : array (Driver.Robot.Hand.Opening) of Real_Vectors.Vector;
+         --  The joints of the arm's fitted chain, the last first: they turn the hand's face, the nearest it the least
+         --  the hand's place. And the turn that last showed an eye a flick none saw unturned, tried first.
+         Hand_Joints    : Count_Vectors.Vector;
+         Revealed_Joint : Natural := 0;
+         Revealed_Way   : Real := 0.0;
+         Flicks_Now  : Natural := 0;       --  the flicks the fixed eyes have seen, read in a held beat
+         Any_Unplaced : Boolean := False;  --  and whether some eye fixed in the world is not placed yet
+         procedure Read_Flicks is
+         begin
+            Flicks_Now := Natural (M.Flicks.Length);
+            Any_Unplaced := False;
+            for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+               if Eye_Mount (M, E).Kind = World_Fixed and then not Driver.Robot.Kinematics.Fixed_Known (M, E) then
+                  Any_Unplaced := True;
+               end if;
+            end loop;
+         end Read_Flicks;
          procedure Read_Arm is
          begin
             World := 0;
@@ -1713,6 +1759,14 @@ package body Driver.Robot.Boot is
             if World > 0 then
                Arm_G := M.Kinematics (World).Group;
                Poses := Natural (M.Kinematics (World).Frames.Length);
+               declare
+                  Chain : Count_Vectors.Vector renames M.Kinematics (World).Result.Chain;
+               begin
+                  Hand_Joints.Clear;
+                  for K in reverse Chain.First_Index .. Chain.Last_Index loop
+                     Hand_Joints.Append (Chain (K));
+                  end loop;
+               end;
                Readings := new Pose_Readings (1 .. Natural'Max (1, Poses), 1 .. Group_Size (M, Arm_G));
                for F in 1 .. Poses loop
                   for C in 1 .. Group_Size (M, Arm_G) loop
@@ -1772,14 +1826,72 @@ package body Driver.Robot.Boot is
                loop
                   Used (Next) := True;
                   Count := Count + 1;
-                  Go_To (Arm_G, [for C in 1 .. Readings'Length (2) => Readings (Next, C)], Report, Land => True);
-                  if Report.Outcome = Driver.Robot.Motion.Reached then
-                     Driver.Robot.Motion.Hold_For_Keyframe (M, 1);
-                     Go_To (Closer, Shut_At, Report, Land => True);
-                     Driver.Robot.Motion.Hold_For_Keyframe (M, 1);
-                     Go_To (Closer, Open_At, Report, Land => True);
-                     Driver.Robot.Motion.Hold_For_Keyframe (M, 1);
-                  end if;
+                  declare
+                     Pose : constant Real_Array := [for C in 1 .. Readings'Length (2) => Readings (Next, C)];
+                     Before_Flick : Natural;
+                     --  The closer to its other opening and back, the arm held still at the pose it reached.
+                     procedure Flick is
+                     begin
+                        Driver.Robot.Motion.Hold_For_Keyframe (M, 1);
+                        Go_To (Closer, Shut_At, Report, Land => True);
+                        Driver.Robot.Motion.Hold_For_Keyframe (M, 1);
+                        Go_To (Closer, Open_At, Report, Land => True);
+                        Driver.Robot.Motion.Hold_For_Keyframe (M, 1);
+                     end Flick;
+                  begin
+                     Driver.Beats.Within_A_Beat (Read_Flicks'Access);
+                     Before_Flick := Flicks_Now;
+                     Go_To (Arm_G, Pose, Report, Land => True);
+                     if Report.Outcome = Driver.Robot.Motion.Reached then
+                        Flick;
+                     end if;
+                     --  A flick no fixed eye saw is flicked again with the hand turned: by each joint of the arm's
+                     --  chain from the hand back, each way, by the widest the keyframes turned that joint, until
+                     --  an eye sees one, the turn that showed one last first. Held at the sweep's poses the hand
+                     --  faced the table, and an eye above it saw its palm over the jaw: u9 (servo seed 3 of the fake
+                     --  robot, both arms, 10-19) flicked arm 1's closer from shut to open 79 times at the sweep's
+                     --  poses, the jaw within the overhead eye's picture by the truth and the palm over it and nearer
+                     --  the eye at the poses checked, and the eye saw none of them; it had seen six of that closer's
+                     --  flicks while the hand pressed the table, turned.
+                     Driver.Beats.Within_A_Beat (Read_Flicks'Access);
+                     if Flicks_Now = Before_Flick and then Any_Unplaced then
+                        declare
+                           procedure Try (J : Positive; Way : Real) is
+                              Widest : Real := 0.0;
+                              Turned : Real_Array := Pose;
+                           begin
+                              for F in 1 .. Poses loop
+                                 Widest := Real'Max (Widest, abs (Readings (F, J) - Readings (1, J)));
+                              end loop;
+                              Turned (J) := Pose (J) + Way * Widest;
+                              Go_To (Arm_G, Turned, Report, Land => True);
+                              if Report.Outcome = Driver.Robot.Motion.Reached then
+                                 Flick;
+                              end if;
+                              Driver.Beats.Within_A_Beat (Read_Flicks'Access);
+                              if Flicks_Now > Before_Flick then
+                                 Revealed_Joint := J;
+                                 Revealed_Way := Way;
+                              end if;
+                           end Try;
+                        begin
+                           if Revealed_Joint in Pose'Range then
+                              Try (Revealed_Joint, Revealed_Way);
+                           end if;
+                           for J of Hand_Joints loop
+                              exit when Flicks_Now > Before_Flick;
+                              if J in Pose'Range then
+                                 for Way of Real_Array'[1.0, -1.0] loop
+                                    exit when Flicks_Now > Before_Flick;
+                                    if J /= Revealed_Joint or else Way /= Revealed_Way then
+                                       Try (J, Way);
+                                    end if;
+                                 end loop;
+                              end if;
+                           end loop;
+                        end;
+                     end if;
+                  end;
                   Driver.Beats.Within_A_Beat (Read_Eyes'Access);
                   if Unplaced and then not Short and then Estimated_Short then
                      Driver.Robot.Motion.Hold_And_Estimate (M);
