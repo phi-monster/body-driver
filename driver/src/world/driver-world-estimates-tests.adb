@@ -1,6 +1,8 @@
 with Ada.Exceptions;
+with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Driver.Bytes;
+with Driver.Conventions;
 with Driver.Json;
 with Driver.Log;
 with Driver.Tests;
@@ -8,6 +10,7 @@ with Driver.World.Tests;
 
 package body Driver.World.Estimates.Tests is
 
+   use Ada.Numerics.Long_Elementary_Functions;
    use Ada.Strings.Unbounded;
    use Driver.Numerics.Arrays;
    use Driver.Tests;
@@ -24,6 +27,8 @@ package body Driver.World.Estimates.Tests is
    Box_Top    : constant := 0.08;
    Table_Half : constant := 0.5;
    Box_Shift  : constant Vec3 := [0.0, 0.0, 0.0];   --  where the box stands off the table's middle
+   Plain_Luma : constant := 20.0;   --  a plain dark box's every face (Plain), as the fake's small black box
+   Plain      : Boolean := False;
 
    function Hash (X, Y, Seed : Integer) return Real is
       H : Long_Long_Integer := Long_Long_Integer (X) * 73_856_093 + Long_Long_Integer (Y) * 19_349_663
@@ -89,10 +94,11 @@ package body Driver.World.Estimates.Tests is
          declare
             P : constant Vec3 := Origin + Near * D - Box_Shift;
          begin
-            Luma := (case Face is
-                        when 3      => Texture (P (1), P (2), 7),
-                        when 1      => Texture (P (2), P (3), 11),
-                        when others => Texture (P (1), P (3), 13));
+            Luma := (if Plain then Plain_Luma
+                     else (case Face is
+                              when 3      => Texture (P (1), P (2), 7),
+                              when 1      => Texture (P (2), P (3), 11),
+                              when others => Texture (P (1), P (3), 13)));
          end;
       elsif D (3) < 0.0 then
          declare
@@ -374,6 +380,78 @@ package body Driver.World.Estimates.Tests is
       end;
    end Seen_Standing;
 
+   --  A plain box (no texture the aligner can tell, as the fake's small black box) boxed in the eye that stands in the
+   --  world before the scene is measured, so that none of the scene's points are its: where its region says it stands
+   --  has the moving eye segment it, and the two outlines meet in its points.
+   procedure Plain_Box is
+      S    : State;
+      Beat : Driver.Clock.Beat := 1;
+      T    : Thing_Id;
+   begin
+      Plain := True;
+      Driver.Services.Start_Replay ([Driver.Services.Instrument => True, others => False]);
+      Gather_Views (S, Beat);
+      New_Episode (S);
+      Beat := Beat + 1;
+      declare
+         O : constant Observation := Seen_At (Places (1), Beat);
+      begin
+         Adopt (S, 2, O, Box_Region (Standing_Eye), T);
+         Observe (S, 2, Camera_Of'Access, Up, True, O);
+      end;
+      for Again in 1 .. 3 loop
+         Beat := Beat + 1;
+         Driver.Services.Replay_Beat (Beat);
+         Observe (S, 2, Camera_Of'Access, Up, True, Seen_At (Places (1), Beat));
+         Answer_Segments (S);
+      end loop;
+      Check (Seen_In (S, T, 1), "the moving eye holds no track of the plain box where its region says it stands");
+      --  Both eyes hold it: its outlines meet apart, and the next beat gathers what they gave.
+      Measure (S, 2, Camera_Of'Access);
+      Beat := Beat + 1;
+      Observe (S, 2, Camera_Of'Access, Up, True, Seen_At (Places (1), Beat));
+      declare
+         Points : constant Driver.World.Points.Placed_Vectors.Vector := Points_Of (S, T);
+         Off    : Natural := 0;
+         Top    : Real := Real'First;
+      begin
+         for M of Points loop
+            --  Off the box beyond Z of its own uncertainty along each axis.
+            for A in 1 .. 3 loop
+               declare
+                  Low  : constant Real := (if A = 3 then 0.0 else -Box_Half);
+                  High : constant Real := (if A = 3 then Box_Top else Box_Half);
+                  Sd   : constant Real := Sqrt (Real'Max (0.0, M.Point.Covariance (A, A)));
+               begin
+                  if M.Point.Mean (A) < Low - Driver.Conventions.Z * Sd or else M.Point.Mean (A) > High + Driver.Conventions.Z * Sd then
+                     Off := Off + 1;
+                  end if;
+               end;
+            end loop;
+            Top := Real'Max (Top, M.Point.Mean (3));
+         end loop;
+         Driver.Log.Line (Driver.Log.World, "world test: the plain box has" & Points.Length'Image & " points," & Off'Image
+                          & " of them off it beyond their uncertainty; the highest at" & Driver.Log.Image (Top, 3));
+         Check (Natural (Points.Length) > 0, "the plain box boxed in the standing eye got no points");
+         Check (Off = 0, Off'Image & " of its points lie off it beyond their uncertainty");
+      end;
+      declare
+         C : constant Point_Estimate := Centre (S, T);
+      begin
+         Driver.Log.Line (Driver.Log.World, "world test: the plain box's centre at" & Driver.Log.Image (C.Mean (1), 3)
+                          & Driver.Log.Image (C.Mean (2), 3) & Driver.Log.Image (C.Mean (3), 3));
+         Check (abs C.Mean (1) <= Box_Half and then abs C.Mean (2) <= Box_Half,
+                "the plain box's centre is not over its footprint");
+      end;
+      Plain := False;
+      Driver.Services.End_Replay;
+   exception
+      when others =>
+         Plain := False;
+         Driver.Services.End_Replay;
+         raise;
+   end Plain_Box;
+
    --  The world's measuring runs apart from the main loop (Driver.Apart), in a task whose stack is GNAT's default.
    procedure Measured_In_A_Task is
       S       : State;
@@ -415,6 +493,9 @@ package body Driver.World.Estimates.Tests is
       Driver.Tests.Register ("world.sight.standing",
                              "a box boxed in an eye that stands in the world gets none of the scene's points the moving"
                              & " eye placed inside its region there, or points off it", Seen_Standing'Access);
+      Driver.Tests.Register ("world.sight.plain",
+                             "a plain box boxed in the eye that stands in the world gets no points from its outlines, or"
+                             & " points off it, or a centre off its footprint", Plain_Box'Access);
       Driver.Tests.Register ("world.sight.task",
                              "the world's measuring fails in a task with the default stack", Measured_In_A_Task'Access);
    end Register;

@@ -3237,6 +3237,7 @@ driver-wire.adb	when 9 =>	9	format	WebSocket framing and handshake (RFC 6455)
 driver-workers.adb	Stack : Worker_Stack (1 .. Natural'Max (1, Count));	1	structure	a pool of at least one worker
 driver-world-cameras.adb	Beside : constant Ray_Estimate := C.Ray ((U => Px.U + 1.0, V => Px.V));	1.0	structure	the next pixel along the row
 driver-world-estimates.adb	(O.Images (Into), True, Box, [1 => (At_Pixel => Prompt, On => True)]);	1	structure	a prompt of one point
+driver-world-estimates.adb	(Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (B.Column_1 - B.Column_0 + 1,	1	structure	a grid at least one pixel apart
 driver-world-estimates.adb	(Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (Driver.Images.Width (Image),	1	structure	grid points are at least one pixel apart
 driver-world-estimates.adb	(Tracks.Segment_On (Here.Track), True, Around, [1 => (At_Pixel => At_Point, On => True)], Beat);	1	structure	one point prompts the segmentation
 driver-world-estimates.adb	(U => Real (C * Step + Step / 2) + 0.5, V => Real (R * Step + Step / 2) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
@@ -3251,37 +3252,57 @@ driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real
 driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2	structure	the middle pixel of a grid cell is half the cell in
 driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2xStride	structure	the middle pixel of a grid cell is half the cell in
 driver-world-estimates.adb	(U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);	2xStride	structure	the middle pixel of a grid cell is half the cell in
+driver-world-estimates.adb	(for all Du in -1 .. 1 =>	1	structure	a patch's corners and the middles of its sides: one patch's half width either way of its middle
+driver-world-estimates.adb	(for all Du in -1 .. 1 =>	1	structure	a patch's corners and the middles of its sides: one patch's half width either way of its middle
+driver-world-estimates.adb	(for all Dv in -1 .. 1 =>	1	structure	a patch's corners and the middles of its sides: one patch's half width either way of its middle
+driver-world-estimates.adb	(for all Dv in -1 .. 1 =>	1	structure	a patch's corners and the middles of its sides: one patch's half width either way of its middle
+driver-world-estimates.adb	(if First > Found.First_Index then (Found (First).Depth + Found (First - 1).Depth) / 2.0	2.0	math	half way to the crossing before
+driver-world-estimates.adb	/ 12.0;	12.0	math	the variance of a flat spread over a length is its square over 12
+driver-world-estimates.adb	Along ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
+driver-world-estimates.adb	Along ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	Best := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-world-estimates.adb	Best := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-world-estimates.adb	Cam.Project ((1.0 / Real (Count)) * Middle, Prompt, Visible);	1.0	math	the mean of the points: their sum over their count
+driver-world-estimates.adb	Cam.Project ((1.0 / Real (R.Points.Length)) * Sum, Px, Visible);	1.0	math	the mean of the points
+driver-world-estimates.adb	Cam.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
+driver-world-estimates.adb	Cam.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	Columns : constant Positive := Positive'Max (1, (W + Step - 1) / Step);	1	numerics	at least one column, and the grid's columns rounded up
 driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);	1.0	math	a mean over the points
 driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);	1.0	math	a mean over the points and their feet
+driver-world-estimates.adb	Eye : Positive := 1;	1	structure	the first eye of those held; set where a crossing is made
 driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	F : Positive := 1;	1	structure	vectors are indexed from one
 driver-world-estimates.adb	I : Positive := 1;	1	structure	vectors are indexed from one
+driver-world-estimates.adb	Lengthwise : constant Real := (Deep - Shallow) ** 2 / 12.0;	12.0	math	the variance of a flat spread over a length is its square over 12
 driver-world-estimates.adb	Middle : constant Driver.Images.Pixel := (U => Real (Width) / 2.0, V => Real (Height) / 2.0);	2.0	math	the middle of the picture: half its width and half its height
 driver-world-estimates.adb	Middle : constant Driver.Images.Pixel := (U => Real (Width) / 2.0, V => Real (Height) / 2.0);	2.0	math	the middle of the picture: half its width and half its height
+driver-world-estimates.adb	Middle : constant Real := (Deep + Shallow) / 2.0;	2.0	math	the stretch's middle
 driver-world-estimates.adb	Middle : constant Vec3 := (1.0 / N) * Sum;	1.0	math	a mean over the points
 driver-world-estimates.adb	Middle := (1.0 / Real (R.Points.Length)) * Middle;	1.0	math	a mean over the points
 driver-world-estimates.adb	Middle_Off : constant Real := (Real (C) + 0.5 - Middle.U) ** 2 + (Real (R) + 0.5 - Middle.V) ** 2;	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-world-estimates.adb	Middle_Off : constant Real := (Real (C) + 0.5 - Middle.U) ** 2 + (Real (R) + 0.5 - Middle.V) ** 2;	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-world-estimates.adb	Natural (Real'Floor (Queries (K).U)) - Stride / 2 + Stride - 1	2	structure	a grid cell reaches half a stride either side of its middle
 driver-world-estimates.adb	Natural (Real'Floor (Queries (K).V)) - Stride / 2 + Stride - 1	2	structure	a grid cell reaches half a stride either side of its middle
-driver-world-estimates.adb	Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (B.Column_1 - B.Column_0 + 1,	1	structure	a grid at least one pixel apart
+driver-world-estimates.adb	Near : Real := Far / 2.0;	2.0	math	any second point of the line draws it: half way to the table, then halving towards it
+driver-world-estimates.adb	Near := (Near + Far) / 2.0;	2.0	math	halving towards the table until the point is in front of the eye
 driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
 driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
 driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
 driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
 driver-world-estimates.adb	Rows : constant Positive := Positive'Max (1, (H + Step - 1) / Step);	1	numerics	at least one row, and the grid's rows rounded up
+driver-world-estimates.adb	Shallow : constant Real := (Found (Last).Depth + Found (Last + 1).Depth) / 2.0;	2.0	math	half way to the crossing after
 driver-world-estimates.adb	Step : constant Positive := Positive'Max (1, Driver.Alignment.Half_Patch (W, H));	1	numerics	a step of at least one pixel
+driver-world-estimates.adb	Step := Step + 1.0;	1.0	structure	a pixel's step along the line in the other eye's picture
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	1	structure	a family holds at least one test
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	2	structure	each point is tested from both eyes that saw it
 driver-world-estimates.adb	and then (for some E in 1 .. Eye_Id'Base (Eyes) => Driver.World.Sight.Views_Of (S.Views, E) > 1)	1	structure	views from more than one place: one place alone places nothing
 driver-world-estimates.adb	for C in Natural (Real'Floor (Queries (K).U)) - Stride / 2 ..	2	structure	a grid cell reaches half a stride either side of its middle
 driver-world-estimates.adb	for R in Natural (Real'Floor (Queries (K).V)) - Stride / 2 ..	2	structure	a grid cell reaches half a stride either side of its middle
+driver-world-estimates.adb	if Count < 2 then	2	structure	outlines meet from two eyes or more: one cone bounds nothing along its own lines
+driver-world-estimates.adb	if Count >= 2	2	structure	outlines meet from two eyes or more: one cone bounds nothing along its own lines
 driver-world-estimates.adb	if Has_Image (Seen.Element.all, E) and then Driver.World.Sight.Views_Of (S.Views, E) > 1 then	1	structure	views from more than one place: one place alone places nothing
+driver-world-estimates.ads	Hulled_At : Driver.Clock.Beat'Base := -1;	1	structure	sentinel: no outline gone into a hull yet (beats start at 0)
 driver-world-estimates.ads	Placed_At : Driver.Clock.Beat'Base := -1;	1	structure	sentinel: no measurement of the region placed yet (beats start at 0)
 driver-world-estimates.ads	Tried_At : Driver.Clock.Beat'Base := -1;	1	structure	sentinel: not tried yet (beats start at 0)
 driver-world-estimates.ads	Tried_Prompt : Driver.Images.Pixel := (U => -1.0, V => -1.0);	1.0	format	no pixel asked yet: a place outside every picture

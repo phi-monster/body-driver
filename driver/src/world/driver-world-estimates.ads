@@ -203,6 +203,7 @@ private
       Tried_Box    : Driver.Instrument.Box;         --  and the box and point it was asked about then
       Tried_Prompt : Driver.Images.Pixel := (U => -1.0, V => -1.0);
       Placed_At : Driver.Clock.Beat'Base := -1;   --  the measurement of its region the eye's points were placed from
+      Hulled_At : Driver.Clock.Beat'Base := -1;   --  and the one its outline last went into the thing's hull with
       Outline   : Point_Vectors.Vector;   --  a pointed region, carried out to the depth of what is seen of
                                           --  the thing; kept while the eye looks for it again
    end record;
@@ -227,6 +228,7 @@ private
       Normals   : Normal_Vectors.Vector;                     --  per point of Points, its placed normal (Place_Points)
       Placed    : Driver.World.Points.Placed_Vectors.Vector;   --  the points an eye placed by itself (Place_Points)
       Placed_Normals : Normal_Vectors.Vector;
+      Hull      : Driver.World.Points.Placed_Vectors.Vector;   --  from the outlines of two eyes or more (Hull)
       Points_In : Eye_Id := Eye_Id'First;
       Points_At : Driver.Clock.Beat := 0;
       Has_Points : Boolean := False;
@@ -257,6 +259,14 @@ private
 
    package Place_Request_Vectors is new Ada.Containers.Vectors (Positive, Place_Request);
 
+   --  A thing two eyes or more hold at a beat, an outline of it measured anew: its hull to work out apart (Hull).
+   type Hull_Request is record
+      Thing : Thing_Id;
+      Seen  : Observation_Holders.Holder;
+   end record;
+
+   package Hull_Request_Vectors is new Ada.Containers.Vectors (Positive, Hull_Request);
+
    package Scene_Point_Vectors is new Ada.Containers.Vectors (Positive, Scene_Point);
 
    type State is limited record
@@ -275,6 +285,7 @@ private
       --  Per eye, the pixels its latest scene showed riding with it (Driver.Robot.Surfaces.Placed.Riding), the cells
       --  of its grid there: the robot's own body in that eye, asked of nothing it places.
       To_Place    : Place_Request_Vectors.Vector; --  the regions measured anew, to be placed apart
+      To_Hull     : Hull_Request_Vectors.Vector;  --  the things whose outlines are to meet apart
       Up          : Direction_Estimate;
       Places      : Place_Vectors.Vector;
       Table       : Driver.Geometry.Plane_Estimate;   --  the table an arm's eye measured, as noted (Note_Table)
