@@ -202,37 +202,37 @@ package body Driver.World.Estimates.Tests is
 
    --  Every segmentation the estimator asked, answered by the scene: the box's own pixels in that eye.
    procedure Answer_Segments (S : State) is
+      procedure Answer (M : Driver.Images.Mask; Asked : String) is
+         Text   : Unbounded_String;
+         Length : Natural := 0;
+         On     : Boolean := False;
+      begin
+         for Row in 0 .. Rows - 1 loop
+            for Column in 0 .. Columns - 1 loop
+               if Driver.Images.Contains (M, Column, Row) /= On then
+                  Append (Text, (if Text = Null_Unbounded_String then "" else ",")
+                          & Driver.Json.Number_Image (Real (Length)));
+                  Length := 0;
+                  On := not On;
+               end if;
+               Length := Length + 1;
+            end loop;
+         end loop;
+         Append (Text, (if Text = Null_Unbounded_String then "" else ",") & Driver.Json.Number_Image (Real (Length)));
+         Driver.Services.Replay_Reply
+           (Driver.Services.Instrument, "/segment", Asked,
+            (Ok      => True,
+             Text    => To_Unbounded_String
+                          ("{""ok"":true,""w"":" & Driver.Json.Number_Image (Real (Columns))
+                           & ",""h"":" & Driver.Json.Number_Image (Real (Rows)) & ",""score"":1,""runs"":["
+                           & To_String (Text) & "]}"),
+             Why     => Null_Unbounded_String,
+             Lasting => False));
+      end Answer;
    begin
       for R of S.Things loop
          for St of R.Starts loop
-            declare
-               M      : constant Driver.Images.Mask := Box_Region (if St.Eye = 1 then Moving_Eye (Places (1)) else Standing_Eye);
-               Text   : Unbounded_String;
-               Length : Natural := 0;
-               On     : Boolean := False;
-            begin
-               for Row in 0 .. Rows - 1 loop
-                  for Column in 0 .. Columns - 1 loop
-                     if Driver.Images.Contains (M, Column, Row) /= On then
-                        Append (Text, (if Text = Null_Unbounded_String then "" else ",")
-                                & Driver.Json.Number_Image (Real (Length)));
-                        Length := 0;
-                        On := not On;
-                     end if;
-                     Length := Length + 1;
-                  end loop;
-               end loop;
-               Append (Text, (if Text = Null_Unbounded_String then "" else ",") & Driver.Json.Number_Image (Real (Length)));
-               Driver.Services.Replay_Reply
-                 (Driver.Services.Instrument, "/segment", St.Asked.Element,
-                  (Ok      => True,
-                   Text    => To_Unbounded_String
-                                ("{""ok"":true,""w"":" & Driver.Json.Number_Image (Real (Columns))
-                                 & ",""h"":" & Driver.Json.Number_Image (Real (Rows)) & ",""score"":1,""runs"":["
-                                 & To_String (Text) & "]}"),
-                   Why     => Null_Unbounded_String,
-                   Lasting => False));
-            end;
+            Answer (Box_Region (if St.Eye = 1 then Moving_Eye (Places (1)) else Standing_Eye), St.Asked.Element);
          end loop;
       end loop;
    end Answer_Segments;

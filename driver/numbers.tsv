@@ -3257,11 +3257,13 @@ driver-world-estimates.adb	(for all Du in -1 .. 1 =>	1	structure	a patch's corne
 driver-world-estimates.adb	(for all Dv in -1 .. 1 =>	1	structure	a patch's corners and the middles of its sides: one patch's half width either way of its middle
 driver-world-estimates.adb	(for all Dv in -1 .. 1 =>	1	structure	a patch's corners and the middles of its sides: one patch's half width either way of its middle
 driver-world-estimates.adb	(if First > Found.First_Index then (Found (First).Depth + Found (First - 1).Depth) / 2.0	2.0	math	half way to the crossing before
+driver-world-estimates.adb	(if Last < Found.Last_Index then (Found (Last).Depth + Found (Last + 1).Depth) / 2.0	2.0	math	half way to the crossing after
 driver-world-estimates.adb	/ 12.0;	12.0	math	the variance of a flat spread over a length is its square over 12
 driver-world-estimates.adb	Along ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	Along ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	Best := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-world-estimates.adb	Best := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
+driver-world-estimates.adb	Beyond := (T + Was) / 2.0;	2.0	math	half way back to the last point kept
 driver-world-estimates.adb	Cam.Project ((1.0 / Real (Count)) * Middle, Prompt, Visible);	1.0	math	the mean of the points: their sum over their count
 driver-world-estimates.adb	Cam.Project ((1.0 / Real (R.Points.Length)) * Sum, Px, Visible);	1.0	math	the mean of the points
 driver-world-estimates.adb	Cam.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
@@ -3269,7 +3271,6 @@ driver-world-estimates.adb	Cam.Ray ((U => Real (Column) + 0.5, V => Real (Row) +
 driver-world-estimates.adb	Columns : constant Positive := Positive'Max (1, (W + Step - 1) / Step);	1	numerics	at least one column, and the grid's columns rounded up
 driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);	1.0	math	a mean over the points
 driver-world-estimates.adb	Covariance => (1.0 / N) * Spread + (1.0 / Real (Count)) * Extent);	1.0	math	a mean over the points and their feet
-driver-world-estimates.adb	Eye : Positive := 1;	1	structure	the first eye of those held; set where a crossing is made
 driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	Eye_Camera.Ray ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));	0.5	structure	a pixel's centre
 driver-world-estimates.adb	F : Positive := 1;	1	structure	vectors are indexed from one
@@ -3291,8 +3292,8 @@ driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.
 driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
 driver-world-estimates.adb	Queries (R * Columns + C + 1) := (U => -1.0, V => -1.0);	1.0	format	a query missing from the grid is given as a pixel with a negative place
 driver-world-estimates.adb	Rows : constant Positive := Positive'Max (1, (H + Step - 1) / Step);	1	numerics	at least one row, and the grid's rows rounded up
-driver-world-estimates.adb	Shallow : constant Real := (Found (Last).Depth + Found (Last + 1).Depth) / 2.0;	2.0	math	half way to the crossing after
 driver-world-estimates.adb	Step : constant Positive := Positive'Max (1, Driver.Alignment.Half_Patch (W, H));	1	numerics	a step of at least one pixel
+driver-world-estimates.adb	Step := 2.0 * Step;	2.0	structure	steps that double from the walk's last: the open end is found in as many steps as its distance doubles that step
 driver-world-estimates.adb	Step := Step + 1.0;	1.0	structure	a pixel's step along the line in the other eye's picture
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	1	structure	a family holds at least one test
 driver-world-estimates.adb	Tests : constant Positive := 2 * Natural'Max (1, Natural (Points.Length));	2	structure	each point is tested from both eyes that saw it

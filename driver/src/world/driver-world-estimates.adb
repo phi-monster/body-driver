@@ -320,8 +320,8 @@ package body Driver.World.Estimates is
       end loop;
    end Holding_Eyes;
 
-   --  At a still beat two eyes or more hold the thing, one of their outlines measured since its hull was last worked
-   --  out: its hull is asked, to be worked out apart (Hull).
+   --  At a still beat two eyes or more hold the thing, one of their outlines measured since its hull was last asked:
+   --  its hull is asked, to be worked out apart (Hull).
    procedure Ask_Hull (S : in out State; Id : Thing_Id; R : in out Thing_Record; Seen : Observation_Holders.Holder) is
       Held  : Eye_Array (1 .. Natural (R.Eyes.Length));
       Count : Natural;
@@ -346,32 +346,37 @@ package body Driver.World.Estimates is
    end Ask_Hull;
 
    --  The thing's points from the outlines of the eyes that hold it at the beat asked, two or more: its silhouette
-   --  cones, for a thing too plain for the aligner (s74's small black box: none of its region's points found, nor any
-   --  of the scene's points inside its region). Along each line of sight of an eye's region, on the region's grid, the
-   --  points whose places in each other of those eyes' pictures lie inside that eye's region where it sees them, and
-   --  inside one at least; the first stretch of them from where the line meets the table towards the eye is where the
-   --  thing is along it (it rests on the table: nothing of it lies beneath that stretch along the line). The points
-   --  asked along the line are where it crosses the other eyes' pixels, a pixel's step apart in one of them, each told
-   --  inside or outside by that eye's own region there. The stretch (to half way to the points either side of it, and
-   --  to the table where it starts at the first) gives its middle as the point, as uncertain along the line as a flat
-   --  spread over it, and across it as a flat spread over the grid's spacing: the points sample what the outlines leave
-   --  of the space, the thing within it (taken at the stretch's beginning, the outlines' bound on the surface the eye
-   --  sees, the plain box test's middle came out 4 cm off its footprint towards the eyes and 13 cm above its own; at
-   --  the stretch's middle, over it and 4.5 cm above). A stretch the other eyes leave open towards the eye gives none.
-   --  Outlines that meet nowhere leave the hull as it was (s74's replay: the fixed eye's region of the box segmented
-   --  again while the arm hid half of it met the arm's eye's along none of 56 lines of sight). Worked out apart: in
-   --  the main loop, the black box's six hulls of s74's replay put 8.5 s onto the world's layer.
+   --  cones, for a thing too plain for the aligner (s74's small black box: none of its region's points found, nor any of
+   --  the scene's points inside its region). Along each line of sight of an eye's region, on the region's grid, the
+   --  points whose places in each other eye's picture lie inside its region where that picture sees them, and inside
+   --  one at least; the first stretch of them from where the line meets the table towards the eye is where the thing
+   --  is along it (it rests on the table: nothing of it lies beneath that stretch along the line). The points asked
+   --  along the line are where it crosses the pixels of the eye whose picture it runs the longest in, each told inside
+   --  or outside by that eye's region; a stretch still inside at the last of them is asked on beyond, of the others, in
+   --  steps that double, to where one leaves it, and gives no point where none does before the eye. The stretch (to half
+   --  way to the points either side of it, and to the table where it starts at the first) gives its middle as the point,
+   --  as uncertain along the line as a flat spread over it, and across it as a flat spread over the grid's spacing: the
+   --  points sample what the outlines leave of the space, the thing within it (taken at the stretch's beginning, the
+   --  outlines' bound on the surface the eye sees, the plain box test's middle came out 4 cm off its footprint towards
+   --  the eyes and 13 cm above its own; at the stretch's middle, over it and 4.5 cm above). It rests on the table, so
+   --  the table beneath a point is covered by the thing in every eye that sees it there, and one does: what the
+   --  outlines leave behind the thing, over a table an eye sees, is not the thing (the plain box test's points 200 ->
+   --  131, its middle 5.6 -> 2.2 cm off the box's towards the eyes). Outlines that meet nowhere leave the hull as it was
+   --  (s74's replay: the fixed eye's region of the box segmented again while the arm hid half of it met the arm's eye's
+   --  along none of 56 lines of sight). Only the eyes that hold it now: its outlines asked of the views kept (s74's
+   --  replay) gave the box's top face alone in the arm's eye's views and what the arm left of it in the fixed eye's,
+   --  and cut the hull to nothing. Worked out apart: in the main loop, the black box's six hulls of s74's replay put
+   --  5.7 s onto the world's layer.
    procedure Hull
      (S         : in out State;
       Req       : Hull_Request;
       Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
                                              return Driver.World.Cameras.Camera'Class)
    is
-      --  Where a line of sight crosses a pixel of another eye: how far along it, which eye, and whether the pixel is
-      --  in that eye's region.
+      --  Where a line of sight crosses a pixel of another outline's picture: how far along it, and whether the pixel
+      --  is in that outline.
       type Crossing is record
          Depth  : Real := 0.0;
-         Eye    : Positive := 1;
          Inside : Boolean := False;
       end record;
       function Deeper (L, R : Crossing) return Boolean is (L.Depth > R.Depth);
@@ -393,199 +398,336 @@ package body Driver.World.Estimates is
          if Count < 2 then
             return;
          end if;
-         for A in 1 .. Count loop
-            declare
-               Cam    : constant Driver.World.Cameras.Camera'Class := Camera_Of (Held (A), Seen.Element);
-               Region : constant Driver.Images.Mask := Tracks.Region (R.Eyes (Held (A)).Track);
-               B      : constant Driver.World.Regions.Box := Driver.World.Regions.Bounds (Region);
-               Stride : constant Positive := Region_Stride (B);
+         declare
+            Total : constant Positive := Count;
+            --  Outline K: the region of the K-th eye holding it at the beat asked.
+            Masks : array (1 .. Total) of Driver.Images.Mask;
 
-               --  Whether the point lies inside the region of each eye but the line's and From that sees it.
-               function Inside_Others (X : Vec3; From : Positive) return Boolean is
+            --  What one outline's camera does: where a point falls in its picture, and its pose, size and lines of
+            --  sight for a walk along a line (Walk).
+            generic
+               with procedure Act (Cam : Driver.World.Cameras.Camera'Class);
+            procedure With_Camera (K : Positive);
+            procedure With_Camera (K : Positive) is
+            begin
+               Act (Camera_Of (Held (K), Seen.Element));
+            end With_Camera;
+
+            --  Whether a point lies inside outline K where its picture sees it (True where it does not see it), and
+            --  whether it sees it.
+            procedure Seen_Inside (K : Positive; X : Vec3; Inside_It, Sees : out Boolean) is
+               procedure Act (Cam : Driver.World.Cameras.Camera'Class) is
+                  Px : Driver.Images.Pixel;
                begin
-                  for K in 1 .. Count loop
-                     if K /= A and then K /= From then
+                  Cam.Project (X, Px, Sees);
+                  Inside_It := not Sees or else Inside (Masks (K), Px);
+               end Act;
+               procedure Run is new With_Camera (Act);
+            begin
+               Run (K);
+            end Seen_Inside;
+
+            --  Where the line from C along D, from the table (Far) towards the eye, runs in a picture: its place at the
+            --  table (U1, V1), its unit way across the picture (Du, Dv), and the stretch of it, in pixels from the
+            --  table's place, that lies inside the picture (Low .. High); none (Low > High) where the eye does not see
+            --  the table's end of it in front, or the line runs nowhere in the picture.
+            procedure Line_In (Other : Driver.World.Cameras.Camera'Class; C, D : Vec3; Far : Real;
+                               U1, V1, Du, Dv, Low, High : out Real) is
+               Pose : constant Rigid := Other.Pose.Pose;
+               function In_Eye (X : Vec3) return Vec3 is (Transposed_Times (Pose.Rotation, X - Pose.Translation));
+               U2, V2 : Real;
+               F1, F2 : Boolean;
+               Near   : Real := Far / 2.0;
+               --  The span of the line's parameter inside 0 .. Size along one axis.
+               procedure Clip (From, Rate, Size : Real) is
+               begin
+                  if Rate = 0.0 then
+                     if From < 0.0 or else From > Size then
+                        High := Real'First;
+                     end if;
+                  else
+                     Low := Real'Max (Low, Real'Min (-From / Rate, (Size - From) / Rate));
+                     High := Real'Min (High, Real'Max (-From / Rate, (Size - From) / Rate));
+                  end if;
+               end Clip;
+            begin
+               Du := 0.0;
+               Dv := 0.0;
+               Low := Real'Last;
+               High := Real'First;
+               Other.Project_In_Eye (In_Eye (C + Far * D), U1, V1, F1);
+               if not F1 then
+                  return;
+               end if;
+               --  A second point of the line in front of the eye, halving towards the table until it is.
+               loop
+                  Other.Project_In_Eye (In_Eye (C + Near * D), U2, V2, F2);
+                  exit when F2 or else Far - Near <= Real'Model_Epsilon * Far;
+                  Near := (Near + Far) / 2.0;
+               end loop;
+               declare
+                  Long : constant Real := Sqrt ((U2 - U1) ** 2 + (V2 - V1) ** 2);
+               begin
+                  if not F2 or else Long = 0.0 then
+                     return;
+                  end if;
+                  Du := (U2 - U1) / Long;
+                  Dv := (V2 - V1) / Long;
+               end;
+               Low := Real'First;
+               High := Real'Last;
+               Clip (U1, Du, Real (Other.Width));
+               Clip (V1, Dv, Real (Other.Height));
+            end Line_In;
+
+            --  How many pixels of outline K's picture the line from C along D runs over towards the eye from the table.
+            function Run_Length (K : Positive; C, D : Vec3; Far : Real) return Real is
+               Long : Real := 0.0;
+               procedure Act (Cam : Driver.World.Cameras.Camera'Class) is
+                  U1, V1, Du, Dv, Low, High : Real;
+               begin
+                  Line_In (Cam, C, D, Far, U1, V1, Du, Dv, Low, High);
+                  Long := Real'Max (0.0, High - Low);
+               end Act;
+               procedure Run is new With_Camera (Act);
+            begin
+               Run (K);
+               return Long;
+            end Run_Length;
+
+            --  Where the line from C along D, up to Far, crosses outline K's pixels.
+            procedure Walk (K : Positive; C, D : Vec3; Far : Real; Found : in out Crossing_Vectors.Vector) is
+               procedure Act (Other : Driver.World.Cameras.Camera'Class) is
+                  Pose : constant Rigid := Other.Pose.Pose;
+                  Gap  : constant Vec3 := Pose.Translation - C;
+                  U1, V1, Du, Dv, Low, High : Real;
+               begin
+                  Line_In (Other, C, D, Far, U1, V1, Du, Dv, Low, High);
+                  declare
+                     Step : Real := Real'Ceiling (Low);
+                  begin
+                     while Step <= High loop
                         declare
-                           Px      : Driver.Images.Pixel;
-                           Visible : Boolean;
+                           Px  : constant Driver.Images.Pixel := (U => U1 + Step * Du, V => V1 + Step * Dv);
+                           Way : constant Vec3 := Times (Pose.Rotation, Other.Ray_In_Eye (Px.U, Px.V));
+                           Dw  : constant Real := Dot (D, Way);
+                           Den : constant Real := 1.0 - Dw ** 2;
                         begin
-                           Camera_Of (Held (K), Seen.Element).Project (X, Px, Visible);
-                           if Visible and then not Inside (Tracks.Region (R.Eyes (Held (K)).Track), Px) then
-                              return False;
+                           if Den > 0.0 then
+                              declare
+                                 T : constant Real := (Dot (D, Gap) - Dw * Dot (Way, Gap)) / Den;
+                              begin
+                                 if T > 0.0 and then T <= Far then
+                                    Found.Append (Crossing'(Depth => T, Inside => Inside (Masks (K), Px)));
+                                 end if;
+                              end;
                            end if;
                         end;
-                     end if;
-                  end loop;
-                  return True;
-               end Inside_Others;
-
-               --  Where the line from C along D, up to Far, crosses eye K's pixels.
-               procedure Crossings (K : Positive; C, D : Vec3; Far : Real; Found : in out Crossing_Vectors.Vector) is
-                  Other   : constant Driver.World.Cameras.Camera'Class := Camera_Of (Held (K), Seen.Element);
-                  Outline : constant Driver.Images.Mask := Tracks.Region (R.Eyes (Held (K)).Track);
-                  Pose    : constant Rigid := Other.Pose.Pose;
-                  function In_Eye (X : Vec3) return Vec3 is (Transposed_Times (Pose.Rotation, X - Pose.Translation));
-                  W  : constant Real := Real (Other.Width);
-                  H  : constant Real := Real (Other.Height);
-                  U1, V1, U2, V2 : Real;
-                  F1, F2 : Boolean;
-                  Near : Real := Far / 2.0;
-               begin
-                  Other.Project_In_Eye (In_Eye (C + Far * D), U1, V1, F1);
-                  if not F1 then
-                     return;
-                  end if;
-                  --  A second point of the line in front of the eye, halving towards the table until it is.
-                  loop
-                     Other.Project_In_Eye (In_Eye (C + Near * D), U2, V2, F2);
-                     exit when F2 or else Far - Near <= Real'Model_Epsilon * Far;
-                     Near := (Near + Far) / 2.0;
-                  end loop;
-                  if not F2 then
-                     return;
-                  end if;
-                  declare
-                     Du   : constant Real := U2 - U1;
-                     Dv   : constant Real := V2 - V1;
-                     Long : constant Real := Sqrt (Du ** 2 + Dv ** 2);
-                     Low  : Real := Real'First;
-                     High : Real := Real'Last;
-                     --  The span of the line's parameter (pixels from the table's point) inside 0 .. Size.
-                     procedure Clip (From, Rate, Size : Real) is
-                     begin
-                        if Rate = 0.0 then
-                           if From < 0.0 or else From > Size then
-                              High := Real'First;
-                           end if;
-                        else
-                           Low := Real'Max (Low, Real'Min (-From / Rate, (Size - From) / Rate));
-                           High := Real'Min (High, Real'Max (-From / Rate, (Size - From) / Rate));
-                        end if;
-                     end Clip;
-                  begin
-                     if Long = 0.0 then
-                        return;
-                     end if;
-                     Clip (U1, Du / Long, W);
-                     Clip (V1, Dv / Long, H);
-                     if Low > High then
-                        return;
-                     end if;
-                     declare
-                        Step : Real := Real'Ceiling (Low);
-                        Gap  : constant Vec3 := Pose.Translation - C;
-                     begin
-                        while Step <= High loop
-                           declare
-                              Px  : constant Driver.Images.Pixel :=
-                                (U => U1 + Step * Du / Long, V => V1 + Step * Dv / Long);
-                              Way : constant Vec3 := Times (Pose.Rotation, Other.Ray_In_Eye (Px.U, Px.V));
-                              Dw  : constant Real := Dot (D, Way);
-                              Den : constant Real := 1.0 - Dw ** 2;
-                           begin
-                              if Den > 0.0 then
-                                 declare
-                                    T : constant Real := (Dot (D, Gap) - Dw * Dot (Way, Gap)) / Den;
-                                 begin
-                                    if T > 0.0 and then T <= Far then
-                                       Found.Append (Crossing'(Depth => T, Eye => K, Inside => Inside (Outline, Px)));
-                                    end if;
-                                 end;
-                              end if;
-                           end;
-                           Step := Step + 1.0;
-                        end loop;
-                     end;
-                  end;
-               end Crossings;
-
-               procedure Along (Px : Driver.Images.Pixel) is
-                  Sight : constant Ray_Estimate := Cam.Ray (Px);
-                  C     : constant Vec3 := Sight.Origin.Mean;
-                  D     : constant Vec3 := Sight.Direction.Unit_Vector;
-                  N     : constant Vec3 := Up_Towards (S, C);
-                  Found : Crossing_Vectors.Vector;
-               begin
-                  if Sight.Direction.Sigma = Real'Last or else not (Dot (N, D) < 0.0) then
-                     return;
-                  end if;
-                  declare
-                     Far : constant Real := Dot (N, S.Table.Centre - C) / Dot (N, D);
-                  begin
-                     if Far <= 0.0 then
-                        return;
-                     end if;
-                     Lines := Lines + 1;
-                     for K in 1 .. Count loop
-                        if K /= A then
-                           Crossings (K, C, D, Far, Found);
-                        end if;
+                        Step := Step + 1.0;
                      end loop;
-                     Deepest_First.Sort (Found);
-                     declare
-                        First, Last : Natural := 0;
-                     begin
-                        for K in Found.First_Index .. Found.Last_Index loop
-                           if Found (K).Inside and then Inside_Others (C + Found (K).Depth * D, Found (K).Eye) then
-                              if First = 0 then
-                                 First := K;
-                              end if;
-                              Last := K;
-                           elsif First > 0 then
-                              exit;
-                           end if;
-                        end loop;
-                        --  A stretch that goes on past the last point asked towards the eye is open there: the
-                        --  other eyes do not bound it. One kept from the first point asked reaches the table.
-                        if First > 0 and then Last < Found.Last_Index then
-                           declare
-                              Deep    : constant Real :=
-                                (if First > Found.First_Index then (Found (First).Depth + Found (First - 1).Depth) / 2.0
-                                 else Far);
-                              Shallow : constant Real := (Found (Last).Depth + Found (Last + 1).Depth) / 2.0;
-                              Middle  : constant Real := (Deep + Shallow) / 2.0;
-                              Across  : constant Real :=
-                                (Middle * Driver.World.Cameras.Radians_Per_Pixel (Cam, Px) * Real (Stride)) ** 2
-                                / 12.0;
-                              Lengthwise : constant Real := (Deep - Shallow) ** 2 / 12.0;
-                           begin
-                              Points.Append
-                                (Driver.World.Points.Placed'
-                                   (Pixel => Px,
-                                    Point => (Mean       => C + Middle * D,
-                                              Covariance => Lengthwise * Outer (D, D)
-                                                            + Across * (Identity3 - Outer (D, D))),
-                                    Eye   => Held (A)));
-                           end;
-                        end if;
-                     end;
                   end;
-               end Along;
-
-               Row : Natural := B.Row_0;
+               end Act;
+               procedure Run is new With_Camera (Act);
             begin
-               while Row <= B.Row_1 loop
-                  declare
-                     Column : Natural := B.Column_0;
+               Run (K);
+            end Walk;
+         begin
+            for K in 1 .. Total loop
+               Masks (K) := Tracks.Region (R.Eyes (Held (K)).Track);
+            end loop;
+            for A in 1 .. Count loop
+               declare
+                  Cam    : constant Driver.World.Cameras.Camera'Class := Camera_Of (Held (A), Seen.Element);
+                  B      : constant Driver.World.Regions.Box := Driver.World.Regions.Bounds (Masks (A));
+                  Stride : constant Positive := Region_Stride (B);
+
+                  procedure Along (Px : Driver.Images.Pixel) is
+                     Sight : constant Ray_Estimate := Cam.Ray (Px);
+                     C     : constant Vec3 := Sight.Origin.Mean;
+                     D     : constant Vec3 := Sight.Direction.Unit_Vector;
+                     N     : constant Vec3 := Up_Towards (S, C);
+                     Found : Crossing_Vectors.Vector;
                   begin
-                     while Column <= B.Column_1 loop
-                        if Driver.Images.Contains (Region, Column, Row) then
-                           Along ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));
+                     if Sight.Direction.Sigma = Real'Last or else not (Dot (N, D) < 0.0) then
+                        return;
+                     end if;
+                     declare
+                        Far    : constant Real := Dot (N, S.Table.Centre - C) / Dot (N, D);
+                        Walker : Natural := 0;
+                        Most   : Real := 0.0;
+                     begin
+                        if Far <= 0.0 then
+                           return;
                         end if;
-                        Column := Column + Stride;
-                     end loop;
-                  end;
-                  Row := Row + Stride;
-               end loop;
-            end;
-         end loop;
-         if Points.Is_Empty then
-            Driver.Log.Line (Driver.Log.World, "thing" & Req.Thing'Image & ": its outlines in" & Count'Image
-                             & " eyes meet along none of" & Lines'Image & " lines of sight; its hull stays as it was");
-            return;
-         end if;
-         Driver.Log.Line (Driver.Log.World, "thing" & Req.Thing'Image & ": its outlines in" & Count'Image
-                          & " eyes meet along" & Points.Length'Image & " of" & Lines'Image & " lines of sight");
+                        Lines := Lines + 1;
+                        --  The outline whose picture the line runs the longest in is walked: its pixels are the finest
+                        --  steps along it.
+                        for K in 1 .. Total loop
+                           if K /= A then
+                              declare
+                                 L : constant Real := Run_Length (K, C, D, Far);
+                              begin
+                                 if L > Most then
+                                    Most := L;
+                                    Walker := K;
+                                 end if;
+                              end;
+                           end if;
+                        end loop;
+                        if Walker = 0 then
+                           return;
+                        end if;
+                        Walk (Walker, C, D, Far, Found);
+                        Deepest_First.Sort (Found);
+                        declare
+                           First, Last : Natural := 0;
+                           function Kept (K : Positive) return Boolean is
+                              X : constant Vec3 := C + Found (K).Depth * D;
+                           begin
+                              if not Found (K).Inside then
+                                 return False;
+                              end if;
+                              for O in 1 .. Total loop
+                                 if O /= A and then O /= Walker then
+                                    declare
+                                       In_It, Sees : Boolean;
+                                    begin
+                                       Seen_Inside (O, X, In_It, Sees);
+                                       if not In_It then
+                                          return False;
+                                       end if;
+                                    end;
+                                 end if;
+                              end loop;
+                              return True;
+                           end Kept;
+                           --  A stretch that goes on past the last point the walk asked towards the eye is asked on
+                           --  beyond it of the other outlines, in steps that double from the walk's last, to where one
+                           --  leaves it (half way back to the last kept) or, reaching the eye, it stays open there and
+                           --  gives no point. One kept from the first point asked reaches the table.
+                           Beyond : Real := 0.0;
+                           Open   : Boolean := False;
+                        begin
+                           for K in Found.First_Index .. Found.Last_Index loop
+                              if Kept (K) then
+                                 if First = 0 then
+                                    First := K;
+                                 end if;
+                                 Last := K;
+                              elsif First > 0 then
+                                 exit;
+                              end if;
+                           end loop;
+                           if First > 0 and then Last = Found.Last_Index then
+                              declare
+                                 Step : Real :=
+                                   (if Last > First then Found (Last - 1).Depth - Found (Last).Depth
+                                    else Found (Last).Depth);
+                                 T    : Real := Found (Last).Depth;
+                                 Was  : Real := Found (Last).Depth;
+                              begin
+                                 Open := True;
+                                 while Step > 0.0 and then T - Step > 0.0 loop
+                                    T := T - Step;
+                                    declare
+                                       X     : constant Vec3 := C + T * D;
+                                       Stays : Boolean := True;
+                                    begin
+                                       for O in 1 .. Total loop
+                                          if O /= A and then Stays then
+                                             declare
+                                                In_It, Sees : Boolean;
+                                             begin
+                                                Seen_Inside (O, X, In_It, Sees);
+                                                Stays := In_It;
+                                             end;
+                                          end if;
+                                       end loop;
+                                       if not Stays then
+                                          Beyond := (T + Was) / 2.0;
+                                          Open := False;
+                                          exit;
+                                       end if;
+                                       Was := T;
+                                    end;
+                                    Step := 2.0 * Step;
+                                 end loop;
+                              end;
+                           end if;
+                           if First > 0 and then not Open then
+                              declare
+                                 Deep    : constant Real :=
+                                   (if First > Found.First_Index then (Found (First).Depth + Found (First - 1).Depth) / 2.0
+                                    else Far);
+                                 Shallow : constant Real :=
+                                   (if Last < Found.Last_Index then (Found (Last).Depth + Found (Last + 1).Depth) / 2.0
+                                    else Beyond);
+                                 Middle  : constant Real := (Deep + Shallow) / 2.0;
+                                 Across  : constant Real :=
+                                   (Middle * Driver.World.Cameras.Radians_Per_Pixel (Cam, Px) * Real (Stride)) ** 2
+                                   / 12.0;
+                                 Lengthwise : constant Real := (Deep - Shallow) ** 2 / 12.0;
+                                 --  It rests on the table: the table beneath the point is covered by the thing in every
+                                 --  outline that sees it there, and one sees it. Where the outlines see few of the places along a line
+                                 --  (near an eye, outside the other pictures), a stretch is left that nothing carves:
+                                 --  the plain box test's outlines in eight views left some 9 cm from the moving eye, 38 cm
+                                 --  above the table, the views of the eye's other places not seeing them.
+                                 X          : constant Vec3 := C + Middle * D;
+                                 Foot       : constant Vec3 := X - Dot (X - S.Table.Centre, N) * N;
+                                 Footed     : Boolean := True;
+                                 Seen_Once  : Boolean := False;
+                              begin
+                                 for O in 1 .. Total loop
+                                    if Footed then
+                                       declare
+                                          In_It, Sees : Boolean;
+                                       begin
+                                          Seen_Inside (O, Foot, In_It, Sees);
+                                          Footed := In_It;
+                                          Seen_Once := Seen_Once or else Sees;
+                                       end;
+                                    end if;
+                                 end loop;
+                                 if Footed and then Seen_Once then
+                                    Points.Append
+                                      (Driver.World.Points.Placed'
+                                         (Pixel => Px,
+                                          Point => (Mean       => X,
+                                                    Covariance => Lengthwise * Outer (D, D)
+                                                                  + Across * (Identity3 - Outer (D, D))),
+                                          Eye   => Held (A)));
+                                 end if;
+                              end;
+                           end if;
+                        end;
+                     end;
+                  end Along;
+
+                  Row : Natural := B.Row_0;
+               begin
+                  while Row <= B.Row_1 loop
+                     declare
+                        Column : Natural := B.Column_0;
+                     begin
+                        while Column <= B.Column_1 loop
+                           if Driver.Images.Contains (Masks (A), Column, Row) then
+                              Along ((U => Real (Column) + 0.5, V => Real (Row) + 0.5));
+                           end if;
+                           Column := Column + Stride;
+                        end loop;
+                     end;
+                     Row := Row + Stride;
+                  end loop;
+               end;
+            end loop;
+            if Points.Is_Empty then
+               Driver.Log.Line (Driver.Log.World, "thing" & Req.Thing'Image & ": its outlines in" & Total'Image
+                                & " eyes meet along none of" & Lines'Image & " lines of sight; its hull stays as it was");
+               return;
+            end if;
+            Driver.Log.Line (Driver.Log.World, "thing" & Req.Thing'Image & ": its outlines in" & Total'Image
+                             & " eyes meet along" & Points.Length'Image & " of" & Lines'Image & " lines of sight");
+         end;
          R.Hull := Points;
          R.Under_Due := True;
          S.Things.Replace_Element (Req.Thing, R);
@@ -1088,6 +1230,13 @@ package body Driver.World.Estimates is
       R       : constant Thing_Record := S.Things (T);
       function Own (Member : Positive) return Boolean is (On_Thing (R, S.Scene (Member).Point.Mean, Camera_Of, Seen));
    begin
+      --  Its outlines met where it was: its hull goes.
+      declare
+         Now : Thing_Record := S.Things (T);
+      begin
+         Now.Hull.Clear;
+         S.Things.Replace_Element (T, Now);
+      end;
       while F <= Natural (S.Surfaces.Length) loop
          if Driver.World.Supports.Mostly (S.Surfaces (F), Own'Access) then
             S.Surfaces.Delete (F);
