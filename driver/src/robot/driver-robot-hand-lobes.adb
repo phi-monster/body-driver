@@ -1940,6 +1940,131 @@ package body Driver.Robot.Hand.Lobes is
                   end if;
                end;
             end if;
+            --  Lobes the closer moves the same way are one: the parts of a finger move together, and fingers that
+            --  close on each other move opposite ways. The way is the closer's motion over a lobe's pixels; two groups
+            --  of lobes join when every lobe of one goes within a right angle of every lobe of the other (the sign of
+            --  their motions' product, as for the ends above), the two whose least agreement is the most first. A ribbed
+            --  finger changes in stripes as it moves, and each stripe was a lobe: d3 (seed 3 of the fake robot, with
+            --  servos, 10-18) saw its one moving jaw as six lobes and as five, and none of its nine presses found a tip.
+            if Motion /= null and then Natural (Result.Lobes.Length) > 1 then
+               declare
+                  N      : constant Natural := Natural (Result.Lobes.Length);
+                  Mu, Mv : Real_Array (1 .. N) := [others => 0.0];
+                  Group  : array (1 .. N) of Positive;
+                  function Agreement (I, J : Positive) return Real is
+                     Size : constant Real := Sqrt ((Mu (I) ** 2 + Mv (I) ** 2) * (Mu (J) ** 2 + Mv (J) ** 2));
+                  begin
+                     return (if Size > 0.0 then (Mu (I) * Mu (J) + Mv (I) * Mv (J)) / Size else 0.0);
+                  end Agreement;
+               begin
+                  for I in 1 .. N loop
+                     Group (I) := I;
+                     declare
+                        Here_I  : constant Mask := Result.Lobes (Result.Lobes.First_Index + I - 1).Here;
+                        There_I : constant Mask := Result.Lobes (Result.Lobes.First_Index + I - 1).There;
+                        U, V    : Real;
+                     begin
+                        for R in 0 .. H - 1 loop
+                           for C in 0 .. W - 1 loop
+                              if Contains (Here_I, C, R) or else Contains (There_I, C, R) then
+                                 Motion (C, R, U, V);
+                                 Mu (I) := Mu (I) + U;
+                                 Mv (I) := Mv (I) + V;
+                              end if;
+                           end loop;
+                        end loop;
+                     end;
+                  end loop;
+                  loop
+                     declare
+                        Best       : Real := 0.0;
+                        Into, From : Natural := 0;
+                     begin
+                        for A in 1 .. N loop
+                           for B in A + 1 .. N loop
+                              if Group (A) = A and then Group (B) = B then
+                                 declare
+                                    Least : Real := Real'Last;
+                                 begin
+                                    for I in 1 .. N loop
+                                       if Group (I) = A then
+                                          for J in 1 .. N loop
+                                             if Group (J) = B then
+                                                Least := Real'Min (Least, Agreement (I, J));
+                                             end if;
+                                          end loop;
+                                       end if;
+                                    end loop;
+                                    if Least > Best then
+                                       Best := Least;
+                                       Into := A;
+                                       From := B;
+                                    end if;
+                                 end;
+                              end if;
+                           end loop;
+                        end loop;
+                        exit when Into = 0;
+                        for I in 1 .. N loop
+                           if Group (I) = From then
+                              Group (I) := Into;
+                           end if;
+                        end loop;
+                        Result.Joined := Result.Joined + 1;
+                     end;
+                  end loop;
+                  if Result.Joined > 0 then
+                     declare
+                        Merged : Lobe_Vectors.Vector;
+                     begin
+                        for G in 1 .. N loop
+                           if Group (G) = G then
+                              declare
+                                 L : Lobe;
+                                 Anchor_Here, Anchor_There : Pixel;
+                                 Anchored_Here, Anchored_There : Boolean;
+                              begin
+                                 L.Here := Create (W, H);
+                                 L.There := Create (W, H);
+                                 for K in 1 .. N loop
+                                    if Group (K) = G then
+                                       declare
+                                          Here_K  : constant Mask := Result.Lobes (Result.Lobes.First_Index + K - 1).Here;
+                                          There_K : constant Mask := Result.Lobes (Result.Lobes.First_Index + K - 1).There;
+                                       begin
+                                          for R in 0 .. H - 1 loop
+                                             for C in 0 .. W - 1 loop
+                                                if Contains (Here_K, C, R) then
+                                                   Include (L.Here, C, R);
+                                                end if;
+                                                if Contains (There_K, C, R) then
+                                                   Include (L.There, C, R);
+                                                end if;
+                                             end loop;
+                                          end loop;
+                                       end;
+                                    end if;
+                                 end loop;
+                                 Summarize (L.Here, L.Count_Here, L.Centre_Here);
+                                 Summarize (L.There, L.Count_There, L.Centre_There);
+                                 Reach_Tip (L.Here, Attached, L.Tip_Here, L.Tip_Known_Here, Anchor_Here, Anchored_Here);
+                                 Reach_Tip (L.There, Attached, L.Tip_There, L.Tip_Known_There, Anchor_There, Anchored_There,
+                                            Given => Anchor_Here, Is_Given => Anchored_Here);
+                                 if not Anchored_Here and then Anchored_There then
+                                    Reach_Tip (L.Here, Attached, L.Tip_Here, L.Tip_Known_Here, Anchor_Here, Anchored_Here,
+                                               Given => Anchor_There, Is_Given => True);
+                                 end if;
+                                 L.Bordered_Here := On_Border (L.Here);
+                                 L.Bordered_There := On_Border (L.There);
+                                 Merged.Append (L);
+                              end;
+                           end if;
+                        end loop;
+                        Result.Lobes := Merged;
+                     end;
+                  end if;
+               end;
+            end if;
             --  The robot's own pixels that did not change: of the robot's brightness as the ends now stand, in
             --  parts larger than the doubt.
             declare

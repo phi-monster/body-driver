@@ -148,6 +148,8 @@ package Driver.Alignment.Keyframes is
       Set_Aside  : Boolean := False;   --  told none, every point on it where it stood, against a prediction that
                                        --  moves them: the points that stood ride with the eye (Add)
       Searched   : Boolean := False;   --  it was searched: the keyframe's prediction had windows wider than a patch
+      Two_Fields : Boolean := False;   --  no field was told over the next, both held enough points, and every point was
+                                       --  asked between where the two put it (Common_Motion)
    end record;
    --  The view's common motion a keyframe was asked from (Add): every keyframe whose prediction's windows are wider
    --  than a patch, a new direction's among them.

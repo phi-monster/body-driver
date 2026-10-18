@@ -1,4 +1,3 @@
-with Ada.Containers.Generic_Array_Sort;
 with Ada.Strings.Fixed;
 with Ada.Calendar;
 with Ada.Numerics.Long_Elementary_Functions;
@@ -2119,6 +2118,8 @@ package body Driver.Robot.Kinematics.Fit is
       --  Whether the sightings tell the joints' order (stage 4), or the fit begun from tells it (From).
       Order_Is_Told : Boolean := False;
       Untold        : Joint_Pair_Lists.Vector;   --  the joints next to each other in it whose swap stage 4 did not tell
+      Untold_Orders : Joint_Lists.Vector;        --  every order stage 4 did not tell from it (Fit_Report.Untold_Orders)
+      Untold_Scales : Real_Lists.Vector;         --  per pair of Untold, the share of the widest turns it is best turned by
 
       procedure Finish (Profiled : Boolean) is
       begin
@@ -2321,6 +2322,8 @@ package body Driver.Robot.Kinematics.Fit is
          Report.Profiled_Over := (if Profiled then Sightings'Length elsif From.Valid then From.Profiled_Over else 0);
          Report.Order_Told := Order_Is_Told;
          Report.Untold := Untold;
+         Report.Untold_Scales := Untold_Scales;
+         Report.Untold_Orders := (if Order_Is_Told then Joint_Lists.Empty_Vector else Untold_Orders);
          Chain := Order;
          Report.Fitted := Report.Determined;
          Close_Stage;
@@ -2426,6 +2429,46 @@ package body Driver.Robot.Kinematics.Fit is
             for J in 1 .. N loop
                if not Usable (J) then
                   Ada.Strings.Unbounded.Append (Which, J'Image);
+                  --  Each keyframe that asked the joint, and why none of its sightings stands for the joint alone: how
+                  --  many points it saw, the joint it was taken for and against which keyframe (0: none), each other
+                  --  joint that stands off the reference by a step its eye sees (by how much, against that step), and
+                  --  how many of its sightings leave out a joint's motion that is not told (Off_Told). x3 (servo seed 3
+                  --  of the fake robot, 10-18) failed here at every fit of its boot, its channel 4 with three keyframes
+                  --  of its own asking, and the line said only which channel.
+                  declare
+                     Said : Ada.Strings.Unbounded.Unbounded_String;
+                  begin
+                     for B in 2 .. Frames loop
+                        if Asked (Asked'First (1) + B - 1, Asked'First (2) + J - 1) then
+                           declare
+                              Seen, Untold : Natural := 0;
+                           begin
+                              for X of Sight loop
+                                 if X.Frame = B then
+                                    Seen := Seen + 1;
+                                    if not X.Off_Told then
+                                       Untold := Untold + 1;
+                                    end if;
+                                 end if;
+                              end loop;
+                              Ada.Strings.Unbounded.Append
+                                (Said, "; keyframe" & B'Image & ":" & Seen'Image & " points, taken for joint"
+                                 & Own_Joint (B)'Image & " against keyframe" & Partner (B)'Image & ","
+                                 & Untold'Image & " of them with another joint's motion untold");
+                              for C in 1 .. N loop
+                                 if C /= J and then Away (B, C) then
+                                    Ada.Strings.Unbounded.Append
+                                      (Said, ", joint" & C'Image & " off by " & Driver.Log.Image (Change (B, C), 2)
+                                       & " against its step " & Driver.Log.Image (Visible (Visible'First + C - 1), 2));
+                                 end if;
+                              end loop;
+                           end;
+                        end if;
+                     end loop;
+                     Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " joint" & J'Image
+                                      & " has no keyframe of its own, of those that asked it"
+                                      & Ada.Strings.Unbounded.To_String (Said));
+                  end;
                end if;
             end loop;
             Fail ("a joint has no keyframe of its own (channel" & Ada.Strings.Unbounded.To_String (Which) & ")");
@@ -4129,74 +4172,143 @@ package body Driver.Robot.Kinematics.Fit is
                   end if;
                end Score_Into;
 
-               --  Whether the residuals A are significantly the smaller than B, residual by residual (the same
-               --  sightings, in the same order): Wilcoxon's signed ranks of |A| - |B|, at Z of their normal
-               --  approximation. Two orders' medians are each as uncertain as their residuals are few, but they are
-               --  read off the same sightings, and what tells one order from another is how each sighting moves:
-               --  compared by the standard error of one median, the true order was no move from a wrong one
+               --  Whether the residuals A are significantly the smaller than B (the same sightings, in the same
+               --  order), keyframe by keyframe: a keyframe's sightings share its readings' errors and where the servos
+               --  landed it within their dead band, and are no independent samples of how well an order fits. Each
+               --  keyframe gives the median of its residuals' sizes under each; Wilcoxon's signed ranks of their
+               --  differences over the keyframes, ties sharing the mean of their ranks, by the ranks' exact
+               --  distribution (every keyframe's sign either way alike), significant when its upper tail is below the
+               --  Gaussian's at Z. Two orders' medians are each as uncertain as their residuals are few, but they are
+               --  read off the same sightings, and what tells one order from another is how each moves: compared by
+               --  the standard error of one median, the true order was no move from a wrong one
                --  (robot.kinematics.desktop with stage 1's plane, 10-16: 0.647 against 0.660 +- 0.030 px), and taken
                --  wherever a median was lower, the search wandered to wrong orders whose medians the noise put lower
-               --  still (all three of its sweeps).
+               --  still (all three of its sweeps). Ranked residual by residual, the thousands of sightings of a few
+               --  keyframes told a wrong order against its swap: s83 (servo seed 6 of the fake robot, 10-18), 1 3 2 4
+               --  5 6 for the true 1 3 4 2 5 6, "every other order searched leaves residuals significantly the larger".
                function Smaller (A, B : Real_Array) return Boolean is
-                  type Signed is record
-                     Size     : Real := 0.0;
-                     Negative : Boolean := False;
-                  end record;
-                  type Signed_Array is array (Positive range <>) of Signed;
-                  function "<" (L, R : Signed) return Boolean is (L.Size < R.Size);
-                  procedure Sort is new Ada.Containers.Generic_Array_Sort (Positive, Signed, Signed_Array);
-                  type Signed_Access is access Signed_Array;
-                  procedure Free is new Ada.Unchecked_Deallocation (Signed_Array, Signed_Access);
-                  --  On the heap: a worker task's stack does not hold 2 a placed sighting.
-                  D_Of : Signed_Access := new Signed_Array (1 .. A'Length);
-                  D    : Signed_Array renames D_Of.all;
-                  M    : Natural := 0;
+                  Sightings : constant Natural := A'Length / 2;
+                  First_Of  : array (1 .. Frames + 1) of Natural := [others => 0];   --  each keyframe's first value
+                  Filled    : array (1 .. Frames) of Natural := [others => 0];
+                  Sizes_A   : Real_Access := new Real_Array (1 .. 2 * Sightings);
+                  Sizes_B   : Real_Access := new Real_Array (1 .. 2 * Sightings);
+                  Apart_Of  : Real_Access := new Real_Array (1 .. 2 * Sightings);   --  where A and B put a sighting
+                  Noise     : Real := 0.0;   --  of A's residuals, robust
+                  M : Natural := 0;
+                  function Frame_Of (P : Positive) return Positive is (Placed_At (Placed_At'First + P - 1).Frame);
                begin
-                  for I in A'Range loop
+                  --  The values grouped by keyframe, in the order they come.
+                  First_Of (1) := 1;
+                  for P in 1 .. Sightings loop
+                     First_Of (Frame_Of (P) + 1) := First_Of (Frame_Of (P) + 1) + 2;
+                  end loop;
+                  for F in 1 .. Frames loop
+                     First_Of (F + 1) := First_Of (F + 1) + First_Of (F);
+                  end loop;
+                  for P in 1 .. Sightings loop
                      declare
-                        X : constant Real := abs A (I);
-                        Y : constant Real := abs B (B'First + I - A'First);
+                        F  : constant Positive := Frame_Of (P);
+                        At_Value : constant Positive := First_Of (F) + Filled (F);
+                        Au : constant Real := A (A'First + 2 * (P - 1));
+                        Av : constant Real := A (A'First + 2 * (P - 1) + 1);
+                        Bu : constant Real := B (B'First + 2 * (P - 1));
+                        Bv : constant Real := B (B'First + 2 * (P - 1) + 1);
+                        --  The residuals are each order's prediction less the one sighting: their difference is how far
+                        --  apart the two orders put it, whatever was seen.
+                        Apart : constant Real :=
+                          (if abs Au >= Real'Last or else abs Av >= Real'Last or else abs Bu >= Real'Last
+                             or else abs Bv >= Real'Last
+                           then Real'Last else Sqrt ((Au - Bu) ** 2 + (Av - Bv) ** 2));
                      begin
-                        if X /= Y then
-                           M := M + 1;
-                           D (M) := (Size     => (if X >= Real'Last or else Y >= Real'Last then Real'Last
-                                                  else abs (X - Y)),
-                                     Negative => X < Y);
-                        end if;
+                        for Part in 0 .. 1 loop
+                           Sizes_A (At_Value + Part) := abs A (A'First + 2 * (P - 1) + Part);
+                           Sizes_B (At_Value + Part) := abs B (B'First + 2 * (P - 1) + Part);
+                           Apart_Of (At_Value + Part) := Apart;
+                        end loop;
+                        Filled (F) := Filled (F) + 2;
                      end;
                   end loop;
-                  if M = 0 then
-                     Free (D_Of);
-                     return False;
-                  end if;
-                  Sort (D (1 .. M));
+                  --  Only a keyframe where the two orders put its sightings apart, by the median, more than A's own
+                  --  residuals scatter, at Z, tells one order from the other: elsewhere both predict what was seen
+                  --  alike, and its sign is the noise's. Chosen by the predictions alone, not by what was seen, the
+                  --  keyframes kept leave the test its level; a keyframe that tells nothing only dilutes it: s83
+                  --  (servo seed 6, replayed 10-18) kept its 17 last untold orders through 40 keyframes of which the
+                  --  turns that tell them apart, 3 to 40 px apart against 0.25 px of noise, were a few.
                   declare
-                     Smaller_Ranks : Real := 0.0;   --  the ranks of the differences where A is the smaller
-                     From          : Positive := 1;
-                     Mm            : constant Real := Real (M);
+                     Finite : Real_Access := new Real_Array (1 .. 2 * Sightings);
+                     K      : Natural := 0;
                   begin
-                     --  Ties share the mean of their ranks.
-                     while From <= M loop
-                        declare
-                           To : Positive := From;
-                        begin
-                           while To < M and then D (To + 1).Size = D (From).Size loop
-                              To := To + 1;
-                           end loop;
-                           for I in From .. To loop
-                              if D (I).Negative then
-                                 Smaller_Ranks := Smaller_Ranks + Real (From + To) / 2.0;
-                              end if;
-                           end loop;
-                           From := To + 1;
-                        end;
+                     for I in A'Range loop
+                        if abs A (I) < Real'Last then
+                           K := K + 1;
+                           Finite (K) := A (I);
+                        end if;
                      end loop;
-                     return Is_Smaller : constant Boolean :=
-                       (Smaller_Ranks - Mm * (Mm + 1.0) / 4.0)
-                       > Driver.Conventions.Z * Sqrt (Mm * (Mm + 1.0) * (2.0 * Mm + 1.0) / 24.0)
-                     do
-                        Free (D_Of);
-                     end return;
+                     Noise := (if K > 1 then Driver.Stats.Robust_Sigma (Finite (1 .. K)) else 0.0);
+                     Free (Finite);
+                  end;
+                  --  Sized, not signed: a keyframe where B's median residual is many times A's is as much evidence as
+                  --  it is large. Counted only by its sign, ten keyframes all one way were the least that told an order
+                  --  at Z (2 ** -10 below the Gaussian's tail), and the order exam's arms (robot.order.exam, 10-18) were
+                  --  never told: eleven of twelve fitted their true order as the best after every pair the fit named was
+                  --  turned, their wrong orders' medians several times the true one's in the keyframes that tell them.
+                  --  The scale a keyframe's difference is judged at is how much A's own median varies from one keyframe
+                  --  to the next (robust, over every keyframe): a keyframe's shared error (its view, where it landed)
+                  --  moves its whole median, as much for the two orders, and is the largest that varies between
+                  --  keyframes; the sum of the told keyframes' differences is then judged against it at Z. A keyframe
+                  --  whose points A puts behind the eye tells against A; one whose points only B puts there, for it.
+                  declare
+                     Medians : Real_Array (1 .. Frames);
+                     Km      : Natural := 0;
+                     Spread  : Real := Real'Last;
+                     Sum     : Real := 0.0;
+                     Behind, Beyond : Boolean := False;
+                  begin
+                     for F in 1 .. Frames loop
+                        if Filled (F) > 0 then
+                           declare
+                              X : constant Real := Driver.Stats.Median (Sizes_A (First_Of (F) .. First_Of (F) + Filled (F) - 1));
+                           begin
+                              if X < Real'Last then
+                                 Km := Km + 1;
+                                 Medians (Km) := X;
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                     if Km > 1 then
+                        Spread := Driver.Stats.Robust_Sigma (Medians (1 .. Km));
+                     end if;
+                     for F in 1 .. Frames loop
+                        if Filled (F) > 0
+                          and then Driver.Stats.Median (Apart_Of (First_Of (F) .. First_Of (F) + Filled (F) - 1))
+                                   > Driver.Conventions.Z * Noise
+                        then
+                           declare
+                              X : constant Real := Driver.Stats.Median (Sizes_A (First_Of (F) .. First_Of (F) + Filled (F) - 1));
+                              Y : constant Real := Driver.Stats.Median (Sizes_B (First_Of (F) .. First_Of (F) + Filled (F) - 1));
+                           begin
+                              if X >= Real'Last then
+                                 Behind := True;
+                              elsif Y >= Real'Last then
+                                 Beyond := True;
+                              else
+                                 M := M + 1;
+                                 Sum := Sum + (Y - X);
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                     Free (Sizes_A);
+                     Free (Sizes_B);
+                     Free (Apart_Of);
+                     if Behind then
+                        return False;
+                     elsif Beyond then
+                        return True;
+                     end if;
+                     return M > 0 and then Spread > 0.0 and then Spread < Real'Last
+                       and then Sum > Driver.Conventions.Z * Spread * Sqrt (Real (M));
                   end;
                end Smaller;
 
@@ -4449,14 +4561,23 @@ package body Driver.Robot.Kinematics.Fit is
                      --  order the fits before had found (a19 on 10-16, at beat 7568: every order's median about 0.52 px
                      --  where the right one had left 0.17, the order 1 2 3 4 5 6 taken, and the arm's fit fell to focal
                      --  lengths of 130 and 145 px; s08's best order went back and forth between two, fit after fit).
+                     --  Which order is the best is judged at the scale of the two medians themselves (Median_Error), the
+                     --  least lower than the kept one by more than Z of their errors together; whether it is told stays
+                     --  the keyframes' test (Smaller). Kept until the keyframes told it, a wrong first best stayed best
+                     --  however much the others' residuals fell below its own: z7 replayed with the untold orders'
+                     --  windows (servo seed 7 of the fake robot, 10-18) kept 3 4 1 6 2 5 at 0.832 px against 0.411 px
+                     --  of 1 2 3 4 5 6, and at 1.121 against 0.608.
                      if Found and then From.Valid and then From.N = N and then From.Chain /= Order then
                         declare
                            Own    : Rigid_Access := new Pose_Array;
                            Before : Real_Access := new Real_Array (1 .. 2 * Multi);
                            M, E   : Real;
+                           Here_E : constant Real := Median_Error (Here, 2 * Placed);
                         begin
                            Score_Into (From.Chain, Own.all, Before.all, M, E);
-                           if not Smaller (Here_R (1 .. 2 * Placed), Before (1 .. 2 * Placed)) then
+                           if M < Real'Last
+                             and then not (M - Here > Driver.Conventions.Z * Sqrt (E ** 2 + Here_E ** 2))
+                           then
                               Order := From.Chain;
                               Here := M;
                               Here_R.all := Before.all;
@@ -4521,6 +4642,223 @@ package body Driver.Robot.Kinematics.Fit is
                            end;
                         end if;
                      end if;
+                  end if;
+                  --  ACTIVE (validation, 10-18): every order the sightings do not tell from this one, and the turn of
+                  --  two joints together that tells each from it most: the points the keyframes of one joint placed,
+                  --  seen through the eye where each order puts it after that turn, in pixels, the median over the
+                  --  points both put in the picture.
+                  if Found and then Here < Real'Last then
+                     declare
+                        Own    : Rigid_Access := new Pose_Array;
+                        Into   : Real_Access := new Real_Array (1 .. 2 * Multi);
+                        M, E   : Real;
+                        C      : Chain_Order (1 .. N);
+                        Point_Of : array (1 .. Tracks) of Vec3 := [others => Zero3];
+                        Has      : array (1 .. Tracks) of Boolean := [others => False];
+                        Points   : Natural := 0;
+                        Reach    : Real_Array (1 .. N) := [others => 0.0];
+                        Untold_Count : Natural := 0;
+                        Tells    : array (1 .. N, 1 .. N) of Natural := [others => [others => 0]];   --  orders a pair tells
+                        --  Per pair, the share of the widest turns its most telling turn took, and how well it told.
+                        Scale_Of : array (1 .. N, 1 .. N) of Real := [others => [others => 1.0]];
+                        Power_Of : array (1 .. N, 1 .. N) of Real := [others => [others => 0.0]];
+                        Dist     : Real_Access;
+                        --  Every pair, each way each, by its joints' widest turns and by halves of them while both halves
+                        --  are turns the fit counts (Visible): a turn that takes most of the points out of the picture tells
+                        --  little however far apart it puts the rest (w7, servo seed 7 of the fake robot, 10-18: its last
+                        --  two untold orders were told apart most by c1 with c4 at their widest, 18 px apart over 6 points,
+                        --  a pair turned once and not again).
+                        type Move is record
+                           I, J   : Positive := 1;
+                           Si, Sj : Real := 1.0;
+                           Scale  : Real := 1.0;   --  the share of the joints' widest turns
+                        end record;
+                        package Move_Lists is new Ada.Containers.Vectors (Positive, Move);
+                        Move_Of : Move_Lists.Vector;
+                        function Change_Of (Mv : Move) return Real_Array is
+                           D : Real_Array (1 .. N) := [others => 0.0];
+                        begin
+                           D (Mv.I) := Mv.Si * Mv.Scale * Reach (Mv.I);
+                           D (Mv.J) := Mv.Sj * Mv.Scale * Reach (Mv.J);
+                           return D;
+                        end Change_Of;
+                        function Move_Image (Mv : Move) return String is
+                          ("c" & Driver.Log.Image (Mv.I) & " by " & Driver.Log.Image (Mv.Si * Mv.Scale * Reach (Mv.I), 4)
+                           & " with c" & Driver.Log.Image (Mv.J) & " by "
+                           & Driver.Log.Image (Mv.Sj * Mv.Scale * Reach (Mv.J), 4));
+                        --  The median pixel distance between the points as Order and Other put them after Mv, and how
+                        --  many both put in the picture.
+                        procedure Apart (Other : Chain_Order; Mv : Move; Median : out Real; Count : out Natural) is
+                           Change : constant Real_Array := Change_Of (Mv);
+                           T1 : constant Rigid := Eye_At (Joints, Order, Change);
+                           T2 : constant Rigid := Eye_At (Joints, Other, Change);
+                           U1, V1, U2, V2 : Real;
+                           A1, A2 : Boolean;
+                        begin
+                           Count := 0;
+                           for P in 1 .. Tracks loop
+                              if Has (P) then
+                                 Project (Lens0, Transpose (T1.Rotation) * (Point_Of (P) - T1.Translation), U1, V1, A1);
+                                 Project (Lens0, Transpose (T2.Rotation) * (Point_Of (P) - T2.Translation), U2, V2, A2);
+                                 if A1 and then A2
+                                   and then U1 >= 0.0 and then U1 < Real (Width) and then V1 >= 0.0 and then V1 < Real (Height)
+                                   and then U2 >= 0.0 and then U2 < Real (Width) and then V2 >= 0.0 and then V2 < Real (Height)
+                                 then
+                                    Count := Count + 1;
+                                    Dist (Count) := Sqrt ((U1 - U2) ** 2 + (V1 - V2) ** 2);
+                                 end if;
+                              end if;
+                           end loop;
+                           Median := (if Count > 0 then Driver.Stats.Median (Dist (1 .. Count)) else 0.0);
+                        end Apart;
+                     begin
+                        for X of Sight loop
+                           if X.Track <= Tracks and then not Has (X.Track) and then Depth (X.Track) > 0.0 then
+                              Has (X.Track) := True;
+                              Point_Of (X.Track) := Depth (X.Track) * Ray (Lens0, X.U0, X.V0);
+                              Points := Points + 1;
+                           end if;
+                        end loop;
+                        Dist := new Real_Array (1 .. Natural'Max (1, Tracks));
+                        for F in 1 .. Frames loop
+                           for J in 1 .. N loop
+                              Reach (J) := Real'Max (Reach (J), abs Change (F, J));
+                           end loop;
+                        end loop;
+                        for I in 1 .. N - 1 loop
+                           for J in I + 1 .. N loop
+                              declare
+                                 Share : Real := 1.0;
+                              begin
+                                 loop
+                                    for Si of Real_Array'[1.0, -1.0] loop
+                                       for Sj of Real_Array'[1.0, -1.0] loop
+                                          Move_Of.Append (Move'(I => I, J => J, Si => Si, Sj => Sj, Scale => Share));
+                                       end loop;
+                                    end loop;
+                                    Share := Share / 2.0;
+                                    exit when Share * Reach (I) < Visible (Visible'First + I - 1)
+                                      or else Share * Reach (J) < Visible (Visible'First + J - 1);
+                                 end loop;
+                              end;
+                           end loop;
+                        end loop;
+                        declare
+                           --  Per move, over the untold orders: how well it tells the one it tells least.
+                           Least_Of : Real_Array (1 .. Natural (Move_Of.Length)) := [others => Real'Last];
+                        begin
+                           for W in 1 .. Ways loop
+                              First_Of (W, C);
+                              loop
+                                 if C /= Order then
+                                    Score_Into (C, Own.all, Into.all, M, E);
+                                    if M < Real'Last and then not Smaller (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed))
+                                    then
+                                       Untold_Count := Untold_Count + 1;
+                                       for P of C loop
+                                          Untold_Orders.Append (P);
+                                       end loop;
+                                       declare
+                                          Best_Move  : Positive := 1;
+                                          Best_Power : Real := -1.0;
+                                          Best_Apart : Real := 0.0;
+                                          Best_Count : Natural := 0;
+                                          D          : Real;
+                                          Cnt        : Natural;
+                                       begin
+                                          for K in 1 .. Natural (Move_Of.Length) loop
+                                             Apart (C, Move_Of (K), D, Cnt);
+                                             --  How well the turn tells the two apart: the pixels between their places of
+                                             --  the points over a median's own error, which falls with the root of how many
+                                             --  points the median is of.
+                                             declare
+                                                Power : constant Real := D * Sqrt (Real (Cnt));
+                                             begin
+                                                if Power > Best_Power then
+                                                   Best_Power := Power;
+                                                   Best_Move := K;
+                                                   Best_Apart := D;
+                                                   Best_Count := Cnt;
+                                                end if;
+                                                Least_Of (K) := Real'Min (Least_Of (K), Power);
+                                             end;
+                                          end loop;
+                                          if Best_Apart > Driver.Conventions.Z * Here then
+                                             declare
+                                                Mv : constant Move := Move_Of (Best_Move);
+                                             begin
+                                                Tells (Mv.I, Mv.J) := Tells (Mv.I, Mv.J) + 1;
+                                                if Best_Power > Power_Of (Mv.I, Mv.J) then
+                                                   Power_Of (Mv.I, Mv.J) := Best_Power;
+                                                   Scale_Of (Mv.I, Mv.J) := Mv.Scale;
+                                                end if;
+                                             end;
+                                          end if;
+                                          Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: the order" & Image (C)
+                                                           & " is not told from" & Image (Order) & " (median "
+                                                           & Driver.Log.Image (M, 3) & " px against "
+                                                           & Driver.Log.Image (Here, 3) & "); the turn that tells them apart"
+                                                           & " most, " & Move_Image (Move_Of (Best_Move))
+                                                           & ", puts their points a median "
+                                                           & Driver.Log.Image (Best_Apart, 3) & " px apart over"
+                                                           & Best_Count'Image & " points");
+                                       end;
+                                    end if;
+                                 end if;
+                                 exit when not Next (C);
+                              end loop;
+                           end loop;
+                           if Untold_Count > 0 then
+                              declare
+                                 Best_Move : Positive := 1;
+                              begin
+                                 for K in 2 .. Natural (Move_Of.Length) loop
+                                    if Least_Of (K) > Least_Of (Best_Move) then
+                                       Best_Move := K;
+                                    end if;
+                                 end loop;
+                                 Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE:" & Untold_Count'Image
+                                                  & " orders not told from" & Image (Order) & " ("
+                                                  & Driver.Log.Image (Here, 3) & " px, over" & Points'Image
+                                                  & " placed points); the one turn that tells it from every one of them"
+                                                  & " most, " & Move_Image (Move_Of (Best_Move)));
+                              end;
+                           else
+                              Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: every order is told from" & Image (Order));
+                           end if;
+                        end;
+                        --  An order not told: the pairs Boot turns together (Untold) are the ones whose turns tell its
+                        --  untold orders apart from it, each the pair that tells one of them most, the pair that tells
+                        --  the most of them first, each at the share of its widest turns that told best (Untold_Scales).
+                        --  The joints next to each other along it were the ones before: s83's told order was one swap of
+                        --  2 and 4 away from the true one, and the turn that tells those two apart is of c2 with c4 (2.8
+                        --  px against 0.25), never turned while its untold orders were others'.
+                        if not Order_Is_Told then
+                           Untold.Clear;
+                           Untold_Scales.Clear;
+                           loop
+                              declare
+                                 Bi, Bj : Natural := 0;
+                              begin
+                                 for I in 1 .. N loop
+                                    for J in 1 .. N loop
+                                       if Tells (I, J) > 0 and then (Bi = 0 or else Tells (I, J) > Tells (Bi, Bj)) then
+                                          Bi := I;
+                                          Bj := J;
+                                       end if;
+                                    end loop;
+                                 end loop;
+                                 exit when Bi = 0;
+                                 Untold.Append (Joint_Pair'(Earlier => Bi, Later => Bj));
+                                 Untold_Scales.Append (Scale_Of (Bi, Bj));
+                                 Tells (Bi, Bj) := 0;
+                              end;
+                           end loop;
+                        end if;
+                        Free (Own);
+                        Free (Into);
+                        Free (Dist);
+                     end;
                   end if;
                   for J in 1 .. Ways loop
                      Free (Results (J).Order);

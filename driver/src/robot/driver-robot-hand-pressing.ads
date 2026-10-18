@@ -61,7 +61,10 @@ package Driver.Robot.Hand.Pressing is
    --  2: every aim "delivered 1.000 of" 1.36 to 1.46, "blocked", and no press was made in the whole boot).
 
    procedure Aim
-     (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed; Yaw : Real := 0.0);
+     (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed; Yaw : Real := 0.0;
+      Shift : Vec3 := [0.0, 0.0, 0.0]);
+   --  Shift moves the whole aim by that much, in the arm's frame (Aim_Reaching: across the table, to where nothing
+   --  stands).
    --  The tool turned about the eye (a point of the tool frame, so that the
    --  eye keeps its view) by the least rotation that points Along, a
    --  direction of the tool frame, into the table, and a plan to get there.

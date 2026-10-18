@@ -1,5 +1,6 @@
 with Ada.Exceptions;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Numerics.Float_Random;
 with Ada.Unchecked_Deallocation;
 with Driver.Bytes;
 with Driver.Clock;
@@ -26,6 +27,7 @@ with Driver.Robot.Kinematics;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Kinematics.Fit;
+with Driver.Robot.Kinematics.Beacon;
 with Ada.Strings.Unbounded;
 with Driver.Robot.Channels;
 with Driver.Robot.Hand;
@@ -4724,7 +4726,7 @@ package body Driver.Robot.Tests is
      (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0; Track_Error : Real := 0.0;
       Local_Error : Real := 0.0; Pending : Boolean := False; Drawn : Boolean := False;
       Matcher_Noise : Real := 0.2; Kept_Share : Real := 1.0; Either : Boolean := False; Distortion : Real := 0.0;
-      Quantum : Real := 0.0; Relief : Real := 0.0; Order_Told_Needed : Boolean := True)
+      Quantum : Real := 0.0; Relief : Real := 0.0; Order_Needed : Boolean := True)
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N       : constant := 6;
@@ -4957,14 +4959,12 @@ package body Driver.Robot.Tests is
                end;
             end loop;
          end if;
-         --  The order where the sightings tell it (Order_Told), and the eye where it rests on the order: a fit that
-         --  says the order is not told gives the best of the orders, no more, and a pose no keyframe had is told as
-         --  well as that. Order_Told_Needed: the sweep's keyframes tell the order.
-         if Order_Told_Needed then
-            Check (Report.Order_Told, "the order of the joints along the arm is not told (" & Chain_Text (Chain)
-                   & " the best of them)");
-         end if;
-         if Report.Order_Told then
+         --  The order, and the eye where it rests on the order: where the sweep's keyframes leave the true order the
+         --  best (Order_Needed), the best is the true one, told or not; and a told one is right. Whether keyframes tell
+         --  an order at Z is the order exams' (robot.order.exam): these sweeps turn no pair the fit names (the boot's
+         --  Pair_Shares), and the fits that told an order from them told it by sightings counted one by one, the test
+         --  that told s83's wrong order (servo seed 6 of the fake robot, 10-18).
+         if Order_Needed or else Report.Order_Told then
          Check (Fit."=" (Chain, Want_Chain), "the joints along the arm, by their readings, came out as " & Chain_Text (Chain)
                 & ", not " & Chain_Text (Want_Chain));
          --  The eye at a pose no keyframe had, lengths in the fit's units.
@@ -7572,11 +7572,11 @@ package body Driver.Robot.Tests is
    procedure Kinematics_In_A_Desktop_Regime is
    begin
       Synthetic_Sweep (0.3, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Either => True,
-                       Order_Told_Needed => False);
-      Synthetic_Sweep (1.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Order_Told_Needed => False);
+                       Order_Needed => False);
+      Synthetic_Sweep (1.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Order_Needed => False);
       --  The same with a wide-angle wrist camera's barrel distortion.
       Synthetic_Sweep (1.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Distortion => -0.2,
-                       Order_Told_Needed => False);
+                       Order_Needed => False);
    end Kinematics_In_A_Desktop_Regime;
 
    --  The same arm, every keyframe's points sharing an error of 0.3 pixels
@@ -7719,6 +7719,316 @@ package body Driver.Robot.Tests is
    begin
       Fit_Of_A_Recording ("tests/data/refit_with_presses.txt", Drawn => True);
    end Kinematics_On_A_Drawn_Recording;
+
+   --  The order exam (10-18): many arms, each swept as Synthetic_Sweep sweeps its own (every joint alone at six
+   --  levels, then every joint at once in seven cells), each a draw about that arm: its axes tilted, its joints'
+   --  places scaled and moved, its readings in a drawn order and unit; its sightings with the matcher's noise, an
+   --  error shared by a keyframe and a smooth field of each keyframe's own. Fitted; while the fit does not tell the
+   --  order, the pairs it names (Fit_Report.Untold) are turned together as Boot turns them, in every row of a
+   --  Hadamard matrix of the pair's signs at the sweep's widest level, and the arm fitted again with them; until
+   --  the order is told or no pair is named that was not turned. Scored against each arm's true order: told and
+   --  right, told and wrong (the fit claims what is false), not told (its best order right or wrong).
+   procedure Order_Exam_At
+     (Width, Height : Positive; Focal, Kept_Share, Matcher_Noise, Frame_Error, Tilt : Real; Seed : Long_Long_Integer)
+   is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      N        : constant := 6;
+      Arms     : constant := 12;
+      Columns  : constant := 16;
+      Rows     : constant := 12;
+      Widest   : constant Real := 0.2;
+      Levels   : constant Real_Array := [0.25 * Widest, -0.25 * Widest, 0.5 * Widest, -0.5 * Widest, Widest, -Widest];
+      Cells    : constant := 7;
+      Noise    : constant Real := Matcher_Noise;
+      Lens     : constant Fit.Lens := (Fx => Focal, Fy => Focal, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0,
+                                       K1 => 0.0, K2 => 0.0);
+      Table    : constant Vec3 := [0.0, -0.6, -0.8];
+      Base_Axes : constant array (1 .. N) of Vec3 :=
+        [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
+      Base_Points : constant array (1 .. N) of Vec3 :=
+        [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
+      Most_Frames : constant := 1 + N * 6 + Cells + 4 * N * (N - 1) / 2;
+      Told_Right, Told_Wrong, Untold_Right, Untold_Wrong, Unfitted : Natural := 0;
+   begin
+      for Arm in 1 .. Arms loop
+         declare
+            Rng      : Generator := (State => Seed + 7919 * Long_Long_Integer (Arm));
+            Keep_Rng : Generator := (State => Seed + 104_729 * Long_Long_Integer (Arm));
+            Kept_Point : constant array (1 .. Columns * Rows) of Boolean :=
+              [for K in 1 .. Columns * Rows => Kept_Share >= 1.0 or else Uniform (Keep_Rng) < Kept_Share];
+            Truth    : Fit.Joint_Array (1 .. N);
+            Order_Of : array (1 .. N) of Positive;
+            Gain     : Real_Array (1 .. N);
+            Changes  : Real_Matrix (1 .. Most_Frames, 1 .. N) := [others => [others => 0.0]];
+            Frames   : Natural := 1;
+            type Sighting_Access is access Fit.Sighting_Array;
+            All_Seen : constant Sighting_Access := new Fit.Sighting_Array (1 .. Most_Frames * Columns * Rows);
+            Seen     : Natural := 0;
+            Turned   : array (1 .. N, 1 .. N) of Boolean := [others => [others => False]];
+            Rounds   : Natural := 0;
+            Want_Chain : Fit.Chain_Order (1 .. N);
+            Joints   : Fit.Joint_Array (1 .. N);
+            Chain    : Fit.Chain_Order (1 .. N);
+            Found    : Fit.Lens;
+            Report   : Fit.Fit_Report;
+
+            --  The sightings of the keyframes from First on, at the true arm, with their errors.
+            procedure Sight (First : Positive) is
+            begin
+               for F in First .. Frames loop
+                  declare
+                     D : Real_Array (1 .. N);
+                     T : Rigid;
+                     Shared_U : constant Real := Frame_Error * Gaussian (Rng);
+                     Shared_V : constant Real := Frame_Error * Gaussian (Rng);
+                  begin
+                     for J in 1 .. N loop
+                        D (J) := Changes (F, J);
+                     end loop;
+                     T := Inverse (Fit.Eye_At (Truth, Along (Truth), D));
+                     for Gy in 1 .. Rows loop
+                        for Gx in 1 .. Columns loop
+                           declare
+                              K  : constant Positive := (Gy - 1) * Columns + Gx;
+                              U0 : constant Real := (Real (Gx) - 0.5) * Real (Width) / Real (Columns);
+                              V0 : constant Real := (Real (Gy) - 0.5) * Real (Height) / Real (Rows);
+                              H  : constant Vec3 := Fit.Ray (Lens, U0, V0);
+                              X  : constant Vec3 := (-1.0 / Real'(Unit (Table) * H)) * H;
+                              U, V : Real;
+                              Ahead : Boolean;
+                           begin
+                              Fit.Project (Lens, T * X, U, V, Ahead);
+                              U := U + Noise * Gaussian (Rng) + Shared_U;
+                              V := V + Noise * Gaussian (Rng) + Shared_V;
+                              if Ahead and then U in 0.0 .. Real (Width) and then V in 0.0 .. Real (Height)
+                                and then Kept_Point (K)
+                              then
+                                 Seen := Seen + 1;
+                                 All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V,
+                                                     Own => 0.0, Own_Freedom => 0, others => <>);
+                              end if;
+                           end;
+                        end loop;
+                     end loop;
+                  end;
+               end loop;
+            end Sight;
+
+            procedure Fit_Now is
+               Given : Real_Matrix (1 .. Frames, 1 .. N);
+               Asked : Fit.Flag_Matrix (1 .. Frames, 1 .. N);
+            begin
+               for F in 1 .. Frames loop
+                  for I in 1 .. N loop
+                     Given (F, I) := Gain (I) * Changes (F, Order_Of (I));
+                     Asked (F, I) := Changes (F, Order_Of (I)) /= 0.0;
+                  end loop;
+               end loop;
+               Fit.Fit (Given, Asked, [for I in 1 .. N => abs Gain (I) * 0.01], All_Seen (1 .. Seen), Width, Height, 0,
+                        Joints, Chain, Found, Report);
+            end Fit_Now;
+         begin
+            --  The arm: each axis tilted and each joint's place scaled and moved by a draw.
+            for J in 1 .. N loop
+               declare
+                  W : constant Vec3 := Unit (Base_Axes (J) + Tilt * Vec3'[Gaussian (Rng), Gaussian (Rng), Gaussian (Rng)]);
+                  P : constant Vec3 := (0.6 + 0.8 * Uniform (Rng)) * Base_Points (J)
+                    + 0.03 * Vec3'[Gaussian (Rng), Gaussian (Rng), Gaussian (Rng)];
+               begin
+                  Truth (J) := (W => W, P => P - Real'(P * W) * W, C => 1.0, Slide => False);
+               end;
+            end loop;
+            --  The readings: a drawn order (Fisher-Yates) and unit, a power of two of either sign.
+            for I in 1 .. N loop
+               Order_Of (I) := I;
+            end loop;
+            for I in reverse 2 .. N loop
+               declare
+                  J : constant Positive := 1 + Natural (Real'Floor (Uniform (Rng) * Real (I))) mod I;
+                  X : constant Positive := Order_Of (I);
+               begin
+                  Order_Of (I) := Order_Of (J);
+                  Order_Of (J) := X;
+               end;
+            end loop;
+            for I in 1 .. N loop
+               Gain (I) := (if Uniform (Rng) < 0.5 then -1.0 else 1.0) * 2.0 ** (Integer (Real'Floor (Uniform (Rng) * 5.0)) - 2);
+               Want_Chain (Order_Of (I)) := I;
+            end loop;
+            --  The sweep: every joint alone at its levels, then the cells.
+            for J in 1 .. N loop
+               for L in Levels'Range loop
+                  Frames := Frames + 1;
+                  Changes (Frames, J) := Levels (L);
+               end loop;
+            end loop;
+            for Row in 1 .. Cells loop
+               Frames := Frames + 1;
+               for J in 1 .. N loop
+                  declare
+                     Bits : Natural := 0;
+                     R    : Natural := Row;
+                     C    : Natural := J;
+                  begin
+                     while R > 0 and then C > 0 loop
+                        if R mod 2 = 1 and then C mod 2 = 1 then
+                           Bits := Bits + 1;
+                        end if;
+                        R := R / 2;
+                        C := C / 2;
+                     end loop;
+                     Changes (Frames, J) := (if Bits mod 2 = 0 then 0.25 else -0.25) * Widest;
+                  end;
+               end loop;
+            end loop;
+            Sight (2);
+            loop
+               Fit_Now;
+               Rounds := Rounds + 1;
+               exit when not Report.Fitted or else Report.Order_Told;
+               declare
+                  Fresh : Natural := 0;
+                  First : constant Positive := Frames + 1;
+               begin
+                  for P of Report.Untold loop
+                     if not Turned (P.Earlier, P.Later) then
+                        Turned (P.Earlier, P.Later) := True;
+                        Fresh := Fresh + 1;
+                        --  The pair's joints by the truth's numbering: the readings are drawn from them.
+                        for S1 of Real_Array'[1.0, -1.0] loop
+                           for S2 of Real_Array'[1.0, -1.0] loop
+                              Frames := Frames + 1;
+                              Changes (Frames, Order_Of (P.Earlier)) := S1 * Widest;
+                              Changes (Frames, Order_Of (P.Later)) := S2 * Widest;
+                           end loop;
+                        end loop;
+                     end if;
+                  end loop;
+                  exit when Fresh = 0;
+                  Sight (First);
+               end;
+            end loop;
+            declare
+               Right : constant Boolean := Report.Fitted and then Fit."=" (Chain, Want_Chain);
+            begin
+               if not Report.Fitted then
+                  Unfitted := Unfitted + 1;
+               elsif Report.Order_Told and then Right then
+                  Told_Right := Told_Right + 1;
+               elsif Report.Order_Told then
+                  Told_Wrong := Told_Wrong + 1;
+               elsif Right then
+                  Untold_Right := Untold_Right + 1;
+               else
+                  Untold_Wrong := Untold_Wrong + 1;
+               end if;
+               Driver.Log.Line (Driver.Log.Robot, "order exam: arm" & Arm'Image & ": true" & Chain_Text (Want_Chain)
+                                & ", fitted" & (if Report.Fitted then Chain_Text (Chain) else " (not fitted: "
+                                                & Ada.Strings.Unbounded.To_String (Report.Why) & ")")
+                                & (if Report.Order_Told then ", told" else ", not told") & " after" & Rounds'Image
+                                & " fits and" & Natural'Image ((Frames - 1 - N * 6 - Cells) / 4) & " pairs turned: "
+                                & (if Right then "right" else "wrong"));
+            end;
+         end;
+      end loop;
+      Driver.Log.Line (Driver.Log.Robot, "order exam:" & Arms'Image & " arms: told and right" & Told_Right'Image
+                       & ", told and wrong" & Told_Wrong'Image & ", not told but right" & Untold_Right'Image
+                       & ", not told and wrong" & Untold_Wrong'Image & ", not fitted" & Unfitted'Image);
+      Check (Told_Wrong = 0, "the fit told a wrong order for" & Told_Wrong'Image & " arms");
+   end Order_Exam_At;
+
+   procedure Order_Exam is
+   begin
+      Order_Exam_At (640, 480, 400.0, 1.0, 0.3, 0.1, 0.3, 1000);
+   end Order_Exam;
+
+   --  As the fake robot's eyes are: 320 by 240 pixels, a focal length of about 143 (its wrist eyes'), a third of the
+   --  points textured (a white table leaves the aligner a fifth of its query points, R6), the matcher's noise 0.5 px
+   --  and a keyframe's shared error 0.2, and the arms' axes tilted further from the template.
+   --  A fixed eye placed by a beacon on the tool (Kinematics.Beacon): an eye 0.8 above and behind a desk, looking
+   --  down at 0.6 rad, a beacon 0.1 ahead of the tool's eye, the tool held at poses drawn over a 0.5 square at
+   --  heights 0.05 to 0.3 and turned up to 0.4 rad about each axis, the centres seen with Gaussian errors of the
+   --  sigma each states (1 to 2 pixels); the eye's lens, pose and the beacon come back within Z of their sigmas.
+   procedure Beacon_Placement is
+      use Driver.Numerics;
+      use Driver.Numerics.Arrays;
+      package Beacon renames Driver.Robot.Kinematics.Beacon;
+      Gen    : Ada.Numerics.Float_Random.Generator;
+      Truth_Lens : constant Driver.Robot.Kinematics.Fit.Lens :=
+        (Fx => 300.0, Fy => 290.0, Cx => 330.0, Cy => 235.0, K1 => 0.0, K2 => 0.0);
+      Down   : constant Real := 0.6;
+      --  The camera: z ahead tilted down toward the desk (+y in the world), x right.
+      Truth  : constant Rigid :=
+        (Rotation    => Exp (Vec3'[-(Ada.Numerics.Pi / 2.0 + Down), 0.0, 0.0]),
+         Translation => [0.0, -0.6, 0.8]);
+      Truth_Beacon : constant Vec3 := [0.01, 0.02, 0.1];
+      N      : constant := 40;
+      Seen   : Beacon.Sighting_Array (1 .. N);
+      Kept   : Natural := 0;
+      Result : Beacon.Report;
+      function Draw (Low, High : Real) return Real is
+        (Low + (High - Low) * Real (Ada.Numerics.Float_Random.Random (Gen)));
+      function Gaussian return Real is
+        (Ada.Numerics.Long_Elementary_Functions.Sqrt
+           (-2.0 * Ada.Numerics.Long_Elementary_Functions.Log (Real'Max (Real'Model_Small, Draw (0.0, 1.0))))
+         * Ada.Numerics.Long_Elementary_Functions.Cos (2.0 * Ada.Numerics.Pi * Draw (0.0, 1.0)));
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 11);
+      while Kept < N loop
+         declare
+            Carrier : constant Rigid :=
+              (Rotation    => Exp (Vec3'[Draw (-0.4, 0.4), Draw (-0.4, 0.4), Draw (-0.4, 0.4)])
+                              * Exp (Vec3'[Ada.Numerics.Pi, 0.0, 0.0]),
+               Translation => [Draw (-0.25, 0.25), Draw (0.0, 0.5), Draw (0.05, 0.3)]);
+            X      : constant Vec3 := Carrier * Truth_Beacon;
+            In_Eye : constant Vec3 := Transpose (Truth.Rotation) * (X - Truth.Translation);
+            U, V   : Real;
+            Front  : Boolean;
+            Sigma  : constant Real := Draw (1.0, 2.0);
+         begin
+            Driver.Robot.Kinematics.Fit.Project (Truth_Lens, In_Eye, U, V, Front);
+            if Front and then U > 0.0 and then U < 640.0 and then V > 0.0 and then V < 480.0 then
+               Kept := Kept + 1;
+               Seen (Kept) := (Carrier => Carrier, U => U + Sigma * Gaussian, V => V + Sigma * Gaussian, Sigma => Sigma);
+            end if;
+         end;
+      end loop;
+      Beacon.Fit_Eye (Seen, 640, 480, Result);
+      Check (Result.Determined, "the eye is not placed: " & Ada.Strings.Unbounded.To_String (Result.Why));
+      if Result.Determined then
+         declare
+            function Sd (T : Positive) return Real is (Ada.Numerics.Long_Elementary_Functions.Sqrt (Result.Covariance (T, T)));
+            Off_Centre : constant Vec3 := Result.Pose.Translation - Truth.Translation;
+            Off_Turn   : constant Vec3 := Driver.Numerics.Log (Transpose (Result.Pose.Rotation) * Truth.Rotation);
+            Off_Beacon : constant Vec3 := Result.Beacon - Truth_Beacon;
+         begin
+            Driver.Log.Line (Driver.Log.Robot, "beacon test: focal" & Result.Lens.Fx'Image & Result.Lens.Fy'Image
+                             & " centre off" & Real'Image (abs Off_Centre) & " turn off" & Real'Image (abs Off_Turn)
+                             & " beacon off" & Real'Image (abs Off_Beacon) & " scatter" & Result.Scatter'Image
+                             & " used" & Result.Used'Image);
+            Check (abs (Ada.Numerics.Long_Elementary_Functions.Log (Result.Lens.Fx / Truth_Lens.Fx))
+                   <= Driver.Conventions.Z * Sd (1), "the focal length across is off its sigma");
+            Check (abs (Ada.Numerics.Long_Elementary_Functions.Log (Result.Lens.Fy / Truth_Lens.Fy))
+                   <= Driver.Conventions.Z * Sd (2), "the focal length down is off its sigma");
+            for A in 1 .. 3 loop
+               Check (abs Off_Centre (A) <= Driver.Conventions.Z * Sd (7 + A),
+                      "the camera's centre is off its sigma along axis" & A'Image & ":" & Off_Centre (A)'Image
+                      & " against" & Sd (7 + A)'Image);
+               Check (abs Off_Beacon (A) <= Driver.Conventions.Z * Sd (10 + A),
+                      "the beacon is off its sigma along axis" & A'Image & ":" & Off_Beacon (A)'Image
+                      & " against" & Sd (10 + A)'Image);
+               Check (abs Off_Turn (A) <= Driver.Conventions.Z * Sd (4 + A),
+                      "the camera's turn is off its sigma about axis" & A'Image & ":" & Off_Turn (A)'Image
+                      & " against" & Sd (4 + A)'Image);
+            end loop;
+         end;
+      end if;
+   end Beacon_Placement;
+
+   procedure Order_Exam_Hard is
+   begin
+      Order_Exam_At (320, 240, 143.0, 0.33, 0.5, 0.2, 0.5, 5000);
+   end Order_Exam_Hard;
 
    procedure Kinematics_Of_A_Drawn_Synthetic_Arm is
    begin
@@ -8275,6 +8585,10 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.kinematics.drawn_recording", "the same recording with its readings in another order "
                              & "and in other units is not determined, its lens off by a percent, or its joints' order "
                              & "along the arm not found", Kinematics_On_A_Drawn_Recording'Access);
+      Driver.Tests.Register ("robot.order.exam", "the order exam's arms come out with a wrong order told", Order_Exam'Access);
+      Driver.Tests.Register ("robot.beacon.place", "a fixed eye placed by a beacon on the tool comes back off its own "
+                             & "sigmas", Beacon_Placement'Access);
+      Driver.Tests.Register ("robot.order.exam_hard", "the order exam's arms, seen as the fake robot's eyes see, come out with a wrong order told", Order_Exam_Hard'Access);
       Driver.Tests.Register ("robot.kinematics.drawn", "the synthetic arm with its readings in another order and in "
                              & "other units comes out with its axes, scales, lens, order or eye at a new pose wrong",
                              Kinematics_Of_A_Drawn_Synthetic_Arm'Access);

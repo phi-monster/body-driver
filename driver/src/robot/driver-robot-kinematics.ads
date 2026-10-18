@@ -155,6 +155,14 @@ private package Driver.Robot.Kinematics is
    --  larger (Fit_Report's Untold): what the order lacks the evidence of. None when the order is told, or every
    --  such swap is told.
 
+   function Contested_Scales (M : Model; A : Arm_Id) return Real_Vectors.Vector;
+   --  Per pair of Contested_Pairs, the share of its joints' widest turns it is best turned by (Fit_Report's
+   --  Untold_Scales).
+
+   function Untold_Count (M : Model; A : Arm_Id) return Natural;
+   --  How many orders of its joints the arm's fit does not tell from its own (Fit_Report's Untold_Orders); 0 when
+   --  told or not fitted.
+
    function Order_Told (M : Model; A : Arm_Id) return Boolean;
    --  The arm is fitted and its sightings tell its joints' order, not only that it is the best of the orders
    --  (Fit.Fit_Report's Order_Told).
@@ -191,6 +199,11 @@ private package Driver.Robot.Kinematics is
    --  is significant against the height's own sigma (the track's depth and the plane's there). A press lands on
    --  what stands there, not on the table (A79's hand 1: five presses of eleven never met the table, item 7). 0
    --  without a fit or a table.
+
+   procedure Clear_Spot (M : Model; A : Arm_Id; Near : Vec3; Within : Real; Spot : out Vec3; Found : out Boolean);
+   --  Of the arm's tracks that lie on its table (Table_On), the one nearest Near across the table's normal with no
+   --  track standing above the table within Within of it (Standing_Near): a place where a press meets the table and
+   --  nothing on it. Found is False without a fit, a table, or such a track.
 
    procedure In_World (M : Model; A : Arm_Id; Placement : out Rigid; Scale : out Real; Known : out Boolean);
    --  The arm's reference frame in the world: X_world = Placement * (Scale *

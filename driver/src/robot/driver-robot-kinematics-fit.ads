@@ -273,6 +273,14 @@ package Driver.Robot.Kinematics.Fit is
       Untold     : Joint_Pair_Lists.Vector;  --  when stage 4 did not tell the order: the joints next to each other along
                                              --  the best order whose swap leaves residuals not significantly the
                                              --  larger; empty when told, or when no stage 4 was run
+      Untold_Scales : Real_Lists.Vector;
+      --  Per pair of Untold: the share of each joint's widest turn the pair is best turned by (the turn that tells the
+      --  untold orders apart most, by the pixels between their places of the points times the root of how many stay in
+      --  the picture).
+      Untold_Orders : Joint_Lists.Vector;
+      --  Every order of the joints the sightings do not tell from the best (stage 4's search over all of them),
+      --  one after another, each as many joints long as the fit has: where the arm may be at a keyframe still to
+      --  be aligned, as far as the order goes (Kinematics.Offer_Of); empty when told, or when no stage 4 was run.
       Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
       Focal_Sigma : Real := Real'Last; --  the uncertainty of the focal length across
       Covariance : Real_Lists.Vector;  --  of the parameters above, row by row, from the errors the residuals

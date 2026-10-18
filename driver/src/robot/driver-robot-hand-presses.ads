@@ -88,7 +88,10 @@ package Driver.Robot.Hand.Presses is
       Press   : out Event;
       Retargeted : Boolean := False;
       Asked   : Pose_Estimate := (others => <>);
-      Step_Of : Step_Function := null);
+      Step_Of : Step_Function := null;
+      Held    : Boolean := False);
+   --  Held: the arm's command at the beat asks it to stand where it reads, by no step the readings tell; a block's
+   --  hold, the let-go (Observe's Driven).
    --  One beat of one arm, Arm its readings; Blocked the verdict on its
    --  latest push, Pushing that push still under way, Still its own readings
    --  at rest, Retargeted a new command for the arm took effect at the beat

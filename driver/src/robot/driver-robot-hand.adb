@@ -803,7 +803,8 @@ package body Driver.Robot.Hand is
                        Shapes.From_Moves (Moves, (From => (if Partial then Tips (Count) else Closed_Tip), To => Open_Tip),
                                           Line'Access, F.Sigma);
                   begin
-                     return Shapes.Fit (Mount.Pose.Translation, Seen, 1, Seen'Last, Bordered, Closed_Is_End => not Partial);
+                     return Shapes.Fit (Mount.Pose.Translation, Seen, 1, Seen'Last, Bordered, Closed_Is_End => not Partial,
+                                        Pixels => Open_Mask);
                   end;
                end;
             end;
@@ -1360,6 +1361,21 @@ package body Driver.Robot.Hand is
          G          : constant Group_Id := Arm_Group (M, R.Arm);
          Retargeted : constant Boolean := Driver.Robot.Channels.Target_Changed (M, G, Natural (O.Beat));
          Asked      : Pose_Estimate;
+         --  The command holds the arm where it reads: no channel's target is off its reading by a step the readings
+         --  tell (Channels.Visible).
+         function Holding return Boolean is
+         begin
+            if not Driver.Robot.Channels.Has_Target (M, G, Natural (O.Beat))
+              or else not Driver.Robot.Channels.Has_Reading (M, G, Natural (O.Beat))
+            then
+               return False;
+            end if;
+            return not Driver.Robot.Channels.Visible
+              (M, G, [for C in 1 .. Group_Size (M, G) =>
+                        Driver.Robot.Channels.Target (M, G, Natural (O.Beat), C)
+                        - Driver.Robot.Channels.Reading (M, G, Natural (O.Beat), C)]);
+         end Holding;
+         Held       : constant Boolean := Holding;
       begin
          if Retargeted and then Driver.Robot.Channels.Has_Target (M, G, Natural (O.Beat)) then
             declare
@@ -1379,7 +1395,7 @@ package body Driver.Robot.Hand is
                                             O.Readings.Element (G),
                                             (if R.Group > 0 then O.Readings.Element (R.Group) else [1 .. 0 => 0.0]),
                                             Found, Press, Retargeted => Retargeted, Asked => Asked,
-                                            Step_Of => Step_Of'Unrestricted_Access);
+                                            Step_Of => Step_Of'Unrestricted_Access, Held => Held);
       end;
       if not Found then
          return;

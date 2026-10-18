@@ -193,6 +193,8 @@ driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Best.M11, UV => Best.M12, 
 driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	a warp that moves nothing is the identity: its diagonal is one
 driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	the other diagonal entry's identity
 driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Guess.W1 * (Slope_1.UU - 1.0) + Guess.W2 * (Slope_2.UU - 1.0),	1.0	math	the weights of the fields are weights of the change from the identity: the one stays
+driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Two_Best.M11, UV => Two_Best.M12, VU => Two_Best.M21, VV => 1.0 + Two_Best.M22),	1.0	math	the field's linear part: the identity plus its gradient
+driver-alignment-keyframes.adb	Linear => (UU => 1.0 + Two_Best.M11, UV => Two_Best.M12, VU => Two_Best.M21, VV => 1.0 + Two_Best.M22),	1.0	math	the field's linear part: the identity plus its gradient
 driver-alignment-keyframes.adb	M (R, 1) := 1.0;	1.0	math	an affine field's constant term has the basis one
 driver-alignment-keyframes.adb	M : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	the three points of a sample, the three terms of an affine field
 driver-alignment-keyframes.adb	M : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	the three points of a sample, the three terms of an affine field
@@ -268,6 +270,7 @@ driver-alignment-keyframes.adb	if 2 * N >= Side * Side then	2	math	at least half
 driver-alignment-keyframes.adb	if 2 * Present < Side * Side then	2	math	at least half the patch: twice the count reaches the patch's size (Align_At)
 driver-alignment-keyframes.adb	if Count > 0 and then Window_Radius (Typical) + 1.0 > Real (Half_Patch (C.Width, C.Height)) then	1.0	math	a pixel to read the window across, as Align judges a window a patch carries
 driver-alignment-keyframes.adb	if Drawable < 2 then	2	math	a turn, a scale and a shift are drawn from two places
+driver-alignment-keyframes.adb	if Driver.Uncertain.Significant (D, Noises (J) * Sqrt (2.0)) then	2.0	statistics	the noise of a difference of two readings
 driver-alignment-keyframes.adb	if N < 3 then	3	math	an affine map along one axis rests on three places at the least
 driver-alignment-keyframes.adb	if Rows < 2 * P then	2	statistics	as many points as twice the terms: as many degrees of freedom as terms
 driver-alignment-keyframes.adb	if Seen < 2 * Terms then	2	statistics	as many points as twice the terms: as many degrees of freedom as terms
@@ -499,6 +502,7 @@ driver-brain-service.adb	Thousandths : constant := 1000.0;	1000.0	format	boxes a
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
 driver-clock.adb	function Nanoseconds_Of (S : Duration) return Long_Long_Integer is (Long_Long_Integer (Real (S) * 1.0e9));	1.0e9	format	nanoseconds per second (the recording format counts nanoseconds)
+driver-conventions.ads	Axis_Directions : constant := 2562;	2562	numerics	the hinge scan's directions, 10 x 4 ** 4 + 2 of a geodesic sphere: 0.07 rad apart, finer than the two views tell a jaw's hinge (0.15 rad on hand.shape.turn)
 driver-conventions.ads	Initial_Damping : constant := 1.0;	1.0	numerics	a fit starts with its damping as large as the curvature itself: a first step is at most half the Gauss-Newton step
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
 driver-conventions.ads	Z : constant := 3.0;	3.0	statistics	the significance level of the one test (documented in Conventions)
@@ -1008,15 +1012,15 @@ driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first ver
 driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log names
 driver-robot-boot.adb	& "" & Driver.Log.Image (Pulls (G, E), 2));	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& "" & Driver.Log.Image (Rests (G, E), 2)	2	format	digits printed in a log line or a message
-driver-robot-boot.adb	& "" & Driver.Log.Image (Step, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if Per_Unit (C) > 0.0 then Driver.Log.Image (Per_Unit (C), 4) & "" else "")	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if Unswept.Length = 1 then ""	1	structure	one arm left to sweep: alone, not a lane
 driver-robot-boot.adb	& Driver.Log.Image (Least (C), 3) & ""	3	format	digits printed in a log line or a message
-driver-robot-boot.adb	& Levels'Image & "" & Driver.Log.Image (Off, 3)	3	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (Of_Reach, 3) & "");	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Plan_Text & "" & Driver.Log.Image (Half, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (S) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
 driver-robot-boot.adb	((Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (Channel)	2.0	structure	half the gap: the next halfway level must be a step a keyframe counts
+driver-robot-boot.adb	(M, 1, [for C in 1 .. Group_Size (M, Arm_G) => Readings (F, C)]).Translation);	1	structure	the first arm, whose frame is the world
 driver-robot-boot.adb	(Text, "" & C'Image & "" & Driver.Log.Image (First (C), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
@@ -1027,7 +1031,11 @@ driver-robot-boot.adb	Arm : Arm_Id := 1;	1	structure	the default of a record fie
 driver-robot-boot.adb	Col := Col / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Descending : array (1 .. 2 * Size) of Boolean := [others => False];	2	structure	two pushes per joint, one each way
+driver-robot-boot.adb	Driver.Log.Line (Driver.Log.Robot, ""	"1	format	words of a log line or a message
 driver-robot-boot.adb	Driver.Robot.Motion.Gather_Rest (M, 1);	1	structure	one probe runs moves back and forth on the eyes' verdicts: the ladder of every channel togetherdriver-robot-boot.adb
+driver-robot-boot.adb	Driver.Robot.Motion.Hold_For_Keyframe (M, 1);	1	structure	the first arm, whose frame is the world
+driver-robot-boot.adb	Driver.Robot.Motion.Hold_For_Keyframe (M, 1);	1	structure	the first arm, whose frame is the world
+driver-robot-boot.adb	Driver.Robot.Motion.Hold_For_Keyframe (M, 1);	1	structure	the first arm, whose frame is the world
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	0.0	structure	from zero: the first step is the smallest every reading can tell
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	1.0	structure	the positive direction for every channel
 driver-robot-boot.adb	Eye : Eye_Id := 1;	1	structure	a placeholder, set before it is read
@@ -1046,11 +1054,10 @@ driver-robot-boot.adb	Levels : array (1 .. 2 * Size) of Level_Vectors.Vector;	2	
 driver-robot-boot.adb	Lost_Least : Real_Array (1 .. 2 * Size) := [others => Real'Last];	2	structure	two pushes a channel: one each way
 driver-robot-boot.adb	M.Groups (R.Ref.Group).Seen_At.Append (0.0);	0.0	math	a channel no probe saw move an eye: no turn
 driver-robot-boot.adb	Needed : array (1 .. Count, 1 .. Natural'Max (1, Most_Channels)) of Boolean :=	1	structure	an array of at least one column: a group of no channels needs none
+driver-robot-boot.adb	Next : Positive := 1;	1	structure	the reference keyframe first
 driver-robot-boot.adb	Now (G, E) := -1;	1	structure	no count: an eye that was not open after the round before
 driver-robot-boot.adb	Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)),	2.0	statistics	the standard error of a scale estimate from Dof degrees of freedom is the scale over the root of twice Dof
-driver-robot-boot.adb	Off : Real := 2.0 * Reached (C);	2.0	numerics	doubling search from the sweep: the sweep held the turn it followed the joint to, the swing goes on from the next doubling of it, and the turn that carries the arm across a fixed eye or to its end is reached within a factor two in a number of levels logarithmic in it
 driver-robot-boot.adb	Off := (if Per_Unit (P.Channel) > 0.0 then Real'Max (2.0 * Off, Patch / Per_Unit (P.Channel))	2.0	structure	the ladder doubles: each level twice the one before
-driver-robot-boot.adb	Off := 2.0 * Off;	2.0	numerics	doubling search: the turn that carries the arm across a fixed eye or to its end is reached within a factor two in a number of levels logarithmic in it
 driver-robot-boot.adb	Offset (Count + 2) := First (C);	2	structure	the second of a channel's two pushes, the other way
 driver-robot-boot.adb	Offset (I) := (Followed_Most (I) + Lost_Least (I)) / 2.0;	2.0	structure	the ladder halves the gap between the widest followed and the least lost level
 driver-robot-boot.adb	Offset (I) := (Followed_Most (I) + Lost_Least (I)) / 2.0;	2.0	structure	the ladder halves the gap between the widest followed and the least lost level
@@ -1066,6 +1073,7 @@ driver-robot-boot.adb	Patch := 2.0 * Real (Driver.Alignment.Half_Patch (M.Eyes (
 driver-robot-boot.adb	Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))));	1	structure	the guessed hold begins at one beat, the unit, while the stream can tell no lag
 driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved,	1.0	structure	the first round pushes by the amounts as recognized, once
 driver-robot-boot.adb	R := R / 2;	2	math	the parity and the next bit of a row and a column
+driver-robot-boot.adb	Readings := new Pose_Readings (1 .. Natural'Max (1, Poses), 1 .. Group_Size (M, Arm_G));	1	structure	at least one row
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	2	format	two digits after the point in the log
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	3	format	three exponent digits in the log
 driver-robot-boot.adb	Rows : Positive := 1;	1	structure	a Sylvester matrix starts at order one
@@ -1080,11 +1088,15 @@ driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 el
 driver-robot-boot.adb	State (Count + 2) := Climbing;	2	structure	the second of a channel's two pushes, the other way
 driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
 driver-robot-boot.adb	State : array (1 .. 2 * Size) of Stop := [others => Blocked];	2	structure	two pushes a channel, one each way
+driver-robot-boot.adb	and then Driver.Robot.Hand.Arm_Of (H, Driver.Robot.Hand.Hand_Id (Id)) = 1	1	structure	the first arm, whose frame is the world
 driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));	2	structure	one more doubling of the push: the responding cells grew at most as the push did
 driver-robot-boot.adb	else 2.0 * Off);	2.0	structure	the ladder doubles: each level twice the one before
 driver-robot-boot.adb	elsif Per_Unit (P.Channel) > 0.0 and then 2.0 * Last.Offset * Per_Unit (P.Channel) > Half then	2.0	structure	the next level, twice this one, would move the view by more than half of it
 driver-robot-boot.adb	exit when Cell_Motion (2.0 * Scale) > Half;	2.0	structure	the cell's next level, twice its shares
+driver-robot-boot.adb	exit when Count > 1 and then not Unplaced;	1	structure	after the first pose
+driver-robot-boot.adb	function Pair_Shares (P : Joint_Pair; Of_Reach : Real := 1.0) return Real_Array is	1.0	structure	the whole of the widest offsets where the fit names no share
 driver-robot-boot.adb	if M.Beats >= 2 * Rest_Beats then	2	structure	the rest is compared with itself at every doubling of its beats, as the estimates are scheduled
+driver-robot-boot.adb	if M.Kinematics (K).Arm = 1 and then M.Kinematics (K).Result.Fitted then	1	structure	the first arm, whose frame is the world
 driver-robot-boot.adb	if N > 1 and then Fitted_Now and then not Told_Now then	1	structure	more than one joint: an order to tell
 driver-robot-boot.adb	if N > 1 and then Followed_In_Pass > 0 and then Fitted_Now then	1	structure	joints move together only when there are at least two
 driver-robot-boot.adb	if N > 1 and then not Fitted_Now	1	structure	a zero start of a sum
@@ -1094,9 +1106,12 @@ driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the pari
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel) then	2.0	structure	the ladder goes down by halving
 driver-robot-boot.adb	if Unswept.Length = 1 or else See_Each_Other then	1	structure	one arm left to sweep: alone, not a lane
+driver-robot-boot.adb	if X.Eye = E and then X.Arm = 1 then	1	structure	the first arm, whose frame is the world
 driver-robot-boot.adb	if not Fitted_Now and then Motion > 2.0 * Patch and then Motion > Fixed then	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
 driver-robot-boot.adb	or else (Lost_Least (I) - Followed_Most (I)) / 2.0 * Per_Unit (Channel) > Patch));	2.0	structure	half the gap's view motion against a patch
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
+driver-robot-boot.adb	then Scales (Scales.First_Index + K - Contested.First_Index) else 1.0)));	1.0	structure	the whole of the widest offsets where the fit names no share
+driver-robot-boot.adb	then Scales (Scales.First_Index + K - Contested.First_Index) else 1.0);	1.0	structure	the whole of the widest offsets where the fit names no share
 driver-robot-channels.adb	(Change_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	statistics	a standardized statistic is tested against unit sigma
 driver-robot-channels.adb	M.Drift.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	no creep until measured
 driver-robot-channels.adb	M.Drift.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	no creep until measured
@@ -1299,6 +1314,7 @@ driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 
 driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 1 => (for all Dc in -1 .. 1 => Inside (C + Dc, R + Dr)))	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 1 => (for all Dc in -1 .. 1 => Inside (C + Dc, R + Dr)))	1	structure	a pixel and its eight neighbours: one step each way
 driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 1 => (for all Dc in -1 .. 1 => Inside (C + Dc, R + Dr)))	1	structure	a pixel and its eight neighbours: one step each way
+driver-robot-hand-lobes.adb	if Motion /= null and then Natural (Result.Lobes.Length) > 1 then	1	structure	joining lobes needs two of them
 driver-robot-hand-lobes.adb	if N < 3 then	3	statistics	a spread within two groups needs a third value
 driver-robot-hand-lobes.adb	if N >= 2 then	2	statistics	a spread needs two values
 driver-robot-hand-lobes.adb	if not (Ahead (C, R, 1, Nc, Nr) and then Contains (M, Nc, Nr)) then	1	structure	the next pixel along the way: one step
@@ -1383,6 +1399,8 @@ driver-robot-hand-presses.adb	U : constant Vec3 := (1.0 / Length) * Step.Mean;	1
 driver-robot-hand-presses.adb	U : constant Vec3 := (1.0 / Length) * Step.Mean;	1.0	math	a vector over its length is its unit vector
 driver-robot-hand-presses.adb	if W.Commands > 1 then	1	structure	the first command that takes effect after the block is the let-go; a second before the hand has rested is the retreat's
 driver-robot-hand-pressing.adb	& "" & Driver.Log.Image (Within, 4) & "");	4	format	digits printed in a log line or a message
+driver-robot-hand-pressing.adb	& "" & Driver.Log.Image (abs Across, 4)	4	format	digits printed in a log line or a message
+driver-robot-hand-pressing.adb	& Driver.Log.Image (Stood_Within, 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand-pressing.adb	Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);	1	structure	odd steps of the sequence of turns go one way, even steps the other: the turns about the way down alternate in sign
 driver-robot-hand-pressing.adb	Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);	1.0	structure	the sign of the turn: one way for the odd steps, the other for the even
 driver-robot-hand-pressing.adb	Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);	1.0	structure	the sign of the turn: one way for the odd steps, the other for the even
@@ -1410,18 +1428,39 @@ driver-robot-hand-shape.adb	& Driver.Log.Image (Thick.Sigma, 4) & ""	4	format	di
 driver-robot-hand-shape.adb	& Driver.Log.Image (Width.Value, 4) & "" & Driver.Log.Image (Width.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-shape.adb	& Driver.Log.Image (Width.Value, 4) & "" & Driver.Log.Image (Width.Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-hand-shape.adb	((Angle_Between (Line (Px), Line ((U => Px.U + 1.0, V => Px.V)))	1.0	structure	the neighbouring pixel, one step across
+driver-robot-hand-shape.adb	(1.0 / (2.0 * H)) * (Point (S.Rotation, S.Shift, Sc.Scale + H) - Point (S.Rotation, S.Shift, Sc.Scale - H));	1.0	math	a reciprocal
+driver-robot-hand-shape.adb	(1.0 / (2.0 * H)) * (Point (S.Rotation, S.Shift, Sc.Scale + H) - Point (S.Rotation, S.Shift, Sc.Scale - H));	2.0	math	a central difference spans twice its step
 driver-robot-hand-shape.adb	(Real'Max (0.0, (C (1, 1) + C (2, 2) + C (3, 3) - D * (C * D)) / 2.0));	2.0	math	the two directions across a line share the variance off it equally on average
+driver-robot-hand-shape.adb	(S.Scatter ** 2) * [for I in 1 .. 3 => [for J in 1 .. 3 => S.Covariance (I, J)]];	3	structure	the three axes of a vector or a 3 x 3 matrix
+driver-robot-hand-shape.adb	(S.Scatter ** 2) * [for I in 1 .. 3 => [for J in 1 .. 3 => S.Covariance (I, J)]];	3	structure	the three axes of a vector or a 3 x 3 matrix
 driver-robot-hand-shape.adb	+ Angle_Between (Line (Px), Line ((U => Px.U, V => Px.V + 1.0)))) / 2.0);	1.0	structure	the neighbouring pixel, one step down
 driver-robot-hand-shape.adb	+ Angle_Between (Line (Px), Line ((U => Px.U, V => Px.V + 1.0)))) / 2.0);	2.0	math	the mean of the two neighbours' angles
 driver-robot-hand-shape.adb	Ahead := Ahead + (if D > 0.0 then 1 elsif D < 0.0 then -1 else 0);	1	math	a vote for one side or the other
 driver-robot-hand-shape.adb	Ahead := Ahead + (if D > 0.0 then 1 elsif D < 0.0 then -1 else 0);	1	math	a vote for one side or the other
 driver-robot-hand-shape.adb	Axis (K) := 1.0;	1.0	math	a unit axis
 driver-robot-hand-shape.adb	Best : Flat := (X => 1.0, Y => 0.0);	1.0	math	some unit direction before any edge is tried
+driver-robot-hand-shape.adb	Best_Four : Real_Vector (1 .. 4) := [others => 0.0];	4	structure	the essential matrix of a turn about a known axis has four entries free
 driver-robot-hand-shape.adb	By_Motion : constant Jacobian := [Cross ([1.0, 0.0, 0.0], Q), Cross ([0.0, 1.0, 0.0], Q),	1.0	math	the unit axes a turn's components are about
 driver-robot-hand-shape.adb	By_Motion : constant Jacobian := [Cross ([1.0, 0.0, 0.0], Q), Cross ([0.0, 1.0, 0.0], Q),	1.0	math	the unit axes a turn's components are about
 driver-robot-hand-shape.adb	Cost := Cost_Of (Rotation, Shift, 0.0);	0.0	math	no step: the cost where the motion is
+driver-robot-hand-shape.adb	Cov : constant Mat3 := (S.Scatter ** 2) * [for I in 1 .. 3 => [for J in 1 .. 3 => S.Covariance (I, J)]];	3	structure	the three axes of a vector or a 3 x 3 matrix
+driver-robot-hand-shape.adb	Cov : constant Mat3 := (S.Scatter ** 2) * [for I in 1 .. 3 => [for J in 1 .. 3 => S.Covariance (I, J)]];	3	structure	the three axes of a vector or a 3 x 3 matrix
+driver-robot-hand-shape.adb	Down := Point (S.Rotation, S.Shift - Eps * (if K = 4 then S.Across_1 else S.Across_2), Sc.Scale);	4	structure	the motion's five terms: the turn's three, the shift's two across itself
+driver-robot-hand-shape.adb	E1 : constant Vec3 := Unit (Cross (U, (if abs U (1) < abs U (2) then Unit_Axis (1) else Unit_Axis (2))));	1	structure	an axis not along the turn's, to build its plane from
+driver-robot-hand-shape.adb	E1 : constant Vec3 := Unit (Cross (U, (if abs U (1) < abs U (2) then Unit_Axis (1) else Unit_Axis (2))));	2	structure	an axis not along the turn's, to build its plane from
+driver-robot-hand-shape.adb	Eigensystem (0.5 * (Sums + Transpose (Sums)), Values, Vectors);	0.5	math	the symmetric part of a matrix
+driver-robot-hand-shape.adb	Eps : constant Real := Real'Model_Epsilon ** (1.0 / 3.0);	1.0	math	a reciprocal
+driver-robot-hand-shape.adb	Eps : constant Real := Real'Model_Epsilon ** (1.0 / 3.0);	3.0	numerics	the step of a central difference: the cube root of the precision balances rounding against truncation
+driver-robot-hand-shape.adb	Four : Real_Vector (1 .. 4);	4	structure	the essential matrix of a turn about a known axis has four entries free
+driver-robot-hand-shape.adb	Four := [for P in 1 .. 4 => Vectors (P, Vectors'Last (2))];	4	structure	the essential matrix of a turn about a known axis has four entries free
+driver-robot-hand-shape.adb	Golden : constant Real := (3.0 - Sqrt (5.0)) * Ada.Numerics.Pi;	3.0	math	the golden angle, which spreads a Fibonacci lattice evenly
+driver-robot-hand-shape.adb	Golden : constant Real := (3.0 - Sqrt (5.0)) * Ada.Numerics.Pi;	5.0	math	the golden angle, which spreads a Fibonacci lattice evenly
+driver-robot-hand-shape.adb	Hinge : constant Vec3 := (1.0 / Turn) * Turn_Vector;	1.0	math	a reciprocal
 driver-robot-hand-shape.adb	Hull : Flat_Access := new Flat_Array (1 .. 2 * Points'Length);	2	math	a monotone chain's hull holds at most twice its points
 driver-robot-hand-shape.adb	Index : Positive := 1;	1	structure	first index
+driver-robot-hand-shape.adb	J (K) := (1.0 / (2.0 * Eps)) * (Up - Down) + Sc.Gradient (K) * By_Scale;	1.0	math	a reciprocal
+driver-robot-hand-shape.adb	J (K) := (1.0 / (2.0 * Eps)) * (Up - Down) + Sc.Gradient (K) * By_Scale;	2.0	math	a central difference spans twice its step
+driver-robot-hand-shape.adb	J : array (1 .. 5) of Vec3;	5	structure	the motion's five terms: the turn's three, the shift's two across itself
 driver-robot-hand-shape.adb	K : Positive := 1;	1	structure	first index
 driver-robot-hand-shape.adb	Kept_Scatter : Real := 1.0;	1.0	statistics	the noise as measured, before any scatter raises it
 driver-robot-hand-shape.adb	Kept_Scatter := Real'Max (1.0, Driver.Stats.Robust_Sigma (Off.all));	1.0	statistics	the noise is raised by the scatter only when it is larger
@@ -1432,30 +1471,56 @@ driver-robot-hand-shape.adb	Outward : constant Real := (if Upper then 1.0 else -
 driver-robot-hand-shape.adb	Own := 1.0 / Ll;	1.0	math	a variance is the inverse of its information
 driver-robot-hand-shape.adb	Part : Real := 1.0;	1.0	math	the whole Gauss-Newton step
 driver-robot-hand-shape.adb	Part := Part / 2.0;	2.0	math	halving the step
-driver-robot-hand-shape.adb	Pixel => Gap * Sqrt (Real (N) / Real (N + 2)));	2	statistics	the gap above the largest of N uniform values: its variance N over (N + 1) squared (N + 2)
+driver-robot-hand-shape.adb	Pixel => Sqrt (Gap ** 2 * Real (N) / Real (N + 2) + Beyond ** 2 / 12.0));	12.0	statistics	the variance of a uniform spread over one, a twelfth
+driver-robot-hand-shape.adb	Pixel => Sqrt (Gap ** 2 * Real (N) / Real (N + 2) + Beyond ** 2 / 12.0));	2	statistics	the spread of the largest of N uniform values, as the gap above it is
+driver-robot-hand-shape.adb	Sums : Real_Matrix (1 .. 4, 1 .. 4) := [others => [others => 0.0]];	4	structure	the essential matrix of a turn about a known axis has four entries free
+driver-robot-hand-shape.adb	Sums : Real_Matrix (1 .. 4, 1 .. 4) := [others => [others => 0.0]];	4	structure	the essential matrix of a turn about a known axis has four entries free
+driver-robot-hand-shape.adb	U : constant Vec3 := (1.0 / T) * W;	1.0	math	a reciprocal
 driver-robot-hand-shape.adb	Unknowns : constant := 5;	5	structure	the motion's unknowns up to scale: a turn's three and a direction's two
-driver-robot-hand-shape.adb	Value => Y_Best + Outward * (Gap - (Family - Single) * Own / 2.0),	2.0	math	the middle of a range
+driver-robot-hand-shape.adb	Up := Point (S.Rotation, S.Shift + Eps * (if K = 4 then S.Across_1 else S.Across_2), Sc.Scale);	4	structure	the motion's five terms: the turn's three, the shift's two across itself
+driver-robot-hand-shape.adb	Value => Y_Best + Outward * (Gap - (Family - Single) * Own / 2.0 + Beyond / 2.0),	2.0	statistics	the middle of a uniform range
+driver-robot-hand-shape.adb	Value => Y_Best + Outward * (Gap - (Family - Single) * Own / 2.0 + Beyond / 2.0),	2.0	statistics	the middle of a uniform range
+driver-robot-hand-shape.adb	Values : Real_Vector (1 .. 4);	4	structure	the essential matrix of a turn about a known axis has four entries free
+driver-robot-hand-shape.adb	Vectors : Real_Matrix (1 .. 4, 1 .. 4);	4	structure	the essential matrix of a turn about a known axis has four entries free
+driver-robot-hand-shape.adb	Vectors : Real_Matrix (1 .. 4, 1 .. 4);	4	structure	the essential matrix of a turn about a known axis has four entries free
 driver-robot-hand-shape.adb	Weight : constant Real := 1.0 / S.Sigma ** 2;	1.0	statistics	a weight is the inverse of the variance
 driver-robot-hand-shape.adb	Weight : constant Real := 1.0 / Sightings (I).Sigma ** 2;	1.0	statistics	a weight is the inverse of the variance
 driver-robot-hand-shape.adb	Weight : constant Real := 1.0 / Sightings (I).Sigma ** 2;	1.0	statistics	a weight is the inverse of the variance
+driver-robot-hand-shape.adb	Weight : constant Real := 1.0 / Sightings (J).Sigma ** 2;	1.0	math	a reciprocal
 driver-robot-hand-shape.adb	Wn : constant Vec3 := (1.0 / L) * W;	1.0	math	a unit vector is the vector over its length
 driver-robot-hand-shape.adb	Work (L).Middle := (1.0 / Real (K)) * Sum;	1.0	math	a mean
+driver-robot-hand-shape.adb	Z : constant Real := 1.0 - 2.0 * (Real (I) - 0.5) / Real (Directions);	0.5	math	a Fibonacci lattice's heights, evenly over the sphere
+driver-robot-hand-shape.adb	Z : constant Real := 1.0 - 2.0 * (Real (I) - 0.5) / Real (Directions);	2.0	math	a Fibonacci lattice's heights, evenly over the sphere
 driver-robot-hand-shape.adb	[1.0, Sights (I).At_Pixel.U - Here.U, Sights (I).At_Pixel.V - Here.V];	1.0	math	the constant term of a plane fitted over the pixels
 driver-robot-hand-shape.adb	[for I in 1 .. 3 =>	3	structure	three coordinates
 driver-robot-hand-shape.adb	[for K in 1 .. 5 =>	5	structure	the motion's five unknowns
 driver-robot-hand-shape.adb	and then abs (Sights (I).At_Pixel.V - Here.V) <= 1.0	1.0	structure	the eight pixels around one: a step each way
+driver-robot-hand-shape.adb	for Dx in -1 .. 1 loop	1	structure	a pixel and its eight neighbours
+driver-robot-hand-shape.adb	for Dx in -1 .. 1 loop	1	structure	a pixel and its eight neighbours
+driver-robot-hand-shape.adb	for Dy in -1 .. 1 loop	1	structure	a pixel and its eight neighbours
+driver-robot-hand-shape.adb	for Dy in -1 .. 1 loop	1	structure	a pixel and its eight neighbours
+driver-robot-hand-shape.adb	for I in 1 .. Directions / 2 loop	2	math	half the lattice: an axis and its opposite are one line
 driver-robot-hand-shape.adb	for I in 2 .. 3 loop	2	structure	the axes after the first
 driver-robot-hand-shape.adb	for I in 2 .. 3 loop	3	structure	three coordinates
+driver-robot-hand-shape.adb	for K in 1 .. 5 loop	5	structure	the motion's five terms: the turn's three, the shift's two across itself
+driver-robot-hand-shape.adb	for K in 1 .. 5 loop	5	structure	the motion's five terms: the turn's three, the shift's two across itself
 driver-robot-hand-shape.adb	for K in 1 .. 5 loop	5	structure	the motion's five unknowns
 driver-robot-hand-shape.adb	for K in 1 .. 5 loop	5	structure	the motion's five unknowns
 driver-robot-hand-shape.adb	for K in 1 .. 5 loop	5	structure	the motion's five unknowns
 driver-robot-hand-shape.adb	for K in 1 .. 5 loop	5	structure	the motion's five unknowns
 driver-robot-hand-shape.adb	for K in 1 .. 5 loop	5	structure	the motion's five unknowns
+driver-robot-hand-shape.adb	for L in 1 .. 5 loop	5	structure	the motion's five terms: the turn's three, the shift's two across itself
 driver-robot-hand-shape.adb	for L in 1 .. 5 loop	5	structure	the motion's five unknowns
+driver-robot-hand-shape.adb	for P in 1 .. 3 loop	3	structure	the three axes of a vector or a 3 x 3 matrix
+driver-robot-hand-shape.adb	for P in 1 .. 4 loop	4	structure	the essential matrix of a turn about a known axis has four entries free
+driver-robot-hand-shape.adb	for Q in 1 .. 3 loop	3	structure	the three axes of a vector or a 3 x 3 matrix
+driver-robot-hand-shape.adb	for Q in 1 .. 4 loop	4	structure	the essential matrix of a turn about a known axis has four entries free
 driver-robot-hand-shape.adb	function D (X : Vec3) return Vec3 is ((1.0 / L) * (X - Real'(Wn * X) * Wn));	1.0	math	the derivative of a unit vector: one over the length
 driver-robot-hand-shape.adb	function Unit_Axis (K : Positive) return Vec3 is ([for I in 1 .. 3 => (if I = K then 1.0 else 0.0)]);	1.0	math	a unit axis
 driver-robot-hand-shape.adb	function Unit_Axis (K : Positive) return Vec3 is ([for I in 1 .. 3 => (if I = K then 1.0 else 0.0)]);	3	structure	three coordinates
+driver-robot-hand-shape.adb	if K <= 3 then	3	structure	the motion's five terms: the turn's three, the shift's two across itself
 driver-robot-hand-shape.adb	if Points (I).Kept and then abs (Sights (I).At_Pixel.U - Here.U) <= 1.0	1.0	structure	the eight pixels around one: a step each way
+driver-robot-hand-shape.adb	subtype Four_Terms is Real_Vector (1 .. 4);	4	structure	the essential matrix of a turn about a known axis has four entries free
 driver-robot-hand-shape.adb	subtype Mat35 is Real_Matrix (1 .. 3, 1 .. 5);	3	structure	three coordinates
 driver-robot-hand-shape.adb	subtype Mat35 is Real_Matrix (1 .. 3, 1 .. 5);	5	structure	the motion's five unknowns
 driver-robot-hand-shape.adb	subtype Vec5 is Real_Vector (1 .. 5);	5	structure	the motion's five unknowns
@@ -1657,11 +1722,81 @@ driver-robot-hand.adb	if S = 1 or else S = Last then	1	structure	the first setti
 driver-robot-hand.adb	if Wide = 1 then	1	structure	the first step from the open end too wide: no part of the travel followed
 driver-robot-hand.adb	return In_World (H, M, Id, O, (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	return In_World (H, M, Id, O, (Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
-driver-robot-hand.adb	return Shapes.Fit (Mount.Pose.Translation, Seen, 1, Seen'Last, Bordered, Closed_Is_End => not Partial);	1	structure	the open tip is the first sighting, the shape's first anchor
+driver-robot-hand.adb	return Shapes.Fit (Mount.Pose.Translation, Seen, 1, Seen'Last, Bordered, Closed_Is_End => not Partial,	1	structure	the first sighting is the open tip, the shape's anchor
 driver-robot-hand.adb	return Tip_Along (H, Id, Lobe, 0.0);	0.0	structure	a lobe no channel moves stands at the open end of a closing it does not have
 driver-robot-hand.ads	(Positive'Max (1, (if Longest_Formed > 0 or else Longest_Settling > 0	1	structure	a view is waited for one beat at least: the asking after the push
 driver-robot-hand.ads	Mad_Efficiency : constant := 0.367_5;	0.367_5	statistics	asymptotic efficiency of the median absolute deviation for Gaussian data
 driver-robot-hand.ads	function Seen_By (Shift : Real) return Real is (if Shift /= 0.0 then 1.0 / abs Shift else 0.0);	1.0	math	one pixel, the image's own sampling step: a whole pixel's displacement of a textured patch changes its pixels by its own contrast
+driver-robot-kinematics-beacon.adb	((Rotation => Base * Driver.Numerics.Exp (Vec3'[P (5), P (6), P (7)]), Translation => Vec3'[P (8), P (9), P (10)]));	10	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	((Rotation => Base * Driver.Numerics.Exp (Vec3'[P (5), P (6), P (7)]), Translation => Vec3'[P (8), P (9), P (10)]));	9	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	(case T is when 1 .. 2 | 5 .. 7 => Eps3, when 3 .. 4 => Eps3 * Real'Max (1.0, abs P (T)),	1.0	numerics	the step of a pixel coordinate is relative above one pixel
+driver-robot-kinematics-beacon.adb	(case T is when 1 .. 2 | 5 .. 7 => Eps3, when 3 .. 4 => Eps3 * Real'Max (1.0, abs P (T)),	2	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	(case T is when 1 .. 2 | 5 .. 7 => Eps3, when 3 .. 4 => Eps3 * Real'Max (1.0, abs P (T)),	3	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	(case T is when 1 .. 2 | 5 .. 7 => Eps3, when 3 .. 4 => Eps3 * Real'Max (1.0, abs P (T)),	4	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	(case T is when 1 .. 2 | 5 .. 7 => Eps3, when 3 .. 4 => Eps3 * Real'Max (1.0, abs P (T)),	5	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	(case T is when 1 .. 2 | 5 .. 7 => Eps3, when 3 .. 4 => Eps3 * Real'Max (1.0, abs P (T)),	7	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	A (T, T) := A (T, T) * (1.0 + Lambda);	1.0	math	Marquardt's damping scales the diagonal
+driver-robot-kinematics-beacon.adb	AtA : Real_Matrix (1 .. 12, 1 .. 12) := [others => [others => 0.0]];	12	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	AtA : Real_Matrix (1 .. 12, 1 .. 12) := [others => [others => 0.0]];	12	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	C3 := (1.0 / Real (N)) * C3;	1.0	math	a reciprocal
+driver-robot-kinematics-beacon.adb	Damping_Ratio : constant Real := 10.0;	10.0	numerics	Marquardt's customary factor for the damping: any factor above one ends where the cost is least, it sets only the path
+driver-robot-kinematics-beacon.adb	Driver.Uncertain.Vector_Gate (2, Natural'Max (0, Freedom), Tests => Count (Keep));	2	structure	a sighting's two coordinates, u and v
+driver-robot-kinematics-beacon.adb	E (T) := 1.0;	1.0	math	a unit vector of the identity, a column of the inverse
+driver-robot-kinematics-beacon.adb	Eps3 : constant Real := Real'Model_Epsilon ** (1.0 / 3.0);	1.0	math	a reciprocal
+driver-robot-kinematics-beacon.adb	Eps3 : constant Real := Real'Model_Epsilon ** (1.0 / 3.0);	3.0	numerics	the step of a central difference: the cube root of the precision balances rounding against truncation
+driver-robot-kinematics-beacon.adb	J (I, T) := (Ru (I) - Rd (I)) / (2.0 * H);	2.0	math	a central difference spans twice its step
+driver-robot-kinematics-beacon.adb	K := K + 2;	2	structure	a sighting's two coordinates, u and v
+driver-robot-kinematics-beacon.adb	K := K + 2;	2	structure	a sighting's two coordinates, u and v
+driver-robot-kinematics-beacon.adb	M : constant Natural := 2 * Count (Keep);	2	structure	a sighting's two coordinates, u and v
+driver-robot-kinematics-beacon.adb	M : constant Natural := 2 * Count (Keep);	2	structure	a sighting's two coordinates, u and v
+driver-robot-kinematics-beacon.adb	P (8 .. 10) := [Centre (1), Centre (2), Centre (3)];	10	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	P (8 .. 10) := [Centre (1), Centre (2), Centre (3)];	8	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	Pn (J, L) := Vectors (4 * (J - 1) + L, Vectors'Last (2));	4	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	Pn, Pm : Real_Matrix (1 .. 3, 1 .. 4);	3	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	Pn, Pm : Real_Matrix (1 .. 3, 1 .. 4);	4	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	R1 : constant Real_Vector (1 .. 12) :=	12	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	R1 : constant Vec3 := (1.0 / K11) * M1;	1.0	math	a reciprocal
+driver-robot-kinematics-beacon.adb	R2 : constant Real_Vector (1 .. 12) :=	12	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	R2 : constant Vec3 := (1.0 / K22) * M2;	1.0	math	a reciprocal
+driver-robot-kinematics-beacon.adb	R3 : constant Vec3 := (1.0 / K33) * Row3;	1.0	math	a reciprocal
+driver-robot-kinematics-beacon.adb	S2 := Sqrt (2.0) * Real (N) / S2;	2.0	math	Hartley's normalization: points a mean distance of the root of their dimension from their centre
+driver-robot-kinematics-beacon.adb	S3 := Sqrt (3.0) * Real (N) / S3;	3.0	math	Hartley's normalization: points a mean distance of the root of their dimension from their centre
+driver-robot-kinematics-beacon.adb	Scale := Real'Max (Scale, abs (Seen (I).Carrier.Translation - Vec3'[P (8), P (9), P (10)]));	10	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	Scale := Real'Max (Scale, abs (Seen (I).Carrier.Translation - Vec3'[P (8), P (9), P (10)]));	9	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	Scatter := Real'Max (1.0, Driver.Stats.Robust_Sigma (Driver.Real_Array (R)));	1.0	statistics	a scatter in units of the stated sigmas is never below one
+driver-robot-kinematics-beacon.adb	T2i (1, 1) := 1.0 / S2;	1.0	math	a reciprocal
+driver-robot-kinematics-beacon.adb	T2i (2, 2) := 1.0 / S2;	1.0	math	a reciprocal
+driver-robot-kinematics-beacon.adb	T2i (3, 3) := 1.0;	1.0	math	the homogeneous coordinate of a point
+driver-robot-kinematics-beacon.adb	T2i : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	the three axes of a vector or a 3 x 3 matrix
+driver-robot-kinematics-beacon.adb	T2i : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	the three axes of a vector or a 3 x 3 matrix
+driver-robot-kinematics-beacon.adb	T3 (4, 4) := 1.0;	1.0	math	the homogeneous coordinate of a point
+driver-robot-kinematics-beacon.adb	T3 : Real_Matrix (1 .. 4, 1 .. 4) := [others => [others => 0.0]];	4	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	T3 : Real_Matrix (1 .. 4, 1 .. 4) := [others => [others => 0.0]];	4	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	Trial (5 .. 7) := [0.0, 0.0, 0.0];	5	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	Trial (5 .. 7) := [0.0, 0.0, 0.0];	7	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	Values : Real_Vector (1 .. 12);	12	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	Vectors : Real_Matrix (1 .. 12, 1 .. 12);	12	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	Vectors : Real_Matrix (1 .. 12, 1 .. 12);	12	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	[0.0, 0.0, 0.0, 0.0, X (1), X (2), X (3), 1.0, -Vn * X (1), -Vn * X (2), -Vn * X (3), -Vn];	1.0	math	the homogeneous coordinate of a point
+driver-robot-kinematics-beacon.adb	[X (1), X (2), X (3), 1.0, 0.0, 0.0, 0.0, 0.0, -Un * X (1), -Un * X (2), -Un * X (3), -Un];	1.0	math	the homogeneous coordinate of a point
+driver-robot-kinematics-beacon.adb	exit when Lambda > 1.0 / Real'Model_Epsilon;	1.0	math	a reciprocal
+driver-robot-kinematics-beacon.adb	for J in 1 .. 12 loop	12	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	for J in 1 .. 3 loop	3	structure	the three axes of a vector or a 3 x 3 matrix
+driver-robot-kinematics-beacon.adb	for J in 1 .. 3 loop	3	structure	the three axes of a vector or a 3 x 3 matrix
+driver-robot-kinematics-beacon.adb	for J in 1 .. 3 loop	3	structure	the three axes of a vector or a 3 x 3 matrix
+driver-robot-kinematics-beacon.adb	for L in 1 .. 12 loop	12	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	for L in 1 .. 3 loop	3	structure	the three axes of a vector or a 3 x 3 matrix
+driver-robot-kinematics-beacon.adb	for L in 1 .. 4 loop	4	structure	a projection's twelve entries, a 3 x 4 matrix, and the homogeneous 4 x 4 of a point
+driver-robot-kinematics-beacon.adb	function Beacon_Of (P : Parameters) return Vec3 is (Vec3'[P (11), P (12), P (13)]);	11	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	function Beacon_Of (P : Parameters) return Vec3 is (Vec3'[P (11), P (12), P (13)]);	12	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	function Beacon_Of (P : Parameters) return Vec3 is (Vec3'[P (11), P (12), P (13)]);	13	structure	the beacon fit's terms in order: the lens 1 to 4, the turn 5 to 7, the centre 8 to 10, the beacon 11 to 13
+driver-robot-kinematics-beacon.adb	if 2 * Ahead <= N then	2	structure	the most of the sightings
+driver-robot-kinematics-beacon.adb	if N < 6 then	6	math	a projection's eleven ratios need six points
+driver-robot-kinematics-beacon.ads	Beacon_Terms : constant := 3;	3	structure	the beacon fit's terms: the lens's four, the pose's six, the beacon's three
+driver-robot-kinematics-beacon.ads	Lens_Terms : constant := 4;	4	structure	the beacon fit's terms: the lens's four, the pose's six, the beacon's three
+driver-robot-kinematics-beacon.ads	Pose_Terms : constant := 6;	6	structure	the beacon fit's terms: the lens's four, the pose's six, the beacon's three
+driver-robot-kinematics-beacon.ads	Scatter : Real := 1.0;	1.0	statistics	a scatter in units of the stated sigmas is never below one
+driver-robot-kinematics-beacon.ads	Sigma : Real := 1.0;	1.0	statistics	a scatter in units of the stated sigmas is never below one
 driver-robot-kinematics-errors.adb	+ C (Across_Down) * Held (2 * S, Q);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	+ C (Both_Down) * Held (2 * S, Q);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	+ Rows (2 * S, A) * Locals (2 * X, R);	2	structure	two residuals per sighting, across and down
@@ -1774,25 +1909,32 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Focal, 1) & ""	1	format
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Here, 3) & "");	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Lens0.Fx, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (M, 3) & "");	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Visible (Visible'First + C - 1), 2));	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Warm_Far * 180.0 / Ada.Numerics.Pi, 2)	180.0	format	radians to degrees for the log
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Warm_Far * 180.0 / Ada.Numerics.Pi, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Real'Image (C) & "" & Real'Image (Sqrt (Variance (O + 5)))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	& (case (P - 7) mod 5 is	5	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	& (case (P - 7) mod 5 is	7	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Best_Apart, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Exp (Best_At + Told_Within), 1) & "" & Warm_Tries'Image	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Here, 3)	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Here, 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Here, 3) & "" & Points'Image	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Err, 3) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Err, 3) & "");	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Least_Pivot, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Lp.Fx, 1) & ""	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (M, 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Mv.Sj * Mv.Scale * Reach (Mv.J), 4));	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element, 1) & "")	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Results (J).Fail_Median, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rp.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Sqrt (Sum (F) / Real (Cnt (F))), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (Mv.I) & "" & Driver.Log.Image (Mv.Si * Mv.Scale * Reach (Mv.I), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),	2	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),	3	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	(Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));	1	structure	the four entries of a turn and a shift about an axis: (A, B) the last column, (E, F) the last row
@@ -1804,8 +1946,7 @@ driver-robot-kinematics-fit.adb	(Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) 
 driver-robot-kinematics-fit.adb	(Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));	4	structure	the four entries of a turn and a shift about an axis: (A, B) the last column, (E, F) the last row
 driver-robot-kinematics-fit.adb	(Arctan (V (2) * V (3) - V (1) * V (4), -(V (1) * V (3) + V (2) * V (4))));	4	structure	the four entries of a turn and a shift about an axis: (A, B) the last column, (E, F) the last row
 driver-robot-kinematics-fit.adb	(Depth > 0.0 and then Sigma < Real'Last and then Driver.Uncertain.Significant (1.0, Sigma));	1.0	statistics	the depth against its own relative uncertainty: a depth of one unit is significant when its sigma is under 1 / Z of it
-driver-robot-kinematics-fit.adb	(Smaller_Ranks - Mm * (Mm + 1.0) / 4.0)	1.0	statistics	the mean of Wilcoxon's signed-rank sum, n (n + 1) / 4
-driver-robot-kinematics-fit.adb	(Smaller_Ranks - Mm * (Mm + 1.0) / 4.0)	4.0	statistics	the mean of Wilcoxon's signed-rank sum, n (n + 1) / 4
+driver-robot-kinematics-fit.adb	(Said, "" & C'Image & "" & Driver.Log.Image (Change (B, C), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	(Sqrt (Real'Max (0.0, E (Errors.Both_Across) + E (Errors.Both_Down)) / 2.0));	2.0	math	the mean of the two components' variances
 driver-robot-kinematics-fit.adb	(V (2 * J - 1) * E_1 (J) + V (2 * J) * E_2 (J));	2	structure	a joint's two numbers across its axis: the entries 2J - 1 and 2J of the vector
 driver-robot-kinematics-fit.adb	(V (2 * J - 1) * E_1 (J) + V (2 * J) * E_2 (J));	2	structure	a joint's two numbers across its axis: the entries 2J - 1 and 2J of the vector
@@ -1822,10 +1963,6 @@ driver-robot-kinematics-fit.adb	(if abs Z_Value <= Driver.Conventions.Z then 0.5
 driver-robot-kinematics-fit.adb	(if abs Z_Value <= Driver.Conventions.Z then 1.0 else Driver.Conventions.Z / abs Z_Value);	1.0	math	the Huber function
 driver-robot-kinematics-fit.adb	(if not Second then [-X0 (I), -Y0 (I), -1.0, 0.0, 0.0, 0.0, X1 (I) * X0 (I), X1 (I) * Y0 (I), X1 (I)]	1.0	math	the homogeneous coordinate of a pixel, in a homography's row
 driver-robot-kinematics-fit.adb	+ G (4) * V (4);	4	structure	the four entries of the planar essential matrix and their rows
-driver-robot-kinematics-fit.adb	> Driver.Conventions.Z * Sqrt (Mm * (Mm + 1.0) * (2.0 * Mm + 1.0) / 24.0)	1.0	statistics	the variance of Wilcoxon's signed-rank sum, n (n + 1) (2 n + 1) / 24
-driver-robot-kinematics-fit.adb	> Driver.Conventions.Z * Sqrt (Mm * (Mm + 1.0) * (2.0 * Mm + 1.0) / 24.0)	1.0	statistics	the variance of Wilcoxon's signed-rank sum, n (n + 1) (2 n + 1) / 24
-driver-robot-kinematics-fit.adb	> Driver.Conventions.Z * Sqrt (Mm * (Mm + 1.0) * (2.0 * Mm + 1.0) / 24.0)	2.0	statistics	the variance of Wilcoxon's signed-rank sum, n (n + 1) (2 n + 1) / 24
-driver-robot-kinematics-fit.adb	> Driver.Conventions.Z * Sqrt (Mm * (Mm + 1.0) * (2.0 * Mm + 1.0) / 24.0)	24.0	statistics	the variance of Wilcoxon's signed-rank sum, n (n + 1) (2 n + 1) / 24
 driver-robot-kinematics-fit.adb	A : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	A : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	A : Real_Matrix (1 .. 4, 1 .. 4) := [others => [others => 0.0]];	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
@@ -1851,12 +1988,20 @@ driver-robot-kinematics-fit.adb	All_R : Real_Access := new Real_Array (1 .. 2 * 
 driver-robot-kinematics-fit.adb	Along : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. S, 1 .. 3);	3	structure	the three components of a vector
 driver-robot-kinematics-fit.adb	Anchor : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	Anchor : Positive := 1;	1	structure	indexes start at one
+driver-robot-kinematics-fit.adb	Apart_Of : Real_Access := new Real_Array (1 .. 2 * Sightings);	2	structure	a sighting's two residuals, u and v
+driver-robot-kinematics-fit.adb	Au : constant Real := A (A'First + 2 * (P - 1));	2	structure	a sighting's two residuals, u and v
+driver-robot-kinematics-fit.adb	Av : constant Real := A (A'First + 2 * (P - 1) + 1);	2	structure	a sighting's two residuals, u and v
 driver-robot-kinematics-fit.adb	B := Start + Ln (2.0) / 2.0;	2.0	math	half an octave above the start: the bracket of the focal search is a factor of root two
 driver-robot-kinematics-fit.adb	B := Start + Ln (2.0) / 2.0;	2.0	math	half an octave above the start: the bracket of the focal search is a factor of root two
 driver-robot-kinematics-fit.adb	B1, B2 : Real_Vector (1 .. 3) := [others => 0.0];	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	Before : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Best_M : Real_Matrix (1 .. 2, 1 .. 3) := [others => [others => 0.0]];	2	structure	the homography's first two rows: its third is 0 0 1 about the axis
 driver-robot-kinematics-fit.adb	Best_M : Real_Matrix (1 .. 2, 1 .. 3) := [others => [others => 0.0]];	3	structure	three-dimensional space
+driver-robot-kinematics-fit.adb	Best_Move : Positive := 1;	1	structure	a record's first
+driver-robot-kinematics-fit.adb	Best_Move : Positive := 1;	1	structure	a record's first
+driver-robot-kinematics-fit.adb	Best_Power : Real := -1.0;	1.0	structure	below every power, so the first move is taken
+driver-robot-kinematics-fit.adb	Bu : constant Real := B (B'First + 2 * (P - 1));	2	structure	a sighting's two residuals, u and v
+driver-robot-kinematics-fit.adb	Bv : constant Real := B (B'First + 2 * (P - 1) + 1);	2	structure	a sighting's two residuals, u and v
 driver-robot-kinematics-fit.adb	C : Real := 1.0;	1.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
 driver-robot-kinematics-fit.adb	C : constant Mat3 := (1.0 / Length ** 2) * (Pr * P.Covariance * Pr);	1.0	math	the normal's change is the inverse-depth vector's change across it over its length
 driver-robot-kinematics-fit.adb	Cl (T) := C (T) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
@@ -1880,6 +2025,7 @@ driver-robot-kinematics-fit.adb	D : constant Real := 1.0 + L.K1 * R2 + L.K2 * R2
 driver-robot-kinematics-fit.adb	D : constant Real := 1.0 + L.K1 * R2 + L.K2 * R2 * R2;	1.0	math	the radial distortion polynomial
 driver-robot-kinematics-fit.adb	Depth_Sigma (T) := (if C (T) > 0.0 then 1.0 / Sqrt (C (T)) else Real'Last);	1.0	math	a standard deviation is the root of the inverse of the information
 driver-robot-kinematics-fit.adb	Directions : constant Natural := 2562;	2562	numerics	the directions the first search scans, as many as an icosahedron split four times; only where the later fits start depends on it
+driver-robot-kinematics-fit.adb	Dist := new Real_Array (1 .. Natural'Max (1, Tracks));	1	structure	at least one place
 driver-robot-kinematics-fit.adb	Dp (T) := Dp (T) + H * Real'Max (1.0, abs Depth (T));	1.0	numerics	the scale floor of a finite difference
 driver-robot-kinematics-fit.adb	Driver.Log.Line (Driver.Log.Robot, "" & Who & ""	"3	format	the stage named in a log line
 driver-robot-kinematics-fit.adb	Du (I - From + 1) := R (R'First + 2 * (I - L'First));	2	structure	two residuals a sighting, one along each image axis
@@ -1901,7 +2047,12 @@ driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / 
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	F_Least := (if Searches = 1 then F else Real'Min (F_Least, F));	1	structure	the first focal length tried starts the least
+driver-robot-kinematics-fit.adb	Filled (F) := Filled (F) + 2;	2	structure	a sighting's two residuals, u and v
 driver-robot-kinematics-fit.adb	Finish (Profiled => not From.Valid or else Sightings'Length >= 2 * From.Profiled_Over);	2	structure	the profile walked again once the sightings have doubled since it was last walked (the ladder's doubling)
+driver-robot-kinematics-fit.adb	Finite : Real_Access := new Real_Array (1 .. 2 * Sightings);	2	structure	a sighting's two residuals, u and v
+driver-robot-kinematics-fit.adb	First_Of (1) := 1;	1	structure	the values grouped by keyframe, from the first
+driver-robot-kinematics-fit.adb	First_Of (1) := 1;	1	structure	the values grouped by keyframe, from the first
+driver-robot-kinematics-fit.adb	First_Of (Frame_Of (P) + 1) := First_Of (Frame_Of (P) + 1) + 2;	2	structure	a sighting's two residuals, u and v
 driver-robot-kinematics-fit.adb	Fit_Abs (I) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	math	a sighting's two residuals, u then v, at 2 I - 1 and 2 I
 driver-robot-kinematics-fit.adb	Fit_Abs (I) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	math	a sighting's two residuals, u then v, at 2 I - 1 and 2 I
 driver-robot-kinematics-fit.adb	Fit_Abs (Kf) := Sqrt (All_R (2 * I - 1) ** 2 + All_R (2 * I) ** 2);	2	structure	two residuals per sighting, across and down
@@ -1915,7 +2066,6 @@ driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	default: the 
 driver-robot-kinematics-fit.adb	Frame : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	Frame : constant Positive := (if Way = 1 then Up_Frame (J) else Down_Frame (J));	1	structure	the two widest keyframes of a joint, one each way
 driver-robot-kinematics-fit.adb	Frame_Of : array (1 .. 2) of Natural := [others => 0];	2	structure	the two ways of a joint's probe: the turn up and the turn downdriver-robot-kinematics-fit.adb
-driver-robot-kinematics-fit.adb	From : Positive := 1;	1	structure	the ranks from the first
 driver-robot-kinematics-fit.adb	Ftf : Real_Matrix (1 .. 3, 1 .. 3) := Transpose (Fm) * Fm;	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	Ftf : Real_Matrix (1 .. 3, 1 .. 3) := Transpose (Fm) * Fm;	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	Fv : constant Real_Vector (1 .. 3) := Fm * V;	3	structure	three-dimensional space
@@ -1927,10 +2077,13 @@ driver-robot-kinematics-fit.adb	H : constant Real := Sqrt (Real'Model_Epsilon) *
 driver-robot-kinematics-fit.adb	H0 => [C.X0 / F, C.Y0 / F, 1.0], H => [C.X1 / F, C.Y1 / F, 1.0]);	1.0	math	a ray through the pixel at unit depth (Ray without distortion)
 driver-robot-kinematics-fit.adb	H0 => [C.X0 / F, C.Y0 / F, 1.0], H => [C.X1 / F, C.Y1 / F, 1.0]);	1.0	math	a ray through the pixel at unit depth (Ray without distortion)
 driver-robot-kinematics-fit.adb	Half : constant := 0.5;	0.5	statistics	an even split: the null of two planes that hold as many points
+driver-robot-kinematics-fit.adb	Here_E : constant Real := Median_Error (Here, 2 * Placed);	2	structure	a sighting's two residuals, u and v
 driver-robot-kinematics-fit.adb	Here_R : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Hm, Fm : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	Hm, Fm : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three-dimensional space
+driver-robot-kinematics-fit.adb	I, J : Positive := 1;	1	structure	a record's first
 driver-robot-kinematics-fit.adb	Into (K + 2) := (if Ahead then V - P.V else Real'Last);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	Into : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	a sighting's two residuals, u and v
 driver-robot-kinematics-fit.adb	Into : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Into : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Into : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	two residuals per sighting, across and down
@@ -1977,6 +2130,7 @@ driver-robot-kinematics-fit.adb	Mt_M : Real_Matrix (1 .. 3, 1 .. 3) := [others =
 driver-robot-kinematics-fit.adb	Mt_M : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	N : constant Vec3 := (1.0 / Length) * P.A;	1.0	math	the unit direction of the inverse-depth vector
 driver-robot-kinematics-fit.adb	N : constant Vec3 := (1.0 / Length) * P.A;	1.0	math	the unit direction of the inverse-depth vector
+driver-robot-kinematics-fit.adb	Noise := (if K > 1 then Driver.Stats.Robust_Sigma (Finite (1 .. K)) else 0.0);	1	statistics	a spread needs two values
 driver-robot-kinematics-fit.adb	Normal := V (1) * E1 + V (2) * E2 + V (3) * W;	1	structure	the vector's components in the frame of the axis
 driver-robot-kinematics-fit.adb	Normal := V (1) * E1 + V (2) * E2 + V (3) * W;	2	structure	the vector's components in the frame of the axis
 driver-robot-kinematics-fit.adb	Normal := V (1) * E1 + V (2) * E2 + V (3) * W;	3	structure	the vector's components in the frame of the axis
@@ -2039,18 +2193,27 @@ driver-robot-kinematics-fit.adb	S.State := (S.State * 48_271) mod 2_147_483_647;
 driver-robot-kinematics-fit.adb	S.State := (S.State * 48_271) mod 2_147_483_647;	48_271	math	the minimal standard generator's multiplier (Park, Miller and Stockmeyer, 1993)
 driver-robot-kinematics-fit.adb	S0 := Sqrt (S0 / Real (2 * M));	2	statistics	the spread per axis: two axes a point
 driver-robot-kinematics-fit.adb	S1 := Sqrt (S1 / Real (2 * M));	2	statistics	the spread per axis: two axes a point
+driver-robot-kinematics-fit.adb	Scale : Real := 1.0;	1.0	structure	the whole of the widest turns, each way
 driver-robot-kinematics-fit.adb	Scale : constant Real := Scale_Of (Sigma, All_Own (2 * I));	2	structure	a sighting's second residual
 driver-robot-kinematics-fit.adb	Scale_Freedom (Sigma, All_Own (2 * I), Sight (Sight'First + I - 1).Own_Freedom);	2	structure	a sighting's two residuals, the horizontal and the vertical
+driver-robot-kinematics-fit.adb	Scale_Of : array (1 .. N, 1 .. N) of Real := [others => [others => 1.0]];	1.0	structure	the whole of the widest turns, each way
 driver-robot-kinematics-fit.adb	Scales : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals to a sighting
 driver-robot-kinematics-fit.adb	Scatter => Squares / Real (Count - 3));	3	statistics	a plane's three terms: its residuals' degrees of freedom
 driver-robot-kinematics-fit.adb	Search_All (1, Ways);	1	structure	every way, from the first
+driver-robot-kinematics-fit.adb	Share : Real := 1.0;	1.0	structure	the whole of the widest turns, each way
+driver-robot-kinematics-fit.adb	Share := Share / 2.0;	2.0	structure	halves of the widest turns: the ladder's own steps double
+driver-robot-kinematics-fit.adb	Si, Sj : Real := 1.0;	1.0	structure	the whole of the widest turns, each way
+driver-robot-kinematics-fit.adb	Sightings : constant Natural := A'Length / 2;	2	structure	a sighting's two residuals, u and v
 driver-robot-kinematics-fit.adb	Sign : constant Real := (if Result.Scale < 0.0 then -1.0 else 1.0);	1.0	math	the sign of the turn per reading unit, kept as the refinement moves its size
 driver-robot-kinematics-fit.adb	Sign : constant Real := (if Result.Scale < 0.0 then -1.0 else 1.0);	1.0	math	the sign of the turn per reading unit, kept as the refinement moves its size
 driver-robot-kinematics-fit.adb	Size : constant Real := (if Now > 0.0 and then Old > 0.0 then Sqrt (Old / Now) else 1.0);	1.0	math	no change of size when there is none to compare
+driver-robot-kinematics-fit.adb	Sizes_A (At_Value + Part) := abs A (A'First + 2 * (P - 1) + Part);	2	structure	a sighting's two residuals, u and v
+driver-robot-kinematics-fit.adb	Sizes_A : Real_Access := new Real_Array (1 .. 2 * Sightings);	2	structure	a sighting's two residuals, u and v
+driver-robot-kinematics-fit.adb	Sizes_B (At_Value + Part) := abs B (B'First + 2 * (P - 1) + Part);	2	structure	a sighting's two residuals, u and v
+driver-robot-kinematics-fit.adb	Sizes_B : Real_Access := new Real_Array (1 .. 2 * Sightings);	2	structure	a sighting's two residuals, u and v
 driver-robot-kinematics-fit.adb	Slope : constant Real := D + R * (2.0 * L.K1 * R + 4.0 * L.K2 * R2 * R);	2.0	math	the derivative of r (1 + K1 r^2 + K2 r^4): 1 + 3 K1 r^2 + 5 K2 r^4, written as D + r (2 K1 r + 4 K2 r^3)
 driver-robot-kinematics-fit.adb	Slope : constant Real := D + R * (2.0 * L.K1 * R + 4.0 * L.K2 * R2 * R);	4.0	math	the derivative of r (1 + K1 r^2 + K2 r^4): 1 + 3 K1 r^2 + 5 K2 r^4, written as D + r (2 K1 r + 4 K2 r^3)
 driver-robot-kinematics-fit.adb	Sm (P, P) := A (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
-driver-robot-kinematics-fit.adb	Smaller_Ranks := Smaller_Ranks + Real (From + To) / 2.0;	2.0	statistics	tied differences share the mean of their ranks
 driver-robot-kinematics-fit.adb	Spread : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Gg / Rr)));	1.0	numerics	the cosine's range, against rounding
 driver-robot-kinematics-fit.adb	Spread : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Gg / Rr)));	1.0	numerics	the cosine's range, against rounding
 driver-robot-kinematics-fit.adb	Spread : constant Real := Sqrt (Real'Max (0.0, ((A11 - A22) / 2.0) ** 2 + A12 ** 2));	2.0	math	a coordinate axis, a cosine, homogeneous coordinates, a mean
@@ -2165,6 +2328,7 @@ driver-robot-kinematics-fit.adb	exit when not Found or else Pass = 2;	2	structur
 driver-robot-kinematics-fit.adb	exit when not Told or else Pass = 2;	2	structure	the four entries solved once unweighted, once weighted to Sampson residuals
 driver-robot-kinematics-fit.adb	for A in 2 .. Frames loop	2	structure	the keyframes after the reference, which is keyframe 1
 driver-robot-kinematics-fit.adb	for Axis in 1 .. 2 loop	2	structure	the two directions across a joint's axis
+driver-robot-kinematics-fit.adb	for B in 2 .. Frames loop	2	structure	every keyframe after the reference
 driver-robot-kinematics-fit.adb	for B in 2 .. Frames loop	2	structure	the keyframes after the reference, which is keyframe 1
 driver-robot-kinematics-fit.adb	for C in 1 .. 3 loop	3	math	a plane through three points, three coordinates each
 driver-robot-kinematics-fit.adb	for D in 1 .. 3 loop	3	math	three coordinates
@@ -2182,6 +2346,7 @@ driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two resi
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	for I in 1 .. 2 * Used loop	2	structure	two residuals to a sighting
 driver-robot-kinematics-fit.adb	for J in 2 .. N loop	2	structure	the keyframes and joints after the first
+driver-robot-kinematics-fit.adb	for K in 2 .. Natural (Move_Of.Length) loop	2	structure	after the first, which the search starts from
 driver-robot-kinematics-fit.adb	for P in 1 .. 3 loop	3	math	three coordinates
 driver-robot-kinematics-fit.adb	for P in 1 .. 3 loop	3	structure	a 3 by 3 matrix's rows and columns
 driver-robot-kinematics-fit.adb	for P in 1 .. 3 loop	3	structure	a 3 by 3 matrix's rows and columns
@@ -2200,6 +2365,7 @@ driver-robot-kinematics-fit.adb	for P in 2 .. 4 loop	4	structure	the four entrie
 driver-robot-kinematics-fit.adb	for P in 2 .. 4 loop	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	for P in 2 .. Entries loop	2	structure	the rest after the first, or the lower triangle from the second row
 driver-robot-kinematics-fit.adb	for P in 2 .. Entries loop	2	structure	the rest after the first, or the lower triangle from the second row
+driver-robot-kinematics-fit.adb	for Part in 0 .. 1 loop	1	structure	the values grouped by keyframe, from the first
 driver-robot-kinematics-fit.adb	for Pass in 1 .. 2 loop	2	structure	the four entries solved once unweighted, once weighted to Sampson residuals
 driver-robot-kinematics-fit.adb	for Pass in 1 .. 2 loop	2	structure	the side solved once unweighted, once weighted to Sampson residuals
 driver-robot-kinematics-fit.adb	for Pass in 1 .. 2 loop	2	structure	two solutions: the first weights every sighting alike, the second by the first's residuals, as the epipolar one
@@ -2221,6 +2387,7 @@ driver-robot-kinematics-fit.adb	if All_In >= 1.0 then	1.0	math	a probability of 
 driver-robot-kinematics-fit.adb	if Count <= 3 or else Determinant (M) = 0.0 then	3	statistics	more points than the plane's three parameters, or their spread is not measured
 driver-robot-kinematics-fit.adb	if Count >= 3 and then Homographic (Frame) then	3	structure	the plane's homography: six unknowns, two equations a sighting
 driver-robot-kinematics-fit.adb	if Count >= 3 and then not Homographic (Frame) then	3	structure	the epipolar one: four unknowns less their scale, one equation a sighting
+driver-robot-kinematics-fit.adb	if Km > 1 then	1	statistics	a spread needs two values
 driver-robot-kinematics-fit.adb	if N = 0 or else S = 0 or else Frames < 2 then	2	structure	the keyframes and joints after the first
 driver-robot-kinematics-fit.adb	if N > 1 and then (for all X of Sight => not Several (X.Frame)) then	1	structure	an arm of one joint has no order to find
 driver-robot-kinematics-fit.adb	if N > 1 and then P_Count > 0 and then P_Count + 1 < N then	1	structure	the anchor adds one row to the pairs; joints beyond one need it
@@ -2489,6 +2656,7 @@ driver-robot-kinematics-hand_eye.adb	while Wanders and then not Lowered and then
 driver-robot-kinematics-hand_eye.ads	Frame : Positive := 2;	2	structure	a sighting is in a keyframe after the reference, which is the first
 driver-robot-kinematics-hand_eye.ads	Pose_Terms : constant := 6;	6	structure	a pose's terms: three of its turn, three of its centre
 driver-robot-kinematics-hand_eye.ads	Track : Positive := 1;	1	structure	the first track, a default every sighting replaces
+driver-robot-kinematics.adb	& "" & Arm'Image & "" & Driver.Log.Image (Report.Scatter, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Lens.Cx, 2) & "" & Sigma (3) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Lens.Cx, 2) & "" & Sigma (3) & ""	3	structure	the lens's terms in Fit.Lens_Terms' order: the focal lengths' logarithms, the principal point
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Lens.Fx, 2) & "" & Sigma (1, Lens.Fx) & ""	1	structure	the lens's terms in Fit.Lens_Terms' order: the focal lengths' logarithms, the principal point
@@ -2496,9 +2664,15 @@ driver-robot-kinematics.adb	& "" & Driver.Log.Image (Lens.Fx, 2) & "" & Sigma (1
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Lockin.Shift (M, R.Eye, R.Group, C), 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Match_Sigma (R), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& "" & Driver.Log.Image (Report.Beacon (1), 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& "" & Driver.Log.Image (Report.Lens.Cx, 1) & "" & Driver.Log.Image (Report.Lens.Cy, 1)	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& "" & Driver.Log.Image (Report.Lens.Cx, 1) & "" & Driver.Log.Image (Report.Lens.Cy, 1)	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& "" & Driver.Log.Image (Report.Pose.Translation (1), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Report.Sigma_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Response (Outputs), 4));	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& "" & Driver.Log.Image (Step_Of (M, R.Arm, C), 4));	4	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& "" & Driver.Log.Image (U, 1)	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& "" & Driver.Log.Image (V, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& (if Here > 0 then "" & Driver.Log.Image (Driver.Stats.Median (Moves (1 .. Here)), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& (if Known (Seen) then Driver.Log.Image (Seen.Value, 6) else "") & ""	6	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Common.Shift_U, 1) & "" & Driver.Log.Image (Common.Shift_V, 1) & ""	1	format	digits printed in a log line or a message
@@ -2506,6 +2680,7 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Common.Shift_U, 1) & "" & Driver
 driver-robot-kinematics.adb	& Driver.Log.Image (Common.Sigma, 2) & "" & Common.Agree'Image & "" & Common.Points'Image	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Common.Turn * 180.0 / Ada.Numerics.Pi, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Common.Turn * 180.0 / Ada.Numerics.Pi, 1) & ""	180.0	format	radians to degrees for the log
+driver-robot-kinematics.adb	& Driver.Log.Image (Length, 2) & "" & Terms'Image & "");	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Lens.Cy, 2) & "" & Sigma (4) & (if Report.Distorted then "" else "")	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Lens.Cy, 2) & "" & Sigma (4) & (if Report.Distorted then "" else "")	4	structure	the lens's terms in Fit.Lens_Terms' order: the focal lengths' logarithms, the principal point
 driver-robot-kinematics.adb	& Driver.Log.Image (Lens.Fx, 2) & "" & Driver.Log.Image (Lens.Fy, 2) & ""	2	format	digits printed in a log line or a message
@@ -2522,22 +2697,30 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Sta
 driver-robot-kinematics.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Real (Fitted - Start), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Real (Placed - Fitted), 1) & ""	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Report.Beacon (2), 3) & "" & Driver.Log.Image (Report.Beacon (3), 3)	3	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Report.Beacon (2), 3) & "" & Driver.Log.Image (Report.Beacon (3), 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Alone, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Clipped, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Keyframe, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Errors.Persistent, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Linear_To, 1) & "" & Driver.Log.Image (Driver.Conventions.Z, 0)	1	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Report.Pose.Translation (2), 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Report.Pose.Translation (3), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Seconds (K), 1));	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Report.Sigma_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Res_U (F) / Real (Res_N (F)), 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Res_V (F) / Real (Res_N (F)), 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Scale, 4) & "" & Driver.Log.Image (R2.Result.Scale_Sigma, 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Scale, 4) & "" & Driver.Log.Image (R2.Result.Scale_Sigma, 4)	4	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Spread, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Sqrt (Res_Sq (F) / Real (Res_N (F))), 2)	2	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Square_Root (Report.Covariance (8, 8) + Report.Covariance (9, 9)	9	format	the beacon fit's centre terms 8 to 10, printed with four digits
+driver-robot-kinematics.adb	& Driver.Log.Image (Square_Root (Report.Covariance (8, 8) + Report.Covariance (9, 9)	9	format	the beacon fit's centre terms 8 to 10, printed with four digits
 driver-robot-kinematics.adb	& Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & "");	1024	format	kilobytes in a megabyte, for the log
 driver-robot-kinematics.adb	& Report.Used'Image & "" & Driver.Log.Image (Report.Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Rss_After'Image & "" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)	1024	format	kilobytes in a megabyte, for the log
 driver-robot-kinematics.adb	& Spread (Fit.Lens_Terms + Hand.Pose_Terms * (K - 1) + 4));	4	structure	the centre's terms follow the turn's three
+driver-robot-kinematics.adb	("" & Driver.Log.Image (Length, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	(2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0)));	2.0	math	the median of a two-dimensional Gaussian's radius is its sigma times the root of 2 ln 2
 driver-robot-kinematics.adb	(2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0)));	2.0	math	the median of a two-dimensional Gaussian's radius is its sigma times the root of 2 ln 2
 driver-robot-kinematics.adb	(Off, Channels.Noise (M, R.Group, C) * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
@@ -2563,6 +2746,10 @@ driver-robot-kinematics.adb	+ Cross (Row, 2) * (Cv_Lens (1, 1) - Cv_Lens (1, 2))
 driver-robot-kinematics.adb	+ Cross (Row, 2) * (Cv_Lens (1, 1) - Cv_Lens (1, 2))) / Fx_Fy);	2	structure	the two focal lengths
 driver-robot-kinematics.adb	+ J (3 + I) (A) * Place (I, L) * J (3 + L) (B);	3	structure	the three derivatives by the eye's turn come before those by its place
 driver-robot-kinematics.adb	+ J (3 + I) (A) * Place (I, L) * J (3 + L) (B);	3	structure	the three derivatives by the eye's turn come before those by its place
+driver-robot-kinematics.adb	+ Real'Max (0.0, Svv / Real (N) - V ** 2)) / 2.0 / Real (N)));	2.0	statistics	the mean of the two coordinates' variances, over the count: a centre's own variance
+driver-robot-kinematics.adb	+ Report.Covariance (10, 10)), 4)	10	format	the beacon fit's centre terms 8 to 10, printed with four digits
+driver-robot-kinematics.adb	+ Report.Covariance (10, 10)), 4)	10	format	the beacon fit's centre terms 8 to 10, printed with four digits
+driver-robot-kinematics.adb	+ Report.Covariance (10, 10)), 4)	4	format	the beacon fit's centre terms 8 to 10, printed with four digits
 driver-robot-kinematics.adb	+ Response (3) ** 2), 4)	4	format	four decimals in the log
 driver-robot-kinematics.adb	+ Response (6) ** 2), 4)	4	format	four decimals in the log
 driver-robot-kinematics.adb	+ [By (Place_At + 1), By (Place_At + 2), By (Place_At + 3)]);	2	structure	a pose's terms: three of its turn, then three of its centre
@@ -2601,6 +2788,8 @@ driver-robot-kinematics.adb	Dir (T) := (U => (Up.U - Down.U) / (2.0 * H), V => (
 driver-robot-kinematics.adb	Ends : array (1 .. 2) of Vec3;	2	math	a central difference: one standard deviation either way
 driver-robot-kinematics.adb	Free_Terms : constant Natural := Fit.Lens_Terms + (if In_World then 3 else 0);	3	structure	the turn's three terms follow the lens's
 driver-robot-kinematics.adb	Fu : constant Regression.Fit := Regression.Solve (X, Yu, 1.0);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
+driver-robot-kinematics.adb	Fu : constant Regression.Fit := Regression.Solve (X, Yu, 1.0);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
+driver-robot-kinematics.adb	Fv : constant Regression.Fit := Regression.Solve (X, Yv, 1.0);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
 driver-robot-kinematics.adb	Fv : constant Regression.Fit := Regression.Solve (X, Yv, 1.0);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
 driver-robot-kinematics.adb	Fx_Fy : constant Real := Cv_Lens (1, 1) * Cv_Lens (2, 2) - Cv_Lens (1, 2) ** 2;	1	structure	the two focal lengths
 driver-robot-kinematics.adb	Fx_Fy : constant Real := Cv_Lens (1, 1) * Cv_Lens (2, 2) - Cv_Lens (1, 2) ** 2;	1	structure	the two focal lengths
@@ -2663,6 +2852,7 @@ driver-robot-kinematics.adb	R.Shifts.Append (0.0);	0.0	structure	not measured ye
 driver-robot-kinematics.adb	R.Stand_Rate := (Real (Stood) + 1.0) / (Real (Had) + 2.0);	1.0	statistics	Laplace's rule of succession: one more than seen over two more than counted
 driver-robot-kinematics.adb	R.Stand_Rate := (Real (Stood) + 1.0) / (Real (Had) + 2.0);	2.0	statistics	Laplace's rule of succession: one more than seen over two more than counted
 driver-robot-kinematics.adb	Regression.Test_Block (Fu, 1, Kp, Stat, Rank);	1	structure	the whole block of the point's columns, from the first: its numerical rank must equal their count for the point's coefficients to be determined
+driver-robot-kinematics.adb	Regression.Test_Block (Fu, 1, Kp, Stat, Rank);	1	structure	the whole block of the point's columns, from the first: its numerical rank must equal their count for the point's coefficients to be determined
 driver-robot-kinematics.adb	Report.Depth_Gains.Append (0.0);	0.0	structure	a query no sighting names has no track in the fit: its depth moves with no term
 driver-robot-kinematics.adb	Res_N : Counts_Access := new Count_List'(1 .. Natural'Max (1, Frame_Count) => 0);	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	Res_Sq : Real_Access := new Real_Array'(1 .. Natural'Max (1, Frame_Count) => 0.0);	1	format	digits printed in a log line or a message
@@ -2677,11 +2867,18 @@ driver-robot-kinematics.adb	Scale := 1.0;	1.0	math	the identity's scale: the fir
 driver-robot-kinematics.adb	Scale := 1.0;	1.0	structure	the identity's scale until the arm is placed
 driver-robot-kinematics.adb	Set.Sigma.Append (0.0);	0.0	format	no standard deviation stated: a keyframe the view has no picture of
 driver-robot-kinematics.adb	Sights_Of (U, V, F, Moved (L, K, (if E = 1 then -Sigma_K else Sigma_K)), S.all);	1	math	a central difference: one standard deviation either way
+driver-robot-kinematics.adb	Sigmas (I) := (if P < Natural (S.Sigma.Length) and then S.Sigma (P) > 0.0 then S.Sigma (P) else 1.0);	1.0	statistics	a pixel: the standard deviation an answer stating none weighs by, under the regression's own residual scale
 driver-robot-kinematics.adb	Step : constant Real := Ada.Numerics.Long_Elementary_Functions."" (Real'Model_Epsilon, 1.0 / 3.0);	1.0	numerics	the step of a central difference is the cube root of the machine epsilon: the one that balances its truncation against its rounding
 driver-robot-kinematics.adb	Step : constant Real := Ada.Numerics.Long_Elementary_Functions."" (Real'Model_Epsilon, 1.0 / 3.0);	3.0	numerics	the cube root
+driver-robot-kinematics.adb	Su := Su + (Real (X) + 0.5);	0.5	math	a pixel's centre
+driver-robot-kinematics.adb	Suu := Suu + (Real (X) + 0.5) ** 2;	0.5	math	a pixel's centre
+driver-robot-kinematics.adb	Sv := Sv + (Real (Y) + 0.5);	0.5	math	a pixel's centre
+driver-robot-kinematics.adb	Svv := Svv + (Real (Y) + 0.5) ** 2;	0.5	math	a pixel's centre
 driver-robot-kinematics.adb	T (T'First (1) + D - 1, T'First (2) + K - 1) + (Ends (2) (D) - Ends (1) (D)) / (2.0 * Sigma_K);	2.0	math	a central difference: one standard deviation either way spans two
 driver-robot-kinematics.adb	Through_Plane (Plane, U0 + 1.0, V0, P1, Ok1);	1.0	math	the warp is the plane's carrying of the pixel a pixel along u
 driver-robot-kinematics.adb	Through_Plane (Plane, U0, V0 + 1.0, P2, Ok2);	1.0	math	and of the pixel a pixel along v
+driver-robot-kinematics.adb	Translation => [X (8), X (9), X (10)]);	10	structure	the joined terms' camera centre, 8 to 10 of the ten: the lens 1 to 4, the turn 5 to 7
+driver-robot-kinematics.adb	Translation => [X (8), X (9), X (10)]);	9	structure	the joined terms' camera centre, 8 to 10 of the ten: the lens 1 to 4, the turn 5 to 7
 driver-robot-kinematics.adb	Turn (I, J) := C (C.First_Index + 6 * (I - 1) + (J - 1));	6	structure	six terms of a placement a row (its turn and its centre)
 driver-robot-kinematics.adb	Turn_1 : constant := 0;	0	structure	the inputs' layout: the two eyes' turns, centres and tables' planes, three numbers each
 driver-robot-kinematics.adb	Turn_2 : constant := 6;	6	structure	the inputs' layout: the two eyes' turns, centres and tables' planes, three numbers each
@@ -2698,10 +2895,18 @@ driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];
 driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];	2	structure	the entries of the covariance of a place, by the pixel's two axes
 driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];	2	structure	the entries of the covariance of a place, by the pixel's two axes
 driver-robot-kinematics.adb	Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];	2	structure	the entries of the covariance of a place, by the pixel's two axes
+driver-robot-kinematics.adb	Variance := [Variance (1) + Far_U ** 2, Variance (2) + Far_U * Far_V, Variance (3) + Far_V ** 2];	1	structure	a pixel covariance's three entries: uu, uv, vv
+driver-robot-kinematics.adb	Variance := [Variance (1) + Far_U ** 2, Variance (2) + Far_U * Far_V, Variance (3) + Far_V ** 2];	2	structure	a pixel covariance's three entries: uu, uv, vv
+driver-robot-kinematics.adb	Variance := [Variance (1) + Far_U ** 2, Variance (2) + Far_U * Far_V, Variance (3) + Far_V ** 2];	3	structure	a pixel covariance's three entries: uu, uv, vv
 driver-robot-kinematics.adb	View_Of : Index_List (1 .. Natural'Max (1, Natural (M.Kinematics.Length))) := [others => 0];	1	structure	a list of at least one place, empty or not
 driver-robot-kinematics.adb	W : constant Natural := Index_Of (M, 1);	1	structure	the first arm is the world
 driver-robot-kinematics.adb	World : constant Natural := Index_Of (M, 1);	1	structure	the first arm's reference frame is the world
+driver-robot-kinematics.adb	World : constant Natural := Index_Of (M, 1);	1	structure	the first arm, whose frame is the world
+driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	2	structure	a track's three coordinates in a flat list
 driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	2	structure	the last of a track's three numbers
+driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	3	structure	a track's three coordinates in a flat list
+driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	3	structure	a track's three coordinates in a flat list
+driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	3	structure	a track's three coordinates in a flat list
 driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	3	structure	three numbers a track
 driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	3	structure	three numbers a track
 driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	3	structure	three numbers a track
@@ -2761,21 +2966,30 @@ driver-robot-kinematics.adb	for S in 1 .. 3 loop	3	structure	the three coordinat
 driver-robot-kinematics.adb	function Sigma (T : Positive; Scale : Real := 1.0) return String is	1.0	math	a term in its own unit unless scaled
 driver-robot-kinematics.adb	if At_Reference and then Natural (R.Frames.Length) > 1 then	1	structure	the twin is a frame after the first: there must be more than one
 driver-robot-kinematics.adb	if Current (M, R) and then R.Result.Fitted and then R.Aligned >= 2 and then Queries > 0 then	2	structure	a keyframe after the reference is the second or later
+driver-robot-kinematics.adb	if Driver.Pixels.Frames (W.Gathering) >= 2 then	2	structure	a view is judged by two frames at least (Views.Gathered)
+driver-robot-kinematics.adb	if Driver.Uncertain.Significant (Driver.Uncertain.Vector_Gate (Terms), Length, 1.0) then	1.0	statistics	the length is in sigmas already: the difference is whitened by the two covariances
 driver-robot-kinematics.adb	if F.Judged and then not F.Known and then F.From > 0 and then Evidence < 2 * F.From then	2	structure	the evidence doubled, as the heavier estimates are due (Estimates_Due)
+driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	2	structure	a track's three coordinates in a flat list
 driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	2	structure	the last of a track's three numbers
+driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	3	structure	a track's three coordinates in a flat list
 driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	3	structure	three numbers a track
 driver-robot-kinematics.adb	if Known and then Q < Queries and then F.Link (Q) >= 1 and then F.Link (Q) <= Joints'Length	1	structure	a track's link 0 rides on nothing; 1 and more are links of the arm
 driver-robot-kinematics.adb	if Kp >= 1 and then Rows >= Kp then	1	structure	a point is regressed when a channel changed in its keyframes, and only with as many rows as columns can the rows determine them
+driver-robot-kinematics.adb	if Kp >= 1 and then Rows >= Kp then	1	structure	a point is regressed when a channel changed in its keyframes, and only with as many rows as columns can the rows determine them
 driver-robot-kinematics.adb	if Natural (R.Frames.Length) = 1 then	1	structure	the first keyframe is the reference
+driver-robot-kinematics.adb	if Own (C) = 0 and then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
 driver-robot-kinematics.adb	if Pictured and then W > 2 * Half and then H > 2 * Half then	2	structure	the patch's whole side: half of it either side of the point
 driver-robot-kinematics.adb	if Pictured and then W > 2 * Half and then H > 2 * Half then	2	structure	the patch's whole side: half of it either side of the point
 driver-robot-kinematics.adb	if R.Views (Position).Eye = H and then R.Views (Position).Aligned >= 2 then	2	structure	a reference and one keyframe at least
 driver-robot-kinematics.adb	if Rows >= 1 then	1	structure	a point answered in one keyframe is regressed: the rank of each channel's block tells what its rows determine
 driver-robot-kinematics.adb	if V.Result.Placed and then V.Aligned >= 2 and then Queries > 0 then	2	structure	a reference and one keyframe at least
+driver-robot-kinematics.adb	if W.Has_Before and then not W.Taken and then Driver.Pixels.Frames (W.Gathering) >= 2	2	structure	a view is judged by two frames at least (Views.Gathered)
 driver-robot-kinematics.adb	or else (Chi > 0.0 and then Driver.Distributions.Chi_Square_Deviate (Chi, 2) > Driver.Conventions.Z)	2	math	a place in a picture has two dimensions
 driver-robot-kinematics.adb	or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) < 36	36	structure	a six by six covariance, row by row
 driver-robot-kinematics.adb	return (if Band < Real'Last then Real'Max (Step, 2.0 * Band) else Step);	2.0	math	two landings of one asked pose, each within the dead band of it
 driver-robot-kinematics.adb	return Square_Root (Fixed_Angle_Sigma (M, E) ** 2 + Var / 2.0);	2.0	math	half the trace: the variance per axis across a line
+driver-robot-kinematics.adb	then "" & Driver.Log.Image (Report.Lens.Fx, 2) & "" & Driver.Log.Image (Report.Lens.Fy, 2)	2	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	then "" & Driver.Log.Image (Report.Lens.Fx, 2) & "" & Driver.Log.Image (Report.Lens.Fy, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	then (1.0 / (R.Result.Table_A * X)) * R.Result.Table_A	1.0	math	the table's plane A * X = 1 scaled to pass through the point
 driver-robot-kinematics.adb	then Driver.Log.Image (R.Shifts (C - 1), 4) & "" & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	then Driver.Log.Image (R.Shifts (C - 1), 4) & "" & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)	4	format	digits printed in a log line or a message
@@ -3108,9 +3322,14 @@ driver-robot.adb	if M.Beats >= 2 * M.Graph_Evidence then	2	numerics	re-estimatin
 driver-robot.adb	return "" & Image_Lag (M, E)'Image & (if Lag_Known (M, E) then "" else "") & "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
 driver-robot.adb	return "" & Image_Lag (M, E)'Image & (if Lag_Known (M, E) then "" else "") & "" & Driver.Log.Image (S.Change_1, 3) & "" & Driver.Log.Image (S.Change_2, 3)	3	format	digits printed in a log line or a message
 driver-robot.adb	then Real'Max (0.0, (S (1, 1) + S (2, 2) + S (3, 3) - Driver.Numerics.Arrays."" (D, Driver.Numerics.Arrays."" (S, D))) / 2.0)	2.0	math	a small turn moves a line by its part across the line, shared by the two axes across it
+driver-robot.ads	Arm : Arm_Id := 1;	1	structure	a record's default
+driver-robot.ads	Arm : Arm_Id := 1;	1	structure	a record's default
 driver-robot.ads	C : Real := 1.0;	1.0	structure	a joint turns one radian per reading unit until fitted
 driver-robot.ads	Change_1, Change_2 : Real := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot.ads	Channel : Positive := 1;	1	structure	a stop record is a channel counted from one
+driver-robot.ads	Closer : Group_Id := 1;	1	structure	a record's default
+driver-robot.ads	Eye : Eye_Id := 1;	1	structure	a record's default
+driver-robot.ads	Eye : Eye_Id := 1;	1	structure	a record's default
 driver-robot.ads	Frame : Positive := 1;	1	structure	keyframes are numbered from one
 driver-robot.ads	Rest_Factor : Real := 1.0;	1.0	math	before it is measured, a cell rests at its floor
 driver-robot.ads	Scale : Real := 1.0;	1.0	math	the identity's scale: the first arm is the world as it is

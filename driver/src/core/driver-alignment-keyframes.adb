@@ -1533,6 +1533,15 @@ package body Driver.Alignment.Keyframes is
       Prior        : Affine;
       Prior_Scale  : Real := 1.0;
       Prior_Spread : Real := 0.0;
+      --  The two fields of the last size that drew two, each on enough points to fix one (Least_Points), and told
+      --  neither over the other, with that size's scale: a turn that moves the eye moves what is near it and what is far
+      --  by fields of their own, and the points on each prefer it about as often as the others prefer theirs (v7, servo
+      --  seed 7 of the fake robot, 10-18: its third joint's keyframes drew 53 points on one field against 44 on the next,
+      --  no field was told, and none of their points was asked; x3's fourth joint the same, and the arm had no keyframe
+      --  of it). Where no field is told, every point is asked between where the two put it.
+      Two_Best, Two_Other : Affine;
+      Two_Scale    : Real := 0.0;
+      Two_Drawn    : Boolean := False;
       --  The sizes tried: from the one Align searches the window at, finer while the field is not told, down to the
       --  coarsest size where a place known to its pixel is a window a patch carries at the full size (Align's own
       --  test of a narrow window): a finer size narrows the prediction no further and scans four times the places
@@ -2057,6 +2066,12 @@ package body Driver.Alignment.Keyframes is
                   end if;
                   Result.Told :=
                     Real (Result.Own) - Real (Result.Other) > Z * Sqrt (Real (Result.Own + Result.Other));
+                  if not Result.Told and then Best_N >= Least_Points and then Other_N >= Least_Points then
+                     Two_Best := Best;
+                     Two_Other := Other;
+                     Two_Scale := Scale;
+                     Two_Drawn := True;
+                  end if;
                   --  Where the field is told, a point whose best place was where it stood while the field moves it
                   --  there beyond a place the size resolves stood against the view; one on the field that moved
                   --  moved with it.
@@ -2148,6 +2163,32 @@ package body Driver.Alignment.Keyframes is
             exit when Was_Prior and then not Refined;
          end;
       end loop;
+      --  No field told, two drawn: every point where the first puts it, its window widened by the outer product of
+      --  where the two disagree there (as Predict widens a candidate by its largest disagreement with another), and a
+      --  place known to a pixel of the size they were drawn at.
+      if not Result.Told and then Two_Drawn then
+         for K in Into'Range loop
+            declare
+               P  : constant Driver.Images.Pixel := C.Points (K - Into'First + 1);
+               Pu : constant Real := P.U / Two_Scale;
+               Pv : constant Real := P.V / Two_Scale;
+               Bu : constant Real := Two_Scale * Move_U (Two_Best, Pu, Pv);
+               Bv : constant Real := Two_Scale * Move_V (Two_Best, Pu, Pv);
+               Du : constant Real := Two_Scale * Move_U (Two_Other, Pu, Pv) - Bu;
+               Dv : constant Real := Two_Scale * Move_V (Two_Other, Pu, Pv) - Bv;
+               Spread : constant Real := Quantization * Two_Scale ** 2;
+            begin
+               Into (K) :=
+                 (From => P,
+                  To => (U => P.U + Bu, V => P.V + Bv),
+                  Linear => (UU => 1.0 + Two_Best.M11, UV => Two_Best.M12, VU => Two_Best.M21, VV => 1.0 + Two_Best.M22),
+                  Cov => (UU => Spread + Du ** 2, UV => Du * Dv, VV => Spread + Dv ** 2),
+                  Linear_Sigma => Real'Last);
+            end;
+         end loop;
+         Result.Told := True;
+         Result.Two_Fields := True;
+      end if;
    end Common_Motion;
 
    function Last_Motion (C : Chain) return Motion is (C.Motion);

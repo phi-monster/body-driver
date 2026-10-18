@@ -172,6 +172,7 @@ package Driver.Robot.Hand.Lobes is
       Parts_Here     : Natural := 0;   --  parts of the pixels given to each end that are attached and larger than the doubt
       Parts_There    : Natural := 0;
       Turned         : Boolean := False;  --  the robot's look gave each end the other's pixels, and the closer's motion turned them
+      Joined         : Natural := 0;      --  lobes joined into others the closer moves the same way (From_Change)
       With_Motion    : Natural := 0;      --  the lobes' pixels, as first given, whose way from end to end goes with the closer's motion
       Against_Motion : Natural := 0;      --  and against it (neither, without a motion to tell)
       Still          : Mask;              --  the robot's own pixels that did not change between the ends (From_Change)

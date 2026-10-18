@@ -92,7 +92,8 @@ package body Driver.Robot.Hand.Presses is
       Press   : out Event;
       Retargeted : Boolean := False;
       Asked   : Pose_Estimate := (others => <>);
-      Step_Of : Step_Function := null)
+      Step_Of : Step_Function := null;
+      Held    : Boolean := False)
    is
       --  The command takes the tool back nearer where it stood before the push than where the block left it: a
       --  retreat, which a hold at the readings the block left (the arm easing back a little since) never is.
@@ -129,7 +130,12 @@ package body Driver.Robot.Hand.Presses is
                if Retargeted then
                   W.Commands := W.Commands + 1;
                end if;
-               if not Blocked or else W.Commands > 0 then
+               --  Or the command already holds the arm where it stands (Held): a push stopped where it was read
+               --  the moment what it met was felt was held there before its verdict came, the one command after the
+               --  block, and no later one changed it. z7 (servo seed 7 of the fake robot, 10-18): its press at open
+               --  stopped so at beat 7060, was judged blocked at 7063, the hold the measure then sent was the stop's,
+               --  and the watcher waited for a let-go 7068 beats, the stream's length; its next press, 12,000 more.
+               if not Blocked or else W.Commands > 0 or else Held then
                   W.State := Let_Go;
                end if;
             end if;

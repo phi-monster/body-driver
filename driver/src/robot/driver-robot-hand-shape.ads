@@ -80,8 +80,12 @@ package Driver.Robot.Hand.Shape is
       Open_Anchor   : Positive;
       Closed_Anchor : Positive;
       Bordered      : Boolean;
-      Closed_Is_End : Boolean := True) return Lobe_Shape
+      Closed_Is_End : Boolean := True;
+      Anchored      : Boolean := True;
+      Pixels        : Driver.Images.Mask := Driver.Images.Create (0, 0)) return Lobe_Shape
      with Pre => Open_Anchor in Sightings'Range and then Closed_Anchor in Sightings'Range;
+   --  Pixels: the lobe's pixels at the open end (the mask it was found in), followed or not; none when not given. Its
+   --  sizes reach over those that show it with no depth (End_Of).
    --  Eye is the eye's centre in the tool frame. The anchors are the
    --  sightings of the lobe's tip at the open end and at the closed end, the
    --  points the presses measure. Bordered: the lobe touches the picture's
@@ -131,6 +135,24 @@ package Driver.Robot.Hand.Shape is
    --  lobe followed part of its travel: Fit's Closed_Is_End); the depth and the
    --  axis, when every lobe is.
 
+   --  The rigid motion of what a set of sightings sees between two pictures of one eye, by Fit's starts and fit
+   --  with no tip to anchor: Turn its rotation vector (axis times angle, the eye's frame) with its covariance in
+   --  radians squared, Shift the unit direction of its shift. For an eye carried by a joint that alone turned
+   --  between the pictures, the turn's axis is the joint's axis in the eye's frame.
+   type Two_View_Motion is record
+      Fitted   : Boolean := False;
+      Why      : Ada.Strings.Unbounded.Unbounded_String;
+      Turn     : Vec3 := [0.0, 0.0, 0.0];
+      Turn_Cov : Mat3 := [others => [others => 0.0]];
+      Shift    : Vec3 := [0.0, 0.0, 0.0];
+      Shift_Sd : Real := Real'Last;   --  radians: how far its direction may turn, at one standard deviation
+      Kept     : Natural := 0;
+      Scatter  : Real := 0.0;
+   end record;
+
+   function Motion_Between (Sightings : Sighting_Array) return Two_View_Motion
+     with Pre => Sightings'Length > 0;
+
 private
 
    type Point is record
@@ -165,6 +187,7 @@ private
       Closed_Anchor : Positive := 1;
       Bordered      : Boolean := False;
       Closed_Is_End : Boolean := True;
+      Pixels        : Driver.Images.Mask;   --  the lobe's pixels at the open end (Fit's Pixels)
    end record;
 
 end Driver.Robot.Hand.Shape;

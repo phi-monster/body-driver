@@ -77,7 +77,8 @@ package body Driver.Robot.Hand.Pressing is
    end Least_Push;
 
    procedure Aim
-     (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed; Yaw : Real := 0.0)
+     (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed; Yaw : Real := 0.0;
+      Shift : Vec3 := [0.0, 0.0, 0.0])
    is
       Tool    : constant Pose_Estimate := Tool_In_Arm (M, Arm, O);
       Down    : constant Direction_Estimate := Up_In_Arm (M, Arm);
@@ -110,6 +111,7 @@ package body Driver.Robot.Hand.Pressing is
             Result.Above := (Rotation => Rotation, Translation => Eye_At - Rotation * Eye_Here);
          end;
       end if;
+      Result.Above.Translation := Result.Above.Translation + Shift;
       Result.Turn := Angle (Transpose (Tool.Pose.Rotation) * Result.Above.Rotation);
       --  The aim points the line of sight at "down" as the arm's eye saw the table: known to that direction's sigma; a
       --  blind aim is the tool's own turn, known as the fit knows it.
@@ -184,91 +186,134 @@ package body Driver.Robot.Hand.Pressing is
       Best_Push  : Real := Real'Last;   --  its least push: how surely the fit places the tool there
       Any        : Boolean := False;
       Tried_Yaw  : Real;
+      --  The first landing found under something standing on the table, and how near anything standing counted there:
+      --  where the circle of turns was refused for that.
+      Stood        : Boolean := False;
+      Stood_At     : Vec3 := [0.0, 0.0, 0.0];
+      Stood_Within : Real := 0.0;
+
+      --  The circle of turns about the way down (Aim's Yaw), the aim moved by Shift.
+      procedure Circle (Shift : Vec3) is
+      begin
+         for K in 0 .. 7 loop
+            --  0, an eighth of a turn one way, the other, a quarter each way, three eighths each way, half a turn.
+            Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);
+            Aim (M, Arm, Eye, O, Along, Result, Yaw, Shift);
+            exit when not Result.Ok;
+            Reaches := Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Planned;
+            if K = 0 and then not Reaches then
+               Unmeasured := Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Unmeasured;
+               Why := Ada.Strings.Unbounded.To_Unbounded_String (Driver.Robot.Motion.Why (Result.Plan));
+            end if;
+            if Reaches then
+               declare
+                  There : Observation := O;
+                  Down  : Estimate;
+               begin
+                  There.Readings.Replace_Element (Group, Driver.Robot.Motion.Last_Readings (Result.Plan));
+                  Down := Gap (M, Arm, There, Tip, Surface, Result.Into);
+                  if Known (Down) and then Down.Value > 0.0 then
+                     declare
+                        Deep : constant Driver.Robot.Motion.Plan := Lowered (M, Arm, There, Result.Into, Down.Value);
+                     begin
+                        Reaches := Driver.Robot.Motion.Status (Deep) = Driver.Robot.Motion.Planned;
+                        if K = 0 and then not Reaches then
+                           Why := Ada.Strings.Unbounded.To_Unbounded_String
+                             ("the descent from it to the contact the presses predict: " & Driver.Robot.Motion.Why (Deep));
+                        end if;
+                     end;
+                     --  Where the tip lands, the tip at the aim lowered by the gap: something standing above the table there
+                     --  (the arm's eye's tracks), within what the landing is uncertain by and the tip's region, is what the
+                     --  press would meet, not the table. This aim is not taken; the next turn of the circle lands elsewhere.
+                     if Reaches then
+                        declare
+                           Tool_There : constant Pose_Estimate := Tool_In_Arm (M, Arm, There);
+                           Landing    : constant Vec3 := Tool_There.Pose * Tip.Mean + Down.Value * Result.Into;
+                           Measured   : constant Boolean :=
+                             Tool_There.Position_Covariance (1, 1) < Real'Last and then Tip.Covariance (1, 1) < Real'Last;
+                           Within     : constant Real :=
+                             (if Measured
+                              then Driver.Conventions.Z * Sqrt (Widest (Tool_There.Position_Covariance) + Widest (Tip.Covariance))
+                                   + Footprint
+                              else 0.0);
+                           Standing   : constant Natural :=
+                             (if Measured then Driver.Robot.Kinematics.Standing_Near (M, Arm, Landing, Within) else 0);
+                        begin
+                           if Standing > 0 then
+                              Reaches := False;
+                              if not Stood then
+                                 Stood := True;
+                                 Stood_At := Landing;
+                                 Stood_Within := Within;
+                              end if;
+                              if K = 0 then
+                                 Why := Ada.Strings.Unbounded.To_Unbounded_String
+                                   ("something stands above the table where the tip would land:" & Standing'Image
+                                    & " of the eye's tracks within " & Driver.Log.Image (Within, 4) & " of it");
+                              end if;
+                           end if;
+                        end;
+                     end if;
+                  end if;
+               end;
+            end if;
+            if Reaches then
+               declare
+                  There : Observation := O;
+               begin
+                  There.Readings.Replace_Element (Group, Driver.Robot.Motion.Last_Readings (Result.Plan));
+                  declare
+                     Push : constant Real := Least_Push (M, Arm, There);
+                  begin
+                     --  The least rotation of those as sure: the turns are tried from the least, and a later one is taken
+                     --  only where the fit places the tool surer by more than the fraction that counts as no change. By the
+                     --  bare comparison, h24 (servo seed 3, 10-17) took turns of 2.36 and 3.14 rad for differences no fit
+                     --  tells, and the arm did not reach four of its aims (blocked, or given up still moving).
+                     if not Any or else Push < (1.0 - Driver.Conventions.Unchanged_Fraction) * Best_Push then
+                        Any := True;
+                        Best := Result;
+                        Best_Yaw := Result.Yawed;
+                        Best_Push := Push;
+                     end if;
+                  end;
+               end;
+            end if;
+         end loop;
+      end Circle;
    begin
       Reaches := False;
       Unmeasured := False;
       Yaw := 0.0;
       Why := Ada.Strings.Unbounded.Null_Unbounded_String;
       Result := (others => <>);
-      for K in 0 .. 7 loop
-         --  0, an eighth of a turn one way, the other, a quarter each way, three eighths each way, half a turn.
-         Yaw := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);
-         Aim (M, Arm, Eye, O, Along, Result, Yaw);
-         exit when not Result.Ok;
-         Reaches := Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Planned;
-         if K = 0 and then not Reaches then
-            Unmeasured := Driver.Robot.Motion.Status (Result.Plan) = Driver.Robot.Motion.Unmeasured;
-            Why := Ada.Strings.Unbounded.To_Unbounded_String (Driver.Robot.Motion.Why (Result.Plan));
-         end if;
-         if Reaches then
-            declare
-               There : Observation := O;
-               Down  : Estimate;
-            begin
-               There.Readings.Replace_Element (Group, Driver.Robot.Motion.Last_Readings (Result.Plan));
-               Down := Gap (M, Arm, There, Tip, Surface, Result.Into);
-               if Known (Down) and then Down.Value > 0.0 then
-                  declare
-                     Deep : constant Driver.Robot.Motion.Plan := Lowered (M, Arm, There, Result.Into, Down.Value);
-                  begin
-                     Reaches := Driver.Robot.Motion.Status (Deep) = Driver.Robot.Motion.Planned;
-                     if K = 0 and then not Reaches then
-                        Why := Ada.Strings.Unbounded.To_Unbounded_String
-                          ("the descent from it to the contact the presses predict: " & Driver.Robot.Motion.Why (Deep));
-                     end if;
-                  end;
-                  --  Where the tip lands, the tip at the aim lowered by the gap: something standing above the table there
-                  --  (the arm's eye's tracks), within what the landing is uncertain by and the tip's region, is what the
-                  --  press would meet, not the table. This aim is not taken; the next turn of the circle lands elsewhere.
-                  if Reaches then
-                     declare
-                        Tool_There : constant Pose_Estimate := Tool_In_Arm (M, Arm, There);
-                        Landing    : constant Vec3 := Tool_There.Pose * Tip.Mean + Down.Value * Result.Into;
-                        Measured   : constant Boolean :=
-                          Tool_There.Position_Covariance (1, 1) < Real'Last and then Tip.Covariance (1, 1) < Real'Last;
-                        Within     : constant Real :=
-                          (if Measured
-                           then Driver.Conventions.Z * Sqrt (Widest (Tool_There.Position_Covariance) + Widest (Tip.Covariance))
-                                + Footprint
-                           else 0.0);
-                        Standing   : constant Natural :=
-                          (if Measured then Driver.Robot.Kinematics.Standing_Near (M, Arm, Landing, Within) else 0);
-                     begin
-                        if Standing > 0 then
-                           Reaches := False;
-                           if K = 0 then
-                              Why := Ada.Strings.Unbounded.To_Unbounded_String
-                                ("something stands above the table where the tip would land:" & Standing'Image
-                                 & " of the eye's tracks within " & Driver.Log.Image (Within, 4) & " of it");
-                           end if;
-                        end if;
-                     end;
-                  end if;
-               end if;
-            end;
-         end if;
-         if Reaches then
-            declare
-               There : Observation := O;
-            begin
-               There.Readings.Replace_Element (Group, Driver.Robot.Motion.Last_Readings (Result.Plan));
+      Circle ([0.0, 0.0, 0.0]);
+      --  Every turn the arm reaches lands its tip on something standing on the table: the aim keeps the eye where it
+      --  stands, and a tip on the lobe's line of sight lands below the eye at every turn of the circle. The press moves
+      --  across the table, by the least that puts its landing on a place of the table nothing stands within the same
+      --  reach of (Kinematics.Clear_Spot), and the circle is tried there once. y7 (servo seed 7 of the fake robot,
+      --  10-18): every turn of its open presses landed within 2.64 of one track standing above the table, the tilts
+      --  of the open opening were never pressed, and the hand's sizes stayed unmeasured.
+      if not Any and then Stood then
+         declare
+            Spot  : Vec3;
+            Found : Boolean;
+         begin
+            Driver.Robot.Kinematics.Clear_Spot (M, Arm, Stood_At, Stood_Within, Spot, Found);
+            if Found then
                declare
-                  Push : constant Real := Least_Push (M, Arm, There);
+                  Normal : constant Vec3 := Driver.Robot.Kinematics.Table (M, Arm).Normal;
+                  Off    : constant Vec3 := Spot - Stood_At;
+                  Across : constant Vec3 := Off - Real'(Off * Normal) * Normal;
                begin
-                  --  The least rotation of those as sure: the turns are tried from the least, and a later one is taken
-                  --  only where the fit places the tool surer by more than the fraction that counts as no change. By the
-                  --  bare comparison, h24 (servo seed 3, 10-17) took turns of 2.36 and 3.14 rad for differences no fit
-                  --  tells, and the arm did not reach four of its aims (blocked, or given up still moving).
-                  if not Any or else Push < (1.0 - Driver.Conventions.Unchanged_Fraction) * Best_Push then
-                     Any := True;
-                     Best := Result;
-                     Best_Yaw := Result.Yawed;
-                     Best_Push := Push;
-                  end if;
+                  Driver.Log.Line (Driver.Log.Robot, "hand: a press's every turn lands on something standing on the"
+                                   & " table; it moves " & Driver.Log.Image (abs Across, 4)
+                                   & " across the table, to the nearest place nothing stands within "
+                                   & Driver.Log.Image (Stood_Within, 4) & " of");
+                  Circle (Across);
                end;
-            end;
-         end if;
-      end loop;
+            end if;
+         end;
+      end if;
       Tried_Yaw := Yaw;
       if Any then
          Result := Best;

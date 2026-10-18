@@ -303,8 +303,6 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Arm    : Arm_Id := 1;
          Eye    : Eye_Id := 1;
          Have   : Natural := 0;       --  the poses its eye has seen its readings from
-         Began  : Natural := 0;       --  the beats the stream had
-         Settles : Natural := 0;     --  the most beats the own eye has taken to settle after a move
          Shows  : Natural := 0;       --  the beats a still picture of the own eye takes to show (Showing_Of)
          Plan   : Driver.Robot.Motion.Plan;
          Ready  : Boolean := False;   --  the raise is planned and its readings show
@@ -317,9 +315,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          procedure Read_Poses (O : Observation) is
             P : constant Natural := Own_Pair (G);
          begin
-            Began := Natural (O.Beat);
             Placed := P > 0;
-            Settles := (if Placed then Settling_Of (H.Data.Pairs (P).Eye) else 0);
             Shows := (if Placed then Showing_Of (H.Data.Pairs (P).Eye) else 0);
             Have := 0;
             if Placed then

@@ -26,6 +26,12 @@ package Driver.Conventions with Pure is
    --  seen by an eye, the link of two planes) starts at the float's epsilon, as it always has: damped steps that
    --  each lower the cost by less than the unchanged fraction stop it short of its minimum.
 
+   Axis_Directions : constant := 2562;
+   --  A search over the directions an axis may have scans a Fibonacci lattice of this many points on the sphere, as
+   --  dense as an icosahedron split four times (about four degrees apart), the half on one side when a direction and
+   --  its opposite are one axis. Only where the fits after it start depends on it: a joint's axis in the arm fit, a
+   --  lobe's hinge in the hand's shape.
+
    Unchanged_Fraction : constant := 0.01;
    --  An iterative estimate has stopped changing when one more iteration
    --  moves it by less than this fraction of its own size. Below this the

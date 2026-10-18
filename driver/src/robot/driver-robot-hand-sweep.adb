@@ -414,6 +414,9 @@ package body Driver.Robot.Hand.Sweep is
               & (if Here.Located.Turned
                  then ": the robot's look gave each end the other's pixels, and the closer's own motion turned them"
                  else "")
+              & (if Here.Located.Joined > 0
+                 then ";" & Here.Located.Joined'Image & " lobes joined into others the closer moves the same way"
+                 else "")
               & ")";
       end case;
    end Account;

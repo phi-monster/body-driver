@@ -357,7 +357,8 @@ package body Driver.Robot.Hand.Shape.Tests is
                      Have (L) := True;
                      Result.Found := Result.Found + 1;
                      Result.Masks (L) := F.Here;
-                     Fits (L) := Fit (R.Eye, Seen, F.Tip_Move_Here, Seen'Last, F.Bordered_Here, Closed_Is_End);
+                     Fits (L) := Fit (R.Eye, Seen, F.Tip_Move_Here, Seen'Last, F.Bordered_Here, Closed_Is_End,
+                                      Pixels => F.Here);
                      Result.Shapes (L) := Fits (L);
                      Result.Tips (L) := [Open => At_Open.Point, Closed_Empty => At_Shut.Point];
                      for O in Opening loop
