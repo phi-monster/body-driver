@@ -78,10 +78,11 @@ package Driver.Robot.Surfaces is
       Unseen : Natural := 0;   --  fewer than two views see where its line of sight meets the table
       Unfound : Natural := 0;  --  no view found it along its segment, there and back
       Unmet  : Natural := 0;   --  found, but no three lines of sight met within their uncertainties
-      Untold : Natural := 0;   --  met, but fewer than two views told its depth by themselves
+      Untold : Natural := 0;   --  met, but by the lines of fewer than two views
       Below  : Natural := 0;   --  placed below the table
       Edge   : Natural := 0;   --  left out where its depth does not go on through its neighbours'
       Placed : Natural := 0;
+      Loose  : Natural := 0;   --  of the placed, those placed as surely as their second view tells the depth
       Error  : Real := 0.0;    --  the aligner's error between the views the round trips measured, in pixels; 0: not
    end record;
 
@@ -100,9 +101,10 @@ package Driver.Robot.Surfaces is
       Counts    : out Placing_Counts)
      with Pre => Result'First = Queries'First and then Result'Last = Queries'Last;
    --  Each query pixel of Now's picture placed from the views Elsewhere, of any eyes, as above, but those whose patch
-   --  stays where it is in the picture of the same eye from the farthest place (Riding): the robot's own body. Table is in the frame
-   --  of the poses, its normal towards the eyes. The queries are a grid of Columns per row, row by row, a query
-   --  missing from the grid given as a pixel with a negative U (it is not asked and has no neighbours). A point on
-   --  the table within their uncertainties is placed and told so (On_Table); one below it is not placed.
+   --  stays where it is in a picture of the same eye from elsewhere where a point of the scene would not (Riding): the
+   --  robot's own body. Table is in the frame of the poses, its normal towards the eyes. The queries are a grid of
+   --  Columns per row, row by row, a query missing from the grid given as a pixel with a negative U (it is not asked
+   --  and has no neighbours). A point on the table within their uncertainties is placed and told so (On_Table); one
+   --  below it is not placed.
 
 end Driver.Robot.Surfaces;

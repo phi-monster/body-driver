@@ -3014,14 +3014,15 @@ driver-robot-surfaces.adb	A := A + (1.0 / (Angles (L) * R) ** 2) * P;	1.0	math	a
 driver-robot-surfaces.adb	Along (1, Column > 0, Column < Columns - 1, Column > 1, Column < Columns - 2);	1	structure	along a row the neighbours are one query apart, two apart for the pair beyond
 driver-robot-surfaces.adb	Along (1, Column > 0, Column < Columns - 1, Column > 1, Column < Columns - 2);	1	structure	along a row the neighbours are one query apart, two apart for the pair beyond
 driver-robot-surfaces.adb	Along (1, Column > 0, Column < Columns - 1, Column > 1, Column < Columns - 2);	2	structure	the pair beyond a point on one side are one and two queries off it
+driver-robot-surfaces.adb	At_Depth (Elsewhere (K), Far / 2.0, U2, W2, F2);	2.0	math	any two points of a line of sight draw its line in a view: the table's and half way there
 driver-robot-surfaces.adb	Between : constant Real := (Unseen + Near) / 2.0;	2.0	numerics	bisection: the depth halfway between the last seen and the first not seen
 driver-robot-surfaces.adb	Counts.Error := Sigma / Sqrt (2.0);	2.0	math	a round trip is two alignments: its spread is the root of twice one's variance
 driver-robot-surfaces.adb	Cu : constant Real := (if Run > 0.0 then (Un - U) / Run else 1.0);	1.0	math	the unit step along u when the segment has no length
 driver-robot-surfaces.adb	D : constant Natural := At_Offset (0, 1);	1	math	the neighbour one row down
+driver-robot-surfaces.adb	D1 : constant Vec3 := Sight (Now, Q.U + 1.0, Q.V);	1.0	math	the next pixel across, for the warp's derivative by u
+driver-robot-surfaces.adb	D2 : constant Vec3 := Sight (Now, Q.U, Q.V + 1.0);	1.0	math	the next pixel down, for the warp's derivative by v
 driver-robot-surfaces.adb	I - 2 * Columns >= Result'First, I + 2 * Columns <= Result'Last);	2	structure	the pair beyond a point along a column are one and two rows off it
 driver-robot-surfaces.adb	I - 2 * Columns >= Result'First, I + 2 * Columns <= Result'Last);	2	structure	the pair beyond a point along a column are one and two rows off it
-driver-robot-surfaces.adb	Into (V, Centre + S * Sight (Now, Q.U + 1.0, Q.V), U1, V1, F1);	1.0	math	the next pixel across, for the warp's derivative by u
-driver-robot-surfaces.adb	Into (V, Centre + S * Sight (Now, Q.U, Q.V + 1.0), U2, V2, F2);	1.0	math	the next pixel down, for the warp's derivative by v
 driver-robot-surfaces.adb	J : array (1 .. 2, 1 .. 3) of Real := [others => [others => 0.0]];	2	structure	a place in a picture: its two coordinates
 driver-robot-surfaces.adb	J : array (1 .. 2, 1 .. 3) of Real := [others => [others => 0.0]];	3	structure	a point of the frame: its three coordinates
 driver-robot-surfaces.adb	L : constant Natural := At_Offset (-1, 0);	1	math	the neighbour one column left
@@ -3029,21 +3030,21 @@ driver-robot-surfaces.adb	Lines : Natural := 1;	1	structure	the eye now is the f
 driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line of sight is the first
 driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line of sight is the first
 driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
-driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
-driver-robot-surfaces.adb	Lines := 1;	1	structure	the eye now's own line, before any view's
 driver-robot-surfaces.adb	Mid : constant Real := (Lo + Hi) / 2.0;	2.0	numerics	bisection: the depth halfway between the two that bracket a window's width
 driver-robot-surfaces.adb	Near := Near / 2.0;	2.0	structure	the depth halves while the view still sees the place: the nearest depth within the halvings a float can tell
 driver-robot-surfaces.adb	Ok := Ahead and then Driver.Distributions.Chi_Square_Deviate (Miss, 2 * Used - 3) <= Z;	2	statistics	two degrees of freedom a line: its distance across it
 driver-robot-surfaces.adb	Ok := Ahead and then Driver.Distributions.Chi_Square_Deviate (Miss, 2 * Used - 3) <= Z;	3	statistics	less the three the point takes
 driver-robot-surfaces.adb	Q : constant Real := (C.VV * Du * Du - 2.0 * C.UV * Du * Dv + C.UU * Dv * Dv) / Det;	2.0	math	the quadratic form's cross term is counted twice
 driver-robot-surfaces.adb	R : constant Natural := At_Offset (1, 0);	1	math	the neighbour one column right
-driver-robot-surfaces.adb	Second : constant Real := Depth (A) - 2.0 * Depth (B) + Depth (C);	2.0	math	a second difference of three points in a line: 1, -2, 1
+driver-robot-surfaces.adb	Second : constant Real := (if I = B then 2.0 else 1.0) * (Depth (I) - Cross);	1.0	math	an end point's departure from the line through the other two is the second difference itself: 1, -2, 1
+driver-robot-surfaces.adb	Second : constant Real := (if I = B then 2.0 else 1.0) * (Depth (I) - Cross);	2.0	math	the middle point's departure is half the second difference: 1, -2, 1
 driver-robot-surfaces.adb	Spread : constant Real := Sqrt (Sigma (A) ** 2 + 4.0 * Sigma (B) ** 2 + Sigma (C) ** 2);	4.0	math	the variance of a second difference: the middle point weighs -2, its variance four times
 driver-robot-surfaces.adb	Through (I - 2 * Step, I - Step, I);	2	structure	the two points before it, one and two steps off
 driver-robot-surfaces.adb	Through (I, I + Step, I + 2 * Step);	2	structure	the two points after it, one and two steps off
 driver-robot-surfaces.adb	U : constant Natural := At_Offset (0, -1);	1	math	the neighbour one row up
 driver-robot-surfaces.adb	Unseen : Real := Near / 2.0;	2.0	numerics	the first depth not seen: one halving past the last seen
 driver-robot-surfaces.adb	Used : constant Natural := Lines - (if Drop > 0 then 1 else 0);	1	structure	one line left out
+driver-robot-surfaces.adb	Var : constant Real := Nu * Nu * C.UU + 2.0 * Nu * Nw * C.UV + Nw * Nw * C.VV;	2.0	math	the cross term of a two-dimensional quadratic form is twice the product
 driver-robot-surfaces.adb	View : Positive := 1;	1	structure	a placeholder view, read only where Found holds
 driver-robot-surfaces.adb	W : constant Real := (if Weighted then 1.0 / (Angles (L) * R) ** 2 else 1.0);	1.0	math	a weight is the inverse of a variance
 driver-robot-surfaces.adb	W : constant Real := (if Weighted then 1.0 / (Angles (L) * R) ** 2 else 1.0);	1.0	math	the unweighted meeting: every line weighs one
@@ -3054,12 +3055,12 @@ driver-robot-surfaces.adb	for A in 1 .. 3 loop	3	structure	the three axes of the
 driver-robot-surfaces.adb	for B in 1 .. 3 loop	3	structure	the three axes of the frame
 driver-robot-surfaces.adb	for D in 2 .. Lines loop	2	structure	the views' lines, after the eye now's own (the first)
 driver-robot-surfaces.adb	for L in 2 .. Lines loop	2	structure	the views' lines, after the eye now's own (the first)
-driver-robot-surfaces.adb	if Ok and then Telling ((if Ok then Drop else 0), X, Cov) >= 2 then	2	structure	two views that tell the depth by themselves: one to refute the other
 driver-robot-surfaces.adb	if Right >= 1.0 and then Sigma < Real'Last then	1.0	statistics	not even one round trip the fit takes for a right one: nothing measured
 driver-robot-surfaces.adb	if Run > 2.0 * Radius then	2.0	structure	a window's width: twice its radius
 driver-robot-surfaces.adb	if Sqrt ((Um - U) ** 2 + (Wm - W) ** 2) > 2.0 * Radius then	2.0	structure	a window's width: twice its radius
 driver-robot-surfaces.adb	if not Ok and then Lines >= 4 then	4	structure	one line more than the three a point needs, so that one can be left out
 driver-robot-surfaces.adb	return Driver.Distributions.Chi_Square_Deviate (Q, 2) > Driver.Conventions.Z;	2	statistics	two degrees of freedom: a place in a picture has two coordinates
+driver-robot-surfaces.adb	while At_Place > 1	1	structure	the first place of the order
 driver-robot-surfaces.adb	while At_Place > 1	1	structure	the first place of the order
 driver-robot-surfaces.ads	Lens : Positive := 1;	1	structure	the lens of a view whose caller names none: the first
 driver-robot.adb	& "" & Driver.Log.Image (M.Eyes (E).Rest_Factor, 2) & ""	2	format	digits printed in a log line or a message
