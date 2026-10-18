@@ -794,17 +794,15 @@ package body Driver.Action.Execution is
    --  The arm's touching parts as one side of a relation: their middle (the
    --  lobes' faces, else its own surface, else its tool), and their points.
    function Effector_Item (S : Snapshot; A : Arm_Id) return Goals.Item is
-      E    : constant Search.Effector := Search.Effector_Of (S, A);
-      Sum  : Vec3 := Zero3;
-      N    : Natural := 0;
-      It   : Goals.Item;
-      Pads : Natural;
+      E   : constant Search.Effector := Search.Effector_Of (S, A);
+      Sum : Vec3 := Zero3;
+      N   : Natural := 0;
+      It  : Goals.Item;
    begin
       for Pd of E.Pads loop
          Sum := Sum + E.Tool * Tip_At (Pd.Lobe, E.Closers (Pd.Closer).Now);
          N := N + 1;
       end loop;
-      Pads := N;
       if N = 0 then
          for Sf of E.Surface loop
             Sum := Sum + E.Tool * Sf.Point;
@@ -812,9 +810,9 @@ package body Driver.Action.Execution is
          end loop;
       end if;
       --  The lobes' ends are where the parts touch: where they are not measured, nor is the middle of them, however
-      --  well the tool is placed.
+      --  well the tool is placed; nor is it where the touching parts' sigma is not known at all.
       It.Centre := (Mean => (if N > 0 then Sum / Real (N) else E.Tool.Translation),
-                    Covariance => (if Pads > 0 and then E.Sigma = Real'Last then [others => [others => Real'Last]]
+                    Covariance => (if E.Sigma = Real'Last then [others => [others => Real'Last]]
                                    else Arm (S, A).Tool.Position_Covariance));
       It.Sigma := E.Sigma;
       for Q of Moving_Points (S, 0, A) loop
