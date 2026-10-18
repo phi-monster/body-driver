@@ -71,6 +71,7 @@ package Driver.Action.Contact.Search is
       Along   : Vec3 := Zero3;           --  unit, tool frame: from the hand toward the lobes' ends
       Depth   : Real := 0.0;             --  how far a thing may go in between the ends
       Sigma   : Real := Real'Last;       --  placement uncertainty of its touching parts
+      Unplaced : Unbounded_String;       --  while Sigma is unknown, which of what it rests on is not measured
       Band    : Real := 0.0;             --  how far behind the lobes' ends a face's touch is set
       Closes  : Boolean := False;        --  some closer brings faces together
       Why_Not : Unbounded_String;        --  why it cannot close, when it cannot

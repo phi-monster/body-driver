@@ -241,6 +241,11 @@ package body Driver.Action.Contact.Search is
       begin
          if Pos_Sd < Real'Last and then Rot_Sd < Real'Last and then Tip_Sd < Real'Last then
             E.Sigma := Sqrt (Pos_Sd ** 2 + (Lever * Rot_Sd) ** 2 + Tip_Sd ** 2);
+         else
+            E.Unplaced := To_Unbounded_String
+              ((if Pos_Sd = Real'Last then " the tool's place" else "")
+               & (if Rot_Sd = Real'Last then " the tool's turn" else "")
+               & (if Tip_Sd = Real'Last then " a lobe's tip somewhere along its travel" else ""));
          end if;
       end;
       if E.Sigma < Real'Last and then Known (Arm_S.Step) then

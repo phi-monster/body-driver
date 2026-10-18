@@ -374,7 +374,10 @@ package body Driver.Action.Goals is
       function Finite (X : Real) return Boolean is (X >= Real'First and then X <= Real'Last);
    begin
       if not Known (Subject.Centre) or else not Known (Object.Centre) then
-         P.Why := To_Unbounded_String ("I have not measured where the two of them are");
+         P.Why := To_Unbounded_String
+           (if not Known (Subject.Centre) and then not Known (Object.Centre) then "I have not measured where either of them is"
+            elsif not Known (Subject.Centre) then "I have not measured where what I move is"
+            else "I have not measured where what it goes over is");
          return P;
       elsif not Finite (Margin) then
          --  How far apart they pass rests on how surely each is where it is: s75's pusher, its lobe's tip unmeasured
