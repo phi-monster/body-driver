@@ -722,13 +722,15 @@ package body Driver.Alignment.Keyframes is
    end Scatter;
 
    procedure Predict
-     (C       : in out Chain;
-      Change  : Driver.Real_Array;
-      Noise   : Driver.Real_Array;
-      Shift   : Driver.Real_Array;
-      Offered : Prediction_Array;
-      Into    : out Prediction_Array;
-      From    : out Source)
+     (C            : in out Chain;
+      Change       : Driver.Real_Array;
+      Noise        : Driver.Real_Array;
+      Shift        : Driver.Real_Array;
+      Offered      : Prediction_Array;
+      Into         : out Prediction_Array;
+      From         : out Source;
+      Point_Slopes : Point_Slope_Array := No_Point_Slopes;
+      Point_Misfit : Driver.Real_Array := No_Misfit)
    is
       Changes : constant Real_Array (1 .. Change'Length) := Change;
       Noises  : constant Real_Array (1 .. Noise'Length) := Noise;
@@ -764,7 +766,13 @@ package body Driver.Alignment.Keyframes is
       --  it there. A large move is so asked from the keyframes along it, a smaller step each, the reference's patch
       --  warped as far as it was: asked from the reference alone, the view of s38's fixed eye 1 (servo seed 6 of the
       --  fake robot, 10-17, replayed) lost its points at the large moves of a joint (3 of 26 at a turn of 612 units),
-      --  and the eye's fit was never determined from the small ones.
+      --  and the eye's fit was never determined from the small ones. A point whose own line the caller measured
+      --  (Point_Slopes) for every channel the change from that keyframe moves is carried along it: there, within what
+      --  the aligner stated of it, what the line's slopes are uncertain by over the change, and how far the line leaves
+      --  the point's own answers (Point_Misfit). Asked where it stood, within the most the change can move the view, a
+      --  point the change moved some pixels is asked from a window wider than the aligner answers narrowly from, and
+      --  no keyframe of such points is followed (Kinematics.Set_Of): s52 (servo seed 6, 10-18, replayed), eye 1's view
+      --  of arm 1 found 0 of 28 points at 13 keyframes where, asked within the lock-in's shifts, it found 8 to 18.
       if C.Own_Points then
          declare
             Known       : constant Boolean := Shifts_Known (Changes, Noises, Shifts);
@@ -796,19 +804,48 @@ package body Driver.Alignment.Keyframes is
                      end if;
                   end loop;
                   declare
-                     Reach : constant Real :=
+                     Reach  : constant Real :=
                        (if Known then Gap else Largest_Sigma (C.Pictures, C.Pictures));
-                     Own   : constant Real :=
+                     Own    : constant Real :=
                        (if Best = 0 then 0.0
                         else Sqrt (Real'Max (C.Frames (Best).Answers (K).Cov.UU, C.Frames (Best).Answers (K).Cov.VV)));
-                     Spread : constant Real := Reach ** 2 + Own ** 2;
+                     Stood  : constant Driver.Images.Pixel := (if Best = 0 then P else C.Frames (Best).Answers (K).To);
+                     Source : constant Real_Array (Changes'Range) :=
+                       (if Best = 0 then Origin else To_Array (C.Frames (Best).Change));
+                     Lined  : Boolean := Point_Slopes'Length > 0;
+                     Du, Dv, Var : Real := 0.0;
                   begin
-                     Into (Into'First + K - 1) :=
-                       (From         => P,
-                        To           => (if Best = 0 then P else C.Frames (Best).Answers (K).To),
-                        Linear       => (if Best = 0 then Identity_Part else C.Frames (Best).Answers (K).Linear),
-                        Cov          => (UU => Spread, UV => 0.0, VV => Spread),
-                        Linear_Sigma => Real'Last);
+                     if Lined then
+                        for J in Changes'Range loop
+                           declare
+                              S : Point_Slope renames
+                                Point_Slopes (Point_Slopes'First + (K - 1) * Changes'Length + J - Changes'First);
+                              D : constant Real := Changes (J) - Source (J);
+                           begin
+                              if Driver.Uncertain.Significant (D, Noises (J) * Sqrt (2.0)) then
+                                 if S.Variance >= Real'Last then
+                                    Lined := False;
+                                 else
+                                    Du := Du + S.U * D;
+                                    Dv := Dv + S.V * D;
+                                    Var := Var + D ** 2 * S.Variance;
+                                 end if;
+                              end if;
+                           end;
+                        end loop;
+                     end if;
+                     declare
+                        Spread : constant Real :=
+                          (if Lined then Own ** 2 + Var + Point_Misfit (Point_Misfit'First + K - 1) ** 2
+                           else Reach ** 2 + Own ** 2);
+                     begin
+                        Into (Into'First + K - 1) :=
+                          (From         => P,
+                           To           => (if Lined then (U => Stood.U + Du, V => Stood.V + Dv) else Stood),
+                           Linear       => (if Best = 0 then Identity_Part else C.Frames (Best).Answers (K).Linear),
+                           Cov          => (UU => Spread, UV => 0.0, VV => Spread),
+                           Linear_Sigma => Real'Last);
+                     end;
                      Any_Earlier := Any_Earlier or else Best > 0;
                   end;
                end;

@@ -72,23 +72,40 @@ package Driver.Alignment.Keyframes is
    No_Offer : constant Prediction_Array (1 .. 0) := [];
    --  For a caller with no model of its own to offer.
 
+   type Point_Slope is record
+      U, V     : Real := 0.0;         --  the pixels a point moves per reading unit of a channel, along each axis
+      Variance : Real := Real'Last;   --  of either, the larger; Real'Last where the point's keyframes do not tell it
+   end record;
+   type Point_Slope_Array is array (Positive range <>) of Point_Slope;
+   No_Point_Slopes : constant Point_Slope_Array (1 .. 0) := [];
+   No_Misfit       : constant Driver.Real_Array (1 .. 0) := [];
+   --  For a caller that measures no point's own motion.
+
    procedure Predict
-     (C       : in out Chain;
-      Change  : Driver.Real_Array;
-      Noise   : Driver.Real_Array;
-      Shift   : Driver.Real_Array;
-      Offered : Prediction_Array;
-      Into    : out Prediction_Array;
-      From    : out Source)
+     (C            : in out Chain;
+      Change       : Driver.Real_Array;
+      Noise        : Driver.Real_Array;
+      Shift        : Driver.Real_Array;
+      Offered      : Prediction_Array;
+      Into         : out Prediction_Array;
+      From         : out Source;
+      Point_Slopes : Point_Slope_Array := No_Point_Slopes;
+      Point_Misfit : Driver.Real_Array := No_Misfit)
      with Pre => Has_Reference (C) and then Change'Length = Noise'Length and then Change'Length = Shift'Length
                  and then Into'Length = Point_Count (C) and then (for all N of Noise => N < Real'Last)
-                 and then (Offered'Length = 0 or else Offered'Length = Point_Count (C));
+                 and then (Offered'Length = 0 or else Offered'Length = Point_Count (C))
+                 and then (Point_Slopes'Length = 0
+                           or else (Point_Slopes'Length = Point_Count (C) * Change'Length
+                                    and then Point_Misfit'Length = Point_Count (C)));
    --  The prediction of every point of the reference in a keyframe at that change of readings (the keyframe's
    --  from the reference's, per channel), from the keyframes before it. Noise is the standard deviation of one
    --  reading of each channel, Shift the pixels the view moves per reading unit of it (zero when not measured: a
    --  change that moves the view by no amount known is predicted to have moved it as far as the aligner searches).
    --  Offered is the caller's own prediction (a fitted model's), or none: it competes with the rest, and the one
-   --  that states the least (the median of the standard deviations over the points) is used.
+   --  that states the least (the median of the standard deviations over the points) is used. Point_Slopes, for a
+   --  chain whose points move each by its own (Begin_Reference's Own_Points), are each point's own motion per
+   --  reading unit of each channel as the caller measured it (point by point, a row of the channels each), and
+   --  Point_Misfit how far each point's measured line leaves its own answers (px): none, no point has a line.
    --  Into has an element per point. The chain remembers the predictions of each order that it made, for the Add
    --  that follows.
 

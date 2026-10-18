@@ -1077,6 +1077,115 @@ package body Driver.Robot.Boot is
                      end loop;
                   end;
                end if;
+               --  The fixed eyes that watch the arm. An eye that stands in the world is placed, its lens and pose
+               --  measured, from the arm it watches move (Kinematics.Hand_Eye), and the sweep's turns, sized by what
+               --  the arm's own eye follows (half its view), carry the arm across a fixed eye's view by a few pixels:
+               --  s49 (servo seed 6 of the fake robot, 10-17), eye 1's tracks of the arm moved 1 to 12 px over the
+               --  whole sweep, its search came to focal lengths of 19 by 197 px (the truth 152) that "two eyes in
+               --  different poses explain alike", and every action the brain asked on what eye 1 saw was refused for
+               --  want of where it is. The arm's base turned 30 degrees from its start would carry its links 49 px
+               --  there (the median of their boxes' corners, by the truth's own cameras), 45 degrees 79.
+               --  A fitted arm with a fixed eye that watches it and is not placed is swung: each joint in turn, the
+               --  one whose turn carries the tool farthest first (the fitted arm's step of the tool for the turn the
+               --  sweep followed the joint to), out from the start each way by twice the turn the sweep followed it to
+               --  and on, doubling, while the arm reaches each level and the tool's step from the start still grows (a
+               --  turn past half a revolution brings it back), a keyframe held at each level; then back to the start,
+               --  and the estimates made, until every fixed eye that watches the arm is placed or every joint swung.
+               if Fitted_Now then
+                  declare
+                     use type Driver.Numerics.Arrays.Real_Vector;
+                     Watching : Natural := 0;   --  the fixed eyes that watch the arm and are not placed
+                     Lever    : Real_Array (1 .. Size) := [others => 0.0];
+                     Swung    : array (1 .. Size) of Boolean := [others => False];
+                     Pose     : Real_Array (1 .. Size);
+                     Step     : Real := 0.0;    --  the tool's step from the start at the level asked
+                     procedure Read_Watching is
+                     begin
+                        Watching := 0;
+                        for E in 1 .. Eye_Count (M) loop
+                           if Eye_Mount (M, Eye_Id (E)).Kind = World_Fixed
+                             and then Response (M, G, Eye_Id (E)) in Driver.Robot.Patch | Driver.Robot.Whole
+                             and then not Driver.Robot.Kinematics.Fixed_Known (M, Eye_Id (E))
+                           then
+                              Watching := Watching + 1;
+                           end if;
+                        end loop;
+                     end Read_Watching;
+                     procedure Read_Levers is
+                     begin
+                        for C in 1 .. Size loop
+                           if Reached (C) > 0.0 then
+                              declare
+                                 To : Real_Array := Start;
+                              begin
+                                 To (C) := Start (C) + Reached (C);
+                                 Lever (C) := abs Driver.Robot.Tool_Step_In_Arm (M, A, Start, To).Mean;
+                              end;
+                           end if;
+                        end loop;
+                     end Read_Levers;
+                     procedure Read_Step is
+                     begin
+                        Step := abs Driver.Robot.Tool_Step_In_Arm (M, A, Start, Pose).Mean;
+                     end Read_Step;
+                  begin
+                     Driver.Beats.Within_A_Beat (Read_Watching'Access);
+                     if Watching > 0 then
+                        Driver.Beats.Within_A_Beat (Read_Levers'Access);
+                        loop
+                           declare
+                              C : Natural := 0;
+                           begin
+                              for K in 1 .. Size loop
+                                 if not Swung (K) and then Lever (K) > 0.0 and then (C = 0 or else Lever (K) > Lever (C)) then
+                                    C := K;
+                                 end if;
+                              end loop;
+                              exit when C = 0;
+                              Swung (C) := True;
+                              Asked_Now := [others => False];
+                              Asked_Now (C) := True;
+                              Driver.Beats.Within_A_Beat (Tell_Asking'Access);
+                              for Sign of Real_Array'[1.0, -1.0] loop
+                                 declare
+                                    Off       : Real := 2.0 * Reached (C);
+                                    Last_Step : Real := 0.0;
+                                    Levels    : Natural := 0;
+                                 begin
+                                    loop
+                                       Pose := Start;
+                                       Pose (C) := Start (C) + Sign * Off;
+                                       Driver.Beats.Within_A_Beat (Read_Step'Access);
+                                       exit when Step <= Last_Step;
+                                       Go_To (G, Pose, Report, Land => True);
+                                       if Report.At_Rest then
+                                          Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                                       end if;
+                                       Levels := Levels + 1;
+                                       exit when Report.Outcome /= Driver.Robot.Motion.Reached;
+                                       Last_Step := Step;
+                                       Off := 2.0 * Off;
+                                    end loop;
+                                    Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " swung channel" & C'Image
+                                                     & (if Sign > 0.0 then " up" else " down") & " for its fixed eyes:"
+                                                     & Levels'Image & " levels, to " & Driver.Log.Image (Off, 3)
+                                                     & " units, the tool " & Driver.Log.Image (Step, 4) & " from the start; "
+                                                     & Ada.Characters.Handling.To_Lower (Report.Outcome'Image));
+                                 end;
+                              end loop;
+                              Asked_Now := [others => False];
+                              Driver.Beats.Within_A_Beat (Tell_Asking'Access);
+                              Go_To (G, Start, Report, Land => True);
+                              Measure_The_Round;
+                              Driver.Beats.Within_A_Beat (Read_Watching'Access);
+                              exit when Watching = 0;
+                           end;
+                        end loop;
+                        Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " swung for its fixed eyes;"
+                                         & Watching'Image & " of them watching it not placed");
+                     end if;
+                  end;
+               end if;
                Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " swept in" & Passes'Image & " passes of"
                                 & Rounds'Image & " rounds, "
                                 & (if not Fitted_Now then "not fitted" elsif Told_Now then "fitted"

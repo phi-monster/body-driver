@@ -332,13 +332,39 @@ package body Driver.Robot.Kinematics is
         and then M.Graph.Effects (K).Verdict in Patch | Whole;
    end Sees;
 
-   --  The fixed eyes that see the arm move keep their pictures at the arm's keyframes, the one just taken (the last of
-   --  R.Frames) included. The first keyframe is a view's reference: its query points are the cells of the eye's picture
-   --  that respond to the arm's push, taken there once. An eye that does not see the arm move at the first keyframe, or
-   --  has no settled picture then, has no view of the arm: the keyframes that move one joint alone, which tell the
-   --  points' links, are all taken from the reference. A later keyframe at which the eye has no settled picture is
-   --  kept without one.
+   --  The fixed eyes keep their pictures at the arm's keyframes, the one just taken (the last of R.Frames) included.
+   --  The first keyframe is a view's reference: its query points are the cells of the eye's picture there that respond
+   --  to the arm's push, asked once the lock-in shows the eye's picture respond to the arm, at the first keyframe or at
+   --  a later one; until then the view keeps every keyframe's picture, and it is aligned once it has its points
+   --  (Align_New). s52 (servo seed 6 of the fake robot, 10-18): the recognition ended sooner than before, the arm's
+   --  first keyframe was taken at beat 761 and eye 1's response to the arm told at beat 1017 (28 of 255 cells); asked
+   --  at the first keyframe alone, the eye had no view of the arm the whole sweep and nothing to be placed from. An
+   --  eye with no settled picture at the first keyframe has no view of the arm: the keyframes that move one joint
+   --  alone, which tell the points' links, are all taken from the reference. A later keyframe at which the eye has no
+   --  settled picture is kept without one.
    procedure Take_Views (M : Model; O : Observation; R : in out Arm_Evidence) is
+      --  The view's points, in its reference picture, once the lock-in shows its eye's picture respond to the arm.
+      procedure Ask (View : in out Hand_View) is
+         Responds : Flag_Vectors.Vector;   --  every cell a fixed eye's view asks follows the push
+      begin
+         if View.Query_U.Is_Empty and then Sees (M, View.Eye, R.Group) then
+            Query_Points (M, View.Eye, R.Group, View.Images.First_Element, View.Query_U, View.Query_V, Responds);
+            if not View.Query_U.Is_Empty then
+               --  Where the view's points are, for the log: what the view of the arm tracks.
+               declare
+                  Text : Ada.Strings.Unbounded.Unbounded_String;
+               begin
+                  for I in View.Query_U.First_Index .. View.Query_U.Last_Index loop
+                     Ada.Strings.Unbounded.Append
+                       (Text, " (" & Driver.Log.Image (View.Query_U (I), 1) & "," & Driver.Log.Image (View.Query_V (I), 1) & ")");
+                  end loop;
+                  Driver.Log.Line (Driver.Log.Robot, "kinematics: eye" & View.Eye'Image & "'s view of arm" & R.Arm'Image
+                                   & " asks" & View.Query_U.Length'Image & " points at keyframe" & R.Frames.Length'Image
+                                   & ", in its reference keyframe's picture:" & Ada.Strings.Unbounded.To_String (Text));
+               end;
+            end if;
+         end if;
+      end Ask;
    begin
       for H in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          if Is_Fixed (M, H) then
@@ -356,39 +382,30 @@ package body Driver.Robot.Kinematics is
                end loop;
                if Seen > 0 then
                   R.Views (Seen).Images.Append (Picture);
+                  Ask (R.Views (Seen));
                elsif Natural (R.Frames.Length) = 1 then
-                  declare
-                     View : Hand_View;
-                     Responds : Flag_Vectors.Vector;   --  every cell a fixed eye's view asks follows the push
-                  begin
-                     if Driver.Images.Width (Picture) > 0 and then Sees (M, H, R.Group) then
+                  if Driver.Images.Width (Picture) > 0 then
+                     declare
+                        View : Hand_View;
+                     begin
                         View.Eye := H;
-                        Query_Points (M, H, R.Group, Picture, View.Query_U, View.Query_V, Responds);
                         View.Images.Append (Picture);
-                        --  Where the view's points are, for the log: what the view of the arm tracks.
-                        declare
-                           Text : Ada.Strings.Unbounded.Unbounded_String;
-                        begin
-                           for I in View.Query_U.First_Index .. View.Query_U.Last_Index loop
-                              Ada.Strings.Unbounded.Append
-                                (Text, " (" & Driver.Log.Image (View.Query_U (I), 1) & "," & Driver.Log.Image (View.Query_V (I), 1) & ")");
-                           end loop;
-                           Driver.Log.Line (Driver.Log.Robot, "kinematics: eye" & H'Image & "'s view of arm" & R.Arm'Image
-                                            & " asks" & View.Query_U.Length'Image & " points, at its reference keyframe:"
-                                            & Ada.Strings.Unbounded.To_String (Text));
-                        end;
-                        if not View.Query_U.Is_Empty then
-                           R.Views.Append (View);
+                        Ask (View);
+                        if View.Query_U.Is_Empty then
+                           Driver.Log.Line
+                             (Driver.Log.Robot, "kinematics: eye" & H'Image & "'s view of arm" & R.Arm'Image
+                              & " asks no points yet: "
+                              & (if not Sees (M, H, R.Group) then "the lock-in shows no response of its picture to the arm"
+                                 else "no textured cell of its picture responds to the arm")
+                              & "; it keeps its pictures from this keyframe until it does");
                         end if;
-                     end if;
-                     if View.Query_U.Is_Empty then
-                        Driver.Log.Line
-                          (Driver.Log.Robot, "kinematics: eye" & H'Image & " keeps no view of arm" & R.Arm'Image & ": "
-                           & (if Driver.Images.Width (Picture) = 0 then "its picture is not settled at the arm's first keyframe"
-                              elsif not Sees (M, H, R.Group) then "the lock-in shows no response of its picture to the arm"
-                              else "no textured cell of its picture responds to the arm"));
-                     end if;
-                  end;
+                        R.Views.Append (View);
+                     end;
+                  else
+                     Driver.Log.Line
+                       (Driver.Log.Robot, "kinematics: eye" & H'Image & " keeps no view of arm" & R.Arm'Image
+                        & ": its picture is not settled at the arm's first keyframe");
+                  end if;
                end if;
             end;
          end if;
@@ -1874,6 +1891,93 @@ package body Driver.Robot.Kinematics is
       Start   : constant Duration := Driver.Clock.Seconds;
       First   : constant Natural := V.Aligned + 1;
       Found   : Natural := 0;
+
+      --  Per point, its own line: the pixels it moves per reading unit of each channel (a row of the channels each),
+      --  from its displacements from the reference in the keyframes it was found at, regressed on those keyframes'
+      --  changes as the arm's own eye's points are (Measure_Shifts: robust, every row scaled by its answer's standard
+      --  deviation, no intercept, taken where the rows determine every channel that changed in them); with the
+      --  variance of each slope, and how far the line leaves the point's answers (its residuals' robust scale, in
+      --  pixels). The chain carries a point along its line from the keyframe nearest the new one that it was found at
+      --  (Keyframes.Predict). A fixed eye's points move each by its link, and the view has no common motion: asked
+      --  where it stood within what the lock-in's shifts say the change moves the view, eye 1's view of arm 1 in s49
+      --  (servo seed 6 of the fake robot, 10-17) was asked within 0.2 to 0.6 px where the keyframes moved the arm's
+      --  links 6 to 22 px from the reference (the simulator's truth), and lost a third to a half of its points for
+      --  leaving the window (keyframe 43: 9 of 26, 46: 5, 49: 4).
+      procedure Measure_Points (Into : out Keyframes.Point_Slope_Array; Misfit : out Real_Array) is
+         use Driver.Numerics.Arrays;
+         use Ada.Numerics.Long_Elementary_Functions;
+         function Change (F : Positive; C : Positive) return Real is
+           (R.Frames (F).Readings (C - 1) - R.Frames.First_Element.Readings (C - 1));
+         function Found_At (S : Match_Set; P : Natural) return Boolean is
+           (S.Frame <= Natural (R.Frames.Length) and then P < Natural (S.Found.Length) and then S.Found (P));
+      begin
+         Into := [others => (others => <>)];
+         Misfit := [others => 0.0];
+         for P in 0 .. Queries - 1 loop
+            declare
+               Own  : array (1 .. N) of Natural := [others => 0];   --  per channel: its column for this point
+               Kp   : Natural := 0;
+               Rows : Natural := 0;
+            begin
+               for S of V.Matches loop
+                  if Found_At (S, P) then
+                     Rows := Rows + 1;
+                     for C in 1 .. N loop
+                        if Own (C) = 0 and then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))
+                        then
+                           Kp := Kp + 1;
+                           Own (C) := Kp;
+                        end if;
+                     end loop;
+                  end if;
+               end loop;
+               if Kp >= 1 and then Rows >= Kp then
+                  declare
+                     X      : Real_Matrix (1 .. Rows, 1 .. Kp) := [others => [others => 0.0]];
+                     Yu, Yv : Real_Array (1 .. Rows);
+                     Sigmas : Real_Array (1 .. Rows);
+                     I      : Natural := 0;
+                  begin
+                     for S of V.Matches loop
+                        if Found_At (S, P) then
+                           I := I + 1;
+                           Sigmas (I) := (if P < Natural (S.Sigma.Length) and then S.Sigma (P) > 0.0 then S.Sigma (P) else 1.0);
+                           for C in 1 .. N loop
+                              if Own (C) > 0 then
+                                 X (I, Own (C)) := Change (S.Frame, C) / Sigmas (I);
+                              end if;
+                           end loop;
+                           Yu (I) := (S.To_U (P) - V.Query_U (P)) / Sigmas (I);
+                           Yv (I) := (S.To_V (P) - V.Query_V (P)) / Sigmas (I);
+                        end if;
+                     end loop;
+                     declare
+                        Fu    : constant Regression.Fit := Regression.Solve (X, Yu, 1.0);
+                        Fv    : constant Regression.Fit := Regression.Solve (X, Yv, 1.0);
+                        Var_U : constant Real_Array := Regression.Coefficient_Variances (Fu);
+                        Var_V : constant Real_Array := Regression.Coefficient_Variances (Fv);
+                        Stat  : Real;
+                        Rank  : Natural;
+                     begin
+                        Regression.Test_Block (Fu, 1, Kp, Stat, Rank);
+                        if Rank = Kp then
+                           for C in 1 .. N loop
+                              if Own (C) > 0 and then Var_U (Own (C)) < Real'Last and then Var_V (Own (C)) < Real'Last then
+                                 Into (Into'First + P * N + C - 1) :=
+                                   (U => Fu.Beta (Own (C)), V => Fv.Beta (Own (C)),
+                                    Variance => Real'Max (Var_U (Own (C)), Var_V (Own (C))));
+                              end if;
+                           end loop;
+                           --  The scales are of residuals in units of the answers' standard deviations.
+                           Misfit (Misfit'First + P) :=
+                             Real'Max (Fu.Scale, Fv.Scale) * Driver.Stats.Median (Sigmas);
+                        end if;
+                     end;
+                  end;
+               end if;
+            end;
+         end loop;
+      end Measure_Points;
    begin
       for C in 1 .. N loop
          Noise (C) := Channels.Noise (M, R.Group, C);
@@ -1918,11 +2022,17 @@ package body Driver.Robot.Kinematics is
                      Change (C) := R.Frames (F).Readings (C - 1) - R.Frames.First_Element.Readings (C - 1);
                   end loop;
                   Offer_Hand (R, V, Readings_Array (R.Frames (F)), Offered.all, Known);
-                  if Known then
-                     Keyframes.Predict (V.Chain, Change, Noise, Shift, Offered.all, Given.all, From);
-                  else
-                     Keyframes.Predict (V.Chain, Change, Noise, Shift, Keyframes.No_Offer, Given.all, From);
-                  end if;
+                  declare
+                     Slopes : Keyframes.Point_Slope_Array (1 .. Queries * N);
+                     Misfit : Real_Array (1 .. Queries);
+                  begin
+                     Measure_Points (Slopes, Misfit);
+                     if Known then
+                        Keyframes.Predict (V.Chain, Change, Noise, Shift, Offered.all, Given.all, From, Slopes, Misfit);
+                     else
+                        Keyframes.Predict (V.Chain, Change, Noise, Shift, Keyframes.No_Offer, Given.all, From, Slopes, Misfit);
+                     end if;
+                  end;
                   Keyframes.Add (V.Chain, Picture, Change, Given.all, Answers.all, Agree.all);
                   Set_Of ("arm" & R.Arm'Image & "'s eye" & V.Eye'Image, F, V.Query_U, V.Query_V, Flag_Vectors.Empty_Vector,
                           Given.all, Answers.all, Agree.all, Set);
@@ -1991,8 +2101,10 @@ package body Driver.Robot.Kinematics is
                if Natural (R.Frames.Length) > R.Aligned and then not R.Query_U.Is_Empty then
                   Align_Arm (M, R);
                end if;
+               --  A view is aligned from when it has its points (Take_Views).
                for Position in R.Views.First_Index .. R.Views.Last_Index loop
                   if R.Views (Position).Eye <= M.Eyes.Last_Index
+                    and then not R.Views (Position).Query_U.Is_Empty
                     and then Natural (R.Views (Position).Images.Length) > R.Views (Position).Aligned
                   then
                      Align_View (M, R, Position);

@@ -138,9 +138,11 @@ package Driver.Robot.Hand.Sweep is
    --  between them is a stop only when taken with the rest of the body there.
 
    function End_Reading (S : State; Channel : Positive; High : Boolean) return Real
-     with Pre => Status (S, Channel) = Measured;
+     with Pre => Status (S, Channel) /= Waiting;
    --  The channel's reading at the low end its lobes were placed from, or at the high end, without copying the
-   --  view taken there.
+   --  view taken there: read at every analysis of its ends, whatever it came to (Renew). s51 (servo seed 6 of
+   --  the fake robot, 10-18): the closer's ends seen again gave no lobes, and the hand's test of whether they are
+   --  the ends it was measured at (Hand.Rebuild) failed the precondition this had of found lobes.
 
    function Closing_Known (S : State; Channel : Positive) return Boolean
      with Pre => Status (S, Channel) = Measured;
@@ -179,7 +181,7 @@ private
       Analysed    : Boolean := False;
       Poses_Low   : Natural := 0;             --  the poses of the arm the eye saw each end's readings from
       Poses_High  : Natural := 0;
-      Low_At, High_At : Real := 0.0;          --  the channel's reading at each end, for the log
+      Low_At, High_At : Real := 0.0;          --  the channel's reading at each end, once its ends are analysed
       Changed     : Natural := 0;             --  the pixels that changed between the ends
       Spread      : Real := 0.0;              --  and the spread of the difference at one that did not
       Beyond      : Real := 0.0;
