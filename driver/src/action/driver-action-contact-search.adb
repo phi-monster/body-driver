@@ -23,10 +23,6 @@ package body Driver.Action.Contact.Search is
    use type Driver.Robot.Arm_Id;
    use type Driver.World.Surface_Id;
 
-   function Largest_Sigma (Covariance : Mat3) return Real is
-     (if Covariance (1, 1) >= Real'Last then Real'Last
-      else Sqrt (Real'Max (Covariance (1, 1), Real'Max (Covariance (2, 2), Covariance (3, 3)))));
-
    --  The least rotation taking the direction From onto To.
    function Align (From, To : Vec3) return Mat3 is
       F : constant Vec3 := Unit (From);

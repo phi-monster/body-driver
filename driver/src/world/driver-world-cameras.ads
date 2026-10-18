@@ -31,6 +31,17 @@ package Driver.World.Cameras is
    function Self_Mask (C : Camera) return Driver.Images.Mask is abstract;
    --  The pixels of the eye that show the robot itself.
 
+   function Ray_In_Eye (C : Camera; U, V : Real) return Vec3 is abstract;
+   --  The unit line of sight through a pixel, in the eye's own frame (Pose turns it into the world's); zero when the
+   --  eye is not measured.
+
+   procedure Project_In_Eye (C : Camera; P : Vec3; U, V : out Real; In_Front : out Boolean) is abstract;
+   --  Where a point of the eye's own frame lands in its picture, inside the picture or not; not In_Front behind the
+   --  eye or when it is not measured.
+
+   function Noise (C : Camera) return Real is abstract;
+   --  How far the aligner errs on its pictures, in pixels; 0 when not measured.
+
    function Radians_Per_Pixel (C : Camera'Class; Px : Pixel) return Real;
    --  How far the line of sight turns from one pixel to the next there,
    --  measured on the camera itself: what an image position's uncertainty in
@@ -49,5 +60,8 @@ package Driver.World.Cameras is
    overriding procedure Project (C : Of_Body; Point : Vec3; Px : out Pixel; Visible : out Boolean);
    overriding function Pose (C : Of_Body) return Pose_Estimate;
    overriding function Self_Mask (C : Of_Body) return Driver.Images.Mask;
+   overriding function Ray_In_Eye (C : Of_Body; U, V : Real) return Vec3;
+   overriding procedure Project_In_Eye (C : Of_Body; P : Vec3; U, V : out Real; In_Front : out Boolean);
+   overriding function Noise (C : Of_Body) return Real;
 
 end Driver.World.Cameras;

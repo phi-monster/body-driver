@@ -8,7 +8,7 @@ with Driver.World.Cameras;
 with Driver.Log;
 with Driver.World.Estimates;
 with Driver.World.Holding;
-with Driver.World.Pairs;
+with Driver.World.Points;
 
 package body Driver.World is
 
@@ -24,15 +24,18 @@ package body Driver.World is
       Taken   : Boolean := False;
       Tool    : Pose_Estimate;
       Closer  : Estimate;
-      Points  : Driver.World.Pairs.Match_Vectors.Vector;
+      Points  : Driver.World.Points.Placed_Vectors.Vector;
       Normals : Driver.World.Estimates.Normal_Vectors.Vector;
    end record;
 
    package Hold_Vectors is new Ada.Containers.Vectors (Positive, Hold_Record);
 
+   package Count_Vectors is new Ada.Containers.Vectors (Positive, Natural);
+
    type Scene_Data is record
       State : Driver.World.Estimates.State;
       Holds : Hold_Vectors.Vector;
+      Swept : Count_Vectors.Vector;   --  per eye, how many of its arm's sweep's pictures are kept as views
    end record;
 
    procedure Free is new Ada.Unchecked_Deallocation (Scene_Data, Scene_Data_Access);
@@ -66,8 +69,33 @@ package body Driver.World is
    begin
       Ensure (S);
       --  The table the first arm's eye measured (the world is that arm's frame): a surface things rest on, whether
-      --  or not pairs of eyes find it.
+      --  or not the scene's points show it.
       Driver.World.Estimates.Note_Table (S.Data.State, Driver.Robot.World_Table (M));
+      --  The pictures each arm's sweep held its eye still for, kept as views of it from the beat its arm is fitted
+      --  on: the places the body has seen the scene from before any still beat of the world's own. A sweep begun
+      --  anew gives its pictures again.
+      for E in 1 .. Eye_Id'Base (Driver.Robot.Eye_Count (M)) loop
+         if Natural (E) <= Natural (O.Images.Length)
+           and then Natural (O.Readings.Length) = Driver.Robot.Group_Count (M)
+         then
+            while Natural (S.Data.Swept.Length) < Natural (E) loop
+               S.Data.Swept.Append (0);
+            end loop;
+            declare
+               Swept : constant Natural := Driver.Robot.Sweep_Views (M, E);
+               Taken : Natural := S.Data.Swept (Positive (E));
+            begin
+               if Swept < Taken then
+                  Taken := 0;
+               end if;
+               for K in Taken + 1 .. Swept loop
+                  Driver.World.Estimates.Keep_View
+                    (S.Data.State, E, Camera_Of'Access, Driver.Robot.Sweep_View (M, E, K, O));
+               end loop;
+               S.Data.Swept.Replace_Element (Positive (E), Swept);
+            end;
+         end if;
+      end loop;
       Driver.World.Estimates.Observe
         (S.Data.State, Driver.Robot.Eye_Count (M), Camera_Of'Access, Driver.Robot.Up (M), Driver.Robot.Still (M), O);
       --  What the hands hold goes with their arms (Driver.World.Holding).
@@ -107,7 +135,7 @@ package body Driver.World is
                      S.Data.Holds.Delete (K);
                   elsif Posed and then not Hd.Points.Is_Empty then
                      declare
-                        Points  : Driver.World.Pairs.Match_Vectors.Vector := Hd.Points;
+                        Points  : Driver.World.Points.Placed_Vectors.Vector := Hd.Points;
                         Normals : Driver.World.Estimates.Normal_Vectors.Vector := Hd.Normals;
                      begin
                         Driver.World.Holding.Carry (Points, Normals, Hd.Tool, Tool);
@@ -119,6 +147,59 @@ package body Driver.World is
          end;
       end loop;
    end Observe;
+
+   function Measure_Due (S : Scene) return Boolean is
+     (S.Data /= null and then Driver.World.Estimates.Measure_Due (S.Data.State));
+
+   procedure Measure (S : in out Scene; M : Driver.Robot.Model) is
+      function Camera_Of (E : Eye_Id; Seen : not null access constant Observation)
+        return Driver.World.Cameras.Camera'Class is
+        (Driver.World.Cameras.Of_Body'(Robot => M'Access, Seen => Seen, Eye => E));
+   begin
+      Ensure (S);
+      Driver.World.Estimates.Measure (S.Data.State, Driver.Robot.Eye_Count (M), Camera_Of'Access);
+   end Measure;
+
+   function Free_Pixel (S : Scene; E : Eye_Id; Width, Height : Positive) return Driver.Images.Pixel is
+     (if S.Data = null then (U => Real (Width) / 2.0, V => Real (Height) / 2.0)
+      else Driver.World.Estimates.Free_Pixel (S.Data.State, E, Width, Height));
+
+   function Scene_Pending (S : Scene) return Boolean is
+     (S.Data /= null and then Driver.World.Estimates.Scene_Pending (S.Data.State));
+
+   function Views_Of (S : Scene; E : Eye_Id) return Natural is
+     (if S.Data = null then 0 else Driver.World.Estimates.Views_Of (S.Data.State, E));
+
+   function Placed_In
+     (S      : Scene;
+      M      : Driver.Robot.Model;
+      E      : Eye_Id;
+      O      : Observation;
+      Region : Driver.Images.Mask) return Driver.Robot.Surfaces.Surface_Point_Array
+   is
+      function Camera_Of (E : Eye_Id; Seen : not null access constant Observation)
+        return Driver.World.Cameras.Camera'Class is
+        (Driver.World.Cameras.Of_Body'(Robot => M'Access, Seen => Seen, Eye => E));
+      Points  : Driver.World.Points.Placed_Vectors.Vector;
+      Normals : Driver.World.Estimates.Normal_Vectors.Vector;
+      Asked   : Natural := 0;
+      Counts  : Driver.Robot.Surfaces.Placing_Counts;
+   begin
+      if S.Data /= null then
+         Driver.World.Estimates.Place_Pixels
+           (S.Data.State, E, Camera_Of'Access, O, Region, Points, Normals, Asked, Counts);
+         Driver.Log.Line (Driver.Log.World, "the region asked of eye" & E'Image & ": "
+                          & Natural (Points.Length)'Image & " of its points stand above the table ("
+                          & Driver.Robot.Surfaces.Image (Counts) & ")");
+      end if;
+      return Result : Driver.Robot.Surfaces.Surface_Point_Array (1 .. Natural (Points.Length)) do
+         for K in Result'Range loop
+            Result (K) := (Pixel  => Points (K).Pixel,
+                           Point  => Points (K).Point,
+                           Normal => Normals (K));
+         end loop;
+      end return;
+   end Placed_In;
 
    procedure New_Episode (S : in out Scene) is
    begin
@@ -136,6 +217,21 @@ package body Driver.World is
    begin
       Driver.Recording.Write_Shared (Driver.Recording.World_Written, B.To_Array);
    end Record_Write;
+
+   procedure Seen_Anew (S : in out Scene) is
+   begin
+      if Driver.Recording.Shared_Started then
+         declare
+            B : Driver.Bytes.Buffer;
+         begin
+            Driver.Msgpack.Put_Array_Header (B, 1);
+            Driver.Msgpack.Put_String (B, "seen anew");
+            Record_Write (B);
+         end;
+      end if;
+      Ensure (S);
+      Driver.World.Estimates.Seen_Anew (S.Data.State);
+   end Seen_Anew;
 
    procedure Put_Point (B : in out Driver.Bytes.Buffer; P : Point_Estimate) is
    begin
@@ -216,11 +312,11 @@ package body Driver.World is
       Ensure (S);
       Driver.World.Estimates.Adopt (S.Data.State, E, O, Region, Thing);
       declare
-         Points  : Driver.World.Pairs.Match_Vectors.Vector;
+         Points  : Driver.World.Points.Placed_Vectors.Vector;
          Normals : Driver.World.Estimates.Normal_Vectors.Vector;
       begin
          for P of Placed loop
-            Points.Append (Driver.World.Pairs.Match'(In_First => P.Pixel, In_Second => P.Pixel, Point => P.Point, First => E));
+            Points.Append (Driver.World.Points.Placed'(Pixel => P.Pixel, Point => P.Point, Eye => E));
             Normals.Append (P.Normal);
          end loop;
          if not Points.Is_Empty then
@@ -237,10 +333,9 @@ package body Driver.World is
       Region : Driver.Images.Mask;
       Thing  : out Thing_Id)
    is
+      None : Driver.Robot.Surfaces.Surface_Point_Array (1 .. 0);
    begin
-      --  An eye that rides on a fitted arm places what it shows there by itself, from the places the arm's sweep
-      --  held it at (Driver.Robot.Surfaces): no instrument and no other eye seeing the same instant is needed.
-      Adopt (S, M, E, O, Region, Driver.Robot.Surfaces.In_Region (M, E, O, Region), Thing);
+      Adopt (S, M, E, O, Region, None, Thing);
    end Adopt;
 
    function Seen_In (S : Scene; T : Thing_Id; E : Eye_Id) return Boolean is
@@ -322,9 +417,9 @@ package body Driver.World is
    function Where (S : Scene; P : Place_Id) return Point_Estimate is (Driver.World.Estimates.Where (S.Data.State, P));
 
    function Samples (S : Scene; T : Thing_Id) return Sample_Array is
-      Points : constant Driver.World.Pairs.Match_Vectors.Vector :=
+      Points : constant Driver.World.Points.Placed_Vectors.Vector :=
         (if Known_Thing (S, T) then Driver.World.Estimates.Points_Of (S.Data.State, T)
-         else Driver.World.Pairs.Match_Vectors.Empty_Vector);
+         else Driver.World.Points.Placed_Vectors.Empty_Vector);
       --  The normals the eye that placed a point gave it (Place_Points); zero for the pairs' points.
       Placed_Normals : constant Driver.World.Estimates.Normal_Vectors.Vector :=
         (if Known_Thing (S, T) then Driver.World.Estimates.Normals_Of (S.Data.State, T)
@@ -339,8 +434,8 @@ package body Driver.World is
         (A.Eye < B.Eye or else (A.Eye = B.Eye and then (A.Row < B.Row or else (A.Row = B.Row and then A.Column < B.Column))));
       package Point_Maps is new Ada.Containers.Ordered_Maps (Key, Positive);
       Index : Point_Maps.Map;
-      function Key_Of (M : Driver.World.Pairs.Match) return Key is
-        ((Eye => M.First, Column => Integer (Real'Floor (M.In_First.U)), Row => Integer (Real'Floor (M.In_First.V))));
+      function Key_Of (M : Driver.World.Points.Placed) return Key is
+        ((Eye => M.Eye, Column => Integer (Real'Floor (M.Pixel.U)), Row => Integer (Real'Floor (M.Pixel.V))));
       function At_Key (K : Key; Found : out Vec3) return Boolean is
          C : constant Point_Maps.Cursor := Index.Find (K);
       begin
@@ -385,9 +480,9 @@ package body Driver.World is
    end Samples;
 
    function Sample_Sigma (S : Scene; T : Thing_Id) return Real is
-      Points : constant Driver.World.Pairs.Match_Vectors.Vector :=
+      Points : constant Driver.World.Points.Placed_Vectors.Vector :=
         (if Known_Thing (S, T) then Driver.World.Estimates.Points_Of (S.Data.State, T)
-         else Driver.World.Pairs.Match_Vectors.Empty_Vector);
+         else Driver.World.Points.Placed_Vectors.Empty_Vector);
       Sum : Real := 0.0;
    begin
       if Points.Is_Empty then
@@ -463,7 +558,9 @@ package body Driver.World is
          What : constant String := Text (Doc, Element (Doc, R, 1));
          N    : constant Natural := Count (Doc, R);
       begin
-         if What = "remember" and then N = 2 then
+         if What = "seen anew" and then N = 1 then
+            Seen_Anew (S);
+         elsif What = "remember" and then N = 2 then
             declare
                Place : Place_Id;
             begin

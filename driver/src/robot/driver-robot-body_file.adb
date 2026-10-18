@@ -6,6 +6,7 @@ with Driver.Json;
 with Driver.Log;
 with Driver.Robot.Flow;
 with Driver.Robot.Graph;
+with Driver.Robot.Kinematics;
 
 package body Driver.Robot.Body_File is
 
@@ -270,6 +271,7 @@ package body Driver.Robot.Body_File is
                  & ", ""shifts"": " & Reals (R.Shifts) & ", ""shift_sigmas"": " & Reals (Shift_Sigmas_Of (R))
                  & ", ""shifts_known"": " & Flags (Shifts_Known_Of (R)) & ", ""shift_points"": " & Counts (R.Shift_Points)
                  & ", ""shifts_seen"": " & Flags (R.Shift_Seen) & ", ""shift_told"": " & Counts (R.Shift_Told)
+                 & ", ""match_noise"": " & Num (Kinematics.Match_Noise (M, R.Arm))
                  & ", ""fitted"": " & Flag (F.Fitted) & ", ""reference"": " & Reals (F.Reference)
                  & ", ""chain"": " & Counts (F.Chain) & ", ""joints"": [");
             for J in F.Joints.First_Index .. F.Joints.Last_Index loop
@@ -733,6 +735,9 @@ package body Driver.Robot.Body_File is
                      R.Shift_Points := Counts_Of (Field (X, "shift_points"));
                      R.Shift_Seen := Flags_Of (Field (X, "shifts_seen"));
                      R.Shift_Told := Counts_Of (Field (X, "shift_told"));
+                     --  How far the aligner errs on its eye's pictures, as its keyframes measured it; absent from a
+                     --  file written before it was kept: not measured.
+                     R.Scatter := (if Is_Number (Field (X, "match_noise")) then Value (Field (X, "match_noise")) else 0.0);
                      declare
                         Sigmas : constant Real_Vectors.Vector := Reals_Of (Field (X, "shift_sigmas"));
                         Known  : constant Flag_Vectors.Vector := Flags_Of (Field (X, "shifts_known"));

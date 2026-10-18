@@ -14,7 +14,7 @@ package body Driver.World.Holding is
    function Largest_Variance (C : Mat3) return Real is (Real'Max (C (1, 1), Real'Max (C (2, 2), C (3, 3))));
 
    procedure Carry
-     (Points   : in out Driver.World.Pairs.Match_Vectors.Vector;
+     (Points   : in out Driver.World.Points.Placed_Vectors.Vector;
       Normals  : in out Driver.World.Estimates.Normal_Vectors.Vector;
       From, To : Pose_Estimate)
    is
@@ -24,7 +24,7 @@ package body Driver.World.Holding is
    begin
       for K in Points.First_Index .. Points.Last_Index loop
          declare
-            M     : Driver.World.Pairs.Match := Points (K);
+            M     : Driver.World.Points.Placed := Points (K);
             Lever : constant Real := abs (M.Point.Mean - From.Pose.Translation);
          begin
             M.Point := (Mean       => Motion * M.Point.Mean,

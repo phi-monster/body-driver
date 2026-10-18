@@ -82,6 +82,11 @@ package body Driver.Action.Snapshots is
    function Closed_Tip (L : Lobe_State) return Vec3 is
      (if L.Path.Is_Empty then Zero3 else L.Path.Last_Element.Tip);
 
+   function Largest_Sigma (Covariance : Mat3) return Real is
+     (if Covariance (1, 1) >= Real'Last or else Covariance (2, 2) >= Real'Last or else Covariance (3, 3) >= Real'Last
+      then Real'Last
+      else Sqrt (Real'Max (Covariance (1, 1), Real'Max (Covariance (2, 2), Covariance (3, 3)))));
+
    function Tip_Sigma (L : Lobe_State) return Real is
       Largest : Real := 0.0;
    begin

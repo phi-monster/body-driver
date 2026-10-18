@@ -66,9 +66,6 @@ package body Driver.Action.Execution is
    function Gravity (S : Snapshot) return Vec3 is
      (if S.Up.Sigma < Real'Last and then abs S.Up.Unit_Vector > 0.0 then Unit (S.Up.Unit_Vector) else Zero3);
 
-   function Largest_Sigma (C : Mat3) return Real is
-     (Sqrt (Real'Max (C (1, 1), Real'Max (C (2, 2), C (3, 3)))));
-
    --  The tool pose after a share S of a unit twist: the tool turns about the
    --  twist's axis with whatever it holds, then shifts.
    function Moved (G : Contact.Twist; S : Real; Tool : Rigid) return Rigid is
@@ -812,8 +809,11 @@ package body Driver.Action.Execution is
             N := N + 1;
          end loop;
       end if;
+      --  The lobes' ends are where the parts touch: where they are not measured, nor is the middle of them, however
+      --  well the tool is placed; nor is it where the touching parts' sigma is not known at all.
       It.Centre := (Mean => (if N > 0 then Sum / Real (N) else E.Tool.Translation),
-                    Covariance => Arm (S, A).Tool.Position_Covariance);
+                    Covariance => (if E.Sigma = Real'Last then [others => [others => Real'Last]]
+                                   else Arm (S, A).Tool.Position_Covariance));
       It.Sigma := E.Sigma;
       for Q of Moving_Points (S, 0, A) loop
          It.Samples.Append (Sample'(Point => Q, Normal => Zero3));
@@ -1024,7 +1024,12 @@ package body Driver.Action.Execution is
                      Limit := Real'Min (Limit, Real'Min (Pi, Turn) / abs Goal.Motion.Angular);
                   end;
                end if;
-               if Limit < Real'Last and then Fits (Limit) then
+               if not (abs Goal.Motion.Angular > 0.0) and then not (abs Goal.Motion.Linear > 0.0) then
+                  --  A twist that moves nothing has no step: every step of it fits where the tool stands, and the
+                  --  doubling never ends (s71: a still twist, its leg and gap unbounded, doubled to infinity, and
+                  --  the episode stopped on the rotation of infinity times nought).
+                  Step := 0.0;
+               elsif Limit < Real'Last and then Fits (Limit) then
                   Step := Limit;
                else
                   --  Doubled from the smallest step while it fits, then halved back down to it.

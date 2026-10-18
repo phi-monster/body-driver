@@ -178,6 +178,28 @@ package Driver.Robot is
    function Ray (M : Model; E : Eye_Id; O : Observation; Px : Driver.Images.Pixel) return Ray_Estimate;
    --  The line of sight through a pixel, in the world frame.
 
+   function Ray_In_Eye (M : Model; E : Eye_Id; U, V : Real) return Vec3;
+   --  The unit line of sight through a pixel of the eye, in its own frame, by its measured lens: an arm's eye's
+   --  fitted with the arm, a fixed eye's fitted where it was placed; zero when the lens is not measured.
+
+   procedure Project_In_Eye (M : Model; E : Eye_Id; P : Vec3; U, V : out Real; In_Front : out Boolean);
+   --  Where a point of the eye's own frame lands in its picture by its measured lens, inside the picture or not; not
+   --  In_Front behind the eye or when the lens is not measured.
+
+   function Eye_Noise (M : Model; E : Eye_Id) return Real;
+   --  How far the aligner errs on the eye's pictures, in pixels: what the keyframes of the arm it rides on measured
+   --  (Kinematics.Match_Noise), or what its placing left of its sightings (a fixed eye); 0 when not measured.
+
+   function Sweep_Views (M : Model; E : Eye_Id) return Natural;
+   --  How many still pictures of eye E the sweep of the arm that carries it kept (Kinematics: the arm's keyframes,
+   --  the first its reference), once the arm is fitted; 0 before, and for an eye no arm carries.
+
+   function Sweep_View (M : Model; E : Eye_Id; K : Positive; Like : Observation) return Observation
+     with Pre => K <= Sweep_Views (M, E) and then Natural (E) <= Natural (Like.Images.Length)
+                 and then Natural (Like.Readings.Length) = Group_Count (M);
+   --  The K-th, as an observation: Like's, with the arm's readings and eye E's picture as they were then, and no
+   --  other picture.
+
    function Eye_Ray (M : Model; E : Eye_Id; Px : Driver.Images.Pixel) return Ray_Estimate;
    --  The same line of sight in the eye's own frame (from its centre of
    --  projection), carrying only the lens's uncertainty: with Eye_In_Tool it
@@ -821,6 +843,12 @@ private
                                              --  with it are not a patch of those told: Kinematics.Measure_Shifts);
                                              --  False for a channel that moves a part of the body in the view
       Shift_Told   : Count_Vectors.Vector;   --  per channel: how many points were told of it
+      Scatter      : Real := 0.0;
+      --  How far the aligner errs on the arm's eye's pictures (Driver.Alignment.Keyframes.Scatter) as the keyframes
+      --  last measured it: kept when the sweep begins anew and in the body file, the eye's error until the keyframes
+      --  measure it again (Kinematics.Match_Noise); 0 until measured. An arm begun from a body file keeps no keyframes,
+      --  and its eye's error was unknown: s58 (servo seed 6, 10-18) placed none of the 336 points of its scene, and its
+      --  eye could not look around (Driver.Robot.Look), every place judged with an error of 0.
       Asking   : Flag_Vectors.Vector;   --  per channel: the sweep is turning it now (Kinematics.Asking), copied into
                                         --  the keyframes taken meanwhile (Keyframe.Asked)
       Sweeping : Boolean := False;   --  the arm's sweep has begun (Kinematics.Begin_Anew): its keyframes are taken

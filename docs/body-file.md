@@ -103,6 +103,9 @@ Per arm, `kinematics.arms` holds:
   view moves with the channel (false for a joint that moves a part of the body in the view, such as the hand's),
   and `shift_told` how many points told it. They are kept when the arm's sweep begins anew, and a body begun
   from the file sweeps from them.
+- `match_noise`: how far the driver's aligner errs on the arm's eye's pictures, in pixels, as the keyframes
+  measured it (0 or absent: not measured). Kept when the sweep begins anew; a body begun from the file judges the
+  places its eye sees things at by it until new keyframes measure it again.
 - `chain`: the arm's joints along it, from its base to the eye, each by its
   reading's place in the group (1 for the first). The robot reports its
   joints in any order; the fit finds the order from the keyframes that moved

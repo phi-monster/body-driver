@@ -8,7 +8,7 @@
 with Driver.Geometry;
 with Driver.Images;
 with Driver.World.Cameras;
-with Driver.World.Pairs;
+with Driver.World.Points;
 with Driver.World.Supports;
 
 private with Driver.World.Estimates;
@@ -25,7 +25,11 @@ package Driver.World.Offline is
       Up        : Direction_Estimate;
       Still     : Boolean;
       O         : Observation);
-   --  One beat, as Driver.World.Observe, with these eyes, up and stillness.
+   --  One beat, as Driver.World.Observe, with these eyes, up and stillness; what the eyes place by themselves then
+   --  is placed at once (Driver.World.Measure).
+
+   procedure Note_Table (B : in out Bench; Plane : Driver.Geometry.Plane_Estimate);
+   --  The table things rest on, as the body's arm's eye measures it for Driver.World, in the frame of the cameras.
 
    procedure Adopt (B : in out Bench; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id);
    procedure New_Episode (B : in out Bench);
@@ -33,7 +37,7 @@ package Driver.World.Offline is
    function Thing_Count (B : Bench) return Natural;
    function Seen_In (B : Bench; T : Thing_Id; E : Eye_Id) return Boolean;
    function Region_In (B : Bench; T : Thing_Id; E : Eye_Id) return Driver.Images.Mask;
-   function Points_Of (B : Bench; T : Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector;
+   function Points_Of (B : Bench; T : Thing_Id) return Driver.World.Points.Placed_Vectors.Vector;
    function Centre (B : Bench; T : Thing_Id) return Point_Estimate;
    function Resting_On (B : Bench; T : Thing_Id) return Surface_Id'Base;
    function Height_Above_Support (B : Bench; T : Thing_Id) return Estimate;

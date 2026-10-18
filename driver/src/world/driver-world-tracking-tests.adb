@@ -110,8 +110,8 @@ package body Driver.World.Tracking.Tests is
       Observe (T, Frame (30, 15), 6, Still => True);
       Check (Wants_Match (T), "a lost thing is not looked for at a still beat");
       declare
-         Points  : constant Driver.Instrument.Point_Array := Match_Points (T);
-         Answers : Driver.Instrument.Answer_Array (Points'Range);
+         Points  : constant Point_Array := Match_Points (T);
+         Answers : Answer_Array (Points'Range);
       begin
          --  The square's edge of 44 pixels whole, a sample of its 100 inside
          --  pixels, and a sample of the box around it.
@@ -124,14 +124,12 @@ package body Driver.World.Tracking.Tests is
                Answers (K) := (Found     => True,
                                To        => (U => Points (K).U + 10.0, V => Points (K).V),
                                Back      => (U => Points (K).U + 0.2 * Gaussian + (if K mod 10 = 0 then 6.0 else 0.0),
-                                             V => Points (K).V + 0.2 * Gaussian),
-                               Certainty => 1.0);
+                                             V => Points (K).V + 0.2 * Gaussian));
             else
                --  The table around it stayed where it was.
                Answers (K) := (Found     => True,
                                To        => (U => Points (K).U + 0.2 * Gaussian, V => Points (K).V + 0.2 * Gaussian),
-                               Back      => (U => Points (K).U + 0.2 * Gaussian, V => Points (K).V + 0.2 * Gaussian),
-                               Certainty => 1.0);
+                               Back      => (U => Points (K).U + 0.2 * Gaussian, V => Points (K).V + 0.2 * Gaussian));
             end if;
          end loop;
          Asked_Match (T);
@@ -166,19 +164,17 @@ package body Driver.World.Tracking.Tests is
       Observe (T, Frame (45, 30), 4, Still => True);
       Check (Wants_Match (T), "a thing that left was not looked for");
       declare
-         Points  : constant Driver.Instrument.Point_Array := Match_Points (T);
-         Answers : Driver.Instrument.Answer_Array (Points'Range);
+         Points  : constant Point_Array := Match_Points (T);
+         Answers : Answer_Array (Points'Range);
       begin
          for K in Points'Range loop
             if K <= Region_Points (T) then
                --  Three in four go nowhere; the rest come back from far off.
                Answers (K) := (Found => K mod 4 = 0, To => (U => 50.0, V => 40.0),
-                               Back => (U => Points (K).U + 15.0 + Real (K mod 7), V => Points (K).V - 9.0),
-                               Certainty => 0.1);
+                               Back => (U => Points (K).U + 15.0 + Real (K mod 7), V => Points (K).V - 9.0));
             else
                Answers (K) := (Found => True, To => Points (K),
-                               Back => (U => Points (K).U + 0.2 * Gaussian, V => Points (K).V + 0.2 * Gaussian),
-                               Certainty => 1.0);
+                               Back => (U => Points (K).U + 0.2 * Gaussian, V => Points (K).V + 0.2 * Gaussian));
             end if;
          end loop;
          Asked_Match (T);
@@ -218,12 +214,11 @@ package body Driver.World.Tracking.Tests is
       Observe (T, Shifted, 4, Still => True);
       Check (Wants_Match (T), "a thing whose eye moved was not looked for");
       declare
-         Points  : constant Driver.Instrument.Point_Array := Match_Points (T);
-         Answers : Driver.Instrument.Answer_Array (Points'Range);
+         Points  : constant Point_Array := Match_Points (T);
+         Answers : Answer_Array (Points'Range);
       begin
          for K in Points'Range loop
-            Answers (K) := (Found => True, To => (U => Points (K).U - 7.0, V => Points (K).V), Back => Points (K),
-                            Certainty => 1.0);
+            Answers (K) := (Found => True, To => (U => Points (K).U - 7.0, V => Points (K).V), Back => Points (K));
          end loop;
          Asked_Match (T);
          Matched (T, Points, Answers);

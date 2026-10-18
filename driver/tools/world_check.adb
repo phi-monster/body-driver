@@ -1,5 +1,4 @@
---  world_check RECORDING TRUTH --inst HOST:PORT [--dump PREFIX] [--until BEAT] [--pairs BEAT PREFIX]
---              [--regions BEAT PREFIX]
+--  world_check RECORDING TRUTH --inst HOST:PORT [--dump PREFIX] [--until BEAT] [--regions BEAT PREFIX]
 --
 --  The world layer alone, on a recording with side-file truth
 --  (harness/robodojo_truth). The recorded frames go through the world's
@@ -7,7 +6,9 @@
 --  optical frame and lens of every eye at every beat) and the true up in
 --  place of the body's own, so every error left is the world layer's. The
 --  body's stillness judgment runs on the recorded readings and commands as
---  the main loop runs it (Driver.Robot), and the instrument answers live.
+--  the main loop runs it (Driver.Robot), and the instrument answers live. The
+--  table the eyes place things above is the one the truth puts under the
+--  objects (the median of their lowest points), level.
 --
 --  Once the scene has been measured, every true object is adopted in the
 --  first eye the middle of its mesh falls in, segmented by the instrument in
@@ -55,7 +56,7 @@ with Driver.Uncertain;
 with Driver.World;
 with Driver.World.Cameras;
 with Driver.World.Offline;
-with Driver.World.Pairs;
+with Driver.World.Points;
 with Driver.World.Supports;
 
 procedure World_Check is
@@ -74,7 +75,6 @@ procedure World_Check is
    use type Driver.Protocol.Message_Kind;
    use type Driver.Recording.Record_Kind;
    use type Driver.World.Surface_Id;
-   use type Driver.Observations.Camera_Id;
 
    subtype Real is Driver.Real;
    subtype Real_Array is Driver.Real_Array;
@@ -341,6 +341,11 @@ procedure World_Check is
    overriding function Pose (C : Truth_Camera) return Pose_Estimate;
    overriding function Self_Mask (C : Truth_Camera) return Driver.Images.Mask;
    --  The truth here holds no image of the robot: its pixels stay in the scene.
+   overriding function Ray_In_Eye (C : Truth_Camera; U, V : Real) return Vec3 is
+     (if C.Known then True_Ray (C.Of_Lens, U, V) else [0.0, 0.0, 0.0]);
+   overriding procedure Project_In_Eye (C : Truth_Camera; P : Vec3; U, V : out Real; In_Front : out Boolean);
+   overriding function Noise (C : Truth_Camera) return Real is (1.0 / Sqrt (12.0));
+   --  The truth's pictures place a point anywhere in its pixel: a uniform pixel's spread.
 
    function Ray (C : Truth_Camera; Px : Driver.Images.Pixel) return Ray_Estimate is
       Unmeasured : Ray_Estimate;
@@ -371,6 +376,17 @@ procedure World_Check is
          Px := (U => U, V => V);
       end if;
    end Project;
+
+   procedure Project_In_Eye (C : Truth_Camera; P : Vec3; U, V : out Real; In_Front : out Boolean) is
+      Visible : Boolean;
+   begin
+      U := 0.0;
+      V := 0.0;
+      In_Front := C.Known and then P (3) > 0.0;
+      if In_Front then
+         True_Pixel (C.Of_Lens, P, U, V, Visible);
+      end if;
+   end Project_In_Eye;
 
    function Pose (C : Truth_Camera) return Pose_Estimate is
      ((Pose => C.Optical, Position_Covariance => [others => [others => 0.0]],
@@ -970,99 +986,6 @@ procedure World_Check is
       return (if N = 0 then 0.0 else Driver.Stats.Median (Z (1 .. N)));
    end Lowest_Median;
 
-   Pairs_At     : Natural := Natural'Last;   --  the beat whose grids are matched pair by pair, when asked
-   Pairs_Prefix : Unbounded_String;
-
-   procedure Pair_Check (O : Observation) is
-      --  Every eye's grid, as the scene's measurement asks it, matched into
-      --  every other eye at this beat, beside where the table plane the truth
-      --  puts under the objects says each grid pixel's sight lands there. One
-      --  file a pair, a line a grid pixel: the pixel; whether the instrument
-      --  answered; its match and the match's way back; its certainty; the
-      --  table's pixel in the second eye and whether it is in view there.
-      Top : constant Real := Lowest_Median (Truth (Line_Of_Beat (Beat)));
-   begin
-      Ada.Text_IO.Put_Line ("beat" & Beat'Image & ": pairs checked against the table plane at z " & Mm (Top) & " mm");
-      for A in 1 .. Eye_Id'Base (Natural (O.Images.Length)) loop
-         for B in 1 .. Eye_Id'Base (Natural (O.Images.Length)) loop
-            if A /= B and then Driver.Observations.Has_Image (O, A) and then Driver.Observations.Has_Image (O, B) then
-               declare
-                  Picture : constant Driver.Images.Image := O.Images (A);
-                  Stride  : constant Positive :=
-                    Positive'Max (1, Natural (Real'Floor (Sqrt (Real (Natural'Min (Driver.Images.Width (Picture),
-                                                                                   Driver.Images.Height (Picture)))))));
-                  Columns : constant Natural := Driver.Images.Width (Picture) / Stride;
-                  Rows    : constant Natural := Driver.Images.Height (Picture) / Stride;
-                  Points  : Driver.Instrument.Point_Array (1 .. Columns * Rows);
-                  Answers : Driver.Instrument.Answer_Array (Points'Range);
-                  Ok      : Boolean;
-                  Why     : Unbounded_String;
-                  First   : constant Truth_Camera := True_Camera (A, Beat);
-                  Second  : constant Truth_Camera := True_Camera (B, Beat);
-                  F       : Ada.Text_IO.File_Type;
-                  Near_3, Near_10, In_View, Answered : Natural := 0;
-               begin
-                  for R in 0 .. Rows - 1 loop
-                     for C in 0 .. Columns - 1 loop
-                        Points (R * Columns + C + 1) :=
-                          (U => Real (C * Stride + Stride / 2) + 0.5, V => Real (R * Stride + Stride / 2) + 0.5);
-                     end loop;
-                  end loop;
-                  Driver.Instrument.Read_Match
-                    (Driver.Services.Call (Driver.Services.Instrument, "/match",
-                                           Driver.Instrument.Match_Request
-                                             ((Stored => False, Image => O.Images (A)),
-                                              (Stored => False, Image => O.Images (B)), Points, True)),
-                     True, Answers, Ok, Why);
-                  if not Ok then
-                     Ada.Text_IO.Put_Line ("pair" & A'Image & B'Image & ": no answer: " & To_String (Why));
-                  else
-                     Ada.Text_IO.Create (F, Ada.Text_IO.Out_File,
-                                         To_String (Pairs_Prefix) & "." & Image (Natural (A)) & "."
-                                         & Image (Natural (B)) & ".txt");
-                     for K in Points'Range loop
-                        declare
-                           Sight : constant Ray_Estimate := First.Ray (Points (K));
-                           D     : constant Vec3 := Sight.Direction.Unit_Vector;
-                           Q     : Driver.Images.Pixel := (U => 0.0, V => 0.0);
-                           Seen  : Boolean := False;
-                           W     : constant Driver.Instrument.Answer := Answers (K);
-                        begin
-                           if D (3) < 0.0 then
-                              Second.Project (Sight.Origin.Mean + ((Top - Sight.Origin.Mean (3)) / D (3)) * D, Q, Seen);
-                           end if;
-                           if W.Found then
-                              Answered := Answered + 1;
-                              if Seen then
-                                 In_View := In_View + 1;
-                                 if Sqrt ((W.To.U - Q.U) ** 2 + (W.To.V - Q.V) ** 2) < 3.0 then
-                                    Near_3 := Near_3 + 1;
-                                 end if;
-                                 if Sqrt ((W.To.U - Q.U) ** 2 + (W.To.V - Q.V) ** 2) < 10.0 then
-                                    Near_10 := Near_10 + 1;
-                                 end if;
-                              end if;
-                           end if;
-                           Ada.Text_IO.Put_Line
-                             (F, Image (Points (K).U, 1) & " " & Image (Points (K).V, 1) & " "
-                              & (if W.Found then "1" else "0") & " " & Image (W.To.U, 2) & " " & Image (W.To.V, 2)
-                              & " " & Image (W.Back.U, 2) & " " & Image (W.Back.V, 2) & " "
-                              & Image (W.Certainty, 3) & " " & Image (Q.U, 2) & " " & Image (Q.V, 2) & " "
-                              & (if Seen then "1" else "0"));
-                        end;
-                     end loop;
-                     Ada.Text_IO.Close (F);
-                     Ada.Text_IO.Put_Line
-                       ("pair" & A'Image & B'Image & ":" & Points'Length'Image & " asked," & Answered'Image
-                        & " answered," & In_View'Image & " of those with the table's point in view of the second,"
-                        & Near_3'Image & " within 3 px of it," & Near_10'Image & " within 10 px");
-                  end if;
-               end;
-            end if;
-         end loop;
-      end loop;
-   end Pair_Check;
-
    Regions_At     : Natural := Natural'Last;   --  the beat whose regions are written, when asked
    Regions_Prefix : Unbounded_String;
 
@@ -1281,12 +1204,20 @@ procedure World_Check is
          declare
             Still : constant Boolean := Driver.Robot.Still (Robot);
          begin
+            Driver.World.Offline.Note_Table
+              (Bench, (Centre       => [0.0, 0.0, Lowest_Median (Truth (Line_Of_Beat (Beat)))],
+                       Normal       => [0.0, 0.0, 1.0],
+                       Tangent_1    => [1.0, 0.0, 0.0],
+                       Tangent_2    => [0.0, 1.0, 0.0],
+                       Offset_Sigma => 0.0,
+                       Tilt_11      => 0.0,
+                       Tilt_12      => 0.0,
+                       Tilt_22      => 0.0,
+                       Points       => 0,
+                       Scatter      => 0.0));
             Driver.World.Offline.Observe (Bench, Natural (O.Images.Length), Camera_Of'Access, Up, Still, O);
             if Beat = Regions_At then
                Write_Regions (O);
-            end if;
-            if Beat = Pairs_At then
-               Pair_Check (O);
             end if;
             if Length (Dump) > 0 and then Driver.World.Offline.Scene_Round (Bench) /= Dumped_Round then
                Dumped_Round := Driver.World.Offline.Scene_Round (Bench);
@@ -1324,9 +1255,9 @@ procedure World_Check is
    ---------------------------------------------------------------------------
    --  The score
 
-   function Finite_Points (T : Driver.World.Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector is
+   function Finite_Points (T : Driver.World.Thing_Id) return Driver.World.Points.Placed_Vectors.Vector is
       --  The thing's points that are numbers: a NaN is not equal to itself.
-      Result : Driver.World.Pairs.Match_Vectors.Vector;
+      Result : Driver.World.Points.Placed_Vectors.Vector;
       Not_Numbers : Natural := 0;
    begin
       for M of Driver.World.Offline.Points_Of (Bench, T) loop
@@ -1551,7 +1482,7 @@ procedure World_Check is
             T      : constant Driver.World.Thing_Id := Adopted_Maps.Key (C);
             A      : constant Adopted := Adopted_Maps.Element (C);
             Name   : constant String := To_String (A.Object);
-            Points : constant Driver.World.Pairs.Match_Vectors.Vector := Finite_Points (T);
+            Points : constant Driver.World.Points.Placed_Vectors.Vector := Finite_Points (T);
             Own_K  : Natural := 0;
             Line   : Unbounded_String := To_Unbounded_String
               ("thing" & T'Image & " (" & Name & ", eye" & A.Eye'Image & "):" & Points.Length'Image & " points");
@@ -1570,7 +1501,7 @@ procedure World_Check is
                begin
                   for I in Off'Range loop
                      declare
-                        M     : constant Driver.World.Pairs.Match := Points (I);
+                        M     : constant Driver.World.Points.Placed := Points (I);
                         Sigma : constant Real :=
                           Sqrt ((M.Point.Covariance (1, 1) + M.Point.Covariance (2, 2) + M.Point.Covariance (3, 3))
                                 / 3.0);
@@ -1794,7 +1725,7 @@ procedure World_Check is
 begin
    if Ada.Command_Line.Argument_Count < 4 or else Ada.Command_Line.Argument (3) /= "--inst" then
       Line (Core, "usage: world_check RECORDING TRUTH --inst HOST:PORT [--dump PREFIX] [--until BEAT]"
-                  & " [--pairs BEAT PREFIX] [--regions BEAT PREFIX]");
+                  & " [--regions BEAT PREFIX]");
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
       return;
    end if;
@@ -1804,9 +1735,6 @@ begin
    for I in 5 .. Ada.Command_Line.Argument_Count - 1 loop
       if Ada.Command_Line.Argument (I) = "--dump" then
          Dump := To_Unbounded_String (Ada.Command_Line.Argument (I + 1));
-      elsif Ada.Command_Line.Argument (I) = "--pairs" and then I + 2 <= Ada.Command_Line.Argument_Count then
-         Pairs_At := Natural'Value (Ada.Command_Line.Argument (I + 1));
-         Pairs_Prefix := To_Unbounded_String (Ada.Command_Line.Argument (I + 2));
       elsif Ada.Command_Line.Argument (I) = "--regions" and then I + 2 <= Ada.Command_Line.Argument_Count then
          Regions_At := Natural'Value (Ada.Command_Line.Argument (I + 1));
          Regions_Prefix := To_Unbounded_String (Ada.Command_Line.Argument (I + 2));

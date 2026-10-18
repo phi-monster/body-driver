@@ -30,19 +30,19 @@ package body Driver.World.Holding.Tests is
         (Pose => (Rotation => Exp ([0.1, -0.2, 0.25]) * Exp ([0.0, 0.0, 0.3]), Translation => [0.22, -0.08, 0.25]),
          Position_Covariance => 9.0e-6 * Identity3, Rotation_Covariance => 2.0e-6 * Identity3);
       Motion : constant Rigid := To.Pose * Inverse (From.Pose);
-      Before : Driver.World.Pairs.Match_Vectors.Vector;
+      Before : Driver.World.Points.Placed_Vectors.Vector;
       Up     : Driver.World.Estimates.Normal_Vectors.Vector;
-      Points : Driver.World.Pairs.Match_Vectors.Vector;
+      Points : Driver.World.Points.Placed_Vectors.Vector;
       Normals : Driver.World.Estimates.Normal_Vectors.Vector;
    begin
       --  A box's corners on the table below the tool, their normals up.
       for X in 0 .. 1 loop
          for Y in 0 .. 1 loop
-            Before.Append (Driver.World.Pairs.Match'
-                             (In_First => (U => 0.0, V => 0.0), In_Second => (U => 0.0, V => 0.0),
+            Before.Append (Driver.World.Points.Placed'
+                             (Pixel => (U => 0.0, V => 0.0),
                               Point => (Mean => [0.18 + 0.04 * Real (X), -0.12 + 0.03 * Real (Y), 0.02],
                                         Covariance => Small),
-                              First => 1));
+                              Eye   => 1));
             Up.Append (Vec3'[0.0, 0.0, 1.0]);
          end loop;
       end loop;

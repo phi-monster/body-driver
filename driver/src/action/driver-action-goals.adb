@@ -371,9 +371,16 @@ package body Driver.Action.Goals is
       N : constant Vec3 := (if abs Object.Up > 0.0 then Object.Up else Gravity (S));
       C : constant Vec3 := Subject.Centre.Mean;
       P : Plan;
+      function Finite (X : Real) return Boolean is (X >= Real'First and then X <= Real'Last);
    begin
       if not Known (Subject.Centre) or else not Known (Object.Centre) then
          P.Why := To_Unbounded_String ("I have not measured where the two of them are");
+         return P;
+      elsif not Finite (Margin) then
+         --  How far apart they pass rests on how surely each is where it is: s75's pusher, its lobe's tip unmeasured
+         --  in depth, had no such sigma, the margin was not a number, and the route over the box stopped the episode
+         --  on the length of a vector of them.
+         P.Why := To_Unbounded_String ("I have not measured how surely the two of them are where they are");
          return P;
       elsif not (abs N > 0.0) then
          P.Why := To_Unbounded_String ("I have not measured which way is up");

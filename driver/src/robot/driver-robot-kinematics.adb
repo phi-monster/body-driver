@@ -253,7 +253,9 @@ package body Driver.Robot.Kinematics is
    end Index_Of;
 
    --  How far the aligner errs on the arm's keyframes (Driver.Alignment.Keyframes.Scatter).
-   function Match_Sigma (R : Arm_Evidence) return Real is (Driver.Alignment.Keyframes.Scatter (R.Chain));
+   function Match_Sigma (R : Arm_Evidence) return Real is
+     (if Driver.Alignment.Keyframes.Scatter (R.Chain) > 0.0 then Driver.Alignment.Keyframes.Scatter (R.Chain)
+      else R.Scatter);
 
    --  The pixels the arm's eye's view moves per reading unit of a channel: the keyframes' own measurement
    --  (Measure_Shifts) when it is significant; 0 otherwise. The lock-in's slope is no measurement of it on every
@@ -685,11 +687,12 @@ package body Driver.Robot.Kinematics is
                Points : constant Count_Vectors.Vector := R.Shift_Points;
                Seen   : constant Flag_Vectors.Vector := R.Shift_Seen;
                Told   : constant Count_Vectors.Vector := R.Shift_Told;
+               Error  : constant Real := Match_Sigma (R);
             begin
                M.Kinematics.Replace_Element
                  (K, (Arm => R.Arm, Group => R.Group, Eye => R.Eye, Shifts => Kept, Shift_Sigmas => Sigmas,
-                      Shift_Points => Points, Shift_Seen => Seen, Shift_Told => Told, Sweeping => True,
-                      others => <>));
+                      Shift_Points => Points, Shift_Seen => Seen, Shift_Told => Told, Scatter => Error,
+                      Sweeping => True, others => <>));
             end;
          end;
       end if;

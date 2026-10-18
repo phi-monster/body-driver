@@ -2,25 +2,29 @@
 --  places it remembers, and how all of that moves.
 --
 --  Each thing has one estimate, shared by every eye and every beat: the
---  region it covers in each eye that sees it, its surface points, measured
---  where two eyes see the same point at the same instant, its centre, the
---  surface it rests on and its height above it along the measured Up, its
---  motion and where it will be, and what holds it. A thing is made from a
---  region an eye points at (Adopt); a region of the same pixels as a thing
---  already there is that thing. Names are not kept here: the brain layer
---  binds the brain's names to thing identities.
+--  region it covers in each eye that sees it, its surface points, placed by
+--  the eyes themselves from the still pictures the world keeps of the scene
+--  (Driver.World.Sight: an eye's views from the places the body held it at,
+--  the places its arm's sweep held it at among them), its centre, the surface
+--  it rests on and its height above it along the measured Up, its motion and
+--  where it will be, and what holds it. A thing is made from a region an eye
+--  points at (Adopt); a region of the same pixels as a thing already there is
+--  that thing. Names are not kept here: the brain layer binds the brain's
+--  names to thing identities.
 --
---  Surfaces are the planes things rest on, fitted to scene points that two
---  eyes see; places are points remembered by the brain's request. A new
---  episode forgets the things and places; surfaces stay, marked as earlier,
---  since a table does not move between episodes but must be seen again to
---  be trusted.
+--  Surfaces are the planes things rest on, fitted to the scene's points the
+--  eyes place the same way; places are points remembered by the brain's
+--  request. A new episode forgets the things and places; surfaces stay,
+--  marked as earlier, since a table does not move between episodes but must
+--  be seen again to be trusted.
 --
 --  Everything comes from the recorded stream: images, the body's measured
---  geometry, the instrument's replies (Driver.Instrument, asked by the
---  estimators and read on later beats), and the deciders' writes (Adopt,
+--  geometry, the instrument's replies (Driver.Instrument: the segmentations
+--  the estimators ask, read on later beats), and the deciders' writes (Adopt,
 --  Remember, Touched, Learn_Friction), recorded where they are made
---  (Replay_Write). Until a quantity is measured it is reported unknown.
+--  (Replay_Write). What the eyes place is heavier than a beat allows and is
+--  computed apart from the main loop (Measure). Until a quantity is measured
+--  it is reported unknown.
 --
 --  Ownership: path B.
 
@@ -57,7 +61,40 @@ package Driver.World is
       H    : Driver.Robot.Hand.Hands;
       O    : Observation;
       Sent : Driver.Commands.Command);
-   --  Estimators only, one beat; Sent as in Driver.Robot.Observe.
+   --  Estimators only, one beat; Sent as in Driver.Robot.Observe. The pictures an arm's sweep held its eye still for
+   --  are kept as views of it once the arm is fitted (Driver.Robot.Sweep_View).
+
+   function Measure_Due (S : Scene) return Boolean;
+   --  The eyes have something to place by themselves: the scene at the start of an episode or after a thing moved,
+   --  a thing's region measured anew, or a track lost at a still beat looking for its thing again.
+
+   procedure Measure (S : in out Scene; M : Driver.Robot.Model);
+   --  Does it, each part at the observation that made it due. It takes seconds: the main program computes it apart
+   --  from its loop with the robot's heavier estimates (Driver.Apart), a replay where the run did.
+
+   procedure Seen_Anew (S : in out Scene);
+   --  The eyes have seen the scene from new places (Driver.Robot.Look): it is measured again at the next still beat,
+   --  from the views those places gave. A decider's write, made within a beat's window.
+
+   function Scene_Pending (S : Scene) return Boolean;
+
+   function Free_Pixel (S : Scene; E : Eye_Id; Width, Height : Positive) return Driver.Images.Pixel;
+   --  Where in the eye's picture a point it is turned to is to be seen: its middle, or, where its latest scene showed
+   --  the robot's own body riding with it there, the nearest pixel that showed none.
+   --  The scene is due, or being measured: a decider that asked for it (Seen_Anew) holds the body until it is not.
+
+   function Views_Of (S : Scene; E : Eye_Id) return Natural;
+   --  How many still pictures of the eye, from as many places, the eyes place from (Driver.World.Sight).
+
+   function Placed_In
+     (S      : Scene;
+      M      : Driver.Robot.Model;
+      E      : Eye_Id;
+      O      : Observation;
+      Region : Driver.Images.Mask) return Driver.Robot.Surfaces.Surface_Point_Array;
+   --  The points eye E's picture at O shows in the region that stand above the table, placed from the views kept
+   --  (Driver.World.Sight) at a grid of the region a patch's half width apart, less the pixels that show the robot;
+   --  none when no view stands apart from where the eye stands. It takes seconds.
 
    procedure New_Episode (S : in out Scene);
    --  Forgets the episode's things and places; surfaces measured before are
@@ -73,8 +110,8 @@ package Driver.World is
       Region : Driver.Images.Mask;
       Thing  : out Thing_Id);
    --  Makes a region of one eye a thing: the existing thing that occupies the
-   --  same pixels, or a new one. An eye that rides on a fitted arm places what it
-   --  shows there by itself (Driver.Robot.Surfaces.In_Region).
+   --  same pixels, or a new one. What the eye shows there is placed at the next
+   --  still beat it holds the thing at (Measure).
 
    procedure Adopt
      (S      : in out Scene;
@@ -85,8 +122,8 @@ package Driver.World is
       Placed : Driver.Robot.Surfaces.Surface_Point_Array;
       Thing  : out Thing_Id);
    --  As Adopt, with the points the eye placed in exactly this region given
-   --  (Driver.Robot.Surfaces.In_Region of it), so they are not placed twice: a
-   --  replay, given the region alone, places the same points again.
+   --  (Placed_In of it), so they are not placed twice; a replay applies them as
+   --  the run had them.
 
    function Seen_In (S : Scene; T : Thing_Id; E : Eye_Id) return Boolean;
    --  Seen by that eye at the latest beat.

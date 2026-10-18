@@ -45,9 +45,10 @@ have the widest ones predicted narrow at once.
 
 Perturbing the sightings of A23's arm 2 by 1e-9 px moved its focal length between 396.9 and 399.2 px (stated sigma
 0.8 px) in an earlier version of the alignment, and moves it between 397.8 and 398.25 px (stated sigma 0.68 px) in this one;
-the other five arms and every RoMa input do not move (under 0.05 px). The descent of the last stage goes down a
-curved narrow valley (the focal length against the distortion): the damping of its Levenberg-Marquardt steps swings between
-16 and 1e5 and the 53 rounds it is given are spent before it ends, where it ends depends on the rounding. Given 424 rounds
+the other five arms, and every fit on the answers RoMa gave (the instrument's matcher then, since removed), do not move
+(under 0.05 px). The descent of the last stage goes down a curved narrow valley (the focal length against the
+distortion): the damping of its Levenberg-Marquardt steps swings between 16 and 1e5 and the 53 rounds it is given are
+spent before it ends, where it ends depends on the rounding. Given 424 rounds
 it ends at 399.2 for every perturbation: that is the optimum of these sightings (their sigmas are too small for the far
 keyframes, whose true errors are twice what they state), 2.8 sigma from the truth; the 397.5 that 53 rounds reach is a
 state that has not converged. The pass loop that re-chooses the sightings now ends at a choice it has met (a fixed point

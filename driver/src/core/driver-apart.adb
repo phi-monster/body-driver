@@ -285,6 +285,9 @@ package body Driver.Apart is
 
    procedure Replay_Apart is
    begin
+      if Due then
+         Compute;
+      end if;
       Replaying_Apart := True;
    end Replay_Apart;
 

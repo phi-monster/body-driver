@@ -20,8 +20,7 @@ package body Driver.Action.Plants.Live is
    package World renames Driver.World;
    package Motion renames Driver.Robot.Motion;
 
-   function Largest_Sigma (C : Mat3) return Real is
-     (Sqrt (Real'Max (C (1, 1), Real'Max (C (2, 2), C (3, 3)))));
+   function Largest_Sigma (Covariance : Mat3) return Real renames Driver.Action.Snapshots.Largest_Sigma;
 
    --  How finely the arm places its tool: of every joint's smallest visible
    --  step, the largest shift and turn of the tool it makes, as the arm's
@@ -173,6 +172,10 @@ package body Driver.Action.Plants.Live is
                   X.Lobes.Append (Lobe);
                end;
             end loop;
+            --  How far a thing may go in between the tips before it meets the hand: the hand measures it from its
+            --  presses (Grip_Depth), and a hand whose depth is not known is no grasper (Search.Effector_Of). Left
+            --  unset, every hand was unknown here whatever its presses measured: the snapshot never had a grasper.
+            X.Depth := Robot_Hand.Grip_Depth (Hands, Id);
             X.Fraction := Robot_Hand.Fraction (Hands, Robot, Id, O);
             S.Hands.Append (X);
          end;

@@ -291,6 +291,15 @@ package body Driver.Alignment is
 
    function Level_Height (P : Pyramid; Level : Natural) return Natural is (P.Sizes (Level).Height);
 
+   function From_Level (P : Pyramid; Level : Natural) return Pyramid is
+      R : Pyramid;
+   begin
+      for K in Level .. Levels (P) - 1 loop
+         R.Sizes.Append (P.Sizes (K));
+      end loop;
+      return R;
+   end From_Level;
+
    procedure Sample_Level
      (P : Pyramid; Level : Natural; U, V : Real; Value, Du, Dv : out Real; Ok : out Boolean)
    is
@@ -1958,5 +1967,47 @@ package body Driver.Alignment is
          end if;
       end;
    end Align;
+
+   function Align_At_Scale (First, Second : Pyramid; Query : Prediction; Widen : Boolean := True) return Answer is
+      Largest, Smallest : Real;
+      Down_First, Down_Second : Natural := 0;   --  the levels each picture is compared at
+   begin
+      Singular_Values (Query.Linear, Largest, Smallest);
+      declare
+         Scale : constant Real := Sqrt (Largest * Smallest);   --  how much larger the second picture shows the place
+      begin
+         --  The second finer: down its levels while it stays as fine as the first or finer.
+         while Down_Second + 1 < Levels (Second) and then Scale / Real (Halving) ** (Down_Second + 1) >= 1.0 loop
+            Down_Second := Down_Second + 1;
+         end loop;
+         --  The first finer: down its levels while the second stays as fine as it or finer.
+         while Down_First + 1 < Levels (First) and then Scale * Real (Halving) ** (Down_First + 1) <= 1.0 loop
+            Down_First := Down_First + 1;
+         end loop;
+      end;
+      if Down_First = 0 and then Down_Second = 0 then
+         return Align (First, Second, Query, Widen);
+      end if;
+      declare
+         F1 : constant Real := Real (Halving) ** Down_First;
+         F2 : constant Real := Real (Halving) ** Down_Second;
+         K  : constant Real := F1 / F2;   --  a step of the first's level, in steps of the second's level, per the warp
+         Q  : constant Prediction :=
+           (From         => (U => Query.From.U / F1, V => Query.From.V / F1),
+            To           => (U => Query.To.U / F2, V => Query.To.V / F2),
+            Linear       => (UU => Query.Linear.UU * K, UV => Query.Linear.UV * K,
+                             VU => Query.Linear.VU * K, VV => Query.Linear.VV * K),
+            Cov          => (UU => Query.Cov.UU / F2 ** 2, UV => Query.Cov.UV / F2 ** 2, VV => Query.Cov.VV / F2 ** 2),
+            Linear_Sigma => (if Query.Linear_Sigma < Real'Last then Query.Linear_Sigma * K else Real'Last));
+         A  : Answer := Align (From_Level (First, Down_First), From_Level (Second, Down_Second), Q, Widen);
+      begin
+         if A.Verdict = Found then
+            A.To := (U => A.To.U * F2, V => A.To.V * F2);
+            A.Cov := (UU => A.Cov.UU * F2 ** 2, UV => A.Cov.UV * F2 ** 2, VV => A.Cov.VV * F2 ** 2);
+            A.Linear := (UU => A.Linear.UU / K, UV => A.Linear.UV / K, VU => A.Linear.VU / K, VV => A.Linear.VV / K);
+         end if;
+         return A;
+      end;
+   end Align_At_Scale;
 
 end Driver.Alignment;

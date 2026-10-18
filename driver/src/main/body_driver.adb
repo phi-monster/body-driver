@@ -209,11 +209,16 @@ procedure Body_Driver is
       end if;
    end Rest;
 
-   function Due return Boolean is (Driver.Robot.Estimates_Due (Robot));
+   function Due return Boolean is (Driver.Robot.Estimates_Due (Robot) or else Driver.World.Measure_Due (Scene));
 
    procedure Compute is
    begin
-      Driver.Robot.Compute_Estimates (Robot);
+      if Driver.Robot.Estimates_Due (Robot) then
+         Driver.Robot.Compute_Estimates (Robot);
+      end if;
+      if Driver.World.Measure_Due (Scene) then
+         Driver.World.Measure (Scene, Robot);
+      end if;
    end Compute;
 
    procedure Estimates_Failed (E : Ada.Exceptions.Exception_Occurrence) is
