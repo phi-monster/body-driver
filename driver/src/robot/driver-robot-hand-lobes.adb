@@ -2065,6 +2065,27 @@ package body Driver.Robot.Hand.Lobes is
                   end if;
                end;
             end if;
+            --  Each lobe's way: the closer's motion of the picture summed over its pixels at both ends.
+            if Motion /= null then
+               for L of Result.Lobes loop
+                  declare
+                     U, V : Real;
+                  begin
+                     L.Way_U := 0.0;
+                     L.Way_V := 0.0;
+                     for R in 0 .. H - 1 loop
+                        for C in 0 .. W - 1 loop
+                           if Contains (L.Here, C, R) or else Contains (L.There, C, R) then
+                              Motion (C, R, U, V);
+                              L.Way_U := L.Way_U + U;
+                              L.Way_V := L.Way_V + V;
+                           end if;
+                        end loop;
+                     end loop;
+                     L.Way_Known := L.Way_U /= 0.0 or else L.Way_V /= 0.0;
+                  end;
+               end loop;
+            end if;
             --  The robot's own pixels that did not change: of the robot's brightness as the ends now stand, in
             --  parts larger than the doubt.
             declare
@@ -2158,70 +2179,13 @@ package body Driver.Robot.Hand.Lobes is
          --  at each end.
          for L of Lobes loop
             declare
-               W     : constant Natural := Width (Attached);
-               H     : constant Natural := Height (Attached);
-               Du    : constant Real := L.Centre_There.U - L.Centre_Here.U;
-               Dv    : constant Real := L.Centre_There.V - L.Centre_Here.V;
-               Size  : constant Real := Sqrt (Du * Du + Dv * Dv);
-               Never : constant Real := Sqrt (Real (W * W + H * H));
-               --  Over the pixels of M that lead along (Su, Sv), a unit step, the median of how many pixels lie between
-               --  each and a still pixel straight ahead of it, Never for one with none ahead; Never when none leads.
-               function Gap (M : Mask; Su, Sv : Real) return Real is
-                  type Reals is array (Positive range <>) of Real;
-                  type Reals_Access is access Reals;
-                  procedure Free is new Ada.Unchecked_Deallocation (Reals, Reals_Access);
-                  Gaps  : Reals_Access := new Reals (1 .. Natural'Max (1, W * H));
-                  Led   : Natural := 0;
-                  Least : Real := Never;
-                  function Ahead (C, R, K : Natural; Column, Row : out Integer) return Boolean is
-                  begin
-                     Column := Integer (Real'Floor (Real (C) + 0.5 + Real (K) * Su));
-                     Row := Integer (Real'Floor (Real (R) + 0.5 + Real (K) * Sv));
-                     return Column in 0 .. W - 1 and then Row in 0 .. H - 1;
-                  end Ahead;
-               begin
-                  for R in 0 .. H - 1 loop
-                     for C in 0 .. W - 1 loop
-                        if Contains (M, C, R) then
-                           declare
-                              Nc, Nr : Integer;
-                           begin
-                              if not (Ahead (C, R, 1, Nc, Nr) and then Contains (M, Nc, Nr)) then
-                                 Least := Never;
-                                 for K in 1 .. Natural (Real'Ceiling (Never)) loop
-                                    exit when not Ahead (C, R, K, Nc, Nr);
-                                    if Contains (Attached, Nc, Nr) then
-                                       Least := Real (K - 1);
-                                       exit;
-                                    end if;
-                                 end loop;
-                                 Led := Led + 1;
-                                 Gaps (Led) := Least;
-                              end if;
-                           end;
-                        end if;
-                     end loop;
-                  end loop;
-                  declare
-                     Side : constant Real :=
-                       (if Led = 0 then Never else Driver.Stats.Median (Real_Array (Gaps (1 .. Led))));
-                  begin
-                     Free (Gaps);
-                     return Side;
-                  end;
-               end Gap;
+               At_Here, At_There, Never : Real;
             begin
-               if Size > 0.0 then
-                  declare
-                     At_There : constant Real := Gap (L.There, Du / Size, Dv / Size);
-                     At_Here  : constant Real := Gap (L.Here, -Du / Size, -Dv / Size);
-                  begin
-                     if At_There /= Never or else At_Here /= Never then
-                        Change := Change + (At_There - At_Here);
-                        Variance := Variance + 2.0 * Pixel_Variance;
-                        Terms := Terms + 1;
-                     end if;
-                  end;
+               Lead_Gaps (L, Attached, At_Here, At_There, Never);
+               if At_There /= Never or else At_Here /= Never then
+                  Change := Change + (At_There - At_Here);
+                  Variance := Variance + 2.0 * Pixel_Variance;
+                  Terms := Terms + 1;
                end if;
             end;
          end loop;
@@ -2231,6 +2195,75 @@ package body Driver.Robot.Hand.Lobes is
       end if;
       return (Value => Change, Sigma => Sqrt (Variance), Degrees_Of_Freedom => Degrees_Of_Freedom);
    end Change_Of;
+
+   --  The way the lobe went from the first view to the other: the closer's own motion of the picture over its pixels
+   --  where that was measured, and the way between its centres where not. Its centres move as its changed pixels do:
+   --  a ribbed finger moved by less than a rib changes in a band each side of every rib, the bands at the two ends
+   --  interleaved, and their centres moved either way (servo seed 3 of the fake robot, 10-18, its jaw shut at the high
+   --  reading: u5 told it shut at the low one, and u4 did not tell it, its lead meeting none of the fixed jaw's ribs
+   --  at either end).
+   procedure Lead_Gaps (L : Lobe; Attached : Mask; At_Here, At_There, Never : out Real) is
+      W     : constant Natural := Width (Attached);
+      H     : constant Natural := Height (Attached);
+      Du    : constant Real := (if L.Way_Known then L.Way_U else L.Centre_There.U - L.Centre_Here.U);
+      Dv    : constant Real := (if L.Way_Known then L.Way_V else L.Centre_There.V - L.Centre_Here.V);
+      Size  : constant Real := Sqrt (Du * Du + Dv * Dv);
+      Far   : constant Real := Sqrt (Real (W * W + H * H));
+      --  Over the pixels of M that lead along (Su, Sv), a unit step, the median of how many pixels lie between
+      --  each and a still pixel straight ahead of it, Far for one with none ahead; Far when none leads.
+      function Gap (M : Mask; Su, Sv : Real) return Real is
+         type Reals is array (Positive range <>) of Real;
+         type Reals_Access is access Reals;
+         procedure Free is new Ada.Unchecked_Deallocation (Reals, Reals_Access);
+         Gaps  : Reals_Access := new Reals (1 .. Natural'Max (1, W * H));
+         Led   : Natural := 0;
+         Least : Real := Far;
+         function Ahead (C, R, K : Natural; Column, Row : out Integer) return Boolean is
+         begin
+            Column := Integer (Real'Floor (Real (C) + 0.5 + Real (K) * Su));
+            Row := Integer (Real'Floor (Real (R) + 0.5 + Real (K) * Sv));
+            return Column in 0 .. W - 1 and then Row in 0 .. H - 1;
+         end Ahead;
+      begin
+         for R in 0 .. H - 1 loop
+            for C in 0 .. W - 1 loop
+               if Contains (M, C, R) then
+                  declare
+                     Nc, Nr : Integer;
+                  begin
+                     if not (Ahead (C, R, 1, Nc, Nr) and then Contains (M, Nc, Nr)) then
+                        Least := Far;
+                        for K in 1 .. Natural (Real'Ceiling (Far)) loop
+                           exit when not Ahead (C, R, K, Nc, Nr);
+                           if Contains (Attached, Nc, Nr) then
+                              Least := Real (K - 1);
+                              exit;
+                           end if;
+                        end loop;
+                        Led := Led + 1;
+                        Gaps (Led) := Least;
+                     end if;
+                  end;
+               end if;
+            end loop;
+         end loop;
+         declare
+            Side : constant Real :=
+              (if Led = 0 then Far else Driver.Stats.Median (Real_Array (Gaps (1 .. Led))));
+         begin
+            Free (Gaps);
+            return Side;
+         end;
+      end Gap;
+   begin
+      Never := Far;
+      At_Here := Far;
+      At_There := Far;
+      if Size > 0.0 then
+         At_There := Gap (L.There, Du / Size, Dv / Size);
+         At_Here := Gap (L.Here, -Du / Size, -Dv / Size);
+      end if;
+   end Lead_Gaps;
 
    --  The matcher's noise and the pixel grid (a uniform square of side one).
    function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Estimate is

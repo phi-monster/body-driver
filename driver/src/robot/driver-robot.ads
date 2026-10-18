@@ -717,7 +717,7 @@ private
       Order_Told    : Boolean := False;   --  its joints' order is told by the sightings, not only the best (Fit_Report)
       Untold        : Joint_Pair_Lists.Vector;   --  when not: the joints next to each other along it whose swap is not
                                                  --  told (Fit_Report)
-      Untold_Scales : Real_Vectors.Vector;       --  per pair of Untold, the share of the widest turns it is best turned by
+      Untold_Turns  : Real_Vectors.Vector;       --  per pair of Untold, its two joints' turns that tell it (Fit_Report)
       Untold_Orders : Count_Vectors.Vector;      --  when not: every order not told from Chain, one after another, as
                                                  --  long as Chain each, by the readings' places (Fit_Report)
       Made_At : Natural := 0;

@@ -273,10 +273,10 @@ package Driver.Robot.Kinematics.Fit is
       Untold     : Joint_Pair_Lists.Vector;  --  when stage 4 did not tell the order: the joints next to each other along
                                              --  the best order whose swap leaves residuals not significantly the
                                              --  larger; empty when told, or when no stage 4 was run
-      Untold_Scales : Real_Lists.Vector;
-      --  Per pair of Untold: the share of each joint's widest turn the pair is best turned by (the turn that tells the
-      --  untold orders apart most, by the pixels between their places of the points times the root of how many stay in
-      --  the picture).
+      Untold_Turns : Real_Lists.Vector;
+      --  Per pair of Untold, two: the turns of its Earlier joint and of its Later one, in their readings' units, that
+      --  tell the untold orders apart most (by the pixels between their places of the points times the root of how
+      --  many stay in the picture) of those that put the points no farther apart than a narrow window follows.
       Untold_Orders : Joint_Lists.Vector;
       --  Every order of the joints the sightings do not tell from the best (stage 4's search over all of them),
       --  one after another, each as many joints long as the fit has: where the arm may be at a keyframe still to

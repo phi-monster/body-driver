@@ -7950,8 +7950,6 @@ package body Driver.Robot.Tests is
    --  heights 0.05 to 0.3 and turned up to 0.4 rad about each axis, the centres seen with Gaussian errors of the
    --  sigma each states (1 to 2 pixels); the eye's lens, pose and the beacon come back within Z of their sigmas.
    procedure Beacon_Placement is
-      use Driver.Numerics;
-      use Driver.Numerics.Arrays;
       package Beacon renames Driver.Robot.Kinematics.Beacon;
       Gen    : Ada.Numerics.Float_Random.Generator;
       Truth_Lens : constant Driver.Robot.Kinematics.Fit.Lens :=

@@ -1157,7 +1157,6 @@ package body Driver.Alignment is
        Linear => Identity_Part, Correlation => 0.0, Fit_Rms => 0.0, Patch_Rms => 0.0, Degrees_Of_Freedom => 0,
        Narrow => False));
 
-   --  The squared length of a displacement in the standard deviations of a covariance (its Mahalanobis length).
    function Squared_Length (Du, Dv : Real; C : Place_Covariance) return Real is
      ((C.VV * Du ** 2 - 2.0 * C.UV * Du * Dv + C.UU * Dv ** 2) / (C.UU * C.VV - C.UV ** 2));
 

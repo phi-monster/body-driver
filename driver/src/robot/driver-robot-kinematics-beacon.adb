@@ -7,7 +7,6 @@ package body Driver.Robot.Kinematics.Beacon is
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Ada.Strings.Unbounded;
-   use Driver.Numerics;
    use Driver.Numerics.Arrays;
 
    type Parameters is array (1 .. Terms) of Real;

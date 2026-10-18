@@ -1,4 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings.Unbounded;
 with Driver.Log;
 with Driver.Pixels;
 
@@ -368,6 +369,28 @@ package body Driver.Robot.Hand.Sweep is
       Pixels_Text : constant String :=
         Natural'Image (Here.Changed) & " pixels changed, beyond " & Driver.Log.Image (Here.Beyond, 1)
         & " levels of a spread of " & Driver.Log.Image (Here.Spread, 2);
+      --  How far each lobe's lead goes at each end before it meets a still pixel (Lobes.Lead_Gaps): what the
+      --  closing is told by against the robot's still pixels, said where it is not told.
+      function Leads_Text return String is
+         Text : Ada.Strings.Unbounded.Unbounded_String;
+         K    : Natural := 0;
+      begin
+         for L of Here.Located.Lobes loop
+            declare
+               At_Low, At_High, Never : Real;
+            begin
+               K := K + 1;
+               Driver.Robot.Hand.Lobes.Lead_Gaps (L, Here.Located.Still, At_Low, At_High, Never);
+               Ada.Strings.Unbounded.Append
+                 (Text, "; lobe" & K'Image & "'s lead meets one "
+                  & (if At_Low = Never then "never" else "after " & Driver.Log.Image (At_Low, 1) & " px")
+                  & " at the low end, "
+                  & (if At_High = Never then "never" else "after " & Driver.Log.Image (At_High, 1) & " px")
+                  & " at the high end");
+            end;
+         end loop;
+         return Ada.Strings.Unbounded.To_String (Text);
+      end Leads_Text;
    begin
       case Here.Status is
          when Waiting =>
@@ -402,9 +425,10 @@ package body Driver.Robot.Hand.Sweep is
                  elsif Known (Here.Change)
                  then "closing direction not significant: their distances changed by "
                       & Driver.Log.Image (Here.Change.Value, 3) & " +- " & Driver.Log.Image (Here.Change.Sigma, 3)
-                      & " pixels between the ends"
+                      & " pixels between the ends" & Leads_Text
                  else "closing direction not known: there is nothing to compare their distances with ("
-                      & Driver.Images.Count (Here.Located.Still)'Image & " of the robot's pixels did not change)")
+                      & Driver.Images.Count (Here.Located.Still)'Image & " of the robot's pixels did not change"
+                      & Leads_Text & ")")
               & " (" & Pixels_Text & ";" & Here.Located.Here'Image & " given to the low end,"
               & Here.Located.There'Image & " to the high end," & Here.Located.Unassigned'Image & " to neither, of doubt "
               & Driver.Log.Image (Here.Located.Doubt, 0) & " pixels, after" & Here.Located.Rounds'Image & " rounds; its parts:"

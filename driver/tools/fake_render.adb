@@ -297,6 +297,38 @@ package body Fake_Render is
       end loop;
    end Rows;
 
+   procedure Nearest
+     (W : Fake_World.World; C : Fake_World.Camera; U, V : Driver.Real; Solid : out Natural; Along : out Driver.Real)
+   is
+      R  : Mat3 renames C.Pose.Rotation;
+      Px : constant Real := (U - C.Cx) / C.Fx;
+      Py : constant Real := (V - C.Cy) / C.Fy;
+      Pn : constant Real := Sqrt (Px * Px + Py * Py + 1.0);
+      Dx : constant Real := (R (1, 1) * Px + R (1, 2) * Py + R (1, 3)) / Pn;
+      Dy : constant Real := (R (2, 1) * Px + R (2, 2) * Py + R (2, 3)) / Pn;
+      Dz : constant Real := (R (3, 1) * Px + R (3, 2) * Py + R (3, 3)) / Pn;
+   begin
+      Solid := 0;
+      Along := Real'Last;
+      for I in W.Solids.First_Index .. W.Solids.Last_Index loop
+         declare
+            Inv : constant Rigid := Inverse (W.Solids (I).Pose);
+            O   : constant Vec3 := Inv * C.Pose.Translation;
+            F   : constant Seen_From :=
+              (Rxx => Inv.Rotation (1, 1), Rxy => Inv.Rotation (1, 2), Rxz => Inv.Rotation (1, 3),
+               Ryx => Inv.Rotation (2, 1), Ryy => Inv.Rotation (2, 2), Ryz => Inv.Rotation (2, 3),
+               Rzx => Inv.Rotation (3, 1), Rzy => Inv.Rotation (3, 2), Rzz => Inv.Rotation (3, 3),
+               Ox => O (1), Oy => O (2), Oz => O (3));
+            T   : constant Real := Distance (W.Solids (I), F, Dx, Dy, Dz);
+         begin
+            if T < Along then
+               Along := T;
+               Solid := I;
+            end if;
+         end;
+      end loop;
+   end Nearest;
+
    procedure Render (W : Fake_World.World; C : aliased Fake_World.Camera; Pixels : aliased in out Driver.Real_Array) is
       Eye : constant Vec3 := C.Pose.Translation;
    begin

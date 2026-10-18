@@ -57,7 +57,7 @@
 with Driver.Images;
 
 private with Ada.Containers.Vectors;
-private with Driver.Uncertain;
+with Driver.Uncertain;
 private with Ada.Finalization;
 private with System.Atomic_Counters;
 
@@ -237,12 +237,18 @@ package Driver.Alignment is
    Quantization : constant Real := 1.0 / 12.0;
    --  The variance of a uniform rounding to a whole unit: of a pixel's level, and of a place known to a pixel.
 
-private
-
    Window_Gate     : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
    Window_Multiple : constant Real := Driver.Uncertain.Threshold (Window_Gate);
    --  How many standard deviations of a prediction a place may lie from it: the length of a two-dimensional
-   --  difference, significant at the tail probability Z has for one dimension.
+   --  difference, significant at the tail probability Z has for one dimension. A prediction that may lie at
+   --  another place too reaches it at its window's edge when the difference enters its covariance divided by
+   --  this, squared (Driver.Robot.Kinematics' untold orders).
+
+   function Squared_Length (Du, Dv : Real; C : Place_Covariance) return Real;
+   --  The squared length of a displacement in the standard deviations of a covariance (its Mahalanobis length): a
+   --  place lies in a prediction's window when it is no more than Window_Multiple, squared.
+
+private
 
    Finest : constant := 0;
    --  The size of the pyramid that is the picture itself.

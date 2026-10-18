@@ -451,14 +451,14 @@ package body Driver.Robot.Boot is
             Fitted_Now   : Boolean := False;
             Told_Now     : Boolean := False;   --  and its joints' order told (Kinematics.Order_Told)
             Contested    : Joint_Pair_Lists.Vector;   --  if not, the pairs it lacks
-            Scales       : Real_Vectors.Vector;       --  and the share of their widest turns each is best turned by
+            Turns        : Real_Vectors.Vector;       --  and the turns of each one's two joints that tell it, two a pair
             Untold_Now   : Natural := 0;              --  how many orders the fit does not tell from its own
             procedure Read_Followed is
             begin
                Fitted_Now := Driver.Robot.Kinematics.Fitted (M, A);
                Told_Now := Driver.Robot.Kinematics.Order_Told (M, A);
                Contested := Driver.Robot.Kinematics.Contested_Pairs (M, A);
-               Scales := Driver.Robot.Kinematics.Contested_Scales (M, A);
+               Turns := Driver.Robot.Kinematics.Contested_Turns (M, A);
                Untold_Now := Driver.Robot.Kinematics.Untold_Count (M, A);
             end Read_Followed;
             --  The beats the body has seen, read in a held beat.
@@ -659,7 +659,7 @@ package body Driver.Robot.Boot is
                --  wrong order the smaller in its four cells that turned channels 3 and 4 opposite ways (by 0.00 to
                --  0.15 px a residual) and the true one in its three that turned them the same way (by 0.01 to 0.13),
                --  over 1148 residuals that the signed ranks counted as many independent ones.
-               procedure Together (Share : Real_Array) is
+               procedure Together (Share : Real_Array; Climb : Boolean) is
                   Rows   : Positive := 1;
                   Turned : array (1 .. N) of Positive;   --  the swept joints with a share, by their place in Swept
                   Count  : Natural := 0;
@@ -740,7 +740,7 @@ package body Driver.Robot.Boot is
                         --  f16b's cells turned every joint about 4 degrees, a pair's difference under a pixel, and its
                         --  arm 1 was fitted in the wrong order in every pass (4, 1, 5, 2, 6, 3 where it is 5, 4, 1, 2,
                         --  6, 3), its median residual twice the right order's.
-                        if Fitted_Now and then Report.Outcome = Driver.Robot.Motion.Reached then
+                        if Climb and then Fitted_Now and then Report.Outcome = Driver.Robot.Motion.Reached then
                            loop
                               exit when Cell_Motion (2.0 * Scale) > Half;
                               Scale := 2.0 * Scale;
@@ -793,25 +793,29 @@ package body Driver.Robot.Boot is
                   return Share;
                end Shares;
 
-               --  The shares of a cell that turns two joints alone: their own shares (Shares), none of the others'. A
-               --  pair's cells climb, as a fitted arm's do, until the view moves by half of it, a budget that a cell of
-               --  every joint spends on all of them: what two joints turned together do that each alone does not grows
-               --  with the product of their turns (s08 on 10-16: the cells of every joint at the end of its passes
-               --  turned each by about 0.08 rad, and the orders 5 1 4 3 2 6 and 1 5 4 3 6 2 left residuals of median
-               --  0.361 and 0.363 px).
-               --  Each of the two by the offset its own keyframes were followed to (Reached), not by its part of the
-               --  view's budget: a pair that the fit names is turned to tell two orders apart, and what tells them
-               --  grows with the product of the turns. x7 (servo seed 7 of the fake robot, 10-18) turned its base pair
-               --  c4 with c5 by 18 and 12 units, a sixth of their reach, as its every-joint cells had already: no
-               --  keyframe of it was fresh, and its order stayed 5 4 1 2 3 6 for the true 4 5 1 2 3 6; the order exam
-               --  turned its pairs by the sweep's widest level and told 19 of 24 arms right and none wrong.
-               --  At the share of those offsets the fit found the pair tells its untold orders apart best by (Of_Reach,
-               --  Kinematics.Contested_Scales), no less than the least turn a keyframe counts.
-               function Pair_Shares (P : Joint_Pair; Of_Reach : Real := 1.0) return Real_Array is
+               --  The shares of a cell that turns two joints alone, none of the others'. What two joints turned
+               --  together do that each alone does not grows with the product of their turns (s08 on 10-16: the cells of
+               --  every joint at the end of its passes turned each by about 0.08 rad, and the orders 5 1 4 3 2 6 and
+               --  1 5 4 3 6 2 left residuals of median 0.361 and 0.363 px), and x7 (servo seed 7 of the fake robot,
+               --  10-18) turned its base pair c4 with c5 by 18 and 12 units, a sixth of their reach: no keyframe of it
+               --  was fresh, and its order stayed 5 4 1 2 3 6 for the true 4 5 1 2 3 6. Turned by the offsets its own
+               --  keyframes were followed to, and climbing as a fitted arm's cells do until the view moved by half of
+               --  it, a pair put its untold orders' places of the points farther apart than a narrow window reaches,
+               --  and its keyframes were not followed (u6, servo seed 3 of the fake robot, 10-19: c2 with c6 by 1784 and
+               --  1806 units, the orders' places 140 px apart). Each of the two by the turn the fit names
+               --  (Kinematics.Contested_Turns: of the turns a narrow window follows, the one that tells the untold
+               --  orders apart most), no less than the least turn a keyframe counts, and no climb past it (Together's
+               --  Climb): doubled, the turns put the places four times as far apart. Where the fit names none, by the
+               --  offset its own keyframes were followed to. K is the pair's place among the fit's, from 0.
+               function Pair_Shares (P : Joint_Pair; K : Natural) return Real_Array is
                   Share : Real_Array (1 .. Size) := [others => 0.0];
+                  Place : constant Natural := Turns.First_Index + 2 * K;   --  of the pair's first turn
+                  Named : constant Boolean := Place + 1 <= Turns.Last_Index;
                begin
-                  Share (P.Earlier) := Real'Max (Of_Reach * Reached (P.Earlier), Least (P.Earlier));
-                  Share (P.Later) := Real'Max (Of_Reach * Reached (P.Later), Least (P.Later));
+                  Share (P.Earlier) :=
+                    Real'Max ((if Named then Turns (Place) else Reached (P.Earlier)), Least (P.Earlier));
+                  Share (P.Later) :=
+                    Real'Max ((if Named then Turns (Place + 1) else Reached (P.Later)), Least (P.Later));
                   return Share;
                end Pair_Shares;
 
@@ -843,8 +847,6 @@ package body Driver.Robot.Boot is
                   if Moves (C) and then First (C) > 0.0 then
                      Order (Count + 1) := (Channel => C, Sign => 1.0);
                      Order (Count + 2) := (Channel => C, Sign => -1.0);
-                     Offset (Count + 1) := First (C);
-                     Offset (Count + 2) := First (C);
                      State (Count + 1) := Climbing;
                      State (Count + 2) := Climbing;
                      Count := Count + 2;
@@ -856,6 +858,14 @@ package body Driver.Robot.Boot is
                   end if;
                end loop;
                Driver.Beats.Within_A_Beat (Draw_Order'Access);
+               --  Each push's first level is its own channel's, read after the pushes are drawn into their order: set
+               --  by the place a push had before the draw, every push took the level of whichever channel had stood
+               --  there (u5, servo seed 3 of the fake robot, 10-18: its channels' units differ fourfold, and the elbow,
+               --  whose level was 28.4 units, was asked 56.4, another's; it turned 4.7 degrees where 2.5 were planned,
+               --  the points its wrist eye saw moved 20.5 px on the mean and up to 75, and 106 of 255 left its picture).
+               for I in 1 .. Count loop
+                  Offset (I) := First (Order (I).Channel);
+               end loop;
                --  Keyframes over every scale from the matcher's limit to the widest
                --  turn: each push climbs a ladder of offsets that double from the
                --  keyframe step, one level a round, every push alive in the round
@@ -905,7 +915,7 @@ package body Driver.Robot.Boot is
                         if N > 1 and then not Fitted_Now
                           and then (for all K in 1 .. N => Per_Unit (Swept (K)) > 0.0)
                         then
-                           Together (Shares);
+                           Together (Shares, Climb => True);
                         end if;
                         Measure_The_Round;
                         Driver.Beats.Within_A_Beat (Read_Round'Access);
@@ -1027,7 +1037,7 @@ package body Driver.Robot.Boot is
                      --  widest offsets followed (the rounds before the fit had their
                      --  own); its predictions go into these frames.
                      if N > 1 and then Followed_In_Pass > 0 and then Fitted_Now then
-                        Together (Shares);
+                        Together (Shares, Climb => True);
                         Measure_The_Round;
                      end if;
                      Driver.Beats.Within_A_Beat (Read_Followed'Access);
@@ -1054,38 +1064,41 @@ package body Driver.Robot.Boot is
                --  a fit after them may name others (the order it tells then may be another, with other neighbours), and
                --  those are turned in their round. Every joint at once, once, when it names none.
                --  A pair named again after its turn is turned again, at the share the fit names then, as long as the
-               --  round before told some order from the fit's own (the untold orders fewer) or named other pairs: w7
+               --  round before told some order from the fit's own (the untold orders fewer) or named other pairs (the
+               --  pairs, not the turns it names them by, which move with every fit's lens and points): w7
                --  (servo seed 7 of the fake robot, 10-18) ended its sweep with two orders untold, the true one among
                --  them, the pair that told them apart most turned once, early, its keyframes with six points in view.
                if N > 1 and then Fitted_Now and then not Told_Now then
                   declare
                      All_Once  : Boolean := False;          --  every joint turned at once
-                     Last_Said : Ada.Strings.Unbounded.Unbounded_String;
+                     Last_Named : Ada.Strings.Unbounded.Unbounded_String;
                      Last_Untold : Natural := Natural'Last;
                   begin
                      loop
                         declare
-                           Said  : Ada.Strings.Unbounded.Unbounded_String;
+                           Said  : Ada.Strings.Unbounded.Unbounded_String;   --  the pairs and their turns, for the log
+                           Named : Ada.Strings.Unbounded.Unbounded_String;   --  the pairs alone
                            use type Ada.Strings.Unbounded.Unbounded_String;
                         begin
                            for K in Contested.First_Index .. Contested.Last_Index loop
                               declare
-                                 P : constant Joint_Pair := Contested (K);
-                                 Of_Reach : constant Real :=
-                                   (if K - Contested.First_Index < Natural (Scales.Length)
-                                    then Scales (Scales.First_Index + K - Contested.First_Index) else 1.0);
+                                 P     : constant Joint_Pair := Contested (K);
+                                 Share : constant Real_Array := Pair_Shares (P, K - Contested.First_Index);
                               begin
+                                 Ada.Strings.Unbounded.Append
+                                   (Named, " c" & Driver.Log.Image (P.Earlier) & " with c" & Driver.Log.Image (P.Later));
                                  Ada.Strings.Unbounded.Append (Said, " c" & Driver.Log.Image (P.Earlier) & " with c"
-                                                               & Driver.Log.Image (P.Later) & " at "
-                                                               & Driver.Log.Image (Of_Reach, 3) & " of their widest");
+                                                               & Driver.Log.Image (P.Later) & " by "
+                                                               & Driver.Log.Image (Share (P.Earlier), 3) & " and "
+                                                               & Driver.Log.Image (Share (P.Later), 3) & " units");
                               end;
                            end loop;
                            exit when Contested.Is_Empty and then All_Once;
-                           exit when not Contested.Is_Empty and then Said = Last_Said and then Untold_Now >= Last_Untold;
-                           Last_Said := Said;
+                           exit when not Contested.Is_Empty and then Named = Last_Named and then Untold_Now >= Last_Untold;
+                           Last_Named := Named;
                            Last_Untold := Untold_Now;
                            if Contested.Is_Empty then
-                              Together (Shares);
+                              Together (Shares, Climb => True);
                               All_Once := True;
                            else
                               Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & "'s joints' order is not told ("
@@ -1093,10 +1106,7 @@ package body Driver.Robot.Boot is
                                                & "turns tell its untold orders apart, a pair at a time:"
                                                & Ada.Strings.Unbounded.To_String (Said));
                               for K in Contested.First_Index .. Contested.Last_Index loop
-                                 Together (Pair_Shares
-                                             (Contested (K),
-                                              (if K - Contested.First_Index < Natural (Scales.Length)
-                                               then Scales (Scales.First_Index + K - Contested.First_Index) else 1.0)));
+                                 Together (Pair_Shares (Contested (K), K - Contested.First_Index), Climb => False);
                               end loop;
                            end if;
                         end;

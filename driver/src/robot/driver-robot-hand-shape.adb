@@ -1375,10 +1375,11 @@ package body Driver.Robot.Hand.Shape is
                        + (if Work (L).Across_Sd > 0.0 then Work (L).Across_Sd ** 2
                           elsif Long > 0.0 and then Width.Sigma < Real'Last then (Width.Sigma / Long) ** 2 else 0.0);
                      Count := Count + 1;
-                     --  A lobe that turns about a hinge shows by its motion the parts that move, and its parts near the
-                     --  hinge hardly do: what moved need not reach across the whole of it along the hinge, and its
-                     --  width there is not seen (hand.shape.turn, 10-18: the jaw's lower half, at its root, moved too
-                     --  little to be found, and its width came out 0.0102 +- 0.0003 where it is 0.0200).
+                     --  A lobe that turns about a hinge turns its faces as it turns: a side that faces its eye at one
+                     --  opening faces away at the other, and the two views see across it along the hinge only where
+                     --  both show it (hand.shape.turn, 10-18, its rig ray-cast: both views see the jaw's top, the upper
+                     --  half of its root end, the lower half behind the palm, and the upper ends of its sides, and its
+                     --  width came out 0.0102 +- 0.0003 where it is 0.0200).
                      Result.Sizes (L - Shapes'First + 1) :=
                        (Width     => (if not Work (L).Hinged and then Standing (Width) and then Standing (Thick)
                                       then Width else (others => <>)),
@@ -1388,8 +1389,8 @@ package body Driver.Robot.Hand.Shape is
                                       then (Value => Face, Sigma => Sqrt (Face_V), Degrees_Of_Freedom => 0)
                                       else (others => <>)));
                      if Work (L).Hinged then
-                        Say (L, "its width along its hinge is not seen: it turns about the hinge, and its parts near the"
-                             & " hinge hardly move between the openings");
+                        Say (L, "its width along its hinge is not measured: it turns its faces as it turns, and what both"
+                             & " openings show of it need not reach across it along the hinge");
                      end if;
                      if not Standing (Thick) or else not (Work (L).Hinged or else Standing (Width)) then
                         Say (L, "its sizes do not stand out of their own uncertainty (width "

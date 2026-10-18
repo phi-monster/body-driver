@@ -155,9 +155,9 @@ private package Driver.Robot.Kinematics is
    --  larger (Fit_Report's Untold): what the order lacks the evidence of. None when the order is told, or every
    --  such swap is told.
 
-   function Contested_Scales (M : Model; A : Arm_Id) return Real_Vectors.Vector;
-   --  Per pair of Contested_Pairs, the share of its joints' widest turns it is best turned by (Fit_Report's
-   --  Untold_Scales).
+   function Contested_Turns (M : Model; A : Arm_Id) return Real_Vectors.Vector;
+   --  Per pair of Contested_Pairs, two: the turns of its Earlier joint and of its Later one, in their readings'
+   --  units, that tell its untold orders apart most of those a narrow window follows (Fit_Report's Untold_Turns).
 
    function Untold_Count (M : Model; A : Arm_Id) return Natural;
    --  How many orders of its joints the arm's fit does not tell from its own (Fit_Report's Untold_Orders); 0 when

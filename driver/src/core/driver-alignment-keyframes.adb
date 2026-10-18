@@ -1216,19 +1216,32 @@ package body Driver.Alignment.Keyframes is
    --  10-15: a keyframe predicted stating 19.8 px had 118 answers on its field and none narrow, so not one was found
    --  and the keyframe was not followed). The field is then fitted to all
    --  the answers, and the asking goes on while more of them agree.
+   --  A point the view's common motion put at a place of its own (Placed) and found there from a window a patch carries
+   --  stands with the keyframe whether or not the keyframe's field puts it there: the common motion told which of its
+   --  places was its own, and the field, one smooth map of the picture, does not hold what lies at other depths than
+   --  the plane it follows (u4 replayed, servo seed 3 of the fake robot, 10-18: channel 4's first keyframe, 114 of its
+   --  points at places of their own, ended with 18 answers from narrow windows among the 94 its field agreed with, the
+   --  rest asked again from the field, and was not followed).
+   function Standing (Placed : Flag_Array; K : Positive; Seen : Answer) return Boolean is
+     (K in Placed'Range and then Placed (K) and then Seen.Verdict = Found and then Seen.Narrow);
+
    procedure Settle
      (C       : Chain;
       Second  : Pyramid;
       Answers : in out Answer_Array;
       Marks   : in out Located_Array;
       Field   : in out Field_Fit;
-      Agree   : in out Flag_Array)
+      Agree   : in out Flag_Array;
+      Placed  : Flag_Array)
    is
       Count    : constant Natural := Marks'Length;
       Given    : Prediction_Array (1 .. Count);
       Todo     : Flag_Array (1 .. Count);
       Agreeing : Natural := Agreeing_Of (Agree);
    begin
+      for K in 1 .. Count loop
+         Agree (K) := Agree (K) or else Standing (Placed, K, Answers (Answers'First + K - 1));
+      end loop;
       loop
          exit when not Field.Valid;
          Todo := [others => False];
@@ -1236,7 +1249,9 @@ package body Driver.Alignment.Keyframes is
             declare
                Seen : Answer renames Answers (Answers'First + K - 1);
             begin
-               if (not Agree (K) and then (Prediction_Caused (Seen) or else Seen.Verdict = Found))
+               if Standing (Placed, K, Seen) then
+                  null;
+               elsif (not Agree (K) and then (Prediction_Caused (Seen) or else Seen.Verdict = Found))
                  or else (Agree (K) and then Seen.Verdict = Found and then not Seen.Narrow)
                  or else Seen.Because = Not_Asked
                then
@@ -1252,6 +1267,9 @@ package body Driver.Alignment.Keyframes is
             Again : Flag_Array (1 .. Count);
          begin
             Fit_Field (C, Marks, Refit, Again);
+            for K in 1 .. Count loop
+               Again (K) := Again (K) or else Standing (Placed, K, Answers (Answers'First + K - 1));
+            end loop;
             exit when not Refit.Valid or else Agreeing_Of (Again) <= Agreeing;
             Field := Refit;
             Agree := Again;
@@ -1296,7 +1314,7 @@ package body Driver.Alignment.Keyframes is
          return;
       end if;
       Fit_Field (C, Marks, Field, Mine);
-      Settle (C, Second, Answers, Marks, Field, Mine);
+      Settle (C, Second, Answers, Marks, Field, Mine, Placed => [1 .. Given'Length => False]);
       Agree := Mine;
    end Realign;
 
@@ -1343,20 +1361,44 @@ package body Driver.Alignment.Keyframes is
    procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flags_Access);
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Reals_Access);
 
-   --  The field of displacements d (p) = M p + T of a place p, in pixels of the size scanned.
-   type Affine is record
+   --  The field of displacements of a place p, in pixels of the size scanned: d (p) = H p - p, H the projective map
+   --  [[1 + M11, M12, Tu], [M21, 1 + M22, Tv], [P1, P2, 1]], an affine one where P1 and P2 are nought. A plane's
+   --  picture under a move of the eye is such a map: a wrist eye that sees a table across a hundred degrees, near it
+   --  at the bottom of its picture and far at the top, sees the one plane move by fields no affine map holds (u4,
+   --  servo seed 3 of the fake robot, 10-18: channel 4's first keyframe drew one field moving the picture's centre
+   --  3.8 -8.2 px and the next 25.6 -20.4, neither told, and its second told one with its places 3.08 px about it).
+   --  Every field kept has its denominator positive over the whole picture (Refit): it puts no place behind a view.
+   type View_Field is record
       M11, M12, M21, M22, Tu, Tv : Real := 0.0;
+      P1, P2 : Real := 0.0;
    end record;
 
-   function Move_U (F : Affine; U, V : Real) return Real is (F.M11 * U + F.M12 * V + F.Tu);
-   function Move_V (F : Affine; U, V : Real) return Real is (F.M21 * U + F.M22 * V + F.Tv);
+   function Weight_Of (F : View_Field; U, V : Real) return Real is (1.0 + F.P1 * U + F.P2 * V);
+   function Move_U (F : View_Field; U, V : Real) return Real is
+     (((1.0 + F.M11) * U + F.M12 * V + F.Tu) / Weight_Of (F, U, V) - U);
+   function Move_V (F : View_Field; U, V : Real) return Real is
+     ((F.M21 * U + (1.0 + F.M22) * V + F.Tv) / Weight_Of (F, U, V) - V);
+
+   --  How the field's map turns and stretches the view at p: its derivative there, the patch's warp.
+   type Field_Derivative is record
+      UU, UV, VU, VV : Real := 0.0;
+   end record;
+
+   function Derivative (F : View_Field; U, V : Real) return Field_Derivative is
+      W  : constant Real := Weight_Of (F, U, V);
+      Qu : constant Real := U + Move_U (F, U, V);
+      Qv : constant Real := V + Move_V (F, U, V);
+   begin
+      return (UU => ((1.0 + F.M11) - Qu * F.P1) / W, UV => (F.M12 - Qu * F.P2) / W,
+              VU => (F.M21 - Qv * F.P1) / W, VV => ((1.0 + F.M22) - Qv * F.P2) / W);
+   end Derivative;
 
    --  Every point's peaks over a window of Radius (pixels of the full size) at size Size of the pyramids: the
    --  candidates are the second picture's pixels there, as Align scans a window (Align_At), and a point whose patch
    --  lies more than half outside the reference's picture has none.
    procedure Scan_Peaks
      (C : Chain; Second : Pyramid; Riding : Flag_Array; Size : Natural; Radius : Real; Peaks : out Peak_Lists;
-      Around : Affine := (others => 0.0))
+      Around : View_Field := (others => 0.0))
    is
       Scale  : constant Real := Real (Halving) ** Size;
       Half   : constant Natural := Half_Patch (C.Pictures.Sizes (Size).Width, C.Pictures.Sizes (Size).Height);
@@ -1516,7 +1558,8 @@ package body Driver.Alignment.Keyframes is
       Into   : out Prediction_Array;
       Result : out Motion;
       Stood  : out Flag_Array;
-      Moved  : out Flag_Array)
+      Moved  : out Flag_Array;
+      Placed : out Flag_Array)
    is
       Count  : constant Natural := Natural (C.Points.Length);
       Radius : constant Real := Window_Radius (Spread);
@@ -1530,18 +1573,9 @@ package body Driver.Alignment.Keyframes is
       --  size): every finer size down to the finest tried refines it (Refit), each scanning only as far as it is
       --  uncertain, centred where it puts each point.
       Have_Prior   : Boolean := False;
-      Prior        : Affine;
+      Prior        : View_Field;
       Prior_Scale  : Real := 1.0;
       Prior_Spread : Real := 0.0;
-      --  The two fields of the last size that drew two, each on enough points to fix one (Least_Points), and told
-      --  neither over the other, with that size's scale: a turn that moves the eye moves what is near it and what is far
-      --  by fields of their own, and the points on each prefer it about as often as the others prefer theirs (v7, servo
-      --  seed 7 of the fake robot, 10-18: its third joint's keyframes drew 53 points on one field against 44 on the next,
-      --  no field was told, and none of their points was asked; x3's fourth joint the same, and the arm had no keyframe
-      --  of it). Where no field is told, every point is asked between where the two put it.
-      Two_Best, Two_Other : Affine;
-      Two_Scale    : Real := 0.0;
-      Two_Drawn    : Boolean := False;
       --  The sizes tried: from the one Align searches the window at, finer while the field is not told, down to the
       --  coarsest size where a place known to its pixel is a window a patch carries at the full size (Align's own
       --  test of a narrow window): a finer size narrows the prediction no further and scans four times the places
@@ -1562,6 +1596,7 @@ package body Driver.Alignment.Keyframes is
       Result := (others => <>);
       Stood := [others => False];
       Moved := [others => False];
+      Placed := [others => False];
       Ada.Numerics.Float_Random.Reset (Gen, Count);
       for Size in reverse Finest_Size .. Start loop
          declare
@@ -1585,7 +1620,7 @@ package body Driver.Alignment.Keyframes is
             --  peaks run down the window row by row (Scan_Peaks): the first of them is found by halving, and a draw
             --  costs the rows within the tolerance, not every peak of the point (f15c replayed on 10-15: at the full
             --  size a point had hundreds, and the draws sat for ten minutes).
-            procedure Nearest (F : Affine; K : Positive; Index : out Natural; Gap : out Real) is
+            procedure Nearest (F : View_Field; K : Positive; Index : out Natural; Gap : out Real) is
                Du : constant Real := Move_U (F, U_Of (K), V_Of (K));
                Dv : constant Real := Move_V (F, U_Of (K), V_Of (K));
             begin
@@ -1625,7 +1660,7 @@ package body Driver.Alignment.Keyframes is
                end if;
             end Nearest;
 
-            function On_Field (F : Affine; K : Positive) return Boolean is
+            function On_Field (F : View_Field; K : Positive) return Boolean is
                I   : Natural;
                Gap : Real;
             begin
@@ -1633,7 +1668,29 @@ package body Driver.Alignment.Keyframes is
                return I > 0 and then Gap <= Tolerance ** 2;
             end On_Field;
 
-            function Agreeing (F : Affine) return Natural is
+            --  The point's own place on field F: its one peak within the tolerance of where the field puts it, every
+            --  peak counted, taken or open; 0 when it has none there or several (which the field alone does not tell
+            --  apart). How many it has there, in Within.
+            procedure Own_Peak (F : View_Field; K : Positive; Index, Within : out Natural) is
+               Du : constant Real := Move_U (F, U_Of (K), V_Of (K));
+               Dv : constant Real := Move_V (F, U_Of (K), V_Of (K));
+            begin
+               Index := 0;
+               Within := 0;
+               if Peaks (K) /= null then
+                  for I in Peaks (K)'Range loop
+                     if (Peaks (K) (I).Du - Du) ** 2 + (Peaks (K) (I).Dv - Dv) ** 2 <= Tolerance ** 2 then
+                        Within := Within + 1;
+                        Index := I;
+                     end if;
+                  end loop;
+               end if;
+               if Within /= 1 then
+                  Index := 0;
+               end if;
+            end Own_Peak;
+
+            function Agreeing (F : View_Field) return Natural is
                N : Natural := 0;
             begin
                for K in 1 .. Count loop
@@ -1645,7 +1702,7 @@ package body Driver.Alignment.Keyframes is
             end Agreeing;
 
             --  The affine field through the places on F, by least squares; F itself when they do not determine one.
-            function Refit (F : Affine) return Affine is
+            function Refit_Affine (F : View_Field) return View_Field is
                N : Natural := 0;
                A : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];
                Bu, Bv : Real_Vector (1 .. 3) := [others => 0.0];
@@ -1687,16 +1744,136 @@ package body Driver.Alignment.Keyframes is
                      Xu : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (L, Bu);
                      Xv : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (L, Bv);
                   begin
-                     return (M11 => Xu (1), M12 => Xu (2), Tu => Xu (3), M21 => Xv (1), M22 => Xv (2), Tv => Xv (3));
+                     return (M11 => Xu (1), M12 => Xu (2), Tu => Xu (3), M21 => Xv (1), M22 => Xv (2), Tv => Xv (3),
+                             others => 0.0);
                   end;
                end;
+            end Refit_Affine;
+
+            --  The projective field through the places on F, by least squares with its last term one, in coordinates
+            --  centred on those places and scaled to a mean distance of the root of two from their centre (Hartley's
+            --  normalization); none when more than its four points' worth do not determine it, or when its
+            --  denominator is not positive at every corner of the picture (a place behind a view).
+            procedure Refit_Projective (F : View_Field; G : out View_Field; Fitted : out Boolean) is
+               type Place is record
+                  U, V, Qu, Qv : Real := 0.0;
+               end record;
+               Places : array (1 .. Count) of Place;
+               N      : Natural := 0;
+               Mu, Mv, Spread : Real := 0.0;
+            begin
+               G := F;
+               Fitted := False;
+               for K in 1 .. Count loop
+                  declare
+                     I   : Natural;
+                     Gap : Real;
+                  begin
+                     Nearest (F, K, I, Gap);
+                     if I > 0 and then Gap <= Tolerance ** 2 then
+                        N := N + 1;
+                        Places (N) := (U => U_Of (K), V => V_Of (K), Qu => U_Of (K) + Peaks (K) (I).Du,
+                                       Qv => V_Of (K) + Peaks (K) (I).Dv);
+                        Mu := Mu + Places (N).U;
+                        Mv := Mv + Places (N).V;
+                     end if;
+                  end;
+               end loop;
+               if N <= 4 then
+                  return;
+               end if;
+               Mu := Mu / Real (N);
+               Mv := Mv / Real (N);
+               for J in 1 .. N loop
+                  Spread := Spread + Sqrt ((Places (J).U - Mu) ** 2 + (Places (J).V - Mv) ** 2);
+               end loop;
+               Spread := Spread / Real (N);
+               if Spread <= 0.0 then
+                  return;
+               end if;
+               declare
+                  S : constant Real := Sqrt (2.0) / Spread;
+                  A : Real_Matrix (1 .. 8, 1 .. 8) := [others => [others => 0.0]];
+                  B : Real_Vector (1 .. 8) := [others => 0.0];
+                  --  A positional aggregate takes its lower bound from the index subtype: read it from its own first.
+                  procedure Add (Row : Real_Vector; Value : Real) is
+                  begin
+                     for R in 1 .. 8 loop
+                        for Q in 1 .. 8 loop
+                           A (R, Q) := A (R, Q) + Row (Row'First + R - 1) * Row (Row'First + Q - 1);
+                        end loop;
+                        B (R) := B (R) + Row (Row'First + R - 1) * Value;
+                     end loop;
+                  end Add;
+               begin
+                  for J in 1 .. N loop
+                     declare
+                        X  : constant Real := S * (Places (J).U - Mu);
+                        Y  : constant Real := S * (Places (J).V - Mv);
+                        Xq : constant Real := S * (Places (J).Qu - Mu);
+                        Yq : constant Real := S * (Places (J).Qv - Mv);
+                     begin
+                        Add ([X, Y, 1.0, 0.0, 0.0, 0.0, -Xq * X, -Xq * Y], Xq);
+                        Add ([0.0, 0.0, 0.0, X, Y, 1.0, -Yq * X, -Yq * Y], Yq);
+                     end;
+                  end loop;
+                  declare
+                     L        : Real_Matrix (1 .. 8, 1 .. 8);
+                     Definite : Boolean;
+                  begin
+                     Driver.Numerics.Dense.Cholesky (A, L, Definite);
+                     if not Definite then
+                        return;
+                     end if;
+                     declare
+                        X : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (L, B);
+                        --  The map in the size's own coordinates: T^-1 Hn T, T = [[S, 0, -S Mu], [0, S, -S Mv], [0, 0, 1]].
+                        Hn : constant Real_Matrix (1 .. 3, 1 .. 3) :=
+                          [[X (1), X (2), X (3)], [X (4), X (5), X (6)], [X (7), X (8), 1.0]];
+                        T  : constant Real_Matrix (1 .. 3, 1 .. 3) := [[S, 0.0, -S * Mu], [0.0, S, -S * Mv], [0.0, 0.0, 1.0]];
+                        Ti : constant Real_Matrix (1 .. 3, 1 .. 3) :=
+                          [[1.0 / S, 0.0, Mu], [0.0, 1.0 / S, Mv], [0.0, 0.0, 1.0]];
+                        H  : constant Real_Matrix (1 .. 3, 1 .. 3) := Ti * Hn * T;
+                        Wl : constant Real := Real (C.Width) / Scale;
+                        Hl : constant Real := Real (C.Height) / Scale;
+                     begin
+                        if H (3, 3) = 0.0 then
+                           return;
+                        end if;
+                        declare
+                           Z : constant Real := H (3, 3);
+                           P : constant View_Field :=
+                             (M11 => H (1, 1) / Z - 1.0, M12 => H (1, 2) / Z, Tu => H (1, 3) / Z,
+                              M21 => H (2, 1) / Z, M22 => H (2, 2) / Z - 1.0, Tv => H (2, 3) / Z,
+                              P1 => H (3, 1) / Z, P2 => H (3, 2) / Z);
+                        begin
+                           if Weight_Of (P, 0.0, 0.0) > 0.0 and then Weight_Of (P, Wl, 0.0) > 0.0
+                             and then Weight_Of (P, 0.0, Hl) > 0.0 and then Weight_Of (P, Wl, Hl) > 0.0
+                           then
+                              G := P;
+                              Fitted := True;
+                           end if;
+                        end;
+                     end;
+                  end;
+               end;
+            end Refit_Projective;
+
+            --  The field through the places on F: the affine one, or the projective one where more points agree with it.
+            function Refit (F : View_Field) return View_Field is
+               Flat      : constant View_Field := Refit_Affine (F);
+               Projected : View_Field;
+               Fitted    : Boolean;
+            begin
+               Refit_Projective (F, Projected, Fitted);
+               return (if Fitted and then Agreeing (Projected) > Agreeing (Flat) then Projected else Flat);
             end Refit;
 
             --  The field the most points agree with, of those drawn from two open places at a time (a turn, a scale
             --  and a shift), the points drawn alike and each point's places in proportion to their correlation, as
             --  many draws as find with probability 1 - Miss a field that half the points have a typical place on,
             --  fewer once the best so far shows that many find it; then refitted while more points agree.
-            procedure Draw (Best : out Affine; Best_N : out Natural) is
+            procedure Draw (Best : out View_Field; Best_N : out Natural) is
                Drawable : Natural := 0;
                Total    : Natural := 0;
                Index    : array (1 .. Count) of Natural := [others => 0];   --  the points with open places
@@ -1752,7 +1929,7 @@ package body Driver.Alignment.Keyframes is
                Batch : constant Positive := Positive'Max (1, Natural (System.Multiprocessors.Number_Of_CPUs));
                type Field_Draw is record
                   Valid : Boolean := False;   --  two points apart, a view the aligner compares
-                  G     : Affine := (others => 0.0);
+                  G     : View_Field := (others => 0.0);
                   N     : Natural := 0;       --  the points agreeing with G
                end record;
                Draws : array (1 .. Batch) of Field_Draw;
@@ -1799,7 +1976,8 @@ package body Driver.Alignment.Keyframes is
                                     return (Valid => True,
                                             G     => (M11 => A - 1.0, M12 => -B, M21 => B, M22 => A - 1.0,
                                                       Tu => Q1u - (A * U_Of (K1) - B * V_Of (K1)),
-                                                      Tv => Q1v - (B * U_Of (K1) + A * V_Of (K1))),
+                                                      Tv => Q1v - (B * U_Of (K1) + A * V_Of (K1)),
+                                                      P1 | P2 => 0.0),
                                             N     => 0);
                                  end;
                               end if;
@@ -1844,7 +2022,7 @@ package body Driver.Alignment.Keyframes is
                         Taken := J;
                         if Draws (J).Valid and then Draws (J).N > Best_N then
                            declare
-                              G : constant Affine := Draws (J).G;
+                              G : constant View_Field := Draws (J).G;
                            begin
                               Best := G;
                               Best_N := Draws (J).N;
@@ -1878,7 +2056,7 @@ package body Driver.Alignment.Keyframes is
                if Best_N > 0 then
                   loop
                      declare
-                        Next   : constant Affine := Refit (Best);
+                        Next   : constant View_Field := Refit (Best);
                         Next_N : constant Natural := Agreeing (Next);
                      begin
                         exit when Next_N <= Best_N;
@@ -1889,13 +2067,14 @@ package body Driver.Alignment.Keyframes is
                end if;
             end Draw;
 
-            Best, Other : Affine;
+            Best, Other : View_Field;
             Best_N, Other_N : Natural := 0;
             On_Best : Flag_Array (1 .. Count) := [others => False];
             Was_Prior : constant Boolean := Have_Prior;
-            Rescaled  : constant Affine :=
+            Rescaled  : constant View_Field :=
               (M11 => Prior.M11, M12 => Prior.M12, M21 => Prior.M21, M22 => Prior.M22,
-               Tu => Prior.Tu * Prior_Scale / Scale, Tv => Prior.Tv * Prior_Scale / Scale);
+               Tu => Prior.Tu * Prior_Scale / Scale, Tv => Prior.Tv * Prior_Scale / Scale,
+               P1 => Prior.P1 * Scale / Prior_Scale, P2 => Prior.P2 * Scale / Prior_Scale);
             Refined   : Boolean := False;
             Stayed    : Flag_Array (1 .. Count) := [others => False];   --  its best place is where it stood
          begin
@@ -1944,12 +2123,12 @@ package body Driver.Alignment.Keyframes is
                --  The field told at a coarser size, refitted on the places nearest it while more points agree: it
                --  was told against every other field there, and the scan here reaches only as far as it is uncertain.
                declare
-                  F : Affine := Rescaled;
+                  F : View_Field := Rescaled;
                   N : Natural := Agreeing (F);
                begin
                   loop
                      declare
-                        G      : constant Affine := Refit (F);
+                        G      : constant View_Field := Refit (F);
                         Agrees : constant Natural := Agreeing (G);
                      begin
                         exit when Agrees <= N;
@@ -2014,7 +2193,7 @@ package body Driver.Alignment.Keyframes is
                   Result.Other := 0;
                   for K in 1 .. Count loop
                      declare
-                        function Place_On (F : Affine) return Real is
+                        function Place_On (F : View_Field) return Real is
                            Du  : constant Real := Move_U (F, U_Of (K), V_Of (K));
                            Dv  : constant Real := Move_V (F, U_Of (K), V_Of (K));
                            Rho : Real := Real'First;
@@ -2047,7 +2226,7 @@ package body Driver.Alignment.Keyframes is
                   --  drawn first, 167 preferring the next and 18 it).
                   if Real (Result.Other) - Real (Result.Own) > Z * Sqrt (Real (Result.Own + Result.Other)) then
                      declare
-                        Was     : constant Affine := Best;
+                        Was     : constant View_Field := Best;
                         Was_N   : constant Natural := Best_N;
                         Was_Own : constant Natural := Result.Own;
                      begin
@@ -2066,12 +2245,6 @@ package body Driver.Alignment.Keyframes is
                   end if;
                   Result.Told :=
                     Real (Result.Own) - Real (Result.Other) > Z * Sqrt (Real (Result.Own + Result.Other));
-                  if not Result.Told and then Best_N >= Least_Points and then Other_N >= Least_Points then
-                     Two_Best := Best;
-                     Two_Other := Other;
-                     Two_Scale := Scale;
-                     Two_Drawn := True;
-                  end if;
                   --  Where the field is told, a point whose best place was where it stood while the field moves it
                   --  there beyond a place the size resolves stood against the view; one on the field that moved
                   --  moved with it.
@@ -2122,30 +2295,51 @@ package body Driver.Alignment.Keyframes is
                   Sigma := Driver.Stats.Robust_Sigma (Residuals (1 .. R));
                   Result.Sigma := Sigma * Scale;
                   Prior_Spread := Sqrt (Sigma ** 2 + Quantization) * Scale;
-                  Result.Turn := Arctan (Best.M21 - Best.M12, 2.0 + Best.M11 + Best.M22);
                   declare
                      Cu : constant Real := Real (C.Width) / 2.0;
                      Cv : constant Real := Real (C.Height) / 2.0;
+                     D  : constant Field_Derivative := Derivative (Best, Cu / Scale, Cv / Scale);
                   begin
+                     Result.Turn := Arctan (D.VU - D.UV, D.UU + D.VV);
                      Result.Shift_U := Scale * Move_U (Best, Cu / Scale, Cv / Scale);
                      Result.Shift_V := Scale * Move_V (Best, Cu / Scale, Cv / Scale);
                   end;
-                  --  Every point where the field puts it: as far off as the places on it lie from it, and a
-                  --  place known to a pixel of the size scanned; the patch turned and stretched as the field
-                  --  turns and stretches the view.
+                  --  Every point at its own place on the field (Own_Peak), known to a pixel of the size scanned;
+                  --  one without a place of its own there where the field puts it, as far off as the places on it
+                  --  lie from it; the patch turned and stretched as the field turns and stretches the view. The
+                  --  field tells which of a point's places is its own, the place tells where: a turn that moves the
+                  --  eye moves what is near it and what is far by fields of their own, the places on one plane's
+                  --  field scatter about it, and put where the field puts them every point of a joint's first
+                  --  keyframe was searched in a window wider than a patch and the keyframe was not followed (u3,
+                  --  servo seed 3 of the fake robot, 10-18: channel 4's first keyframe told a field, its places
+                  --  2.14 px about it; in six passes no keyframe of channel 4 was followed, and the arm was never
+                  --  fitted).
+                  Result.Own_Places := 0;
                   for K in Into'Range loop
                      declare
-                        P  : constant Driver.Images.Pixel := C.Points (K - Into'First + 1);
-                        Pu : constant Real := P.U / Scale;
-                        Pv : constant Real := P.V / Scale;
-                        Spread : constant Real := (Sigma ** 2 + Quantization) * Scale ** 2;
+                        Point  : constant Positive := K - Into'First + 1;
+                        P      : constant Driver.Images.Pixel := C.Points (Point);
+                        Pu     : constant Real := P.U / Scale;
+                        Pv     : constant Real := P.V / Scale;
+                        Own, Within : Natural;
                      begin
-                        Into (K) :=
-                          (From => P,
-                           To => (U => P.U + Scale * Move_U (Best, Pu, Pv), V => P.V + Scale * Move_V (Best, Pu, Pv)),
-                           Linear => (UU => 1.0 + Best.M11, UV => Best.M12, VU => Best.M21, VV => 1.0 + Best.M22),
-                           Cov => (UU => Spread, UV => 0.0, VV => Spread),
-                           Linear_Sigma => Real'Last);
+                        Own_Peak (Best, Point, Own, Within);
+                        Placed (Placed'First + Point - 1) := Own > 0;
+                        Result.Own_Places := Result.Own_Places + Boolean'Pos (Own > 0);
+                        declare
+                           Du : constant Real := (if Own > 0 then Peaks (Point) (Own).Du else Move_U (Best, Pu, Pv));
+                           Dv : constant Real := (if Own > 0 then Peaks (Point) (Own).Dv else Move_V (Best, Pu, Pv));
+                           Spread : constant Real :=
+                             (if Own > 0 then Quantization else Sigma ** 2 + Quantization) * Scale ** 2;
+                           D : constant Field_Derivative := Derivative (Best, Pu, Pv);
+                        begin
+                           Into (K) :=
+                             (From => P,
+                              To => (U => P.U + Scale * Du, V => P.V + Scale * Dv),
+                              Linear => (UU => D.UU, UV => D.UV, VU => D.VU, VV => D.VV),
+                              Cov => (UU => Spread, UV => 0.0, VV => Spread),
+                              Linear_Sigma => Real'Last);
+                        end;
                      end;
                   end loop;
                end;
@@ -2163,32 +2357,6 @@ package body Driver.Alignment.Keyframes is
             exit when Was_Prior and then not Refined;
          end;
       end loop;
-      --  No field told, two drawn: every point where the first puts it, its window widened by the outer product of
-      --  where the two disagree there (as Predict widens a candidate by its largest disagreement with another), and a
-      --  place known to a pixel of the size they were drawn at.
-      if not Result.Told and then Two_Drawn then
-         for K in Into'Range loop
-            declare
-               P  : constant Driver.Images.Pixel := C.Points (K - Into'First + 1);
-               Pu : constant Real := P.U / Two_Scale;
-               Pv : constant Real := P.V / Two_Scale;
-               Bu : constant Real := Two_Scale * Move_U (Two_Best, Pu, Pv);
-               Bv : constant Real := Two_Scale * Move_V (Two_Best, Pu, Pv);
-               Du : constant Real := Two_Scale * Move_U (Two_Other, Pu, Pv) - Bu;
-               Dv : constant Real := Two_Scale * Move_V (Two_Other, Pu, Pv) - Bv;
-               Spread : constant Real := Quantization * Two_Scale ** 2;
-            begin
-               Into (K) :=
-                 (From => P,
-                  To => (U => P.U + Bu, V => P.V + Bv),
-                  Linear => (UU => 1.0 + Two_Best.M11, UV => Two_Best.M12, VU => Two_Best.M21, VV => 1.0 + Two_Best.M22),
-                  Cov => (UU => Spread + Du ** 2, UV => Du * Dv, VV => Spread + Dv ** 2),
-                  Linear_Sigma => Real'Last);
-            end;
-         end loop;
-         Result.Told := True;
-         Result.Two_Fields := True;
-      end if;
    end Common_Motion;
 
    function Last_Motion (C : Chain) return Motion is (C.Motion);
@@ -2228,6 +2396,12 @@ package body Driver.Alignment.Keyframes is
       Count  : constant Natural := Given'Length;
       Marks  : Located_Array (1 .. Count);
       Mine   : Flag_Array (1 .. Count) := [others => False];
+      --  A point the view's common motion put at a place of its own (Common_Motion's Placed) is asked there, in every
+      --  round, not where the rounds' field puts it, and stands with the keyframe once found there (Settle): the
+      --  field the rounds fit is one smooth map of the picture, and a point off it by the view's depths was asked where
+      --  the field put it, in a window wider than a patch (u3 replayed, 10-18: channel 4's first keyframe, its common
+      --  motion told, 6 of its 86 points found from narrow windows).
+      Own_Place : Flag_Array (1 .. Count) := [others => False];
       Next   : Frame;
 
       --  Whether the field puts the point inside the picture: where the prediction was of any use.
@@ -2286,6 +2460,10 @@ package body Driver.Alignment.Keyframes is
          --  points must agree on, searched about where they stood as far as the prediction puts them and errs. A
          --  window a patch carries at the full size is searched there as given: there is nothing to tell apart. None
          --  told, a new direction asks no point, and a prediction from the keyframes is searched as it was given.
+         --  Asked between two fields where none was told, a new direction stood on places a field nothing had told put
+         --  its points at: u6 (servo seed 3 of the fake robot, 10-19), the elbow's first keyframe, 19 of its 23
+         --  sightings off the truth by more than 4 px, where its keyframe the other way, its field told, had 126 of 134
+         --  within it.
          --  On a servo arm whose every keyframe stands a few units off the reference in the joints not asked (its
          --  landings), the keyframes' predictions erred by more than their windows and the points slid along the
          --  table's grain out of them (f15w on 10-15, arm 2: keyframes 22-25 found 8, 6, 16 and 10 points of 255,
@@ -2325,7 +2503,15 @@ package body Driver.Alignment.Keyframes is
                Typical := Driver.Stats.Median (Sigmas (1 .. Count));
                Typical_Move := Driver.Stats.Median (Moves (1 .. Count));
             end if;
-            if Count > 0 and then Window_Radius (Typical) + 1.0 > Real (Half_Patch (C.Width, C.Height)) then
+            --  The view's common motion stands in for a prediction only where there is none: a new direction's (a
+            --  caller's wide one it only narrows, where the two agree: below). A fitted arm's prediction (Supplied)
+            --  is the arm's, every point at its own depth, and a field of the picture asked in its place put the
+            --  points where no one plane's motion puts them, and the answers it placed at their own peaks stood as
+            --  sightings (u6, servo seed 3 of the fake robot, 10-19: keyframes 36 and 42, the arm's prediction 0.2 to
+            --  5 px off the truth, every sighting 70 to 137 px off it).
+            if Count > 0 and then C.Last = New_Direction
+              and then Window_Radius (Typical) + 1.0 > Real (Half_Patch (C.Width, C.Height))
+            then
                declare
                   Common : Motion;
                   --  The search is about where the points stood: its window reaches the farthest place the
@@ -2333,27 +2519,61 @@ package body Driver.Alignment.Keyframes is
                   --  a prediction wider than that says only "anywhere" (f15c replayed on 10-15: a new direction's
                   --  window, from a channel's shift measured far beyond the view's, was over 40,000 pixels across, and
                   --  the count of its places overflowed).
-                  Spread : constant Real :=
-                    (if C.Last = New_Direction then Sqrt (Given (Given'First).Cov.UU)
-                     else Farthest / Window_Multiple + Typical);
+                  Spread : constant Real := Sqrt (Given (Given'First).Cov.UU);
                begin
                   declare
                      Stood, Moved : Flag_Array (1 .. Count);
                   begin
                      Common_Motion (C, Second, Real'Min (Spread, Largest_Sigma (C.Pictures, Second)), Riding, Asked, Common,
-                                    Stood, Moved);
+                                    Stood, Moved, Own_Place);
+                     Keep_Evidence (C, Stood, Moved);
+                  end;
+                  Common.Searched := True;
+                  C.Motion := Common;
+                  if not Common.Told then
+                     Own_Place := [others => False];
+                     Done := [others => True];
+                  end if;
+               end;
+            elsif Count > 0 and then C.Last = Supplied
+              and then Window_Radius (Typical) + 1.0 > Real (Half_Patch (C.Width, C.Height))
+            then
+               --  A caller's prediction (a fitted arm's: every point at its own depth) wider than a patch carries is
+               --  narrowed by the view's common motion where the two agree: a point at a place of its own on the
+               --  field, inside the window the prediction states for it, is asked there; every other point as the
+               --  caller predicted it. Asked from the arm alone, a fitted arm's climbs and pairs were searched wide
+               --  and not followed: u7 (servo seed 3 of the fake robot, 10-19), 26 keyframes of its pairs predicted
+               --  from the arm stating 5 to 44 px, 18 of them found no point, and its climbs' keyframes not followed
+               --  found their points a median 3 to 11 px from where the arm put them. Asked wherever the field put
+               --  them, a told field the arm did not allow put the points 70 to 137 px off the truth where the arm
+               --  predicted them within 5 (u6, keyframes 36 and 42).
+               declare
+                  Common : Motion;
+                  Places : Prediction_Array (1 .. Count);
+               begin
+                  declare
+                     Stood, Moved : Flag_Array (1 .. Count);
+                  begin
+                     Common_Motion (C, Second, Real'Min (Farthest / Window_Multiple + Typical,
+                                                         Largest_Sigma (C.Pictures, Second)),
+                                    Riding, Places, Common, Stood, Moved, Own_Place);
                      Keep_Evidence (C, Stood, Moved);
                   end;
                   Common.Searched := True;
                   Common.Set_Aside := Riding_Field (Common);
                   C.Motion := Common;
-                  if not Common.Told or else Common.Set_Aside then
-                     if C.Last = New_Direction then
-                        Done := [others => True];
-                     else
-                        Asked := Given;
-                     end if;
-                  end if;
+                  for K in 1 .. Count loop
+                     declare
+                        G : Prediction renames Given (Given'First + K - 1);
+                     begin
+                        Own_Place (K) := Own_Place (K) and then Common.Told and then not Common.Set_Aside
+                          and then Squared_Length (Places (K).To.U - G.To.U, Places (K).To.V - G.To.V, G.Cov)
+                                   <= Window_Multiple ** 2;
+                        if Own_Place (K) then
+                           Asked (K) := Places (K);
+                        end if;
+                     end;
+                  end loop;
                end;
             elsif Count > 0 and then C.Last = Extrapolated then
                --  A prediction from the keyframes before whose windows a patch carries is checked against the
@@ -2373,12 +2593,15 @@ package body Driver.Alignment.Keyframes is
                   begin
                      Common_Motion (C, Second, Real'Min (Farthest / Window_Multiple + Typical, Largest_Sigma (C.Pictures, Second)),
                                  Riding, Places, Common,
-                                    Stood, Moved);
+                                    Stood, Moved, Own_Place);
                      Keep_Evidence (C, Stood, Moved);
                   end;
                   Common.Searched := True;
                   Common.Set_Aside := Riding_Field (Common);
                   C.Motion := Common;
+                  if not Common.Told or else Common.Set_Aside then
+                     Own_Place := [others => False];
+                  end if;
                   if Common.Told and then not Common.Set_Aside then
                      for K in 1 .. Count loop
                         declare
@@ -2388,7 +2611,10 @@ package body Driver.Alignment.Keyframes is
                            Apart : constant Real := Sqrt (Du ** 2 + Dv ** 2);
                            Rest  : constant Real := Real'Max (0.0, Apart - Sqrt (Places (K).Cov.UU));
                         begin
-                           if Apart > 0.0 and then Rest > 0.0 then
+                           --  A point at a place of its own is asked there.
+                           if Own_Place (K) then
+                              Asked (K) := Places (K);
+                           elsif Apart > 0.0 and then Rest > 0.0 then
                               Asked (K).Cov := (UU => G.Cov.UU + (Rest / Apart) ** 2 * Du ** 2,
                                                 UV => G.Cov.UV + (Rest / Apart) ** 2 * Du * Dv,
                                                 VV => G.Cov.VV + (Rest / Apart) ** 2 * Dv ** 2);
@@ -2412,7 +2638,7 @@ package body Driver.Alignment.Keyframes is
                      Round (K) := True;
                      Done (K) := True;
                      Any := True;
-                     if Next.Field.Valid then
+                     if Next.Field.Valid and then not Own_Place (K) then
                         Asked (K) := Asked_From (C, Next.Field, C.Points (K));
                      end if;
                   end if;
@@ -2440,7 +2666,7 @@ package body Driver.Alignment.Keyframes is
             end;
          end loop;
       end;
-      Settle (C, Second, Answers, Marks, Next.Field, Mine);
+      Settle (C, Second, Answers, Marks, Next.Field, Mine, Placed => Own_Place);
       Agree := Mine;
       --  How far the extrapolation of each order that was tried was off, beyond what the fields it rested on carry:
       --  what the keyframe says of the curvature of the move (Frame). It is judged against the keyframe's field at

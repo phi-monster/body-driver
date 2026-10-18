@@ -1,4 +1,6 @@
 with Ada.Characters.Handling;
+with Ada.Environment_Variables;
+with Ada.Text_IO;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings;
 with Ada.Strings.Fixed;
@@ -189,8 +191,51 @@ package body Driver.Robot.Kinematics is
       and then R.Stand_Rate > 0.0
       and then Regression.Count_Significant (R.Stood_Off (P), R.Stood_Off (P) + R.Moved_With (P), R.Stand_Rate));
 
+   --  A point moves with the view when the lock-in sees its cell follow the arm's pushes (Query_Responds, read again at
+   --  every estimate: Refresh_Responds) and its keyframes neither tell it still nor riding. The keyframes' verdict alone
+   --  stood in for the lock-in's once it was told, and a point of the jaws, matched in the wrong place as often as not,
+   --  moved by its answers: u6 (servo seed 3 of the fake robot, 10-19), 65 of its 255 points on the jaws, and 598
+   --  sightings of them in the fit, 382 off the truth by more than 4 px, of the run's 653 such.
    function Moving_Point (R : Arm_Evidence; P : Natural) return Boolean is
-     ((P >= Natural (R.Still.Length) or else not R.Still (P)) and then not Rides (R, P));
+     ((P >= Natural (R.Query_Responds.Length) or else R.Query_Responds (P))
+      and then (P >= Natural (R.Still.Length) or else not R.Still (P)) and then not Rides (R, P));
+
+   --  The lock-in's latest verdict on every query point's cell: whether it follows the arm's pushes (Query_Points'
+   --  Follows), kept as it was while the lock-in has told nothing. A cell of the world the recognition's small pushes
+   --  did not move follows once the sweep's pushes are measured; the hand's jaws in a wrist eye's view never do.
+   procedure Refresh_Responds (M : Model; R : in out Arm_Evidence) is
+   begin
+      if R.Eye = 0 or else R.Eye > M.Eyes.Last_Index then
+         return;
+      end if;
+      declare
+         S    : Eye_Stream renames M.Eyes (R.Eye);
+         G    : Cell_Grid renames S.Grid;
+         Kept : constant Natural := Natural (S.Kept_Groups.Length);
+      begin
+         if Kept = 0 or else G.Width = 0 or else G.Height = 0 then
+            return;
+         end if;
+         for P in 0 .. Natural'Min (Natural (R.Query_U.Length), Natural (R.Query_Responds.Length)) - 1 loop
+            declare
+               X       : constant Natural := Natural'Min (G.Width - 1, Natural (Real'Floor (Real'Max (0.0, R.Query_U (P)))));
+               Y       : constant Natural := Natural'Min (G.Height - 1, Natural (Real'Floor (Real'Max (0.0, R.Query_V (P)))));
+               Cell    : constant Natural :=
+                 ((Y + 1) * G.Rows - 1) / G.Height * G.Columns + ((X + 1) * G.Columns - 1) / G.Width;
+               Follows : Boolean := False;
+            begin
+               for K in 0 .. Kept - 1 loop
+                  if S.Kept_Groups (K) = Natural (R.Group) and then Cell * Kept + K < Natural (S.Shifts.Length)
+                    and then S.Shifts (Cell * Kept + K) > 0.0
+                  then
+                     Follows := True;
+                  end if;
+               end loop;
+               R.Query_Responds.Replace_Element (P, Follows);
+            end;
+         end loop;
+      end;
+   end Refresh_Responds;
 
    --  Per point of the arm's reference, whether it does not move with the view (not Moving_Point): still at every
    --  keyframe, or riding with the eye by the keyframes' own evidence (Rides). Set_Of judges a keyframe's sightings
@@ -1013,9 +1058,16 @@ package body Driver.Robot.Kinematics is
                         end;
                         Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];
                         --  The order the fit does not tell: the farthest place an untold order puts the point, as the
-                        --  outer product of its difference from this one (as Keyframes.Predict widens a candidate by
-                        --  its largest disagreement with another); an order that puts it behind the eye shows it
-                        --  nowhere to search. A keyframe that turns two joints the fit does not order is searched where
+                        --  outer product of its difference from this one over the window's multiple, squared: the
+                        --  window then reaches that place at its edge, and the prediction's own uncertainty beside it.
+                        --  The truth is at one of the orders' places, not spread about them: taken whole, as
+                        --  Keyframes.Predict widens a candidate by its largest disagreement with another, the window
+                        --  reached the window's multiple of the difference beyond it, and a keyframe the untold orders
+                        --  put apart by more than two pixels was searched wide, however well the fitted arm predicted
+                        --  it: u6 (servo seed 3 of the fake robot, 10-19), its pairs turned to tell its untold orders,
+                        --  c1 with c3 and c1 with c4 predicted within 0.39 to 0.47 px of the truth on the median, their
+                        --  windows stating 10 to 16 px, and no point of them was followed. An order that puts the
+                        --  point behind the eye shows it nowhere to search. A keyframe that turns two joints the fit does not order is searched where
                         --  either order puts its points, and the order told after it is the one the picture shows, not
                         --  the one it was predicted from: z7 (servo seed 7 of the fake robot, 10-18) turned c1 with c2
                         --  under the best order 4 5 2 1 3 6, each point asked within 1.8 to 6 px of where that order put
@@ -1037,6 +1089,8 @@ package body Driver.Robot.Kinematics is
                                  end if;
                               end;
                            end loop;
+                           Far_U := Far_U / Driver.Alignment.Window_Multiple;
+                           Far_V := Far_V / Driver.Alignment.Window_Multiple;
                            Variance := [Variance (1) + Far_U ** 2, Variance (2) + Far_U * Far_V, Variance (3) + Far_V ** 2];
                         end;
                         Into (K).To := Here;
@@ -1063,13 +1117,14 @@ package body Driver.Robot.Kinematics is
       then ", the view's common motion set aside (none at size" & Common.Level'Image & ", every one of its"
            & Common.Own'Image & " points where it stood, against a prediction that moves them): asked as predicted"
       elsif Common.Told
-      then (if Common.Two_Fields then " between the two fields the view's motion drew, none told, at size" else " from the view's common motion at size")
+      then " from the view's common motion at size"
            & Common.Level'Image & ": turned "
            & Driver.Log.Image (Common.Turn * 180.0 / Ada.Numerics.Pi, 1) & " deg, its centre moved "
            & Driver.Log.Image (Common.Shift_U, 1) & " " & Driver.Log.Image (Common.Shift_V, 1) & " px +- "
            & Driver.Log.Image (Common.Sigma, 2) & ";" & Common.Agree'Image & " of" & Common.Points'Image
-           & " points on it," & Common.Own'Image & " on it alone against" & Common.Other'Image & " on the next best;"
-           & Common.Draws'Image & " draws" & ";" & Common.Unmoved'Image & " where they stood"
+           & " points on it," & Common.Own'Image & " on it alone against" & Common.Other'Image & " on the next best,"
+           & Common.Own_Places'Image & " at a place of their own on it;" & Common.Draws'Image & " draws" & ";"
+           & Common.Unmoved'Image & " where they stood"
       else ", no common motion of the view told (at size" & Common.Level'Image & "," & Common.Own'Image
            & " points on the best field alone against" & Common.Other'Image & " on the next, of"
            & Common.Points'Image & ";" & Common.Draws'Image & " draws;" & Common.Unmoved'Image & " where they stood)");
@@ -1734,6 +1789,7 @@ package body Driver.Robot.Kinematics is
       if (for some X of Noise => X >= Real'Last) then
          return;
       end if;
+      Refresh_Responds (M, R);
       if R.Aligned = 0 then
          declare
             Points : Keyframe_Point_Access := new Keyframes.Point_Array (1 .. Queries);
@@ -1779,9 +1835,7 @@ package body Driver.Robot.Kinematics is
                Riding : Keyframes.Flag_Array (1 .. Queries);
             begin
                for I in Riding'Range loop
-                  Riding (I) := Rides (R, I - 1) or else
-                    (if I - 1 < Natural (R.Still.Length) then R.Still (I - 1)
-                     else I - 1 < Natural (R.Query_Responds.Length) and then not R.Query_Responds (I - 1));
+                  Riding (I) := not Moving_Point (R, I - 1);
                end loop;
                Keyframes.Add (R.Chain, R.Frames (F).Image, Change, Given.all, Answers.all, Agree.all, Riding);
                declare
@@ -1805,6 +1859,43 @@ package body Driver.Robot.Kinematics is
             Rss_After := Driver.Memory.Resident_Kilobytes / 1024;
             Set_Of ("arm" & R.Arm'Image, F, R.Query_U, R.Query_V, Unmoving (R), Given.all, Answers.all, Agree.all,
                     Set);
+            --  For a study against a fake robot's truth (tools/truth_points): with BD_DUMP_KEYS naming a folder, every
+            --  point of the keyframe, where it stood in the reference, where the prediction put it and stated it, and what
+            --  the aligner answered, in a file of the arm and the keyframe. u5's elbow was found so to have turned twice the
+            --  turn planned for it (10-19), the view's points 20 px on the mean and 106 of 255 out of the picture.
+            if Ada.Environment_Variables.Exists ("BD_DUMP_KEYS") then
+               declare
+                  File : Ada.Text_IO.File_Type;
+                  Name : constant String := Ada.Environment_Variables.Value ("BD_DUMP_KEYS") & "/arm"
+                    & Ada.Strings.Fixed.Trim (R.Arm'Image, Ada.Strings.Left) & "_kf"
+                    & Ada.Strings.Fixed.Trim (F'Image, Ada.Strings.Left) & ".txt";
+               begin
+                  Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Name);
+                  Ada.Text_IO.Put_Line (File, "beat" & R.Frames (F).Beat'Image & " reference"
+                                        & R.Frames.First_Element.Beat'Image & " eye" & R.Eye'Image);
+                  for I in 1 .. Queries loop
+                     declare
+                        G : Driver.Alignment.Prediction renames Given (Given'First + I - 1);
+                        A : Driver.Alignment.Answer renames Answers (Answers'First + I - 1);
+                     begin
+                        Ada.Text_IO.Put_Line
+                          (File, I'Image & " " & Driver.Log.Image (R.Query_U (I - 1), 2) & " "
+                           & Driver.Log.Image (R.Query_V (I - 1), 2) & " given " & Driver.Log.Image (G.To.U, 2) & " "
+                           & Driver.Log.Image (G.To.V, 2) & " "
+                           & Driver.Log.Image (Ada.Numerics.Long_Elementary_Functions.Sqrt (Real'Max (G.Cov.UU, G.Cov.VV)), 2)
+                           & " answer " & Driver.Log.Image (A.To.U, 2) & " " & Driver.Log.Image (A.To.V, 2) & " "
+                           & Ada.Characters.Handling.To_Lower (A.Verdict'Image) & " "
+                           & (if A.Narrow then "narrow" else "wide") & " "
+                           & (if Agree (Agree'First + I - 1) then "agree" else "apart") & " "
+                           & Ada.Characters.Handling.To_Lower (A.Because'Image) & " "
+                           & (if Set.Found (I - 1) then "sighting" else "-") & " "
+                           & (if I - 1 < Natural (R.Query_Responds.Length) and then not R.Query_Responds (I - 1)
+                               then "still" else "follows"));
+                     end;
+                  end loop;
+                  Ada.Text_IO.Close (File);
+               end;
+            end if;
             --  A change of a channel whose shift the keyframes have not measured is a new direction: the keyframe is
             --  asked from the view's common motion (Keyframes.Add). Before, a new direction searched every point
             --  alone as wide as the aligner looks, and when that found nothing it was aligned again from the lock-in's
@@ -2329,6 +2420,36 @@ package body Driver.Robot.Kinematics is
               else Then_Radius - Now_Radius >= 1.0);
    end Narrowed;
 
+   --  Of a keyframe's answers a fit may rest on (Found), those within the gate of where a fit puts them (Offered) and
+   --  of what it states of them there. A keyframe aligned again from a fit (Realign_Arms, Realign_Views) takes the new
+   --  answers when as many of them as of the old lie there: it gains what its first window refused, and loses nothing
+   --  it had. A keyframe of a joint the fit hardly knows, aligned again from a window wider than the one its first
+   --  answers came from, lost them: u3 replayed (servo seed 3 of the fake robot, 10-18), channel 4's keyframe 13, 97
+   --  points found from the view's common motion, 13 from the fitted arm's window of 5.3 px, not one from a window a
+   --  patch carries, and the next fit had no keyframe of channel 4's own. A keyframe kept takes the window it was
+   --  offered as the one to narrow on, so it is aligned again only from a narrower one.
+   function Agreeing (X : Match_Set; Offered : Keyframes.Prediction_Array) return Natural is
+      Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
+      N    : Natural := 0;
+   begin
+      for I in 0 .. Natural'Min (Natural (X.Found.Length), Offered'Length) - 1 loop
+         if X.Found (I) then
+            declare
+               P : Driver.Alignment.Prediction renames Offered (Offered'First + I);
+            begin
+               if not Driver.Uncertain.Significant
+                        (Gate, Ada.Numerics.Long_Elementary_Functions.Sqrt
+                                 ((X.To_U (I) - P.To.U) ** 2 + (X.To_V (I) - P.To.V) ** 2),
+                         Ada.Numerics.Long_Elementary_Functions.Sqrt (Real'Max (P.Cov.UU, P.Cov.VV)))
+               then
+                  N := N + 1;
+               end if;
+            end;
+         end if;
+      end loop;
+      return N;
+   end Agreeing;
+
    function Realign_Arms (M : in out Model) return Boolean is
       Changed : Boolean := False;
    begin
@@ -2337,6 +2458,7 @@ package body Driver.Robot.Kinematics is
             R       : Arm_Evidence renames M.Kinematics (Index);
             Queries : constant Natural := Natural (R.Query_U.Length);
             Done    : Natural := 0;
+            Kept    : Natural := 0;   --  aligned again and kept as they were
             Start   : constant Duration := Driver.Clock.Seconds;
          begin
             if Current (M, R) and then R.Result.Fitted and then R.Aligned >= 2 and then Queries > 0 then
@@ -2357,19 +2479,31 @@ package body Driver.Robot.Kinematics is
                         --  next one to that). The windows narrow by a pixel at the least each time, so the repeating ends.
                         if Known and then Narrowed (R.Matches (S), Stated_By (Offered.all)) then
                            Keyframes.Realign (R.Chain, R.Frames (F).Image, Offered.all, Answers.all, Agree.all);
+                           --  The new answers stand in for the old when as many lie where the fitted arm puts them
+                           --  (Agreeing).
                            declare
                               Set : Match_Set;
                            begin
                               Set_Of ("arm" & R.Arm'Image, F, R.Query_U, R.Query_V, Unmoving (R), Offered.all, Answers.all, Agree.all,
                                       Set);
-                              R.Matches.Replace_Element (S, Set);
-                              if Set.Wide = 0 then
-                                 R.Frames (F).Image := Driver.Images.No_Image;
+                              if Agreeing (Set, Offered.all) >= Agreeing (R.Matches (S), Offered.all) then
+                                 R.Matches.Replace_Element (S, Set);
+                                 if Set.Wide = 0 then
+                                    R.Frames (F).Image := Driver.Images.No_Image;
+                                 end if;
+                                 R.Revision := R.Revision + 1;
+                                 Done := Done + 1;
+                                 Changed := True;
+                              else
+                                 declare
+                                    Was : Match_Set := R.Matches (S);
+                                 begin
+                                    Was.Stated := Set.Stated;
+                                    R.Matches.Replace_Element (S, Was);
+                                 end;
+                                 Kept := Kept + 1;
                               end if;
                            end;
-                           R.Revision := R.Revision + 1;
-                           Done := Done + 1;
-                           Changed := True;
                         end if;
                         Free (Offered);
                         Free (Answers);
@@ -2379,10 +2513,16 @@ package body Driver.Robot.Kinematics is
                end loop;
                if Done > 0 then
                   Measure_Shifts (M, R);
+               end if;
+               if Done > 0 or else Kept > 0 then
                   Driver.Log.Line
                     (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " aligned" & Done'Image
-                     & " keyframes again from the fitted arm, in "
-                     & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
+                     & " keyframes again from the fitted arm"
+                     & (if Kept > 0
+                        then ", and" & Kept'Image & " more kept as they were (fewer of the new answers where the arm"
+                             & " puts them)"
+                        else "")
+                     & ", in " & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
                end if;
             end if;
          end;
@@ -2405,6 +2545,7 @@ package body Driver.Robot.Kinematics is
                      V       : Hand_View renames R.Views (Position);
                      Queries : constant Natural := Natural (V.Query_U.Length);
                      Done    : Natural := 0;
+                     Kept    : Natural := 0;   --  aligned again and kept as they were
                      Start   : constant Duration := Driver.Clock.Seconds;
                   begin
                      if V.Result.Placed and then V.Aligned >= 2 and then Queries > 0 then
@@ -2424,19 +2565,31 @@ package body Driver.Robot.Kinematics is
                                     Offer_Hand (R, V, Readings_Array (R.Frames (F)), Offered.all, Known);
                                     if Known and then Narrowed (V.Matches (S), Stated_By (Offered.all)) then
                                        Keyframes.Realign (V.Chain, V.Images (F), Offered.all, Answers.all, Agree.all);
+                                       --  The new answers stand in for the old when as many lie where the fitted eye
+                                       --  puts them (Agreeing).
                                        declare
                                           Set : Match_Set;
                                        begin
                                           Set_Of ("arm" & R.Arm'Image & "'s eye" & V.Eye'Image, F, V.Query_U, V.Query_V, Flag_Vectors.Empty_Vector,
                                                   Offered.all, Answers.all, Agree.all, Set);
-                                          V.Matches.Replace_Element (S, Set);
-                                          if Set.Wide = 0 then
-                                             V.Images.Replace_Element (F, Driver.Images.No_Image);
+                                          if Agreeing (Set, Offered.all) >= Agreeing (V.Matches (S), Offered.all) then
+                                             V.Matches.Replace_Element (S, Set);
+                                             if Set.Wide = 0 then
+                                                V.Images.Replace_Element (F, Driver.Images.No_Image);
+                                             end if;
+                                             V.Revision := V.Revision + 1;
+                                             Done := Done + 1;
+                                             Changed := True;
+                                          else
+                                             declare
+                                                Was : Match_Set := V.Matches (S);
+                                             begin
+                                                Was.Stated := Set.Stated;
+                                                V.Matches.Replace_Element (S, Was);
+                                             end;
+                                             Kept := Kept + 1;
                                           end if;
                                        end;
-                                       V.Revision := V.Revision + 1;
-                                       Done := Done + 1;
-                                       Changed := True;
                                     end if;
                                     Free (Offered);
                                     Free (Answers);
@@ -2445,11 +2598,15 @@ package body Driver.Robot.Kinematics is
                               end if;
                            end;
                         end loop;
-                        if Done > 0 then
+                        if Done > 0 or else Kept > 0 then
                            Driver.Log.Line
                              (Driver.Log.Robot, "kinematics: eye" & V.Eye'Image & "'s view of arm" & R.Arm'Image
-                              & " aligned" & Done'Image & " keyframes again from the fitted eye, in "
-                              & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
+                              & " aligned" & Done'Image & " keyframes again from the fitted eye"
+                              & (if Kept > 0
+                                 then ", and" & Kept'Image & " more kept as they were (fewer of the new answers where"
+                                      & " the eye puts them)"
+                                 else "")
+                              & ", in " & Driver.Log.Image (Real (Driver.Clock.Seconds - Start), 1) & " s");
                         end if;
                      end if;
                   end;
@@ -3005,14 +3162,14 @@ package body Driver.Robot.Kinematics is
                      else
                         Result.Untold := R.Result.Untold;
                      end if;
-                     Result.Untold_Scales.Clear;
+                     Result.Untold_Turns.Clear;
                      if not Report.Order_Told then
                         if not Report.Untold.Is_Empty then
-                           for X of Report.Untold_Scales loop
-                              Result.Untold_Scales.Append (X);
+                           for X of Report.Untold_Turns loop
+                              Result.Untold_Turns.Append (X);
                            end loop;
                         else
-                           Result.Untold_Scales := R.Result.Untold_Scales;
+                           Result.Untold_Turns := R.Result.Untold_Turns;
                         end if;
                      end if;
                      Result.Untold_Orders.Clear;
@@ -4414,14 +4571,14 @@ package body Driver.Robot.Kinematics is
       return M.Kinematics (Index_Of (M, A)).Result.Untold;
    end Contested_Pairs;
 
-   function Contested_Scales (M : Model; A : Arm_Id) return Real_Vectors.Vector is
+   function Contested_Turns (M : Model; A : Arm_Id) return Real_Vectors.Vector is
       None : Real_Vectors.Vector;
    begin
       if not Fitted (M, A) or else M.Kinematics (Index_Of (M, A)).Result.Order_Told then
          return None;
       end if;
-      return M.Kinematics (Index_Of (M, A)).Result.Untold_Scales;
-   end Contested_Scales;
+      return M.Kinematics (Index_Of (M, A)).Result.Untold_Turns;
+   end Contested_Turns;
 
    function Untold_Count (M : Model; A : Arm_Id) return Natural is
    begin

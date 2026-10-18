@@ -48,6 +48,12 @@ package body Driver.Robot.Hand is
       --  How many stops its measured channels had when the hand was last made of them: a stop the decider adds
       --  between two views too far apart to follow makes the hand again, its lobes followed along the stops.
       Stops_Made : Natural := 0;
+      --  Whether the eye's place in its arm's tool frame was known when the hand was last made: the tips' lines of
+      --  sight and the lobes' shapes rest on it, and a hand made before the arm was fitted is made again once it is.
+      --  Made once, at its ends' first measure, the hand kept what the eye's mount was then: u7 (servo seed 3 of the
+      --  fake robot, 10-19) made its hand at beat 838, fitted its arm at 1887, and 26 presses later its lobe was
+      --  still "its eye's mount was not measured when it was swept", no tip measured.
+      Placed_Made : Boolean := False;
    end record;
 
    package Pair_Vectors is new Ada.Containers.Vectors (Positive, Pair);
@@ -582,10 +588,10 @@ package body Driver.Robot.Hand is
    begin
       for L in Table'Range loop
          for Which in Opening loop
-            --  A lobe no channel moves has no line of sight: its presses go to the book as a tip anywhere, starting
-            --  from the tool frame's origin (Touch, the free model).
+            --  A lobe no channel moves and no eye sees (a tool's) has no line of sight: its presses go to the book as a
+            --  tip anywhere, starting from the tool frame's origin (Touch, the free model). A fixed jaw is seen.
             Table (L) (Which) :=
-              (if Made.Lobes (L).Channel = 0
+              (if Made.Lobes (L).Channel = 0 and then not Made.Lobes (L).Sights (Which).Known
                then (Known  => False,
                      Lined  => False,
                      Ray    => (Origin    => (Mean => Zero3, Covariance => [others => [others => 0.0]]),
@@ -902,6 +908,97 @@ package body Driver.Robot.Hand is
                                      Size    => <>));
                   end;
                end loop;
+               --  A jaw that closes onto a fixed one has a finger no channel moves: the fixed jaw, which the moving
+               --  jaw's lead meets at the closed end and not at the open one (Lobes.Lead_Gaps against the robot's
+               --  still pixels). Its tip is where the moving tip meets it, going on the way the jaw closes from where
+               --  the closed end shows it: the first of the robot's still pixels straight ahead; the lobe whose lead
+               --  meets them nearest gives it. It is pressed as any finger is, along that pixel's line of sight, the
+               --  same at either opening (Channel 0, seen). Unknown, every touch went to the moving jaw: u7 (servo
+               --  seed 3 of the fake robot, 10-19) pressed its hand onto a slab on the table with the fixed jaw, the
+               --  moving one 6 mm above it by the truth, and put the moving jaw's tip 10.8 cm from its eye along its
+               --  line of sight where it is 5.2.
+               declare
+                  Still    : constant Driver.Images.Mask := Sweeps.Located_Of (P.Sweep, C).Still;
+                  W        : constant Natural := Driver.Images.Width (Still);
+                  H        : constant Natural := Driver.Images.Height (Still);
+                  Nearest  : Real := Real'Last;
+                  Fixed_Px : Driver.Images.Pixel := (U => 0.0, V => 0.0);
+                  Found    : Boolean := False;
+                  Centre   : Driver.Images.Pixel := (U => 0.0, V => 0.0);   --  of the robot's still pixels
+                  Still_N  : Natural := 0;
+               begin
+                  for Y in 0 .. H - 1 loop
+                     for X in 0 .. W - 1 loop
+                        if Driver.Images.Contains (Still, X, Y) then
+                           Still_N := Still_N + 1;
+                           Centre := (U => Centre.U + Real (X) + 0.5, V => Centre.V + Real (Y) + 0.5);
+                        end if;
+                     end loop;
+                  end loop;
+                  if Still_N > 0 then
+                     Centre := (U => Centre.U / Real (Still_N), V => Centre.V / Real (Still_N));
+                     for L of Sweeps.Lobes_Of (P.Sweep, C) loop
+                        declare
+                           At_Low, At_High, Never : Real;
+                           Tip   : constant Driver.Images.Pixel := (if Closed_High then L.Tip_There else L.Tip_Here);
+                           Known : constant Boolean := (if Closed_High then L.Tip_Known_There else L.Tip_Known_Here);
+                           --  The way the jaw closes: the lobe's way from the low view to the high one, turned round
+                           --  when it is shut at the low reading (Lead_Gaps' convention).
+                           Du    : constant Real := (if L.Way_Known then L.Way_U else L.Centre_There.U - L.Centre_Here.U);
+                           Dv    : constant Real := (if L.Way_Known then L.Way_V else L.Centre_There.V - L.Centre_Here.V);
+                           Size  : constant Real := Sqrt (Du * Du + Dv * Dv);
+                        begin
+                           Driver.Robot.Hand.Lobes.Lead_Gaps (L, Still, At_Low, At_High, Never);
+                           declare
+                              Shut_Gap : constant Real := (if Closed_High then At_High else At_Low);
+                              Open_Gap : constant Real := (if Closed_High then At_Low else At_High);
+                              Su       : constant Real := (if Size > 0.0 then (if Closed_High then Du else -Du) / Size else 0.0);
+                              Sv       : constant Real := (if Size > 0.0 then (if Closed_High then Dv else -Dv) / Size else 0.0);
+                           begin
+                              if Known and then Size > 0.0 and then Shut_Gap < Never and then Shut_Gap < Open_Gap
+                                and then Shut_Gap < Nearest
+                              then
+                                 for K in 1 .. Natural (Real'Floor (Never)) loop
+                                    declare
+                                       Xk : constant Real := Real'Floor (Tip.U + Real (K) * Su);
+                                       Yk : constant Real := Real'Floor (Tip.V + Real (K) * Sv);
+                                    begin
+                                       exit when Xk < 0.0 or else Yk < 0.0 or else Xk >= Real (W) or else Yk >= Real (H);
+                                       if Driver.Images.Contains (Still, Natural (Xk), Natural (Yk)) then
+                                          Nearest := Shut_Gap;
+                                          Fixed_Px := (U => Xk + 0.5, V => Yk + 0.5);
+                                          Found := True;
+                                          exit;
+                                       end if;
+                                    end;
+                                 end loop;
+                              end if;
+                           end;
+                        end;
+                     end loop;
+                  end if;
+                  if Found then
+                     declare
+                        Closed : constant Driver.Robot.Hand.Views.View := (if Closed_High then High else Low);
+                        Seen   : constant Sight := Seen_Tip (Closed, True, Fixed_Px, Still, Centre);
+                     begin
+                        Made.Lobes.Append
+                          (Lobe_Record'(Channel => 0,
+                                        Sights  => [others => Seen],
+                                        Stops   => <>,
+                                        Patches => [others => Driver.Robot.Hand.Slide.Empty],
+                                        Way     => <>,
+                                        Shape   => Driver.Robot.Hand.Shape.Unfitted
+                                                     ("a fixed jaw: no channel moves it; its tip is where the moving jaw "
+                                                      & "closes onto it"),
+                                        Size    => <>));
+                        Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & P.Group'Image & " channel" & C'Image
+                                         & " closes a jaw onto a fixed one, its lead " & Driver.Log.Image (Nearest, 1)
+                                         & " px from the robot's still pixels at the closed end: a finger no channel"
+                                         & " moves, its tip at " & Image (Fixed_Px));
+                     end;
+                  end if;
+               end;
                --  The group's readings at each opening: this channel at its end,
                --  the others as they were held while it was swept.
                for Which in Opening loop
@@ -974,13 +1071,16 @@ package body Driver.Robot.Hand is
       end if;
    end Adopt;
 
-   procedure Report (P : in out Pair; D : in out Hand_Data; M : Model);
+   procedure Report (P : in out Pair; D : in out Hand_Data; M : Model; O : Observation);
    --  Says what became of every channel whose ends are new since it last
    --  said, and makes the hand of the measured ones again: a hand found from
-   --  older ends does not stand when the ends are new and give no lobes.
+   --  older ends does not stand when the ends are new and give no lobes. Made
+   --  again too when the eye's place in the tool frame has become known
+   --  (Pair.Placed_Made).
 
-   procedure Report (P : in out Pair; D : in out Hand_Data; M : Model) is
-      Said : Boolean := False;
+   procedure Report (P : in out Pair; D : in out Hand_Data; M : Model; O : Observation) is
+      Said   : Boolean := False;
+      Placed : constant Boolean := Eye_In_Tool (M, P.Eye, O).Position_Covariance (1, 1) < Real'Last;
    begin
       for C in 1 .. Sweeps.Channels (P.Sweep) loop
          if Sweeps.Unannounced (P.Sweep, C) then
@@ -1008,14 +1108,17 @@ package body Driver.Robot.Hand is
       end loop;
       declare
          Stops_Now : Natural := 0;
+         Measured  : Boolean := False;   --  some channel's lobes to make the hand of
       begin
          for C in 1 .. Sweeps.Channels (P.Sweep) loop
             if Sweeps.Status (P.Sweep, C) = Sweeps.Measured then
                Stops_Now := Stops_Now + Sweeps.Stops (P.Sweep, C);
+               Measured := True;
             end if;
          end loop;
-         if Said or else Stops_Now /= P.Stops_Made then
+         if Said or else Stops_Now /= P.Stops_Made or else (Measured and then Placed /= P.Placed_Made) then
             P.Stops_Made := Stops_Now;
+            P.Placed_Made := Placed;
             Rebuild (D, P, M);
          end if;
       end;
@@ -1557,7 +1660,7 @@ package body Driver.Robot.Hand is
             P : Pair := H.Data.Pairs (I);
          begin
             Feed (P, M, O);
-            Report (P, H.Data.all, M);
+            Report (P, H.Data.all, M, O);
             H.Data.Pairs.Replace_Element (I, P);
          end;
       end loop;

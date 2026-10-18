@@ -8,6 +8,7 @@ with Driver.Numerics.Dense;
 with Driver.Parallel_For;
 with Driver.Robot.Regression;
 with Driver.Robot.Kinematics.Errors;
+with Driver.Alignment;
 with Driver.Stats;
 with Driver.Uncertain;
 
@@ -1979,35 +1980,20 @@ package body Driver.Robot.Kinematics.Fit is
       function Away (Frame, J : Positive) return Boolean is
         (Visible (Visible'First + J - 1) > 0.0 and then abs Change (Frame, J) >= Visible (Visible'First + J - 1));
 
-      --  Only joint J moved in the keyframe, as far as its eye can tell: it was asked to, and every other joint
-      --  stands where it stood in the reference.
-      function Only (Frame, J : Positive) return Boolean is
-        (Moved (Frame, J) and then (for all C in 1 .. N => C = J or else not Away (Frame, C)));
-
-      function Single (Frame : Positive) return Natural is
-      begin
-         for J in 1 .. N loop
-            if Only (Frame, J) then
-               return J;
-            end if;
-         end loop;
-         return 0;
-      end Single;
-
       --  The keyframe stands from the reference by two joints or more, as far as their eyes can tell, asked now or
       --  left there before: what tells the joints' order.
       function Several (Frame : Positive) return Boolean is
         (for some J in 1 .. N => Away (Frame, J) and then (for some K in J + 1 .. N => Away (Frame, K)));
 
       --  Each keyframe's joint of its own, and the keyframe it shows that joint's turn against: the reference when
-      --  every other joint stands where it stood there (Single); else, of the keyframes with sightings, the one that
-      --  differs from it in that joint alone and by the most. A servo sent back to the sweep's start lands within its
-      --  dead band of it, so two landings differ by up to twice that, and the reference is a landing too (f15c on
-      --  10-15, arm 2: the joints not asked stood 4 and 8 units from the reference at a dead band of 4, and five
-      --  joints of six had no keyframe of their own against it). Two pushes of one joint from one start share every
-      --  other joint's landing. Stages 1 and 2 fit one joint at a time and take a keyframe's sightings against its
-      --  partner (the point's place there: Pairs); the stages after take them against the reference, with every
-      --  joint's reading.
+      --  every other joint stands where it stood there or its motion is taken out (Alone); else, of the keyframes
+      --  with sightings, the one that differs from it in that joint alone and by the most. A servo sent back to the
+      --  sweep's start lands within its dead band of it, so two landings differ by up to twice that, and the reference
+      --  is a landing too (f15c on 10-15, arm 2: the joints not asked stood 4 and 8 units from the reference at a dead
+      --  band of 4, and five joints of six had no keyframe of their own against it). Two pushes of one joint from one
+      --  start share every other joint's landing. Stages 1 and 2 fit one joint at a time and take a keyframe's
+      --  sightings against its partner (the point's place there: Pairs); the stages after take them against the
+      --  reference, with every joint's reading.
       Own_Joint : array (1 .. Frames) of Natural := [others => 0];
       Partner   : array (1 .. Frames) of Natural := [others => 0];
 
@@ -2119,7 +2105,7 @@ package body Driver.Robot.Kinematics.Fit is
       Order_Is_Told : Boolean := False;
       Untold        : Joint_Pair_Lists.Vector;   --  the joints next to each other in it whose swap stage 4 did not tell
       Untold_Orders : Joint_Lists.Vector;        --  every order stage 4 did not tell from it (Fit_Report.Untold_Orders)
-      Untold_Scales : Real_Lists.Vector;         --  per pair of Untold, the share of the widest turns it is best turned by
+      Untold_Turns : Real_Lists.Vector;          --  per pair of Untold, its two joints' turns that tell it best
 
       procedure Finish (Profiled : Boolean) is
       begin
@@ -2322,7 +2308,7 @@ package body Driver.Robot.Kinematics.Fit is
          Report.Profiled_Over := (if Profiled then Sightings'Length elsif From.Valid then From.Profiled_Over else 0);
          Report.Order_Told := Order_Is_Told;
          Report.Untold := Untold;
-         Report.Untold_Scales := Untold_Scales;
+         Report.Untold_Turns := Untold_Turns;
          Report.Untold_Orders := (if Order_Is_Told then Joint_Lists.Empty_Vector else Untold_Orders);
          Chain := Order;
          Report.Fitted := Report.Determined;
@@ -2340,16 +2326,41 @@ package body Driver.Robot.Kinematics.Fit is
       end if;
       declare
          Sighted : array (1 .. Frames) of Boolean := [others => False];
+         --  Every sighting of the keyframe has the motion of the joints it did not ask taken out (Off_Told).
+         Offs_Told : array (1 .. Frames) of Boolean := [others => True];
          Tracks  : Natural := 0;
+
+         --  The one joint the keyframe turned alone, 0 for none: it was asked to (Moved), and every other joint stands
+         --  where it stood in the reference as far as its eye can tell, or was not asked and its motion is taken out
+         --  of every sighting (Sighting's Off_U, Off_V), as the stages of one joint take the sightings. A servo lands
+         --  off its target, and as the fit came to its joints' own steps those landings were steps its eye sees:
+         --  v3 (servo seed 3 of the fake robot, replayed 10-18) had joint 4's three keyframes stand 6 and 12 units off
+         --  in joints 1 and 2 against their steps of 4 and 8, every sighting with those joints' motion taken out,
+         --  and once its pairs were turned every fit ended at stage 0 ("a joint has no keyframe of its own").
+         function Alone (Frame : Positive) return Natural is
+         begin
+            for J in 1 .. N loop
+               if Moved (Frame, J)
+                 and then (for all C in 1 .. N =>
+                             C = J or else not Away (Frame, C)
+                             or else (Offs_Told (Frame)
+                                      and then not Asked (Asked'First (1) + Frame - 1, Asked'First (2) + C - 1)))
+               then
+                  return J;
+               end if;
+            end loop;
+            return 0;
+         end Alone;
       begin
          for X of Sight loop
             Sighted (X.Frame) := True;
+            Offs_Told (X.Frame) := Offs_Told (X.Frame) and then X.Off_Told;
             Tracks := Natural'Max (Tracks, X.Track);
          end loop;
          for B in 2 .. Frames loop
             if Sighted (B) then
-               if Single (B) > 0 then
-                  Own_Joint (B) := Single (B);
+               if Alone (B) > 0 then
+                  Own_Joint (B) := Alone (B);
                   Partner (B) := 1;
                else
                   for J in 1 .. N loop
@@ -4186,8 +4197,22 @@ package body Driver.Robot.Kinematics.Fit is
                --  still (all three of its sweeps). Ranked residual by residual, the thousands of sightings of a few
                --  keyframes told a wrong order against its swap: s83 (servo seed 6 of the fake robot, 10-18), 1 3 2 4
                --  5 6 for the true 1 3 4 2 5 6, "every other order searched leaves residuals significantly the larger".
-               function Smaller (A, B : Real_Array) return Boolean is
+               --  What the test found, for the log to say why an order is not told.
+               type Judgement is record
+                  Smaller : Boolean := False;
+                  Seen    : Natural := 0;          --  keyframes with sightings
+                  Telling : Natural := 0;          --  of them, those that put the two orders' points apart
+                  Noise   : Real := 0.0;           --  A's residuals' scatter, robust
+                  Spread  : Real := Real'Last;     --  how much A's keyframe medians vary
+                  Sum     : Real := 0.0;           --  B's medians less A's over the telling keyframes
+                  Needed  : Real := Real'Last;     --  what the sum must pass: Z of the spread for each telling one
+                  Behind  : Boolean := False;      --  A puts a telling keyframe's points behind the eye
+                  Beyond  : Boolean := False;      --  only B does
+               end record;
+
+               function Judge (A, B : Real_Array) return Judgement is
                   Sightings : constant Natural := A'Length / 2;
+                  Verdict   : Judgement;
                   First_Of  : array (1 .. Frames + 1) of Natural := [others => 0];   --  each keyframe's first value
                   Filled    : array (1 .. Frames) of Natural := [others => 0];
                   Sizes_A   : Real_Access := new Real_Array (1 .. 2 * Sightings);
@@ -4214,11 +4239,15 @@ package body Driver.Robot.Kinematics.Fit is
                         Bu : constant Real := B (B'First + 2 * (P - 1));
                         Bv : constant Real := B (B'First + 2 * (P - 1) + 1);
                         --  The residuals are each order's prediction less the one sighting: their difference is how far
-                        --  apart the two orders put it, whatever was seen.
+                        --  apart the two orders put it, whatever was seen. Where both put it behind the eye they agree
+                        --  it is nowhere, and it tells neither from the other; where one does, they are as far apart
+                        --  as can be.
+                        A_Nowhere : constant Boolean := abs Au >= Real'Last or else abs Av >= Real'Last;
+                        B_Nowhere : constant Boolean := abs Bu >= Real'Last or else abs Bv >= Real'Last;
                         Apart : constant Real :=
-                          (if abs Au >= Real'Last or else abs Av >= Real'Last or else abs Bu >= Real'Last
-                             or else abs Bv >= Real'Last
-                           then Real'Last else Sqrt ((Au - Bu) ** 2 + (Av - Bv) ** 2));
+                          (if A_Nowhere and then B_Nowhere then 0.0
+                           elsif A_Nowhere or else B_Nowhere then Real'Last
+                           else Sqrt ((Au - Bu) ** 2 + (Av - Bv) ** 2));
                      begin
                         for Part in 0 .. 1 loop
                            Sizes_A (At_Value + Part) := abs A (A'First + 2 * (P - 1) + Part);
@@ -4256,7 +4285,9 @@ package body Driver.Robot.Kinematics.Fit is
                   --  to the next (robust, over every keyframe): a keyframe's shared error (its view, where it landed)
                   --  moves its whole median, as much for the two orders, and is the largest that varies between
                   --  keyframes; the sum of the told keyframes' differences is then judged against it at Z. A keyframe
-                  --  whose points A puts behind the eye tells against A; one whose points only B puts there, for it.
+                  --  whose points A puts behind the eye tells against A; one whose points only B puts there, for it; one
+                  --  whose points both put there tells neither: counted against A, it kept A from being told from every
+                  --  order that put them there as well.
                   declare
                      Medians : Real_Array (1 .. Frames);
                      Km      : Natural := 0;
@@ -4280,6 +4311,9 @@ package body Driver.Robot.Kinematics.Fit is
                         Spread := Driver.Stats.Robust_Sigma (Medians (1 .. Km));
                      end if;
                      for F in 1 .. Frames loop
+                        if Filled (F) > 0 then
+                           Verdict.Seen := Verdict.Seen + 1;
+                        end if;
                         if Filled (F) > 0
                           and then Driver.Stats.Median (Apart_Of (First_Of (F) .. First_Of (F) + Filled (F) - 1))
                                    > Driver.Conventions.Z * Noise
@@ -4288,7 +4322,9 @@ package body Driver.Robot.Kinematics.Fit is
                               X : constant Real := Driver.Stats.Median (Sizes_A (First_Of (F) .. First_Of (F) + Filled (F) - 1));
                               Y : constant Real := Driver.Stats.Median (Sizes_B (First_Of (F) .. First_Of (F) + Filled (F) - 1));
                            begin
-                              if X >= Real'Last then
+                              if X >= Real'Last and then Y >= Real'Last then
+                                 null;
+                              elsif X >= Real'Last then
                                  Behind := True;
                               elsif Y >= Real'Last then
                                  Beyond := True;
@@ -4302,15 +4338,35 @@ package body Driver.Robot.Kinematics.Fit is
                      Free (Sizes_A);
                      Free (Sizes_B);
                      Free (Apart_Of);
-                     if Behind then
-                        return False;
-                     elsif Beyond then
-                        return True;
+                     Verdict.Telling := M;
+                     Verdict.Noise := Noise;
+                     Verdict.Spread := Spread;
+                     Verdict.Sum := Sum;
+                     Verdict.Behind := Behind;
+                     Verdict.Beyond := Beyond;
+                     if Spread < Real'Last then
+                        Verdict.Needed := Driver.Conventions.Z * Spread * Sqrt (Real (M));
                      end if;
-                     return M > 0 and then Spread > 0.0 and then Spread < Real'Last
-                       and then Sum > Driver.Conventions.Z * Spread * Sqrt (Real (M));
+                     Verdict.Smaller :=
+                       (if Behind then False
+                        elsif Beyond then True
+                        else M > 0 and then Spread > 0.0 and then Spread < Real'Last and then Sum > Verdict.Needed);
+                     return Verdict;
                   end;
-               end Smaller;
+               end Judge;
+
+               function Smaller (A, B : Real_Array) return Boolean is (Judge (A, B).Smaller);
+
+               --  Why B was not told from A, in words.
+               function Why_Image (J : Judgement) return String is
+                 (if J.Behind then "the order found puts the points of a keyframe that tells the two apart behind the eye"
+                  elsif J.Telling = 0 then
+                    "no keyframe of" & J.Seen'Image & " puts the two orders' points apart by more than Z of the residuals' "
+                    & "scatter, " & Driver.Log.Image (J.Noise, 3) & " px"
+                  else J.Telling'Image & " of" & J.Seen'Image & " keyframes put the two orders' points apart by more than Z "
+                    & "of the residuals' scatter, " & Driver.Log.Image (J.Noise, 3) & " px; there its medians are larger by "
+                    & Driver.Log.Image (J.Sum, 3) & " px in all, against the " & Driver.Log.Image (J.Needed, 3)
+                    & " px Z of the keyframes' spread (" & Driver.Log.Image (J.Spread, 3) & " px) asks of that many");
 
 
                procedure Free_All is
@@ -4372,6 +4428,7 @@ package body Driver.Robot.Kinematics.Fit is
                      Fails       : Boolean := False;   --  some order of its own is not significantly the larger
                      Fail_Order  : Chain_Access;
                      Fail_Median : Real := 0.0;
+                     Fail_Why    : Judgement;
                   end record;
                   --  The ways: every first joint, and when there are two or more joints, every second one after it.
                   Kept    : constant Positive := Natural'Min (2, N);
@@ -4492,7 +4549,8 @@ package body Driver.Robot.Kinematics.Fit is
                      loop
                         if C /= Order then
                            Score_Into (C, Own.all, Into.all, M, E);
-                           if not Smaller (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed)) then
+                           Result.Fail_Why := Judge (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed));
+                           if not Result.Fail_Why.Smaller then
                               Result.Fails := True;
                               Result.Fail_Order := new Chain_Order'(C);
                               Result.Fail_Median := M;
@@ -4541,7 +4599,7 @@ package body Driver.Robot.Kinematics.Fit is
                      Found := True;
                      Order := From.Chain;
                      Order_Is_Told := True;
-                     Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along the arm,"
+                     Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along " & (if Who = "" then "the arm" else Who) & ","
                                       & Image (Order) & ", told before, is told still against every swap of two joints"
                                       & " next to each other; no other order is searched");
                   else
@@ -4566,7 +4624,13 @@ package body Driver.Robot.Kinematics.Fit is
                      --  the keyframes' test (Smaller). Kept until the keyframes told it, a wrong first best stayed best
                      --  however much the others' residuals fell below its own: z7 replayed with the untold orders'
                      --  windows (servo seed 7 of the fake robot, 10-18) kept 3 4 1 6 2 5 at 0.832 px against 0.411 px
-                     --  of 1 2 3 4 5 6, and at 1.121 against 0.608.
+                     --  of 1 2 3 4 5 6, and at 1.121 against 0.608. The keyframes' test has its say on which is the best
+                     --  as well: the least takes the kept one's place too where the keyframes that tell the two apart find
+                     --  its residuals significantly the smaller (Smaller). By the medians alone a kept wrong order stood
+                     --  against the truth that left less: u9 (servo seed 3 of the fake robot, both arms, 10-19) kept 3 1 5
+                     --  2 6 4 for its arm 2 at 0.343 px against 3 5 1 2 6 4, the truth, at 0.337, whose sightings the
+                     --  three keyframes that told the two apart left 1.606 px the smaller in all against a bar of 0.722,
+                     --  and its sweep ended with the order not told.
                      if Found and then From.Valid and then From.N = N and then From.Chain /= Order then
                         declare
                            Own    : Rigid_Access := new Pose_Array;
@@ -4578,9 +4642,18 @@ package body Driver.Robot.Kinematics.Fit is
                            if M < Real'Last
                              and then not (M - Here > Driver.Conventions.Z * Sqrt (E ** 2 + Here_E ** 2))
                            then
-                              Order := From.Chain;
-                              Here := M;
-                              Here_R.all := Before.all;
+                              if Smaller (Here_R (1 .. 2 * Placed), Before (1 .. 2 * Placed)) then
+                                 Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along "
+                                                  & (if Who = "" then "the arm" else Who) & "," & Image (Order)
+                                                  & ", takes the place of" & Image (From.Chain) & " (median "
+                                                  & Driver.Log.Image (Here, 3) & " px against " & Driver.Log.Image (M, 3)
+                                                  & "): the keyframes that tell the two apart leave its sightings"
+                                                  & " significantly the smaller");
+                              else
+                                 Order := From.Chain;
+                                 Here := M;
+                                 Here_R.all := Before.all;
+                              end if;
                            end if;
                            Free (Own);
                            Free (Before);
@@ -4592,17 +4665,18 @@ package body Driver.Robot.Kinematics.Fit is
                         for J in 1 .. Ways loop
                            if Results (J).Fails then
                               Order_Is_Told := False;
-                              Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along the arm,"
+                              Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along " & (if Who = "" then "the arm" else Who) & ","
                                                & Image (Order) & ", is not told: the order"
                                                & Image (Results (J).Fail_Order.all) & " leaves residuals of median "
                                                & Driver.Log.Image (Results (J).Fail_Median, 3) & " px against "
                                                & Driver.Log.Image (Here, 3)
-                                               & " px, not significantly the larger by their signed ranks");
+                                               & " px, not significantly the larger: "
+                                               & Why_Image (Results (J).Fail_Why));
                               exit;
                            end if;
                         end loop;
                         if Order_Is_Told then
-                           Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along the arm,"
+                           Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along " & (if Who = "" then "the arm" else Who) & ","
                                             & Image (Order) & ", is told: every other order searched leaves residuals"
                                             & " significantly the larger than its " & Driver.Log.Image (Here, 3) & " px");
                         end if;
@@ -4659,9 +4733,19 @@ package body Driver.Robot.Kinematics.Fit is
                         Reach    : Real_Array (1 .. N) := [others => 0.0];
                         Untold_Count : Natural := 0;
                         Tells    : array (1 .. N, 1 .. N) of Natural := [others => [others => 0]];   --  orders a pair tells
-                        --  Per pair, the share of the widest turns its most telling turn took, and how well it told.
-                        Scale_Of : array (1 .. N, 1 .. N) of Real := [others => [others => 1.0]];
+                        --  Per pair, the turns of its two joints its most telling turn took, and how well it told.
+                        Turn_I_Of, Turn_J_Of : array (1 .. N, 1 .. N) of Real := [others => [others => 0.0]];
                         Power_Of : array (1 .. N, 1 .. N) of Real := [others => [others => 0.0]];
+                        --  The farthest two orders may put a point apart for a keyframe of the turn to be followed: the
+                        --  window that reaches both places (Kinematics' untold orders, Driver.Alignment.Window_Multiple),
+                        --  the fit's own scatter beside them, no wider than one a patch carries where the pictures are
+                        --  finest (Finest_Radius). A turn whose places of the points lie farther apart is searched wide
+                        --  and tells nothing: u6 (servo seed 3 of the fake robot, 10-19) turned its pairs where they
+                        --  told its untold orders apart most, c2 with c6 by 1784 and 1806 units, 140 px apart, and
+                        --  replayed, its four keyframes moved the points 48 to 70 px, a fifth to a quarter of them out of
+                        --  the picture, and found none of them; six of the 39 keyframes of its pairs found points, one
+                        --  of them hardly moved, and 719 orders stayed untold.
+                        Followable : Real := 0.0;
                         Dist     : Real_Access;
                         --  Every pair, each way each, by its joints' widest turns and by halves of them while both halves
                         --  are turns the fit counts (Visible): a turn that takes most of the points out of the picture tells
@@ -4720,6 +4804,25 @@ package body Driver.Robot.Kinematics.Fit is
                            end if;
                         end loop;
                         Dist := new Real_Array (1 .. Natural'Max (1, Tracks));
+                        declare
+                           Finite : Real_Access := new Real_Array (1 .. 2 * Placed);
+                           K      : Natural := 0;
+                           Scatter, Margin : Real;   --  the fit's residuals', and the window it alone asks
+                        begin
+                           for I in 1 .. 2 * Placed loop
+                              if abs Here_R (I) < Real'Last then
+                                 K := K + 1;
+                                 Finite (K) := Here_R (I);
+                              end if;
+                           end loop;
+                           Scatter := (if K > 1 then Driver.Stats.Robust_Sigma (Finite (1 .. K)) else Real'Last);
+                           Free (Finite);
+                           if Scatter < Real'Last then
+                              Margin := Driver.Alignment.Window_Radius (Scatter);
+                              Followable :=
+                                Sqrt (Real'Max (0.0, Driver.Alignment.Finest_Radius (Width, Height) ** 2 - Margin ** 2));
+                           end if;
+                        end;
                         for F in 1 .. Frames loop
                            for J in 1 .. N loop
                               Reach (J) := Real'Max (Reach (J), abs Change (F, J));
@@ -4770,9 +4873,9 @@ package body Driver.Robot.Kinematics.Fit is
                                              Apart (C, Move_Of (K), D, Cnt);
                                              --  How well the turn tells the two apart: the pixels between their places of
                                              --  the points over a median's own error, which falls with the root of how many
-                                             --  points the median is of.
+                                             --  points the median is of; none for a turn no narrow window follows.
                                              declare
-                                                Power : constant Real := D * Sqrt (Real (Cnt));
+                                                Power : constant Real := (if D <= Followable then D * Sqrt (Real (Cnt)) else 0.0);
                                              begin
                                                 if Power > Best_Power then
                                                    Best_Power := Power;
@@ -4783,25 +4886,31 @@ package body Driver.Robot.Kinematics.Fit is
                                                 Least_Of (K) := Real'Min (Least_Of (K), Power);
                                              end;
                                           end loop;
-                                          if Best_Apart > Driver.Conventions.Z * Here then
+                                          if Best_Power > 0.0 and then Best_Apart > Driver.Conventions.Z * Here then
                                              declare
                                                 Mv : constant Move := Move_Of (Best_Move);
                                              begin
                                                 Tells (Mv.I, Mv.J) := Tells (Mv.I, Mv.J) + 1;
                                                 if Best_Power > Power_Of (Mv.I, Mv.J) then
                                                    Power_Of (Mv.I, Mv.J) := Best_Power;
-                                                   Scale_Of (Mv.I, Mv.J) := Mv.Scale;
+                                                   Turn_I_Of (Mv.I, Mv.J) := abs (Mv.Scale * Reach (Mv.I));
+                                                   Turn_J_Of (Mv.I, Mv.J) := abs (Mv.Scale * Reach (Mv.J));
                                                 end if;
                                              end;
                                           end if;
-                                          Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: the order" & Image (C)
+                                          Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: " & (if Who = "" then "the arm" else Who) & ": the order" & Image (C)
                                                            & " is not told from" & Image (Order) & " (median "
                                                            & Driver.Log.Image (M, 3) & " px against "
-                                                           & Driver.Log.Image (Here, 3) & "); the turn that tells them apart"
-                                                           & " most, " & Move_Image (Move_Of (Best_Move))
-                                                           & ", puts their points a median "
-                                                           & Driver.Log.Image (Best_Apart, 3) & " px apart over"
-                                                           & Best_Count'Image & " points");
+                                                           & Driver.Log.Image (Here, 3) & "); "
+                                                           & (if Best_Power <= 0.0
+                                                              then "no turn of two joints puts their points apart within the "
+                                                                   & Driver.Log.Image (Followable, 3) & " px a narrow window follows"
+                                                              else "the turn that tells them apart most within the "
+                                                                   & Driver.Log.Image (Followable, 3) & " px a narrow window follows, "
+                                                                   & Move_Image (Move_Of (Best_Move))
+                                                                   & ", puts their points a median "
+                                                                   & Driver.Log.Image (Best_Apart, 3) & " px apart over"
+                                                                   & Best_Count'Image & " points"));
                                        end;
                                     end if;
                                  end if;
@@ -4817,25 +4926,25 @@ package body Driver.Robot.Kinematics.Fit is
                                        Best_Move := K;
                                     end if;
                                  end loop;
-                                 Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE:" & Untold_Count'Image
+                                 Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: " & (if Who = "" then "the arm" else Who) & ":" & Untold_Count'Image
                                                   & " orders not told from" & Image (Order) & " ("
                                                   & Driver.Log.Image (Here, 3) & " px, over" & Points'Image
                                                   & " placed points); the one turn that tells it from every one of them"
                                                   & " most, " & Move_Image (Move_Of (Best_Move)));
                               end;
                            else
-                              Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: every order is told from" & Image (Order));
+                              Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: " & (if Who = "" then "the arm" else Who) & ": every order is told from" & Image (Order));
                            end if;
                         end;
                         --  An order not told: the pairs Boot turns together (Untold) are the ones whose turns tell its
                         --  untold orders apart from it, each the pair that tells one of them most, the pair that tells
-                        --  the most of them first, each at the share of its widest turns that told best (Untold_Scales).
+                        --  the most of them first, each by the turns of its two joints that told best (Untold_Turns).
                         --  The joints next to each other along it were the ones before: s83's told order was one swap of
                         --  2 and 4 away from the true one, and the turn that tells those two apart is of c2 with c4 (2.8
                         --  px against 0.25), never turned while its untold orders were others'.
                         if not Order_Is_Told then
                            Untold.Clear;
-                           Untold_Scales.Clear;
+                           Untold_Turns.Clear;
                            loop
                               declare
                                  Bi, Bj : Natural := 0;
@@ -4850,7 +4959,8 @@ package body Driver.Robot.Kinematics.Fit is
                                  end loop;
                                  exit when Bi = 0;
                                  Untold.Append (Joint_Pair'(Earlier => Bi, Later => Bj));
-                                 Untold_Scales.Append (Scale_Of (Bi, Bj));
+                                 Untold_Turns.Append (Turn_I_Of (Bi, Bj));
+                                 Untold_Turns.Append (Turn_J_Of (Bi, Bj));
                                  Tells (Bi, Bj) := 0;
                               end;
                            end loop;

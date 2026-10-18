@@ -93,6 +93,8 @@ package Driver.Robot.Hand.Lobes is
       Tip_Move_There      : Natural := 0;
       Bordered_Here       : Boolean := False;      --  some pixel of it lies on the image's border
       Bordered_There      : Boolean := False;
+      Way_U, Way_V        : Real := 0.0;           --  the way the closer moves the picture over its pixels, from the
+      Way_Known           : Boolean := False;      --  first view's reading towards the other's (From_Change's Motion)
    end record;
    --  The moves are the evidence for the lobe's shape (Driver.Robot.Hand.Shape):
    --  a pixel of the lobe and the same point of it in the other view.
@@ -377,6 +379,12 @@ package Driver.Robot.Hand.Lobes is
 
    function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask) return Estimate;
    function Direction (Lobes : Lobe_Vectors.Vector; Attached : Mask) return Closing;
+
+   procedure Lead_Gaps (L : Lobe; Attached : Mask; At_Here, At_There, Never : out Real);
+   --  How far a lobe's lead goes at each end before it meets one of the robot's still pixels (Attached): over the
+   --  pixels of the end that lead the way the lobe arrived there from the other end, the median of how many pixels lie
+   --  between each and a still pixel straight ahead, Never (the picture's diagonal) for one with none ahead, and Never
+   --  when none leads or the lobe did not move. What Closing_Change compares of each lobe.
    --  The same for lobes of From_Change, whose pixels' places are known to
    --  the grid alone (a uniform square of side one) and not to a matcher.
 

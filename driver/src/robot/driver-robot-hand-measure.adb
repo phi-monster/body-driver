@@ -825,6 +825,8 @@ procedure Measure (H : in out Hands; M : in out Model) is
          Still_A_Closer : Boolean := False;
          Began : Natural := 0;   --  the beats the stream had when the sweep began
          Settles : Natural := 0; --  the most beats the own eye has taken to settle after a move
+         --  Where no step is measured, what every eye's lock-in and the reading's noise say of it (Visible_Step).
+         No_Step : Ada.Strings.Unbounded.Unbounded_String;
          procedure Read_Start (O : Observation) is
             R : constant Real_Array := O.Readings.Element (G);
             P : constant Natural := Own_Pair (G);
@@ -835,6 +837,24 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Step := Visible_Step (M, G, C);
             Pixel := (if P > 0 then Seen_By (Driver.Robot.Lockin.Shift (M, H.Data.Pairs (P).Eye, G, C)) else 0.0);
             Still_A_Closer := Sweepable (H, M, G);
+            if not Known (Step) then
+               for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+                  declare
+                     Gain, Spread : Real;
+                     Measured     : Boolean;
+                  begin
+                     Driver.Robot.Lockin.Gain_Of (M, E, G, C, Gain, Spread, Measured);
+                     Ada.Strings.Unbounded.Append
+                       (No_Step, "; eye" & E'Image & " " & Response (M, G, E)'Image & ", "
+                        & (if not Measured then "no gain of it in the lock-in"
+                           else "its gain " & Driver.Log.Image (Gain, 3) & " against "
+                                & Driver.Log.Image (Driver.Conventions.Z * Sqrt (Real'Max (0.0, Spread)), 3)
+                                & ", Z of its spread's root"));
+                  end;
+               end loop;
+               Ada.Strings.Unbounded.Append
+                 (No_Step, "; the reading's noise " & Driver.Log.Image (Reading_Noise (M, G, C), 3));
+            end if;
          end Read_Start;
       begin
          Hold_Beat (Read_Start'Access);
@@ -845,7 +865,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          end if;
          if not Known (Step) then
             Driver.Log.Line (Driver.Log.Robot, "hand: closer group" & G'Image & " channel" & C'Image
-                             & " has no visible step measured; not swept");
+                             & " has no visible step measured; not swept" & Ada.Strings.Unbounded.To_String (No_Step));
             return;
          end if;
          --  Each way doubles its push from the visible step while the reading
@@ -1431,7 +1451,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                              --  A lobe no closer moves has no line of sight (Press_Lobe): it is pressed along the way down,
                              --  and its line of sight's tilt from it is no number (s14 on 10-16, the hand's closer not its
                              --  own: the tilt of a zero line of sight stopped the boot).
-                             & (if R.Lobes (Lobe).Channel > 0 and then R.Lobes (Lobe).Sights (Which).Known
+                             & (if R.Lobes (Lobe).Sights (Which).Known
                                 then ", its line of sight tilted "
                                      & Driver.Log.Image
                                          (Driver.Robot.Hand.Aims.Spread
@@ -1614,7 +1634,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
          --  The lobe of a tool no closer moves has no line of sight: it is pressed along the way down, the
          --  surface's normal turned into the tool frame where the tool stands, read in a held beat; without a
          --  surface known there is no way down and no press.
-         Lined      : constant Boolean := R.Lobes (Lobe).Channel > 0;
+         Lined      : constant Boolean := R.Lobes (Lobe).Channel > 0 or else R.Lobes (Lobe).Sights (Which).Known;
          Sight      : Vec3 := (if Lined then R.Lobes (Lobe).Sights (Which).Ray.Direction.Unit_Vector else Zero3);
          Down_Known : Boolean := Lined;
          procedure Read_Down (O : Observation) is
