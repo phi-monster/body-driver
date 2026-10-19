@@ -1665,8 +1665,13 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Unfollowed := False;
             Best := Driver.Robot.Hand.Views.Reading_Holders.Empty_Holder;
             Arm_Is := 0;
+            --  Its ends are asked for, as Read_Open asks for them: the views can have moved on since the lobes were
+            --  placed. u26 (servo seed 3 of the fake robot, 10-19): the gaps of hand 2's closer cut by three readings
+            --  (Fill_Stops) and the closer opened again, the ends were taken here before they were seen still again,
+            --  and the boot ended on Low_End's precondition.
             if P = 0 or else There = 0 or else C > Sweeps.Channels (H.Data.Pairs (P).Sweep)
               or else Sweeps.Status (H.Data.Pairs (P).Sweep, C) /= Sweeps.Measured
+              or else not Sweeps.Has_Ends (H.Data.Pairs (P).Sweep, C)
             then
                return;
             end if;
