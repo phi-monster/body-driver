@@ -1,5 +1,8 @@
 with Ada.Strings.Fixed;
 with Ada.Calendar;
+with Ada.Environment_Variables;
+with Ada.Long_Float_Text_IO;
+with Ada.Text_IO;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Distributions;
@@ -1923,6 +1926,118 @@ package body Driver.Robot.Kinematics.Fit is
    ---------------------------------------------------------------------------
    --  The fit
 
+   --  For a fit studied alone (tools/fit_replay): with BD_DUMP_FITS naming a folder, every fit's inputs, in a file
+   --  of what is fitted and the fit's number in the run, every real to its last bit.
+   protected Dumps is
+      procedure Next (Number : out Positive);
+   private
+      Count : Natural := 0;
+   end Dumps;
+
+   protected body Dumps is
+      procedure Next (Number : out Positive) is
+      begin
+         Count := Count + 1;
+         Number := Count;
+      end Next;
+   end Dumps;
+
+   procedure Dump_Inputs
+     (Changes : Driver.Numerics.Arrays.Real_Matrix; Asked : Flag_Matrix; Visible : Real_Array;
+      Sightings : Sighting_Array; Width, Height : Positive; Unit_Frames : Natural; Who : String; From : Fit_Start)
+   is
+      use Ada.Text_IO;
+      File   : File_Type;
+      Number : Positive;
+      Name   : String := Who;
+      procedure Put_Real (X : Real) is
+      begin
+         Put (File, " ");
+         Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);
+      end Put_Real;
+      procedure Put_Flag (B : Boolean) is
+      begin
+         Put (File, Natural'Image (Boolean'Pos (B)));
+      end Put_Flag;
+   begin
+      for C of Name loop
+         if C = ' ' then
+            C := '_';
+         end if;
+      end loop;
+      Dumps.Next (Number);
+      Create (File, Out_File, Ada.Environment_Variables.Value ("BD_DUMP_FITS") & "/" & Name & "_"
+              & Ada.Strings.Fixed.Trim (Number'Image, Ada.Strings.Left) & ".txt");
+      Put_Line (File, "who " & Who);
+      Put_Line (File, "sizes" & Natural'Image (Changes'Length (1)) & Natural'Image (Visible'Length)
+                & Natural'Image (Sightings'Length) & Width'Image & Height'Image & Unit_Frames'Image);
+      Put_Line (File, "changes");
+      for I in Changes'Range (1) loop
+         for J in Changes'Range (2) loop
+            Put_Real (Changes (I, J));
+         end loop;
+         New_Line (File);
+      end loop;
+      Put_Line (File, "asked");
+      for I in Asked'Range (1) loop
+         for J in Asked'Range (2) loop
+            Put_Flag (Asked (I, J));
+         end loop;
+         New_Line (File);
+      end loop;
+      Put_Line (File, "visible");
+      for X of Visible loop
+         Put_Real (X);
+      end loop;
+      New_Line (File);
+      Put_Line (File, "sightings");
+      for X of Sightings loop
+         Put (File, X.Frame'Image & X.Track'Image);
+         Put_Real (X.U0);
+         Put_Real (X.V0);
+         Put_Real (X.U);
+         Put_Real (X.V);
+         Put_Real (X.Own);
+         Put (File, X.Own_Freedom'Image);
+         Put_Real (X.Off_U);
+         Put_Real (X.Off_V);
+         Put_Flag (X.Off_Told);
+         New_Line (File);
+      end loop;
+      Put_Line (File, "from" & From.N'Image);
+      Put_Flag (From.Valid);
+      Put_Flag (From.Whole);
+      Put_Flag (From.Order_Told);
+      Put (File, From.Profiled_Over'Image);
+      Put_Real (From.Focal_Within);
+      Put_Real (From.Searched_Least);
+      Put_Real (From.Searched_Most);
+      New_Line (File);
+      Put_Real (From.L.Fx);
+      Put_Real (From.L.Fy);
+      Put_Real (From.L.Cx);
+      Put_Real (From.L.Cy);
+      Put_Real (From.L.K1);
+      Put_Real (From.L.K2);
+      New_Line (File);
+      for J of From.Joints loop
+         for X of J.W loop
+            Put_Real (X);
+         end loop;
+         for X of J.P loop
+            Put_Real (X);
+         end loop;
+         Put_Real (J.C);
+         Put_Flag (J.Slide);
+         New_Line (File);
+      end loop;
+      for C of From.Chain loop
+         Put (File, C'Image);
+      end loop;
+      New_Line (File);
+      Close (File);
+   end Dump_Inputs;
+
    procedure Fit
      (Changes    : Driver.Numerics.Arrays.Real_Matrix;
       Asked      : Flag_Matrix;
@@ -2141,6 +2256,11 @@ package body Driver.Robot.Kinematics.Fit is
                   end if;
                end;
             end loop;
+            if Who /= "" then
+               Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " has" & Front'Image
+                                & " sightings whose point lies in front of both eyes and" & Back'Image & " behind both"
+                                & (if Back > Front then ": every translation is turned over" else ""));
+            end if;
             if Back > Front then
                for J of Joints loop
                   if J.Slide then
@@ -2316,6 +2436,9 @@ package body Driver.Robot.Kinematics.Fit is
       end Finish;
 
    begin
+      if Ada.Environment_Variables.Exists ("BD_DUMP_FITS") then
+         Dump_Inputs (Changes, Asked, Visible, Sightings, Width, Height, Unit_Frames, Who, From);
+      end if;
       Report := (others => <>);
       Joints := [others => <>];
       Chain := Order;
