@@ -2002,11 +2002,12 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.I
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Least_Pivot, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Lp.Fx, 1) & ""	1	format	digits printed in a log line or a message
-driver-robot-kinematics-fit.adb	& Driver.Log.Image (M, 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Misfit_Of (U), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Mv.Sj * Mv.Scale * Reach (Mv.J), 4));	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element, 1) & "")	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Results (J).Fail_Median, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rp.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Spread_Of (Best_Move), 3) & ""));	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Sqrt (Sum (F) / Real (Cnt (F))), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
@@ -2070,6 +2071,10 @@ driver-robot-kinematics-fit.adb	Av : constant Real := A (A'First + 2 * (P - 1) +
 driver-robot-kinematics-fit.adb	B := Start + Ln (2.0) / 2.0;	2.0	math	half an octave above the start: the bracket of the focal search is a factor of root two
 driver-robot-kinematics-fit.adb	B := Start + Ln (2.0) / 2.0;	2.0	math	half an octave above the start: the bracket of the focal search is a factor of root two
 driver-robot-kinematics-fit.adb	B1, B2 : Real_Vector (1 .. 3) := [others => 0.0];	3	structure	three-dimensional space
+driver-robot-kinematics-fit.adb	Base_Ahead := new Seen_Grid'(1 .. Natural (Move_Of.Length) => [1 .. Natural'Max (1, Tracks) => False]);	1	structure	at least one place
+driver-robot-kinematics-fit.adb	Base_In := new Seen_Grid'(1 .. Natural (Move_Of.Length) => [1 .. Natural'Max (1, Tracks) => False]);	1	structure	at least one place
+driver-robot-kinematics-fit.adb	Base_U := new Place_Grid (1 .. Natural (Move_Of.Length), 1 .. Natural'Max (1, Tracks));	1	structure	at least one place
+driver-robot-kinematics-fit.adb	Base_V := new Place_Grid (1 .. Natural (Move_Of.Length), 1 .. Natural'Max (1, Tracks));	1	structure	at least one place
 driver-robot-kinematics-fit.adb	Before : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Best_M : Real_Matrix (1 .. 2, 1 .. 3) := [others => [others => 0.0]];	2	structure	the homography's first two rows: its third is 0 0 1 about the axis
 driver-robot-kinematics-fit.adb	Best_M : Real_Matrix (1 .. 2, 1 .. 3) := [others => [others => 0.0]];	3	structure	three-dimensional space
@@ -2123,6 +2128,7 @@ driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / 
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	F_Least := (if Searches = 1 then F else Real'Min (F_Least, F));	1	structure	the first focal length tried starts the least
+driver-robot-kinematics-fit.adb	Far_Squared := new Place_Grid'(1 .. Natural (Move_Of.Length) => [1 .. Natural'Max (1, Tracks) => 0.0]);	1	structure	at least one place
 driver-robot-kinematics-fit.adb	Filled (F) := Filled (F) + 2;	2	structure	a sighting's two residuals, u and v
 driver-robot-kinematics-fit.adb	Finish (Profiled => not From.Valid or else Sightings'Length >= 2 * From.Profiled_Over);	2	structure	the profile walked again once the sightings have doubled since it was last walked (the ladder's doubling)
 driver-robot-kinematics-fit.adb	Finite : Real_Access := new Real_Array (1 .. 2 * Placed);	2	structure	two residuals per sighting, across and down

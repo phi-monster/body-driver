@@ -119,7 +119,7 @@ package Driver.Alignment.Keyframes is
                  and then Agree'Length = Answers'Length;
    --  Aligns every point of the reference into Image from the given prediction, as Add does, and keeps nothing: the
    --  chain is not changed. For a keyframe aligned before from a prediction too uncertain to search, and now offered
-   --  a better one. Agree is as Add's.
+   --  a better one. The prediction is the caller's at every point (Add's Supplied_At). Agree is as Add's.
 
    procedure Forget_Last (C : in out Chain)
      with Pre => Keyframes (C) > 0;
@@ -297,6 +297,7 @@ private
       Last     : Source := Supplied;   --  where the last prediction came from, until the keyframe it was for is added
       Motion   : Driver.Alignment.Keyframes.Motion;   --  the common motion the keyframe added last was asked from
       Stood, Moved_On : Flag_Vectors.Vector;   --  per point, of that motion (Stood_And_Moved)
+      Supplied_At : Flag_Vectors.Vector;   --  per point, whether the last prediction there was the caller's (Predict)
       Own_Points : Boolean := False;   --  the points move each by its own (Begin_Reference)
    end record;
 

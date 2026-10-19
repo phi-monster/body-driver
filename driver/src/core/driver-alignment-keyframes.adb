@@ -753,6 +753,7 @@ package body Driver.Alignment.Keyframes is
    begin
       C.Latest := [others => <>];
       C.Combined := (others => <>);
+      C.Supplied_At := Flag_Vectors.To_Vector (False, Ada.Containers.Count_Type (Count));
       From := Same_Pose;
       if Count = 0 or else Is_None (Changes, Noises) then
          Stay (0.0);
@@ -1110,6 +1111,10 @@ package body Driver.Alignment.Keyframes is
             if Offer_Wins then
                From := Supplied;
                Into := Offered;
+               for K in Into'Range loop
+                  C.Supplied_At.Replace_Element
+                    (K - Into'First + 1, Sqrt (Real'Max (Into (K).Cov.UU, Into (K).Cov.VV)) < Reach);
+               end loop;
             elsif Combined_Wins then
                From := Extrapolated;
                Extrapolate (C, C.Combined, Into);
@@ -1127,6 +1132,30 @@ package body Driver.Alignment.Keyframes is
                   begin
                      Into (K).Cov := (UU => Into (K).Cov.UU + D.Du ** 2, UV => Into (K).Cov.UV + D.Du * D.Dv,
                                       VV => Into (K).Cov.VV + D.Dv ** 2);
+                  end;
+               end loop;
+            end if;
+            --  Each point is asked from whichever prediction states less there: the fitted arm's offer, or the one
+            --  chosen. The arm predicts only the points it has a depth for, and the median over every point, most of
+            --  them without one, never chose it (w11, servo seed 11 of the fake robot, 10-19: arm 2 offered for 97 of
+            --  its keyframes, the median unbounded at every one of the 18 traced), though on the points it predicts it
+            --  erred 4.1 px where the prediction chosen erred 21.6 (the median over the 52 keyframes it bounded,
+            --  against the truth, the table's points). Replayed so, before the aligner kept the arm's points where the arm
+            --  put them (Add), arm 2's sightings the truth calls right grew from 3348 to 3990 and its wrong ones from 223
+            --  to 241; its keyframes with no right sighting fell from 87 to 55, its keyframes of two joints or more that
+            --  found no point from 62 to 31. The keyframe keeps the chosen
+            --  prediction's source (Last) for its other points; a point the arm predicts is the caller's (Supplied_At)
+            --  wherever it states less than the most the change can move it (Reach), as when the arm's offer wins.
+            if Offered'Length = Into'Length and then From /= Supplied then
+               for K in Into'Range loop
+                  declare
+                     Arm  : Prediction renames Offered (Offered'First + K - Into'First);
+                     Arms : constant Real := Sqrt (Real'Max (Arm.Cov.UU, Arm.Cov.VV));
+                  begin
+                     if Arms < Reach and then Arms < Sqrt (Real'Max (Into (K).Cov.UU, Into (K).Cov.VV)) then
+                        Into (K) := Arm;
+                        C.Supplied_At.Replace_Element (K - Into'First + 1, True);
+                     end if;
                   end;
                end loop;
             end if;
@@ -1314,7 +1343,9 @@ package body Driver.Alignment.Keyframes is
          return;
       end if;
       Fit_Field (C, Marks, Field, Mine);
-      Settle (C, Second, Answers, Marks, Field, Mine, Placed => [1 .. Given'Length => False]);
+      --  Every point is the caller's (Add's Supplied_At): one found from a narrow window where the caller put it stands
+      --  whether or not the field of the others puts it there.
+      Settle (C, Second, Answers, Marks, Field, Mine, Placed => [1 .. Given'Length => True]);
       Agree := Mine;
    end Realign;
 
@@ -1323,6 +1354,7 @@ package body Driver.Alignment.Keyframes is
    begin
       C.Frames.Delete_Last;
       C.Last := Supplied;
+      C.Supplied_At.Clear;
       C.Latest := [others => <>];
       C.Combined := (others => <>);
    end Forget_Last;
@@ -2402,7 +2434,22 @@ package body Driver.Alignment.Keyframes is
       --  the field put it, in a window wider than a patch (u3 replayed, 10-18: channel 4's first keyframe, its common
       --  motion told, 6 of its 86 points found from narrow windows).
       Own_Place : Flag_Array (1 .. Count) := [others => False];
+      --  A point the caller's model predicted (Predict's Supplied_At: a fitted arm's, at the point's own depth) is
+      --  asked where that model puts it in every round, not where the rounds' field puts it, and stands with the
+      --  keyframe once found there (Settle), as a point at a place of its own does: the field is one smooth map of
+      --  the picture, and it does not hold what lies at other depths than the plane it follows. Asked again from the
+      --  field, or from the view's common motion where the rest of the keyframe was extrapolated or a new direction,
+      --  arm 2's points the arm predicted were not found: w11 (servo seed 11 of the fake robot, 10-19, replayed with
+      --  each point asked from whichever prediction states less there), its pair turns of joints 1 and 3 by 100 and
+      --  308 units, about 100 of their 255 points from the arm, found a point at one of thirteen keyframes (4 there);
+      --  by half that, 7 to 26 at each of eleven.
+      Supplied_At : constant Flag_Array (1 .. Count) :=
+        [for K in 1 .. Count => K <= Natural (C.Supplied_At.Length) and then C.Supplied_At (K)];
       Next   : Frame;
+
+      --  Whether a place lies inside the window a prediction states for the point.
+      function Within (Place, Predicted : Prediction) return Boolean is
+        (Squared_Length (Place.To.U - Predicted.To.U, Place.To.V - Predicted.To.V, Predicted.Cov) <= Window_Multiple ** 2);
 
       --  Whether the field puts the point inside the picture: where the prediction was of any use.
       function In_View (P : Driver.Images.Pixel) return Boolean is
@@ -2435,6 +2482,7 @@ package body Driver.Alignment.Keyframes is
          end;
          Next.Moved := C.Last /= Same_Pose;
          C.Last := Supplied;
+         C.Supplied_At.Clear;
          C.Latest := [others => <>];
          C.Combined := (others => <>);
          C.Frames.Append (Next);
@@ -2519,20 +2567,36 @@ package body Driver.Alignment.Keyframes is
                   --  a prediction wider than that says only "anywhere" (f15c replayed on 10-15: a new direction's
                   --  window, from a channel's shift measured far beyond the view's, was over 40,000 pixels across, and
                   --  the count of its places overflowed).
-                  Spread : constant Real := Sqrt (Given (Given'First).Cov.UU);
+                  --  Of the points the new direction asks: the caller's (Supplied_At) state their own.
+                  Spread : Real := 0.0;
+                  Places : Prediction_Array (1 .. Count) := Given;
                begin
+                  for K in 1 .. Count loop
+                     if not Supplied_At (K) then
+                        Spread := Real'Max (Spread, Sqrt (Given (Given'First + K - 1).Cov.UU));
+                     end if;
+                  end loop;
                   declare
                      Stood, Moved : Flag_Array (1 .. Count);
                   begin
-                     Common_Motion (C, Second, Real'Min (Spread, Largest_Sigma (C.Pictures, Second)), Riding, Asked, Common,
+                     Common_Motion (C, Second, Real'Min (Spread, Largest_Sigma (C.Pictures, Second)), Riding, Places, Common,
                                     Stood, Moved, Own_Place);
                      Keep_Evidence (C, Stood, Moved);
                   end;
                   Common.Searched := True;
                   C.Motion := Common;
-                  if not Common.Told then
+                  if Common.Told then
+                     for K in 1 .. Count loop
+                        if Supplied_At (K) then
+                           Own_Place (K) := Own_Place (K) and then Within (Places (K), Given (Given'First + K - 1));
+                        end if;
+                        if Own_Place (K) or else not Supplied_At (K) then
+                           Asked (K) := Places (K);
+                        end if;
+                     end loop;
+                  else
                      Own_Place := [others => False];
-                     Done := [others => True];
+                     Done := [for K in 1 .. Count => Done (K) or else not Supplied_At (K)];
                   end if;
                end;
             elsif Count > 0 and then C.Last = Supplied
@@ -2567,8 +2631,7 @@ package body Driver.Alignment.Keyframes is
                         G : Prediction renames Given (Given'First + K - 1);
                      begin
                         Own_Place (K) := Own_Place (K) and then Common.Told and then not Common.Set_Aside
-                          and then Squared_Length (Places (K).To.U - G.To.U, Places (K).To.V - G.To.V, G.Cov)
-                                   <= Window_Multiple ** 2;
+                          and then Within (Places (K), G);
                         if Own_Place (K) then
                            Asked (K) := Places (K);
                         end if;
@@ -2611,8 +2674,15 @@ package body Driver.Alignment.Keyframes is
                            Apart : constant Real := Sqrt (Du ** 2 + Dv ** 2);
                            Rest  : constant Real := Real'Max (0.0, Apart - Sqrt (Places (K).Cov.UU));
                         begin
-                           --  A point at a place of its own is asked there.
-                           if Own_Place (K) then
+                           --  A point the caller's model predicted (Supplied_At) is asked at a place of its own only
+                           --  inside the window that model states for it, and else as predicted, as where the whole
+                           --  keyframe is the caller's (above); every other point at a place of its own is asked there.
+                           if Supplied_At (K) then
+                              Own_Place (K) := Own_Place (K) and then Within (Places (K), G);
+                              if Own_Place (K) then
+                                 Asked (K) := Places (K);
+                              end if;
+                           elsif Own_Place (K) then
                               Asked (K) := Places (K);
                            elsif Apart > 0.0 and then Rest > 0.0 then
                               Asked (K).Cov := (UU => G.Cov.UU + (Rest / Apart) ** 2 * Du ** 2,
@@ -2638,7 +2708,7 @@ package body Driver.Alignment.Keyframes is
                      Round (K) := True;
                      Done (K) := True;
                      Any := True;
-                     if Next.Field.Valid and then not Own_Place (K) then
+                     if Next.Field.Valid and then not Own_Place (K) and then not Supplied_At (K) then
                         Asked (K) := Asked_From (C, Next.Field, C.Points (K));
                      end if;
                   end if;
@@ -2666,7 +2736,8 @@ package body Driver.Alignment.Keyframes is
             end;
          end loop;
       end;
-      Settle (C, Second, Answers, Marks, Next.Field, Mine, Placed => Own_Place);
+      Settle (C, Second, Answers, Marks, Next.Field, Mine,
+              Placed => [for K in 1 .. Count => Own_Place (K) or else Supplied_At (K)]);
       Agree := Mine;
       --  How far the extrapolation of each order that was tried was off, beyond what the fields it rested on carry:
       --  what the keyframe says of the curvature of the move (Frame). It is judged against the keyframe's field at
@@ -2748,6 +2819,7 @@ package body Driver.Alignment.Keyframes is
       end if;
       Next.Moved := C.Last /= Same_Pose;
       C.Last := Supplied;
+      C.Supplied_At.Clear;
       C.Latest := [others => <>];
       C.Combined := (others => <>);
       C.Frames.Append (Next);

@@ -41,6 +41,45 @@ pixel). The cost is on the first fit: the arm's lens is known to about 2.5 % unt
 (A79 arm 1: focal sigma 9.8 px at the first fit, 1.9 px at the last); a sweep with a keyframe between 35 and 140 px would
 have the widest ones predicted narrow at once.
 
+## A fitted arm predicts each point at its own depth
+
+The fitted arm predicts every point it has a depth for (`Kinematics.Offer_Of`): where the eye at the keyframe's readings
+sees it, as uncertain as the fit leaves the eye's pose and the point's depth, and as the farthest untold order of the
+joints puts it. A point without a depth it does not predict.
+
+On w11 (servo seed 11 of the fake robot, 10-19, replayed and judged against the simulator's truth), arm 2 turned its
+joints 1 and 3 together by 100 and 308 units, four times (keyframes 75 to 78), and its view's points moved 112 to 126
+px. At each keyframe 10 to 40 points had the arm's prediction. Against the truth those points were off by a median 1.6
+to 2.6 px, where the arm stated 4.8 to 6.6. The keyframe's other points were extrapolated from the single-joint
+keyframes before, and were off by 100 to 116 px against the 44 to 71 they stated. No point stood with any of the
+four keyframes. The arm's points were asked from windows wider than a patch: 9, 2, 2 and 0 of them were answered,
+none from a narrow window and none where the keyframe's field agreed. The reasons:
+
+- the prediction chosen for a keyframe was the one whose median over all its points states least. The arm's is
+  unbounded where it has no depth, so the extrapolation won at every keyframe traced;
+- once the arm's prediction was taken point by point, its points were still handled as the rest of the keyframe. They
+  were checked against the view's common motion, which is one plane's motion, and asked again from the keyframe's
+  field, one smooth map of the picture. Neither holds what lies at other depths than the plane it follows.
+
+At half that turn (keyframes 114 to 117, the points moving 46 to 64 px), 19, 19, 25 and 17 points stood with the
+keyframes, every one of them the arm's and from a narrow window.
+
+So each point is asked from whichever prediction states less there. A point the arm predicted is asked where the arm
+puts it in every round, and it is taken at a place of its own on the common motion only inside the window the arm
+states for it. Once found there it stands with the keyframe, as a point at a place of its own does
+(`Keyframes.Predict`, `Supplied_At`; `Keyframes.Add`).
+
+Replayed so on u21 (servo seed 3, 10-19), 13 of its 22 keyframes of pairs still had no point stand (15 of 23 on its
+live run). At each, the arm's 36 to 102 points lay within 1 to 8 px of the truth on the median, but the arm stated 7 to
+15 px for them, because the farthest of its 12 untold orders put them that far, and every one was asked from a window
+wider than a patch. The pair to turn had been chosen for the two orders it told apart most, within the window those two
+need. A keyframe is searched in the window that reaches every untold order's places, so the turn is now chosen by that
+window: the median, over the points, of the farthest place an untold order puts each, within what a narrow window
+follows (`Kinematics.Fit`, the active planner's `Spread_Of`). While many orders are untold, the turns are small.
+
+A keyframe aligned again from the fitted arm (`Keyframes.Realign`) takes the arm's prediction at every point, and its
+points found narrowly where the arm put them stand, as in `Add`.
+
 ## The fit's last stage is chaotic on some data
 
 Perturbing the sightings of A23's arm 2 by 1e-9 px moved its focal length between 396.9 and 399.2 px (stated sigma
