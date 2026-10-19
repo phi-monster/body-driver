@@ -1,7 +1,11 @@
+with Ada.Numerics.Long_Elementary_Functions;
+with Driver.Conventions;
 with Driver.Robot.Channels;
 with Driver.Robot.Lag;
 
 package body Driver.Robot.Graph is
+
+   use Ada.Numerics.Long_Elementary_Functions;
 
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
@@ -219,6 +223,17 @@ package body Driver.Robot.Graph is
                Patched    : Boolean := False;
                Unsure     : Boolean := False;   --  some eye has not told
                Undecided_Eye : Boolean := False;   --  some eye told, but not enough to decide
+
+               --  Another eye on an arm shows the group a patch of significantly more cells than Kept shows it now (a
+               --  sign test: each cell that responds in either is as likely in both where the two show the group
+               --  alike). Not where Kept was not measured: it then tells nothing.
+               function Clearer (Kept : Eye_Id) return Boolean is
+                  Now : constant Eye_Effect := Effect (M, G, Kept);
+               begin
+                  return Best_Eye > 0 and then Best_Eye /= Kept and then Now.Verdict /= Unmeasured
+                    and then Real (Best_Count) - Real (Now.Responding)
+                             > Driver.Conventions.Z * Sqrt (Real (Best_Count + Now.Responding));
+               end Clearer;
             begin
                for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
                   declare
@@ -258,12 +273,18 @@ package body Driver.Robot.Graph is
                --  the group unclassified, its closer's sweep and its hand dropped; s32, s36 and s37 lost theirs the
                --  same day), undecided, or a patch. An eye that may ride the group (undecided, its view possibly
                --  whole: the rule above) still leaves it unclassified; an eye in which the group moves nothing, or
-               --  moves the whole view, takes the role off, and so does the eye leaving the arm.
+               --  moves the whole view, takes the role off, and so does the eye leaving the arm. So does another eye
+               --  on an arm whose patch of the group significantly outnumbers in cells what the eye that showed it
+               --  shows now (Clearer): the eye that showed a closer first may have been the only eye then known to
+               --  ride an arm (w11, servo seed 11 of the fake robot, 10-19: arm 1's closer a patch of 6 to 8 cells in
+               --  arm 2's eye and of 36 in arm 1's own, which was known to ride arm 1 from beat 2543 on; the
+               --  remembered eye kept the closer on arm 2, and arm 1 was given none).
                if Undecided_Eye then
                   null;
                elsif M.Groups (G).Closer_Eye > 0
                  and then Gr.Mounts (M.Groups (G).Closer_Eye).Kind = Arm_Carried
                  and then Effect (M, G, M.Groups (G).Closer_Eye).Verdict in Unmeasured | Undecided | Patch
+                 and then not Clearer (M.Groups (G).Closer_Eye)
                then
                   Gr.Roles.Replace_Element (G, Closer);
                   Gr.Arm_Of.Replace_Element (G, Gr.Mounts (M.Groups (G).Closer_Eye).Arm);

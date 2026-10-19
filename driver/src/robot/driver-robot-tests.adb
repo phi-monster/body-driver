@@ -635,6 +635,60 @@ package body Driver.Robot.Tests is
       Check (Role (M, 3) = Closer, "once the eye decided nothing moved, the group is " & Role (M, 3)'Image);
    end Undecided_Eye_Leaves_Group_Unclassified;
 
+   --  A closer's remembered eye (Group_Stream.Closer_Eye) yields to another eye on an arm whose patch of the group
+   --  significantly outnumbers its own in cells, and only to such a one; where the remembered eye was not measured it
+   --  tells nothing and keeps the group (w11, servo seed 11 of the fake robot, 10-19: arm 1's closer stayed on arm 2
+   --  by arm 2's eye, 6 to 8 cells, though arm 1's own eye showed it in 36).
+   procedure Clearer_Eye_Takes_A_Closer is
+      M     : Model;
+      Group : constant Group_Id := 3;   --  the rig's closer
+      Own   : Eye_Effect;
+      Least : Natural := 0;   --  the fewest cells of a patch in eye 2 that significantly outnumber eye 1's
+      function Index_Of (E : Eye_Id) return Positive is ((Natural (Group) - 1) * Eye_Count (M) + Natural (E));
+      function Patch_Of (Cells : Natural) return Eye_Effect is
+        (Verdict => Patch, Responding => Cells, Textured => Own.Textured,
+         Fraction => (Value => Real (Cells) / Real (Own.Textured), Sigma => 0.07, Degrees_Of_Freedom => 0),
+         Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => False);
+   begin
+      Exercise_Rig (M);
+      Own := M.Graph.Effects (Index_Of (1));
+      Check (Role (M, Group) = Closer and then Own.Verdict = Patch
+             and then Eye_Mount (M, 1).Kind = Arm_Carried and then Eye_Mount (M, 2).Kind = Arm_Carried
+             and then Eye_Mount (M, 1).Arm /= Eye_Mount (M, 2).Arm
+             and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 1).Arm,
+             "the rig's closer is no patch of eye 1 on eye 1's arm, or eyes 1 and 2 ride no two arms");
+      if Own.Verdict /= Patch or else Eye_Mount (M, 2).Kind /= Arm_Carried then
+         return;
+      end if;
+      for N in Own.Responding + 1 .. Own.Textured loop
+         if Real (N) - Real (Own.Responding) > Driver.Conventions.Z * Sqrt (Real (N + Own.Responding)) then
+            Least := N;
+            exit;
+         end if;
+      end loop;
+      Check (Least > Own.Responding + 1,
+             "of" & Own.Textured'Image & " cells, none outnumber eye 1's" & Own.Responding'Image
+             & " both by one at least and not significantly");
+      if Least <= Own.Responding + 1 then
+         return;
+      end if;
+      M.Graph.Effects.Replace_Element (Index_Of (2), Patch_Of (Least - 1));
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, Group) = Closer and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 1).Arm,
+             "a patch of" & Natural'Image (Least - 1) & " cells in eye 2 against" & Own.Responding'Image
+             & " in eye 1 moved the closer, " & Role (M, Group)'Image);
+      M.Graph.Effects.Replace_Element (Index_Of (2), Patch_Of (Least));
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, Group) = Closer and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 2).Arm,
+             "a patch of" & Least'Image & " cells in eye 2 against" & Own.Responding'Image
+             & " in eye 1 left the closer on eye 1's arm, " & Role (M, Group)'Image);
+      M.Graph.Effects.Replace_Element (Index_Of (2), (Verdict => Unmeasured, others => <>));
+      M.Graph.Effects.Replace_Element (Index_Of (1), Patch_Of (Own.Textured));
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, Group) = Closer and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 2).Arm,
+             "eye 2 not measured, the closer left its arm for eye 1's, " & Role (M, Group)'Image);
+   end Clearer_Eye_Takes_A_Closer;
+
    --  An arm whose own eye the lock-in calls undecided keeps that eye while its keyframes tell that the eye's view
    --  moves with it (Arm_Evidence.Shift_Seen): the aligner measures over the whole picture what the lock-in's flow
    --  measures a beat at a time (f15o on 10-15: the lock-in, regressing the sweep's and the hand's beats again,
@@ -8801,6 +8855,9 @@ package body Driver.Robot.Tests is
                              & "own eye is called an arm after enough presses", Presses_Leave_A_Closer_A_Closer'Access);
       Driver.Tests.Register ("robot.roles.undecided", "a group some eye is still undecided about is called a closer or a "
                              & "part, though that eye may ride on it", Undecided_Eye_Leaves_Group_Unclassified'Access);
+      Driver.Tests.Register ("robot.roles.clearer", "a closer's remembered eye yields to another eye on an arm whose "
+                             & "patch of it significantly outnumbers its own, and only to such a one",
+                             Clearer_Eye_Takes_A_Closer'Access);
       Driver.Tests.Register ("robot.roles.keyframes", "an arm loses the eye its keyframes tell moves with it when the "
                              & "lock-in is undecided about it, or keeps one the lock-in sees it move nothing in",
                              Keyframes_Hold_An_Eye_On_Its_Arm'Access);
