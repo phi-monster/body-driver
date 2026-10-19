@@ -2016,6 +2016,7 @@ driver-robot-kinematics-fit.adb	& "" & Real'Image (C) & "" & Real'Image (Sqrt (V
 driver-robot-kinematics-fit.adb	& (case (P - 7) mod 5 is	5	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	& (case (P - 7) mod 5 is	7	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Best_Apart, 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (D, 3) & "" & Cnt'Image);	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Exp (Best_At + Told_Within), 1) & "" & Warm_Tries'Image	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Followable, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Followable, 3) & ""	3	format	digits printed in a log line or a message
@@ -2195,6 +2196,7 @@ driver-robot-kinematics-fit.adb	H0 => [C.X0 / F, C.Y0 / F, 1.0], H => [C.X1 / F,
 driver-robot-kinematics-fit.adb	Half : constant := 0.5;	0.5	statistics	an even split: the null of two planes that hold as many points
 driver-robot-kinematics-fit.adb	Here_E : constant Real := Median_Error (Here, 2 * Placed);	2	structure	a sighting's two residuals, u and v
 driver-robot-kinematics-fit.adb	Here_R : Real_Access := new Real_Array (1 .. 2 * Multi);	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	High.Scale := Low.Scale * 2.0;	2.0	math	the shares halve: the next share up is twice this one
 driver-robot-kinematics-fit.adb	Hm, Fm : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	Hm, Fm : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	I, J : Positive := 1;	1	structure	a record's first
@@ -2239,6 +2241,7 @@ driver-robot-kinematics-fit.adb	Low : Positive := 1;	1	structure	the search of t
 driver-robot-kinematics-fit.adb	M : constant Real_Matrix (1 .. 2, 1 .. 3) :=	2	structure	the homography's first two rows: its third is 0 0 1 about the axis
 driver-robot-kinematics-fit.adb	M : constant Real_Matrix (1 .. 2, 1 .. 3) :=	3	structure	three-dimensional space
 driver-robot-kinematics-fit.adb	M_A (P_Count + 1, Anchor) := 1.0;	1.0	structure	the anchor joint's row
+driver-robot-kinematics-fit.adb	Mid.Scale := (Low.Scale + High.Scale) / 2.0;	2.0	math	the middle of two shares
 driver-robot-kinematics-fit.adb	Middle : constant Real := (Low + Top) / 2.0;	2.0	math	the middle of an interval
 driver-robot-kinematics-fit.adb	Minimal : constant := 3;	3	math	three points fix a plane
 driver-robot-kinematics-fit.adb	Most : Positive := 1;	1	structure	the search of the eigenvalues from the first
@@ -2501,6 +2504,7 @@ driver-robot-kinematics-fit.adb	function Rayleigh_Median return Real is (Sqrt (2
 driver-robot-kinematics-fit.adb	function Rayleigh_Median return Real is (Sqrt (2.0 * Ln (2.0)));	2.0	math	the median of a Rayleigh variate (the length of two Gaussian components) is sqrt (2 ln 2) times their scale
 driver-robot-kinematics-fit.adb	if (if Way = 1 then Up_Frame (J) else Down_Frame (J)) > 0 then	1	structure	the two widest keyframes of a joint, one each way
 driver-robot-kinematics-fit.adb	if All_In >= 1.0 then	1.0	math	a probability of one: every sample is of agreeing points
+driver-robot-kinematics-fit.adb	if Best_U_Of (I, J) > 0 and then Best_Of (I, J).Scale < 1.0 then	1.0	structure	a share of one is the pair's widest turns, which none is above
 driver-robot-kinematics-fit.adb	if Count <= 3 or else Determinant (M) = 0.0 then	3	statistics	more points than the plane's three parameters, or their spread is not measured
 driver-robot-kinematics-fit.adb	if Count >= 3 and then Homographic (Frame) then	3	structure	the plane's homography: six unknowns, two equations a sighting
 driver-robot-kinematics-fit.adb	if Count >= 3 and then not Homographic (Frame) then	3	structure	the epipolar one: four unknowns less their scale, one equation a sighting

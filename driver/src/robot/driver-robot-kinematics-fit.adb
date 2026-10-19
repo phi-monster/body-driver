@@ -5052,6 +5052,81 @@ package body Driver.Robot.Kinematics.Fit is
                            --  the truth (a median) but stated 7 to 15 px for the farthest untold order's places, every one
                            --  of them asked from a window wider than a patch.
                            Spread_Of : Real_Array (1 .. Moves) := [others => Real'Last];
+                           --  Per pair, the move that told one untold order most, and that order (its place among them).
+                           Best_Of   : array (1 .. N, 1 .. N) of Move;
+                           Best_U_Of : array (1 .. N, 1 .. N) of Natural := [others => [others => 0]];
+
+                           --  The untold order U, as the moves' passes list them.
+                           function Other_Of (U : Positive) return Chain_Order is
+                              Other : Chain_Order (1 .. N);
+                           begin
+                              for J in 1 .. N loop
+                                 Other (J) := Untold_Orders (Untold_Orders.Last_Index - (Untold_Count - U + 1) * N + J);
+                              end loop;
+                              return Other;
+                           end Other_Of;
+
+                           --  Where the joints in order C put the placed points after Mv, and whether before the eye.
+                           procedure Places (C : Chain_Order; Mv : Move; U, V : out Real_Array; Ahead : out Flags) is
+                              T : constant Rigid := Eye_At (Joints, C, Change_Of (Mv));
+                           begin
+                              for P in 1 .. Tracks loop
+                                 U (P) := 0.0;
+                                 V (P) := 0.0;
+                                 Ahead (P) := False;
+                                 if Has (P) then
+                                    Project (Lens0, Transpose (T.Rotation) * (Point_Of (P) - T.Translation), U (P), V (P),
+                                             Ahead (P));
+                                 end if;
+                              end loop;
+                           end Places;
+
+                           function In_Picture (U, V : Real) return Boolean is
+                             (U >= 0.0 and then U < Real (Width) and then V >= 0.0 and then V < Real (Height));
+
+                           --  Spread_Of of a move of no pass, against Followable: the median, over the points Order puts
+                           --  in the picture, of the farthest an untold order puts each from there.
+                           function Followed (Mv : Move) return Boolean is
+                              U1, V1, U2, V2 : Real_Array (1 .. Tracks);
+                              A1, A2         : Flags (1 .. Tracks);
+                              Far            : Real_Array (1 .. Tracks) := [others => 0.0];
+                              Count          : Natural := 0;
+                           begin
+                              Places (Order, Mv, U1, V1, A1);
+                              for U in 1 .. Untold_Count loop
+                                 Places (Other_Of (U), Mv, U2, V2, A2);
+                                 for P in 1 .. Tracks loop
+                                    if A1 (P) and then A2 (P) then
+                                       Far (P) := Real'Max (Far (P), (U1 (P) - U2 (P)) ** 2 + (V1 (P) - V2 (P)) ** 2);
+                                    end if;
+                                 end loop;
+                              end loop;
+                              for P in 1 .. Tracks loop
+                                 if A1 (P) and then In_Picture (U1 (P), V1 (P)) then
+                                    Count := Count + 1;
+                                    Dist (Count) := Sqrt (Far (P));
+                                 end if;
+                              end loop;
+                              return Count > 0 and then Driver.Stats.Median (Dist (1 .. Count)) <= Followable;
+                           end Followed;
+
+                           --  Apart's median and count for a move of no pass.
+                           procedure Separation (Other : Chain_Order; Mv : Move; Median : out Real; Count : out Natural) is
+                              U1, V1, U2, V2 : Real_Array (1 .. Tracks);
+                              A1, A2         : Flags (1 .. Tracks);
+                           begin
+                              Places (Order, Mv, U1, V1, A1);
+                              Places (Other, Mv, U2, V2, A2);
+                              Count := 0;
+                              for P in 1 .. Tracks loop
+                                 if A1 (P) and then A2 (P) and then In_Picture (U1 (P), V1 (P)) and then In_Picture (U2 (P), V2 (P))
+                                 then
+                                    Count := Count + 1;
+                                    Dist (Count) := Sqrt ((U1 (P) - U2 (P)) ** 2 + (V1 (P) - V2 (P)) ** 2);
+                                 end if;
+                              end loop;
+                              Median := (if Count > 0 then Driver.Stats.Median (Dist (1 .. Count)) else 0.0);
+                           end Separation;
                         begin
                            for W in 1 .. Ways loop
                               First_Of (W, C);
@@ -5131,6 +5206,8 @@ package body Driver.Robot.Kinematics.Fit is
                                        Tells (Mv.I, Mv.J) := Tells (Mv.I, Mv.J) + 1;
                                        if Best_Power > Power_Of (Mv.I, Mv.J) then
                                           Power_Of (Mv.I, Mv.J) := Best_Power;
+                                          Best_Of (Mv.I, Mv.J) := Mv;
+                                          Best_U_Of (Mv.I, Mv.J) := U;
                                           Turn_I_Of (Mv.I, Mv.J) := abs (Mv.Scale * Reach (Mv.I));
                                           Turn_J_Of (Mv.I, Mv.J) := abs (Mv.Scale * Reach (Mv.J));
                                        end if;
@@ -5151,6 +5228,63 @@ package body Driver.Robot.Kinematics.Fit is
                                                           & Best_Count'Image & " points, every untold order a median "
                                                           & Driver.Log.Image (Spread_Of (Best_Move), 3) & " px from them"));
                               end;
+                           end loop;
+                           --  Each pair's turn grown to the widest a narrow window follows. Two joints' order shows in
+                           --  what each turns through the other: the places the orders give the points move apart nearly
+                           --  as the square of the turns, and the shares halve, so the share found best may tell a
+                           --  quarter of what one short of the next share up does. q14 (servo seed 7 of the fake robot,
+                           --  10-19): its last untold order, a swap of c3 and c6, was told apart most by both at half
+                           --  their widest turns, 74.5 units, 1.97 px apart within the 6.74 px followed; at the widest,
+                           --  not followed; the sweep ended with the wrong order the best. Between the share and the next
+                           --  one up, when that one is not followed, halved until the two shares' turns differ by less
+                           --  than either joint's visible step, or no share lies between them.
+                           for I in 1 .. N loop
+                              for J in 1 .. N loop
+                                 if Best_U_Of (I, J) > 0 and then Best_Of (I, J).Scale < 1.0 then
+                                    declare
+                                       Low  : Move := Best_Of (I, J);
+                                       High : Move := Low;
+                                       Was  : constant Move := Low;
+                                    begin
+                                       High.Scale := Low.Scale * 2.0;
+                                       if not Followed (High) then
+                                          loop
+                                             exit when (High.Scale - Low.Scale) * Reach (Low.I) < Visible (Visible'First + Low.I - 1)
+                                               and then (High.Scale - Low.Scale) * Reach (Low.J) < Visible (Visible'First + Low.J - 1);
+                                             declare
+                                                Mid : Move := Low;
+                                             begin
+                                                Mid.Scale := (Low.Scale + High.Scale) / 2.0;
+                                                exit when Mid.Scale <= Low.Scale or else Mid.Scale >= High.Scale;
+                                                if Followed (Mid) then
+                                                   Low := Mid;
+                                                else
+                                                   High := Mid;
+                                                end if;
+                                             end;
+                                          end loop;
+                                          if Low.Scale > Was.Scale then
+                                             declare
+                                                D   : Real;
+                                                Cnt : Natural;
+                                             begin
+                                                Separation (Other_Of (Best_U_Of (I, J)), Low, D, Cnt);
+                                                if D * Sqrt (Real (Cnt)) > Power_Of (I, J) then
+                                                   Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: "
+                                                                    & (if Who = "" then "the arm" else Who) & ": "
+                                                                    & Move_Image (Was) & " grown to " & Move_Image (Low)
+                                                                    & ", the widest a narrow window follows: the points "
+                                                                    & Driver.Log.Image (D, 3) & " px apart over" & Cnt'Image);
+                                                   Power_Of (I, J) := D * Sqrt (Real (Cnt));
+                                                   Turn_I_Of (I, J) := abs (Low.Scale * Reach (Low.I));
+                                                   Turn_J_Of (I, J) := abs (Low.Scale * Reach (Low.J));
+                                                end if;
+                                             end;
+                                          end if;
+                                       end if;
+                                    end;
+                                 end if;
+                              end loop;
                            end loop;
                            Free (Base_U);
                            Free (Base_V);
