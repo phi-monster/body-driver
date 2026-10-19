@@ -1,4 +1,4 @@
-with Ada.Containers.Vectors;
+with Ada.Containers.Doubly_Linked_Lists;
 with Driver.Beats;
 with Driver.Log;
 with Driver.Memory;
@@ -8,7 +8,12 @@ with Driver.Services;
 
 package body Driver.Apart is
 
-   package Message_Vectors is new Ada.Containers.Vectors (Positive, Message);
+   --  The messages kept back, first in first out: each is taken from the front of a list. Taken from the front of a
+   --  vector, every message taken moved all those behind it, and catching up after a long estimate cost the square
+   --  of the backlog: q9 (servo seed 7 of the fake robot, 10-19), an estimate kept 3 400 beats back, and of 2126
+   --  samples of the estimator's task 1875 were in that move, while one arm's sweep waited for the estimates and
+   --  the other's went on without them.
+   package Message_Lists is new Ada.Containers.Doubly_Linked_Lists (Message);
 
    procedure Note (Kind : Driver.Recording.Record_Kind) is
    begin
@@ -45,7 +50,7 @@ package body Driver.Apart is
    private
       Kept, Most : Natural := 0;   --  of the apart episode under way
       Phase    : Phase_Kind := Home;
-      Queue    : Message_Vectors.Vector;
+      Queue    : Message_Lists.List;
       Has_Rest : Boolean := False;   --  the rest of Rest_Msg is still to be given
       Rest_Msg : Message;
       Mark     : Natural := 0;       --  messages kept back when the last answer went
@@ -242,7 +247,7 @@ package body Driver.Apart is
    --  Replay: one task, so no protection.
 
    Replaying_Apart : Boolean := False;
-   Replay_Queue    : Message_Vectors.Vector;
+   Replay_Queue    : Message_Lists.List;
    Replay_Has_Rest : Boolean := False;
    Replay_Rest_Msg : Message;
 
