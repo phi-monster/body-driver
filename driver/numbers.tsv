@@ -1144,14 +1144,13 @@ driver-robot-boot.adb	if X.Eye = E and then X.Arm = 1 then	1	structure	the first
 driver-robot-boot.adb	if not Fitted_Now and then Motion > 2.0 * Patch and then Motion > Fixed then	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
 driver-robot-boot.adb	or else (Lost_Least (I) - Followed_Most (I)) / 2.0 * Per_Unit (Channel) > Patch));	2.0	structure	half the gap's view motion against a patch
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
-driver-robot-channels.adb	(Change_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	statistics	a standardized statistic is tested against unit sigma
 driver-robot-channels.adb	M.Drift.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	no creep until measured
 driver-robot-channels.adb	M.Drift.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	no creep until measured
 driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	the first round takes every change for motion: noise zero
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, 0.0);	0.0	math	a reading that repeats exactly at every rest beat has no jitter: any change of it is motion
 driver-robot-channels.adb	M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. 2 * K)) / Sqrt (2.0));	2.0	math	a change is the difference of two readings
 driver-robot-channels.adb	Moved : Real_Access := new Real_Array (1 .. 2 * Rest);	2	structure	the changes and their negations
-driver-robot-channels.adb	Quantum : constant Real := Resolution (M, G, Last) / Sqrt (12.0);	12.0	math	the variance of a uniform spread over one unit is a twelfth of it: the noise of rounding to the unit
+driver-robot-channels.adb	Quantum : constant Real := Unit / Sqrt (12.0);	12.0	math	the variance of a uniform spread over one step is a twelfth of the step squared: the noise of rounding to the step
 driver-robot-channels.adb	S.Targets.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Targets.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Twin_Values.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without an echo; Present marks the beats a reading came, and an echo comes with it
@@ -1159,6 +1158,7 @@ driver-robot-channels.adb	S.Twin_Values.Prepend (0.0, Ada.Containers.Count_Type 
 driver-robot-channels.adb	S.Values.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	Start : Positive := 1;	1	structure	the trend-free rest starts at the first rest beat until a trend shows
+driver-robot-channels.adb	and then Driver.Uncertain.Significant (Change_Gate (Tested), Sqrt (Q), 1.0);	1.0	statistics	a standardized statistic is tested against unit sigma
 driver-robot-channels.adb	if Count - Start + 1 < 2 and then Count >= 2 then	2	statistics	a trend of the changes needs two of them; fewer tell nothing
 driver-robot-channels.adb	if Count - Start + 1 < 2 and then Count >= 2 then	2	statistics	a trend of the changes needs two of them; fewer tell nothing
 driver-robot-channels.adb	return 1.0;	1.0	structure	one reading unit: an integer on the wire changes by whole units or not at all
@@ -3196,9 +3196,9 @@ driver-robot-motion.adb	& Driver.Log.Image (Failed_At, 4) & ""	4	format	digits p
 driver-robot-motion.adb	& Driver.Log.Image (Kinematics.Conditioning (M, A, Failed_From), 6)),	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Largest, 1) & "" & To_String (Off_By)	1	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Share, 2) & "");	2	format	digits printed in a log line or a message
-driver-robot-motion.adb	(Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom));	2.0	math	the difference of two readings has twice the variance of one
-driver-robot-motion.adb	(Driver.Uncertain.Scalar_Gate (Channels.Noise_Freedom (M, G, Channel))) * Sigma * Sqrt (2.0));	2.0	math	a change is the difference of two readings
+driver-robot-motion.adb	(Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0)));	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	(Error, Noise * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
+driver-robot-motion.adb	(Wire, Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate) * Sigma * Sqrt (2.0));	2.0	math	a change is the difference of two readings
 driver-robot-motion.adb	(if Noise < Real'Last then Turn + Driver.Conventions.Z * Sqrt (2.0) * Noise else Turn);	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	(if Q'Length = 0 then "" else Readings_Image (Q (Q'First .. Q'Last - 1)) & "" & Driver.Log.Image (Q (Q'Last), 6));	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	* (S.High_Seen (I) - S.Low_Seen (I)) / 2.0)	2.0	math	two independent stops fall anywhere in the channel's travel and meet within D of one another with probability 2 D over the travel: D is that probability, the false alarm rate of Z, times the travel over two
@@ -3213,7 +3213,6 @@ driver-robot-motion.adb	Append (Report.Detail, "" & Driver.Log.Image (Largest, 1
 driver-robot-motion.adb	Creep : Real_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	Driver.Log.Line (Driver.Log.Robot, Where & "" & Driver.Log.Image (Before, 6)	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	Driver.Log.Line (Driver.Log.Robot, Where & "" & Driver.Log.Image (Found_At, 6)	6	format	digits printed in a log line or a message
-driver-robot-motion.adb	Freedom : Count_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	L.Append (0.0);	0.0	structure	no steady error known yet
 driver-robot-motion.adb	Largest := Real'Max (Largest, abs Error / (Noise * Sqrt (2.0)));	2.0	statistics	the noise of a difference of two readings
 driver-robot-motion.adb	Least : Estimate := (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0);	1.0	math	the whole step delivered, until a push says less
@@ -3255,7 +3254,7 @@ driver-robot-motion.adb	Way : constant Real := (if Offsets (Offsets'First + I - 
 driver-robot-motion.adb	Way : constant Real := (if Offsets (Offsets'First + I - 1) > 0.0 then 1.0 else -1.0)	1.0	math	a direction's sign, along or against
 driver-robot-motion.adb	Window : Natural := 2;	2	structure	the beat of the move and the beat it shows in the readings
 driver-robot-motion.adb	Window := Natural'Max (Window, 2 + Natural'Max (0, Image_Lag (M, Eye_Id (E))));	2	structure	the beat of the move and the beat it shows in the readings
-driver-robot-motion.adb	and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom);	2.0	math	the difference of two readings has twice the variance of one
+driver-robot-motion.adb	and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0));	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
 driver-robot-motion.adb	exit when Again >= 1.0;	1.0	math	a chance of one is certainty of a false alarm: such a look is no evidence
 driver-robot-motion.adb	exit when Hi > 0.0 and then (Lo = 0.0 or else Hi <= 2.0 * Lo);	2.0	structure	within a doubling, the ladder's own step
@@ -3290,7 +3289,7 @@ driver-robot-steps.adb	Own (C) := (Unit * Sqrt (2.0) * Sigma) ** 2;	2.0	statisti
 driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
 driver-robot-steps.adb	and then Channels.Has_Reading (M, G, Beat - 2))	2	structure	the last two beats of a push: three readings tell two steps and their ratio, the fewest that tell a run of shrinking steps
 driver-robot-steps.adb	and then Driver.Uncertain.Significant (Along, Sqrt (2.0) * Sigma)	2.0	math	the difference of two readings has twice the variance of one
-driver-robot-steps.adb	and then Driver.Uncertain.Significant (Gone, Noise * Sqrt (2.0), Channels.Noise_Freedom (M, G, C))	2.0	statistics	the noise of a difference of two readings is sqrt 2 times one reading's
+driver-robot-steps.adb	and then Driver.Uncertain.Significant (Gone, Noise * Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings is sqrt 2 times one reading's
 driver-robot-steps.adb	else Beat - Natural'Min (Beat, Natural'Max (1, S.Episodes.Last_Element.Start) - 1));	1	structure	the beat before the push's start, where its readings were read
 driver-robot-steps.adb	if E.Length <= 0.0 or else Beat < E.Start + 2	2	structure	the last two beats of a push: three readings tell two steps and their ratio, the fewest that tell a run of shrinking steps
 driver-robot-steps.adb	if G > M.Groups.Last_Index or else Natural (M.Groups (G).Free_Shortfalls.Length) <= 2 then	2	structure	the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by

@@ -55,7 +55,8 @@ private package Driver.Robot.Channels is
    function Noise_Measured (M : Model; G : Group_Id) return Boolean;
 
    function Noise_Freedom (M : Model; G : Group_Id; Channel : Positive) return Natural;
-   --  The degrees of freedom the channel's noise rests on (0: known or exact).
+   --  The degrees of freedom the channel's noise rests on (0: known or exact): how far a rest that a doubling of
+   --  its beats repeats is trusted (Boot). A test of a change takes the noise as measured (Significant_Change).
    --  Every channel of the group has its noise measured.
 
    function Resolution (M : Model; G : Group_Id; Beat : Natural) return Real
@@ -66,6 +67,13 @@ private package Driver.Robot.Channels is
    --  reading at Beat (of one reading unit when every reading is zero) in the
    --  format they came in (Driver.Observations.Precision_Of). A push below it
    --  cannot show in the readings.
+
+   function Step_Unit (M : Model; G : Group_Id; Beat : Natural; Channel : Positive) return Real
+     with Pre => Has_Reading (M, G, Beat);
+   --  One step of the channel's readings up to Beat: for an integer wire the least change they have shown (a
+   --  joint whose ticks the body reports as four units each steps by four), the wire's unit where they never
+   --  changed; for floats the wire's resolution at Beat (Resolution). A change of one step at rest is the
+   --  reading's rounding, a joint between two of its values flipping to the other and back, not jitter.
 
    function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean
      with Pre => D'First = 1 and then D'Length = Group_Size (M, G);

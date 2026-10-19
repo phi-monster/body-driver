@@ -387,7 +387,7 @@ package body Driver.Robot.Steps is
                     abs (Channels.Reading (M, G, Beat, C) - S.From (C - 1) - Channels.Drift (M, G, C) * Real (Since));
                begin
                   if Noise < Real'Last and then Noise > 0.0
-                    and then Driver.Uncertain.Significant (Gone, Noise * Sqrt (2.0), Channels.Noise_Freedom (M, G, C))
+                    and then Driver.Uncertain.Significant (Gone, Noise * Sqrt (2.0))
                   then
                      return True;
                   end if;

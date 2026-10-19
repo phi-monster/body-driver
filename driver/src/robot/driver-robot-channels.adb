@@ -221,6 +221,9 @@ package body Driver.Robot.Channels is
       All_Changes : Real_Access := new Real_Array (1 .. Rest);
       Count       : Natural := 0;
       Start       : Positive := 1;
+      Last        : constant Natural := Natural (M.Groups (G).Present.Length) - 1;
+      --  One step of the reading (Step_Unit): a rest change of one step is its rounding.
+      Unit        : constant Real := (if Has_Reading (M, G, Last) then Step_Unit (M, G, Last, Channel) else 0.0);
    begin
       for B in 1 .. Natural (M.Groups (G).Present.Length) - 1 loop
          if At_Rest (M, G, B) then
@@ -255,8 +258,16 @@ package body Driver.Robot.Channels is
          Free (Moved);
          return;
       end if;
+      --  A change of one step is the reading's rounding (Step_Unit): a joint at rest between two of its values flips
+      --  to the other and back. The jitter is what rest does beyond it, and the floor below keeps the rounding.
+      --  Counted as jitter, the flips of a reading that steps by four set its noise at 4.19 units, a change had to
+      --  pass 17.8 units a beat to be motion, and a handful of them measured the noise on so few degrees of freedom
+      --  that no push passed at all: w11 (servo seed 11 of the fake robot, 10-19), arm 1's fourth channel at beat
+      --  2540, 24 rest changes of four units each, the joint flipping one tick and back in the truth; w12, the
+      --  same body, its estimate of beat 5940: 766 beats of the arm pushed in one round, none in the next, its
+      --  noise 4 to 12.6 units the round after, and the arm taken still while it turned 53 units a beat.
       for I in Start .. Count loop
-         if All_Changes (I) /= 0.0 then
+         if abs All_Changes (I) > Unit then
             K := K + 1;
             Moved (K) := All_Changes (I);
             Moved (Rest + K) := -All_Changes (I);
@@ -294,19 +305,16 @@ package body Driver.Robot.Channels is
       --  push shook the base, pushes were taken to be answered 194, 293 and 444 beats late, and every look
       --  thereafter waited that long. A float's unit is its last bit: what repeats exactly there is kept exact
       --  (the rules on Resolution in Steps and Smallest_Step tell such a reading from none).
-      declare
-         Last : constant Natural := Natural (M.Groups (G).Present.Length) - 1;
-      begin
-         if Last < Natural (M.Groups (G).Precisions.Length) and then M.Groups (G).Precisions (Last) = 0 then
-            declare
-               Quantum : constant Real := Resolution (M, G, Last) / Sqrt (12.0);
-            begin
-               if M.Noise (Index) < Quantum then
-                  M.Noise.Replace_Element (Index, Quantum);
-               end if;
-            end;
-         end if;
-      end;
+      --  The rounding of a reading that steps by more than its wire's unit is its own step's (Step_Unit).
+      if Last < Natural (M.Groups (G).Precisions.Length) and then M.Groups (G).Precisions (Last) = 0 then
+         declare
+            Quantum : constant Real := Unit / Sqrt (12.0);
+         begin
+            if M.Noise (Index) < Quantum then
+               M.Noise.Replace_Element (Index, Quantum);
+            end if;
+         end;
+      end if;
       Free (Moved);
    end Measure_Channel;
 
@@ -381,6 +389,26 @@ package body Driver.Robot.Channels is
       return Real'Scaling (1.0, Real'Exponent (if Scale > 0.0 then Scale else 1.0) - Bits);
    end Resolution;
 
+   function Step_Unit (M : Model; G : Group_Id; Beat : Natural; Channel : Positive) return Real is
+      Least : Real := Real'Last;
+   begin
+      if M.Groups (G).Precisions (Beat) /= 0 then
+         return Resolution (M, G, Beat);
+      end if;
+      for B in 1 .. Beat loop
+         if Has_Reading (M, G, B) and then Has_Reading (M, G, B - 1) then
+            declare
+               D : constant Real := abs Change (M, G, B, Channel);
+            begin
+               if D > 0.0 and then D < Least then
+                  Least := D;
+               end if;
+            end;
+         end if;
+      end loop;
+      return (if Least < Real'Last then Least else Resolution (M, G, Beat));
+   end Step_Unit;
+
    function Noise_Freedom (M : Model; G : Group_Id; Channel : Positive) return Natural is
       K : constant Natural := First_Channel (M, G) + Channel - 1;
    begin
@@ -396,16 +424,15 @@ package body Driver.Robot.Channels is
    --  (their squared deviations add to a chi-square), so a group of many
    --  channels raises no more false alarms than a single one. A channel
    --  whose noise is not measured yet gives no evidence.
-   --  The gate of a change of so many channels at so many degrees of freedom, searched once: a quantile is a pure
+   --  The gate of a change of so many channels, searched once: a quantile is a pure
    --  function of its arguments, and the search is an inversion of a tail that takes thousands of operations. The
    --  lock-in asks at every beat of every group when it marks the usable beats (12 000 beats, 7 groups, 3 eyes: the
    --  marks were most of a 14 s recompute on a fake body), the stillness watch at every beat. Kept under a lock:
    --  the callers run on many tasks.
    type Gate_Key is record
-      Tested, Freedom : Natural;
+      Tested : Natural;
    end record;
-   function "<" (A, B : Gate_Key) return Boolean is
-     (A.Tested < B.Tested or else (A.Tested = B.Tested and then A.Freedom < B.Freedom));
+   function "<" (A, B : Gate_Key) return Boolean is (A.Tested < B.Tested);
    package Gate_Maps is new Ada.Containers.Ordered_Maps (Gate_Key, Driver.Uncertain.Gate, "<", Driver.Uncertain."=");
    protected Gates_Known is
       procedure Get (Key : Gate_Key; Value : out Driver.Uncertain.Gate; Found : out Boolean);
@@ -428,23 +455,28 @@ package body Driver.Robot.Channels is
       end Keep;
    end Gates_Known;
 
-   function Change_Gate (Tested : Positive; Freedom : Natural) return Driver.Uncertain.Gate is
-      Key   : constant Gate_Key := (Tested, Freedom);
+   function Change_Gate (Tested : Positive) return Driver.Uncertain.Gate is
+      Key   : constant Gate_Key := (Tested => Tested);
       Value : Driver.Uncertain.Gate;
       Found : Boolean;
    begin
       Gates_Known.Get (Key, Value, Found);
       if not Found then
-         Value := Driver.Uncertain.Vector_Gate (Tested, Freedom);
+         Value := Driver.Uncertain.Vector_Gate (Tested);
          Gates_Known.Keep (Key, Value);
       end if;
       return Value;
    end Change_Gate;
 
+   --  The noise is taken as measured: its degrees of freedom do not widen the gate. Widened by the fewest of the
+   --  group's channels (the F quantile of so few), a noise one channel measured on two or three changes set the
+   --  whole group's gate at hundreds of sigmas, and no ask or step of the group was a change (w12, the estimate of
+   --  beat 5940: its second round, every channel's noise on 1 to 4 degrees of freedom, no beat of arm 1 pushed).
+   --  The rounding floors every noise of an integer reading (Measure_Channel), and a noise measured on few changes
+   --  beyond a step stands as their size.
    function Significant_Change (M : Model; G : Group_Id; D : Real_Array; Scale : Real) return Boolean is
       Q       : Real := 0.0;
       Tested  : Natural := 0;
-      Freedom : Natural := Natural'Last;
    begin
       for C in D'Range loop
          declare
@@ -457,13 +489,11 @@ package body Driver.Robot.Channels is
             elsif Sigma < Real'Last then
                Q := Q + (D (C) / (Sigma * Scale)) ** 2;
                Tested := Tested + 1;
-               Freedom := Natural'Min (Freedom, Noise_Freedom (M, G, C));
             end if;
          end;
       end loop;
       return Tested > 0
-        and then Driver.Uncertain.Significant
-          (Change_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);
+        and then Driver.Uncertain.Significant (Change_Gate (Tested), Sqrt (Q), 1.0);
    end Significant_Change;
 
    function Asked (M : Model; G : Group_Id; Beat : Natural) return Boolean is

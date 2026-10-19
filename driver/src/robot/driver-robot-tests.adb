@@ -1401,6 +1401,74 @@ package body Driver.Robot.Tests is
       Check (not Channels.Moving (M, 1, 60), "the exact repeats at beat 60 are motion");
    end Channel_Noise_Of_A_Crawl;
 
+   --  One integer observation of the given groups' readings, each group one array, every group's wire an integer.
+   procedure Observe_Integers (M : in out Model; B : Natural; Values : Real_Array; Sizes : Natural_Array) is
+      O    : Observation;
+      Sent : constant Driver.Commands.Command := Driver.Commands.Hold;
+      At_V : Natural := Values'First;
+   begin
+      O.Beat := Driver.Clock.Beat (B);
+      O.Images.Append (Driver.Images.No_Image);
+      O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+      for S of Sizes loop
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Values (At_V .. At_V + S - 1));
+         O.Precisions.Append (0);
+         At_V := At_V + S;
+      end loop;
+      Observe (M, O, Sent);
+   end Observe_Integers;
+
+   --  A reading that steps by four units (a joint whose ticks the body reports as four units each) and flips one
+   --  step at rest, to the next value and back, has the rounding's noise of its own step: a change of two steps in
+   --  a beat is motion, one step is not (w11, servo seed 11 of the fake robot, 10-19: 24 such flips set arm 1's
+   --  fourth channel's noise at 4.19 units, and a change had to pass 17.8 units a beat to be motion).
+   procedure Noise_Of_Single_Step_Flips is
+      M    : Model;
+      Step : constant Real := 4.0;
+      function Value (B : Natural) return Real is
+        (2000.0 + (if B >= 110 then 2.0 * Step * Real (B - 109) elsif B mod 20 in 5 .. 9 then Step else 0.0));
+   begin
+      for B in 0 .. 119 loop
+         Observe_Integers (M, B, [1 => Value (B)], [1 => 1]);
+         if B in 2 .. 100 and then B mod 20 = 0 then
+            Estimate_Now (M);
+         end if;
+      end loop;
+      Check (Reading_Noise (M, 1, 1) = Step / Sqrt (12.0),
+             "a reading flipping one step of" & Step'Image & " at rest has noise" & Real'Image (Reading_Noise (M, 1, 1))
+             & ", not its step's rounding" & Real'Image (Step / Sqrt (12.0)));
+      Check (not Channels.Moving (M, 1, 25) and then not Channels.Moving (M, 1, 30), "a flip of one step is motion");
+      Check (Channels.Moving (M, 1, 112), "a change of two steps in a beat is no motion");
+   end Noise_Of_Single_Step_Flips;
+
+   --  A group whose every channel's noise rests on few changes (one degree of freedom each) still tells a change
+   --  well beyond them: the noise is taken as measured, not widened by the fewest degrees of freedom (w12, servo seed
+   --  11 of the fake robot, 10-19: its estimate of beat 5940 found arm 1 pushed at 766 beats in one round and at
+   --  none in the next, every channel's noise then on 1 to 4 degrees of freedom).
+   procedure Change_Against_Noise_Of_Few_Changes is
+      M : Model;
+      --  Both flip a unit once (their step: Channels.Step_Unit), then two units out and back every ten beats, as evenly
+      --  as no half of the rest trends; the second then moves 20 units in a beat.
+      function First (B : Natural) return Real is
+        (2000.0 + (if B = 2 then 1.0 elsif B < 60 and then B mod 10 in 5 .. 7 then 2.0 else 0.0));
+      function Second (B : Natural) return Real is (First (B) + (if B >= 65 then 20.0 else 0.0));
+   begin
+      for B in 0 .. 70 loop
+         Observe_Integers (M, B, [First (B), Second (B)], [1 => 2]);
+         if B = 60 then
+            Estimate_Now (M);
+         end if;
+      end loop;
+      Check (Channels.Noise_Freedom (M, 1, 1) > 0 and then Channels.Noise_Freedom (M, 1, 2) > 0,
+             "the rig's noises rest on" & Channels.Noise_Freedom (M, 1, 1)'Image & " and"
+             & Channels.Noise_Freedom (M, 1, 2)'Image & " degrees of freedom, not on few changes");
+      Check (Channels.Moving (M, 1, 65),
+             "a change of 20 units against noises of" & Real'Image (Reading_Noise (M, 1, 1)) & " and"
+             & Real'Image (Reading_Noise (M, 1, 2)) & " is no motion");
+      Check (not Channels.Moving (M, 1, 15), "a change of the channels' own jitter is motion");
+   end Change_Against_Noise_Of_Few_Changes;
+
    --  Readings that come as integers (a servo's ticks: the SO-101 pair, R0) resolve to one unit, so the smallest push
    --  of such a joint without jitter is one unit; a rig's Reals resolve to the unit in the last place of the group's
    --  largest reading.
@@ -8873,6 +8941,12 @@ package body Driver.Robot.Tests is
                              & "with it", Unprobed_Group_Stays_Unclassified'Access);
       Driver.Tests.Register ("robot.channels.creep", "a reading that crawls at the start and then repeats exactly, never "
                              & "pushed, is given its crawl as rest noise", Channel_Noise_Of_A_Crawl'Access);
+      Driver.Tests.Register ("robot.channels.flips", "a reading that steps by four units and flips one step at rest is "
+                             & "given a jitter of its step, so a change of two steps in a beat is no motion",
+                             Noise_Of_Single_Step_Flips'Access);
+      Driver.Tests.Register ("robot.channels.gate", "a group whose channels' noises rest on few changes is blind to a "
+                             & "change far beyond them (the gate widened by the fewest degrees of freedom)",
+                             Change_Against_Noise_Of_Few_Changes'Access);
       Driver.Tests.Register ("robot.channels.integers", "readings that come as integers are given a float's resolution, "
                              & "so the first push of a tick-counting joint is a trillionth of a tick (R0)",
                              Resolution_Of_Integer_Readings'Access);

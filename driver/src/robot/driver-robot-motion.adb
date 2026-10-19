@@ -841,17 +841,16 @@ package body Driver.Robot.Motion is
    end Look;
 
    --  The smallest change of the channel's reading that tells from its noise
-   --  (a change is the difference of two readings), and no less than its wire
-   --  can carry (Channels.Resolution: one unit of an integer reading); without
-   --  jitter, the latter.
+   --  (a change is the difference of two readings, the noise taken as measured:
+   --  Channels.Significant_Change), and no less than one step of the reading
+   --  (Channels.Step_Unit); without jitter, the latter.
    function Smallest_Step (M : Model; G : Group_Id; Channel : Positive) return Real is
       Sigma : constant Real := Reading_Noise (M, G, Channel);
-      Wire  : constant Real := Channels.Resolution (M, G, M.Beats - 1);
+      Wire  : constant Real := Channels.Step_Unit (M, G, M.Beats - 1, Channel);
    begin
       if Sigma > 0.0 and then Sigma < Real'Last then
          return Real'Max
-           (Wire, Driver.Uncertain.Threshold
-                    (Driver.Uncertain.Scalar_Gate (Channels.Noise_Freedom (M, G, Channel))) * Sigma * Sqrt (2.0));
+           (Wire, Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate) * Sigma * Sqrt (2.0));
       end if;
       return Wire;
    end Smallest_Step;
@@ -1073,20 +1072,20 @@ package body Driver.Robot.Motion is
    --  fraction that shrinks towards one as the offset grows, which exact
    --  readings call significant.)
    function Further
-     (M : Model; Ref : Channel_Ref; Advance, Noise : Real; Freedom : Natural) return Boolean
+     (M : Model; Ref : Channel_Ref; Advance, Noise : Real) return Boolean
    is
       V : constant Estimate := Visible_Step (M, Ref.Group, Ref.Channel);
    begin
       return Advance > 0.0 and then (not Known (V) or else Advance >= V.Value)
-        and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom);
+        and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0));
    end Further;
 
    --  The body executed a level: the reading went along the ask, significantly against its own noise. The eye's
    --  visible step is not asked here: it is the lock-in's, measured from the few pushes before, and asked of an
    --  executed turn it made arm_a's second joint, moved 19.6 units at every level, "not further" at every one,
    --  and the probe doubled nineteen times (R6's fifth start, 10-14).
-   function Executed (Advance, Noise : Real; Freedom : Natural) return Boolean is
-     (Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom));
+   function Executed (Advance, Noise : Real) return Boolean is
+     (Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0)));
 
    --  A level some eye saw, confirmed by moves back and forth by the same
    --  offsets, each of them seen and each executed by the body, until the
@@ -1109,7 +1108,6 @@ package body Driver.Robot.Motion is
       Base      : Driver.Commands.Command;
       Offsets   : Real_Array;
       Noise     : Real_Array;
-      Freedom   : Count_Array;
       After     : Real_Array;   --  the readings the level's own move left
       Unlooked  : in out Natural;
       Chance    : Real;
@@ -1149,7 +1147,7 @@ package body Driver.Robot.Motion is
                   Way : constant Real := (if Offsets (Offsets'First + I - 1) > 0.0 then 1.0 else -1.0)
                                          * (if At_Amount then 1.0 else -1.0);
                begin
-                  Made := Made or else Executed (Way * (Now (I) - Before (I)), Noise (I), Freedom (I));
+                  Made := Made or else Executed (Way * (Now (I) - Before (I)), Noise (I));
                end;
             end if;
          end loop;
@@ -1183,7 +1181,6 @@ package body Driver.Robot.Motion is
       Usable   : out Flag_Array;
       Start    : out Real_Array;
       Noise    : out Real_Array;
-      Freedom  : out Count_Array;
       Base     : out Driver.Commands.Command;
       Amount   : out Real;
       Unlooked : out Natural;
@@ -1204,7 +1201,6 @@ package body Driver.Robot.Motion is
       Start_At := 0;
       Creep := [others => 0.0];
       Noise := [others => 0.0];
-      Freedom := [others => 0];
       Base := Driver.Commands.Hold;
       Amount := First;
       Driver.Beats.Next (B);
@@ -1232,7 +1228,6 @@ package body Driver.Robot.Motion is
                   Start_At := M.Beats - 1;
                   Creep (I) := Channels.Drift (M, G, C);
                   Noise (I) := Reading_Noise (M, G, C);
-                  Freedom (I) := Channels.Noise_Freedom (M, G, C);
                   if not Driver.Commands.Has_Target (Base, G) then
                      declare
                         H : Real_Array (1 .. Group_Size (M, G));
@@ -1268,7 +1263,6 @@ package body Driver.Robot.Motion is
       Base      : Driver.Commands.Command;            --  every listed group at its hold
       Start     : Real_Array (1 .. N);   --  each reading when the probe began
       Noise     : Real_Array (1 .. N);
-      Freedom   : Count_Array (1 .. N);
       Following : Flag_Array (1 .. N);
       Delivered : Flag_Array (1 .. N) := [others => False];   --  some level moved it along the ask
       Did       : Flag_Array (1 .. N) := [others => False];   --  this level's ask was executed (Executed)
@@ -1281,7 +1275,7 @@ package body Driver.Robot.Motion is
       Farthest_At : Count_Array (1 .. N);   --  the beat each one's farthest reading was read at
    begin
       Report := (others => <>);
-      Begin_Probe (M, Listed, First, Usable, Start, Noise, Freedom, Base, Amount, Unlooked, Start_At, Creep);
+      Begin_Probe (M, Listed, First, Usable, Start, Noise, Base, Amount, Unlooked, Start_At, Creep);
       Farthest_At := [others => Start_At];
       Following := Usable;
       if Amount <= 0.0 or else (for all U of Usable => not U) then
@@ -1320,7 +1314,7 @@ package body Driver.Robot.Motion is
                for I in 1 .. N loop
                   if Usable (I)
                     and then Executed (Sign * (Now (I) - Start (I)) - Sign * Creep (I) * Real (Now_At - Start_At),
-                                       Noise (I), Freedom (I))
+                                       Noise (I))
                   then
                      Went := Went + 1;
                   end if;
@@ -1378,9 +1372,9 @@ package body Driver.Robot.Motion is
                      Advance   : constant Real :=
                        Excursion - Farthest (I)
                        - Sign * Creep (I) * Real (Now_At - Natural'Min (Now_At, Farthest_At (I)));
-                     Went      : constant Boolean := Further (M, Listed (I), Advance, Noise (I), Freedom (I));
+                     Went      : constant Boolean := Further (M, Listed (I), Advance, Noise (I));
                   begin
-                     Did (I) := Executed (Advance, Noise (I), Freedom (I));
+                     Did (I) := Executed (Advance, Noise (I));
                      if Delivered (I) and then not Went and then not Moving (I) then
                         --  Its own end: held where it last followed.
                         Following (I) := False;
@@ -1417,7 +1411,7 @@ package body Driver.Robot.Motion is
                declare
                   Confirmed : Boolean;
                begin
-                  Confirm (M, Listed, Usable, Base, Offsets, Noise, Freedom, Now, Unlooked, Chance, Confirmed);
+                  Confirm (M, Listed, Usable, Base, Offsets, Noise, Now, Unlooked, Chance, Confirmed);
                   if Confirmed then
                      Report.Seen := True;
                      Report.Excursion := Amount;
@@ -1450,7 +1444,6 @@ package body Driver.Robot.Motion is
       Base      : Driver.Commands.Command;
       Start     : Real_Array (1 .. 1);
       Noise     : Real_Array (1 .. 1);
-      Freedom   : Count_Array (1 .. 1);
       Amount    : Real;
       Unlooked  : Natural;
       Signs     : constant array (Sense) of Real := [Increasing => 1.0, Decreasing => -1.0];
@@ -1465,7 +1458,7 @@ package body Driver.Robot.Motion is
       Farthest_At : array (Sense) of Natural;      --  the beat each way's farthest reading was read at
    begin
       Report := (others => <>);
-      Begin_Probe (M, Listed, First, Usable, Start, Noise, Freedom, Base, Amount, Unlooked, Start_At, Creep);
+      Begin_Probe (M, Listed, First, Usable, Start, Noise, Base, Amount, Unlooked, Start_At, Creep);
       Farthest_At := [others => Start_At];
       if not Usable (1) then
          return;
@@ -1516,9 +1509,9 @@ package body Driver.Robot.Motion is
                   Advance   : constant Real :=
                     Excursion - Farthest (Way)
                     - Signs (Way) * Creep (1) * Real (Now_At - Natural'Min (Now_At, Farthest_At (Way)));
-                  Went      : constant Boolean := Further (M, Ref, Advance, Noise (1), Freedom (1));
+                  Went      : constant Boolean := Further (M, Ref, Advance, Noise (1));
                begin
-                  Did (Way) := Executed (Advance, Noise (1), Freedom (1));
+                  Did (Way) := Executed (Advance, Noise (1));
                   if Delivered (Way) and then not Went and then not Moving (1) then
                      --  Its own end.
                      Open (Way) := False;
