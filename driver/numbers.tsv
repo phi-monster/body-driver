@@ -1764,6 +1764,9 @@ driver-robot-hand.adb	& Driver.Log.Image (Shift.Still, 1) & "" & Driver.Log.Imag
 driver-robot-hand.adb	& Lobe_No'Image & "" & Driver.Log.Image (Readings (Wide), 6)	6	format	digits printed in a log line or a message
 driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message
+driver-robot-hand.adb	("" & Driver.Log.Image (X (1), 4) & "" & Driver.Log.Image (X (2), 4) & "" & Driver.Log.Image (X (3), 4) & "");	4	format	digits printed in a log line or a message
+driver-robot-hand.adb	("" & Driver.Log.Image (X (1), 4) & "" & Driver.Log.Image (X (2), 4) & "" & Driver.Log.Image (X (3), 4) & "");	4	format	digits printed in a log line or a message
+driver-robot-hand.adb	("" & Driver.Log.Image (X (1), 4) & "" & Driver.Log.Image (X (2), 4) & "" & Driver.Log.Image (X (3), 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand.adb	(2 + Natural (Found (H, Id).Lobes (Lobe).Stops.Length));	2	structure	the two openings beside the stops between them
 driver-robot-hand.adb	(Lobe_Record'(Channel => 1,	1	structure	a hand given to the tests has its lobes on the closer first channel
 driver-robot-hand.adb	(Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (Over / Step + 1.0, 2.0))));	1.0	math	doubling from Step covers Over in n steps when Step times two to the n less one reaches it
@@ -2080,8 +2083,8 @@ driver-robot-kinematics-fit.adb	Across_Columns (3 * I - 3 + D, 2 * J - 2 + Axis)
 driver-robot-kinematics-fit.adb	Across_Columns (3 * I - 3 + D, 2 * J - 2 + Axis) := Col (D);	3	structure	three rows per sighting, two columns per joint
 driver-robot-kinematics-fit.adb	Across_Columns (3 * I - 3 + D, 2 * J - 2 + Axis) := Col (D);	3	structure	three rows per sighting, two columns per joint
 driver-robot-kinematics-fit.adb	Across_Columns : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 3 * S, 1 .. Reduced);	3	structure	three rows per sighting
-driver-robot-kinematics-fit.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	structure	a real in the dump has one digit before its point
 driver-robot-kinematics-fit.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	math	one digit after the point more than a real's own carries it to its last bit (17 significant digits round-trip a double)
+driver-robot-kinematics-fit.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	structure	a real in the dump has one digit before its point
 driver-robot-kinematics-fit.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	structure	the exponent's least width
 driver-robot-kinematics-fit.adb	Ada.Strings.Unbounded.Append (Trace, "" & Driver.Log.Image (F, 1) & "" & Driver.Log.Image (Sum, 3));	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	Ada.Strings.Unbounded.Append (Trace, "" & Driver.Log.Image (F, 1) & "" & Driver.Log.Image (Sum, 3));	3	format	digits printed in a log line or a message

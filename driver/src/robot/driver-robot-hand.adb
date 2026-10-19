@@ -1193,6 +1193,8 @@ package body Driver.Robot.Hand is
 
    function Tips_Said (R : Hand_Record; Which : Opening) return String is
       Text : Unbounded_String;
+      function Image (X : Vec3) return String is
+        ("(" & Driver.Log.Image (X (1), 4) & " " & Driver.Log.Image (X (2), 4) & " " & Driver.Log.Image (X (3), 4) & ")");
    begin
       for L in 1 .. Natural (R.Lobes.Length) loop
          declare
@@ -1209,6 +1211,20 @@ package body Driver.Robot.Hand is
                             & " along the axes the tilts of the presses told most and least ("
                             & (if Driver.Robot.Hand.Tips.Tested (R.Book, L, Which) then "tested across the sight"
                                else "not tested across the sight") & ")"));
+            --  Where the tip is, and a face's corners, in the tool frame: what a study against a body's truth reads.
+            if Known (Reach) then
+               Append (Text, ", its tip at " & Image (Driver.Robot.Hand.Tips.Tip (R.Book, L, Which).Mean));
+               declare
+                  Corners : constant Corner_Vectors.Vector := Driver.Robot.Hand.Tips.Face (R.Book, L, Which);
+               begin
+                  if not Corners.Is_Empty then
+                     Append (Text, ", its face's corners at");
+                     for X of Corners loop
+                        Append (Text, " " & Image (X));
+                     end loop;
+                  end if;
+               end;
+            end if;
          end;
       end loop;
       return To_String (Text);
