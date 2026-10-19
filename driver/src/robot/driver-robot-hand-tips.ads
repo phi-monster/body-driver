@@ -45,6 +45,10 @@ package Driver.Robot.Hand.Tips is
       --  its openings in the picture, times the angle a pixel spans (Pitch). A press that cannot say how far it slid
       --  has that much of it.
       Pitch  : Real := 0.0;   --  the angle a pixel spans at the tip
+      Face   : Corner_Vectors.Vector;
+      --  The corners of the outline of the lobe's tip region, unit directions of the tool frame from the line's origin:
+      --  the end of the finger is a face, and the corner of it that leads into a surface is where a press rests
+      --  (Touch's faces). Empty: the tip is a point on its line.
    end record;
 
    type Lobe_Sights is array (Opening) of Sight_Of;
@@ -121,6 +125,10 @@ package Driver.Robot.Hand.Tips is
    --  Every press kept, agreeing or not.
 
    function Tip (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Point_Estimate;
+
+   function Face (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Corner_Vectors.Vector;
+   --  The corners of the lobe's tip face where the fit of that kind puts them, tool frame; empty for a lobe whose
+   --  sight has no face, or whose tip that fit does not have.
    --  The tip as the presses fix it: the lowest of their hits, unknown until
    --  a press stopped by the tip fixes it (Driver.Robot.Hand.Touch). One
    --  press fixes it and nothing has checked it: provisional, as long as it

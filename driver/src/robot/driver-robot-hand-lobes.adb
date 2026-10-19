@@ -1463,6 +1463,60 @@ package body Driver.Robot.Hand.Lobes is
       return (if N = 0 then Tip else (U => Su / Real (N), V => Sv / Real (N)));
    end Tip_Track;
 
+   function Tip_Outline (Cap : Mask) return Pixel_Vectors.Vector is
+      --  Of each column the region holds, its top and bottom pixel: a column's middle pixels lie inside the hull.
+      Ends : Pixel_Vectors.Vector;
+      Hull : Pixel_Vectors.Vector;
+      function Turn (O, A, B : Pixel) return Real is ((A.U - O.U) * (B.V - O.V) - (A.V - O.V) * (B.U - O.U));
+   begin
+      for C in 0 .. Width (Cap) - 1 loop
+         declare
+            Top    : Integer := -1;
+            Bottom : Integer := -1;
+         begin
+            for R in 0 .. Height (Cap) - 1 loop
+               if Contains (Cap, C, R) then
+                  if Top < 0 then
+                     Top := R;
+                  end if;
+                  Bottom := R;
+               end if;
+            end loop;
+            if Top >= 0 then
+               Ends.Append (Pixel'(U => Real (C) + 0.5, V => Real (Top) + 0.5));
+               if Bottom /= Top then
+                  Ends.Append (Pixel'(U => Real (C) + 0.5, V => Real (Bottom) + 0.5));
+               end if;
+            end if;
+         end;
+      end loop;
+      if Natural (Ends.Length) < 3 then
+         return Ends;
+      end if;
+      --  The monotone chain: the ends come by column and, within one, by row; the lower chain forward, the upper
+      --  back, each keeping only turns one way.
+      for P of Ends loop
+         while Natural (Hull.Length) >= 2 and then Turn (Hull (Hull.Last_Index - 1), Hull.Last_Element, P) <= 0.0 loop
+            Hull.Delete_Last;
+         end loop;
+         Hull.Append (P);
+      end loop;
+      declare
+         Lower : constant Natural := Natural (Hull.Length) + 1;
+      begin
+         for I in reverse Ends.First_Index .. Ends.Last_Index - 1 loop
+            while Natural (Hull.Length) >= Lower
+              and then Turn (Hull (Hull.Last_Index - 1), Hull.Last_Element, Ends (I)) <= 0.0
+            loop
+               Hull.Delete_Last;
+            end loop;
+            Hull.Append (Ends (I));
+         end loop;
+      end;
+      Hull.Delete_Last;
+      return Hull;
+   end Tip_Outline;
+
    function Tip_Cap (Lobe_Mask : Mask; Centre, Tip : Pixel) return Mask is
       W       : constant Natural := Width (Lobe_Mask);
       H       : constant Natural := Height (Lobe_Mask);

@@ -137,6 +137,12 @@ package Driver.Robot.Hand.Lobes is
    --  (a15 on 10-16, stops at 8.68 to 8.69: 242.5 and 218.5 across in turn), and the steps between views measured
    --  by it were jumps the closer's motion did not make. The region's mean moves as the lobe does.
 
+   package Pixel_Vectors is new Ada.Containers.Vectors (Positive, Pixel, Driver.Images."=");
+
+   function Tip_Outline (Cap : Mask) return Pixel_Vectors.Vector;
+   --  The corners of a tip region's outline, its convex hull's, in order around it (pixel centres); the region's
+   --  pixels themselves when fewer than three columns' ends make a hull. The tip's face, as the eye sees it.
+
    function Tip_Spread (Cap : Mask; Tip : Pixel) return Real;
    --  How far the pixels of a tip region lie from the tip pixel, per axis, in
    --  pixels (root mean square). Zero for an empty region.

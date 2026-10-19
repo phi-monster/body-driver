@@ -1,4 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Containers.Indefinite_Vectors;
 with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Numerics.Dense;
@@ -89,7 +90,8 @@ package body Driver.Robot.Hand.Touch is
      (Presses  : Press_Array;
       Sights   : Sight_Array;
       Surfaces : Surface_Prior_Array;
-      As       : Model := On_Sight) return Fit_Result
+      As       : Model := On_Sight;
+      Faces    : Face_Array := No_Faces) return Fit_Result
    is
       J : constant Natural := Sights'Length;
       K : constant Natural := Surfaces'Length;
@@ -139,15 +141,77 @@ package body Driver.Robot.Hand.Touch is
         (Line_Of (P) + Tip_Q (W * (Sight_Of (P) - 1) + 2) * Across_Of (Sight_Of (P), 1)
          + Tip_Q (W * (Sight_Of (P) - 1) + 3) * Across_Of (Sight_Of (P), 2));
 
+      --  A sight with a face (Faces): its unknowns are the face's distance along the sight's line and its two tilts
+      --  across it, the plane through the line's point at that distance whose normal the two tilts turn from the line.
+      function Faced (S : Positive) return Boolean is
+        (As = On_Sight and then Faces'Length > 0 and then not Faces (Faces'First + S - 1).Is_Empty);
+      function Corners (S : Positive) return Natural is
+        (if Faced (S) then Natural (Faces (Faces'First + S - 1).Length) else 0);
+      function Corner (S, K : Positive) return Vec3 is (Faces (Faces'First + S - 1) (K));
+
+      --  How far along a corner's line the face meets it, per unit of the face's distance: the corner's line along the
+      --  normal (the sight's line turned back by the tangents of the tilts across it). None or less: the face, so
+      --  tilted, does not meet that line before the eye.
+      function Reach (S, K : Positive) return Real is
+        (Corner (S, K) * Line (S).Direction.Unit_Vector
+         - Tan (Tip_Q (W * (S - 1) + 2)) * (Corner (S, K) * Across_Of (S, 1))
+         - Tan (Tip_Q (W * (S - 1) + 3)) * (Corner (S, K) * Across_Of (S, 2)));
+
+      function Corner_At (S, K : Positive) return Vec3 is
+        (Line (S).Origin.Mean + (Tip_Q (W * (S - 1) + 1) / Reach (S, K)) * Corner (S, K));
+
+      --  The corner of a press's face that leads into its surface: the lowest along the surface's normal at the
+      --  press's pose, of the corners the face meets before the eye; 0 when it meets none.
+      function Contact_Of (P : Press) return Natural is
+         S    : constant Positive := Sight_Of (P);
+         Lift : constant Vec3 := Transpose (P.Tool.Pose.Rotation) * Nominal (Surface_Of (P)).Normal;
+         Best : Natural := 0;
+         Low  : Real := Real'Last;
+      begin
+         for K in 1 .. Corners (S) loop
+            if Reach (S, K) > 0.0 and then Lift * Corner_At (S, K) < Low then
+               Low := Lift * Corner_At (S, K);
+               Best := K;
+            end if;
+         end loop;
+         return Best;
+      end Contact_Of;
+
+      --  A face's tilt: a face its eye sees turns from the line of sight by less than a right angle either way, so
+      --  the prior of each tilt is that of a uniform spread over a half turn.
+      Tilt_Sigma : constant Real := Ada.Numerics.Pi / Sqrt (12.0);
+
       --  The tip where the finger stands free, and under a press (slid along its own line).
+      --  The tip where the finger stands free (a face's: its point on the sight's line), and under a press (slid along
+      --  its own line; a face's: the corner of it that leads into the surface).
       function Tip_At (S : Positive) return Vec3 is
-        (if As = On_Sight then Line (S).Origin.Mean + Tip_Q (W * (S - 1) + 1) * Aim_At (S)
+        (if Faced (S) then Line (S).Origin.Mean + Tip_Q (W * (S - 1) + 1) * Line (S).Direction.Unit_Vector
+         elsif As = On_Sight then Line (S).Origin.Mean + Tip_Q (W * (S - 1) + 1) * Aim_At (S)
          else Vec3 (Tip_Q (W * (S - 1) + 1 .. W * S)));
 
       function Tip_Under (P : Press) return Vec3 is
-        (if As = On_Sight
+        (if Faced (Sight_Of (P)) and then Contact_Of (P) > 0 then Corner_At (Sight_Of (P), Contact_Of (P))
+         elsif As = On_Sight
          then Line (Sight_Of (P)).Origin.Mean + Tip_Q (W * (Sight_Of (P) - 1) + 1) * Aim_Of (P)
          else Tip_At (Sight_Of (P)));
+
+      --  A press's line at the start, the tilts none: of its face, the corner that leads into the surface whose
+      --  normal is N, on the plane across the sight's line at a unit distance; the press's own line without a face.
+      function Start_Line (P : Press; N : Vec3) return Vec3 is
+         S    : constant Positive := Sight_Of (P);
+         Lift : constant Vec3 := Transpose (P.Tool.Pose.Rotation) * N;
+         U    : constant Vec3 := Line (S).Direction.Unit_Vector;
+         Best : Vec3 := Line_Of (P);
+         Low  : Real := Real'Last;
+      begin
+         for K in 1 .. Corners (S) loop
+            if Corner (S, K) * U > 0.0 and then Lift * ((1.0 / (Corner (S, K) * U)) * Corner (S, K)) < Low then
+               Low := Lift * ((1.0 / (Corner (S, K) * U)) * Corner (S, K));
+               Best := (1.0 / (Corner (S, K) * U)) * Corner (S, K);
+            end if;
+         end loop;
+         return Best;
+      end Start_Line;
 
       --  How far a finger that slid under the press by an angle is off, at the tip's distance: along an axis nothing
       --  tells here.
@@ -166,6 +230,11 @@ package body Driver.Robot.Hand.Touch is
       end Noise_Of;
 
       Chosen  : Flags_Access := new Flags'(Presses'Range => True);
+      --  Each press's corner of its face held while the fit is solved (0: none, the corner that leads at the estimate):
+      --  the corner that leads moves as the face's tilts do, and solved with it free the fit swung from one corner to
+      --  another and stopped short, its presses left out from an estimate that had not settled.
+      type Corner_Choice is array (Positive range <>) of Natural;
+      Held : Corner_Choice (Presses'Range) := [others => 0];
       Deleted : Vector_Access := new Real_Vector'(Presses'Range => 0.0);
       Stopped : Index_Array (1 .. J) := [others => 0];
       Sunk    : Index_Array (1 .. J) := [others => 0];
@@ -254,7 +323,9 @@ package body Driver.Robot.Hand.Touch is
                         P    : Press renames Presses (I);
                         S    : constant Positive := Sight_Of (P);
                         F    : constant Positive := Surface_Of (P);
-                        X    : constant Vec3 := Tip_Under (P) + P.Slide;   --  the finger as it stood under the press
+                        --  The corner held for the press, of a face: the finger as it stood under the press.
+                        K0   : constant Natural := (if Faced (S) then Held (I) else 0);
+                        X    : constant Vec3 := (if K0 > 0 then Corner_At (S, K0) else Tip_Under (P)) + P.Slide;
                         Y    : constant Vec3 := P.Tool.Pose * X;
                         N    : constant Vec3 := Nominal (F).Normal;
                         Lift : constant Vec3 := Transpose (P.Tool.Pose.Rotation) * N;
@@ -264,8 +335,27 @@ package body Driver.Robot.Hand.Touch is
                      begin
                         Row := Row + 1;
                         Press_Of_Row (Row) := I;
-                        --  The height is linear in the tip's unknowns.
-                        if As = On_Sight then
+                        --  The height is linear in the tip's unknowns, a point's; a face's corner is its distance over
+                        --  its reach along its line: its height moves with the distance by the corner's line along the
+                        --  lift over the reach, and with each tilt by that times the distance, the corner's line across
+                        --  the sight's along the tilt, over the reach and the tilt's cosine squared.
+                        if K0 > 0 then
+                           declare
+                              Dist : constant Real := Tip_Q (W * (S - 1) + 1);
+                              D    : constant Real := Reach (S, K0);
+                              Rate : constant Real := Lift * Corner (S, K0);
+                           begin
+                              Base (Row, C0) := Rate / D;
+                              Base (Row, C0 + 1) :=
+                                Rate * Dist * (Corner (S, K0) * Across_Of (S, 1)) * (1.0 + Tan (Tip_Q (W * (S - 1) + 2)) ** 2)
+                                / D ** 2;
+                              Base (Row, C0 + 2) :=
+                                Rate * Dist * (Corner (S, K0) * Across_Of (S, 2)) * (1.0 + Tan (Tip_Q (W * (S - 1) + 3)) ** 2)
+                                / D ** 2;
+                              Rhs (Row) := -(H - (Base (Row, C0) * Dist + Base (Row, C0 + 1) * Tip_Q (W * (S - 1) + 2)
+                                                  + Base (Row, C0 + 2) * Tip_Q (W * (S - 1) + 3)));
+                           end;
+                        elsif As = On_Sight then
                            declare
                               Dist : constant Real := Tip_Q (W * (S - 1) + 1);
                            begin
@@ -312,13 +402,13 @@ package body Driver.Robot.Hand.Touch is
                   end if;
                end loop;
                --  Each tip's two angles across its line, whitened: the prior is that they are none, to the
-               --  eye's and the lobe's region's sigma.
+               --  eye's and the lobe's region's sigma; a face's two tilts, to a tilt's (Tilt_Sigma).
                if As = On_Sight then
                   for S in 1 .. J loop
                      if Column_Of_Sight (S) > 0 then
                         for Axis in 1 .. Lateral loop
                            Row := Row + 1;
-                           Base (Row, Column_Of_Sight (S) + Axis) := 1.0 / Across_Sigma (S);
+                           Base (Row, Column_Of_Sight (S) + Axis) := 1.0 / (if Faced (S) then Tilt_Sigma else Across_Sigma (S));
                         end loop;
                      end if;
                   end loop;
@@ -466,7 +556,7 @@ package body Driver.Robot.Hand.Touch is
                   O : constant Vec3 := P.Tool.Pose * (Line (S).Origin.Mean + P.Slide);
                begin
                   R := R + 1;
-                  A (R, S) := N * (P.Tool.Pose.Rotation * Line_Of (P));
+                  A (R, S) := N * (P.Tool.Pose.Rotation * Start_Line (P, N));
                   Used (S) := True;
                   if Prior (F).Measured then
                      B (R) := N * (Nominal (F).Centre - O);
@@ -515,7 +605,7 @@ package body Driver.Robot.Hand.Touch is
                      for P of Presses loop
                         if Surface_Of (P) = F then
                            Sum := Sum + P.Tool.Pose * (Line (Sight_Of (P)).Origin.Mean + P.Slide
-                                                       + Q (Sight_Of (P)) * Line_Of (P));
+                                                       + Q (Sight_Of (P)) * Start_Line (P, N));
                            Count := Count + 1;
                         end if;
                      end loop;
@@ -599,7 +689,7 @@ package body Driver.Robot.Hand.Touch is
          else
             --  From the tips on their lines and the surfaces they gave.
             declare
-               Along : constant Fit_Result := Fit (Presses, Sights, Surfaces, On_Sight);
+               Along : constant Fit_Result := Fit (Presses, Sights, Surfaces, On_Sight, Faces);
             begin
                if not Along.Ok then
                   return Done;
@@ -630,19 +720,31 @@ package body Driver.Robot.Hand.Touch is
          declare
             Previous : Real := Real'Last;
             Solved   : Boolean;
+            --  The corners held so far in this round: one met again ends it, as their standing does.
+            package Choice_Lists is new Ada.Containers.Indefinite_Vectors (Positive, Corner_Choice);
+            Tried    : Choice_Lists.Vector;
+            function Leading_Now return Corner_Choice is
+              ([for I in Presses'Range =>
+                  (if Faced (Sight_Of (Presses (I))) then Contact_Of (Presses (I)) else 0)]);
          begin
             loop
-               Lay_Out;
-               Solve (Solved);
-               if not Solved then
-                  return Done;
-               end if;
-               declare
-                  Size : constant Real := Take;
-               begin
-                  exit when Size <= Driver.Conventions.Unchanged_Fraction ** 2 or else Size >= Previous;
-                  Previous := Size;
-               end;
+               Held := Leading_Now;
+               Tried.Append (Held);
+               Previous := Real'Last;
+               loop
+                  Lay_Out;
+                  Solve (Solved);
+                  if not Solved then
+                     return Done;
+                  end if;
+                  declare
+                     Size : constant Real := Take;
+                  begin
+                     exit when Size <= Driver.Conventions.Unchanged_Fraction ** 2 or else Size >= Previous;
+                     Previous := Size;
+                  end;
+               end loop;
+               exit when Tried.Contains (Leading_Now);
             end loop;
          end;
          declare
@@ -702,9 +804,10 @@ package body Driver.Robot.Hand.Touch is
                   declare
                      Dist  : constant Real := Tip_Q (W * (S - 1) + 1);
                      Var_S : constant Real := Solution_Cov (C0, C0);
-                     Dir   : constant Vec3 := Aim_At (S);
-                     E1    : constant Vec3 := Across_Of (S, 1);
-                     E2    : constant Vec3 := Across_Of (S, 2);
+                     --  A face's point on the line moves with its distance alone; its tilts move its corners.
+                     Dir   : constant Vec3 := (if Faced (S) then Line (S).Direction.Unit_Vector else Aim_At (S));
+                     E1    : constant Vec3 := (if Faced (S) then Zero3 else Across_Of (S, 1));
+                     E2    : constant Vec3 := (if Faced (S) then Zero3 else Across_Of (S, 2));
                      --  The tip is the origin and Dist times the direction: how it moves with the distance and the
                      --  two angles, and the three's covariance as the presses and the priors left it.
                      Moves : constant Mat3 :=
@@ -717,7 +820,9 @@ package body Driver.Robot.Hand.Touch is
                      Mean_V : constant Real := (Own (2, 2) + Own (3, 3)) / 2.0;
                      Spread_V : constant Real :=
                        Mean_V + Sqrt (((Own (2, 2) - Own (3, 3)) / 2.0) ** 2 + Own (2, 3) ** 2);
-                     Prior_V : constant Real := Across_Sigma (S) ** 2;
+                     Prior_V : constant Real := (if Faced (S) then Tilt_Sigma else Across_Sigma (S)) ** 2;
+                     --  How far a face's corners lie from its point on the line: what a tilt moves them by, per unit.
+                     Extent  : Real := 0.0;
                      Slid_V  : constant Real := Common_Slide (S) ** 2;
                   begin
                      Result.Tips (S).Distance := (Value => Dist, Sigma => Sqrt (Var_S + Slid_V), Degrees_Of_Freedom => 0);
@@ -729,9 +834,17 @@ package body Driver.Robot.Hand.Touch is
                      --  Tested across the line: an offset of a prior sigma along the least told axis shows above Z
                      --  noises when the presses leave a variance of the prior's over one more than Z squared; or the
                      --  prior there, at the tip's distance, is below the noise along the line already.
+                     for K in 1 .. Corners (S) loop
+                        if Reach (S, K) > 0.0 then
+                           Result.Tips (S).Face.Append (Corner_At (S, K));
+                           Extent := Real'Max (Extent, abs (Corner_At (S, K) - Tip_At (S)));
+                        end if;
+                     end loop;
+                     --  A face is tested across its line when its tilts are, as a point's offsets: or when a tilt of a
+                     --  prior sigma moves its corners by less than the noise along the line.
                      Result.Tips (S).Tested :=
                        Spread_V * (1.0 + Driver.Conventions.Z ** 2) <= Prior_V
-                       or else Dist * Across_Sigma (S) <= Sqrt (Var_S);
+                       or else (if Faced (S) then Extent * Tilt_Sigma else Dist * Across_Sigma (S)) <= Sqrt (Var_S);
                   end;
                else
                   Result.Tips (S).Tip :=
@@ -804,8 +917,13 @@ package body Driver.Robot.Hand.Touch is
             begin
                if Column_Of_Sight (S) > 0 and then Geometry.Known (Result.Planes (F)) then
                   declare
-                     U    : constant Vec3 := Line (S).Direction.Unit_Vector;
-                     Y    : constant Vec3 := Presses (I).Tool.Pose * (Tip_At (S) + Presses (I).Slide);
+                     --  A face's: its corner that leads, which moves along its own line by the corner's reach per
+                     --  unit of the face's distance.
+                     K0   : constant Natural := (if Faced (S) then Contact_Of (Presses (I)) else 0);
+                     U    : constant Vec3 :=
+                       (if K0 > 0 then (1.0 / Reach (S, K0)) * Corner (S, K0) else Line (S).Direction.Unit_Vector);
+                     Y    : constant Vec3 :=
+                       Presses (I).Tool.Pose * ((if K0 > 0 then Corner_At (S, K0) else Tip_At (S)) + Presses (I).Slide);
                      N    : constant Vec3 := Result.Planes (F).Normal;
                      Over : constant Real := N * (Y - Result.Planes (F).Centre);
                      Rate : constant Real := (Transpose (Presses (I).Tool.Pose.Rotation) * N) * U;

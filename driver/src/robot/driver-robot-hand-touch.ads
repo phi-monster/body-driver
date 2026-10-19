@@ -67,6 +67,16 @@ package Driver.Robot.Hand.Touch is
    type Sight_Array is array (Positive range <>) of Ray_Estimate;
    --  Lines of sight to the tips, tool frame.
 
+   type Face_Array is array (Positive range <>) of Corner_Vectors.Vector;
+   No_Faces : constant Face_Array (1 .. 0) := [];
+   --  Per sight, the tip's face as its eye sees it: the corners of the outline of the lobe's tip region, each a unit
+   --  direction of the tool frame from the sight's origin; empty, the tip is a point on its line. A face is a plane
+   --  through those corners' lines (On_Sight: its distance along the sight's line and its two tilts across it), and a
+   --  press rests on the corner of it that leads into the surface: the end of a finger is a face, not a point, and
+   --  which corner of it touches is the way the hand leans (u18, servo seed 3 of the fake robot, 10-19: the twelve
+   --  presses a tip rested on, by the truth, each stopped on a corner of a jaw's far face, a face 9.5 by 21 mm whose
+   --  corners lay 57 and 70 mm from the wrist eye; the bottom edge's at ten of them, the top edge's at two).
+
    type Surface_Prior (Measured : Boolean := False) is record
       case Measured is
          when True  => Plane : Geometry.Plane_Estimate;   --  in the frame of the presses' poses
@@ -115,6 +125,9 @@ package Driver.Robot.Hand.Touch is
                                      --  prior there is below the noise (On_Sight; a free tip has no line)
       Stopped   : Natural := 0;      --  presses left out because the tip stayed above the surface
       Sunk      : Natural := 0;      --  presses it rests on that left it below the surface
+      --  On_Sight with a face: its corners where the fit puts them, tool frame; the Tip is then the face's point on
+      --  the sight's line.
+      Face      : Corner_Vectors.Vector;
    end record;
 
    type Tip_Fit_Array is array (Positive range <>) of Tip_Fit;
@@ -140,13 +153,16 @@ package Driver.Robot.Hand.Touch is
      (Presses  : Press_Array;
       Sights   : Sight_Array;
       Surfaces : Surface_Prior_Array;
-      As       : Model := On_Sight) return Fit_Result
-     with Pre => (for all P of Presses => P.Sight in Sights'Range and then P.Surface in Surfaces'Range);
+      As       : Model := On_Sight;
+      Faces    : Face_Array := No_Faces) return Fit_Result
+     with Pre => (for all P of Presses => P.Sight in Sights'Range and then P.Surface in Surfaces'Range)
+                 and then (Faces'Length = 0 or else Faces'Length = Sights'Length);
    --  Ok is False when the presses that remain leave fewer equations than
    --  unknowns (a measured surface's prior counts as equations: as many
    --  fix the unknowns, one more checks them), or leave some unknown fixed
    --  only to working precision; a tip no press remains for is not Ok. Free
-   --  starts from the On_Sight solution.
+   --  starts from the On_Sight solution. Faces, when given, are the sights'
+   --  faces in order (a sight with none is a point on its line); Free has none.
 
    function Distinct (A, B : Pose_Estimate) return Boolean;
    --  The poses are apart by more than their uncertainty tells them from:

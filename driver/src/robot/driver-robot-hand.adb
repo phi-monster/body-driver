@@ -598,13 +598,15 @@ package body Driver.Robot.Hand is
                                 Direction => (Unit_Vector => [0.0, 0.0, 1.0], Sigma => Real'Last)),
                      Spread => 0.0,
                      Travel => 0.0,
-                     Pitch  => 0.0)
+                     Pitch  => 0.0,
+                     Face   => Corner_Vectors.Empty_Vector)
                else (Known  => Made.Lobes (L).Sights (Which).Known,
                      Lined  => True,
                      Ray    => Made.Lobes (L).Sights (Which).Ray,
                      Spread => Made.Lobes (L).Sights (Which).Spread,
                      Travel => Made.Lobes (L).Way.Reach * Made.Lobes (L).Sights (Which).Pitch,
-                     Pitch  => Made.Lobes (L).Sights (Which).Pitch));
+                     Pitch  => Made.Lobes (L).Sights (Which).Pitch,
+                     Face   => Made.Lobes (L).Sights (Which).Face));
          end loop;
       end loop;
       for Id in D.Found.First_Index .. D.Found.Last_Index loop
@@ -638,7 +640,7 @@ package body Driver.Robot.Hand is
       is
       begin
          if not Known then
-            return (Known => False, Pixel => Px, Ray => <>, Spread => 0.0, Pitch => 0.0);
+            return (Known => False, Pixel => Px, Ray => <>, Spread => 0.0, Pitch => 0.0, Face => <>);
          end if;
          declare
             Line  : constant Ray_Estimate := Eye_Ray (M, P.Eye, Px);
@@ -650,7 +652,21 @@ package body Driver.Robot.Hand is
                             Line.Direction.Unit_Vector * Next.Direction.Unit_Vector)
                else 0.0);
             Ray   : constant Ray_Estimate := Driver.Robot.Hand.Frames.Into (Eye_In_Tool (M, P.Eye, V.Seen), Line);
+            Cap   : constant Driver.Images.Mask := Driver.Robot.Hand.Lobes.Tip_Cap (Region, Centre, Px);
+            --  The tip's face: the corners of the tip region's outline, their lines taken into the tool frame as the
+            --  tip's is.
+            Face  : Corner_Vectors.Vector;
          begin
+            for Corner of Driver.Robot.Hand.Lobes.Tip_Outline (Cap) loop
+               declare
+                  Its : constant Ray_Estimate :=
+                    Driver.Robot.Hand.Frames.Into (Eye_In_Tool (M, P.Eye, V.Seen), Eye_Ray (M, P.Eye, Corner));
+               begin
+                  if Its.Direction.Sigma < Real'Last and then abs Its.Direction.Unit_Vector > 0.0 then
+                     Face.Append (Its.Direction.Unit_Vector);
+                  end if;
+               end;
+            end loop;
             --  A sight is known when its line is: the eye's lens and its place in the tool frame are the arm's
             --  fit's, and until the arm is fitted a tip seen in the picture has no line of sight to press along
             --  (the first fake body: its arm's focal length undetermined, its hand swept, and the press's aim
@@ -658,9 +674,9 @@ package body Driver.Robot.Hand is
             return (Known  => Ray.Direction.Sigma < Real'Last and then abs Ray.Direction.Unit_Vector > 0.0,
                     Pixel  => Px,
                     Ray    => Ray,
-                    Spread => Pitch * Driver.Robot.Hand.Lobes.Tip_Spread
-                                        (Driver.Robot.Hand.Lobes.Tip_Cap (Region, Centre, Px), Px),
-                    Pitch  => Pitch);
+                    Spread => Pitch * Driver.Robot.Hand.Lobes.Tip_Spread (Cap, Px),
+                    Pitch  => Pitch,
+                    Face   => Face);
          end;
       end Seen_Tip;
 

@@ -59,7 +59,8 @@ package body Driver.Robot.Hand.Tips.Tests is
                                           Direction => (Unit_Vector => Line (L, O), Sigma => 1.0e-5)),
                                Spread => Spread,
                                Travel => Travel,
-                               Pitch  => Pitch)]]);
+                               Pitch  => Pitch,
+                               Face   => <>)]]);
 
    Down : constant Vec3 := [0.0, 0.0, -1.0];
 

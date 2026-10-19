@@ -1223,6 +1223,7 @@ driver-robot-hand-lobes.adb	Along : constant Real := ((Real (C) + 0.5 - Au) * Re
 driver-robot-hand-lobes.adb	Au := Au + Real (C) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Av := Av + Real (R) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Best : Real := -1.0;	1.0	structure	below any between-group variance: no cut found yet
+driver-robot-hand-lobes.adb	Bottom : Integer := -1;	1	structure	sentinel: no row of the column held yet
 driver-robot-hand-lobes.adb	Cap := Kind_A / (Real (Total) + 2.0);	2.0	statistics	a share of n pixels with one counted in each of the two kinds: n + 2 pseudo-counts
 driver-robot-hand-lobes.adb	Column := Integer (Real'Floor (Real (C) + 0.5 + Real (K) * Su));	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-lobes.adb	Cu := Cu + Real (C) + 0.5;	0.5	math	a pixel is at its centre, half a pixel in
@@ -1233,6 +1234,10 @@ driver-robot-hand-lobes.adb	Displacement_Gate => Vector_Gate (2),	2	structure	an
 driver-robot-hand-lobes.adb	Displacement_Gate => Vector_Gate (2, Dof),	2	structure	an image displacement has two components
 driver-robot-hand-lobes.adb	Dist.Replace_Element (Index (W, C, R), 0.0);	0.0	math	where the lobe is attached its distance to the attachment is zero
 driver-robot-hand-lobes.adb	Dof : constant Natural := Natural (Real'Floor (Mad_Efficiency * Real (2 * Count)));	2	structure	two coordinates per correspondence
+driver-robot-hand-lobes.adb	Ends.Append (Pixel'(U => Real (C) + 0.5, V => Real (Bottom) + 0.5));	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Ends.Append (Pixel'(U => Real (C) + 0.5, V => Real (Bottom) + 0.5));	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Ends.Append (Pixel'(U => Real (C) + 0.5, V => Real (Top) + 0.5));	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Ends.Append (Pixel'(U => Real (C) + 0.5, V => Real (Top) + 0.5));	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Family : constant Gate := Vector_Gate (2, Noise.Displacement.Degrees_Of_Freedom, Tests => Tests);	2	structure	an image displacement has two components
 driver-robot-hand-lobes.adb	Flips := Flips + Boolean'Pos ((Next (J) > 0.5) /= Label (J));	0.5	math	a pixel is of the kind it is likelier to be of: a share above a half
 driver-robot-hand-lobes.adb	Gaps : Reals_Access := new Reals (1 .. Natural'Max (1, W * H));	1	structure	one entry at the least, whatever the picture
@@ -1286,6 +1291,7 @@ driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0
 driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	math	a pixel is at its centre, half a pixel in
 driver-robot-hand-lobes.adb	Tip := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	math	a pixel is at its centre, half a pixel in
+driver-robot-hand-lobes.adb	Top : Integer := -1;	1	structure	sentinel: no row of the column held yet
 driver-robot-hand-lobes.adb	Trips : Real_Access := new Real_Array (1 .. 2 * Count);	2	structure	two coordinates per correspondence
 driver-robot-hand-lobes.adb	Turn : constant Real := Driver.Conventions.Z ** 2 / 2.0;	2.0	math	twice the log of the likelihood ratio is above Z squared when two kinds are told apart (Wilks)
 driver-robot-hand-lobes.adb	Variance := Variance + 2.0 * Pixel_Variance;	2.0	math	a gap is the difference of two places, each one pixel's variance
@@ -1356,6 +1362,7 @@ driver-robot-hand-lobes.adb	if Contains (M, C, R) and then (for all Dr in -1 .. 
 driver-robot-hand-lobes.adb	if Motion /= null and then Natural (Result.Lobes.Length) > 1 then	1	structure	joining lobes needs two of them
 driver-robot-hand-lobes.adb	if N < 3 then	3	statistics	a spread within two groups needs a third value
 driver-robot-hand-lobes.adb	if N >= 2 then	2	statistics	a spread needs two values
+driver-robot-hand-lobes.adb	if Natural (Ends.Length) < 3 then	3	math	three points are the fewest a hull turns about
 driver-robot-hand-lobes.adb	if not (Ahead (C, R, 1, Nc, Nr) and then Contains (M, Nc, Nr)) then	1	structure	the next pixel along the way: one step
 driver-robot-hand-lobes.adb	or else (Last >= Doubts.First_Index + 3 and then Still (Last, Last - 2) and then Still (Last - 1, Last - 3));	2	structure	a round and the one two before it
 driver-robot-hand-lobes.adb	or else (Last >= Doubts.First_Index + 3 and then Still (Last, Last - 2) and then Still (Last - 1, Last - 3));	3	structure	four doubts compared, two rounds apart twice: the last four
@@ -1365,6 +1372,7 @@ driver-robot-hand-lobes.adb	return (Last >= Doubts.First_Index + 2 and then Stil
 driver-robot-hand-lobes.adb	return (Last >= Doubts.First_Index + 2 and then Still (Last, Last - 1) and then Still (Last - 1, Last - 2))	2	structure	two rounds in a row: three doubts compared, the last and the two before
 driver-robot-hand-lobes.adb	return (if Region = 0 then 0.0 else Sqrt (Sum / (2.0 * Real (Region))));	2.0	statistics	the mean over the two axes of the squared distance
 driver-robot-hand-lobes.adb	type Bins is array (0 .. 255) of Real;	255	format	a luma level of the eye's 8-bit pictures (Driver.Images)
+driver-robot-hand-lobes.adb	while Natural (Hull.Length) >= 2 and then Turn (Hull (Hull.Last_Index - 1), Hull.Last_Element, P) <= 0.0 loop	2	math	a turn is told by the two points kept last and the next
 driver-robot-hand-lobes.ads	and then Driver.Pixels.Frames (Anchor) >= 2;	2	statistics	a deviation over poses needs two poses
 driver-robot-hand-lowering.adb	Enough : constant Boolean := T.Count > 2;	2	statistics	a scatter of shares needs more than two pushes before it, as a shortfall's does in the step tracker
 driver-robot-hand-lowering.adb	Lowering := Lowering / Real (Natural'Max (1, Where'Length));	1	structure	a hand has a point at the least (the tool's origin), so a mean never divides by nothing
@@ -1651,12 +1659,19 @@ driver-robot-hand-touch.adb	(Line (S).Direction.Unit_Vector + Tip_Q (W * (S - 1)
 driver-robot-hand-touch.adb	(Line (S).Direction.Unit_Vector + Tip_Q (W * (S - 1) + 2) * Across_Of (S, 1)	2	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
 driver-robot-hand-touch.adb	(Line_Of (P) + Tip_Q (W * (Sight_Of (P) - 1) + 2) * Across_Of (Sight_Of (P), 1)	1	structure	the first of the two axes across the line
 driver-robot-hand-touch.adb	(Line_Of (P) + Tip_Q (W * (Sight_Of (P) - 1) + 2) * Across_Of (Sight_Of (P), 1)	2	structure	the second unknown of a tip: its first angle across the line
+driver-robot-hand-touch.adb	(if K0 > 0 then (1.0 / Reach (S, K0)) * Corner (S, K0) else Line (S).Direction.Unit_Vector);	1.0	math	a corner's line per unit of the face's distance: over its reach
 driver-robot-hand-touch.adb	+ Base (Row, C0 + 2) * Tip_Q (W * (S - 1) + 3)));	2	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
+driver-robot-hand-touch.adb	+ Base (Row, C0 + 2) * Tip_Q (W * (S - 1) + 3)));	2	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
+driver-robot-hand-touch.adb	+ Base (Row, C0 + 2) * Tip_Q (W * (S - 1) + 3)));	3	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
 driver-robot-hand-touch.adb	+ Base (Row, C0 + 2) * Tip_Q (W * (S - 1) + 3)));	3	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
 driver-robot-hand-touch.adb	+ Tip_Q (W * (S - 1) + 3) * Across_Of (S, 2));	2	structure	the second axis across a line
 driver-robot-hand-touch.adb	+ Tip_Q (W * (S - 1) + 3) * Across_Of (S, 2));	3	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
 driver-robot-hand-touch.adb	+ Tip_Q (W * (Sight_Of (P) - 1) + 3) * Across_Of (Sight_Of (P), 2));	2	structure	the second of the two axes across the line
 driver-robot-hand-touch.adb	+ Tip_Q (W * (Sight_Of (P) - 1) + 3) * Across_Of (Sight_Of (P), 2));	3	structure	the third unknown of a tip: its second angle across the line
+driver-robot-hand-touch.adb	- Tan (Tip_Q (W * (S - 1) + 2)) * (Corner (S, K) * Across_Of (S, 1))	1	structure	the first axis across a line
+driver-robot-hand-touch.adb	- Tan (Tip_Q (W * (S - 1) + 2)) * (Corner (S, K) * Across_Of (S, 1))	2	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
+driver-robot-hand-touch.adb	- Tan (Tip_Q (W * (S - 1) + 3)) * (Corner (S, K) * Across_Of (S, 2)));	2	structure	the second axis across a line
+driver-robot-hand-touch.adb	- Tan (Tip_Q (W * (S - 1) + 3)) * (Corner (S, K) * Across_Of (S, 2)));	3	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
 driver-robot-hand-touch.adb	A (R, J + F) := -1.0;	1.0	math	a higher surface lowers the height by as much
 driver-robot-hand-touch.adb	Base (Row + 1, CF) := 1.0 / P.Offset_Sigma;	1.0	math	a prior's row is whitened by its own sigma
 driver-robot-hand-touch.adb	Base (Row + 2, CF + 1) := 1.0 / L11;	1.0	math	the inverse of the tilt covariance's Cholesky factor
@@ -1666,15 +1681,18 @@ driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	1.0	math	the in
 driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	3	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-touch.adb	Base (Row, C0 + 1) := Dist * (Lift * Across_Of (S, 1));	1	structure	the first axis across a line
+driver-robot-hand-touch.adb	Base (Row, C0 + 2) :=	2	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
 driver-robot-hand-touch.adb	Base (Row, C0 + 2) := Dist * (Lift * Across_Of (S, 2));	2	structure	the second axis across a line
 driver-robot-hand-touch.adb	Base (Row, C0 + 2) := Dist * (Lift * Across_Of (S, 2));	2	structure	the second axis across a line
 driver-robot-hand-touch.adb	Base (Row, CF + 2) := -(Nominal (F).Tangent_2 * (Y - Nominal (F).Centre));	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-touch.adb	Base (Row, CF) := -1.0;	1.0	math	a higher surface lowers the height by as much
-driver-robot-hand-touch.adb	Base (Row, Column_Of_Sight (S) + Axis) := 1.0 / Across_Sigma (S);	1.0	math	a prior whitened: one over its sigma
+driver-robot-hand-touch.adb	Base (Row, Column_Of_Sight (S) + Axis) := 1.0 / (if Faced (S) then Tilt_Sigma else Across_Sigma (S));	1.0	math	a prior whitened: one over its sigma
+driver-robot-hand-touch.adb	Best := (1.0 / (Corner (S, K) * U)) * Corner (S, K);	1.0	math	a corner's line at a unit distance along the sight's line
 driver-robot-hand-touch.adb	C13 : constant Real := Solution_Cov (CF, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
-driver-robot-hand-touch.adb	E1 : constant Vec3 := Across_Of (S, 1);	1	structure	the first axis across a line
-driver-robot-hand-touch.adb	E2 : constant Vec3 := Across_Of (S, 2);	2	structure	the second axis across a line
+driver-robot-hand-touch.adb	E1 : constant Vec3 := (if Faced (S) then Zero3 else Across_Of (S, 1));	1	structure	the first axis across a line
+driver-robot-hand-touch.adb	E2 : constant Vec3 := (if Faced (S) then Zero3 else Across_Of (S, 2));	2	structure	the second axis across a line
 driver-robot-hand-touch.adb	Lateral : constant := 2;	2	structure	two angles across a line of sight
+driver-robot-hand-touch.adb	Low := Lift * ((1.0 / (Corner (S, K) * U)) * Corner (S, K));	1.0	math	a corner's line at a unit distance along the sight's line
 driver-robot-hand-touch.adb	Mean_V + Sqrt (((Own (2, 2) - Own (3, 3)) / 2.0) ** 2 + Own (2, 3) ** 2);	2.0	math	the middle and the half gap of the two by two covariance of the tip's angles across its line, whose largest root is the middle plus the root of the half gap squared and the cross term squared
 driver-robot-hand-touch.adb	Mean_V : constant Real := (Own (2, 2) + Own (3, 3)) / 2.0;	2.0	math	the middle and the half gap of the two by two covariance of the tip's angles across its line, whose largest root is the middle plus the root of the half gap squared and the cross term squared
 driver-robot-hand-touch.adb	Nominal (F) := Moved (Nominal (F), Solution_Q (CF), Solution_Q (CF + 1), Solution_Q (CF + 2));	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
@@ -1682,15 +1700,24 @@ driver-robot-hand-touch.adb	P.Scatter := (if Prior (F).Measured then Prior (F).P
 driver-robot-hand-touch.adb	Pinned (Rows + C, C) := 1.0;	1.0	math	an unknown nothing bears on is pinned by a unit row
 driver-robot-hand-touch.adb	Plane_Unknowns : constant := 3;	3	structure	a surface's error is its offset and its two tilts
 driver-robot-hand-touch.adb	Point_Unknowns : constant := 3;	3	structure	a point has three coordinates
+driver-robot-hand-touch.adb	Rate * Dist * (Corner (S, K0) * Across_Of (S, 1)) * (1.0 + Tan (Tip_Q (W * (S - 1) + 2)) ** 2)	1	structure	the first axis across a line
+driver-robot-hand-touch.adb	Rate * Dist * (Corner (S, K0) * Across_Of (S, 1)) * (1.0 + Tan (Tip_Q (W * (S - 1) + 2)) ** 2)	1.0	math	a tangent's derivative is one plus its square
+driver-robot-hand-touch.adb	Rate * Dist * (Corner (S, K0) * Across_Of (S, 1)) * (1.0 + Tan (Tip_Q (W * (S - 1) + 2)) ** 2)	2	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
+driver-robot-hand-touch.adb	Rate * Dist * (Corner (S, K0) * Across_Of (S, 2)) * (1.0 + Tan (Tip_Q (W * (S - 1) + 3)) ** 2)	1.0	math	a tangent's derivative is one plus its square
+driver-robot-hand-touch.adb	Rate * Dist * (Corner (S, K0) * Across_Of (S, 2)) * (1.0 + Tan (Tip_Q (W * (S - 1) + 3)) ** 2)	2	structure	the second axis across a line
+driver-robot-hand-touch.adb	Rate * Dist * (Corner (S, K0) * Across_Of (S, 2)) * (1.0 + Tan (Tip_Q (W * (S - 1) + 3)) ** 2)	3	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
+driver-robot-hand-touch.adb	Rhs (Row) := -(H - (Base (Row, C0) * Dist + Base (Row, C0 + 1) * Tip_Q (W * (S - 1) + 2)	2	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
 driver-robot-hand-touch.adb	Rhs (Row) := -(H - (Base (Row, C0) * Dist + Base (Row, C0 + 1) * Tip_Q (W * (S - 1) + 2)	2	structure	a tip's unknowns in order: its distance, its first angle across its line, its second
 driver-robot-hand-touch.adb	Sigma : Vector_Access := new Real_Vector'(1 .. Rows => 1.0);	1.0	math	a prior's rows are whitened already
 driver-robot-hand-touch.adb	Spread_V * (1.0 + Driver.Conventions.Z ** 2) <= Prior_V	1.0	statistics	an offset of a prior sigma shows above Z noises when the variance the presses leave is the prior's over one more than Z squared
 driver-robot-hand-touch.adb	T12 : constant Real := Solution_Cov (CF + 1, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-touch.adb	T22 : constant Real := Solution_Cov (CF + 2, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-touch.adb	T22 : constant Real := Solution_Cov (CF + 2, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Tilt_Sigma : constant Real := Ada.Numerics.Pi / Sqrt (12.0);	12.0	math	the variance of a uniform spread is a twelfth of its square: a tilt spread over a half turn
 driver-robot-hand-touch.adb	Weight : constant Real := 1.0 / Noise_Of (Presses (I)) ** 2;	1.0	math	a weight is one over a variance
 driver-robot-hand-touch.adb	if Chosen (I) and then Deleted (I) < 0.0 and then Significant (Deleted (I), 1.0) then	1.0	math	a residual already in units of its own sigma
 driver-robot-hand-touch.adb	if Chosen (I) and then Deleted (I) > 0.0 and then Significant (Deleted (I), 1.0)	1.0	math	a residual already in units of its own sigma
+driver-robot-hand-touch.adb	if Corner (S, K) * U > 0.0 and then Lift * ((1.0 / (Corner (S, K) * U)) * Corner (S, K)) < Low then	1.0	math	a corner's line at a unit distance along the sight's line
 driver-robot-hand-touch.adb	return (if Which = 1 then E1 else Cross (U, E1));	1	structure	the first axis across a line is the one found, the second is across both
 driver-robot-hand-touch.adb	then Moved (Prior (F).Plane, Correction (Plane_Unknowns * F - 2), Correction (Plane_Unknowns * F - 1),	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-views.adb	(not T.Current.Is_Empty and then Driver.Pixels.Frames (T.Current.Constant_Reference.Element.Frames) >= 2);	2	statistics	a pixel's own variance needs two frames

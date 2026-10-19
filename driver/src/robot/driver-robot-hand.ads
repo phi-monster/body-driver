@@ -20,6 +20,7 @@
 --  and nothing of where the arm stands in the world. Only Tip, Tip_Now and
 --  Grip_Centre take it into the world, through the arm's placement and unit.
 
+with Ada.Containers.Vectors;
 with Driver.Clock;
 with Driver.Commands;
 with Driver.Images;
@@ -31,6 +32,10 @@ package Driver.Robot.Hand is
    type Hand_Id is new Positive;
 
    type Hands is tagged limited private;
+
+   package Corner_Vectors is new Ada.Containers.Vectors (Positive, Vec3, Driver.Numerics.Arrays."=");
+   --  The corners of a lobe's tip face as its eye sees them (Touch, Fit's Faces; Tips.Sight_Of): unit directions of
+   --  the tool frame from the sight's origin.
 
    procedure Observe (H : in out Hands; M : Model; O : Observation; Sent : Driver.Commands.Command);
    --  Estimators only, one beat; Sent as in Driver.Robot.Observe.
@@ -271,6 +276,7 @@ private
       Ray    : Ray_Estimate;
       Spread : Real := 0.0;   --  of the lobe's tip region from that pixel, per axis, as an angle (Tips.Sight_Of)
       Pitch  : Real := 0.0;   --  the angle a pixel spans there
+      Face   : Corner_Vectors.Vector;   --  the corners of the outline of the lobe's tip region (Lobes.Tip_Outline)
    end record;
 
    type Sight_Array is array (Opening) of Sight;

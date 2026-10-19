@@ -668,7 +668,8 @@ package body Driver.Robot.Hand.Tests is
                   Ray    => (Origin    => (Mean => Zero3, Covariance => [others => [others => 0.0]]),
                              Direction => (Unit_Vector => Rays, Sigma => 2.5e-4)),
                   Spread => 0.0,
-                  Pitch  => 0.0);
+                  Pitch  => 0.0,
+                  Face   => <>);
             end loop;
             Adopt (H, 2, 1, 1, [1 => 0.04], [1 => 0.0], Rows);
          end;

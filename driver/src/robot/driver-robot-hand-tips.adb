@@ -75,6 +75,31 @@ package body Driver.Robot.Hand.Tips is
       end;
    end Known_Sights;
 
+   --  The faces of the sights in the fit, in Known_Sights' order.
+   function Known_Faces (T : Sight_Table) return Driver.Robot.Hand.Touch.Face_Array is
+      Count : Natural := 0;
+   begin
+      for Row of T loop
+         for S of Row loop
+            Count := Count + Boolean'Pos (In_Fit (S));
+         end loop;
+      end loop;
+      declare
+         Result : Driver.Robot.Hand.Touch.Face_Array (1 .. Count);
+         N      : Natural := 0;
+      begin
+         for Row of T loop
+            for S of Row loop
+               if In_Fit (S) then
+                  N := N + 1;
+                  Result (N) := (if S.Lined then S.Face else Corner_Vectors.Empty_Vector);
+               end if;
+            end loop;
+         end loop;
+         return Result;
+      end;
+   end Known_Faces;
+
    function Fit_Ok (B : Book) return Boolean is (not B.Fitted.Is_Empty and then B.Fitted.Element.Ok);
 
    function Surface (B : Book) return Driver.Geometry.Plane_Estimate is
@@ -121,6 +146,12 @@ package body Driver.Robot.Hand.Tips is
       --  it as far as the presses' tilts do not tell.
       return Fitted_Tip (B, Index, Kind).Tip;
    end Tip;
+
+   function Face (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Corner_Vectors.Vector is
+      Index : constant Natural := Fitted_Index (B, Lobe, At_Opening, Kind);
+   begin
+      return (if Index = 0 then Corner_Vectors.Empty_Vector else Fitted_Tip (B, Index, Kind).Face);
+   end Face;
 
    function Beat (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Driver.Clock.Beat is
       Result : Driver.Clock.Beat := 0;
@@ -322,7 +353,8 @@ package body Driver.Robot.Hand.Tips is
                F : constant Driver.Robot.Hand.Touch.Fit_Result :=
                  Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)],
                                               As => (if Any_Unlined (T) then Driver.Robot.Hand.Touch.Free
-                                                     else Driver.Robot.Hand.Touch.On_Sight));
+                                                     else Driver.Robot.Hand.Touch.On_Sight),
+                                              Faces => Known_Faces (T));
             begin
                B.Free := Fit_Holders.To_Holder (F);
                if F.Ok then
@@ -443,7 +475,8 @@ package body Driver.Robot.Hand.Tips is
             F : constant Driver.Robot.Hand.Touch.Fit_Result :=
               Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)],
                                            As => (if Any_Unlined (T) then Driver.Robot.Hand.Touch.Free
-                                                  else Driver.Robot.Hand.Touch.On_Sight));
+                                                  else Driver.Robot.Hand.Touch.On_Sight),
+                                           Faces => Known_Faces (T));
          begin
             B.Fitted := Fit_Holders.To_Holder (F);
             for I in B.Kept.First_Index .. B.Kept.Last_Index loop
@@ -478,7 +511,12 @@ package body Driver.Robot.Hand.Tips is
    function Leading (B : Book; At_Opening : Opening; Into : Vec3) return Natural is
       --  The lobe whose tip is foremost along Into, when every lobe seen at
       --  this opening has a fitted tip; else the lobe whose line of sight lies
-      --  closest to Into.
+      --  closest to Into. A face's tip is foremost by its corner that is (Face),
+      --  its line closest by the corner's line that is: two jaws shut on one
+      --  another have their tips at the one place where they meet, and the
+      --  corners apart (u18, seed 3 of the fake robot, 10-19: of the twelve
+      --  presses a tip rested on, given by the tips, 7 went to the jaw whose
+      --  corner touched, 3 to the other one, and at 2 both had).
       T       : constant Sight_Table := Sights_Of (B);
       By_Tips : Boolean := True;
       Best    : Natural := 0;
@@ -492,10 +530,19 @@ package body Driver.Robot.Hand.Tips is
       for L in T'Range loop
          if T (L) (At_Opening).Known then
             declare
-               Ahead : constant Real :=
+               Ahead : Real :=
                  (if By_Tips then Tip (B, L, At_Opening).Mean * Into
                   else T (L) (At_Opening).Ray.Direction.Unit_Vector * Into);
             begin
+               if By_Tips then
+                  for X of Face (B, L, At_Opening) loop
+                     Ahead := Real'Max (Ahead, X * Into);
+                  end loop;
+               else
+                  for X of T (L) (At_Opening).Face loop
+                     Ahead := Real'Max (Ahead, X * Into);
+                  end loop;
+               end if;
                if Ahead > Score then
                   Score := Ahead;
                   Best := L;

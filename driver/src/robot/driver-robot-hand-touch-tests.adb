@@ -570,6 +570,118 @@ package body Driver.Robot.Hand.Touch.Tests is
       Check (Distinct (Pose, Turned), "a pose turned twenty sigmas is not apart");
    end Poses_Apart;
 
+   --  Three fingers whose ends are faces, each a rectangle 9.5 by 21 mm turned 30 degrees from its line of sight (as a
+   --  jaw's far face is from the wrist eye of the fake robot: u18, 10-19, its corners 57 and 70 mm from the eye). Each
+   --  is pressed at seven poses, straight and leaning six ways further than its face turns from its line of sight, and
+   --  rests on the corner of its face that leads into the table: three corners of each at least, so the presses tell
+   --  its tilts (leaning less, a face rests on the corners of its one edge that leads, and turns freely about it). Fitted as faces, no press is left out and every corner of every face is where it is;
+   --  fitted as points on their lines of sight, the presses that rest on corners at other depths do not agree.
+   --  How high a point of the tool frame stands when the tool is turned by R: the third row of R times it.
+   function Height (R : Mat3; X : Vec3) return Real is (R (3, 1) * X (1) + R (3, 2) * X (2) + R (3, 3) * X (3));
+
+   procedure Faces_Rest_On_Their_Leading_Corners is
+      Lobes  : constant := 3;
+      Half_W : constant Real := 0.00475;
+      Half_H : constant Real := 0.0105;
+      Lean   : constant Real := Ada.Numerics.Pi / 6.0;
+      Centre : constant array (1 .. Lobes) of Vec3 := [[0.13, -0.03, 0.0], [0.135, 0.0, -0.004], [0.13, 0.03, 0.002]];
+      type Corner_Set is array (1 .. 4) of Vec3;
+      Corners : array (1 .. Lobes) of Corner_Set;
+      Faces   : Face_Array (1 .. Lobes);
+      Lines   : Sight_Array (1 .. Lobes);
+      Presses : Press_Array (1 .. 7 * Lobes);
+      N       : Natural := 0;
+      Tilts   : constant array (1 .. 7) of Real := [0.0, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75];
+      Ways    : constant array (1 .. 7) of Real := [for P in 1 .. 7 => Real (P - 2) * Ada.Numerics.Pi / 3.0];
+      Touched : array (1 .. Lobes, 1 .. 4) of Boolean := [others => [others => False]];
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 41);
+      for L in 1 .. Lobes loop
+         declare
+            U  : constant Vec3 := Unit (Centre (L) - Eye);
+            E1 : constant Vec3 := Unit (Cross (U, [0.0, 1.0, 0.0]));
+            Normal : constant Vec3 := Cos (Lean) * U + Sin (Lean) * E1;
+            A  : constant Vec3 := Unit (Cross (Normal, E1));
+            B  : constant Vec3 := Unit (Cross (Normal, A));
+         begin
+            Corners (L) := [Centre (L) + Half_W * A + Half_H * B, Centre (L) - Half_W * A + Half_H * B,
+                            Centre (L) - Half_W * A - Half_H * B, Centre (L) + Half_W * A - Half_H * B];
+            for K in 1 .. 4 loop
+               Faces (L).Append (Unit (Corners (L) (K) - Eye));
+            end loop;
+            Lines (L) := (Origin => (Mean => Eye, Covariance => 1.0e-10 * Identity3),
+                          Direction => (Unit_Vector => U, Sigma => 1.0e-5));
+         end;
+      end loop;
+      for L in 1 .. Lobes loop
+         for P in 1 .. 7 loop
+            declare
+               Down : constant Vec3 := [0.0, 0.0, -1.0];
+               U    : constant Vec3 := Unit (Centre (L) - Eye);
+               Axis : constant Vec3 := Cross (U, Down);
+               R    : constant Mat3 :=
+                 Exp (Tilts (P) * [Cos (Ways (P)), Sin (Ways (P)), 0.0]) * Exp (Arcsin (abs Axis) * Unit (Axis));
+               Low  : Positive := 1;
+            begin
+               for K in 2 .. 4 loop
+                  if Height (R, Corners (L) (K)) < Height (R, Corners (L) (Low)) then
+                     Low := K;
+                  end if;
+               end loop;
+               Touched (L, Low) := True;
+               declare
+                  Landing : constant Vec3 := [0.02 * Real (P), 0.03 * Real (L), 0.0];
+                  T       : constant Vec3 := Landing - R * Corners (L) (Low);
+                  Noisy   : constant Rigid :=
+                    (Rotation    => Exp (Turn_Sigma * [Gaussian, Gaussian, Gaussian]) * R,
+                     Translation => T + Pose_Sigma * [Gaussian, Gaussian, Gaussian]);
+               begin
+                  N := N + 1;
+                  Presses (N) := (Tool    => (Pose                => Noisy,
+                                              Position_Covariance => (Pose_Sigma ** 2) * Identity3,
+                                              Rotation_Covariance => (Turn_Sigma ** 2) * Identity3),
+                                  Sight   => L,
+                                  Surface => 1,
+                                  others  => <>);
+               end;
+            end;
+         end loop;
+      end loop;
+      declare
+         As_Faces  : constant Fit_Result := Fit (Presses, Lines, [1 => (Measured => True, Plane => Table)], On_Sight, Faces);
+         As_Points : constant Fit_Result := Fit (Presses, Lines, [1 => (Measured => True, Plane => Table)], On_Sight);
+         Left_Out  : Natural := 0;
+         Worst     : Real := 0.0;
+      begin
+         for A of As_Points.Agrees loop
+            Left_Out := Left_Out + Boolean'Pos (not A);
+         end loop;
+         for L in 1 .. Lobes loop
+            Check (Natural'(Boolean'Pos (Touched (L, 1)) + Boolean'Pos (Touched (L, 2)) + Boolean'Pos (Touched (L, 3))
+                             + Boolean'Pos (Touched (L, 4))) >= 3,
+                   "the rig's presses rest on fewer than three corners of face" & L'Image);
+         end loop;
+         Check (As_Faces.Ok, "the presses of three faces were not fitted");
+         if As_Faces.Ok then
+            for A of As_Faces.Agrees loop
+               Check (A, "a press resting on its face's leading corner was left out (as points, "
+                      & Left_Out'Image & " of" & Presses'Length'Image & " were)");
+            end loop;
+            for L in 1 .. Lobes loop
+               Check (Natural (As_Faces.Tips (L).Face.Length) = 4,
+                      "face" & L'Image & " came out with" & As_Faces.Tips (L).Face.Length'Image & " corners");
+               if Natural (As_Faces.Tips (L).Face.Length) = 4 then
+                  for K in 1 .. 4 loop
+                     Worst := Real'Max (Worst, abs (As_Faces.Tips (L).Face (K) - Corners (L) (K)));
+                  end loop;
+               end if;
+            end loop;
+            Check (Worst < 1.0e-3, "a face's corner came out" & Real'Image (Worst) & " m from where it is (as points,"
+                   & Left_Out'Image & " of" & Presses'Length'Image & " presses were left out)");
+         end if;
+      end;
+   end Faces_Rest_On_Their_Leading_Corners;
+
    procedure Register is
    begin
       Driver.Tests.Register ("hand.touch.on_sight", "a press that stopped on something else moves the tip",
@@ -598,6 +710,8 @@ package body Driver.Robot.Hand.Touch.Tests is
       Driver.Tests.Register ("hand.touch.lateral", "presses straight or tilted by a hair confirm a tip across its line, "
                              & "or tilts about one axis do, or tilts about two do not move it to the vertex that touched",
                              Lateral_Offset_Needs_Tilts'Access);
+      Driver.Tests.Register ("hand.touch.faces", "presses that rest on the corners of tilted faces leave some out, or put "
+                             & "a face's corners away from where they are", Faces_Rest_On_Their_Leading_Corners'Access);
    end Register;
 
 end Driver.Robot.Hand.Touch.Tests;
