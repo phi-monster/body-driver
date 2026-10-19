@@ -15,7 +15,7 @@ with Ada.Strings.Unbounded;
 private package Driver.Robot.Body_File is
 
    --  Method versions; each goes up when the code that measures it changes.
-   Noise_Method      : constant := 2;
+   Noise_Method      : constant := 3;
    Travel_Method     : constant := 1;
    Ends_Method       : constant := 2;
    Steps_Method      : constant := 3;

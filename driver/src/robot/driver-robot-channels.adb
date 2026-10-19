@@ -490,6 +490,46 @@ package body Driver.Robot.Channels is
       end;
    end Asked;
 
+   --  Whether the change into Beat brings the group's readings nearer its target than they were the beat before, by
+   --  more than their noise explains: the step along the way that remained (the target less the readings before)
+   --  is positive, and significant against the noise along that way. A push's answer that comes in steps no eye can
+   --  tell from one beat to the next (Moving) is under way while it closes in, and its beats are no rest; a held
+   --  reading's jitter goes either way and does not keep closing in. With the noise zero (the first round of
+   --  Measure) any step nearer closes in. A group held where its readings are, or whose noise is not measured,
+   --  closes in on nothing.
+   function Closing_In (M : Model; G : Group_Id; Beat : Natural) return Boolean is
+      Way    : Real_Array (1 .. M.Groups (G).Size);
+      Length : Real := 0.0;
+      Along  : Real := 0.0;
+      Spread : Real := 0.0;
+   begin
+      if Beat = 0 or else not Has_Target (M, G, Beat) or else not Has_Reading (M, G, Beat)
+        or else not Has_Reading (M, G, Beat - 1)
+      then
+         return False;
+      end if;
+      for C in Way'Range loop
+         Way (C) := Target (M, G, Beat, C) - Reading (M, G, Beat - 1, C);
+         Length := Length + Way (C) ** 2;
+      end loop;
+      Length := Sqrt (Length);
+      if Length = 0.0 then
+         return False;
+      end if;
+      for C in Way'Range loop
+         declare
+            Sigma : constant Real := Noise (M, G, C);
+         begin
+            if Sigma = Real'Last then
+               return False;
+            end if;
+            Along := Along + Way (C) / Length * Change (M, G, Beat, C);
+            Spread := Spread + (Way (C) / Length * Sigma) ** 2;
+         end;
+      end loop;
+      return Along > 0.0 and then Driver.Uncertain.Significant (Along, Sqrt (2.0 * Spread));
+   end Closing_In;
+
    procedure Measure_Pushes (M : in out Model) is
    begin
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -542,18 +582,30 @@ package body Driver.Robot.Channels is
                   if M.Groups (G).Commandable and then Asked (M, G, B) then
                      Active := True;
                      Onset := B;
-                     Moved := Moving (M, G, B, Steps);
+                     Moved := Moving (M, G, B, Steps) or else Closing_In (M, G, B);
                   elsif Active then
                      --  Until the reading first moves the push waits out the
                      --  delay; after that its response lasts, overshoot and all,
-                     --  until the reading is still. A push that is not answered
-                     --  within the delay is over.
+                     --  until the reading is still: neither moving nor closing in
+                     --  on its target (Closing_In). A push that is not answered
+                     --  within the delay is over. Ended where its steps fell below
+                     --  what an eye can tell from one beat to the next, a push left
+                     --  the rest of its answer to the rest, and a reading that
+                     --  repeats exactly at rest had its noise measured from that
+                     --  answer alone: q7 (servo seed 7 of the fake robot, 10-19),
+                     --  arm 1, its visible steps 4.4 to 36 units, answered the push
+                     --  of beat 3204 by 5, 6, -5, 8, -4 and -5 units, then by 1, 3,
+                     --  -2, 4, -2 and -2, then by one or none; its six channels'
+                     --  noise came from those changes, 1.05 to 8.4 units on one
+                     --  degree of freedom, its pushes were no longer asked for
+                     --  (Asked) and their answers rest too, and the test of motion
+                     --  passed nothing until the next estimate.
                      if not Moved then
-                        Moved := Moving (M, G, B, Steps);
+                        Moved := Moving (M, G, B, Steps) or else Closing_In (M, G, B);
                         if not Moved and then B - Onset >= Delay_Beats then
                            Active := False;
                         end if;
-                     elsif not Moving (M, G, B, Steps) then
+                     elsif not Moving (M, G, B, Steps) and then not Closing_In (M, G, B) then
                         Active := False;
                      end if;
                   end if;

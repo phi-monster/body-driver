@@ -1339,7 +1339,7 @@ procedure Measure (H : in out Hands; M : in out Model) is
                return;
             end if;
             Rests_Now := H.Data.Found (Id).Rests;
-            Arm_Still := Arm_Is > 0 and then not Driver.Robot.Channels.Moving (M, Arm_Is, M.Beats);
+            Arm_Still := not Driver.Robot.Channels.Moving (M, Arm_Is, M.Beats);
          end Read_Rests;
 
          procedure Read_Arm (O : Observation) is
